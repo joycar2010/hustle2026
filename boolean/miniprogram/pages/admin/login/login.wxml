@@ -1,0 +1,22 @@
+<!-- login.wxml -->
+<view class="login-container">
+  <view class="login-header">
+    <image src="/images/logo.png" mode="aspectFit"></image>
+    <view class="login-title">布珥·迈拓空间设计</view>
+    <view class="login-subtitle">管理员登录</view>
+  </view>
+  
+  <form bindsubmit="login" class="login-form">
+    <view class="form-item">
+      <view class="form-label">账号</view>
+      <input name="username" placeholder="请输入管理员账号" placeholder-class="placeholder" class="form-input" />
+    </view>
+    
+    <view class="form-item">
+      <view class="form-label">密码</view>
+      <input name="password" placeholder="请输入管理员密码" placeholder-class="placeholder" class="form-input" password="true" />
+    </view>
+    
+    <button form-type="submit" class="login-btn">登录</button>
+  </form>
+</view>

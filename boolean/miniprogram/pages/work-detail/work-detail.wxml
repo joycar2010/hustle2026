@@ -1,0 +1,66 @@
+<!-- work-detail.wxml -->
+<navigation-bar title="作品详情" back="{{true}}" color="black" background="#FFF"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="container">
+    <!-- 加载状态 -->
+    <view wx:if="{{loading}}" class="loading-container">
+      <view class="loading-spinner"></view>
+      <text class="loading-text">加载中...</text>
+    </view>
+    
+    <!-- 错误状态 -->
+    <view wx:elif="{{error}}" class="error-container">
+      <view class="error-icon">⚠️</view>
+      <text class="error-text">{{error}}</text>
+      <button class="retry-btn" bindtap="onRetry">重新加载</button>
+    </view>
+    
+    <!-- 作品详情内容 -->
+    <view wx:elif="{{work}}" class="content">
+      <!-- 作品标题 -->
+      <view class="work-title-section">
+        <view class="work-title">{{work.title}}</view>
+        <view class="work-meta">
+          <text class="meta-item">{{work.spaceType || ''}}</text>
+          <text class="meta-divider" wx:if="{{work.spaceType}}">|</text>
+          <text class="meta-item">{{work.area || ''}}㎡</text>
+          <text class="meta-divider" wx:if="{{work.area}}">|</text>
+          <text class="meta-item">{{work.location || ''}}</text>
+        </view>
+      </view>
+      
+      <!-- 作品图片画廊 -->
+      <view class="image-gallery" wx:if="{{work.images && work.images.length > 0}}">
+        <block wx:for="{{work.images}}" wx:key="index" wx:for-item="image">
+          <view class="gallery-item" wx:if="{{image}}">
+            <image src="{{image}}" mode="aspectFit"></image>
+          </view>
+        </block>
+      </view>
+      
+      <!-- 作品描述 -->
+      <view class="description-section">
+        <view class="section-subtitle">设计说明</view>
+        <view class="description-content">{{work.description || '暂无描述'}}</view>
+      </view>
+      
+      <!-- 设计团队 -->
+      <view class="team-section">
+        <view class="section-subtitle">设计团队</view>
+        <view class="team-info">布珥·迈拓空间设计团队</view>
+      </view>
+      
+      <!-- 咨询按钮 -->
+      <view class="contact-section">
+        <button class="contact-btn" bindtap="onContact">立即咨询设计方案</button>
+      </view>
+    </view>
+    
+    <!-- 数据为空状态 -->
+    <view wx:else class="empty-container">
+      <view class="empty-icon">📭</view>
+      <text class="empty-text">暂无作品详情数据</text>
+      <button class="retry-btn" bindtap="onRetry">重新加载</button>
+    </view>
+  </view>
+</scroll-view>

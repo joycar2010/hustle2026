@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据统计 - 布珥·迈拓空间设计</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #191919;
+            color: #fff;
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* 侧边栏样式 */
+        .sidebar {
+            width: 280px;
+            background-color: #2a2a2a;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 30px 0;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar-header {
+            padding: 0 30px 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .sidebar-logo {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 15px;
+            margin-left: auto;
+            margin-right: auto;
+            color: #e61736;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .sidebar-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .sidebar-subtitle {
+            font-size: 16px;
+            color: #cc0000;
+            text-align: center;
+        }
+        
+        .sidebar-menu {
+            flex: 1;
+            padding: 30px 0;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 20px 30px;
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .menu-item:hover {
+            background-color: rgba(230, 23, 54, 0.1);
+            color: #fff;
+        }
+        
+        .menu-item.active {
+            background-color: rgba(230, 23, 54, 0.1);
+            color: #e61736;
+            border-left-color: #e61736;
+        }
+        
+        .menu-icon {
+            font-size: 24px;
+            margin-right: 15px;
+        }
+        
+        .menu-text {
+            font-size: 18px;
+            font-weight: 500;
+        }
+        
+        .logout-item {
+            margin-top: auto;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* 主内容区域 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* 顶部导航栏 */
+        .top-nav {
+            height: 80px;
+            background-color: #2a2a2a;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40px;
+        }
+        
+        .nav-left {
+            display: flex;
+            align-items: center;
+        }
+        
+        .nav-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .nav-right {
+            display: flex;
+            align-items: center;
+        }
+        
+        /* 内容区域 */
+        .content {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+        }
+        
+        /* 统计卡片容器 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        /* 统计卡片 */
+        .stat-card {
+            background-color: #2a2a2a;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 20px rgba(230, 23, 54, 0.2);
+            border-color: rgba(230, 23, 54, 0.3);
+        }
+        
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .stat-title {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .stat-icon {
+            font-size: 32px;
+            color: #e61736;
+        }
+        
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        
+        .stat-change {
+            font-size: 14px;
+            color: #4caf50;
+        }
+        
+        /* 图表容器 */
+        .charts-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-card {
+            background-color: #2a2a2a;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .chart-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 20px;
+        }
+        
+        /* 图表区域 */
+        .chart-area {
+            height: 300px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        
+        /* 数据表格 */
+        .data-table-container {
+            background-color: #2a2a2a;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            margin-bottom: 30px;
+        }
+        
+        .table-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 20px;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .data-table th,
+        .data-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .data-table th {
+            font-weight: bold;
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        .data-table td {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .data-table tbody tr:hover {
+            background-color: rgba(230, 23, 54, 0.1);
+        }
+        
+        /* 刷新按钮 */
+        .refresh-btn {
+            padding: 10px 20px;
+            background-color: #e61736;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        
+        .refresh-btn:hover {
+            background-color: #cc0000;
+            transform: translateY(-2px);
+        }
+        
+        /* 加载状态 */
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
+        
+        .loading::after {
+            content: '';
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #e61736;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        /* 通知提示 */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 500;
+            z-index: 2000;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+        
+        .toast.active {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        .toast.success {
+            background-color: #4caf50;
+        }
+        
+        .toast.error {
+            background-color: #cc0000;
+        }
+        
+        .toast.info {
+            background-color: #2196f3;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 1200px) {
+            .charts-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 240px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .top-nav {
+                padding: 0 20px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .sidebar {
+                width: 100%;
+                position: fixed;
+                left: -100%;
+                z-index: 1000;
+            }
+            
+            .sidebar.open {
+                left: 0;
+            }
+            
+            .main-content {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <img src="/images/logo.png" alt="布珥·迈拓空间设计" style="width: 100%; height: 100%; object-fit: contain;">
+            </div>
+            <div class="sidebar-title">布珥·迈拓空间设计</div>
+            <div class="sidebar-subtitle">管理后台</div>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <a href="/dashboard" class="menu-item">
+                <div class="menu-icon">📊</div>
+                <div class="menu-text">仪表盘</div>
+            </a>
+            <a href="/works" class="menu-item">
+                <div class="menu-icon">📋</div>
+                <div class="menu-text">作品管理</div>
+            </a>
+            <a href="/categories" class="menu-item">
+                <div class="menu-icon">🏷️</div>
+                <div class="menu-text">分类管理</div>
+            </a>
+            <a href="/leads" class="menu-item">
+                <div class="menu-icon">👥</div>
+                <div class="menu-text">线索管理</div>
+            </a>
+            <a href="/about" class="menu-item">
+                <div class="menu-icon">ℹ️</div>
+                <div class="menu-text">关于我们</div>
+            </a>
+            <a href="/stats" class="menu-item active">
+                <div class="menu-icon">📈</div>
+                <div class="menu-text">数据统计</div>
+            </a>
+            <a href="/settings" class="menu-item">
+                <div class="menu-icon">⚙️</div>
+                <div class="menu-text">系统设置</div>
+            </a>
+            <a href="/logout" class="menu-item logout-item">
+                <div class="menu-icon">🚪</div>
+                <div class="menu-text">退出登录</div>
+            </a>
+        </nav>
+    </div>
+    
+    <!-- 主内容区域 -->
+    <div class="main-content">
+        <!-- 顶部导航栏 -->
+        <div class="top-nav">
+            <div class="nav-left">
+                <div class="nav-title">数据统计</div>
+            </div>
+            <div class="nav-right">
+                <button class="refresh-btn" onclick="refreshData()">
+                    🔄 刷新数据
+                </button>
+            </div>
+        </div>
+        
+        <!-- 内容区域 -->
+        <div class="content">
+            <!-- 统计卡片 -->
+            <div class="stats-grid" id="statsGrid">
+                <div class="loading"></div>
+            </div>
+            
+            <!-- 图表区域 -->
+            <div class="charts-container" id="chartsContainer">
+                <div class="loading"></div>
+            </div>
+            
+            <!-- 数据表格 -->
+            <div class="data-table-container">
+                <div class="table-title">详细统计数据</div>
+                <table class="data-table" id="dataTable">
+                    <thead>
+                        <tr>
+                            <th>项目类型</th>
+                            <th>作品数量</th>
+                            <th>浏览量</th>
+                            <th>线索数量</th>
+                            <th>转化率</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: rgba(255, 255, 255, 0.5);">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 通知提示 -->
+    <div class="toast" id="toast"></div>
+    
+    <script>
+        // 全局状态
+        let statsData = null;
+        let lastUpdateTime = null;
+        
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStatsData();
+            
+            // 设置定时刷新，每5分钟自动刷新一次
+            setInterval(loadStatsData, 5 * 60 * 1000);
+        });
+        
+        // 加载统计数据
+        async function loadStatsData() {
+            showLoading();
+            
+            try {
+                const response = await fetch('/api/v1/stats/detailed');
+                if (!response.ok) {
+                    throw new Error('加载数据失败');
+                }
+                
+                const result = await response.json();
+                if (result.success) {
+                    statsData = result.data;
+                    lastUpdateTime = new Date();
+                    renderStats();
+                    renderCharts();
+                    renderTable();
+                    showToast('数据加载成功', 'success');
+                } else {
+                    throw new Error(result.message || '加载数据失败');
+                }
+            } catch (error) {
+                console.error('加载统计数据错误:', error);
+                showToast('加载数据失败', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // 刷新数据
+        function refreshData() {
+            loadStatsData();
+        }
+        
+        // 显示加载状态
+        function showLoading() {
+            const statsGrid = document.getElementById('statsGrid');
+            const chartsContainer = document.getElementById('chartsContainer');
+            
+            statsGrid.innerHTML = '<div class="loading"></div>';
+            chartsContainer.innerHTML = '<div class="loading"></div>';
+        }
+        
+        // 隐藏加载状态
+        function hideLoading() {
+            // 加载完成后自动隐藏，不需要额外操作
+        }
+        
+        // 渲染统计卡片
+        function renderStats() {
+            if (!statsData) return;
+            
+            const statsGrid = document.getElementById('statsGrid');
+            const statsCards = [
+                {
+                    title: '作品总数',
+                    value: statsData.totalWorks,
+                    icon: '📋',
+                    change: `+${statsData.worksChange} 本月`,
+                    color: '#4caf50'
+                },
+                {
+                    title: '分类数量',
+                    value: statsData.totalCategories,
+                    icon: '🏷️',
+                    change: `+${statsData.categoriesChange} 本月`,
+                    color: '#2196f3'
+                },
+                {
+                    title: '线索总数',
+                    value: statsData.totalLeads,
+                    icon: '👥',
+                    change: `+${statsData.leadsChange} 本月`,
+                    color: '#ff9800'
+                },
+                {
+                    title: '总浏览量',
+                    value: statsData.totalViews,
+                    icon: '👁️',
+                    change: `+${statsData.viewsChange}% 本月`,
+                    color: '#9c27b0'
+                }
+            ];
+            
+            statsGrid.innerHTML = statsCards.map(card => `
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-title">${card.title}</div>
+                        <div class="stat-icon">${card.icon}</div>
+                    </div>
+                    <div class="stat-value">${card.value.toLocaleString()}</div>
+                    <div class="stat-change" style="color: ${card.color}">${card.change}</div>
+                </div>
+            `).join('');
+        }
+        
+        // 渲染图表（简化版，实际项目中可以使用Chart.js等库）
+        function renderCharts() {
+            if (!statsData) return;
+            
+            const chartsContainer = document.getElementById('chartsContainer');
+            
+            chartsContainer.innerHTML = `
+                <div class="chart-card">
+                    <div class="chart-title">作品类型分布</div>
+                    <div class="chart-area">
+                        <div style="font-size: 18px; text-align: center; color: rgba(255, 255, 255, 0.7);">
+                            <div style="margin-bottom: 20px;">作品类型分布图表</div>
+                            <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+                                ${Object.entries(statsData.worksByCategory).map(([category, count]) => `
+                                    <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 300px;">
+                                        <div style="width: 120px; text-align: left;">${category}</div>
+                                        <div style="flex: 1; height: 20px; background-color: rgba(255, 255, 255, 0.1); border-radius: 10px; overflow: hidden;">
+                                            <div style="height: 100%; width: ${(count / statsData.totalWorks) * 100}%; background-color: #e61736; transition: width 0.5s ease;"></div>
+                                        </div>
+                                        <div style="width: 50px; text-align: right;">${count}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">线索状态分布</div>
+                    <div class="chart-area">
+                        <div style="font-size: 18px; text-align: center; color: rgba(255, 255, 255, 0.7);">
+                            <div style="margin-bottom: 20px;">线索状态分布图表</div>
+                            <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+                                ${Object.entries(statsData.leadsByStatus).map(([status, count]) => `
+                                    <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 300px;">
+                                        <div style="width: 120px; text-align: left;">${getStatusName(status)}</div>
+                                        <div style="flex: 1; height: 20px; background-color: rgba(255, 255, 255, 0.1); border-radius: 10px; overflow: hidden;">
+                                            <div style="height: 100%; width: ${(count / statsData.totalLeads) * 100}%; background-color: ${getStatusColor(status)}; transition: width 0.5s ease;"></div>
+                                        </div>
+                                        <div style="width: 50px; text-align: right;">${count}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 渲染数据表格
+        function renderTable() {
+            if (!statsData) return;
+            
+            const tableBody = document.getElementById('tableBody');
+            
+            const tableRows = statsData.detailedStats.map(stat => `
+                <tr>
+                    <td>${stat.category}</td>
+                    <td>${stat.worksCount}</td>
+                    <td>${stat.views}</td>
+                    <td>${stat.leadsCount}</td>
+                    <td>${stat.conversionRate}%</td>
+                </tr>
+            `).join('');
+            
+            tableBody.innerHTML = tableRows;
+        }
+        
+        // 获取状态名称
+        function getStatusName(status) {
+            const statusMap = {
+                'new': '新线索',
+                'processing': '处理中',
+                'completed': '已完成',
+                'canceled': '已取消'
+            };
+            return statusMap[status] || status;
+        }
+        
+        // 获取状态颜色
+        function getStatusColor(status) {
+            const colorMap = {
+                'new': '#ffc107',
+                'processing': '#2196f3',
+                'completed': '#4caf50',
+                'canceled': '#f44336'
+            };
+            return colorMap[status] || '#9e9e9e';
+        }
+        
+        // 显示通知
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} active`;
+            
+            setTimeout(() => {
+                toast.classList.remove('active');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

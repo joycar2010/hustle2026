@@ -1,0 +1,170 @@
+/**contact.scss**/
+page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #191919;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: #fff;
+}
+
+.scrollarea {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.container {
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 通用区块样式 */
+.contact-section,
+.form-section,
+.map-section {
+  padding: 30rpx;
+  background-color: #000;
+  margin-bottom: 20rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.section-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #fff;
+  margin-bottom: 25rpx;
+  padding-left: 10rpx;
+  border-left: 4rpx solid #e61736;
+}
+
+/* 联系列表样式 */
+.contact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 25rpx;
+}
+
+.contact-item {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 25rpx;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 16rpx;
+  transition: all 0.3s ease;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.contact-item:active {
+  transform: scale(0.98);
+  background-color: rgba(230, 23, 54, 0.1);
+  border-color: #e61736;
+}
+
+.contact-icon {
+  font-size: 48rpx;
+  margin-top: 5rpx;
+  color: #e61736;
+}
+
+.contact-content {
+  flex: 1;
+}
+
+.contact-label {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 8rpx;
+}
+
+.contact-value {
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #fff;
+}
+
+/* 表单样式 */
+.form-item {
+  margin-bottom: 30rpx;
+}
+
+.form-label {
+  display: block;
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #fff;
+  margin-bottom: 15rpx;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  padding: 20rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  color: #fff;
+  box-sizing: border-box;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  border-color: #e61736;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.form-textarea {
+  min-height: 150rpx;
+  line-height: 1.6;
+  resize: none;
+}
+
+.form-picker {
+  padding: 20rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 12rpx;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.picker-text {
+  font-size: 26rpx;
+  color: #fff;
+}
+
+.submit-btn {
+  width: 100%;
+  background-color: #e61736;
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: bold;
+  padding: 22rpx 0;
+  border-radius: 50rpx;
+  border: none;
+  box-shadow: 0 4rpx 16rpx rgba(230, 23, 54, 0.3);
+  transition: all 0.3s ease;
+  margin-top: 20rpx;
+}
+
+.submit-btn:active {
+  transform: scale(0.98);
+  box-shadow: 0 2rpx 8rpx rgba(230, 23, 54, 0.5);
+}
+
+.placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* 地图样式 */
+.map-container {
+  width: 100%;
+  height: 300rpx;
+  border-radius: 16rpx;
+  overflow: hidden;
+  border: 1rpx solid rgba(255, 255, 255, 0.1);
+}
+
+.map-container image {
+  width: 100%;
+  height: 100%;
+}

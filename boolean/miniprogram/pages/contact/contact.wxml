@@ -1,0 +1,74 @@
+<!-- contact.wxml -->
+<navigation-bar title="联系我们" back="{{true}}" color="white" background="#000"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="container">
+    <!-- 联系信息 -->
+    <view class="contact-section">
+      <view class="section-title">联系方式</view>
+      <view class="contact-list">
+        <view class="contact-item">
+          <view class="contact-icon">📞</view>
+          <view class="contact-content">
+            <view class="contact-label">电话咨询</view>
+            <view class="contact-value" bindtap="makePhoneCall">400-123-4567</view>
+          </view>
+        </view>
+        <view class="contact-item">
+          <view class="contact-icon">📧</view>
+          <view class="contact-content">
+            <view class="contact-label">邮箱咨询</view>
+            <view class="contact-value">info@boolean-mustang.com</view>
+          </view>
+        </view>
+        <view class="contact-item">
+          <view class="contact-icon">📍</view>
+          <view class="contact-content">
+            <view class="contact-label">公司地址</view>
+            <view class="contact-value">上海市浦东新区陆家嘴金融中心88号</view>
+          </view>
+        </view>
+        <view class="contact-item">
+          <view class="contact-icon">⏰</view>
+          <view class="contact-content">
+            <view class="contact-label">营业时间</view>
+            <view class="contact-value">周一至周日 9:00-18:00</view>
+          </view>
+        </view>
+      </view>
+    </view>
+    
+    <!-- 咨询表单 -->
+    <view class="form-section">
+      <view class="section-title">在线咨询</view>
+      <form bindsubmit="submitForm">
+        <view class="form-item">
+          <view class="form-label">您的姓名</view>
+          <input name="name" placeholder="请输入您的姓名" placeholder-class="placeholder" class="form-input" />
+        </view>
+        <view class="form-item">
+          <view class="form-label">联系电话</view>
+          <input name="phone" placeholder="请输入您的联系电话" placeholder-class="placeholder" class="form-input" type="number" />
+        </view>
+        <view class="form-item">
+          <view class="form-label">咨询类型</view>
+          <picker name="type" range="{{consultTypes}}" class="form-picker">
+            <view class="picker-text">{{selectedType}}</view>
+          </picker>
+        </view>
+        <view class="form-item">
+          <view class="form-label">留言内容</view>
+          <textarea name="message" placeholder="请输入您的咨询内容" placeholder-class="placeholder" class="form-textarea" auto-height="true" />
+        </view>
+        <button form-type="submit" class="submit-btn">提交咨询</button>
+      </form>
+    </view>
+    
+    <!-- 公司地图 -->
+    <view class="map-section">
+      <view class="section-title">公司位置</view>
+      <view class="map-container">
+        <image src="/images/map.png" mode="aspectFit"></image>
+      </view>
+    </view>
+  </view>
+</scroll-view>

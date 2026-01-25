@@ -1,0 +1,101 @@
+<!--index.wxml-->
+<navigation-bar title="" back="{{false}}" color="white" background="#000"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="container">
+    <!-- 品牌Logo和名称 -->
+    <view class="header-section">
+      <image class="logo" src="/images/logo.png" mode="aspectFit"></image>
+      <text class="header-title">布珥设计</text>
+    </view>
+    
+    <!-- 设计理念 -->
+    <view class="concept-section">
+      <text class="concept-title">DESIGN CONCEPT</text>
+      <text class="concept-content">我们专注于为客户提供高品质的空间设计服务，
+        用专业的设计理念和精湛的技术，
+        打造独特的空间体验。</text>
+    </view>
+    
+    <!-- 服务分类 -->
+    <view class="service-section">
+      <navigator url="/pages/works/works?type=residential" class="service-item">
+        <view class="service-circle">
+          <text class="service-number">01</text>
+          <text class="service-name">家装设计</text>
+        </view>
+      </navigator>
+      <navigator url="/pages/works/works?type=office" class="service-item">
+        <view class="service-circle">
+          <text class="service-number">02</text>
+          <text class="service-name">公装设计</text>
+        </view>
+      </navigator>
+      <navigator url="/pages/works/works?type=commercial" class="service-item">
+        <view class="service-circle">
+          <text class="service-number">03</text>
+          <text class="service-name">商业空间</text>
+        </view>
+      </navigator>
+    </view>
+    
+    <!-- 精选作品 -->
+    <view class="works-section">
+      <view class="section-header">
+        <text class="section-title">精品案例</text>
+        <navigator url="/pages/works/works" class="more-button">查看全部</navigator>
+      </view>
+      <view class="works-list">
+        <block wx:for="{{featuredWorks}}" wx:key="id" wx:for-item="work">
+          <navigator url="/pages/work-detail/work-detail?id={{work.id}}" class="work-item">
+            <view class="work-image-wrapper">
+              <image src="{{work.coverImage}}" mode="aspectFill"></image>
+              <view class="work-badge">{{work.spaceType}}</view>
+            </view>
+            <view class="work-info">
+              <text class="work-title">{{work.title}}</text>
+              <text class="work-meta">{{work.area}}㎡ · {{work.location}}</text>
+              <view class="work-actions">
+                <text class="action-text">查看详情</text>
+                <text class="action-arrow">→</text>
+              </view>
+            </view>
+          </navigator>
+        </block>
+      </view>
+    </view>
+    
+    <!-- 关于我们 -->
+    <view class="about-section">
+      <view class="about-header">
+        <text class="about-title">关于布珥</text>
+      </view>
+      <view class="about-content">
+        <text class="about-text">布珥·迈拓空间设计是一家专注于高端空间设计的专业公司，
+          致力于为客户提供个性化、高品质的空间设计解决方案。</text>
+        <navigator url="/pages/brand/brand" class="about-button">了解更多</navigator>
+      </view>
+    </view>
+    
+    <!-- 联系我们 -->
+    <view class="contact-section">
+      <view class="contact-header">
+        <text class="contact-title">联系我们</text>
+      </view>
+      <view class="contact-info">
+        <view class="contact-item">
+          <text class="contact-label">电话</text>
+          <text class="contact-value">400-123-4567</text>
+        </view>
+        <view class="contact-item">
+          <text class="contact-label">邮箱</text>
+          <text class="contact-value">info@boolean-mustang.com</text>
+        </view>
+        <view class="contact-item">
+          <text class="contact-label">地址</text>
+          <text class="contact-value">上海市浦东新区陆家嘴金融中心88号</text>
+        </view>
+      </view>
+      <button class="contact-btn" bindtap="onContact">立即咨询</button>
+    </view>
+  </view>
+</scroll-view>

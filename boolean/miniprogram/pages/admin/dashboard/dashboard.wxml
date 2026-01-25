@@ -1,0 +1,64 @@
+<!-- dashboard.wxml -->
+<navigation-bar title="管理后台" back="{{true}}" color="white" background="#2a2a2a"></navigation-bar>
+<scroll-view class="scrollarea" scroll-y type="list">
+  <view class="container">
+    <view class="welcome-section">
+      <view class="welcome-text">欢迎回来，管理员</view>
+      <view class="welcome-subtext">布珥·迈拓空间设计管理后台</view>
+    </view>
+    
+    <view class="menu-section">
+      <view class="menu-grid">
+        <navigator url="#" class="menu-item">
+          <view class="menu-icon">📋</view>
+          <view class="menu-title">作品管理</view>
+          <view class="menu-desc">添加、编辑和删除作品</view>
+        </navigator>
+        
+        <navigator url="#" class="menu-item">
+          <view class="menu-icon">🏷️</view>
+          <view class="menu-title">分类管理</view>
+          <view class="menu-desc">管理作品分类和标签</view>
+        </navigator>
+        
+        <navigator url="#" class="menu-item">
+          <view class="menu-icon">👥</view>
+          <view class="menu-title">线索管理</view>
+          <view class="menu-desc">查看和处理客户线索</view>
+        </navigator>
+        
+        <navigator url="#" class="menu-item">
+          <view class="menu-icon">📊</view>
+          <view class="menu-title">数据统计</view>
+          <view class="menu-desc">查看作品浏览和咨询数据</view>
+        </navigator>
+        
+        <navigator url="#" class="menu-item">
+          <view class="menu-icon">⚙️</view>
+          <view class="menu-title">系统设置</view>
+          <view class="menu-desc">管理系统参数和配置</view>
+        </navigator>
+        
+        <navigator url="/pages/admin/login/login" class="menu-item logout">
+          <view class="menu-icon">🚪</view>
+          <view class="menu-title">退出登录</view>
+          <view class="menu-desc">安全退出管理后台</view>
+        </navigator>
+      </view>
+    </view>
+    
+    <view class="info-section">
+      <view class="info-title">快速操作</view>
+      <view class="quick-actions">
+        <button class="action-btn" bindtap="addWork">
+          <text class="action-icon">+</text>
+          <text class="action-text">添加新作品</text>
+        </button>
+        <button class="action-btn" bindtap="viewLeads">
+          <text class="action-icon">📋</text>
+          <text class="action-text">查看新线索</text>
+        </button>
+      </view>
+    </view>
+  </view>
+</scroll-view>
