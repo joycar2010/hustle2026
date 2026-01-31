@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>线索管理 - 布珥·迈拓空间设计</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -13,93 +14,75 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background-color: #191919;
-            color: #fff;
+            background-color: #1a2430;
+            color: #ffffff;
             display: flex;
             min-height: 100vh;
+            line-height: 1.6;
         }
         
         /* 侧边栏样式 */
         .sidebar {
-            width: 280px;
-            background-color: #2a2a2a;
+            width: 240px;
+            background-color: #151e29;
+            padding: 20px 0;
             border-right: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 30px 0;
-            display: flex;
-            flex-direction: column;
-            transition: all 0.3s ease;
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            overflow-y: auto;
         }
         
-        .sidebar-header {
-            padding: 0 30px 30px;
+        .logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 20px 30px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
         
-        .sidebar-logo {
+        .logo img {
             width: 80px;
             height: 80px;
-            margin-bottom: 15px;
-            margin-left: auto;
-            margin-right: auto;
-            color: #e61736;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            border-radius: 8px;
         }
         
-        .sidebar-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #fff;
-            margin-bottom: 10px;
-            text-align: center;
+        .nav-menu {
+            margin-top: 30px;
         }
         
-        .sidebar-subtitle {
-            font-size: 16px;
-            color: #cc0000;
-            text-align: center;
-        }
-        
-        .sidebar-menu {
-            flex: 1;
-            padding: 30px 0;
-        }
-        
-        .menu-item {
-            display: flex;
-            align-items: center;
-            padding: 20px 30px;
-            color: rgba(255, 255, 255, 0.8);
-            text-decoration: none;
+        .nav-item {
+            padding: 15px 20px;
+            cursor: pointer;
             transition: all 0.3s ease;
             border-left: 3px solid transparent;
         }
         
-        .menu-item:hover {
-            background-color: rgba(230, 23, 54, 0.1);
-            color: #fff;
+        .nav-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
         }
         
-        .menu-item.active {
-            background-color: rgba(230, 23, 54, 0.1);
-            color: #e61736;
-            border-left-color: #e61736;
+        .nav-item.active {
+            background-color: rgba(153, 0, 0, 0.2);
+            border-left-color: #990000;
         }
         
-        .menu-icon {
-            font-size: 24px;
-            margin-right: 15px;
+        .nav-item a {
+            color: #ffffff;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            font-size: 16px;
         }
         
-        .menu-text {
+        .nav-item i {
+            margin-right: 12px;
             font-size: 18px;
-            font-weight: 500;
         }
         
-        .logout-item {
-            margin-top: auto;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        .nav-item span {
+            flex: 1;
         }
         
         /* 主内容区域 */
@@ -108,12 +91,13 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            margin-left: 240px;
         }
         
         /* 顶部导航栏 */
         .top-nav {
             height: 80px;
-            background-color: #2a2a2a;
+            background-color: #151e29;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             display: flex;
             align-items: center;
@@ -135,6 +119,79 @@
         .nav-right {
             display: flex;
             align-items: center;
+            gap: 30px;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 24px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .user-info:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            transform: translateY(-2px);
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #ffffff;
+            border: 2px solid #cc0000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #cc0000;
+            margin-right: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-avatar {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(204, 0, 0, 0.3);
+        }
+        
+        .user-details {
+            text-align: right;
+            transition: all 0.3s ease;
+        }
+        
+        .user-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-role {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        /* 用户信息更新动画 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .user-info.updated {
+            animation: fadeIn 0.5s ease;
         }
         
         .btn {
@@ -151,7 +208,7 @@
         }
         
         .btn-primary {
-            background-color: #e61736;
+            background-color: #990000;
             color: #fff;
         }
         
@@ -165,15 +222,15 @@
             flex: 1;
             padding: 40px;
             overflow-y: auto;
+            background-color: #1a2430;
         }
         
         /* 线索管理 */
         .leads-container {
-            background-color: #2a2a2a;
+            background-color: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            border-radius: 8px;
             padding: 30px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
         
         /* 筛选和搜索区域 */
@@ -218,6 +275,11 @@
             outline: none;
             min-width: 150px;
         }
+
+        .filter-select option {
+            background-color: #1a2430;
+            color: white;
+        }
         
         /* 线索列表 */
         .leads-table {
@@ -244,7 +306,7 @@
         }
         
         .leads-table tbody tr:hover {
-            background-color: rgba(230, 23, 54, 0.1);
+            background-color: rgba(153, 0, 0, 0.1);
         }
         
         /* 状态标签 */
@@ -304,6 +366,15 @@
         
         .btn-danger:hover {
             background-color: #a30000;
+        }
+
+        .btn-success {
+            background-color: #22c55e;
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background-color: #16a34a;
         }
         
         /* 模态框 */
@@ -386,8 +457,13 @@
         }
         
         .form-input:focus {
-            border-color: #e61736;
-            box-shadow: 0 0 0 3px rgba(230, 23, 54, 0.1);
+            border-color: #990000;
+            box-shadow: 0 0 0 3px rgba(153, 0, 0, 0.1);
+        }
+
+        .form-input option {
+            background-color: #1a2430;
+            color: white;
         }
         
         .form-textarea {
@@ -415,7 +491,7 @@
             width: 30px;
             height: 30px;
             border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #e61736;
+            border-top-color: #990000;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -477,7 +553,16 @@
         
         @media (max-width: 768px) {
             .sidebar {
-                width: 240px;
+                transform: translateX(-100%);
+            }
+            
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            
+            .main-content {
+                margin-left: 0;
+                width: 100%;
             }
             
             .content {
@@ -499,73 +584,107 @@
         }
         
         @media (max-width: 576px) {
-            .sidebar {
-                width: 100%;
-                position: fixed;
-                left: -100%;
-                z-index: 1000;
-            }
-            
-            .sidebar.open {
-                left: 0;
-            }
-            
-            .main-content {
-                width: 100%;
-            }
-            
             .action-buttons {
                 flex-direction: column;
+            }
+            
+            .modal-content {
+                width: 95%;
+                max-width: 500px;
+                margin: 20px;
+                padding: 20px;
+            }
+            
+            .form-group {
+                margin-bottom: 15px;
+            }
+            
+            .form-input {
+                font-size: 14px;
+                padding: 10px;
+            }
+            
+            .form-actions {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .form-actions button {
+                width: 100%;
+                margin: 0;
             }
         }
     </style>
 </head>
 <body>
     <!-- 侧边栏 -->
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo">
-                <img src="/images/logo.png" alt="布珥·迈拓空间设计" style="width: 100%; height: 100%; object-fit: contain;">
-            </div>
-            <div class="sidebar-title">布珥·迈拓空间设计</div>
-            <div class="sidebar-subtitle">管理后台</div>
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="/images/logo.png" alt="Logo">
+      </div>
+      <nav class="nav-menu">
+        <div class="nav-item">
+          <a href="/dashboard">
+            <i class="fas fa-tachometer-alt"></i>
+            <span>仪表盘</span>
+          </a>
         </div>
-        
-        <nav class="sidebar-menu">
-            <a href="/dashboard" class="menu-item">
-                <div class="menu-icon">📊</div>
-                <div class="menu-text">仪表盘</div>
-            </a>
-            <a href="/works" class="menu-item">
-                <div class="menu-icon">📋</div>
-                <div class="menu-text">作品管理</div>
-            </a>
-            <a href="/categories" class="menu-item">
-                <div class="menu-icon">🏷️</div>
-                <div class="menu-text">分类管理</div>
-            </a>
-            <a href="/leads" class="menu-item active">
-                <div class="menu-icon">👥</div>
-                <div class="menu-text">线索管理</div>
-            </a>
-            <a href="/stats" class="menu-item">
-                <div class="menu-icon">📈</div>
-                <div class="menu-text">数据统计</div>
-            </a>
-            <a href="/settings" class="menu-item">
-                <div class="menu-icon">⚙️</div>
-                <div class="menu-text">系统设置</div>
-            </a>
-            <a href="/about" class="menu-item">
-                <div class="menu-icon">ℹ️</div>
-                <div class="menu-text">关于我们</div>
-            </a>
-            <a href="/logout" class="menu-item logout-item">
-                <div class="menu-icon">🚪</div>
-                <div class="menu-text">退出登录</div>
-            </a>
-        </nav>
-    </div>
+        <div class="nav-item">
+          <a href="/brand-edit">
+            <i class="fas fa-edit"></i>
+            <span>品牌管理</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/works">
+            <i class="fas fa-palette"></i>
+            <span>作品管理</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/categories">
+            <i class="fas fa-list"></i>
+            <span>分类管理</span>
+          </a>
+        </div>
+        <div class="nav-item active">
+          <a href="/leads">
+            <i class="fas fa-handshake"></i>
+            <span>线索管理</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/customers">
+            <i class="fas fa-users"></i>
+            <span>客户管理</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/stats">
+            <i class="fas fa-chart-bar"></i>
+            <span>数据统计</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/settings">
+            <i class="fas fa-cog"></i>
+            <span>系统设置</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/users">
+            <i class="fas fa-user-cog"></i>
+            <span>操作员管理</span>
+          </a>
+        </div>
+        <div class="nav-item">
+          <a href="/logout">
+            <i class="fas fa-sign-out-alt"></i>
+            <span>退出登录</span>
+          </a>
+        </div>
+      </nav>
+    </aside>
     
     <!-- 主内容区域 -->
     <div class="main-content">
@@ -578,6 +697,13 @@
                 <button class="btn btn-primary" onclick="openAddModal()">
                     + 添加线索
                 </button>
+                <div class="user-info" id="userInfoContainer">
+                    <div class="user-avatar" id="userAvatar">A</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">管理员</div>
+                        <div class="user-role" id="userRole">系统管理员</div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -621,59 +747,79 @@
                 <button class="close-btn" onclick="closeModal()">&times;</button>
             </div>
             
-            <form id="leadsForm" onsubmit="submitForm(event)">
-                <input type="hidden" id="leadId">
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadName">客户名称</label>
-                    <input type="text" class="form-input" id="leadName" name="name" required placeholder="请输入客户名称">
+            <div style="width: 100%;">
+                <!-- 线索编辑表单 -->
+                <div style="width: 100%; max-width: 800px; margin: 0 auto;">
+                    <form id="leadsForm" onsubmit="submitForm(event)">
+                        <input type="hidden" id="leadId">
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadName">客户名称</label>
+                            <input type="text" class="form-input" id="leadName" name="name" required placeholder="请输入客户名称">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadPhone">联系电话</label>
+                            <input type="tel" class="form-input" id="leadPhone" name="phone" required placeholder="请输入联系电话">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadEmail">电子邮箱</label>
+                            <input type="email" class="form-input" id="leadEmail" name="email" placeholder="请输入电子邮箱">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadProjectType">项目类型</label>
+                            <select class="form-input" id="leadProjectType" name="projectType" required>
+                                <option value="residential">家装设计</option>
+                                <option value="office">公装设计</option>
+                                <option value="commercial">商业空间</option>
+                                <option value="other">其他</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadBudget">预算范围</label>
+                            <input type="text" class="form-input" id="leadBudget" name="budget" placeholder="请输入预算范围">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadStatus">状态</label>
+                            <select class="form-input" id="leadStatus" name="status" required>
+                                <option value="new">新线索</option>
+                                <option value="processing">处理中</option>
+                                <option value="completed">已完成</option>
+                                <option value="canceled">已取消</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadDescription">备注</label>
+                            <textarea class="form-input form-textarea" id="leadDescription" name="description" placeholder="请输入备注信息"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadWechatAvatar">微信头像</label>
+                            <input type="text" class="form-input" id="leadWechatAvatar" name="wechatAvatar" placeholder="请输入微信头像URL">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadWechatNickname">微信昵称</label>
+                            <input type="text" class="form-input" id="leadWechatNickname" name="wechatNickname" placeholder="请输入微信昵称">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="leadWechatOpenId">微信OpenID</label>
+                            <input type="text" class="form-input" id="leadWechatOpenId" name="wechatOpenId" placeholder="请输入微信OpenID">
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+                            <button type="submit" class="btn btn-primary">保存</button>
+                        </div>
+                    </form>
                 </div>
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadPhone">联系电话</label>
-                    <input type="tel" class="form-input" id="leadPhone" name="phone" required placeholder="请输入联系电话">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadEmail">电子邮箱</label>
-                    <input type="email" class="form-input" id="leadEmail" name="email" placeholder="请输入电子邮箱">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadProjectType">项目类型</label>
-                    <select class="form-input" id="leadProjectType" name="projectType" required>
-                        <option value="residential">家装设计</option>
-                        <option value="office">公装设计</option>
-                        <option value="commercial">商业空间</option>
-                        <option value="other">其他</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadBudget">预算范围</label>
-                    <input type="text" class="form-input" id="leadBudget" name="budget" placeholder="请输入预算范围">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadStatus">状态</label>
-                    <select class="form-input" id="leadStatus" name="status" required>
-                        <option value="new">新线索</option>
-                        <option value="processing">处理中</option>
-                        <option value="completed">已完成</option>
-                        <option value="canceled">已取消</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label" for="leadDescription">备注</label>
-                    <textarea class="form-input form-textarea" id="leadDescription" name="description" placeholder="请输入备注信息"></textarea>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
-                    <button type="submit" class="btn btn-primary">保存</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
     
@@ -690,12 +836,133 @@
         let currentFilter = '';
         let currentSearch = '';
         
+        // 加载当前用户信息
+        async function loadCurrentUserInfo() {
+            try {
+                const response = await fetch('/api/v1/users/current');
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重定向到登录页面
+                        console.log('未授权访问，重定向到登录页面');
+                        window.location.href = '/login';
+                        return null;
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    return result.data;
+                } else {
+                    console.error('获取用户信息失败:', result.message || '未知错误');
+                    return null;
+                }
+            } catch (error) {
+                console.error('获取用户信息出错:', error.message);
+                return null;
+            }
+        }
+        
+        // 更新用户信息显示
+        function updateUserInfoDisplay(userInfo) {
+            if (!userInfo) {
+                return;
+            }
+            
+            const { id, username, role, permissions } = userInfo;
+            
+            const userInfoContainer = document.getElementById('userInfoContainer');
+            const userAvatar = document.getElementById('userAvatar');
+            const userName = document.getElementById('userName');
+            const userRole = document.getElementById('userRole');
+            
+            if (userAvatar) {
+                userAvatar.textContent = id || 'A';
+            }
+            
+            if (userName) {
+                userName.textContent = username || '未知用户';
+            }
+            
+            if (userRole) {
+                const roleMap = {
+                    'admin': '系统管理员',
+                    'editor': '编辑员',
+                    'viewer': '查看员'
+                };
+                userRole.textContent = roleMap[role] || '普通用户';
+            }
+            
+            // 添加更新动画效果
+            if (userInfoContainer) {
+                userInfoContainer.classList.add('updated');
+                setTimeout(() => {
+                    userInfoContainer.classList.remove('updated');
+                }, 500);
+            }
+            
+            // 根据权限更新导航菜单
+            updateNavigationBasedOnPermissions(permissions, role);
+        }
+        
+        // 根据权限更新导航菜单
+        function updateNavigationBasedOnPermissions(permissions, role) {
+            // 导航项与权限的映射关系
+            const navPermissionMap = {
+                'dashboard': 'dashboard',
+                'brand-edit': 'brand',
+                'works': 'works',
+                'categories': 'categories',
+                'leads': 'leads',
+                'customers': 'customers',
+                'stats': 'stats',
+                'settings': 'settings',
+                'users': 'users'
+            };
+            
+            // 获取所有导航项
+            const navItems = document.querySelectorAll('.nav-item');
+            
+            navItems.forEach(navItem => {
+                const link = navItem.querySelector('a');
+                if (link) {
+                    const href = link.getAttribute('href');
+                    // 提取路径部分（去掉开头的/）
+                    const path = href.substring(1);
+                    
+                    // 检查是否需要权限控制（排除退出登录）
+                    if (path !== 'logout') {
+                        const requiredPermission = navPermissionMap[path];
+                        
+                        // 管理员角色或有对应权限的用户可以看到该导航项
+                        if (role === 'admin' || (permissions && permissions[requiredPermission])) {
+                            navItem.style.display = 'block';
+                        } else {
+                            navItem.style.display = 'none';
+                        }
+                    }
+                }
+            });
+        }
+        
         // 初始化页面
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             loadLeads();
+            
+            // 加载当前用户信息
+            const userInfo = await loadCurrentUserInfo();
+            updateUserInfoDisplay(userInfo);
             
             // 设置定时刷新，每30秒更新一次数据
             setInterval(loadLeads, 30000);
+            
+            // 设置定时刷新用户信息，每5分钟更新一次
+            setInterval(async () => {
+                const updatedUserInfo = await loadCurrentUserInfo();
+                updateUserInfoDisplay(updatedUserInfo);
+            }, 300000);
         });
         
         // 加载线索数据
@@ -798,6 +1065,9 @@
                             <th>项目类型</th>
                             <th>预算范围</th>
                             <th>状态</th>
+                            <th>微信头像</th>
+                            <th>微信昵称</th>
+                            <th>微信OpenID</th>
                             <th>创建时间</th>
                             <th>操作</th>
                         </tr>
@@ -812,15 +1082,27 @@
                                 <td>${lead.projectType}</td>
                                 <td>${lead.budget || '-'}</td>
                                 <td>${getStatusTag(lead.status)}</td>
+                                <td>${lead.wechatAvatar ? `<img src="${lead.wechatAvatar}" alt="头像" style="width: 40px; height: 40px; border-radius: 50%;">` : '-'}</td>
+                                <td>${lead.wechatNickname || '-'}</td>
+                                <td>${lead.wechatOpenId || '-'}</td>
                                 <td>${new Date(lead.createdAt).toLocaleString()}</td>
                                 <td>
-                                    <div class="action-buttons">
-                                        <button class="btn btn-sm btn-secondary" onclick="editLead(${lead.id})">
-                                            编辑
-                                        </button>
-                                        <button class="btn btn-sm btn-danger" onclick="deleteLead(${lead.id})">
-                                            删除
-                                        </button>
+                                    <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                        <!-- 左侧：添加客户信息按钮 -->
+                                        <div style="flex: 1; min-width: 150px;">
+                                            <button class="btn btn-sm btn-success" onclick="openAddCustomerModal(${lead.id})" title="添加客户信息至客户管理">
+                                                ➕ 添加客户
+                                            </button>
+                                        </div>
+                                        <!-- 右侧：编辑和删除按钮 -->
+                                        <div class="action-buttons">
+                                            <button class="btn btn-sm btn-secondary" onclick="editLead(${lead.id})">
+                                                编辑
+                                            </button>
+                                            <button class="btn btn-sm btn-danger" onclick="deleteLead(${lead.id})">
+                                                删除
+                                            </button>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
@@ -918,6 +1200,9 @@
             document.getElementById('leadBudget').value = lead.budget;
             document.getElementById('leadStatus').value = lead.status;
             document.getElementById('leadDescription').value = lead.description;
+            document.getElementById('leadWechatAvatar').value = lead.wechatAvatar || '';
+            document.getElementById('leadWechatNickname').value = lead.wechatNickname || '';
+            document.getElementById('leadWechatOpenId').value = lead.wechatOpenId || '';
             
             document.getElementById('leadsModal').classList.add('active');
         }
@@ -959,7 +1244,10 @@
                     projectType: document.getElementById('leadProjectType').value,
                     budget: document.getElementById('leadBudget').value,
                     status: document.getElementById('leadStatus').value,
-                    description: document.getElementById('leadDescription').value
+                    description: document.getElementById('leadDescription').value,
+                    wechatAvatar: document.getElementById('leadWechatAvatar').value,
+                    wechatNickname: document.getElementById('leadWechatNickname').value,
+                    wechatOpenId: document.getElementById('leadWechatOpenId').value
                 };
                 
                 let response;
@@ -994,6 +1282,64 @@
             } catch (error) {
                 console.error('提交表单错误:', error);
                 showToast('操作失败，请检查输入格式', 'error');
+            }
+        }
+        
+        // 打开添加客户信息模态框
+        function openAddCustomerModal(leadId) {
+            // 直接调用添加客户信息函数
+            addCustomerFromLeadDirect(leadId);
+        }
+
+        // 直接从线索添加客户信息
+        async function addCustomerFromLeadDirect(leadId) {
+            try {
+                showToast('正在添加客户信息...', 'info');
+                
+                const response = await fetch(`/api/v1/leads/${leadId}/add-to-customers`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast('客户信息添加成功', 'success');
+                } else {
+                    showToast(result.message || '客户信息添加失败', 'error');
+                }
+            } catch (error) {
+                console.error('添加客户信息错误:', error);
+                showToast('添加客户信息失败，请稍后重试', 'error');
+            }
+        }
+
+        // 从线索添加客户信息
+        async function addCustomerFromLead() {
+            const leadId = document.getElementById('leadId').value;
+            if (!leadId) {
+                document.getElementById('customerAddResult').textContent = '请先选择要编辑的线索';
+                document.getElementById('customerAddResult').style.color = '#ffc107';
+                return;
+            }
+            
+            try {
+                document.getElementById('customerAddResult').textContent = '正在添加客户信息...';
+                document.getElementById('customerAddResult').style.color = '#2196f3';
+                
+                const response = await fetch(`/api/v1/leads/${leadId}/add-to-customers`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('customerAddResult').textContent = '客户信息添加成功';
+                    document.getElementById('customerAddResult').style.color = '#4caf50';
+                    showToast('客户信息添加成功', 'success');
+                } else {
+                    document.getElementById('customerAddResult').textContent = result.message || '客户信息添加失败';
+                    document.getElementById('customerAddResult').style.color = '#f44336';
+                    showToast('客户信息添加失败', 'error');
+                }
+            } catch (error) {
+                console.error('添加客户信息错误:', error);
+                document.getElementById('customerAddResult').textContent = '添加客户信息失败，请稍后重试';
+                document.getElementById('customerAddResult').style.color = '#f44336';
+                showToast('添加客户信息失败', 'error');
             }
         }
         

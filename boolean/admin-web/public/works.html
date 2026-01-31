@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>作品管理 - 布珥·迈拓空间设计</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -13,93 +14,71 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background-color: #191919;
-            color: #fff;
+            background-color: #1a2430;
+            color: #ffffff;
             display: flex;
             min-height: 100vh;
+            line-height: 1.6;
         }
         
         /* 侧边栏样式 */
         .sidebar {
-            width: 280px;
-            background-color: #2a2a2a;
+            width: 240px;
+            background-color: #151e29;
+            padding: 20px 0;
             border-right: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 30px 0;
-            display: flex;
-            flex-direction: column;
-            transition: all 0.3s ease;
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            overflow-y: auto;
         }
-        
-        .sidebar-header {
-            padding: 0 30px 30px;
+
+        .logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 20px 30px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
-        .sidebar-logo {
+
+        .logo img {
             width: 80px;
             height: 80px;
-            margin-bottom: 15px;
-            margin-left: auto;
-            margin-right: auto;
-            color: #e61736;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            border-radius: 8px;
         }
-        
-        .sidebar-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #fff;
-            margin-bottom: 10px;
-            text-align: center;
+
+        .nav-menu {
+            margin-top: 30px;
         }
-        
-        .sidebar-subtitle {
-            font-size: 16px;
-            color: #cc0000;
-            text-align: center;
-        }
-        
-        .sidebar-menu {
-            flex: 1;
-            padding: 30px 0;
-        }
-        
-        .menu-item {
-            display: flex;
-            align-items: center;
-            padding: 20px 30px;
-            color: rgba(255, 255, 255, 0.8);
-            text-decoration: none;
+
+        .nav-item {
+            padding: 15px 20px;
+            cursor: pointer;
             transition: all 0.3s ease;
             border-left: 3px solid transparent;
         }
-        
-        .menu-item:hover {
-            background-color: rgba(230, 23, 54, 0.1);
-            color: #fff;
+
+        .nav-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
         }
-        
-        .menu-item.active {
-            background-color: rgba(230, 23, 54, 0.1);
-            color: #e61736;
-            border-left-color: #e61736;
+
+        .nav-item.active {
+            background-color: rgba(153, 0, 0, 0.2);
+            border-left-color: #990000;
         }
-        
-        .menu-icon {
-            font-size: 24px;
-            margin-right: 15px;
+
+        .nav-item a {
+            color: #ffffff;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            font-size: 16px;
         }
-        
-        .menu-text {
+
+        .nav-item i {
+            margin-right: 12px;
             font-size: 18px;
-            font-weight: 500;
-        }
-        
-        .logout-item {
-            margin-top: auto;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         /* 主内容区域 */
@@ -108,12 +87,13 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            margin-left: 240px;
         }
         
         /* 顶部导航栏 */
         .top-nav {
             height: 80px;
-            background-color: #2a2a2a;
+            background-color: #151e29;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             display: flex;
             align-items: center;
@@ -135,29 +115,79 @@
         .nav-right {
             display: flex;
             align-items: center;
+            gap: 30px;
         }
         
-        .btn {
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 24px;
             transition: all 0.3s ease;
-            text-decoration: none;
-            display: inline-block;
-            text-align: center;
-            border: none;
+            cursor: pointer;
         }
         
-        .btn-primary {
-            background-color: #e61736;
-            color: #fff;
-        }
-        
-        .btn-primary:hover {
-            background-color: #cc0000;
+        .user-info:hover {
+            background-color: rgba(255, 255, 255, 0.05);
             transform: translateY(-2px);
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #ffffff;
+            border: 2px solid #cc0000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #cc0000;
+            margin-right: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-avatar {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(204, 0, 0, 0.3);
+        }
+        
+        .user-details {
+            text-align: right;
+            transition: all 0.3s ease;
+        }
+        
+        .user-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-role {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        /* 用户信息更新动画 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .user-info.updated {
+            animation: fadeIn 0.5s ease;
         }
         
         /* 内容区域 */
@@ -165,15 +195,65 @@
             flex: 1;
             padding: 40px;
             overflow-y: auto;
+            background-color: #1a2430;
         }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background-color: #990000;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #cc0000;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+
+        .btn-danger {
+            background-color: #cc0000;
+            color: white;
+        }
+
+
         
         /* 作品管理 */
         .works-container {
-            background-color: #2a2a2a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
             padding: 30px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         /* 筛选和搜索区域 */
@@ -219,6 +299,11 @@
             min-width: 150px;
         }
         
+        .filter-select option {
+            background-color: #1a2430;
+            color: white;
+        }
+        
         /* 作品列表 */
         .works-table {
             width: 100%;
@@ -244,7 +329,7 @@
         }
         
         .works-table tbody tr:hover {
-            background-color: rgba(230, 23, 54, 0.1);
+            background-color: rgba(153, 0, 0, 0.1);
         }
         
         /* 图片预览 */
@@ -252,37 +337,24 @@
             width: 80px;
             height: 60px;
             object-fit: cover;
-            border-radius: 6px;
+            border-radius: 4px;
         }
         
         /* 操作按钮 */
-        .action-buttons {
+        .action-links {
             display: flex;
             gap: 10px;
         }
         
-        .btn-sm {
-            padding: 5px 12px;
+        .action-link {
+            color: #990000;
+            text-decoration: none;
             font-size: 14px;
-            border-radius: 4px;
+            cursor: pointer;
         }
         
-        .btn-secondary {
-            background-color: rgba(255, 255, 255, 0.1);
-            color: #fff;
-        }
-        
-        .btn-secondary:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-        }
-        
-        .btn-danger {
-            background-color: #cc0000;
-            color: #fff;
-        }
-        
-        .btn-danger:hover {
-            background-color: #a30000;
+        .action-link:hover {
+            text-decoration: underline;
         }
         
         /* 分页 */
@@ -295,23 +367,23 @@
         }
         
         .pagination button {
-            background-color: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff;
             padding: 8px 16px;
-            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
             cursor: pointer;
+            font-size: 14px;
             transition: all 0.3s ease;
         }
         
         .pagination button:hover {
-            background-color: rgba(230, 23, 54, 0.1);
-            border-color: #e61736;
+            background-color: rgba(255, 255, 255, 0.15);
         }
         
         .pagination button.active {
-            background-color: #e61736;
-            border-color: #e61736;
+            background-color: #990000;
+            border-color: #990000;
         }
         
         .pagination button:disabled {
@@ -323,95 +395,127 @@
         .modal {
             display: none;
             position: fixed;
-            top: 0;
+            z-index: 1000;
             left: 0;
+            top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.5);
         }
-        
+
         .modal.active {
             display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        
+
         .modal-content {
-            background-color: #2a2a2a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            background-color: #1a2430;
+            border-radius: 8px;
             padding: 30px;
             width: 90%;
             max-width: 600px;
             max-height: 80vh;
             overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
+
+        /* 自定义滚动条样式 */
+        .modal-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .modal-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .modal-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+
+        .modal-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
         .modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
         }
-        
+
         .modal-title {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .close {
+            color: rgba(255, 255, 255, 0.6);
             font-size: 24px;
             font-weight: bold;
-            color: #fff;
-        }
-        
-        .close-btn {
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 24px;
             cursor: pointer;
-            opacity: 0.7;
         }
-        
-        .close-btn:hover {
-            opacity: 1;
+
+        .close:hover {
+            color: white;
         }
         
         /* 表单样式 */
         .form-group {
             margin-bottom: 20px;
         }
-        
+
         .form-label {
             display: block;
-            font-size: 16px;
-            font-weight: 500;
-            color: #fff;
             margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 500;
         }
-        
+
         .form-input {
             width: 100%;
             padding: 12px;
-            background-color: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            color: #fff;
-            font-size: 16px;
-            outline: none;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            color: white;
+            font-size: 14px;
         }
-        
+
         .form-input:focus {
-            border-color: #e61736;
-            box-shadow: 0 0 0 3px rgba(230, 23, 54, 0.1);
+            outline: none;
+            border-color: #990000;
         }
-        
+
+        .form-input option {
+            background-color: #1a2430;
+            color: white;
+        }
+
         .form-textarea {
+            width: 100%;
+            padding: 12px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            color: white;
+            font-size: 14px;
             resize: vertical;
-            min-height: 120px;
+            min-height: 100px;
         }
-        
-        .form-actions {
+
+        .form-textarea:focus {
+            outline: none;
+            border-color: #990000;
+        }
+
+        .modal-footer {
             display: flex;
-            gap: 15px;
             justify-content: flex-end;
+            gap: 10px;
             margin-top: 30px;
         }
         
@@ -428,7 +532,7 @@
             width: 30px;
             height: 30px;
             border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #e61736;
+            border-top-color: #990000;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -448,8 +552,8 @@
         .image-preview {
             width: 100%;
             height: 200px;
-            border: 2px dashed rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
             background-color: rgba(255, 255, 255, 0.05);
             cursor: pointer;
             overflow: hidden;
@@ -458,8 +562,8 @@
         }
         
         .image-preview:hover {
-            border-color: rgba(230, 23, 54, 0.3);
-            background-color: rgba(230, 23, 54, 0.05);
+            border-color: rgba(153, 0, 0, 0.3);
+            background-color: rgba(153, 0, 0, 0.05);
         }
         
         .preview-placeholder {
@@ -478,15 +582,15 @@
         }
         
         .preview-text {
-            font-size: 16px;
+            font-size: 14px;
         }
         
         /* 图片上传区域样式 */
         .image-upload-area {
             width: 100%;
             min-height: 150px;
-            border: 2px dashed rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
             background-color: rgba(255, 255, 255, 0.05);
             cursor: pointer;
             position: relative;
@@ -494,13 +598,13 @@
         }
         
         .image-upload-area:hover {
-            border-color: rgba(230, 23, 54, 0.3);
-            background-color: rgba(230, 23, 54, 0.05);
+            border-color: rgba(153, 0, 0, 0.3);
+            background-color: rgba(153, 0, 0, 0.05);
         }
         
         .image-upload-area.dragover {
-            border-color: rgba(230, 23, 54, 0.5);
-            background-color: rgba(230, 23, 54, 0.1);
+            border-color: rgba(153, 0, 0, 0.5);
+            background-color: rgba(153, 0, 0, 0.1);
         }
         
         .upload-placeholder {
@@ -523,13 +627,13 @@
         }
         
         .upload-text div:first-child {
-            font-size: 16px;
+            font-size: 14px;
             margin-bottom: 5px;
         }
         
         .upload-hint {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.3);
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
         }
         
         /* 上传进度样式 */
@@ -555,13 +659,13 @@
             content: '';
             display: block;
             height: 100%;
-            background-color: #e61736;
+            background-color: #990000;
             width: 0%;
             transition: width 0.3s ease;
         }
         
         .progress-text {
-            font-size: 16px;
+            font-size: 14px;
             color: rgba(255, 255, 255, 0.7);
         }
         
@@ -577,9 +681,8 @@
             position: relative;
             width: 100%;
             aspect-ratio: 1;
-            border-radius: 8px;
+            border-radius: 4px;
             overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
         
         .uploaded-image {
@@ -592,7 +695,7 @@
             position: absolute;
             top: 5px;
             right: 5px;
-            background-color: rgba(230, 23, 54, 0.8);
+            background-color: rgba(153, 0, 0, 0.8);
             color: white;
             border: none;
             border-radius: 50%;
@@ -607,7 +710,7 @@
         }
         
         .remove-image:hover {
-            background-color: rgba(230, 23, 54, 1);
+            background-color: rgba(153, 0, 0, 1);
             transform: scale(1.1);
         }
         
@@ -625,24 +728,81 @@
             transform: translateX(100%);
             transition: all 0.3s ease;
         }
-        
+
         .toast.active {
             opacity: 1;
             transform: translateX(0);
         }
-        
+
         .toast.success {
             background-color: #4caf50;
         }
-        
+
         .toast.error {
             background-color: #cc0000;
         }
-        
+
         .toast.info {
             background-color: #2196f3;
         }
         
+        /* 开关组件样式 */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.2);
+            transition: .4s;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+        }
+
+        input:checked + .slider {
+            background-color: #990000;
+        }
+
+        input:focus + .slider {
+            box-shadow: 0 0 1px #990000;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Rounded sliders */
+        .slider.round {
+            border-radius: 20px;
+        }
+
+        .slider.round:before {
+            border-radius: 50%;
+        }
+
         /* 响应式设计 */
         @media (max-width: 1200px) {
             .filter-bar {
@@ -658,6 +818,10 @@
             .works-table td {
                 padding: 10px;
             }
+            
+            .action-buttons {
+                flex-wrap: wrap;
+            }
         }
         
         @media (max-width: 768px) {
@@ -665,12 +829,8 @@
                 width: 240px;
             }
             
-            .content {
+            .main-content {
                 padding: 20px;
-            }
-            
-            .top-nav {
-                padding: 0 20px;
             }
             
             .works-container {
@@ -703,59 +863,78 @@
             .main-content {
                 width: 100%;
             }
-            
-            .action-buttons {
-                flex-direction: column;
-            }
         }
     </style>
 </head>
 <body>
     <!-- 侧边栏 -->
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo">
-                <img src="/images/logo.png" alt="布珥·迈拓空间设计" style="width: 100%; height: 100%; object-fit: contain;">
-            </div>
-            <div class="sidebar-title">布珥·迈拓空间设计</div>
-            <div class="sidebar-subtitle">管理后台</div>
+    <aside class="sidebar">
+        <div class="logo">
+            <img src="/images/logo.png" alt="Logo">
         </div>
-        
-        <nav class="sidebar-menu">
-            <a href="/dashboard" class="menu-item">
-                <div class="menu-icon">📊</div>
-                <div class="menu-text">仪表盘</div>
-            </a>
-            <a href="/works" class="menu-item active">
-                <div class="menu-icon">📋</div>
-                <div class="menu-text">作品管理</div>
-            </a>
-            <a href="/categories" class="menu-item">
-                <div class="menu-icon">🏷️</div>
-                <div class="menu-text">分类管理</div>
-            </a>
-            <a href="/leads" class="menu-item">
-                <div class="menu-icon">👥</div>
-                <div class="menu-text">线索管理</div>
-            </a>
-            <a href="/stats" class="menu-item">
-                <div class="menu-icon">📈</div>
-                <div class="menu-text">数据统计</div>
-            </a>
-            <a href="/settings" class="menu-item">
-                <div class="menu-icon">⚙️</div>
-                <div class="menu-text">系统设置</div>
-            </a>
-            <a href="/about" class="menu-item">
-                <div class="menu-icon">ℹ️</div>
-                <div class="menu-text">关于我们</div>
-            </a>
-            <a href="/logout" class="menu-item logout-item">
-                <div class="menu-icon">🚪</div>
-                <div class="menu-text">退出登录</div>
-            </a>
+        <nav class="nav-menu">
+            <div class="nav-item">
+                <a href="/dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>仪表盘</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/brand-edit">
+                    <i class="fas fa-edit"></i>
+                    <span>品牌管理</span>
+                </a>
+            </div>
+            <div class="nav-item active">
+                <a href="/works">
+                    <i class="fas fa-palette"></i>
+                    <span>作品管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/categories">
+                    <i class="fas fa-list"></i>
+                    <span>分类管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/leads">
+                    <i class="fas fa-handshake"></i>
+                    <span>线索管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/customers">
+                    <i class="fas fa-users"></i>
+                    <span>客户管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/stats">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>数据统计</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/settings">
+                    <i class="fas fa-cog"></i>
+                    <span>系统设置</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/users">
+                    <i class="fas fa-user-cog"></i>
+                    <span>操作员管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>退出登录</span>
+                </a>
+            </div>
         </nav>
-    </div>
+    </aside>
     
     <!-- 主内容区域 -->
     <div class="main-content">
@@ -768,6 +947,13 @@
                 <button class="btn btn-primary" onclick="openAddModal()">
                     + 添加作品
                 </button>
+                <div class="user-info" id="userInfoContainer">
+                    <div class="user-avatar" id="userAvatar">A</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">管理员</div>
+                        <div class="user-role" id="userRole">系统管理员</div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -809,19 +995,19 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title" id="modalTitle">添加作品</h2>
-                <button class="close-btn" onclick="closeModal()">&times;</button>
+                <span class="close" onclick="closeModal()">&times;</span>
             </div>
             
             <form id="worksForm" onsubmit="submitForm(event)">
                 <input type="hidden" id="workId">
                 
                 <div class="form-group">
-                    <label class="form-label" for="workTitle">作品标题</label>
+                    <label class="form-label" for="workTitle">作品标题 <span style="color: #990000;">*</span></label>
                     <input type="text" class="form-input" id="workTitle" name="title" required placeholder="请输入作品标题">
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label" for="workType">作品类型</label>
+                    <label class="form-label" for="workType">作品类型 <span style="color: #990000;">*</span></label>
                     <select class="form-input" id="workType" name="type" required>
                         <option value="residential">家装设计</option>
                         <option value="office">公装设计</option>
@@ -831,17 +1017,17 @@
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label" for="workArea">面积 (㎡)</label>
+                    <label class="form-label" for="workArea">面积 (㎡) <span style="color: #990000;">*</span></label>
                     <input type="number" class="form-input" id="workArea" name="area" required placeholder="请输入作品面积">
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label" for="workLocation">所在城市</label>
+                    <label class="form-label" for="workLocation">所在城市 <span style="color: #990000;">*</span></label>
                     <input type="text" class="form-input" id="workLocation" name="location" required placeholder="请输入所在城市">
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label" for="workCover">封面图片</label>
+                    <label class="form-label" for="workCover">封面图片 <span style="color: #990000;">*</span></label>
                     <div class="image-upload-container">
                         <input type="file" id="coverFileInput" accept="image/jpeg,image/png,image/jpg" style="display: none;" onchange="handleCoverImageChange(event)">
                         <input type="hidden" id="workCover" name="coverImage" required>
@@ -850,13 +1036,13 @@
                                 <span class="preview-icon">📷</span>
                                 <span class="preview-text">点击选择封面图片</span>
                             </div>
-                            <img id="coverPreviewImg" src="" alt="封面预览" style="display: none; width: 100%; height: auto; border-radius: 8px;">
+                            <img id="coverPreviewImg" src="" alt="封面预览" style="display: none; width: 100%; height: auto; border-radius: 4px;">
                         </div>
                     </div>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">作品图片列表</label>
+                    <label class="form-label">作品图片列表 <span style="color: #990000;">*</span></label>
                     <div class="image-upload-area" id="imagesUploadArea" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" onclick="document.getElementById('imagesFileInput').click()">
                         <input type="file" id="imagesFileInput" accept="image/jpeg,image/png,image/jpg" multiple style="display: none;" onchange="handleImagesChange(event)">
                         <input type="hidden" id="workImages" name="images" required>
@@ -877,10 +1063,50 @@
                 
                 <div class="form-group">
                     <label class="form-label" for="workDescription">作品描述</label>
-                    <textarea class="form-input form-textarea" id="workDescription" name="description" placeholder="请输入作品描述"></textarea>
+                    <textarea class="form-textarea" id="workDescription" name="description" placeholder="请输入作品描述"></textarea>
                 </div>
                 
-                <div class="form-actions">
+                <div class="form-group">
+                    <label class="form-label" for="workDesignPeriod">设计周期</label>
+                    <input type="text" class="form-input" id="workDesignPeriod" name="designPeriod" placeholder="请输入设计周期，如：6个月">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workStyle">设计风格</label>
+                    <input type="text" class="form-input" id="workStyle" name="style" placeholder="请输入设计风格，如：现代简约">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workDesignDescription">设计描述</label>
+                    <textarea class="form-textarea" id="workDesignDescription" name="designDescription" placeholder="请输入详细设计描述"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workDesignConcept">设计理念</label>
+                    <textarea class="form-textarea" id="workDesignConcept" name="designConcept" placeholder="请输入设计理念和思路"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workFunctionPlanning">功能规划</label>
+                    <textarea class="form-textarea" id="workFunctionPlanning" name="functionPlanning" placeholder="请输入空间功能规划"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workMaterialSelection">材料选择</label>
+                    <textarea class="form-textarea" id="workMaterialSelection" name="materialSelection" placeholder="请输入材料选择方案"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workHighlights">项目亮点</label>
+                    <textarea class="form-textarea" id="workHighlights" name="highlights" placeholder="请输入项目亮点，每行一个"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="workSpaceType">空间类型</label>
+                    <input type="text" class="form-input" id="workSpaceType" name="spaceType" placeholder="请输入空间类型，如：住宅">
+                </div>
+                
+                <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
                     <button type="submit" class="btn btn-primary">保存</button>
                 </div>
@@ -901,9 +1127,130 @@
         let currentFilter = '';
         let currentSearch = '';
         
+        // 加载当前用户信息
+        async function loadCurrentUserInfo() {
+            try {
+                const response = await fetch('/api/v1/users/current');
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重定向到登录页面
+                        console.log('未授权访问，重定向到登录页面');
+                        window.location.href = '/login';
+                        return null;
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    return result.data;
+                } else {
+                    console.error('获取用户信息失败:', result.message || '未知错误');
+                    return null;
+                }
+            } catch (error) {
+                console.error('获取用户信息出错:', error.message);
+                return null;
+            }
+        }
+        
+        // 更新用户信息显示
+        function updateUserInfoDisplay(userInfo) {
+            if (!userInfo) {
+                return;
+            }
+            
+            const { id, username, role, permissions } = userInfo;
+            
+            const userInfoContainer = document.getElementById('userInfoContainer');
+            const userAvatar = document.getElementById('userAvatar');
+            const userName = document.getElementById('userName');
+            const userRole = document.getElementById('userRole');
+            
+            if (userAvatar) {
+                userAvatar.textContent = id || 'A';
+            }
+            
+            if (userName) {
+                userName.textContent = username || '未知用户';
+            }
+            
+            if (userRole) {
+                const roleMap = {
+                    'admin': '系统管理员',
+                    'editor': '编辑员',
+                    'viewer': '查看员'
+                };
+                userRole.textContent = roleMap[role] || '普通用户';
+            }
+            
+            // 添加更新动画效果
+            if (userInfoContainer) {
+                userInfoContainer.classList.add('updated');
+                setTimeout(() => {
+                    userInfoContainer.classList.remove('updated');
+                }, 500);
+            }
+            
+            // 根据权限更新导航菜单
+            updateNavigationBasedOnPermissions(permissions, role);
+        }
+        
+        // 根据权限更新导航菜单
+        function updateNavigationBasedOnPermissions(permissions, role) {
+            // 导航项与权限的映射关系
+            const navPermissionMap = {
+                'dashboard': 'dashboard',
+                'brand-edit': 'brand',
+                'works': 'works',
+                'categories': 'categories',
+                'leads': 'leads',
+                'customers': 'customers',
+                'stats': 'stats',
+                'settings': 'settings',
+                'users': 'users'
+            };
+            
+            // 获取所有导航项
+            const navItems = document.querySelectorAll('.nav-item');
+            
+            navItems.forEach(navItem => {
+                const link = navItem.querySelector('a');
+                if (link) {
+                    const href = link.getAttribute('href');
+                    // 提取路径部分（去掉开头的/）
+                    const path = href.substring(1);
+                    
+                    // 检查是否需要权限控制（排除退出登录）
+                    if (path !== 'logout') {
+                        const requiredPermission = navPermissionMap[path];
+                        
+                        // 管理员角色或有对应权限的用户可以看到该导航项
+                        if (role === 'admin' || (permissions && permissions[requiredPermission])) {
+                            navItem.style.display = 'block';
+                        } else {
+                            navItem.style.display = 'none';
+                        }
+                    }
+                }
+            });
+        }
+        
         // 初始化页面
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             loadWorks();
+            
+            // 加载当前用户信息
+            const userInfo = await loadCurrentUserInfo();
+            updateUserInfoDisplay(userInfo);
+            
+            // 设置定时刷新用户信息，每5分钟更新一次
+            setInterval(async () => {
+                const updatedUserInfo = await loadCurrentUserInfo();
+                updateUserInfoDisplay(updatedUserInfo);
+            }, 300000);
             
             // 处理URL参数，自动打开添加模态框
             const urlParams = new URLSearchParams(window.location.search);
@@ -1017,7 +1364,15 @@
                                 <td>${work.location}</td>
                                 <td>${work.views || 0}</td>
                                 <td>
-                                    <div class="action-buttons">
+                                    <div class="action-buttons" style="display: flex; align-items: center; gap: 15px;">
+                                        <!-- 权限控制开关 -->
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <span style="font-size: 14px;">公开</span>
+                                            <label class="switch">
+                                                <input type="checkbox" ${work.isPublic ? 'checked' : ''} onchange="toggleWorkPermission(${work.id}, this.checked)">
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
                                         <button class="btn btn-sm btn-secondary" onclick="editWork(${work.id})">
                                             编辑
                                         </button>
@@ -1132,6 +1487,14 @@
             document.getElementById('workCover').value = work.coverImage;
             document.getElementById('workImages').value = JSON.stringify(work.images);
             document.getElementById('workDescription').value = work.description;
+            document.getElementById('workDesignPeriod').value = work.designPeriod || '';
+            document.getElementById('workStyle').value = work.style || '';
+            document.getElementById('workDesignDescription').value = work.designDescription || '';
+            document.getElementById('workDesignConcept').value = work.designConcept || '';
+            document.getElementById('workFunctionPlanning').value = work.functionPlanning || '';
+            document.getElementById('workMaterialSelection').value = work.materialSelection || '';
+            document.getElementById('workHighlights').value = work.highlights ? work.highlights.join('\n') : '';
+            document.getElementById('workSpaceType').value = work.spaceType || '';
             
             document.getElementById('worksModal').classList.add('active');
         }
@@ -1174,7 +1537,15 @@
                     location: document.getElementById('workLocation').value,
                     coverImage: document.getElementById('workCover').value,
                     images: JSON.parse(document.getElementById('workImages').value),
-                    description: document.getElementById('workDescription').value
+                    description: document.getElementById('workDescription').value,
+                    designPeriod: document.getElementById('workDesignPeriod').value,
+                    style: document.getElementById('workStyle').value,
+                    designDescription: document.getElementById('workDesignDescription').value,
+                    designConcept: document.getElementById('workDesignConcept').value,
+                    functionPlanning: document.getElementById('workFunctionPlanning').value,
+                    materialSelection: document.getElementById('workMaterialSelection').value,
+                    highlights: document.getElementById('workHighlights').value.split('\n').filter(line => line.trim() !== ''),
+                    spaceType: document.getElementById('workSpaceType').value
                 };
                 
                 // 前端验证
@@ -1459,6 +1830,48 @@
             setTimeout(() => {
                 toast.classList.remove('active');
             }, 3000);
+        }
+        
+        // 切换作品权限状态
+        async function toggleWorkPermission(id, isPublic) {
+            try {
+                const response = await fetch(`/api/v1/works/${id}/permission`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ isPublic })
+                });
+                
+                // 检查响应状态
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // 检查响应是否为JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Response is not JSON');
+                }
+                
+                const result = await response.json();
+                if (result.success) {
+                    showToast('权限状态更新成功', 'success');
+                    // 更新本地作品数据
+                    const work = works.find(w => w.id === id);
+                    if (work) {
+                        work.isPublic = isPublic;
+                        work.updatedAt = new Date().toISOString();
+                    }
+                    // 重新渲染表格
+                    renderWorksTable();
+                } else {
+                    showToast('权限状态更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('切换作品权限状态错误:', error);
+                showToast('操作失败，请检查网络连接或重新登录', 'error');
+            }
         }
         
         // 点击模态框外部关闭

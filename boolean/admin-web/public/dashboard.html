@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>布尔·迈拓空间设计 - 后台管理</title>
+    <title>布珥·迈拓空间设计 - 后台管理</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -13,93 +14,71 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background-color: #191919;
-            color: #fff;
+            background-color: #1a2430;
+            color: #ffffff;
             display: flex;
             min-height: 100vh;
+            line-height: 1.6;
         }
         
         /* 侧边栏样式 */
         .sidebar {
-            width: 280px;
-            background-color: #2a2a2a;
+            width: 240px;
+            background-color: #151e29;
+            padding: 20px 0;
             border-right: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 30px 0;
-            display: flex;
-            flex-direction: column;
-            transition: all 0.3s ease;
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            overflow-y: auto;
         }
-        
-        .sidebar-header {
-            padding: 0 30px 30px;
+
+        .logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 20px 30px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
-        .sidebar-logo {
+
+        .logo img {
             width: 80px;
             height: 80px;
-            margin-bottom: 15px;
-            margin-left: auto;
-            margin-right: auto;
-            color: #e61736;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            border-radius: 8px;
         }
-        
-        .sidebar-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #fff;
-            margin-bottom: 10px;
-            text-align: center;
+
+        .nav-menu {
+            margin-top: 30px;
         }
-        
-        .sidebar-subtitle {
-            font-size: 16px;
-            color: #cc0000;
-            text-align: center;
-        }
-        
-        .sidebar-menu {
-            flex: 1;
-            padding: 30px 0;
-        }
-        
-        .menu-item {
-            display: flex;
-            align-items: center;
-            padding: 20px 30px;
-            color: rgba(255, 255, 255, 0.8);
-            text-decoration: none;
+
+        .nav-item {
+            padding: 15px 20px;
+            cursor: pointer;
             transition: all 0.3s ease;
             border-left: 3px solid transparent;
         }
-        
-        .menu-item:hover {
-            background-color: rgba(230, 23, 54, 0.1);
-            color: #fff;
+
+        .nav-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
         }
-        
-        .menu-item.active {
-            background-color: rgba(230, 23, 54, 0.1);
-            color: #e61736;
-            border-left-color: #e61736;
+
+        .nav-item.active {
+            background-color: rgba(153, 0, 0, 0.2);
+            border-left-color: #990000;
         }
-        
-        .menu-icon {
-            font-size: 24px;
-            margin-right: 15px;
+
+        .nav-item a {
+            color: #ffffff;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            font-size: 16px;
         }
-        
-        .menu-text {
+
+        .nav-item i {
+            margin-right: 12px;
             font-size: 18px;
-            font-weight: 500;
-        }
-        
-        .logout-item {
-            margin-top: auto;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         /* 主内容区域 */
@@ -108,12 +87,13 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            margin-left: 240px;
         }
         
         /* 顶部导航栏 */
         .top-nav {
             height: 80px;
-            background-color: #2a2a2a;
+            background-color: #151e29;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             display: flex;
             align-items: center;
@@ -135,36 +115,79 @@
         .nav-right {
             display: flex;
             align-items: center;
-        }
-        
-        .welcome-text {
-            font-size: 16px;
-            color: rgba(255, 255, 255, 0.8);
-            margin-right: 20px;
+            gap: 30px;
         }
         
         .user-info {
             display: flex;
             align-items: center;
+            padding: 8px 12px;
+            border-radius: 24px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .user-info:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            transform: translateY(-2px);
         }
         
         .user-avatar {
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background-color: rgba(230, 23, 54, 0.1);
+            background-color: #ffffff;
+            border: 2px solid #cc0000;
             display: flex;
-            justify-content: center;
             align-items: center;
-            color: #e61736;
+            justify-content: center;
             font-weight: bold;
-            margin-right: 10px;
+            color: #cc0000;
+            margin-right: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-avatar {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(204, 0, 0, 0.3);
+        }
+        
+        .user-details {
+            text-align: right;
+            transition: all 0.3s ease;
         }
         
         .user-name {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 500;
-            color: #fff;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-role {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        /* 用户信息更新动画 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .user-info.updated {
+            animation: fadeIn 0.5s ease;
         }
         
         /* 内容区域 */
@@ -172,16 +195,16 @@
             flex: 1;
             padding: 40px;
             overflow-y: auto;
+            background-color: #1a2430;
         }
         
         /* 欢迎卡片 */
         .welcome-card {
-            background-color: #2a2a2a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
             padding: 40px;
             margin-bottom: 30px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .welcome-message {
@@ -205,18 +228,17 @@
         }
         
         .stat-card {
-            background-color: #2a2a2a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
             padding: 30px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             transition: all 0.3s ease;
         }
         
         .stat-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 6px 20px rgba(230, 23, 54, 0.2);
-            border-color: rgba(230, 23, 54, 0.3);
+            box-shadow: 0 6px 20px rgba(153, 0, 0, 0.2);
+            border-color: rgba(153, 0, 0, 0.3);
         }
         
         .stat-header {
@@ -233,7 +255,7 @@
         
         .stat-icon {
             font-size: 32px;
-            color: #e61736;
+            color: #990000;
         }
         
         .stat-value {
@@ -250,11 +272,10 @@
         
         /* 快速操作 */
         .quick-actions {
-            background-color: #2a2a2a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
             padding: 30px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .actions-title {
@@ -276,9 +297,9 @@
             align-items: center;
             justify-content: center;
             padding: 30px 20px;
-            background-color: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
             font-size: 18px;
             color: #fff;
             text-decoration: none;
@@ -286,15 +307,15 @@
         }
         
         .action-btn:hover {
-            background-color: rgba(230, 23, 54, 0.1);
-            border-color: #e61736;
+            background-color: rgba(153, 0, 0, 0.2);
+            border-color: #990000;
             transform: translateY(-3px);
         }
         
         .action-icon {
             font-size: 48px;
             margin-bottom: 15px;
-            color: #e61736;
+            color: #990000;
         }
         
         .action-text {
@@ -307,12 +328,8 @@
                 width: 240px;
             }
             
-            .content {
+            .main-content {
                 padding: 20px;
-            }
-            
-            .top-nav {
-                padding: 0 20px;
             }
             
             .stats-grid {
@@ -343,69 +360,98 @@
     </style>
 </head>
 <body>
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo">
-                <img src="/images/logo.png" alt="布珥·迈拓空间设计" style="width: 100%; height: 100%; object-fit: contain;">
-            </div>
-            <div class="sidebar-title">布珥·迈拓空间设计</div>
-            <div class="sidebar-subtitle">管理后台</div>
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+        <div class="logo">
+            <img src="/images/logo.png" alt="Logo">
         </div>
-        
-        <nav class="sidebar-menu">
-            <a href="/dashboard" class="menu-item active">
-                <div class="menu-icon">📊</div>
-                <div class="menu-text">仪表盘</div>
-            </a>
-            <a href="/works" class="menu-item" id="worksLink">
-                <div class="menu-icon">📋</div>
-                <div class="menu-text">作品管理</div>
-            </a>
-            <a href="/categories" class="menu-item" id="categoriesLink">
-                <div class="menu-icon">🏷️</div>
-                <div class="menu-text">分类管理</div>
-            </a>
-            <a href="/leads" class="menu-item" id="leadsLink">
-                <div class="menu-icon">👥</div>
-                <div class="menu-text">线索管理</div>
-            </a>
-            <a href="/stats" class="menu-item">
-                <div class="menu-icon">📈</div>
-                <div class="menu-text">数据统计</div>
-            </a>
-            <a href="/settings" class="menu-item">
-                <div class="menu-icon">⚙️</div>
-                <div class="menu-text">系统设置</div>
-            </a>
-            <a href="/about" class="menu-item">
-                <div class="menu-icon">ℹ️</div>
-                <div class="menu-text">关于我们</div>
-            </a>
+        <nav class="nav-menu">
+            <div class="nav-item active">
+                <a href="/dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>仪表盘</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/brand-edit">
+                    <i class="fas fa-edit"></i>
+                    <span>品牌管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/works">
+                    <i class="fas fa-palette"></i>
+                    <span>作品管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/categories">
+                    <i class="fas fa-list"></i>
+                    <span>分类管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/leads">
+                    <i class="fas fa-handshake"></i>
+                    <span>线索管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/customers">
+                    <i class="fas fa-users"></i>
+                    <span>客户管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/stats">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>数据统计</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/settings">
+                    <i class="fas fa-cog"></i>
+                    <span>系统设置</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/users">
+                    <i class="fas fa-user-cog"></i>
+                    <span>操作员管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>退出登录</span>
+                </a>
+            </div>
         </nav>
-        
-        <a href="/logout" class="menu-item logout-item">
-            <div class="menu-icon">🚪</div>
-            <div class="menu-text">退出登录</div>
-        </a>
-    </div>
+    </aside>
     
+    <!-- 主内容区域 -->
     <div class="main-content">
+        <!-- 顶部导航栏 -->
         <div class="top-nav">
             <div class="nav-left">
-                <div class="nav-title">管理后台</div>
+                <div class="nav-title">仪表盘</div>
             </div>
             <div class="nav-right">
-                <div class="user-info">
-                    <div class="user-avatar">A</div>
-                    <div class="user-name">管理员</div>
+                <div class="user-info" id="userInfoContainer">
+                    <div class="user-avatar" id="userAvatar">A</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">管理员</div>
+                        <div class="user-role" id="userRole">系统管理员</div>
+                    </div>
                 </div>
             </div>
         </div>
         
+        <!-- 内容区域 -->
         <div class="content">
             <div class="welcome-card">
                 <div class="welcome-message">欢迎回来，管理员</div>
-                <div class="welcome-subtext">布尔·迈拓空间设计管理后台</div>
+                <div class="welcome-subtext">布珥·迈拓空间设计管理后台</div>
             </div>
             
             <div class="stats-grid">
@@ -536,14 +582,165 @@
             }
         }
         
+        // 加载当前用户信息
+        async function loadCurrentUserInfo() {
+            try {
+                const response = await fetch('/api/v1/users/current');
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重定向到登录页面
+                        console.log('未授权访问，重定向到登录页面');
+                        window.location.href = '/login';
+                        return null;
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    return result.data;
+                } else {
+                    console.error('获取用户信息失败:', result.message || '未知错误');
+                    return null;
+                }
+            } catch (error) {
+                console.error('获取用户信息出错:', error.message);
+                return null;
+            }
+        }
+        
+        // 更新用户信息显示
+        function updateUserInfoDisplay(userInfo) {
+            if (!userInfo) {
+                return;
+            }
+            
+            const userInfoContainer = document.getElementById('userInfoContainer');
+            const userAvatar = document.getElementById('userAvatar');
+            const userName = document.getElementById('userName');
+            const userRole = document.getElementById('userRole');
+            const welcomeMessage = document.querySelector('.welcome-message');
+            
+            if (userAvatar) {
+                userAvatar.textContent = userInfo.id || 'A';
+            }
+            
+            if (userName) {
+                userName.textContent = userInfo.username || '未知用户';
+            }
+            
+            if (userRole) {
+                const roleMap = {
+                    'admin': '系统管理员',
+                    'editor': '编辑员',
+                    'viewer': '查看员'
+                };
+                userRole.textContent = roleMap[userInfo.role] || '普通用户';
+            }
+            
+            // 更新欢迎消息
+            if (welcomeMessage) {
+                welcomeMessage.textContent = `欢迎回来，${userInfo.username || '未知用户'}`;
+            }
+            
+            // 添加更新动画效果
+            if (userInfoContainer) {
+                userInfoContainer.classList.add('updated');
+                setTimeout(() => {
+                    userInfoContainer.classList.remove('updated');
+                }, 500);
+            }
+            
+            // 根据权限更新导航菜单
+            updateNavigationBasedOnPermissions(userInfo.permissions, userInfo.role);
+        }
+        
+        // 根据权限更新导航菜单
+        function updateNavigationBasedOnPermissions(permissions, role) {
+            // 导航项与权限的映射关系
+            const navPermissionMap = {
+                'dashboard': 'dashboard',
+                'brand-edit': 'brand',
+                'works': 'works',
+                'categories': 'categories',
+                'leads': 'leads',
+                'customers': 'customers',
+                'stats': 'stats',
+                'settings': 'settings',
+                'users': 'users'
+            };
+            
+            // 获取所有导航项
+            const navItems = document.querySelectorAll('.nav-item');
+            
+            navItems.forEach(navItem => {
+                const link = navItem.querySelector('a');
+                if (link) {
+                    const href = link.getAttribute('href');
+                    // 提取路径部分（去掉开头的/）
+                    const path = href.substring(1);
+                    
+                    // 检查是否需要权限控制（排除退出登录）
+                    if (path !== 'logout') {
+                        const requiredPermission = navPermissionMap[path];
+                        
+                        // 检查用户是否有对应权限
+                        if (permissions && permissions[requiredPermission]) {
+                            navItem.style.display = 'block';
+                        } else {
+                            navItem.style.display = 'none';
+                        }
+                    }
+                }
+            });
+            
+            // 根据权限更新快速操作按钮
+            updateQuickActionsBasedOnPermissions(permissions, role);
+        }
+        
+        // 根据权限更新快速操作按钮
+        function updateQuickActionsBasedOnPermissions(permissions, role) {
+            const quickActions = document.querySelectorAll('.action-btn');
+            
+            quickActions.forEach((actionBtn, index) => {
+                // 快速操作按钮与权限的映射关系
+                const actionPermissionMap = {
+                    0: 'works', // 添加新作品
+                    1: 'leads', // 查看新线索
+                    2: 'categories', // 管理分类
+                    3: 'stats' // 查看统计
+                };
+                
+                const requiredPermission = actionPermissionMap[index];
+                
+                if (permissions && permissions[requiredPermission]) {
+                    actionBtn.style.display = 'flex';
+                } else {
+                    actionBtn.style.display = 'none';
+                }
+            });
+        }
+        
         // 页面加载时获取数据
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             fetchStats();
+            
+            // 加载当前用户信息
+            const userInfo = await loadCurrentUserInfo();
+            updateUserInfoDisplay(userInfo);
             
             // 设置定时刷新，每30秒更新一次数据
             setInterval(fetchStats, 30000);
             
-            // 修复1: 为"添加新作品"按钮添加事件监听器
+            // 设置定时刷新用户信息，每5分钟更新一次
+            setInterval(async () => {
+                const updatedUserInfo = await loadCurrentUserInfo();
+                updateUserInfoDisplay(updatedUserInfo);
+            }, 300000);
+            
+            // 为"添加新作品"按钮添加事件监听器
             const addWorkBtn = document.querySelector('.action-btn:first-child');
             if (addWorkBtn) {
                 addWorkBtn.addEventListener('click', (e) => {
@@ -553,12 +750,30 @@
                 });
             }
             
-            // 修复2: 为当前页面的仪表盘链接添加阻止默认行为
-            const dashboardLink = document.querySelector('.menu-item.active[href="/dashboard"]');
-            if (dashboardLink) {
-                dashboardLink.addEventListener('click', (e) => {
+            // 为"查看新线索"按钮添加事件监听器
+            const viewLeadsBtn = document.querySelector('.action-btn:nth-child(2)');
+            if (viewLeadsBtn) {
+                viewLeadsBtn.addEventListener('click', (e) => {
                     e.preventDefault();
-                    // 防止当前页面链接导致的页面刷新和认证检查
+                    window.location.href = '/leads';
+                });
+            }
+            
+            // 为"管理分类"按钮添加事件监听器
+            const manageCategoriesBtn = document.querySelector('.action-btn:nth-child(3)');
+            if (manageCategoriesBtn) {
+                manageCategoriesBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    window.location.href = '/categories';
+                });
+            }
+            
+            // 为"查看统计"按钮添加事件监听器
+            const viewStatsBtn = document.querySelector('.action-btn:nth-child(4)');
+            if (viewStatsBtn) {
+                viewStatsBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    window.location.href = '/stats';
                 });
             }
         });

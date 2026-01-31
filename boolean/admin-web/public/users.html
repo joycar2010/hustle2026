@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>操作员管理 - 布珥·迈拓空间设计</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #1a2430;
+            color: #ffffff;
+            display: flex;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        
+        /* 侧边栏样式 */
+        .sidebar {
+            width: 240px;
+            background-color: #151e29;
+            padding: 20px 0;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 20px 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .logo img {
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+        }
+        
+        .nav-menu {
+            margin-top: 30px;
+        }
+        
+        .nav-item {
+            padding: 15px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        .nav-item.active {
+            background-color: rgba(153, 0, 0, 0.2);
+            border-left-color: #990000;
+        }
+        
+        .nav-item a {
+            color: #ffffff;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            font-size: 16px;
+        }
+        
+        .nav-item i {
+            margin-right: 12px;
+            font-size: 18px;
+        }
+        
+        /* 主内容区域 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin-left: 240px;
+        }
+        
+        /* 顶部导航栏 */
+        .top-nav {
+            height: 80px;
+            background-color: #151e29;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40px;
+        }
+        
+        .nav-left {
+            display: flex;
+            align-items: center;
+        }
+        
+        .nav-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 24px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .user-info:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            transform: translateY(-2px);
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #ffffff;
+            border: 2px solid #cc0000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #cc0000;
+            margin-right: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-avatar {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(204, 0, 0, 0.3);
+        }
+        
+        .user-details {
+            text-align: right;
+            transition: all 0.3s ease;
+        }
+        
+        .user-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+        
+        .user-role {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.3s ease;
+        }
+        
+        .user-info:hover .user-role {
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        /* 用户信息更新动画 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .user-info.updated {
+            animation: fadeIn 0.5s ease;
+        }
+        
+        /* 按钮样式 */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .btn i {
+            margin-right: 8px;
+        }
+        
+        .btn-primary {
+            background-color: #990000;
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background-color: #cc0000;
+        }
+        
+        .btn-secondary {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        .btn-secondary:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-danger {
+            background-color: #cc0000;
+            color: #fff;
+        }
+        
+        .btn-danger:hover {
+            background-color: #ff0000;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+        
+        /* 内容区域 */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+        }
+        
+        /* 表格样式 */
+        .users-container {
+            background-color: #151e29;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        .page-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        .users-table th {
+            padding: 15px;
+            text-align: left;
+            font-weight: bold;
+            color: #fff;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .users-table td {
+            padding: 15px;
+            color: #fff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .users-table tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background-color: #151e29;
+            border-radius: 8px;
+            padding: 24px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .modal-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        
+        .modal-close:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        /* 表单样式 */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 16px;
+            font-weight: 500;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            outline: none;
+        }
+        
+        .form-input:focus {
+            border-color: #990000;
+            box-shadow: 0 0 0 3px rgba(153, 0, 0, 0.1);
+        }
+        
+        .form-input option {
+            background-color: #1a2430;
+            color: white;
+        }
+        
+        /* 权限配置样式 */
+        .permissions-section {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+        
+        .permissions-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #fff;
+        }
+        
+        .permissions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .permission-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .permission-label {
+            font-size: 16px;
+            color: #fff;
+        }
+        
+        /* 开关样式 */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.2);
+            transition: .4s;
+            border-radius: 34px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #990000;
+        }
+        
+        input:focus + .slider {
+            box-shadow: 0 0 1px #990000;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
+            .top-nav {
+                padding: 0 20px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .users-container {
+                padding: 20px;
+            }
+            
+            .users-table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+        
+        /* 通知提示 */
+        .toast {
+            position: fixed;
+            top: 90px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100%);
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 500;
+            z-index: 1500;
+            opacity: 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .toast.active {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        
+        .toast.success {
+            background-color: #4CAF50;
+        }
+        
+        .toast.error {
+            background-color: #cc0000;
+        }
+        
+        .toast.info {
+            background-color: #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+        <div class="logo">
+            <img src="/images/logo.png" alt="Logo">
+        </div>
+        <nav class="nav-menu">
+            <div class="nav-item">
+                <a href="/dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>仪表盘</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/brand-edit">
+                    <i class="fas fa-edit"></i>
+                    <span>品牌管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/works">
+                    <i class="fas fa-palette"></i>
+                    <span>作品管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/categories">
+                    <i class="fas fa-list"></i>
+                    <span>分类管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/leads">
+                    <i class="fas fa-handshake"></i>
+                    <span>线索管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/customers">
+                    <i class="fas fa-users"></i>
+                    <span>客户管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/stats">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>数据统计</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/settings">
+                    <i class="fas fa-cog"></i>
+                    <span>系统设置</span>
+                </a>
+            </div>
+            <div class="nav-item active">
+                <a href="/users">
+                    <i class="fas fa-user-cog"></i>
+                    <span>操作员管理</span>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="/logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>退出登录</span>
+                </a>
+            </div>
+        </nav>
+    </aside>
+    
+    <!-- 主内容区域 -->
+    <div class="main-content">
+        <!-- 顶部导航栏 -->
+        <div class="top-nav">
+            <div class="nav-left">
+                <div class="nav-title">操作员管理</div>
+            </div>
+            <div class="nav-right">
+                <button class="btn btn-primary" onclick="openAddModal()">
+                    <i class="fas fa-plus"></i> 添加操作员
+                </button>
+                <div class="user-info" id="userInfoContainer">
+                    <div class="user-avatar" id="userAvatar">A</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">管理员</div>
+                        <div class="user-role" id="userRole">系统管理员</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 内容区域 -->
+        <div class="content">
+            <div class="users-container">
+                <h1 class="page-title">操作员列表</h1>
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>用户名</th>
+                            <th>角色</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody">
+                        <!-- 用户列表将通过JavaScript动态生成 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 添加/编辑用户模态框 -->
+    <div class="modal" id="userModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">添加操作员</h2>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="userForm" onsubmit="submitForm(event)">
+                <input type="hidden" id="userId">
+                <div class="form-group">
+                    <label class="form-label" for="username">用户名</label>
+                    <input type="text" class="form-input" id="username" placeholder="请输入用户名" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="password">密码</label>
+                    <input type="password" class="form-input" id="password" placeholder="请输入密码">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="role">角色</label>
+                    <select class="form-input" id="role">
+                        <option value="admin">管理员</option>
+                        <option value="editor">编辑员</option>
+                        <option value="viewer">查看员</option>
+                    </select>
+                </div>
+                
+                <!-- 权限配置 -->
+                <div class="permissions-section">
+                    <h3 class="permissions-title">模块权限配置</h3>
+                    <div class="permissions-grid">
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permDashboard" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">仪表盘</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permWorks" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">作品管理</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permCategories" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">分类管理</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permLeads" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">线索管理</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permCustomers" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">客户管理</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permBrand" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">品牌管理</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permStats" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">数据统计</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permSettings" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">系统设置</span>
+                        </div>
+                        <div class="permission-item">
+                            <label class="switch">
+                                <input type="checkbox" id="permUsers" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="permission-label">操作员管理</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- 查看日志模态框 -->
+    <div class="modal" id="logsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="logsModalTitle">操作日志</h2>
+                <button class="modal-close" onclick="closeLogsModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="logs-container">
+                <div class="logs-search">
+                    <input type="text" class="form-input" id="logsSearch" placeholder="搜索日志内容...">
+                    <button class="btn btn-secondary" onclick="searchLogs()">搜索</button>
+                </div>
+                <div class="logs-table-container">
+                    <table class="users-table" id="logsTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>操作类型</th>
+                                <th>操作内容</th>
+                                <th>IP地址</th>
+                                <th>操作时间</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody">
+                            <!-- 日志列表将通过JavaScript动态生成 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="logs-pagination" id="logsPagination">
+                    <!-- 分页控件将通过JavaScript动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 全局用户数据
+        let users = [];
+        
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', async () => {
+            loadUsers();
+            await loadCurrentUserInfo();
+            
+            // 设置定时刷新用户信息，每5分钟更新一次
+            setInterval(async () => {
+                await loadCurrentUserInfo();
+            }, 300000);
+        });
+        
+        // 加载当前登录用户信息
+        async function loadCurrentUserInfo() {
+            try {
+                const response = await fetch('/api/v1/users/current');
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        // 未授权，重定向到登录页面
+                        console.log('未授权访问，重定向到登录页面');
+                        window.location.href = '/login';
+                        return null;
+                    }
+                    throw new Error('加载用户信息失败');
+                }
+                const result = await response.json();
+                if (result.success) {
+                    updateUserInfoDisplay(result.data);
+                    return result.data;
+                } else {
+                    console.error('加载用户信息失败:', result.message);
+                    return null;
+                }
+            } catch (error) {
+                console.error('加载用户信息错误:', error);
+                // 使用默认值
+                updateUserInfoDisplay({ id: 0, username: '管理员', role: '系统管理员' });
+                return null;
+            }
+        }
+        
+        // 更新用户信息显示
+        function updateUserInfoDisplay(userData) {
+            if (!userData) {
+                return;
+            }
+            
+            const { id, username, role, permissions } = userData;
+            
+            // 更新用户名显示
+            document.getElementById('userName').textContent = username || '管理员';
+            
+            // 更新角色显示
+            const roleMap = {
+                admin: '系统管理员',
+                editor: '编辑员',
+                viewer: '查看员'
+            };
+            document.getElementById('userRole').textContent = roleMap[role] || role || '系统管理员';
+            
+            // 更新头像显示（使用操作员ID）
+            const avatarText = id ? id.toString() : '0';
+            document.getElementById('userAvatar').textContent = avatarText;
+            
+            // 添加更新动画效果
+            const userInfoContainer = document.querySelector('.user-info');
+            if (userInfoContainer) {
+                userInfoContainer.classList.add('updated');
+                setTimeout(() => {
+                    userInfoContainer.classList.remove('updated');
+                }, 500);
+            }
+            
+            // 根据权限更新导航菜单
+            updateNavigationBasedOnPermissions(permissions, role);
+        }
+        
+        // 根据权限更新导航菜单
+        function updateNavigationBasedOnPermissions(permissions, role) {
+            // 导航项与权限的映射关系
+            const navPermissionMap = {
+                'dashboard': 'dashboard',
+                'brand-edit': 'brand',
+                'works': 'works',
+                'categories': 'categories',
+                'leads': 'leads',
+                'customers': 'customers',
+                'stats': 'stats',
+                'settings': 'settings',
+                'users': 'users'
+            };
+            
+            // 获取所有导航项
+            const navItems = document.querySelectorAll('.nav-item');
+            
+            navItems.forEach(navItem => {
+                const link = navItem.querySelector('a');
+                if (link) {
+                    const href = link.getAttribute('href');
+                    // 提取路径部分（去掉开头的/）
+                    const path = href.substring(1);
+                    
+                    // 检查是否需要权限控制（排除退出登录）
+                    if (path !== 'logout') {
+                        const requiredPermission = navPermissionMap[path];
+                        
+                        // 管理员角色或有对应权限的用户可以看到该导航项
+                        if (role === 'admin' || (permissions && permissions[requiredPermission])) {
+                            navItem.style.display = 'block';
+                        } else {
+                            navItem.style.display = 'none';
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 实时更新用户信息
+        function refreshUserInfo() {
+            loadCurrentUserInfo();
+        }
+        
+        // 每5分钟自动更新用户信息
+        setInterval(refreshUserInfo, 5 * 60 * 1000);
+        
+        // 加载用户列表
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/v1/users');
+                if (!response.ok) {
+                    throw new Error('加载用户列表失败');
+                }
+                const result = await response.json();
+                if (result.success) {
+                    users = result.data;
+                    renderUsers();
+                } else {
+                    showToast('加载用户列表失败', 'error');
+                }
+            } catch (error) {
+                console.error('加载用户列表错误:', error);
+                showToast('加载用户列表失败', 'error');
+            }
+        }
+        
+        // 渲染用户列表
+        function renderUsers() {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = '';
+            
+            users.forEach(user => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${user.id}</td>
+                    <td>${user.username}</td>
+                    <td>${user.role === 'admin' ? '管理员' : user.role === 'editor' ? '编辑员' : '查看员'}</td>
+                    <td>${new Date(user.createdAt).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="viewUserLogs(${user.id})">查看日志</button>
+                        <button class="btn btn-sm btn-secondary" onclick="editUser(${user.id})">编辑</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id})">删除</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // 打开添加模态框
+        function openAddModal() {
+            document.getElementById('modalTitle').textContent = '添加操作员';
+            document.getElementById('userId').value = '';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('role').value = 'admin';
+            
+            // 重置权限开关为选中状态
+            document.getElementById('permDashboard').checked = true;
+            document.getElementById('permWorks').checked = true;
+            document.getElementById('permCategories').checked = true;
+            document.getElementById('permLeads').checked = true;
+            document.getElementById('permCustomers').checked = true;
+            document.getElementById('permBrand').checked = true;
+            document.getElementById('permStats').checked = true;
+            document.getElementById('permSettings').checked = true;
+            
+            document.getElementById('userModal').classList.add('active');
+        }
+        
+        // 编辑用户
+        function editUser(id) {
+            const user = users.find(u => u.id === id);
+            if (!user) return;
+            
+            document.getElementById('modalTitle').textContent = '编辑操作员';
+            document.getElementById('userId').value = user.id;
+            document.getElementById('username').value = user.username;
+            document.getElementById('password').value = '';
+            document.getElementById('role').value = user.role;
+            
+            // 设置权限开关状态
+            const permissions = user.permissions || {};
+            document.getElementById('permDashboard').checked = permissions.dashboard !== false;
+            document.getElementById('permWorks').checked = permissions.works !== false;
+            document.getElementById('permCategories').checked = permissions.categories !== false;
+            document.getElementById('permLeads').checked = permissions.leads !== false;
+            document.getElementById('permCustomers').checked = permissions.customers !== false;
+            document.getElementById('permBrand').checked = permissions.brand !== false;
+            document.getElementById('permStats').checked = permissions.stats !== false;
+            document.getElementById('permSettings').checked = permissions.settings !== false;
+            document.getElementById('permUsers').checked = permissions.users !== false;
+            
+            document.getElementById('userModal').classList.add('active');
+        }
+        
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('userModal').classList.remove('active');
+        }
+        
+        // 提交表单
+        async function submitForm(event) {
+            event.preventDefault();
+            
+            const userId = document.getElementById('userId').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const role = document.getElementById('role').value;
+            
+            // 收集权限配置
+            const permissions = {
+                dashboard: document.getElementById('permDashboard').checked,
+                works: document.getElementById('permWorks').checked,
+                categories: document.getElementById('permCategories').checked,
+                leads: document.getElementById('permLeads').checked,
+                customers: document.getElementById('permCustomers').checked,
+                brand: document.getElementById('permBrand').checked,
+                stats: document.getElementById('permStats').checked,
+                settings: document.getElementById('permSettings').checked,
+                users: document.getElementById('permUsers').checked
+            };
+            
+            try {
+                let response;
+                if (userId) {
+                    // 编辑用户
+                    response = await fetch(`/api/v1/users/${userId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ username, password, role, permissions })
+                    });
+                } else {
+                    // 添加用户
+                    response = await fetch('/api/v1/users', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ username, password, role, permissions })
+                    });
+                }
+                
+                const result = await response.json();
+                if (result.success) {
+                    showToast(userId ? '编辑操作员成功' : '添加操作员成功', 'success');
+                    closeModal();
+                    loadUsers();
+                } else {
+                    showToast(result.message || '操作失败', 'error');
+                }
+            } catch (error) {
+                console.error('提交表单错误:', error);
+                showToast('操作失败', 'error');
+            }
+        }
+        
+        // 删除用户
+        async function deleteUser(id) {
+            if (confirm('确定要删除该操作员吗？')) {
+                try {
+                    const response = await fetch(`/api/v1/users/${id}`, {
+                        method: 'DELETE'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        showToast('删除操作员成功', 'success');
+                        loadUsers();
+                    } else {
+                        showToast(result.message || '删除失败', 'error');
+                    }
+                } catch (error) {
+                    console.error('删除用户错误:', error);
+                    showToast('删除失败', 'error');
+                }
+            }
+        }
+        
+        // 显示通知
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            // 显示通知
+            setTimeout(() => {
+                toast.classList.add('active');
+            }, 100);
+            
+            // 自动隐藏
+            setTimeout(() => {
+                toast.classList.remove('active');
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+        
+        // 查看用户日志
+        function viewUserLogs(userId) {
+            const user = users.find(u => u.id === userId);
+            if (!user) return;
+            
+            document.getElementById('logsModalTitle').textContent = `${user.username}的操作日志`;
+            document.getElementById('logsSearch').value = '';
+            document.getElementById('logsModal').classList.add('active');
+            
+            // 加载用户日志
+            loadUserLogs(userId);
+        }
+        
+        // 关闭日志模态框
+        function closeLogsModal() {
+            document.getElementById('logsModal').classList.remove('active');
+        }
+        
+        // 加载用户日志
+        async function loadUserLogs(userId) {
+            try {
+                const response = await fetch(`/api/v1/logs?userId=${userId}`);
+                if (!response.ok) {
+                    throw new Error('加载日志失败');
+                }
+                const result = await response.json();
+                if (result.success) {
+                    renderLogs(result.data);
+                } else {
+                    showToast('加载日志失败', 'error');
+                }
+            } catch (error) {
+                console.error('加载日志错误:', error);
+                showToast('加载日志失败', 'error');
+            }
+        }
+        
+        // 渲染日志列表
+        function renderLogs(logs) {
+            const tbody = document.getElementById('logsTableBody');
+            tbody.innerHTML = '';
+            
+            if (logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">暂无操作日志</td></tr>';
+                return;
+            }
+            
+            logs.forEach(log => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${log.id}</td>
+                    <td>${log.actionType}</td>
+                    <td>${log.actionContent}</td>
+                    <td>${log.ipAddress}</td>
+                    <td>${new Date(log.createdAt).toLocaleString()}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // 搜索日志
+        function searchLogs() {
+            const searchTerm = document.getElementById('logsSearch').value;
+            // 这里可以实现搜索功能
+            showToast('搜索功能待实现', 'info');
+        }
+    </script>
+</body>
+</html>

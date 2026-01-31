@@ -7,6 +7,7 @@ const fs = require('fs');
 // 导入lowdb数据库
 const { db, initDatabase, getNextId } = require('./db');
 const bcrypt = require('bcrypt');
+const saltRounds = 10;
 
 // 创建数据目录
 const dataDir = path.join(__dirname, 'data');
@@ -20,12 +21,18 @@ const PORT = process.env.PORT || 3000;
 // 中间件配置
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(bodyParser.json({ limit: '10mb' }));
+
+// 先定义API路由，再定义静态文件路由
+// API路由定义...
+
+// 静态文件路由
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 跨域配置
 app.use((req, res, next) => {
-  // 允许所有来源访问
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // 允许携带凭证时不能使用通配符
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
   // 允许的请求方法
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   // 允许的请求头
@@ -78,6 +85,49 @@ function requireAuth(req, res, next) {
   }
 }
 
+// 基于权限的访问控制中间件
+function requirePermission(permission) {
+  return (req, res, next) => {
+    if (req.session.user) {
+      const user = db.data.users.find(u => u.username === req.session.user.username);
+      if (user) {
+        // 检查用户是否有对应权限
+        if (user.permissions && user.permissions[permission]) {
+            next();
+        } else {
+            res.status(403).json({ success: false, message: '无权限访问' });
+        }
+      } else {
+        res.status(404).json({ success: false, message: '用户不存在' });
+      }
+    } else {
+      res.status(401).json({ success: false, message: '未登录' });
+    }
+  };
+}
+
+// 页面访问权限控制中间件
+function requirePageAccess(page) {
+  return (req, res, next) => {
+    if (req.session.user) {
+      const user = db.data.users.find(u => u.username === req.session.user.username);
+      if (user) {
+        // 检查用户是否有对应权限
+        if (user.permissions && user.permissions[page] === true) {
+            next();
+        } else {
+            // 对于页面访问，重定向到无权限页面或仪表盘
+            res.redirect('/dashboard');
+        }
+      } else {
+        res.redirect('/login');
+      }
+    } else {
+      res.redirect('/login');
+    }
+  };
+}
+
 // 根路径路由 - 重定向到登录页面
 app.get('/', (req, res) => {
   if (req.session.user) {
@@ -85,6 +135,11 @@ app.get('/', (req, res) => {
   } else {
     res.redirect('/login');
   }
+});
+
+// 操作员管理页面路由
+app.get('/users', requirePageAccess('users'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'users.html'));
 });
 
 // 登录页面路由
@@ -96,97 +151,55 @@ app.get('/login', (req, res) => {
   }
 });
 
-// 登录验证路由
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  
-  try {
-    // 查找用户
-    const user = db.data.users.find(u => u.username === username);
-    
-    if (user) {
-      // 验证密码
-      const match = await bcrypt.compare(password, user.password);
-      if (match) {
-        req.session.user = user;
-        res.json({ success: true, redirect: '/dashboard' });
-      } else {
-        res.json({ success: false, message: '用户名或密码错误' });
-      }
-    } else {
-      res.json({ success: false, message: '用户名或密码错误' });
-    }
-  } catch (error) {
-    console.error('登录验证失败:', error);
-    res.status(500).json({ success: false, message: '登录验证失败' });
-  }
-});
+
 
 // 仪表盘路由
-app.get('/dashboard', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-  } else {
-    res.redirect('/login');
-  }
+app.get('/dashboard', requirePageAccess('dashboard'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 // 作品管理页面路由
-app.get('/works', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'works.html'));
-  } else {
-    res.redirect('/login');
-  }
+app.get('/works', requirePageAccess('works'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'works.html'));
 });
 
 // 分类管理页面路由
-app.get('/categories', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'categories.html'));
-  } else {
-    res.redirect('/login');
-  }
+app.get('/categories', requirePageAccess('categories'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'categories.html'));
 });
 
 // 线索管理页面路由
-app.get('/leads', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'leads.html'));
-  } else {
-    res.redirect('/login');
-  }
+app.get('/leads', requirePageAccess('leads'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'leads.html'));
 });
 
 // 数据统计页面路由
-app.get('/stats', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'stats.html'));
-  } else {
-    res.redirect('/login');
-  }
+app.get('/stats', requirePageAccess('stats'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'stats.html'));
 });
 
 // 系统设置页面路由
-app.get('/settings', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'settings.html'));
-  } else {
-    res.redirect('/login');
-  }
+app.get('/settings', requirePageAccess('settings'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
 });
 
-// 关于我们页面路由
-app.get('/about', (req, res) => {
-  if (req.session.user) {
-    res.sendFile(path.join(__dirname, 'public', 'settings.html'));
-  } else {
-    res.redirect('/login');
-  }
+// 关于我们页面路由 - 重定向到品牌管理
+app.get('/about', requirePageAccess('brand'), (req, res) => {
+  res.redirect('/brand-edit');
+});
+
+// 客户管理页面路由
+app.get('/customers', requirePageAccess('customers'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'customers.html'));
+});
+
+// 品牌管理页面路由
+app.get('/brand-edit', requirePageAccess('brand'), (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'brand-edit.html'));
 });
 
 // 获取统计数据的API端点
-app.get('/api/v1/stats', requireAuth, (req, res) => {
+app.get('/api/v1/stats', requirePermission('stats'), (req, res) => {
   try {
     // 从数据库获取统计数据
     const worksCount = db.data.works.length;
@@ -216,7 +229,7 @@ app.get('/api/v1/stats', requireAuth, (req, res) => {
 });
 
 // 获取详细统计数据的API端点
-app.get('/api/v1/stats/detailed', requireAuth, (req, res) => {
+app.get('/api/v1/stats/detailed', requirePermission('stats'), (req, res) => {
   try {
     // 从数据库获取数据
     const categories = db.data.categories;
@@ -306,11 +319,24 @@ app.get('/logout', (req, res) => {
 // 获取作品列表
 app.get('/api/v1/works', (req, res) => {
   try {
-    // 从数据库获取所有作品并按创建时间倒序排序
-    const works = [...db.data.works].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // 获取查询参数
+    const { type } = req.query;
+    
+    // 从数据库获取作品
+    let works = [...db.data.works];
+    
+    // 如果指定了分类，进行筛选
+    if (type) {
+      works = works.filter(work => work.type === type);
+    }
+    
+    // 按创建时间倒序排序
+    works = works.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
     res.json({
       success: true,
       data: works,
+      total: works.length,
       message: '获取作品列表成功'
     });
   } catch (error) {
@@ -318,6 +344,44 @@ app.get('/api/v1/works', (req, res) => {
     res.status(500).json({
       success: false,
       message: '获取作品列表失败'
+    });
+  }
+});
+
+// 更新作品权限状态
+app.put('/api/v1/works/:id/permission', requirePermission('works'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { isPublic } = req.body;
+    
+    const workIndex = db.data.works.findIndex(w => w.id === id);
+    if (workIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '作品不存在'
+      });
+    }
+    
+    // 更新权限状态
+    db.data.works[workIndex] = {
+      ...db.data.works[workIndex],
+      isPublic: Boolean(isPublic),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      data: db.data.works[workIndex],
+      message: '更新作品权限状态成功'
+    });
+  } catch (error) {
+    console.error('更新作品权限状态失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '更新作品权限状态失败'
     });
   }
 });
@@ -350,9 +414,9 @@ app.get('/api/v1/works/:id', (req, res) => {
 });
 
 // 添加作品
-app.post('/api/v1/works', requireAuth, async (req, res) => {
+app.post('/api/v1/works', requirePermission('works'), async (req, res) => {
   try {
-    const { title, type, area, location, coverImage, images, description } = req.body;
+    const { title, type, area, location, coverImage, images, description, isPublic, designPeriod, style, designDescription, designConcept, functionPlanning, materialSelection, highlights, spaceType } = req.body;
     
     // 验证必填字段
     if (!title || !type || !area || !location || !coverImage || !images) {
@@ -434,7 +498,22 @@ app.post('/api/v1/works', requireAuth, async (req, res) => {
       coverImage: coverImage.trim(),
       images: images.map(img => img.trim()),
       description: description ? description.trim() : '',
+      designPeriod: designPeriod ? designPeriod.trim() : '6个月',
+      style: style ? style.trim() : '现代简约',
+      designDescription: designDescription ? designDescription.trim() : '设计描述内容，包括设计概念、空间规划、功能布局等详细信息。',
+      designConcept: designConcept ? designConcept.trim() : '设计理念内容，包括设计思路、创意来源、设计目标等详细信息。',
+      functionPlanning: functionPlanning ? functionPlanning.trim() : '功能规划内容，包括空间功能分区、流线规划、使用需求分析等详细信息。',
+      materialSelection: materialSelection ? materialSelection.trim() : '材料选择内容，包括主要材料、色彩搭配、质感对比等详细信息。',
+      highlights: highlights || [
+        '开放式流动空间，视野更加开阔',
+        '主次分明布局，功能分区合理',
+        '自然光线引入，创造舒适氛围',
+        '材质纹理对比，提升空间质感',
+        '大面玻璃幕墙，充分采光通风'
+      ],
+      spaceType: spaceType ? spaceType.trim() : '住宅',
       views: 0,
+      isPublic: isPublic !== undefined ? Boolean(isPublic) : true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -447,7 +526,7 @@ app.post('/api/v1/works', requireAuth, async (req, res) => {
     category.updatedAt = new Date().toISOString();
     
     // 保存数据库
-    await db.write();
+    db.write();
     
     res.status(201).json({
       success: true,
@@ -464,7 +543,7 @@ app.post('/api/v1/works', requireAuth, async (req, res) => {
 });
 
 // 编辑作品
-app.put('/api/v1/works/:id', requireAuth, async (req, res) => {
+app.put('/api/v1/works/:id', requirePermission('works'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const workIndex = db.data.works.findIndex(w => w.id === id);
@@ -476,7 +555,7 @@ app.put('/api/v1/works/:id', requireAuth, async (req, res) => {
       });
     }
     
-    const { title, type, area, location, coverImage, images, description } = req.body;
+    const { title, type, area, location, coverImage, images, description, isPublic, designPeriod, style, designDescription, designConcept, functionPlanning, materialSelection, highlights, spaceType } = req.body;
     
     // 验证必填字段
     if (!title || !type || !area || !location || !coverImage || !images) {
@@ -562,6 +641,21 @@ app.put('/api/v1/works/:id', requireAuth, async (req, res) => {
       coverImage: coverImage.trim(),
       images: images.map(img => img.trim()),
       description: description ? description.trim() : '',
+      designPeriod: designPeriod ? designPeriod.trim() : originalWork.designPeriod || '6个月',
+      style: style ? style.trim() : originalWork.style || '现代简约',
+      designDescription: designDescription ? designDescription.trim() : originalWork.designDescription || '设计描述内容，包括设计概念、空间规划、功能布局等详细信息。',
+      designConcept: designConcept ? designConcept.trim() : originalWork.designConcept || '设计理念内容，包括设计思路、创意来源、设计目标等详细信息。',
+      functionPlanning: functionPlanning ? functionPlanning.trim() : originalWork.functionPlanning || '功能规划内容，包括空间功能分区、流线规划、使用需求分析等详细信息。',
+      materialSelection: materialSelection ? materialSelection.trim() : originalWork.materialSelection || '材料选择内容，包括主要材料、色彩搭配、质感对比等详细信息。',
+      highlights: highlights || originalWork.highlights || [
+        '开放式流动空间，视野更加开阔',
+        '主次分明布局，功能分区合理',
+        '自然光线引入，创造舒适氛围',
+        '材质纹理对比，提升空间质感',
+        '大面玻璃幕墙，充分采光通风'
+      ],
+      spaceType: spaceType ? spaceType.trim() : originalWork.spaceType || '住宅',
+      isPublic: isPublic !== undefined ? Boolean(isPublic) : originalWork.isPublic,
       updatedAt: new Date().toISOString()
     };
     
@@ -582,7 +676,7 @@ app.put('/api/v1/works/:id', requireAuth, async (req, res) => {
     }
     
     // 保存数据库
-    await db.write();
+    db.write();
     
     res.json({
       success: true,
@@ -599,7 +693,7 @@ app.put('/api/v1/works/:id', requireAuth, async (req, res) => {
 });
 
 // 删除作品
-app.delete('/api/v1/works/:id', requireAuth, async (req, res) => {
+app.delete('/api/v1/works/:id', requirePermission('works'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const workIndex = db.data.works.findIndex(w => w.id === id);
@@ -626,7 +720,7 @@ app.delete('/api/v1/works/:id', requireAuth, async (req, res) => {
     }
     
     // 保存数据库
-    await db.write();
+    db.write();
     
     res.json({
       success: true,
@@ -663,7 +757,7 @@ app.get('/api/v1/categories', (req, res) => {
 });
 
 // 获取单个分类详情
-app.get('/api/v1/categories/:id', requireAuth, (req, res) => {
+app.get('/api/v1/categories/:id', requirePermission('categories'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const category = db.data.categories.find(c => c.id === id);
@@ -690,7 +784,7 @@ app.get('/api/v1/categories/:id', requireAuth, (req, res) => {
 });
 
 // 添加分类
-app.post('/api/v1/categories', requireAuth, (req, res) => {
+app.post('/api/v1/categories', requirePermission('categories'), (req, res) => {
   try {
     const { name, slug, description } = req.body;
     
@@ -743,7 +837,7 @@ app.post('/api/v1/categories', requireAuth, (req, res) => {
 });
 
 // 编辑分类
-app.put('/api/v1/categories/:id', requireAuth, (req, res) => {
+app.put('/api/v1/categories/:id', requirePermission('categories'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const categoryIndex = db.data.categories.findIndex(c => c.id === id);
@@ -801,7 +895,7 @@ app.put('/api/v1/categories/:id', requireAuth, (req, res) => {
 });
 
 // 删除分类
-app.delete('/api/v1/categories/:id', requireAuth, (req, res) => {
+app.delete('/api/v1/categories/:id', requirePermission('categories'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const categoryIndex = db.data.categories.findIndex(c => c.id === id);
@@ -842,10 +936,403 @@ app.delete('/api/v1/categories/:id', requireAuth, (req, res) => {
   }
 });
 
+// 客户管理API端点
+
+// 获取客户列表
+app.get('/api/v1/customers', requirePermission('customers'), (req, res) => {
+  try {
+    // 从数据库获取所有客户并按创建时间倒序排序
+    let customers = [...db.data.customers].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    // 如果指定了客户类型，进行筛选
+    const { type } = req.query;
+    if (type) {
+      customers = customers.filter(customer => customer.customerType === type);
+    }
+    
+    res.json({
+      success: true,
+      data: customers,
+      message: '获取客户列表成功'
+    });
+  } catch (error) {
+    console.error('获取客户列表失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取客户列表失败'
+    });
+  }
+});
+
+// 获取单个客户详情
+app.get('/api/v1/customers/:id', requirePermission('customers'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const customer = db.data.customers.find(c => c.id === id);
+    
+    if (customer) {
+      res.json({
+        success: true,
+        data: customer,
+        message: '获取客户详情成功'
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: '客户不存在'
+      });
+    }
+  } catch (error) {
+    console.error('获取客户详情失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取客户详情失败'
+    });
+  }
+});
+
+// 添加客户
+app.post('/api/v1/customers', requirePermission('customers'), (req, res) => {
+  try {
+    const { wechatAvatar, wechatNickname, name, phone, email, customerType, permissions } = req.body;
+    
+    // 验证必填字段
+    if (!name || !phone || !customerType) {
+      return res.status(400).json({
+        success: false,
+        message: '客户名称、联系电话和客户类型为必填字段'
+      });
+    }
+    
+    // 检查是否已经存在相同电话或邮箱的客户
+    const existingCustomer = db.data.customers.find(customer => 
+      customer.phone === phone || (email && customer.email === email)
+    );
+    
+    if (existingCustomer) {
+      return res.status(400).json({
+        success: false,
+        message: '该客户已存在'
+      });
+    }
+    
+    // 创建新客户
+    const newCustomer = {
+      id: getNextId('customer'),
+      wechatAvatar: wechatAvatar || '',
+      wechatNickname: wechatNickname || '',
+      name,
+      phone,
+      email: email || '',
+      customerType,
+      permissions: permissions || {
+        viewWorks: true,
+        categories: []
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 添加到数据库
+    db.data.customers.push(newCustomer);
+    
+    // 保存数据库
+    db.write();
+    
+    res.status(201).json({
+      success: true,
+      data: newCustomer,
+      message: '添加客户成功'
+    });
+  } catch (error) {
+    console.error('添加客户失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '添加客户失败'
+    });
+  }
+});
+
+// 编辑客户
+app.put('/api/v1/customers/:id', requirePermission('customers'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const customerIndex = db.data.customers.findIndex(c => c.id === id);
+    
+    if (customerIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '客户不存在'
+      });
+    }
+    
+    const { wechatAvatar, wechatNickname, name, phone, email, customerType, permissions } = req.body;
+    
+    // 验证必填字段
+    if (!name || !phone || !customerType) {
+      return res.status(400).json({
+        success: false,
+        message: '客户名称、联系电话和客户类型为必填字段'
+      });
+    }
+    
+    // 检查是否已经存在相同电话或邮箱的客户（排除当前客户）
+    const existingCustomer = db.data.customers.find(customer => 
+      (customer.phone === phone || (email && customer.email === email)) && customer.id !== id
+    );
+    
+    if (existingCustomer) {
+      return res.status(400).json({
+        success: false,
+        message: '该客户已存在'
+      });
+    }
+    
+    // 更新客户
+    const updatedCustomer = {
+      ...db.data.customers[customerIndex],
+      wechatAvatar: wechatAvatar || '',
+      wechatNickname: wechatNickname || '',
+      name,
+      phone,
+      email: email || '',
+      customerType,
+      permissions: permissions || {
+        viewWorks: true,
+        categories: []
+      },
+      updatedAt: new Date().toISOString()
+    };
+    
+    db.data.customers[customerIndex] = updatedCustomer;
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      data: updatedCustomer,
+      message: '编辑客户成功'
+    });
+  } catch (error) {
+    console.error('编辑客户失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '编辑客户失败'
+    });
+  }
+});
+
+// 删除客户
+app.delete('/api/v1/customers/:id', requirePermission('customers'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const customerIndex = db.data.customers.findIndex(c => c.id === id);
+    
+    if (customerIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '客户不存在'
+      });
+    }
+    
+    // 删除客户
+    db.data.customers.splice(customerIndex, 1);
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      message: '删除客户成功'
+    });
+  } catch (error) {
+    console.error('删除客户失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '删除客户失败'
+    });
+  }
+});
+
+// 客户分类API端点
+
+// 获取客户分类列表
+app.get('/api/v1/customer-categories', requirePermission('customers'), (req, res) => {
+  try {
+    // 从数据库获取所有客户分类并按创建时间倒序排序
+    const categories = [...db.data.customerCategories].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({
+      success: true,
+      data: categories,
+      message: '获取客户分类列表成功'
+    });
+  } catch (error) {
+    console.error('获取客户分类列表失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取客户分类列表失败'
+    });
+  }
+});
+
+// 添加客户分类
+app.post('/api/v1/customer-categories', requirePermission('customers'), (req, res) => {
+  try {
+    const { name, description } = req.body;
+    
+    // 验证必填字段
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: '分类名称为必填字段'
+      });
+    }
+    
+    // 检查分类名称是否已存在
+    const existingCategory = db.data.customerCategories.find(c => c.name === name);
+    if (existingCategory) {
+      return res.status(400).json({
+        success: false,
+        message: '分类名称已存在'
+      });
+    }
+    
+    // 创建新客户分类
+    const newCategory = {
+      id: getNextId('customerCategory'),
+      name,
+      description: description || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 添加到数据库
+    db.data.customerCategories.push(newCategory);
+    
+    // 保存数据库
+    db.write();
+    
+    res.status(201).json({
+      success: true,
+      data: newCategory,
+      message: '添加客户分类成功'
+    });
+  } catch (error) {
+    console.error('添加客户分类失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '添加客户分类失败'
+    });
+  }
+});
+
+// 编辑客户分类
+app.put('/api/v1/customer-categories/:id', requirePermission('customers'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const categoryIndex = db.data.customerCategories.findIndex(c => c.id === id);
+    
+    if (categoryIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '客户分类不存在'
+      });
+    }
+    
+    const { name, description } = req.body;
+    
+    // 验证必填字段
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: '分类名称为必填字段'
+      });
+    }
+    
+    // 检查分类名称是否已存在（排除当前分类）
+    const existingCategory = db.data.customerCategories.find(c => c.name === name && c.id !== id);
+    if (existingCategory) {
+      return res.status(400).json({
+        success: false,
+        message: '分类名称已存在'
+      });
+    }
+    
+    // 更新客户分类
+    const updatedCategory = {
+      ...db.data.customerCategories[categoryIndex],
+      name,
+      description: description || '',
+      updatedAt: new Date().toISOString()
+    };
+    
+    db.data.customerCategories[categoryIndex] = updatedCategory;
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      data: updatedCategory,
+      message: '编辑客户分类成功'
+    });
+  } catch (error) {
+    console.error('编辑客户分类失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '编辑客户分类失败'
+    });
+  }
+});
+
+// 删除客户分类
+app.delete('/api/v1/customer-categories/:id', requirePermission('customers'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const categoryIndex = db.data.customerCategories.findIndex(c => c.id === id);
+    
+    if (categoryIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '客户分类不存在'
+      });
+    }
+    
+    const categoryName = db.data.customerCategories[categoryIndex].name;
+    
+    // 检查是否有客户使用该分类
+    const customerUsingCategory = db.data.customers.find(customer => customer.customerType === categoryName);
+    if (customerUsingCategory) {
+      return res.status(400).json({
+        success: false,
+        message: '该分类下存在客户，无法删除'
+      });
+    }
+    
+    // 删除客户分类
+    db.data.customerCategories.splice(categoryIndex, 1);
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      message: '删除客户分类成功'
+    });
+  } catch (error) {
+    console.error('删除客户分类失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '删除客户分类失败'
+    });
+  }
+});
+
 // 线索管理API端点
 
 // 获取线索列表
-app.get('/api/v1/leads', requireAuth, (req, res) => {
+app.get('/api/v1/leads', requirePermission('leads'), (req, res) => {
   try {
     // 从数据库获取所有线索并按创建时间倒序排序
     const leads = [...db.data.leads].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -864,7 +1351,7 @@ app.get('/api/v1/leads', requireAuth, (req, res) => {
 });
 
 // 获取单个线索详情
-app.get('/api/v1/leads/:id', requireAuth, (req, res) => {
+app.get('/api/v1/leads/:id', requirePermission('leads'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const lead = db.data.leads.find(l => l.id === id);
@@ -891,15 +1378,27 @@ app.get('/api/v1/leads/:id', requireAuth, (req, res) => {
 });
 
 // 添加线索
-app.post('/api/v1/leads', requireAuth, (req, res) => {
+app.post('/api/v1/leads', (req, res) => {
   try {
-    const { name, phone, email, projectType, budget, status, description } = req.body;
+    const { name, phone, email, projectType, budget, status, description, wechatAvatar, wechatOpenId, wechatNickname } = req.body;
     
     // 验证必填字段
     if (!name || !phone || !projectType || !status) {
       return res.status(400).json({
         success: false,
         message: '客户名称、联系电话、项目类型和状态为必填字段'
+      });
+    }
+    
+    // 检查是否已经存在相同电话或邮箱的线索
+    const existingLead = db.data.leads.find(lead => 
+      lead.phone === phone || (email && lead.email === email)
+    );
+    
+    if (existingLead) {
+      return res.status(400).json({
+        success: false,
+        message: '您已经提交过咨询，我们会尽快联系您'
       });
     }
     
@@ -913,6 +1412,9 @@ app.post('/api/v1/leads', requireAuth, (req, res) => {
       budget: budget || '',
       status,
       description: description || '',
+      wechatAvatar: wechatAvatar || '',
+      wechatOpenId: wechatOpenId || '',
+      wechatNickname: wechatNickname || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -938,7 +1440,7 @@ app.post('/api/v1/leads', requireAuth, (req, res) => {
 });
 
 // 编辑线索
-app.put('/api/v1/leads/:id', requireAuth, (req, res) => {
+app.put('/api/v1/leads/:id', requirePermission('leads'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const leadIndex = db.data.leads.findIndex(l => l.id === id);
@@ -950,7 +1452,7 @@ app.put('/api/v1/leads/:id', requireAuth, (req, res) => {
       });
     }
     
-    const { name, phone, email, projectType, budget, status, description } = req.body;
+    const { name, phone, email, projectType, budget, status, description, wechatAvatar, wechatOpenId, wechatNickname } = req.body;
     
     // 验证必填字段
     if (!name || !phone || !projectType || !status) {
@@ -970,6 +1472,9 @@ app.put('/api/v1/leads/:id', requireAuth, (req, res) => {
       budget: budget || '',
       status,
       description: description || '',
+      wechatAvatar: wechatAvatar || '',
+      wechatOpenId: wechatOpenId || '',
+      wechatNickname: wechatNickname || '',
       updatedAt: new Date().toISOString()
     };
     
@@ -991,7 +1496,7 @@ app.put('/api/v1/leads/:id', requireAuth, (req, res) => {
 });
 
 // 删除线索
-app.delete('/api/v1/leads/:id', requireAuth, (req, res) => {
+app.delete('/api/v1/leads/:id', requirePermission('leads'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const leadIndex = db.data.leads.findIndex(l => l.id === id);
@@ -1022,10 +1527,110 @@ app.delete('/api/v1/leads/:id', requireAuth, (req, res) => {
   }
 });
 
+// 从线索添加客户信息
+app.get('/api/v1/leads/:id/add-to-customers', requirePermission('leads'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const lead = db.data.leads.find(l => l.id === id);
+    
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: '线索不存在'
+      });
+    }
+    
+    // 检查是否已经存在相同电话或邮箱的客户
+    const existingCustomer = db.data.customers.find(customer => 
+      customer.phone === lead.phone || (lead.email && customer.email === lead.email)
+    );
+    
+    if (existingCustomer) {
+      return res.status(400).json({
+        success: false,
+        message: '该客户已存在'
+      });
+    }
+    
+    // 创建新客户
+    const newCustomer = {
+      id: getNextId('customer'),
+      wechatAvatar: lead.wechatAvatar || '',
+      wechatNickname: lead.wechatNickname || '',
+      name: lead.name,
+      phone: lead.phone,
+      email: lead.email || '',
+      customerType: '普通客户',
+      permissions: {
+        viewWorks: true,
+        categories: []
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 添加到数据库
+    db.data.customers.push(newCustomer);
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      data: newCustomer,
+      message: '客户信息添加成功'
+    });
+  } catch (error) {
+    console.error('从线索添加客户信息失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '客户信息添加失败'
+    });
+  }
+});
+
+// 根据OpenID获取用户权限
+app.get('/api/v1/permissions/:openId', (req, res) => {
+  try {
+    const openId = req.params.openId;
+    
+    // 查找具有该OpenID的客户
+    const customer = db.data.customers.find(c => c.wechatOpenId === openId);
+    
+    if (customer && customer.permissions) {
+      res.json({
+        success: true,
+        data: customer.permissions,
+        message: '获取用户权限成功'
+      });
+    } else {
+      // 如果没有找到客户，返回默认权限
+      res.json({
+        success: true,
+        data: {
+          viewWorks: true,
+          categories: []
+        },
+        message: '用户未找到，使用默认权限'
+      });
+    }
+  } catch (error) {
+    console.error('获取用户权限失败:', error);
+    res.status(500).json({
+      success: false,
+      data: {
+        viewWorks: true,
+        categories: []
+      },
+      message: '获取用户权限失败，使用默认权限'
+    });
+  }
+});
+
 // 系统设置API端点
 
 // 获取系统设置
-app.get('/api/v1/settings', requireAuth, (req, res) => {
+app.get('/api/v1/settings', requirePermission('settings'), (req, res) => {
   try {
     // 从数据库获取系统设置
     const settings = db.data.settings;
@@ -1044,7 +1649,7 @@ app.get('/api/v1/settings', requireAuth, (req, res) => {
 });
 
 // 更新系统设置
-app.put('/api/v1/settings', requireAuth, (req, res) => {
+app.put('/api/v1/settings', requirePermission('settings'), (req, res) => {
   try {
     // 更新系统设置
     db.data.settings = { ...db.data.settings, ...req.body };
@@ -1070,7 +1675,7 @@ app.put('/api/v1/settings', requireAuth, (req, res) => {
 // 关于我们API端点
 
 // 获取关于我们数据
-app.get('/api/v1/about', requireAuth, (req, res) => {
+app.get('/api/v1/about', (req, res) => {
   try {
     // 从数据库获取关于我们数据
     const aboutData = db.data.about;
@@ -1089,7 +1694,7 @@ app.get('/api/v1/about', requireAuth, (req, res) => {
 });
 
 // 更新关于我们数据
-app.put('/api/v1/about', requireAuth, (req, res) => {
+app.put('/api/v1/about', requirePermission('brand'), (req, res) => {
   try {
     // 更新关于我们数据
     db.data.about = { ...db.data.about, ...req.body };
@@ -1115,7 +1720,7 @@ app.put('/api/v1/about', requireAuth, (req, res) => {
 // 用户管理API端点
 
 // 获取用户列表
-app.get('/api/v1/users', requireAuth, (req, res) => {
+app.get('/api/v1/users', requirePermission('users'), (req, res) => {
   try {
     // 从数据库获取所有用户
     const users = db.data.users;
@@ -1133,10 +1738,227 @@ app.get('/api/v1/users', requireAuth, (req, res) => {
   }
 });
 
-// 添加用户
-app.post('/api/v1/users', requireAuth, async (req, res) => {
+
+
+
+
+// 获取当前登录用户信息
+app.get('/api/v1/users/current', requireAuth, (req, res) => {
   try {
-    const { username, password, role } = req.body;
+    if (req.session.user) {
+      // 从数据库中获取完整的用户信息
+      const user = db.data.users.find(u => u.username === req.session.user.username);
+      if (user) {
+        res.json({
+          success: true,
+          data: {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            permissions: user.permissions
+          },
+          message: '获取用户信息成功'
+        });
+      } else {
+        res.status(404).json({
+          success: false,
+          message: '用户不存在'
+        });
+      }
+    } else {
+      res.status(401).json({
+        success: false,
+        message: '未登录'
+      });
+    }
+  } catch (error) {
+    console.error('获取用户信息失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取用户信息失败'
+    });
+  }
+});
+
+
+
+// 初始化数据库并启动服务器
+async function startServer() {
+  try {
+    // 初始化数据库
+    await initDatabase();
+    console.log('数据库初始化成功');
+    
+    // 启动服务器
+    app.listen(PORT, () => {
+      console.log(`Admin web server is running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('服务器启动失败:', error);
+    process.exit(1);
+  }
+}
+
+// 日志管理API端点
+
+// 获取用户日志
+app.get('/api/v1/logs', requirePermission('users'), (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    let logs = [...db.data.logs];
+    
+    // 如果指定了用户ID，进行筛选
+    if (userId) {
+      logs = logs.filter(log => log.userId === parseInt(userId));
+    }
+    
+    // 按创建时间倒序排序
+    logs = logs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    res.json({
+      success: true,
+      data: logs,
+      message: '获取日志列表成功'
+    });
+  } catch (error) {
+    console.error('获取日志列表失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取日志列表失败'
+    });
+  }
+});
+
+// 日志记录函数
+function logOperation(req, actionType, actionContent) {
+  try {
+    if (req.session.user) {
+      const user = db.data.users.find(u => u.username === req.session.user.username);
+      if (user) {
+        const newLog = {
+          id: db.data.logs.length + 1,
+          userId: user.id,
+          username: user.username,
+          actionType,
+          actionContent,
+          ipAddress: req.ip || 'unknown',
+          createdAt: new Date().toISOString()
+        };
+        
+        db.data.logs.push(newLog);
+        db.write();
+      }
+    }
+  } catch (error) {
+    console.error('记录日志失败:', error);
+  }
+}
+
+// 登录成功后记录日志
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  
+  try {
+    // 查找用户
+    const user = db.data.users.find(u => u.username === username);
+    
+    if (user) {
+      // 验证密码
+      const match = await bcrypt.compare(password, user.password);
+      if (match) {
+        req.session.user = user;
+        
+        // 记录登录日志
+        logOperation(req, 'login', '用户登录系统');
+        
+        res.json({ success: true, redirect: '/dashboard' });
+      } else {
+        res.json({ success: false, message: '用户名或密码错误' });
+      }
+    } else {
+      res.json({ success: false, message: '用户名或密码错误' });
+    }
+  } catch (error) {
+    console.error('登录验证失败:', error);
+    res.status(500).json({ success: false, message: '登录验证失败' });
+  }
+});
+
+// 编辑用户后记录日志
+app.put('/api/v1/users/:id', requirePermission('users'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const userIndex = db.data.users.findIndex(u => u.id === id);
+    
+    if (userIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+    
+    const { username, password, role, permissions } = req.body;
+    
+    // 验证必填字段
+    if (!username) {
+      return res.status(400).json({
+        success: false,
+        message: '用户名为必填字段'
+      });
+    }
+    
+    // 验证用户名是否已存在（排除当前用户）
+    const existingUser = db.data.users.find(u => u.username === username && u.id !== id);
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: '用户名已存在'
+      });
+    }
+    
+    // 更新用户信息
+    const updatedUser = {
+      ...db.data.users[userIndex],
+      username,
+      role: role || db.data.users[userIndex].role,
+      permissions: permissions || db.data.users[userIndex].permissions,
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 如果提供了新密码，更新密码
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+      updatedUser.password = hashedPassword;
+    }
+    
+    // 更新数据库
+    db.data.users[userIndex] = updatedUser;
+    
+    // 保存数据库
+    db.write();
+    
+    // 记录操作日志
+    logOperation(req, 'user_edit', `编辑用户: ${updatedUser.username}`);
+    
+    res.json({
+      success: true,
+      data: updatedUser,
+      message: '编辑用户成功'
+    });
+  } catch (error) {
+    console.error('编辑用户失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '编辑用户失败'
+    });
+  }
+});
+
+// 添加用户后记录日志
+app.post('/api/v1/users', requirePermission('users'), async (req, res) => {
+  try {
+    const { username, password, role, permissions } = req.body;
     
     // 验证必填字段
     if (!username || !password) {
@@ -1164,6 +1986,17 @@ app.post('/api/v1/users', requireAuth, async (req, res) => {
       username,
       password: hashedPassword,
       role: role || 'admin',
+      permissions: permissions || {
+        dashboard: true,
+        works: true,
+        categories: true,
+        leads: true,
+        customers: true,
+        brand: true,
+        stats: true,
+        settings: true,
+        users: true
+      },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -1173,6 +2006,9 @@ app.post('/api/v1/users', requireAuth, async (req, res) => {
     
     // 保存数据库
     db.write();
+    
+    // 记录操作日志
+    logOperation(req, 'user_add', `添加用户: ${newUser.username}`);
     
     res.status(201).json({
       success: true,
@@ -1188,8 +2024,8 @@ app.post('/api/v1/users', requireAuth, async (req, res) => {
   }
 });
 
-// 编辑用户
-app.put('/api/v1/users/:id', requireAuth, async (req, res) => {
+// 删除用户后记录日志
+app.delete('/api/v1/users/:id', requirePermission('users'), (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const userIndex = db.data.users.findIndex(u => u.id === id);
@@ -1201,71 +2037,7 @@ app.put('/api/v1/users/:id', requireAuth, async (req, res) => {
       });
     }
     
-    const { username, password, role } = req.body;
-    
-    // 验证必填字段
-    if (!username) {
-      return res.status(400).json({
-        success: false,
-        message: '用户名为必填字段'
-      });
-    }
-    
-    // 验证用户名是否已存在（排除当前用户）
-    const existingUser = db.data.users.find(u => u.username === username && u.id !== id);
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: '用户名已存在'
-      });
-    }
-    
-    // 更新用户信息
-    const updatedUser = {
-      ...db.data.users[userIndex],
-      username,
-      role: role || db.data.users[userIndex].role,
-      updatedAt: new Date().toISOString()
-    };
-    
-    // 如果提供了新密码，更新密码
-    if (password) {
-      const hashedPassword = await bcrypt.hash(password, saltRounds);
-      updatedUser.password = hashedPassword;
-    }
-    
-    // 更新数据库
-    db.data.users[userIndex] = updatedUser;
-    
-    // 保存数据库
-    db.write();
-    
-    res.json({
-      success: true,
-      data: updatedUser,
-      message: '编辑用户成功'
-    });
-  } catch (error) {
-    console.error('编辑用户失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '编辑用户失败'
-    });
-  }
-});
-
-// 删除用户
-app.delete('/api/v1/users/:id', requireAuth, (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const userIndex = db.data.users.findIndex(u => u.id === id);
-    
-    if (userIndex === -1) {
-      return res.status(404).json({
-        success: false,
-        message: '用户不存在'
-      });
-    }
+    const username = db.data.users[userIndex].username;
     
     // 不能删除最后一个管理员用户
     const remainingAdmins = db.data.users.filter(u => u.id !== id && u.role === 'admin');
@@ -1281,6 +2053,9 @@ app.delete('/api/v1/users/:id', requireAuth, (req, res) => {
     
     // 保存数据库
     db.write();
+    
+    // 记录操作日志
+    logOperation(req, 'user_delete', `删除用户: ${username}`);
     
     res.json({
       success: true,
