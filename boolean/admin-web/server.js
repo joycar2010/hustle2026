@@ -3,6 +3,13 @@ const session = require('express-session');
 const bodyParser = require('body-parser');
 const path = require('path');
 const fs = require('fs');
+const fileUpload = require('express-fileupload');
+
+// 创建上传目录
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 // 导入lowdb数据库
 const { db, initDatabase, getNextId } = require('./db');
@@ -16,11 +23,12 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // 中间件配置
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(bodyParser.json({ limit: '10mb' }));
+app.use(fileUpload({ useTempFiles: true, tempFileDir: '/tmp/' }));
 
 // 先定义API路由，再定义静态文件路由
 // API路由定义...
@@ -47,6 +55,49 @@ app.use((req, res, next) => {
   }
   
   next();
+});
+
+// 图片上传API
+app.post('/api/v1/upload', (req, res) => {
+  try {
+    if (!req.files || !req.files.image) {
+      return res.json({
+        success: false,
+        message: '请选择要上传的图片'
+      });
+    }
+    
+    const image = req.files.image;
+    const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}.${image.name.split('.').pop()}`;
+    const filePath = path.join(uploadDir, fileName);
+    
+    // 保存图片
+    image.mv(filePath, (err) => {
+      if (err) {
+        console.error('保存图片失败:', err);
+        return res.json({
+          success: false,
+          message: '保存图片失败'
+        });
+      }
+      
+      // 返回图片URL
+      const imageUrl = `/uploads/${fileName}`;
+      res.json({
+        success: true,
+        data: {
+          url: imageUrl,
+          fileName: fileName
+        }
+      });
+    });
+  } catch (error) {
+    console.error('上传图片错误:', error);
+    res.json({
+      success: false,
+      message: '上传图片失败'
+    });
+  }
 });
 
 // Session配置

@@ -1,7 +1,7 @@
 // api.js - API请求工具
 
 // 后端API基础URL
-const BASE_URL = 'http://localhost:3000/api/v1';
+const BASE_URL = 'http://localhost:3001/api/v1';
 
 /**
  * 封装的请求函数

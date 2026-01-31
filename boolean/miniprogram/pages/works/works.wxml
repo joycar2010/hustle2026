@@ -24,7 +24,7 @@
             </view>
             <view class="work-content">
               <view class="work-title">{{work.title}}</view>
-              <view class="work-subtitle">{{work.description || '融合现代美学与实用功能的空间设计'}}</view>
+              <view class="work-subtitle">{{work.processedDescription}}</view>
               <view class="work-meta">
                 <view class="meta-item">
                   <view class="meta-label">项目面积</view>

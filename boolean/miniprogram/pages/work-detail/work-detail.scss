@@ -377,6 +377,20 @@ page {
   line-height: 1.4;
 }
 
+.no-related-projects {
+  padding: 100rpx 40rpx;
+  text-align: center;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 12rpx;
+  border: 2rpx dashed rgba(255, 255, 255, 0.2);
+}
+
+.no-related-text {
+  font-size: 28rpx;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.5;
+}
+
 /* 版权信息 */
 .copyright-section {
   margin-bottom: 60rpx;

@@ -16,6 +16,7 @@ Page({
       description: '',
       features: []
     },
+    relatedProjects: [],
     userInfo: null,
     userPermissions: {
       viewWorks: true,
@@ -230,6 +231,23 @@ Page({
     api.worksApi.getWorkDetail(id).then(res => {
       let workData = res.data || this.data.work;
       
+      // 处理富文本数据，将相对路径图片转换为完整URL
+      if (workData.description) {
+        workData.description = this.processRichText(workData.description);
+      }
+      if (workData.designDescription) {
+        workData.designDescription = this.processRichText(workData.designDescription);
+      }
+      if (workData.designConcept) {
+        workData.designConcept = this.processRichText(workData.designConcept);
+      }
+      if (workData.functionPlanning) {
+        workData.functionPlanning = this.processRichText(workData.functionPlanning);
+      }
+      if (workData.materialSelection) {
+        workData.materialSelection = this.processRichText(workData.materialSelection);
+      }
+      
       // 处理图片数据，验证图片URL
       if (workData.images && Array.isArray(workData.images)) {
         workData.images = workData.images.filter(imageUrl => this.validateImageUrl(imageUrl));
@@ -269,13 +287,17 @@ Page({
         }
       }
       
-      this.setData({
-        work: workData,
-        isLoading: false,
-        unauthorized: false,
-        unauthorizedReason: ''
+      // 加载相关项目
+      this.loadRelatedProjects(workData.id, workData.type).then(relatedProjects => {
+        this.setData({
+          work: workData,
+          relatedProjects: relatedProjects,
+          isLoading: false,
+          unauthorized: false,
+          unauthorizedReason: ''
+        });
+        wx.hideLoading();
       });
-      wx.hideLoading();
     }).catch(err => {
       console.error('加载作品详情失败:', err);
       wx.hideLoading();
@@ -288,6 +310,47 @@ Page({
         wx.navigateBack();
       }, 1500);
     });
+  },
+
+  /**
+   * 加载相关项目
+   */
+  loadRelatedProjects(currentWorkId, workType) {
+    return new Promise((resolve, reject) => {
+      api.worksApi.getWorks({ type: workType }).then(res => {
+        if (res.success && res.data) {
+          // 过滤掉当前作品，只返回其他作品
+          const relatedProjects = res.data.filter(work => work.id !== currentWorkId).slice(0, 2);
+          resolve(relatedProjects);
+        } else {
+          resolve([]);
+        }
+      }).catch(() => {
+        resolve([]);
+      });
+    });
+  },
+  
+  /**
+   * 处理富文本数据，将相对路径图片转换为完整URL
+   * @param {string} html - 富文本HTML
+   * @returns {string} - 处理后的富文本HTML
+   */
+  processRichText(html) {
+    if (!html || typeof html !== 'string') {
+      return html;
+    }
+    
+    // 处理图片路径，将相对路径转换为完整URL
+    const baseUrl = 'http://localhost:3001';
+    let processedHtml = html;
+    
+    // 替换相对路径的图片
+    processedHtml = processedHtml.replace(/<img\s+src="\/([^"]+)"[^>]*>/gi, (match, src) => {
+      return `<img src="${baseUrl}/${src}" alt="作品图片" style="max-width: 100%; height: auto;"/>`;
+    });
+    
+    return processedHtml;
   },
 
   /**

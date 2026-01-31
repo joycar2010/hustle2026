@@ -803,6 +803,59 @@
             border-radius: 50%;
         }
 
+        /* 富文本编辑器样式 */
+        .rich-text-editor {
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .editor-toolbar {
+            display: flex;
+            gap: 5px;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            flex-wrap: wrap;
+        }
+        
+        .toolbar-btn {
+            padding: 8px 12px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+        
+        .toolbar-btn:hover {
+            background-color: rgba(255, 255, 255, 0.15);
+            border-color: #990000;
+        }
+        
+        .editor-content {
+            min-height: 200px;
+            padding: 15px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            outline: none;
+        }
+        
+        .editor-content:empty:before {
+            content: attr(placeholder);
+            color: rgba(255, 255, 255, 0.3);
+            pointer-events: none;
+        }
+        
+        .editor-content img {
+            max-width: 100%;
+            height: auto;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        
         /* 响应式设计 */
         @media (max-width: 1200px) {
             .filter-bar {
@@ -1063,7 +1116,22 @@
                 
                 <div class="form-group">
                     <label class="form-label" for="workDescription">作品描述</label>
-                    <textarea class="form-textarea" id="workDescription" name="description" placeholder="请输入作品描述"></textarea>
+                    <div class="rich-text-editor">
+                        <div class="editor-toolbar">
+                            <button type="button" class="toolbar-btn" onclick="format('bold')"><i class="fas fa-bold"></i></button>
+                            <button type="button" class="toolbar-btn" onclick="format('italic')"><i class="fas fa-italic"></i></button>
+                            <button type="button" class="toolbar-btn" onclick="format('underline')"><i class="fas fa-underline"></i></button>
+                            <button type="button" class="toolbar-btn" onclick="format('strike')"><i class="fas fa-strikethrough"></i></button>
+                            <button type="button" class="toolbar-btn" onclick="format('header', 1)"><i class="fas fa-heading"></i> H1</button>
+                            <button type="button" class="toolbar-btn" onclick="format('header', 2)"><i class="fas fa-heading"></i> H2</button>
+                            <button type="button" class="toolbar-btn" onclick="format('list', 'ordered')"><i class="fas fa-list-ol"></i></button>
+                            <button type="button" class="toolbar-btn" onclick="format('list', 'bullet')"><i class="fas fa-list-ul"></i></button>
+                            <button type="button" class="toolbar-btn" onclick="insertImage()"><i class="fas fa-image"></i> 图片</button>
+                            <button type="button" class="toolbar-btn" onclick="clearContent()"><i class="fas fa-trash"></i> 清空</button>
+                        </div>
+                        <div class="editor-content" id="editorContent" contenteditable="true" placeholder="请输入作品描述"></div>
+                        <input type="hidden" id="workDescription" name="description">
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -1465,6 +1533,10 @@
             document.getElementById('modalTitle').textContent = '添加作品';
             document.getElementById('worksForm').reset();
             document.getElementById('workId').value = '';
+            
+            // 重置图片上传状态
+            resetImageUpload();
+            
             document.getElementById('worksModal').classList.add('active');
         }
         
@@ -1478,6 +1550,9 @@
             const work = works.find(w => w.id === id);
             if (!work) return;
             
+            // 重置图片上传状态
+            resetImageUpload();
+            
             document.getElementById('modalTitle').textContent = '编辑作品';
             document.getElementById('workId').value = work.id;
             document.getElementById('workTitle').value = work.title;
@@ -1485,8 +1560,9 @@
             document.getElementById('workArea').value = work.area;
             document.getElementById('workLocation').value = work.location;
             document.getElementById('workCover').value = work.coverImage;
-            document.getElementById('workImages').value = JSON.stringify(work.images);
             document.getElementById('workDescription').value = work.description;
+            // 加载富文本内容
+            loadRichTextContent(work.description);
             document.getElementById('workDesignPeriod').value = work.designPeriod || '';
             document.getElementById('workStyle').value = work.style || '';
             document.getElementById('workDesignDescription').value = work.designDescription || '';
@@ -1496,7 +1572,97 @@
             document.getElementById('workHighlights').value = work.highlights ? work.highlights.join('\n') : '';
             document.getElementById('workSpaceType').value = work.spaceType || '';
             
+            // 更新封面图片预览
+            if (work.coverImage) {
+                const coverPreview = document.getElementById('coverPreview');
+                const previewPlaceholder = coverPreview.querySelector('.preview-placeholder');
+                const coverPreviewImg = document.getElementById('coverPreviewImg');
+                
+                // 隐藏占位符，显示图片
+                previewPlaceholder.style.display = 'none';
+                coverPreviewImg.src = work.coverImage;
+                coverPreviewImg.style.display = 'block';
+            }
+            
+            // 更新作品图片预览，使用现有的uploadedImages数组
+            if (work.images && work.images.length > 0) {
+                // 重置uploadedImages数组
+                uploadedImages = [];
+                
+                // 将work.images转换为uploadedImages格式
+                work.images.forEach((url, index) => {
+                    uploadedImages.push({
+                        id: Date.now() + index,
+                        url: url,
+                        name: `作品图片 ${index + 1}`
+                    });
+                });
+                
+                // 渲染图片预览
+                renderUploadedImages();
+                updateImagesInput();
+                
+                // 隐藏上传占位符
+                if (uploadedImages.length > 0) {
+                    document.querySelector('.upload-placeholder').style.display = 'none';
+                }
+            }
+            
             document.getElementById('worksModal').classList.add('active');
+        }
+        
+        // 富文本编辑器功能
+        function format(command, value = null) {
+            document.execCommand(command, false, value);
+        }
+        
+        function clearContent() {
+            document.getElementById('editorContent').innerHTML = '';
+        }
+        
+        function insertImage() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('image', file);
+                    
+                    const response = await fetch('/api/v1/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    if (result.success) {
+                        const img = document.createElement('img');
+                        img.src = result.data.url;
+                        img.alt = '作品图片';
+                        document.execCommand('insertHTML', false, img.outerHTML);
+                    } else {
+                        showToast('上传图片失败', 'error');
+                    }
+                } catch (error) {
+                    console.error('上传图片错误:', error);
+                    showToast('上传图片失败', 'error');
+                }
+            };
+            input.click();
+        }
+        
+        // 保存富文本内容到隐藏输入框
+        function saveRichTextContent() {
+            const editorContent = document.getElementById('editorContent').innerHTML;
+            document.getElementById('workDescription').value = editorContent;
+        }
+        
+        // 加载富文本内容
+        function loadRichTextContent(content) {
+            document.getElementById('editorContent').innerHTML = content || '';
         }
         
         // 删除作品
@@ -1524,6 +1690,9 @@
         // 提交表单
         async function submitForm(event) {
             event.preventDefault();
+            
+            // 保存富文本内容
+            saveRichTextContent();
             
             const formData = new FormData(event.target);
             const workId = document.getElementById('workId').value;
@@ -1793,6 +1962,12 @@
             coverPreviewImg.style.display = 'none';
             coverPlaceholder.style.display = 'flex';
             document.getElementById('workCover').value = '';
+            
+            // 重置上传占位符
+            const uploadPlaceholder = document.querySelector('.upload-placeholder');
+            if (uploadPlaceholder) {
+                uploadPlaceholder.style.display = 'flex';
+            }
         }
         
         // 编辑作品时加载图片

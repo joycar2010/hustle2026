@@ -63,7 +63,7 @@
       <text class="section-number">01</text>
       <text class="section-title">项目介绍</text>
     </view>
-    <text class="section-content">{{work.description || '项目介绍内容，包括项目背景、客户需求、设计目标等详细信息。'}}</text>
+    <rich-text class="section-content" nodes="{{work.description || '<p>项目介绍内容，包括项目背景、客户需求、设计目标等详细信息。</p>'}}"></rich-text>
   </view>
   
   <!-- 设计描述 -->
@@ -72,7 +72,7 @@
       <text class="section-number">02</text>
       <text class="section-title">设计描述</text>
     </view>
-    <text class="section-content">{{work.designDescription || '设计描述内容，包括设计概念、空间规划、功能布局等详细信息。'}}</text>
+    <rich-text class="section-content" nodes="{{work.designDescription || '<p>设计描述内容，包括设计概念、空间规划、功能布局等详细信息。</p>'}}"></rich-text>
     <view class="work-images">
       <image class="work-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
     </view>
@@ -84,7 +84,7 @@
       <text class="section-number">03</text>
       <text class="section-title">设计理念</text>
     </view>
-    <text class="section-content">{{work.designConcept || '设计理念内容，包括设计思路、创意来源、设计目标等详细信息。'}}</text>
+    <rich-text class="section-content" nodes="{{work.designConcept || '<p>设计理念内容，包括设计思路、创意来源、设计目标等详细信息。</p>'}}"></rich-text>
     <view class="work-images">
       <image class="work-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
     </view>
@@ -96,7 +96,7 @@
       <text class="section-number">04</text>
       <text class="section-title">功能规划</text>
     </view>
-    <text class="section-content">{{work.functionPlanning || '功能规划内容，包括空间功能分区、流线规划、使用需求分析等详细信息。'}}</text>
+    <rich-text class="section-content" nodes="{{work.functionPlanning || '<p>功能规划内容，包括空间功能分区、流线规划、使用需求分析等详细信息。</p>'}}"></rich-text>
     <view class="work-images">
       <image class="work-image" src="{{work.images[3] || work.images[0] || ''}}" mode="aspectFill"></image>
     </view>
@@ -108,7 +108,7 @@
       <text class="section-number">05</text>
       <text class="section-title">材料选择</text>
     </view>
-    <text class="section-content">{{work.materialSelection || '材料选择内容，包括主要材料、色彩搭配、质感对比等详细信息。'}}</text>
+    <rich-text class="section-content" nodes="{{work.materialSelection || '<p>材料选择内容，包括主要材料、色彩搭配、质感对比等详细信息。</p>'}}"></rich-text>
     <view class="work-images">
       <image class="work-image" src="{{work.images[4] || work.images[0] || ''}}" mode="aspectFill"></image>
     </view>
@@ -178,19 +178,15 @@
       <text class="section-title">相关项目</text>
     </view>
     <view class="related-list">
-      <view class="related-item" bindtap="navigateToRelatedProject" data-id="1">
+      <view wx:for="{{relatedProjects}}" wx:key="id" class="related-item" bindtap="navigateToRelatedProject" data-id="{{item.id}}">
         <view class="related-image-container">
-          <image class="related-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
-          <view class="related-number">02</view>
+          <image class="related-image" src="{{item.coverImage || item.images[0] || ''}}" mode="aspectFill"></image>
+          <view class="related-number">0{{index + 2}}</view>
         </view>
-        <text class="related-title">相关项目 1</text>
+        <text class="related-title">{{item.title}}</text>
       </view>
-      <view class="related-item" bindtap="navigateToRelatedProject" data-id="2">
-        <view class="related-image-container">
-          <image class="related-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
-          <view class="related-number">03</view>
-        </view>
-        <text class="related-title">相关项目 2</text>
+      <view wx:if="{{relatedProjects.length === 0}}" class="no-related-projects">
+        <text class="no-related-text">暂无相关项目</text>
       </view>
     </view>
   </view>

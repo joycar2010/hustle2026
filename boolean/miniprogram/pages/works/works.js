@@ -120,6 +120,30 @@ Page({
   },
 
   /**
+   * 处理富文本数据，将相对路径图片转换为完整URL
+   * @param {string} html - 富文本HTML
+   * @returns {string} - 处理后的富文本HTML
+   */
+  processRichText(html) {
+    if (!html || typeof html !== 'string') {
+      return html;
+    }
+    
+    // 处理图片路径，将相对路径转换为完整URL
+    const baseUrl = 'http://localhost:3001';
+    let processedHtml = html;
+    
+    // 替换相对路径的图片
+    processedHtml = processedHtml.replace(/<img\s+src="\/([^"]+)"[^>]*>/gi, (match, src) => {
+      return `<img src="${baseUrl}/${src}" alt="作品图片" style="max-width: 100%; height: auto;"/>`;
+    });
+    
+    // 限制富文本内容长度，只显示前100个字符的纯文本
+    const plainText = processedHtml.replace(/<[^>]*>/g, '').substring(0, 100);
+    return plainText;
+  },
+
+  /**
    * 加载作品列表
    */
   loadWorks() {
@@ -143,6 +167,14 @@ Page({
         } else {
           work.images = [];
         }
+        
+        // 处理富文本描述
+        if (work.description) {
+          work.processedDescription = this.processRichText(work.description);
+        } else {
+          work.processedDescription = '融合现代美学与实用功能的空间设计';
+        }
+        
         return work;
       });
       
