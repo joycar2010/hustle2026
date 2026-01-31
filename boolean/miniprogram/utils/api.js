@@ -26,7 +26,7 @@ async function request(url, options = {}) {
           resolve(response.data);
         } else if (response.statusCode === 400) {
           // 400 错误请求
-          const errorMsg = `请求参数错误: ${response.data?.message || '无效的请求参数'}`;
+          const errorMsg = `请求参数错误: ${response.data && response.data.message ? response.data.message : '无效的请求参数'}`;
           console.error('API请求错误:', errorMsg);
           reject(new Error(errorMsg));
         } else if (response.statusCode === 401) {
@@ -46,12 +46,12 @@ async function request(url, options = {}) {
           reject(new Error(errorMsg));
         } else if (response.statusCode >= 500) {
           // 5xx 服务器错误
-          const errorMsg = `服务器错误: ${response.data?.message || '服务器内部错误'}`;
+          const errorMsg = `服务器错误: ${response.data && response.data.message ? response.data.message : '服务器内部错误'}`;
           console.error('API请求错误:', errorMsg);
           reject(new Error(errorMsg));
         } else {
           // 其他状态码
-          const errorMsg = `请求失败: ${response.statusCode} ${response.data?.message || '未知错误'}`;
+          const errorMsg = `请求失败: ${response.statusCode} ${response.data && response.data.message ? response.data.message : '未知错误'}`;
           console.error('API请求错误:', errorMsg);
           reject(new Error(errorMsg));
         }
@@ -84,10 +84,13 @@ async function request(url, options = {}) {
 const worksApi = {
   /**
    * 获取作品列表
+   * @param {Object} params - 请求参数
    * @returns {Promise<Object>} - 作品列表
    */
-  async getWorks() {
-    return await request('/works');
+  async getWorks(params = {}) {
+    return await request('/works', {
+      data: params
+    });
   },
 
   /**
@@ -105,8 +108,11 @@ const worksApi = {
    */
   async getStats() {
     return await request('/stats');
-  },
+  }
+};
 
+// 分类相关API
+const categoryApi = {
   /**
    * 获取分类列表
    * @returns {Promise<Object>} - 分类列表
@@ -116,7 +122,61 @@ const worksApi = {
   }
 };
 
+// 线索相关API
+const leadApi = {
+  /**
+   * 创建线索
+   * @param {Object} leadData - 线索数据
+   * @returns {Promise<Object>} - 创建结果
+   */
+  async createLead(leadData) {
+    return await request('/leads', {
+      method: 'POST',
+      data: leadData
+    });
+  }
+};
+
+// 联系信息API
+const contactApi = {
+  /**
+   * 获取联系信息
+   * @returns {Promise<Object>} - 联系信息
+   */
+  async getContactInfo() {
+    return await request('/contact');
+  }
+};
+
+// 关于我们API
+const aboutApi = {
+  /**
+   * 获取关于我们信息
+   * @returns {Promise<Object>} - 关于我们信息
+   */
+  async getAboutInfo() {
+    return await request('/about');
+  }
+};
+
+// 权限相关API
+const permissionsApi = {
+  /**
+   * 根据OpenID获取用户权限
+   * @param {string} openId - 用户OpenID
+   * @returns {Promise<Object>} - 用户权限
+   */
+  async getPermissionsByOpenId(openId) {
+    return await request(`/permissions/${openId}`);
+  }
+};
+
 module.exports = {
   request,
-  worksApi
+  worksApi,
+  contactApi,
+  aboutApi,
+  categoryApi,
+  leadApi,
+  permissionsApi
 };

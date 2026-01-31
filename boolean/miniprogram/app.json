@@ -5,8 +5,7 @@
     "pages/work-detail/work-detail",
     "pages/brand/brand",
     "pages/contact/contact",
-    "pages/admin/login/login",
-    "pages/admin/dashboard/dashboard"
+    "pages/webview/webview"
   ],
   "window": {
     "navigationBarTextStyle": "white",
@@ -57,5 +56,6 @@
     "connectSocket": 10000,
     "uploadFile": 10000,
     "downloadFile": 10000
-  }
+  },
+  "cloud": true
 }

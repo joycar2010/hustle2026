@@ -1,150 +1,329 @@
-// work-detail.ts
-const app = getApp()
-// 引入API工具
-const { worksApi } = require('../../utils/api')
+// pages/work-detail/work-detail.js
+const api = require('../../utils/api');
 
-Component({
+Page({
+  /**
+   * 页面的初始数据
+   */
   data: {
-    work: null,
-    loading: true,
-    error: ''
-  },
-  
-  lifetimes: {
-    attached() {
-      // 获取页面参数
-      const pages = getCurrentPages()
-      const currentPage = pages[pages.length - 1]
-      const options = currentPage.options || {}
-      
-      this.loadWorkDetailWithValidation(options.id)
+    work: {
+      id: '',
+      title: '',
+      images: [],
+      spaceType: '',
+      area: '',
+      location: '',
+      description: '',
+      features: []
     },
-    
-    show() {
-      // 页面重新显示时刷新数据
-      const pages = getCurrentPages()
-      const currentPage = pages[pages.length - 1]
-      const options = currentPage.options || {}
-      
-      this.loadWorkDetailWithValidation(options.id)
+    userInfo: null,
+    userPermissions: {
+      viewWorks: true,
+      categories: []
+    },
+    isLoading: true,
+    unauthorized: false,
+    unauthorizedReason: ''
+  },
+
+  /**
+   * 生命周期函数--监听页面加载
+   */
+  onLoad(options) {
+    const id = options.id;
+    if (id) {
+      // 先获取用户信息和权限
+      this.getUserInfoAndPermissions().then(() => {
+        // 然后加载作品详情
+        this.loadWorkDetail(id);
+      });
+    } else {
+      wx.showToast({
+        title: '参数错误',
+        icon: 'none'
+      });
+      setTimeout(() => {
+        wx.navigateBack();
+      }, 1500);
     }
   },
-  
-  methods: {
-    // 验证ID并加载作品详情
-    loadWorkDetailWithValidation(id) {
-      // 验证ID是否有效
-      if (!id || isNaN(Number(id))) {
-        this.setData({
-          loading: false,
-          error: '无效的作品ID',
-          work: null
-        })
-        return
-      }
-      
-      // 转换为数字类型ID
-      const numericId = Number(id)
-      this.loadWorkDetail(numericId)
-    },
-    
-    // 加载作品详情
-    async loadWorkDetail(id) {
-      try {
-        this.setData({ loading: true, error: '', work: null })
-        
-        // 从API获取作品详情
-        const result = await worksApi.getWorkDetail(id)
-        
-        if (result.success && result.data) {
-          // 转换作品数据格式，处理可能的null或undefined值
-          // 验证并过滤有效图片URL
-          const validateImageUrl = (url) => {
-            if (!url || typeof url !== 'string') return false;
-            
-            // 检查是否为Base64图片
-            if (url.startsWith('data:image/')) {
-              // 检查Base64图片格式是否正确
-              return url.match(/^data:image\/(png|jpg|jpeg|gif|webp);base64,/) !== null;
-            }
-            
-            // 检查是否为标准URL格式
-            try {
-              new URL(url);
-              return true;
-            } catch {
-              // 检查是否为相对路径
-              return url.startsWith('/') || url.startsWith('./') || url.startsWith('../');
-            }
-          };
+
+  /**
+   * 获取用户信息和权限
+   */
+  getUserInfoAndPermissions() {
+    return new Promise((resolve, reject) => {
+      // 先获取微信用户信息
+      wx.getUserProfile({
+        desc: '用于获取您的权限信息',
+        success: (res) => {
+          const userInfo = res.userInfo;
+          this.setData({ userInfo });
           
-          // 过滤有效图片
-          const validImages = Array.isArray(result.data.images) 
-            ? result.data.images.filter(img => validateImageUrl(img)) 
-            : [];
-          
-          // 验证封面图片
-          const validCoverImage = validateImageUrl(result.data.coverImage) ? result.data.coverImage : '';
-          
-          const work = {
-            ...result.data,
-            spaceType: this.getSpaceTypeText(result.data.type),
-            area: result.data.area ? result.data.area.toString() : '',
-            views: result.data.views || 0,
-            location: result.data.location || '',
-            title: result.data.title || '未知作品',
-            description: result.data.description || '',
-            coverImage: validCoverImage,
-            images: validImages,
-            createdAt: result.data.createdAt || '',
-            updatedAt: result.data.updatedAt || ''
+          // 尝试获取openId
+          try {
+            wx.cloud.callFunction({
+              name: 'getOpenId',
+              success: (openIdRes) => {
+                const openId = openIdRes.result.openid;
+                // 根据openId获取用户权限
+                this.getUserPermissions(openId).then(permissions => {
+                  this.setData({ userPermissions: permissions });
+                  resolve();
+                }).catch(() => {
+                  // 获取权限失败，使用默认权限
+                  resolve();
+                });
+              },
+              fail: () => {
+                // 获取openId失败，使用默认权限
+                resolve();
+              }
+            });
+          } catch (error) {
+            // 云函数调用失败，使用默认权限
+            resolve();
           }
-          
-          this.setData({
-            work: work,
-            loading: false,
-            error: ''
-          })
-        } else {
-          throw new Error(result.message || '获取作品详情失败')
+        },
+        fail: () => {
+          // 用户拒绝授权，使用默认权限
+          resolve();
         }
-      } catch (error) {
-        console.error('加载作品详情失败:', error)
-        this.setData({ 
-          error: error.message || '加载失败，请检查网络连接或稍后重试', 
-          loading: false,
-          work: null
-        })
-      }
-    },
-    
-    // 手动重试加载
-    onRetry() {
-      // 获取页面参数
-      const pages = getCurrentPages()
-      const currentPage = pages[pages.length - 1]
-      const options = currentPage.options || {}
-      
-      this.loadWorkDetailWithValidation(options.id)
-    },
-    
-    // 获取空间类型文本
-    getSpaceTypeText(type) {
-      if (!type) return ''
-      
-      const typeMap = {
-        'residential': '家装设计',
-        'office': '公装设计',
-        'commercial': '商业空间',
-        'other': '其他'
-      }
-      return typeMap[type] || type
-    },
-    
-    onContact() {
-      wx.navigateTo({
-        url: '/pages/contact/contact'
-      })
+      });
+    });
+  },
+
+  /**
+   * 根据openId获取用户权限
+   */
+  getUserPermissions(openId) {
+    return new Promise((resolve, reject) => {
+      // 调用后端API获取用户权限
+      api.permissionsApi.getPermissionsByOpenId(openId).then(res => {
+        if (res.success && res.data) {
+          resolve(res.data);
+        } else {
+          // 获取权限失败，使用默认权限
+          resolve({
+            viewWorks: true,
+            categories: []
+          });
+        }
+      }).catch(() => {
+        // 网络错误，使用默认权限
+        resolve({
+          viewWorks: true,
+          categories: []
+        });
+      });
+    });
+  },
+
+  /**
+   * 生命周期函数--监听页面初次渲染完成
+   */
+  onReady() {
+
+  },
+
+  /**
+   * 生命周期函数--监听页面显示
+   */
+  onShow() {
+    // 每次页面显示时重新获取用户权限，确保权限变更实时生效
+    if (this.data.work.id) {
+      this.getUserInfoAndPermissions().then(() => {
+        // 权限更新后重新加载数据
+        this.loadWorkDetail(this.data.work.id);
+      });
     }
+  },
+
+  /**
+   * 刷新用户权限
+   */
+  refreshPermissions() {
+    return this.getUserInfoAndPermissions();
+  },
+
+  /**
+   * 生命周期函数--监听页面隐藏
+   */
+  onHide() {
+
+  },
+
+  /**
+   * 生命周期函数--监听页面卸载
+   */
+  onUnload() {
+
+  },
+
+  /**
+   * 页面相关事件处理函数--监听用户下拉动作
+   */
+  onPullDownRefresh() {
+    const pages = getCurrentPages();
+    const currentPage = pages[pages.length - 1];
+    const id = currentPage.options.id;
+    this.loadWorkDetail(id);
+    wx.stopPullDownRefresh();
+  },
+
+  /**
+   * 页面上拉触底事件的处理函数
+   */
+  onReachBottom() {
+
+  },
+
+  /**
+   * 用户点击右上角分享
+   */
+  onShareAppMessage() {
+    return {
+      title: `布珥·迈拓空间设计 - ${this.data.work.title}`,
+      path: `/pages/work-detail/work-detail?id=${this.data.work.id}`
+    };
+  },
+
+  /**
+   * 验证图片URL是否有效
+   * @param {string} url - 图片URL
+   * @returns {boolean} - 是否有效
+   */
+  validateImageUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+    
+    // 检查是否是Base64编码的图片
+    if (url.startsWith('data:image/')) {
+      return true;
+    }
+    
+    // 检查是否是placeholder域名（过滤掉占位符图片）
+    if (url.includes('via.placeholder.com')) {
+      return false;
+    }
+    
+    // 检查是否是有效的HTTP/HTTPS URL
+    const httpRegex = /^(https?:\/\/)[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$/;
+    if (!httpRegex.test(url)) {
+      return false;
+    }
+    
+    // 检查域名是否有效（简单检查，避免明显无效的域名）
+    const domainRegex = /^(https?:\/\/)([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/;
+    return domainRegex.test(url);
+  },
+
+  /**
+   * 加载作品详情
+   */
+  loadWorkDetail(id) {
+    wx.showLoading({
+      title: '加载中...'
+    });
+
+    api.worksApi.getWorkDetail(id).then(res => {
+      let workData = res.data || this.data.work;
+      
+      // 处理图片数据，验证图片URL
+      if (workData.images && Array.isArray(workData.images)) {
+        workData.images = workData.images.filter(imageUrl => this.validateImageUrl(imageUrl));
+      } else {
+        workData.images = [];
+      }
+      
+      // 检查作品是否公开
+      if (workData.isPublic === false) {
+        // 作品不公开，需要检查用户权限
+        const { userPermissions } = this.data;
+        
+        // 检查用户是否有查看权限
+        if (!userPermissions.viewWorks) {
+          // 用户没有查看作品的权限
+          wx.hideLoading();
+          this.setData({
+            isLoading: false,
+            unauthorized: true,
+            unauthorizedReason: '您没有查看作品的权限'
+          });
+          return;
+        }
+        
+        // 检查按分类的权限
+        if (workData.type && userPermissions.categories && userPermissions.categories.length > 0) {
+          if (!userPermissions.categories.includes(workData.type)) {
+            // 用户没有查看该分类作品的权限
+            wx.hideLoading();
+            this.setData({
+              isLoading: false,
+              unauthorized: true,
+              unauthorizedReason: '您没有查看该分类作品的权限'
+            });
+            return;
+          }
+        }
+      }
+      
+      this.setData({
+        work: workData,
+        isLoading: false,
+        unauthorized: false,
+        unauthorizedReason: ''
+      });
+      wx.hideLoading();
+    }).catch(err => {
+      console.error('加载作品详情失败:', err);
+      wx.hideLoading();
+      this.setData({ isLoading: false });
+      wx.showToast({
+        title: '加载失败，请重试',
+        icon: 'none'
+      });
+      setTimeout(() => {
+        wx.navigateBack();
+      }, 1500);
+    });
+  },
+
+  /**
+   * 导航到相关项目
+   */
+  navigateToRelatedProject(e) {
+    const id = e.currentTarget.dataset.id;
+    wx.navigateTo({
+      url: `/pages/work-detail/work-detail?id=${id}`
+    });
+  },
+
+  /**
+   * 返回上级
+   */
+  navigateBack() {
+    wx.navigateBack();
+  },
+
+  /**
+   * 跳转到联系页面
+   */
+  goToContact() {
+    wx.switchTab({
+      url: '/pages/contact/contact',
+      success: () => {
+        console.log('成功跳转到联系页面');
+      },
+      fail: (err) => {
+        console.error('跳转到联系页面失败:', err);
+        wx.showToast({
+          title: '跳转失败，请稍后重试',
+          icon: 'error',
+          duration: 2000
+        });
+      }
+    });
   }
-})
+});

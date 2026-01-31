@@ -1,66 +1,202 @@
-<!-- work-detail.wxml -->
-<navigation-bar title="作品详情" back="{{true}}" color="black" background="#FFF"></navigation-bar>
-<scroll-view class="scrollarea" scroll-y type="list">
-  <view class="container">
-    <!-- 加载状态 -->
-    <view wx:if="{{loading}}" class="loading-container">
-      <view class="loading-spinner"></view>
-      <text class="loading-text">加载中...</text>
-    </view>
-    
-    <!-- 错误状态 -->
-    <view wx:elif="{{error}}" class="error-container">
-      <view class="error-icon">⚠️</view>
-      <text class="error-text">{{error}}</text>
-      <button class="retry-btn" bindtap="onRetry">重新加载</button>
-    </view>
-    
-    <!-- 作品详情内容 -->
-    <view wx:elif="{{work}}" class="content">
-      <!-- 作品标题 -->
-      <view class="work-title-section">
-        <view class="work-title">{{work.title}}</view>
-        <view class="work-meta">
-          <text class="meta-item">{{work.spaceType || ''}}</text>
-          <text class="meta-divider" wx:if="{{work.spaceType}}">|</text>
-          <text class="meta-item">{{work.area || ''}}㎡</text>
-          <text class="meta-divider" wx:if="{{work.area}}">|</text>
-          <text class="meta-item">{{work.location || ''}}</text>
-        </view>
-      </view>
-      
-      <!-- 作品图片画廊 -->
-      <view class="image-gallery" wx:if="{{work.images && work.images.length > 0}}">
-        <block wx:for="{{work.images}}" wx:key="index" wx:for-item="image">
-          <view class="gallery-item" wx:if="{{image}}">
-            <image src="{{image}}" mode="aspectFit"></image>
-          </view>
-        </block>
-      </view>
-      
-      <!-- 作品描述 -->
-      <view class="description-section">
-        <view class="section-subtitle">设计说明</view>
-        <view class="description-content">{{work.description || '暂无描述'}}</view>
-      </view>
-      
-      <!-- 设计团队 -->
-      <view class="team-section">
-        <view class="section-subtitle">设计团队</view>
-        <view class="team-info">布珥·迈拓空间设计团队</view>
-      </view>
-      
-      <!-- 咨询按钮 -->
-      <view class="contact-section">
-        <button class="contact-btn" bindtap="onContact">立即咨询设计方案</button>
-      </view>
-    </view>
-    
-    <!-- 数据为空状态 -->
-    <view wx:else class="empty-container">
-      <view class="empty-icon">📭</view>
-      <text class="empty-text">暂无作品详情数据</text>
-      <button class="retry-btn" bindtap="onRetry">重新加载</button>
+<!-- 自定义导航栏 -->
+<page-meta>
+  <navigation-bar title="作品详情" show-back="true"></navigation-bar>
+</page-meta>
+
+<!-- 作品详情页面 -->
+<view class="back-button" bindtap="navigateBack">
+  <text class="back-icon">←</text>
+</view>
+
+<!-- 加载中状态 -->
+<view wx:if="{{isLoading}}" class="loading-container">
+  <text class="loading-text">加载中...</text>
+</view>
+
+<!-- 未授权提示界面 -->
+<view wx:if="{{!isLoading && unauthorized}}" class="unauthorized-container">
+  <view class="unauthorized-content">
+    <view class="unauthorized-icon">🔒</view>
+    <text class="unauthorized-title">无权限访问</text>
+    <text class="unauthorized-message">{{unauthorizedReason}}</text>
+    <view class="unauthorized-buttons">
+      <button class="back-button" bindtap="navigateBack">返回上级</button>
     </view>
   </view>
-</scroll-view>
+</view>
+
+<!-- 作品详情 -->
+<view wx:elif="{{!isLoading && !unauthorized}}" class="work-detail-section">
+  <!-- 作品标题 -->
+  <view class="work-header">
+    <text class="work-title">{{work.title}}</text>
+  </view>
+  
+  <!-- 项目信息 -->
+  <view class="project-info">
+    <view class="info-row">
+      <text class="info-label">项目面积</text>
+      <text class="info-value">{{work.area || '320'}}㎡</text>
+      <text class="info-label">项目地点</text>
+      <text class="info-value">{{work.location || '杭州市西湖区'}}</text>
+    </view>
+    <view class="info-row">
+      <text class="info-label">设计周期</text>
+      <text class="info-value">{{work.designPeriod || '6个月'}}</text>
+      <text class="info-label">设计风格</text>
+      <text class="info-value">{{work.style || '现代简约'}}</text>
+    </view>
+  </view>
+  
+  <!-- 作品图片轮播 -->
+  <view class="work-images">
+    <swiper indicator-dots="true" autoplay="true" interval="5000" duration="1000" circular="true">
+      <swiper-item wx:for="{{work.images}}" wx:key="index">
+        <image class="work-image" src="{{item}}" mode="aspectFill"></image>
+      </swiper-item>
+    </swiper>
+  </view>
+  
+  <!-- 项目介绍 -->
+  <view class="work-section">
+    <view class="section-header">
+      <text class="section-number">01</text>
+      <text class="section-title">项目介绍</text>
+    </view>
+    <text class="section-content">{{work.description || '项目介绍内容，包括项目背景、客户需求、设计目标等详细信息。'}}</text>
+  </view>
+  
+  <!-- 设计描述 -->
+  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+    <view class="section-header">
+      <text class="section-number">02</text>
+      <text class="section-title">设计描述</text>
+    </view>
+    <text class="section-content">{{work.designDescription || '设计描述内容，包括设计概念、空间规划、功能布局等详细信息。'}}</text>
+    <view class="work-images">
+      <image class="work-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
+    </view>
+  </view>
+  
+  <!-- 设计理念 -->
+  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+    <view class="section-header">
+      <text class="section-number">03</text>
+      <text class="section-title">设计理念</text>
+    </view>
+    <text class="section-content">{{work.designConcept || '设计理念内容，包括设计思路、创意来源、设计目标等详细信息。'}}</text>
+    <view class="work-images">
+      <image class="work-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
+    </view>
+  </view>
+  
+  <!-- 功能规划 -->
+  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+    <view class="section-header">
+      <text class="section-number">04</text>
+      <text class="section-title">功能规划</text>
+    </view>
+    <text class="section-content">{{work.functionPlanning || '功能规划内容，包括空间功能分区、流线规划、使用需求分析等详细信息。'}}</text>
+    <view class="work-images">
+      <image class="work-image" src="{{work.images[3] || work.images[0] || ''}}" mode="aspectFill"></image>
+    </view>
+  </view>
+  
+  <!-- 材料选择 -->
+  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+    <view class="section-header">
+      <text class="section-number">05</text>
+      <text class="section-title">材料选择</text>
+    </view>
+    <text class="section-content">{{work.materialSelection || '材料选择内容，包括主要材料、色彩搭配、质感对比等详细信息。'}}</text>
+    <view class="work-images">
+      <image class="work-image" src="{{work.images[4] || work.images[0] || ''}}" mode="aspectFill"></image>
+    </view>
+  </view>
+  
+  <!-- 项目亮点 -->
+  <view class="work-section">
+    <view class="section-header">
+      <text class="section-number">06</text>
+      <text class="section-title">项目亮点</text>
+    </view>
+    <view class="highlight-list">
+      <view class="highlight-item">
+        <text class="highlight-icon">•</text>
+        <text class="highlight-text">开放式流动空间，视野更加开阔</text>
+      </view>
+      <view class="highlight-item">
+        <text class="highlight-icon">•</text>
+        <text class="highlight-text">主次分明布局，功能分区合理</text>
+      </view>
+      <view class="highlight-item">
+        <text class="highlight-icon">•</text>
+        <text class="highlight-text">自然光线引入，创造舒适氛围</text>
+      </view>
+      <view class="highlight-item">
+        <text class="highlight-icon">•</text>
+        <text class="highlight-text">材质纹理对比，提升空间质感</text>
+      </view>
+      <view class="highlight-item">
+        <text class="highlight-icon">•</text>
+        <text class="highlight-text">大面玻璃幕墙，充分采光通风</text>
+      </view>
+    </view>
+  </view>
+  
+  <!-- 项目图集 -->
+  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+    <view class="section-header">
+      <text class="section-number">07</text>
+      <text class="section-title">项目图集</text>
+    </view>
+    <view class="gallery-images">
+      <image class="gallery-image" src="{{work.images[0] || ''}}" mode="aspectFill"></image>
+      <image class="gallery-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
+      <image class="gallery-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
+      <image class="gallery-image" src="{{work.images[3] || work.images[0] || ''}}" mode="aspectFill"></image>
+      <image class="gallery-image" src="{{work.images[4] || work.images[0] || ''}}" mode="aspectFill"></image>
+      <image class="gallery-image" src="{{work.images[5] || work.images[0] || ''}}" mode="aspectFill"></image>
+    </view>
+  </view>
+  
+  <!-- 咨询按钮 -->
+  <view class="interest-section">
+    <view class="interest-content">
+      <text class="interest-title">对这个项目感兴趣？</text>
+      <text class="interest-subtitle">轻松获取设计方案，加速启动您的项目</text>
+      <view class="interest-cta" bindtap="goToContact">
+        在线咨询
+      </view>
+    </view>
+  </view>
+  
+  <!-- 相关项目 -->
+  <view class="related-section">
+    <view class="section-header">
+      <text class="section-number">08</text>
+      <text class="section-title">相关项目</text>
+    </view>
+    <view class="related-list">
+      <view class="related-item" bindtap="navigateToRelatedProject" data-id="1">
+        <view class="related-image-container">
+          <image class="related-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
+          <view class="related-number">02</view>
+        </view>
+        <text class="related-title">相关项目 1</text>
+      </view>
+      <view class="related-item" bindtap="navigateToRelatedProject" data-id="2">
+        <view class="related-image-container">
+          <image class="related-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
+          <view class="related-number">03</view>
+        </view>
+        <text class="related-title">相关项目 2</text>
+      </view>
+    </view>
+  </view>
+  
+  <!-- 版权信息 -->
+  <view class="copyright-section">
+    <text class="copyright-text">© 2026 布珥·迈拓空间设计</text>
+  </view>
+</view>

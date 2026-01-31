@@ -1,170 +1,270 @@
-/**contact.scss**/
+/* 页面背景 */
 page {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background-color: #191919;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  color: #fff;
+  background-color: #1A2430;
+  color: #FFFFFF;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
-.scrollarea {
-  flex: 1;
-  overflow-y: auto;
+/* 联系页面 */
+.contact-section {
+  padding: 0 40rpx 60rpx 40rpx;
 }
 
-.container {
-  padding: 0;
-  box-sizing: border-box;
-}
-
-/* 通用区块样式 */
-.contact-section,
-.form-section,
-.map-section {
-  padding: 30rpx;
-  background-color: #000;
-  margin-bottom: 20rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+.section {
+  margin-bottom: 60rpx;
 }
 
 .section-title {
-  font-size: 32rpx;
+  font-size: 36rpx;
   font-weight: bold;
-  color: #fff;
-  margin-bottom: 25rpx;
-  padding-left: 10rpx;
-  border-left: 4rpx solid #e61736;
+  margin: 60rpx 0 20rpx 0;
+  color: #FFFFFF;
+  text-align: center;
 }
 
-/* 联系列表样式 */
-.contact-list {
-  display: flex;
-  flex-direction: column;
-  gap: 25rpx;
+.section-subtitle {
+  font-size: 28rpx;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  display: block;
 }
 
-.contact-item {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  padding: 25rpx;
+/* 联系信息 */
+.contact-info {
+  margin-bottom: 60rpx;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 30rpx;
+}
+
+.info-item {
   background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 16rpx;
+  padding: 35rpx;
+  border-radius: 12rpx;
+  text-align: center;
   transition: all 0.3s ease;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
 }
 
-.contact-item:active {
-  transform: scale(0.98);
-  background-color: rgba(230, 23, 54, 0.1);
-  border-color: #e61736;
+.info-item:active {
+  transform: translateY(2rpx);
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
-.contact-icon {
-  font-size: 48rpx;
-  margin-top: 5rpx;
-  color: #e61736;
-}
-
-.contact-content {
-  flex: 1;
-}
-
-.contact-label {
+.info-label {
+  display: block;
   font-size: 24rpx;
   color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 8rpx;
+  margin-bottom: 15rpx;
 }
 
-.contact-value {
+.info-value {
+  display: block;
   font-size: 28rpx;
+  color: #FFFFFF;
   font-weight: bold;
-  color: #fff;
 }
 
-/* 表单样式 */
+.info-link {
+  color: #990000;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.info-link:active {
+  color: #cc0000;
+}
+
+/* 宽信息项（营业时间） */
+.info-item-wide {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+
+.info-item-wide .info-value {
+  text-align: center;
+  font-weight: normal;
+}
+
+/* 联系表单 */
+.contact-form {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 40rpx;
+  border-radius: 12rpx;
+  margin-bottom: 60rpx;
+}
+
+.form-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #990000;
+  margin-bottom: 30rpx;
+  text-align: center;
+  display: block;
+}
+
 .form-item {
   margin-bottom: 30rpx;
 }
 
-.form-label {
-  display: block;
-  font-size: 26rpx;
-  font-weight: bold;
-  color: #fff;
-  margin-bottom: 15rpx;
+.form-input, .form-textarea, .form-picker {
+  width: 100%;
+  padding: 25rpx;
+  font-size: 28rpx;
+  color: #FFFFFF;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 2rpx solid rgba(255, 255, 255, 0.1);
+  border-radius: 8rpx;
+  box-sizing: border-box;
 }
 
-.form-input,
-.form-textarea {
-  width: 100%;
-  padding: 20rpx;
-  border: 2rpx solid rgba(255, 255, 255, 0.1);
-  border-radius: 12rpx;
-  font-size: 26rpx;
-  color: #fff;
-  box-sizing: border-box;
-  background-color: rgba(255, 255, 255, 0.05);
+.picker-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.picker-content::after {
+  content: '▼';
+  font-size: 20rpx;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: 10rpx;
 }
 
 .form-input:focus,
 .form-textarea:focus {
-  border-color: #e61736;
-  background-color: rgba(255, 255, 255, 0.08);
+  border-color: #990000;
+  outline: none;
 }
 
 .form-textarea {
-  min-height: 150rpx;
-  line-height: 1.6;
+  height: 200rpx;
   resize: none;
 }
 
-.form-picker {
-  padding: 20rpx;
-  border: 2rpx solid rgba(255, 255, 255, 0.1);
-  border-radius: 12rpx;
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-.picker-text {
-  font-size: 26rpx;
-  color: #fff;
-}
-
-.submit-btn {
-  width: 100%;
-  background-color: #e61736;
-  color: #ffffff;
-  font-size: 28rpx;
-  font-weight: bold;
-  padding: 22rpx 0;
-  border-radius: 50rpx;
-  border: none;
-  box-shadow: 0 4rpx 16rpx rgba(230, 23, 54, 0.3);
-  transition: all 0.3s ease;
-  margin-top: 20rpx;
-}
-
-.submit-btn:active {
-  transform: scale(0.98);
-  box-shadow: 0 2rpx 8rpx rgba(230, 23, 54, 0.5);
+.form-input {
+  height: 80rpx; /* 根据字体大小调整输入框高度 */
 }
 
 .placeholder {
   color: rgba(255, 255, 255, 0.3);
 }
 
-/* 地图样式 */
-.map-container {
+.submit-btn {
   width: 100%;
-  height: 300rpx;
-  border-radius: 16rpx;
-  overflow: hidden;
-  border: 1rpx solid rgba(255, 255, 255, 0.1);
+  background-color: #990000;
+  color: #FFFFFF;
+  font-size: 32rpx;
+  font-weight: bold;
+  padding: 25rpx 0;
+  border: none;
+  border-radius: 8rpx;
+  margin-top: 20rpx;
+  transition: all 0.3s ease;
 }
 
-.map-container image {
-  width: 100%;
-  height: 100%;
+.submit-btn:active {
+  transform: scale(0.98);
+  background-color: rgba(227, 28, 77, 0.9);
+}
+
+.submit-btn::after {
+  border: none;
+}
+
+/* 地图位置 */
+.map-section {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 40rpx;
+  border-radius: 12rpx;
+}
+
+.map-title {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #990000;
+  margin-bottom: 30rpx;
+  text-align: center;
+  display: block;
+}
+
+.address-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+  padding: 16rpx;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 8rpx;
+  transition: all 0.3s ease;
+}
+
+.address-item:active {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.address-label {
+  width: 120rpx;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 24rpx;
+}
+
+.address-value {
+  flex: 1;
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 1.5;
+  text-decoration: underline;
+  color: #990000;
+}
+
+/* 响应式设计 */
+@media (max-width: 768rpx) {
+  .contact-section {
+    padding: 0 30rpx 40rpx 30rpx;
+  }
+
+  .section-title {
+    font-size: 32rpx;
+    margin: 40rpx 0 15rpx 0;
+  }
+
+  .section-subtitle {
+    font-size: 24rpx;
+  }
+
+  .info-grid {
+    grid-template-columns: 1fr;
+    gap: 25rpx;
+  }
+
+  .contact-form,
+  .map-section {
+    padding: 30rpx;
+  }
+
+  .form-title,
+  .map-title {
+    font-size: 28rpx;
+    margin-bottom: 25rpx;
+  }
+
+  .form-input,
+  .form-textarea,
+  .form-picker {
+    padding: 20rpx;
+    font-size: 26rpx;
+  }
+
+  .form-textarea {
+    height: 180rpx;
+  }
+
+  .submit-btn {
+    font-size: 28rpx;
+    padding: 20rpx 0;
+  }
+
+
 }

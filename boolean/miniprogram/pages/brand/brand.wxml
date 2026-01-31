@@ -1,84 +1,144 @@
-<!-- brand.wxml -->
-<navigation-bar title="关于我们" back="{{false}}" color="black" background="#FFF"></navigation-bar>
-<scroll-view class="scrollarea" scroll-y type="list">
-  <view class="container">
-    <!-- 品牌LOGO和名称 -->
-    <view class="brand-header">
-      <image src="/images/logo.png" mode="aspectFit"></image>
-      <view class="brand-name">布珥·迈拓空间设计</view>
-      <view class="brand-slogan">用设计定义高端空间美学</view>
+<!-- 自定义导航栏 -->
+<page-meta>
+  <navigation-bar title="关于我们" show-back="true"></navigation-bar>
+</page-meta>
+
+<!-- 品牌页面 -->
+<view class="brand-section">
+  <!-- 品牌图片 -->
+  <view class="brand-image-container">
+    <image class="brand-image" src="{{brandInfo.logo}}" mode="aspectFit"></image>
+  </view>
+  
+  <!-- 品牌介绍 -->
+  <view class="section">
+    <view class="section-title">{{brandInfo.name}}</view>
+    <view class="brand-intro">
+      <text class="intro-text">{{brandInfo.description}}</text>
     </view>
-    
-    <!-- 公司简介 -->
-    <view class="section">
-      <view class="section-title">公司简介</view>
-      <view class="section-content">
-        <text class="content-text">布珥·迈拓空间设计是一家专注于高端空间设计的专业机构，致力于为客户提供从概念设计到施工落地的全方位服务。我们的设计团队由经验丰富的设计师组成，擅长各种风格的空间设计，包括现代简约、轻奢、中式、美式等。</text>
-        <text class="content-text">我们坚持以客户需求为中心，结合空间特点和设计美学，创造出既实用又美观的空间解决方案。我们的作品涵盖了住宅、办公、商业等多种空间类型，赢得了客户的广泛认可和好评。</text>
+  </view>
+  
+  <!-- 我们的成就 -->
+  <view class="section">
+    <view class="section-subtitle">我们的成就</view>
+    <view class="achievements-grid">
+      <view class="achievement-item">
+        <text class="achievement-number">{{achievements.designers}}</text>
+        <text class="achievement-label">专业设计师</text>
+      </view>
+      <view class="achievement-item">
+        <text class="achievement-number">{{achievements.suppliers}}</text>
+        <text class="achievement-label">合作供应商</text>
+      </view>
+      <view class="achievement-item">
+        <text class="achievement-number">{{achievements.projects}}</text>
+        <text class="achievement-label">完成项目</text>
+      </view>
+      <view class="achievement-item">
+        <text class="achievement-number">{{achievements.awards}}</text>
+        <text class="achievement-label">行业奖项</text>
       </view>
     </view>
-    
-    <!-- 设计理念 -->
-    <view class="section">
-      <view class="section-title">设计理念</view>
-      <view class="concept-list">
-        <view class="concept-item">
-          <view class="concept-icon">🎯</view>
-          <view class="concept-content">
-            <view class="concept-title">以人为本</view>
-            <view class="concept-desc">设计源于生活，服务于生活，注重人的体验和感受</view>
-          </view>
-        </view>
-        <view class="concept-item">
-          <view class="concept-icon">💎</view>
-          <view class="concept-content">
-            <view class="concept-title">品质至上</view>
-            <view class="concept-desc">追求卓越品质，注重细节，精益求精</view>
-          </view>
-        </view>
-        <view class="concept-item">
-          <view class="concept-icon">✨</view>
-          <view class="concept-content">
-            <view class="concept-title">创新设计</view>
-            <view class="concept-desc">不断探索新的设计理念和方法，保持设计的新鲜感和创新性</view>
-          </view>
-        </view>
-        <view class="concept-item">
-          <view class="concept-icon">🤝</view>
-          <view class="concept-content">
-            <view class="concept-title">合作共赢</view>
-            <view class="concept-desc">与客户建立长期合作关系，实现共赢发展</view>
-          </view>
-        </view>
-      </view>
-    </view>
-    
-    <!-- 团队介绍 -->
-    <view class="section">
-      <view class="section-title">设计团队</view>
-      <view class="team-intro">
-        <text class="content-text">我们拥有一支专业的设计团队，团队成员均具有丰富的设计经验和专业背景。我们注重团队协作，充分发挥每个人的优势，为客户提供最优质的设计服务。</text>
-        <text class="content-text">我们的设计师不仅具有扎实的专业知识，还具备良好的沟通能力和服务意识，能够深入理解客户需求，提供个性化的设计解决方案。</text>
-      </view>
-    </view>
-    
-    <!-- 联系信息 -->
-    <view class="section">
-      <view class="section-title">联系我们</view>
-      <view class="contact-info">
-        <view class="contact-item">
-          <view class="contact-label">电话</view>
-          <view class="contact-value">400-123-4567</view>
-        </view>
-        <view class="contact-item">
-          <view class="contact-label">邮箱</view>
-          <view class="contact-value">info@boolean-mustang.com</view>
-        </view>
-        <view class="contact-item">
-          <view class="contact-label">地址</view>
-          <view class="contact-value">上海市浦东新区陆家嘴金融中心88号</view>
+  </view>
+  
+  <!-- 设计理念 -->
+  <view class="section">
+    <view class="section-subtitle">设计理念</view>
+    <view class="concept-list">
+      <view wx:for="{{concepts}}" wx:key="id" class="concept-item">
+        <view class="concept-number">{{item.id < 10 ? '0' + item.id : item.id}}</view>
+        <view class="concept-content">
+          <text class="concept-title">{{item.title}}</text>
+          <text class="concept-desc">{{item.description}}</text>
         </view>
       </view>
     </view>
   </view>
-</scroll-view>
+  
+  <!-- 设计流程 -->
+  <view class="section">
+    <view class="section-subtitle">设计流程</view>
+    <view class="process-list">
+      <view wx:for="{{process}}" wx:key="id" class="process-item">
+        <view class="process-number">{{item.id < 10 ? '0' + item.id : item.id}}</view>
+        <view class="process-content">
+          <text class="process-title">{{item.title}}</text>
+          <text class="process-desc">{{item.description}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+  
+  <!-- 核心团队 -->
+  <view class="section">
+    <view class="section-title">核心团队</view>
+    <view class="team-list">
+      <view wx:for="{{team}}" wx:key="id" class="team-item">
+        <view class="team-info">
+          <text class="team-name">{{item.name}}</text>
+          <text class="team-position">{{item.position}}</text>
+        </view>
+        <view class="team-image-container">
+          <image class="team-image" src="{{item.image}}" mode="aspectFill"></image>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 资质荣誉 -->
+  <view class="section">
+    <view class="section-title">资质荣誉</view>
+    <view class="honor-list">
+      <view wx:for="{{honors}}" wx:key="id" class="honor-item">
+        <view class="honor-icon">{{item.icon}}</view>
+        <view class="honor-content">
+          <text class="honor-title">{{item.title}}</text>
+          <text class="honor-desc">{{item.description}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 公司照片 -->
+  <view class="section" wx:if="{{companyPhotos && companyPhotos.length > 0}}">
+    <view class="section-title">公司风采</view>
+    <view class="photos-grid">
+      <view wx:for="{{companyPhotos}}" wx:key="id" class="photo-item">
+        <image src="{{item.url}}" mode="aspectFit" class="photo-image"></image>
+        <view class="photo-description" wx:if="{{item.description}}">{{item.description}}</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 合作伙伴 -->
+  <view class="section">
+    <view class="section-title">合作伙伴</view>
+    <view class="partner-desc">
+      {{partners.description}}
+    </view>
+    <view class="partner-grid">
+      <view wx:for="{{partners.list}}" wx:key="index" class="partner-item">
+        <image wx:if="{{item.image}}" src="{{item.image}}" mode="aspectFit" class="partner-image"></image>
+        <view wx:else>
+          {{item.name || item}}
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 合作咨询 -->
+  <view class="cooperation-section">
+    <view class="cooperation-title">{{cooperation.title}}</view>
+    <view class="cooperation-desc">
+      {{cooperation.description}}
+    </view>
+    <view class="cooperation-cta" bindtap="goToContact">
+      在线咨询
+    </view>
+  </view>
+
+  <!-- 版权信息 -->
+  <view class="copyright-section">
+    <text class="copyright-text">© 2026 {{brandInfo.name}}</text>
+  </view>
+</view>

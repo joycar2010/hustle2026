@@ -1,153 +1,197 @@
-// works.ts
-const app = getApp()
-// 引入API工具
-const { worksApi } = require('../../utils/api')
+// pages/works/works.js
+const api = require('../../utils/api');
 
-Component({
+Page({
+  /**
+   * 页面的初始数据
+   */
   data: {
-    currentType: 'all',
+    worksList: [],
+    filterType: '',
+    total: 0,
+    page: 1,
+    pageSize: 12,
     hasMore: true,
-    works: [],
-    filteredWorks: [],
-    loading: true,
-    error: ''
+    loading: false
   },
-  
-  lifetimes: {
-    attached() {
-      // 获取页面参数
-      const pages = getCurrentPages()
-      const currentPage = pages[pages.length - 1]
-      const options = currentPage.options || {}
-      
-      if (options.type) {
-        this.setData({
-          currentType: options.type
-        })
-      }
-      
-      // 加载作品列表
-      this.loadWorks()
-    },
-    
-    show() {
-      // 页面重新显示时刷新数据
-      if (this.data.works.length > 0) {
-        // 延迟刷新，避免频繁请求
-        setTimeout(() => {
-          this.loadWorks()
-        }, 500)
-      }
+
+  /**
+   * 生命周期函数--监听页面加载
+   */
+  onLoad(options) {
+    // 从url参数获取筛选类型
+    if (options.type) {
+      this.setData({
+        filterType: options.type
+      });
+    }
+    this.loadWorks();
+  },
+
+  /**
+   * 生命周期函数--监听页面初次渲染完成
+   */
+  onReady() {
+
+  },
+
+  /**
+   * 生命周期函数--监听页面显示
+   */
+  onShow() {
+    // 每次页面显示时重新加载数据，确保获取最新版本
+    this.loadWorks();
+  },
+
+  /**
+   * 生命周期函数--监听页面隐藏
+   */
+  onHide() {
+
+  },
+
+  /**
+   * 生命周期函数--监听页面卸载
+   */
+  onUnload() {
+
+  },
+
+  /**
+   * 页面相关事件处理函数--监听用户下拉动作
+   */
+  onPullDownRefresh() {
+    this.setData({
+      page: 1,
+      worksList: []
+    });
+    this.loadWorks();
+    wx.stopPullDownRefresh();
+  },
+
+  /**
+   * 页面上拉触底事件的处理函数
+   */
+  onReachBottom() {
+    if (this.data.worksList.length < this.data.total) {
+      this.loadMore();
     }
   },
-  
-  methods: {
-    // 加载作品列表
-    async loadWorks() {
-      try {
-        this.setData({ loading: true, error: '' })
-        
-        // 从API获取作品列表
-        const result = await worksApi.getWorks()
-        
-        if (result.success) {
-          // 转换作品数据格式
-          // 验证图片URL有效性
-          const validateImageUrl = (url) => {
-            if (!url || typeof url !== 'string') return false;
-            
-            // 检查是否为Base64图片
-            if (url.startsWith('data:image/')) {
-              // 检查Base64图片格式是否正确
-              return url.match(/^data:image\/(png|jpg|jpeg|gif|webp);base64,/) !== null;
-            }
-            
-            // 检查是否为标准URL格式
-            try {
-              new URL(url);
-              return true;
-            } catch {
-              // 检查是否为相对路径
-              return url.startsWith('/') || url.startsWith('./') || url.startsWith('../');
-            }
-          };
-          
-          const formattedWorks = result.data.map(work => ({
-            id: work.id,
-            title: work.title,
-            spaceType: this.getSpaceTypeText(work.type),
-            area: work.area.toString(),
-            coverImage: validateImageUrl(work.coverImage) ? work.coverImage : '',
-            type: work.type,
-            views: work.views || 0,
-            createdAt: work.createdAt || '',
-            updatedAt: work.updatedAt || ''
-          }))
-          
-          this.setData({
-            works: formattedWorks,
-            loading: false
-          })
-          
-          // 应用筛选
-          this.filterWorks()
+
+  /**
+   * 用户点击右上角分享
+   */
+  onShareAppMessage() {
+    return {
+      title: '布珥·迈拓空间设计 - 设计作品',
+      path: '/pages/works/works'
+    };
+  },
+
+  /**
+   * 验证图片URL是否有效
+   * @param {string} url - 图片URL
+   * @returns {boolean} - 是否有效
+   */
+  validateImageUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+    
+    // 检查是否是Base64编码的图片
+    if (url.startsWith('data:image/')) {
+      return true;
+    }
+    
+    // 检查是否是placeholder域名（过滤掉占位符图片）
+    if (url.includes('via.placeholder.com')) {
+      return false;
+    }
+    
+    // 检查是否是有效的HTTP/HTTPS URL
+    const httpRegex = /^(https?:\/\/)[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$/;
+    if (!httpRegex.test(url)) {
+      return false;
+    }
+    
+    // 检查域名是否有效（简单检查，避免明显无效的域名）
+    const domainRegex = /^(https?:\/\/)([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/;
+    return domainRegex.test(url);
+  },
+
+  /**
+   * 加载作品列表
+   */
+  loadWorks() {
+    this.setData({ loading: true });
+
+    const params = {
+      page: this.data.page,
+      pageSize: this.data.pageSize
+    };
+
+    if (this.data.filterType) {
+      params.type = this.data.filterType;
+    }
+
+    api.worksApi.getWorks(params).then(res => {
+      // 处理作品数据，验证图片URL
+      const processedWorks = (res.data || []).map(work => {
+        // 处理图片数据
+        if (work.images && Array.isArray(work.images)) {
+          work.images = work.images.filter(imageUrl => this.validateImageUrl(imageUrl));
         } else {
-          throw new Error(result.message || '获取作品失败')
+          work.images = [];
         }
-      } catch (error) {
-        console.error('加载作品列表失败:', error)
-        this.setData({
-          error: '加载失败，请检查网络连接或稍后重试',
-          loading: false
-        })
-      }
-    },
-    
-    // 手动重试加载
-    onRetry() {
-      this.loadWorks()
-    },
-    
-    // 切换作品类型
-    switchType(e) {
-      const type = e.currentTarget.dataset.type
-      this.setData({
-        currentType: type
-      })
-      this.filterWorks()
-    },
-    
-    // 筛选作品
-    filterWorks() {
-      const { currentType, works } = this.data
-      let filtered
-      
-      if (currentType === 'all') {
-        filtered = works
-      } else {
-        filtered = works.filter((work) => work.type === currentType)
-      }
+        return work;
+      });
       
       this.setData({
-        filteredWorks: filtered
-      })
-    },
-    
-    // 获取空间类型文本
-    getSpaceTypeText(type) {
-      const typeMap = {
-        'residential': '家装设计',
-        'office': '公装设计',
-        'commercial': '商业空间',
-        'other': '其他'
-      }
-      return typeMap[type] || type
-    },
-    
-    // 下拉刷新
-    onPullDownRefresh() {
-      this.loadWorks()
-      wx.stopPullDownRefresh()
-    }
+        worksList: this.data.page === 1 ? processedWorks : [...this.data.worksList, ...processedWorks],
+        total: res.total || 0,
+        hasMore: (this.data.page === 1 ? processedWorks.length : this.data.worksList.length + processedWorks.length) < (res.total || 0),
+        loading: false
+      });
+    }).catch(err => {
+      console.error('加载作品失败:', err);
+      this.setData({ loading: false });
+      wx.showToast({
+        title: '加载失败，请重试',
+        icon: 'none'
+      });
+    });
+  },
+
+  /**
+   * 加载更多作品
+   */
+  loadMore() {
+    this.setData({
+      page: this.data.page + 1
+    });
+    this.loadWorks();
+  },
+
+  /**
+   * 设置筛选类型
+   */
+  setFilterType(e) {
+    const type = e.currentTarget.dataset.type;
+    this.setData({
+      filterType: type,
+      page: 1,
+      worksList: []
+    });
+    this.loadWorks();
+  },
+
+  /**
+   * 跳转到作品详情页
+   */
+  navigateToWorkDetail(e) {
+    const id = e.currentTarget.dataset.id;
+    wx.navigateTo({
+      url: `/pages/work-detail/work-detail?id=${id}`
+    });
   }
-})
+});
