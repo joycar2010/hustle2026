@@ -20,7 +20,9 @@
     <text class="unauthorized-title">无权限访问</text>
     <text class="unauthorized-message">{{unauthorizedReason}}</text>
     <view class="unauthorized-buttons">
-      <button class="back-button" bindtap="navigateBack">返回上级</button>
+      <view class="back-circle-button" bindtap="navigateBack">
+        <text class="back-circle-icon">←</text>
+      </view>
     </view>
   </view>
 </view>
@@ -48,13 +50,9 @@
     </view>
   </view>
   
-  <!-- 作品图片轮播 -->
-  <view class="work-images">
-    <swiper indicator-dots="true" autoplay="true" interval="5000" duration="1000" circular="true">
-      <swiper-item wx:for="{{work.images}}" wx:key="index">
-        <image class="work-image" src="{{item}}" mode="aspectFill"></image>
-      </swiper-item>
-    </swiper>
+  <!-- 作品封面图片 -->
+  <view class="work-cover">
+    <image class="cover-image" src="{{work.coverImage || work.images[0] || ''}}" mode="aspectFill"></image>
   </view>
   
   <!-- 项目介绍 -->
@@ -67,51 +65,39 @@
   </view>
   
   <!-- 设计描述 -->
-  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+  <view class="work-section">
     <view class="section-header">
       <text class="section-number">02</text>
       <text class="section-title">设计描述</text>
     </view>
     <rich-text class="section-content" nodes="{{work.designDescription || '<p>设计描述内容，包括设计概念、空间规划、功能布局等详细信息。</p>'}}"></rich-text>
-    <view class="work-images">
-      <image class="work-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
-    </view>
   </view>
   
   <!-- 设计理念 -->
-  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+  <view class="work-section">
     <view class="section-header">
       <text class="section-number">03</text>
       <text class="section-title">设计理念</text>
     </view>
     <rich-text class="section-content" nodes="{{work.designConcept || '<p>设计理念内容，包括设计思路、创意来源、设计目标等详细信息。</p>'}}"></rich-text>
-    <view class="work-images">
-      <image class="work-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
-    </view>
   </view>
   
   <!-- 功能规划 -->
-  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+  <view class="work-section">
     <view class="section-header">
       <text class="section-number">04</text>
       <text class="section-title">功能规划</text>
     </view>
     <rich-text class="section-content" nodes="{{work.functionPlanning || '<p>功能规划内容，包括空间功能分区、流线规划、使用需求分析等详细信息。</p>'}}"></rich-text>
-    <view class="work-images">
-      <image class="work-image" src="{{work.images[3] || work.images[0] || ''}}" mode="aspectFill"></image>
-    </view>
   </view>
   
   <!-- 材料选择 -->
-  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+  <view class="work-section">
     <view class="section-header">
       <text class="section-number">05</text>
       <text class="section-title">材料选择</text>
     </view>
     <rich-text class="section-content" nodes="{{work.materialSelection || '<p>材料选择内容，包括主要材料、色彩搭配、质感对比等详细信息。</p>'}}"></rich-text>
-    <view class="work-images">
-      <image class="work-image" src="{{work.images[4] || work.images[0] || ''}}" mode="aspectFill"></image>
-    </view>
   </view>
   
   <!-- 项目亮点 -->
@@ -121,42 +107,24 @@
       <text class="section-title">项目亮点</text>
     </view>
     <view class="highlight-list">
-      <view class="highlight-item">
+      <view wx:for="{{work.highlights && work.highlights.length > 0 ? work.highlights : ['开放式流动空间，视野更加开阔', '主次分明布局，功能分区合理', '自然光线引入，创造舒适氛围', '材质纹理对比，提升空间质感', '大面玻璃幕墙，充分采光通风']}}" wx:key="index" class="highlight-item">
         <text class="highlight-icon">•</text>
-        <text class="highlight-text">开放式流动空间，视野更加开阔</text>
-      </view>
-      <view class="highlight-item">
-        <text class="highlight-icon">•</text>
-        <text class="highlight-text">主次分明布局，功能分区合理</text>
-      </view>
-      <view class="highlight-item">
-        <text class="highlight-icon">•</text>
-        <text class="highlight-text">自然光线引入，创造舒适氛围</text>
-      </view>
-      <view class="highlight-item">
-        <text class="highlight-icon">•</text>
-        <text class="highlight-text">材质纹理对比，提升空间质感</text>
-      </view>
-      <view class="highlight-item">
-        <text class="highlight-icon">•</text>
-        <text class="highlight-text">大面玻璃幕墙，充分采光通风</text>
+        <text class="highlight-text">{{item}}</text>
       </view>
     </view>
   </view>
   
   <!-- 项目图集 -->
-  <view wx:if="{{userPermissions.viewWorks}}" class="work-section">
+  <view class="work-section">
     <view class="section-header">
       <text class="section-number">07</text>
       <text class="section-title">项目图集</text>
     </view>
     <view class="gallery-images">
-      <image class="gallery-image" src="{{work.images[0] || ''}}" mode="aspectFill"></image>
-      <image class="gallery-image" src="{{work.images[1] || work.images[0] || ''}}" mode="aspectFill"></image>
-      <image class="gallery-image" src="{{work.images[2] || work.images[0] || ''}}" mode="aspectFill"></image>
-      <image class="gallery-image" src="{{work.images[3] || work.images[0] || ''}}" mode="aspectFill"></image>
-      <image class="gallery-image" src="{{work.images[4] || work.images[0] || ''}}" mode="aspectFill"></image>
-      <image class="gallery-image" src="{{work.images[5] || work.images[0] || ''}}" mode="aspectFill"></image>
+      <image wx:for="{{work.images || []}}" wx:key="index" class="gallery-image" src="{{item}}" mode="aspectFill"></image>
+      <view wx:if="{{!work.images || work.images.length === 0}}" class="no-images">
+        <text class="no-images-text">暂无图片</text>
+      </view>
     </view>
   </view>
   

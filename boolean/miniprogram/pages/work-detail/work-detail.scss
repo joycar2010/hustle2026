@@ -60,6 +60,25 @@ page {
   margin-bottom: 60rpx;
 }
 
+/* 作品封面图片 */
+.work-cover {
+  margin-bottom: 60rpx;
+  border-radius: 12rpx;
+  overflow: hidden;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.cover-image {
+  width: 100%;
+  height: 400rpx;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.work-cover:active .cover-image {
+  transform: scale(1.02);
+}
+
 .info-row {
   display: flex;
   align-items: center;
@@ -228,6 +247,10 @@ page {
 @media (max-width: 768rpx) {
   .work-detail-section {
     padding: 0 30rpx 40rpx 30rpx;
+  }
+
+  .cover-image {
+    height: 300rpx;
   }
 
   .work-images swiper {
@@ -475,20 +498,27 @@ page {
   gap: 30rpx;
 }
 
-.unauthorized-buttons .back-button {
+.back-circle-button {
+  width: 100rpx;
+  height: 100rpx;
   background-color: #990000;
-  color: #FFFFFF;
-  font-size: 32rpx;
-  font-weight: bold;
-  padding: 25rpx 80rpx;
-  border-radius: 8rpx;
-  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4rpx 12rpx rgba(153, 0, 0, 0.3);
   transition: all 0.3s ease;
 }
 
-.unauthorized-buttons .back-button:active {
-  transform: scale(0.98);
+.back-circle-button:active {
+  transform: scale(0.95);
   background-color: rgba(153, 0, 0, 0.9);
+}
+
+.back-circle-icon {
+  font-size: 48rpx;
+  color: #FFFFFF;
+  font-weight: bold;
 }
 
 /* 未授权提示界面响应式设计 */
@@ -511,8 +541,12 @@ page {
     margin-bottom: 40rpx;
   }
 
-  .unauthorized-buttons .back-button {
-    font-size: 28rpx;
-    padding: 20rpx 60rpx;
+  .back-circle-button {
+    width: 80rpx;
+    height: 80rpx;
+  }
+  
+  .back-circle-icon {
+    font-size: 40rpx;
   }
 }

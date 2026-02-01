@@ -62,6 +62,7 @@ const defaultData = {
       spaceType: '住宅',
       views: 125,
       isPublic: true,
+      isFeatured: false,
       createdAt: '2024-01-15T10:30:00Z',
       updatedAt: '2024-01-15T10:30:00Z'
     },
@@ -93,6 +94,7 @@ const defaultData = {
       spaceType: '办公室',
       views: 98,
       isPublic: true,
+      isFeatured: false,
       createdAt: '2024-01-10T14:20:00Z',
       updatedAt: '2024-01-10T14:20:00Z'
     },
@@ -126,6 +128,7 @@ const defaultData = {
       spaceType: '餐厅',
       views: 156,
       isPublic: true,
+      isFeatured: false,
       createdAt: '2024-01-05T09:15:00Z',
       updatedAt: '2024-01-05T09:15:00Z'
     }

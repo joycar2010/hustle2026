@@ -109,9 +109,10 @@ Page({
    * 加载精选作品
    */
   loadFeaturedWorks() {
-    api.worksApi.getWorks().then(res => {
+    // 传递featured=true参数，获取精选作品
+    api.worksApi.getWorks({ featured: true }).then(res => {
       // 处理作品数据，验证图片URL
-      const processedWorks = res.data.slice(0, 3).map(work => {
+      const processedWorks = res.data.map(work => {
         // 处理图片数据
         const validImages = [];
         
@@ -131,13 +132,19 @@ Page({
         
         work.images = validImages;
         return work;
-      });
+      }).slice(0, 3); // 只显示3个精选作品
       
       this.setData({
-        featuredWorks: processedWorks // 只显示3个精选作品
+        featuredWorks: processedWorks
       });
     }).catch(err => {
       console.error('加载精选作品失败:', err);
+      // 错误处理：显示友好提示
+      wx.showToast({
+        title: '加载精选作品失败',
+        icon: 'none',
+        duration: 2000
+      });
     });
   },
 

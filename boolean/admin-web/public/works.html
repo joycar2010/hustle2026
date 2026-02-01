@@ -239,6 +239,11 @@
         .btn-sm {
             padding: 6px 12px;
             font-size: 14px;
+            height: 32px;
+            min-width: 60px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .btn-danger {
@@ -1416,6 +1421,7 @@
                             <th>面积</th>
                             <th>城市</th>
                             <th>浏览量</th>
+                            <th>精选</th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -1431,6 +1437,15 @@
                                 <td>${work.area}㎡</td>
                                 <td>${work.location}</td>
                                 <td>${work.views || 0}</td>
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-size: 14px;">精选</span>
+                                        <label class="switch">
+                                            <input type="checkbox" ${work.isFeatured ? 'checked' : ''} onchange="toggleWorkFeatured(${work.id}, this.checked)">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                </td>
                                 <td>
                                     <div class="action-buttons" style="display: flex; align-items: center; gap: 15px;">
                                         <!-- 权限控制开关 -->
@@ -2045,6 +2060,48 @@
                 }
             } catch (error) {
                 console.error('切换作品权限状态错误:', error);
+                showToast('操作失败，请检查网络连接或重新登录', 'error');
+            }
+        }
+
+        // 切换作品精选状态
+        async function toggleWorkFeatured(id, isFeatured) {
+            try {
+                const response = await fetch(`/api/v1/works/${id}/feature`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ isFeatured })
+                });
+                
+                // 检查响应状态
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // 检查响应是否为JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Response is not JSON');
+                }
+                
+                const result = await response.json();
+                if (result.success) {
+                    showToast('精选状态更新成功', 'success');
+                    // 更新本地作品数据
+                    const work = works.find(w => w.id === id);
+                    if (work) {
+                        work.isFeatured = isFeatured;
+                        work.updatedAt = new Date().toISOString();
+                    }
+                    // 重新渲染表格
+                    renderWorksTable();
+                } else {
+                    showToast('精选状态更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('切换作品精选状态错误:', error);
                 showToast('操作失败，请检查网络连接或重新登录', 'error');
             }
         }

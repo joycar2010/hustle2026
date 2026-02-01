@@ -348,6 +348,12 @@
             padding: 5px 12px;
             font-size: 14px;
             border-radius: 4px;
+            min-width: 80px;
+        }
+        
+        .active-status {
+            font-weight: bold;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
         }
         
         .btn-secondary {
@@ -1087,14 +1093,26 @@
                                 <td>${lead.wechatOpenId || '-'}</td>
                                 <td>${new Date(lead.createdAt).toLocaleString()}</td>
                                 <td>
-                                    <div style="display: flex; gap: 10px; align-items: flex-start;">
-                                        <!-- 左侧：添加客户信息按钮 -->
-                                        <div style="flex: 1; min-width: 150px;">
+                                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                                        <!-- 顶部：添加客户信息按钮 -->
+                                        <div>
                                             <button class="btn btn-sm btn-success" onclick="openAddCustomerModal(${lead.id})" title="添加客户信息至客户管理">
                                                 ➕ 添加客户
                                             </button>
                                         </div>
-                                        <!-- 右侧：编辑和删除按钮 -->
+                                        <!-- 中间：状态变更按钮组 -->
+                                        <div class="action-buttons" style="gap: 5px; flex-wrap: wrap;">
+                                            <button class="btn btn-sm ${lead.status === 'processing' ? 'btn-secondary active-status' : 'btn-secondary'}" onclick="updateLeadStatus(${lead.id}, 'processing')">
+                                                处理中
+                                            </button>
+                                            <button class="btn btn-sm ${lead.status === 'completed' ? 'btn-success active-status' : 'btn-secondary'}" onclick="updateLeadStatus(${lead.id}, 'completed')">
+                                                已完成
+                                            </button>
+                                            <button class="btn btn-sm ${lead.status === 'canceled' ? 'btn-danger active-status' : 'btn-secondary'}" onclick="updateLeadStatus(${lead.id}, 'canceled')">
+                                                已取消
+                                            </button>
+                                        </div>
+                                        <!-- 底部：编辑和删除按钮 -->
                                         <div class="action-buttons">
                                             <button class="btn btn-sm btn-secondary" onclick="editLead(${lead.id})">
                                                 编辑
@@ -1341,6 +1359,47 @@
                 document.getElementById('customerAddResult').style.color = '#f44336';
                 showToast('添加客户信息失败', 'error');
             }
+        }
+        
+        // 更新线索状态
+        async function updateLeadStatus(leadId, newStatus) {
+            if (!confirm(`确定要将这条线索状态更新为「${getStatusText(newStatus)}」吗？`)) {
+                return;
+            }
+            
+            try {
+                showToast('正在更新状态...', 'info');
+                
+                const response = await fetch(`/api/v1/leads/${leadId}/status`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ status: newStatus })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    showToast('状态更新成功', 'success');
+                    loadLeads(); // 重新加载线索列表以更新状态
+                } else {
+                    showToast('状态更新失败', 'error');
+                }
+            } catch (error) {
+                console.error('更新线索状态错误:', error);
+                showToast('状态更新失败，请稍后重试', 'error');
+            }
+        }
+        
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'new': '新线索',
+                'processing': '处理中',
+                'completed': '已完成',
+                'canceled': '已取消'
+            };
+            return statusMap[status] || status;
         }
         
         // 显示通知

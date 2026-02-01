@@ -7,12 +7,18 @@ Page({
    */
   data: {
     worksList: [],
+    categories: [],
     filterType: '',
     total: 0,
     page: 1,
     pageSize: 12,
     hasMore: true,
-    loading: false
+    loading: false,
+    categoriesLoading: false,
+    userPermissions: {
+      viewWorks: false,
+      categories: []
+    }
   },
 
   /**
@@ -25,7 +31,29 @@ Page({
         filterType: options.type
       });
     }
-    this.loadWorks();
+    // 获取用户权限
+    this.getUserPermissions();
+    // 获取分类数据
+    this.getCategories();
+  },
+
+  /**
+   * 获取分类数据
+   */
+  getCategories() {
+    this.setData({ categoriesLoading: true });
+    
+    api.categoryApi.getCategories().then(res => {
+      // 处理分类数据
+      const categories = res.data || [];
+      this.setData({
+        categories: categories,
+        categoriesLoading: false
+      });
+    }).catch(err => {
+      console.error('加载分类失败:', err);
+      this.setData({ categoriesLoading: false });
+    });
   },
 
   /**
@@ -39,7 +67,25 @@ Page({
    * 生命周期函数--监听页面显示
    */
   onShow() {
-    // 每次页面显示时重新加载数据，确保获取最新版本
+    // 每次页面显示时重新获取用户权限并加载数据
+    this.getUserPermissions();
+    // 每次页面显示时重新获取分类数据，确保数据同步更新
+    this.getCategories();
+  },
+  
+  /**
+   * 获取用户权限
+   */
+  getUserPermissions() {
+    // 获取全局应用实例
+    const appInstance = getApp();
+    
+    // 使用全局用户权限
+    this.setData({
+      userPermissions: appInstance.globalData.userPermissions
+    });
+    
+    // 加载作品列表
     this.loadWorks();
   },
 
@@ -159,8 +205,30 @@ Page({
     }
 
     api.worksApi.getWorks(params).then(res => {
-      // 处理作品数据，验证图片URL
-      const processedWorks = (res.data || []).map(work => {
+      const { userPermissions } = this.data;
+      
+      // 处理作品数据，验证图片URL并根据权限过滤
+      const processedWorks = (res.data || []).filter(work => {
+        // 检查作品是否公开
+        if (work.isPublic === true) {
+          return true;
+        }
+        
+        // 非公开作品需要检查用户权限
+        // 检查用户是否有查看作品的基本权限
+        if (!userPermissions.viewWorks) {
+          return false;
+        }
+        
+        // 检查分类权限
+        if (work.type && userPermissions.categories && userPermissions.categories.length > 0) {
+          if (!userPermissions.categories.includes(work.type)) {
+            return false;
+          }
+        }
+        
+        return true;
+      }).map(work => {
         // 处理图片数据
         if (work.images && Array.isArray(work.images)) {
           work.images = work.images.filter(imageUrl => this.validateImageUrl(imageUrl));
@@ -177,6 +245,16 @@ Page({
         
         return work;
       });
+      
+      // 检查是否有作品可显示
+      if (processedWorks.length === 0) {
+        // 显示无作品提示
+        wx.showToast({
+          title: '暂无作品',
+          icon: 'none',
+          duration: 3000
+        });
+      }
       
       this.setData({
         worksList: this.data.page === 1 ? processedWorks : [...this.data.worksList, ...processedWorks],

@@ -96,10 +96,14 @@ const worksApi = {
   /**
    * 获取作品详情
    * @param {number} id - 作品ID
+   * @param {string} openId - 用户OpenID
    * @returns {Promise<Object>} - 作品详情
    */
-  async getWorkDetail(id) {
-    return await request(`/works/${id}`);
+  async getWorkDetail(id, openId = '') {
+    const params = openId ? { openId } : {};
+    return await request(`/works/${id}`, {
+      data: params
+    });
   },
 
   /**

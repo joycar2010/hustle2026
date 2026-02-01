@@ -4,9 +4,9 @@
 <!-- 筛选栏 -->
 <view class="filter-bar">
   <view class="filter-item {{filterType === '' ? 'active' : ''}}" bindtap="setFilterType" data-type="">全部</view>
-  <view class="filter-item {{filterType === 'residential' ? 'active' : ''}}" bindtap="setFilterType" data-type="residential">家装设计</view>
-  <view class="filter-item {{filterType === 'office' ? 'active' : ''}}" bindtap="setFilterType" data-type="office">公装设计</view>
-  <view class="filter-item {{filterType === 'commercial' ? 'active' : ''}}" bindtap="setFilterType" data-type="commercial">商业空间</view>
+  <block wx:for="{{categories}}" wx:key="id">
+    <view class="filter-item {{filterType === item.slug ? 'active' : ''}}" bindtap="setFilterType" data-type="{{item.slug}}">{{item.name}}</view>
+  </block>
 </view>
 
 <scroll-view class="scrollarea" scroll-y type="list" style="background-color: #1A2430;">

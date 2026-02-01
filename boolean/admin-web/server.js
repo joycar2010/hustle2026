@@ -30,11 +30,7 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(fileUpload({ useTempFiles: true, tempFileDir: '/tmp/' }));
 
-// 先定义API路由，再定义静态文件路由
-// API路由定义...
-
-// 静态文件路由
-app.use(express.static(path.join(__dirname, 'public')));
+// 先定义中间件，再定义API路由，最后定义静态文件路由
 
 // 跨域配置
 app.use((req, res, next) => {
@@ -371,7 +367,7 @@ app.get('/logout', (req, res) => {
 app.get('/api/v1/works', (req, res) => {
   try {
     // 获取查询参数
-    const { type } = req.query;
+    const { type, featured } = req.query;
     
     // 从数据库获取作品
     let works = [...db.data.works];
@@ -381,8 +377,20 @@ app.get('/api/v1/works', (req, res) => {
       works = works.filter(work => work.type === type);
     }
     
-    // 按创建时间倒序排序
-    works = works.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // 如果指定了精选状态，进行筛选
+    if (featured !== undefined) {
+      const isFeatured = featured === 'true';
+      works = works.filter(work => work.isFeatured === isFeatured);
+    }
+    
+    // 排序逻辑：先按精选状态排序（精选作品在前），再按更新时间倒序排序
+    works = works.sort((a, b) => {
+      // 先比较精选状态
+      if (a.isFeatured && !b.isFeatured) return -1;
+      if (!a.isFeatured && b.isFeatured) return 1;
+      // 如果精选状态相同，按更新时间倒序排序
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
     
     res.json({
       success: true,
@@ -437,6 +445,65 @@ app.put('/api/v1/works/:id/permission', requirePermission('works'), async (req, 
   }
 });
 
+// 更新作品精选状态
+app.put('/api/v1/works/:id/feature', requirePermission('works'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { isFeatured } = req.body;
+    
+    const workIndex = db.data.works.findIndex(w => w.id === id);
+    if (workIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '作品不存在'
+      });
+    }
+    
+    // 更新精选状态
+    db.data.works[workIndex] = {
+      ...db.data.works[workIndex],
+      isFeatured: Boolean(isFeatured),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 记录操作日志
+    const operationLog = {
+      id: Date.now(),
+      action: 'update_work_featured',
+      userId: req.session.user ? req.session.user.id : null,
+      username: req.session.user ? req.session.user.username : 'system',
+      workId: id,
+      workTitle: db.data.works[workIndex].title,
+      oldValue: !isFeatured,
+      newValue: isFeatured,
+      timestamp: new Date().toISOString(),
+      ip: req.ip,
+      userAgent: req.headers['user-agent']
+    };
+    
+    // 添加到操作日志数组
+    if (!db.data.operationLogs) {
+      db.data.operationLogs = [];
+    }
+    db.data.operationLogs.push(operationLog);
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      data: db.data.works[workIndex],
+      message: '更新作品精选状态成功'
+    });
+  } catch (error) {
+    console.error('更新作品精选状态失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '更新作品精选状态失败'
+    });
+  }
+});
+
 // 获取单个作品详情
 app.get('/api/v1/works/:id', (req, res) => {
   try {
@@ -444,6 +511,43 @@ app.get('/api/v1/works/:id', (req, res) => {
     const work = db.data.works.find(w => w.id === id);
     
     if (work) {
+      // 获取OpenID参数（从查询参数中获取）
+      const openId = req.query.openId;
+      
+      // 服务端权限验证，对于未设置isPublic字段的作品，默认视为不公开
+      if (work.isPublic !== true) {
+        // 作品不公开，需要验证用户权限
+        if (!openId) {
+          // 没有提供OpenID，拒绝访问
+          return res.status(403).json({
+            success: false,
+            message: '需要登录才能访问该作品'
+          });
+        }
+        
+        // 查找具有该OpenID的客户
+        const customer = db.data.customers.find(c => c.wechatOpenId === openId);
+        
+        if (!customer || !customer.permissions || !customer.permissions.viewWorks) {
+          // 客户不存在或没有查看权限
+          return res.status(403).json({
+            success: false,
+            message: '您没有查看该作品的权限'
+          });
+        }
+        
+        // 检查作品分类权限
+        if (work.type && customer.permissions.categories && customer.permissions.categories.length > 0) {
+          if (!customer.permissions.categories.includes(work.type)) {
+            // 客户没有查看该分类作品的权限
+            return res.status(403).json({
+              success: false,
+              message: '您没有查看该分类作品的权限'
+            });
+          }
+        }
+      }
+      
       res.json({
         success: true,
         data: work,
@@ -564,7 +668,8 @@ app.post('/api/v1/works', requirePermission('works'), async (req, res) => {
       ],
       spaceType: spaceType ? spaceType.trim() : '住宅',
       views: 0,
-      isPublic: isPublic !== undefined ? Boolean(isPublic) : true,
+      isPublic: isPublic !== undefined ? Boolean(isPublic) : false,
+      isFeatured: isFeatured !== undefined ? Boolean(isFeatured) : false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -707,6 +812,7 @@ app.put('/api/v1/works/:id', requirePermission('works'), async (req, res) => {
       ],
       spaceType: spaceType ? spaceType.trim() : originalWork.spaceType || '住宅',
       isPublic: isPublic !== undefined ? Boolean(isPublic) : originalWork.isPublic,
+      isFeatured: isFeatured !== undefined ? Boolean(isFeatured) : originalWork.isFeatured,
       updatedAt: new Date().toISOString()
     };
     
@@ -1578,6 +1684,77 @@ app.delete('/api/v1/leads/:id', requirePermission('leads'), (req, res) => {
   }
 });
 
+// 更新线索状态
+app.put('/api/v1/leads/:id/status', requirePermission('leads'), (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { status } = req.body;
+    
+    // 验证状态值
+    const validStatuses = ['new', 'processing', 'completed', 'canceled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: '无效的状态值，有效的状态值为：new, processing, completed, canceled'
+      });
+    }
+    
+    const leadIndex = db.data.leads.findIndex(l => l.id === id);
+    if (leadIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '线索不存在'
+      });
+    }
+    
+    // 获取原状态
+    const originalStatus = db.data.leads[leadIndex].status;
+    
+    // 更新状态
+    db.data.leads[leadIndex] = {
+      ...db.data.leads[leadIndex],
+      status,
+      updatedAt: new Date().toISOString()
+    };
+    
+    // 记录操作日志
+    const operationLog = {
+      id: Date.now(),
+      action: 'update_lead_status',
+      userId: req.session.user ? req.session.user.id : null,
+      username: req.session.user ? req.session.user.username : 'system',
+      leadId: id,
+      leadName: db.data.leads[leadIndex].name,
+      oldValue: originalStatus,
+      newValue: status,
+      timestamp: new Date().toISOString(),
+      ip: req.ip,
+      userAgent: req.headers['user-agent']
+    };
+    
+    // 添加到操作日志数组
+    if (!db.data.operationLogs) {
+      db.data.operationLogs = [];
+    }
+    db.data.operationLogs.push(operationLog);
+    
+    // 保存数据库
+    db.write();
+    
+    res.json({
+      success: true,
+      data: db.data.leads[leadIndex],
+      message: '更新线索状态成功'
+    });
+  } catch (error) {
+    console.error('更新线索状态失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '更新线索状态失败'
+    });
+  }
+});
+
 // 从线索添加客户信息
 app.get('/api/v1/leads/:id/add-to-customers', requirePermission('leads'), (req, res) => {
   try {
@@ -1832,6 +2009,9 @@ app.get('/api/v1/users/current', requireAuth, (req, res) => {
 });
 
 
+
+// 静态文件路由
+app.use(express.static(path.join(__dirname, 'public')));
 
 // 初始化数据库并启动服务器
 async function startServer() {

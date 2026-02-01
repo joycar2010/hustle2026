@@ -19,7 +19,7 @@ Page({
     relatedProjects: [],
     userInfo: null,
     userPermissions: {
-      viewWorks: true,
+      viewWorks: false,
       categories: []
     },
     isLoading: true,
@@ -33,11 +33,17 @@ Page({
   onLoad(options) {
     const id = options.id;
     if (id) {
-      // 先获取用户信息和权限
-      this.getUserInfoAndPermissions().then(() => {
-        // 然后加载作品详情
-        this.loadWorkDetail(id);
+      // 获取全局应用实例
+      const appInstance = getApp();
+      
+      // 使用全局用户信息和权限
+      this.setData({
+        userInfo: appInstance.globalData.userInfo,
+        userPermissions: appInstance.globalData.userPermissions
       });
+      
+      // 加载作品详情
+      this.loadWorkDetail(id);
     } else {
       wx.showToast({
         title: '参数错误',
@@ -47,77 +53,6 @@ Page({
         wx.navigateBack();
       }, 1500);
     }
-  },
-
-  /**
-   * 获取用户信息和权限
-   */
-  getUserInfoAndPermissions() {
-    return new Promise((resolve, reject) => {
-      // 先获取微信用户信息
-      wx.getUserProfile({
-        desc: '用于获取您的权限信息',
-        success: (res) => {
-          const userInfo = res.userInfo;
-          this.setData({ userInfo });
-          
-          // 尝试获取openId
-          try {
-            wx.cloud.callFunction({
-              name: 'getOpenId',
-              success: (openIdRes) => {
-                const openId = openIdRes.result.openid;
-                // 根据openId获取用户权限
-                this.getUserPermissions(openId).then(permissions => {
-                  this.setData({ userPermissions: permissions });
-                  resolve();
-                }).catch(() => {
-                  // 获取权限失败，使用默认权限
-                  resolve();
-                });
-              },
-              fail: () => {
-                // 获取openId失败，使用默认权限
-                resolve();
-              }
-            });
-          } catch (error) {
-            // 云函数调用失败，使用默认权限
-            resolve();
-          }
-        },
-        fail: () => {
-          // 用户拒绝授权，使用默认权限
-          resolve();
-        }
-      });
-    });
-  },
-
-  /**
-   * 根据openId获取用户权限
-   */
-  getUserPermissions(openId) {
-    return new Promise((resolve, reject) => {
-      // 调用后端API获取用户权限
-      api.permissionsApi.getPermissionsByOpenId(openId).then(res => {
-        if (res.success && res.data) {
-          resolve(res.data);
-        } else {
-          // 获取权限失败，使用默认权限
-          resolve({
-            viewWorks: true,
-            categories: []
-          });
-        }
-      }).catch(() => {
-        // 网络错误，使用默认权限
-        resolve({
-          viewWorks: true,
-          categories: []
-        });
-      });
-    });
   },
 
   /**
@@ -131,20 +66,19 @@ Page({
    * 生命周期函数--监听页面显示
    */
   onShow() {
-    // 每次页面显示时重新获取用户权限，确保权限变更实时生效
+    // 每次页面显示时更新用户权限，确保权限变更实时生效
     if (this.data.work.id) {
-      this.getUserInfoAndPermissions().then(() => {
-        // 权限更新后重新加载数据
-        this.loadWorkDetail(this.data.work.id);
+      const appInstance = getApp();
+      
+      // 更新用户信息和权限
+      this.setData({
+        userInfo: appInstance.globalData.userInfo,
+        userPermissions: appInstance.globalData.userPermissions
       });
+      
+      // 权限更新后重新加载数据
+      this.loadWorkDetail(this.data.work.id);
     }
-  },
-
-  /**
-   * 刷新用户权限
-   */
-  refreshPermissions() {
-    return this.getUserInfoAndPermissions();
   },
 
   /**
@@ -228,7 +162,19 @@ Page({
       title: '加载中...'
     });
 
-    api.worksApi.getWorkDetail(id).then(res => {
+    const appInstance = getApp();
+    const isCustomerInDatabase = appInstance.globalData.isAuthenticated;
+    
+    // 获取用户OpenID
+    let openId = '';
+    try {
+      // 从本地存储获取OpenID
+      openId = wx.getStorageSync('openId') || '';
+    } catch (e) {
+      console.error('获取OpenID失败:', e);
+    }
+
+    api.worksApi.getWorkDetail(id, openId).then(res => {
       let workData = res.data || this.data.work;
       
       // 处理富文本数据，将相对路径图片转换为完整URL
@@ -255,24 +201,52 @@ Page({
         workData.images = [];
       }
       
-      // 检查作品是否公开
-      if (workData.isPublic === false) {
+      // 客户身份验证和访问权限控制
+      // 首先检查作品是否公开，对于未设置isPublic字段的作品，默认视为不公开
+      if (workData.isPublic !== true) {
         // 作品不公开，需要检查用户权限
-        const { userPermissions } = this.data;
-        
-        // 检查用户是否有查看权限
-        if (!userPermissions.viewWorks) {
-          // 用户没有查看作品的权限
+        if (!isCustomerInDatabase) {
+          // 客户不在数据库中，限制访问
           wx.hideLoading();
           this.setData({
             isLoading: false,
             unauthorized: true,
-            unauthorizedReason: '您没有查看作品的权限'
+            unauthorizedReason: '该作品未开放，仅对注册客户可见'
           });
           return;
+        } else {
+          // 客户已在数据库中，检查具体权限
+          const { userPermissions } = this.data;
+          
+          // 检查用户是否有查看权限
+          if (!userPermissions.viewWorks) {
+            // 用户没有查看作品的权限
+            wx.hideLoading();
+            this.setData({
+              isLoading: false,
+              unauthorized: true,
+              unauthorizedReason: '您没有查看作品的权限'
+            });
+            return;
+          }
+          
+          // 检查按分类的权限
+          if (workData.type && userPermissions.categories && userPermissions.categories.length > 0) {
+            if (!userPermissions.categories.includes(workData.type)) {
+              // 用户没有查看该分类作品的权限
+              wx.hideLoading();
+              this.setData({
+                isLoading: false,
+                unauthorized: true,
+                unauthorizedReason: '您没有查看该分类作品的权限'
+              });
+              return;
+            }
+          }
         }
-        
-        // 检查按分类的权限
+      } else {
+        // 作品公开，检查作品分类权限（如果有分类权限限制）
+        const { userPermissions } = this.data;
         if (workData.type && userPermissions.categories && userPermissions.categories.length > 0) {
           if (!userPermissions.categories.includes(workData.type)) {
             // 用户没有查看该分类作品的权限
@@ -287,6 +261,7 @@ Page({
         }
       }
       
+      // 所有权限检查通过，加载完整内容
       // 加载相关项目
       this.loadRelatedProjects(workData.id, workData.type).then(relatedProjects => {
         this.setData({
