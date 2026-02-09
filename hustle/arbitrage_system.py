@@ -5,7 +5,6 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 import ccxt
-from pybit.unified_trading import HTTP
 from functools import wraps
 import statistics
 
@@ -545,11 +544,15 @@ class ExchangeConnector:
             logger.info('币安连接成功')
             
             # 连接Bybit
-            self.bybit = HTTP(
-                api_key=self.config['bybit']['api_key'],
-                api_secret=self.config['bybit']['api_secret'],
-                testnet=False
-            )
+            self.bybit = ccxt.bybit({
+                'apiKey': self.config['bybit']['api_key'],
+                'secret': self.config['bybit']['api_secret'],
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'swap'
+                }
+            })
+            self.bybit.load_markets()
             logger.info('Bybit连接成功')
         except Exception as e:
             logger.error(f'交易所连接失败: {e}')
@@ -588,31 +591,24 @@ class ExchangeConnector:
             return None
     
     @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
-    async def get_bybit_price(self, symbol='XAUUSD+'):
+    async def get_bybit_price(self, symbol='XAUUSD/USDT:USDT'):
         start_time = time.time()
         try:
-            ticker = self.bybit.get_tickers(category='tradfi', symbol=symbol)
-            if ticker['retCode'] == 0:
-                data = ticker['result']['list'][0]
-                
-                # 记录API响应时间
-                response_time = time.time() - start_time
-                performance_monitor.record_api_response('bybit_price', response_time)
-                performance_monitor.record_success('api')
-                
-                return {
-                    'bid': float(data['bid1Price']),
-                    'ask': float(data['ask1Price']),
-                    'last': float(data['lastPrice'])
-                }
-            else:
-                # 记录错误
-                response_time = time.time() - start_time
-                performance_monitor.record_api_response('bybit_price', response_time)
-                performance_monitor.record_error('api')
-                
-                logger.error(f'Bybit API错误: {ticker["retMsg"]}')
-                return None
+            ticker = self.bybit.fetch_ticker(symbol)
+            last_price = float(ticker['last'])
+            bid_price = float(ticker['bid']) if ticker['bid'] is not None else last_price
+            ask_price = float(ticker['ask']) if ticker['ask'] is not None else last_price
+            
+            # 记录API响应时间
+            response_time = time.time() - start_time
+            performance_monitor.record_api_response('bybit_price', response_time)
+            performance_monitor.record_success('api')
+            
+            return {
+                'bid': bid_price,
+                'ask': ask_price,
+                'last': last_price
+            }
         except Exception as e:
             # 记录错误
             response_time = time.time() - start_time
