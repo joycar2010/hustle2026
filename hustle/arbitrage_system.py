@@ -4,9 +4,11 @@ import pytz
 import asyncio
 import json
 from datetime import datetime, timedelta
-import ccxt
 from functools import wraps
 import statistics
+
+# 导入VeighNa连接器
+from vnpy_connector import VNPYExchangeConnector
 
 # 配置日志
 logging.basicConfig(
@@ -190,8 +192,9 @@ class ConfigManager:
                 'api_secret': 'YOUR_BINANCE_SECRET'
             },
             'bybit': {
-                'api_key': 'YOUR_BYBIT_KEY',
-                'api_secret': 'YOUR_BYBIT_SECRET'
+                'server': 'Bybit-Live-2',
+                'username': '5229471',
+                'password': 'Lk106504!'
             },
             'min_spread': 3.0,
             'exit_spread': 0.5,
@@ -523,62 +526,42 @@ class ExchangeConnector:
     def __init__(self, config, risk_manager=None):
         self.config = config
         self.risk_manager = risk_manager
-        self.binance = None
-        self.bybit = None
+        self.connector = VNPYExchangeConnector(config)
         # 初始化连接
         asyncio.run(self._connect())
     
-    @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
     async def _connect(self):
         try:
-            # 连接币安
-            self.binance = ccxt.binance({
-                'apiKey': self.config['binance']['api_key'],
-                'secret': self.config['binance']['api_secret'],
-                'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'future'
-                }
-            })
-            self.binance.load_markets()
-            logger.info('币安连接成功')
-            
-            # 连接Bybit
-            self.bybit = ccxt.bybit({
-                'apiKey': self.config['bybit']['api_key'],
-                'secret': self.config['bybit']['api_secret'],
-                'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'swap'
-                }
-            })
-            self.bybit.load_markets()
-            logger.info('Bybit连接成功')
+            success = self.connector.connect()
+            if not success:
+                raise Exception('VeighNa交易所连接失败')
+            logger.info('VeighNa交易所连接成功')
         except Exception as e:
             logger.error(f'交易所连接失败: {e}')
             if self.risk_manager:
                 self.risk_manager.record_api_failure()
             raise
     
-    @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
     async def get_binance_price(self, symbol='XAUUSDT'):
         start_time = time.time()
         try:
-            ticker = self.binance.fetch_ticker(symbol)
-            last_price = float(ticker['last'])
-            bid_price = float(ticker['bid']) if ticker['bid'] is not None else last_price
-            ask_price = float(ticker['ask']) if ticker['ask'] is not None else last_price
-            
-            # 记录API响应时间
-            response_time = time.time() - start_time
-            performance_monitor.record_api_response('binance_price', response_time)
-            performance_monitor.record_success('api')
-            
-            return {
-                'bid': bid_price,
-                'ask': ask_price,
-                'last': last_price
-            }
+            price = await self.connector.get_binance_price(symbol)
+            if price:
+                # 记录API响应时间
+                response_time = time.time() - start_time
+                performance_monitor.record_api_response('binance_price', response_time)
+                performance_monitor.record_success('api')
+                return price
+            else:
+                # 记录错误
+                response_time = time.time() - start_time
+                performance_monitor.record_api_response('binance_price', response_time)
+                performance_monitor.record_error('api')
+                
+                logger.error('获取币安价格失败')
+                if self.risk_manager:
+                    self.risk_manager.record_api_failure()
+                return None
         except Exception as e:
             # 记录错误
             response_time = time.time() - start_time
@@ -590,25 +573,26 @@ class ExchangeConnector:
                 self.risk_manager.record_api_failure()
             return None
     
-    @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
-    async def get_bybit_price(self, symbol='XAUUSD/USDT:USDT'):
+    async def get_bybit_price(self, symbol='XAUUSD'):
         start_time = time.time()
         try:
-            ticker = self.bybit.fetch_ticker(symbol)
-            last_price = float(ticker['last'])
-            bid_price = float(ticker['bid']) if ticker['bid'] is not None else last_price
-            ask_price = float(ticker['ask']) if ticker['ask'] is not None else last_price
-            
-            # 记录API响应时间
-            response_time = time.time() - start_time
-            performance_monitor.record_api_response('bybit_price', response_time)
-            performance_monitor.record_success('api')
-            
-            return {
-                'bid': bid_price,
-                'ask': ask_price,
-                'last': last_price
-            }
+            price = await self.connector.get_bybit_price(symbol)
+            if price:
+                # 记录API响应时间
+                response_time = time.time() - start_time
+                performance_monitor.record_api_response('bybit_price', response_time)
+                performance_monitor.record_success('api')
+                return price
+            else:
+                # 记录错误
+                response_time = time.time() - start_time
+                performance_monitor.record_api_response('bybit_price', response_time)
+                performance_monitor.record_error('api')
+                
+                logger.error('获取Bybit价格失败')
+                if self.risk_manager:
+                    self.risk_manager.record_api_failure()
+                return None
         except Exception as e:
             # 记录错误
             response_time = time.time() - start_time
@@ -620,33 +604,28 @@ class ExchangeConnector:
                 self.risk_manager.record_api_failure()
             return None
     
-    @retry_with_backoff(max_retries=2, base_delay=1, max_delay=3)
     async def binance_place_order(self, symbol, side, amount, price=None, order_type='limit'):
         start_time = time.time()
         try:
-            if order_type == 'market':
-                order = self.binance.create_market_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=amount
-                )
+            order = await self.connector.binance_place_order(symbol, side, amount, price, order_type)
+            if order:
+                # 记录订单执行时间
+                execution_time = time.time() - start_time
+                performance_monitor.record_order_execution('binance', execution_time)
+                performance_monitor.record_success('order')
+                
+                logger.info(f'币安下单成功: {order}')
+                return order
             else:
-                order = self.binance.create_order(
-                    symbol=symbol,
-                    side=side,
-                    type=order_type,
-                    amount=amount,
-                    price=price,
-                    params={'timeInForce': 'GTC'}
-                )
-            
-            # 记录订单执行时间
-            execution_time = time.time() - start_time
-            performance_monitor.record_order_execution('binance', execution_time)
-            performance_monitor.record_success('order')
-            
-            logger.info(f'币安下单成功: {order}')
-            return order
+                # 记录错误
+                execution_time = time.time() - start_time
+                performance_monitor.record_order_execution('binance', execution_time)
+                performance_monitor.record_error('order')
+                
+                logger.error('币安下单失败')
+                if self.risk_manager:
+                    self.risk_manager.record_order_failure()
+                return None
         except Exception as e:
             # 记录错误
             execution_time = time.time() - start_time
@@ -658,33 +637,11 @@ class ExchangeConnector:
                 self.risk_manager.record_order_failure()
             return None
     
-    @retry_with_backoff(max_retries=2, base_delay=1, max_delay=3)
     async def bybit_place_order(self, symbol, side, amount, price=None, order_type='limit'):
         start_time = time.time()
         try:
-            # Bybit TradFi使用Lot单位，1 Lot = 100 XAU
-            quantity_lot = amount / 100
-            
-            if order_type == 'market':
-                order = self.bybit.place_order(
-                    category='tradfi',
-                    symbol=symbol,
-                    side=side,
-                    orderType=order_type,
-                    qty=str(quantity_lot)
-                )
-            else:
-                order = self.bybit.place_order(
-                    category='tradfi',
-                    symbol=symbol,
-                    side=side,
-                    orderType=order_type,
-                    qty=str(quantity_lot),
-                    price=str(price),
-                    timeInForce='GTC'
-                )
-            
-            if order['retCode'] == 0:
+            order = await self.connector.bybit_place_order(symbol, side, amount, price, order_type)
+            if order:
                 # 记录订单执行时间
                 execution_time = time.time() - start_time
                 performance_monitor.record_order_execution('bybit', execution_time)
@@ -698,7 +655,9 @@ class ExchangeConnector:
                 performance_monitor.record_order_execution('bybit', execution_time)
                 performance_monitor.record_error('order')
                 
-                logger.error(f'Bybit下单失败: {order["retMsg"]}')
+                logger.error('Bybit下单失败')
+                if self.risk_manager:
+                    self.risk_manager.record_order_failure()
                 return None
         except Exception as e:
             # 记录错误
@@ -711,7 +670,7 @@ class ExchangeConnector:
                 self.risk_manager.record_order_failure()
             return None
     
-    async def close_all_bybit_positions(self, symbol='XAUUSD+'):
+    async def close_all_bybit_positions(self, symbol='XAUUSD'):
         try:
             # 这里简化处理，实际应该获取当前持仓并平仓
             logger.info('关闭Bybit所有头寸')
@@ -719,23 +678,10 @@ class ExchangeConnector:
         except Exception as e:
             logger.error(f'平Bybit仓位失败: {e}')
     
-    @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
     async def get_market_depth(self, exchange, symbol, limit=10):
         """获取市场深度"""
         try:
-            if exchange == 'binance':
-                orderbook = self.binance.fetch_order_book(symbol, limit)
-            elif exchange == 'bybit':
-                orderbook = self.bybit.get_orderbook(category='tradfi', symbol=symbol, limit=limit)
-                if orderbook['retCode'] == 0:
-                    return orderbook['result']
-                else:
-                    logger.error(f'Bybit获取订单簿失败: {orderbook["retMsg"]}')
-                    return None
-            else:
-                logger.error(f'不支持的交易所: {exchange}')
-                return None
-            
+            orderbook = await self.connector.get_order_book(exchange, symbol, limit)
             return orderbook
         except Exception as e:
             logger.error(f'获取市场深度失败: {e}')
@@ -755,12 +701,8 @@ class ExchangeConnector:
                 return {'has_enough_liquidity': False, 'estimated_slippage': 0}
             
             # 计算市场深度
-            if exchange == 'binance':
-                bids = orderbook['bids']
-                asks = orderbook['asks']
-            else:  # bybit
-                bids = [(float(b['price']), float(b['size'])) for b in orderbook['bids']]
-                asks = [(float(a['price']), float(a['size'])) for a in orderbook['asks']]
+            bids = orderbook['bids']
+            asks = orderbook['asks']
             
             # 评估买单流动性和预测滑点
             total_bid_liquidity = 0
@@ -891,7 +833,7 @@ class ExchangeConnector:
                     elif exchange == 'bybit':
                         order = await self.bybit_place_order(
                             symbol,
-                            side.capitalize(),
+                            side,
                             order_size,
                             price,
                             order_type
@@ -920,7 +862,7 @@ class ExchangeConnector:
                     elif exchange == 'bybit':
                         order = await self.bybit_place_order(
                             symbol,
-                            side.capitalize(),
+                            side,
                             amount,
                             price,
                             order_type
@@ -945,7 +887,7 @@ class ExchangeConnector:
                         elif exchange == 'bybit':
                             order = await self.bybit_place_order(
                                 symbol,
-                                side.capitalize(),
+                                side,
                                 order_size,
                                 price,
                                 order_type
@@ -963,11 +905,10 @@ class ExchangeConnector:
             logger.error(f'智能订单路由失败: {e}')
             return []
     
-    @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
     async def get_binance_account_info(self):
         """获取币安账户信息"""
         try:
-            account = self.binance.fetch_balance()
+            account = await self.connector.get_binance_account_info()
             return account
         except Exception as e:
             logger.error(f'获取币安账户信息失败: {e}')
@@ -975,11 +916,10 @@ class ExchangeConnector:
                 self.risk_manager.record_api_failure()
             return None
     
-    @retry_with_backoff(max_retries=3, base_delay=1, max_delay=5)
     async def get_bybit_account_info(self):
         """获取Bybit账户信息"""
         try:
-            account = self.bybit.get_wallet_balance(accountType='UNIFIED', coin='USDT')
+            account = await self.connector.get_bybit_account_info()
             return account
         except Exception as e:
             logger.error(f'获取Bybit账户信息失败: {e}')
@@ -1032,7 +972,7 @@ class Strategy:
         
         # 评估流动性和预测滑点
         binance_liquidity_task = self.exchange.assess_liquidity('binance', 'XAUUSDT', self.trade_size_xau)
-        bybit_liquidity_task = self.exchange.assess_liquidity('bybit', 'XAUUSD+', self.trade_size_xau)
+        bybit_liquidity_task = self.exchange.assess_liquidity('bybit', 'XAUUSD', self.trade_size_xau)
         
         binance_liquidity, bybit_liquidity = await asyncio.gather(
             binance_liquidity_task, 
@@ -1124,9 +1064,10 @@ class Strategy:
                         logger.warning(f'币安保证金率警告: {binance_margin:.2f}%')
             
             # 检查Bybit保证金率
-            if bybit_account and bybit_account['retCode'] == 0:
-                total_balance = float(bybit_account['result']['list'][0]['totalEquity'])
-                used_margin = float(bybit_account['result']['list'][0]['usedMargin'])
+            if bybit_account:
+                # MT5账户信息格式不同，简化处理
+                total_balance = float(bybit_account.get('balance', 0))
+                used_margin = float(bybit_account.get('frozen', 0))
                 if used_margin > 0:
                     bybit_margin = (total_balance / used_margin) * 100
                     logger.info(f'Bybit保证金率: {bybit_margin:.2f}%')
@@ -1224,7 +1165,7 @@ class Strategy:
             
             bybit_orders_task = self.exchange.smart_order_router(
                 'bybit',
-                'XAUUSD+',
+                'XAUUSD',
                 bybit_side,
                 self.trade_size_xau,
                 bybit_price if order_type == 'limit' else None,

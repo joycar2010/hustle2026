@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+websockets
+redis
+python-dotenv
+aiohttp
+asyncio
+vnpy
+vnpy_binance
+vnpy_bybit

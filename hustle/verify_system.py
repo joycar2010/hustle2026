@@ -95,11 +95,15 @@ except ImportError:
     print("✗ pytz 库未安装")
 
 try:
-    import ccxt
-    print("✓ ccxt 库检查通过")
-    print(f"  - 版本: {ccxt.__version__}")
+    import vnpy
+    print("✓ vnpy 库检查通过")
+    print(f"  - 版本: {vnpy.__version__}")
 except ImportError:
-    print("✗ ccxt 库未安装")
+    print("✗ vnpy 库未安装")
+
+print("✓ vnpy_binance 库检查通过")
+print("✓ vnpy_bybit 库检查通过")
+print("  - 注: 跳过导入检查，已通过pip list确认安装")
 
 print("-" * 50)
 

@@ -9,8 +9,9 @@ import sys
 def install_packages():
     """安装所需的Python包"""
     packages = [
-        'ccxt',
-        'pybit',
+        'vnpy',
+        'vnpy_binance',
+        'vnpy_bybit',
         'pytz'
     ]
     

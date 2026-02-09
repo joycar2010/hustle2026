@@ -1,0 +1,39 @@
+# 忽略node_modules目录
+node_modules/
+
+# 忽略虚拟环境
+.venv/
+
+# 忽略__pycache__目录
+__pycache__/
+
+# 忽略日志文件
+*.log
+
+# 忽略备份文件
+backup/
+
+# 忽略环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 忽略构建文件
+build/
+dist/
+
+# 忽略测试覆盖率文件
+coverage/
+
+# 忽略IDE配置文件
+.vscode/
+.idea/
+
+# 忽略操作系统文件
+.DS_Store
+Thumbs.db
+
+# 忽略其他目录
+../
