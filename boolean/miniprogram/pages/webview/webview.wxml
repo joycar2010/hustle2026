@@ -1,2 +1,0 @@
-<!-- pages/webview/webview.wxml -->
-<web-view src="{{url}}" bindmessage="onMessage" bindload="onWebviewLoad" binderror="onError"></web-view>
