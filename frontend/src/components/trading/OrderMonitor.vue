@@ -45,6 +45,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import api from '@/services/api'
 
 const orders = ref([])
 let updateInterval = null
@@ -62,23 +63,10 @@ onUnmounted(() => {
 
 async function fetchOrders() {
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(
-      'http://localhost:8000/api/v1/trading/orders?limit=50',
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    )
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch orders')
-    }
-
-    const data = await response.json()
-    orders.value = data
+    const response = await api.get('/api/v1/trading/orders', {
+      params: { limit: 50 }
+    })
+    orders.value = response.data
   } catch (error) {
     console.error('Failed to fetch orders:', error)
     // Keep existing orders on error

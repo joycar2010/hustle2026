@@ -47,6 +47,8 @@ async def create_strategy_config(
         order_qty=config_data.order_qty,
         retry_times=config_data.retry_times,
         mt5_stuck_threshold=config_data.mt5_stuck_threshold,
+        opening_sync_count=config_data.opening_sync_count,
+        closing_sync_count=config_data.closing_sync_count,
         is_enabled=config_data.is_enabled,
     )
 

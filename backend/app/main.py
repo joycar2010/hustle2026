@@ -1,6 +1,8 @@
 """Main FastAPI application entry point"""
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
 import logging
 from app.core.config import settings
@@ -51,6 +53,33 @@ async def log_requests(request: Request, call_next):
     logger.info(f"[REQUEST] {request.method} {request.url.path}")
     response = await call_next(request)
     logger.info(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
+    return response
+
+
+# Global exception handler to ensure CORS headers are always present
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Ensure CORS headers are included in all error responses"""
+    origin = request.headers.get("origin")
+
+    if isinstance(exc, StarletteHTTPException):
+        status_code = exc.status_code
+        detail = exc.detail
+    else:
+        status_code = 500
+        detail = "Internal server error"
+        logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    response = JSONResponse(
+        status_code=status_code,
+        content={"detail": detail}
+    )
+
+    # Always add CORS headers for allowed origins
+    if origin and origin in settings.cors_origins_list:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+
     return response
 
 # Include API routers

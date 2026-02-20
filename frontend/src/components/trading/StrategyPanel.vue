@@ -212,6 +212,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
+import api from '@/services/api'
 
 const props = defineProps({
   type: {
@@ -254,8 +255,6 @@ onUnmounted(() => {
 
 async function fetchStrategyData() {
   try {
-    const token = localStorage.getItem('token')
-
     // Fetch market data for spread calculation
     const data = await marketStore.fetchMarketData()
 
@@ -273,28 +272,17 @@ async function fetchStrategyData() {
     }
 
     // Fetch real account asset data
-    const accountResponse = await fetch(
-      'http://localhost:8000/api/v1/accounts/dashboard/aggregated',
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    )
+    const accountResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const accountData = accountResponse.data
 
-    if (accountResponse.ok) {
-      const accountData = await accountResponse.json()
+    // Calculate available assets for each platform
+    const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
+    const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
 
-      // Calculate available assets for each platform
-      const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
-      const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
-
-      binanceAssets.value = binanceAccounts.reduce((sum, acc) =>
-        sum + (acc.balance?.available_balance || 0), 0)
-      bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
-        sum + (acc.balance?.available_balance || 0), 0)
-    }
+    binanceAssets.value = binanceAccounts.reduce((sum, acc) =>
+      sum + (acc.balance?.available_balance || 0), 0)
+    bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
+      sum + (acc.balance?.available_balance || 0), 0)
   } catch (error) {
     console.error('Failed to fetch strategy data:', error)
   }
@@ -317,8 +305,6 @@ function removeLadder(index) {
 
 async function saveConfig() {
   try {
-    const token = localStorage.getItem('token')
-
     // Ensure sync quantities are integers
     const configData = {
       strategy_type: props.type,
@@ -329,27 +315,11 @@ async function saveConfig() {
       closing_enabled: config.value.closingEnabled
     }
 
-    const response = await fetch(
-      'http://localhost:8000/api/v1/strategies/config',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(configData)
-      }
-    )
-
-    if (response.ok) {
-      alert('配置保存成功！')
-    } else {
-      const error = await response.json()
-      alert(`配置保存失败: ${error.detail || '未知错误'}`)
-    }
+    const response = await api.post('/api/v1/strategies/config', configData)
+    alert('配置保存成功！')
   } catch (error) {
     console.error('Failed to save config:', error)
-    alert('配置保存失败，请检查网络连接')
+    alert(`配置保存失败: ${error.response?.data?.detail || error.message}`)
   }
 }
 
