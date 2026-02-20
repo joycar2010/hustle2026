@@ -469,9 +469,34 @@ async def get_version_history(
     try:
         import subprocess
 
-        # Get last 20 commits
+        # Fetch latest commits from remote to sync with GitHub
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin"],
+            capture_output=True,
+            text=True,
+            cwd="."
+        )
+
+        # Don't fail if fetch fails (might be offline), just log it
+        if fetch_result.returncode != 0:
+            print(f"Warning: Git fetch failed: {fetch_result.stderr}")
+
+        # Get current branch name
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd="."
+        )
+
+        if branch_result.returncode != 0:
+            raise Exception(f"Failed to get current branch: {branch_result.stderr}")
+
+        current_branch = branch_result.stdout.strip()
+
+        # Get last 20 commits from current branch
         result = subprocess.run(
-            ["git", "log", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
+            ["git", "log", current_branch, "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
             capture_output=True,
             text=True,
             cwd="."
@@ -509,6 +534,19 @@ async def push_to_github(
     try:
         import subprocess
 
+        # Get current branch name
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd="."
+        )
+
+        if branch_result.returncode != 0:
+            raise Exception(f"Failed to get current branch: {branch_result.stderr}")
+
+        current_branch = branch_result.stdout.strip()
+
         # Check if there are changes to commit
         status_result = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -544,9 +582,16 @@ async def push_to_github(
             if commit_result.returncode != 0:
                 raise Exception(f"Git commit failed: {commit_result.stderr}")
 
-        # Push to remote
+        # Push to remote with current branch
+        # Use force push for backup branches to overwrite remote if needed
+        push_args = ["git", "push"]
+        if current_branch.startswith("backup-"):
+            push_args.extend(["--force", "origin", current_branch])
+        else:
+            push_args.extend(["origin", current_branch])
+
         push_result = subprocess.run(
-            ["git", "push"],
+            push_args,
             capture_output=True,
             text=True,
             cwd="."
@@ -556,7 +601,8 @@ async def push_to_github(
             raise Exception(f"Git push failed: {push_result.stderr}")
 
         return {
-            "message": "Successfully pushed to GitHub",
+            "message": f"Successfully pushed to GitHub branch: {current_branch}",
+            "branch": current_branch,
             "output": push_result.stdout
         }
     except Exception as e:
