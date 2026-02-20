@@ -110,24 +110,30 @@
               <th class="pb-2">时间</th>
               <th class="pb-2">正向点差</th>
               <th class="pb-2">反向点差</th>
-              <th class="pb-2">买价</th>
-              <th class="pb-2">卖价</th>
+              <th class="pb-2">Binance买/卖</th>
+              <th class="pb-2">Bybit买/卖</th>
               <th class="pb-2">状态</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="record in paginatedRecords" :key="record.id" class="border-b border-gray-800">
               <td class="py-3">{{ formatDateTime(record.timestamp) }}</td>
-              <td :class="record.forward_spread >= 2.0 ? 'text-green-500' : 'text-gray-400'">
+              <td :class="record.forward_spread >= 2.0 ? 'text-green-500' : record.forward_spread <= -2.0 ? 'text-red-500' : 'text-gray-400'">
                 {{ record.forward_spread.toFixed(2) }}
               </td>
-              <td :class="record.reverse_spread >= 2.0 ? 'text-red-500' : 'text-gray-400'">
+              <td :class="record.reverse_spread >= 2.0 ? 'text-green-500' : record.reverse_spread <= -2.0 ? 'text-red-500' : 'text-gray-400'">
                 {{ record.reverse_spread.toFixed(2) }}
               </td>
-              <td>{{ record.buy_price.toFixed(2) }} USDT</td>
-              <td>{{ record.sell_price.toFixed(2) }} USDT</td>
+              <td class="text-sm">
+                <span class="text-green-500">{{ record.binance_bid.toFixed(2) }}</span> /
+                <span class="text-red-500">{{ record.binance_ask.toFixed(2) }}</span>
+              </td>
+              <td class="text-sm">
+                <span class="text-green-500">{{ record.bybit_bid.toFixed(2) }}</span> /
+                <span class="text-red-500">{{ record.bybit_ask.toFixed(2) }}</span>
+              </td>
               <td>
-                <span v-if="record.forward_spread >= 2.0 || record.reverse_spread >= 2.0"
+                <span v-if="Math.abs(record.forward_spread) >= 2.0 || Math.abs(record.reverse_spread) >= 2.0"
                       class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">
                   可套利
                 </span>
@@ -306,10 +312,12 @@ async function querySpreadData() {
     spreadRecords.value = response.data.map((item, index) => ({
       id: item.id || index + 1,
       timestamp: item.timestamp,
-      forward_spread: Math.abs(item.forward_spread || 0),
-      reverse_spread: Math.abs(item.reverse_spread || 0),
-      buy_price: item.binance_quote?.bid || 0,
-      sell_price: item.bybit_quote?.ask || 0
+      forward_spread: item.forward_spread || 0,
+      reverse_spread: item.reverse_spread || 0,
+      binance_bid: item.binance_quote?.bid || 0,
+      binance_ask: item.binance_quote?.ask || 0,
+      bybit_bid: item.bybit_quote?.bid || 0,
+      bybit_ask: item.bybit_quote?.ask || 0
     }))
 
     currentPage.value = 1
@@ -448,13 +456,15 @@ function formatTime(timestamp) {
 
 function exportData() {
   const csv = [
-    ['时间', '正向点差', '反向点差', '买价', '卖价'],
+    ['时间', '正向点差', '反向点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价'],
     ...spreadRecords.value.map(r => [
       formatDateTime(r.timestamp),
       r.forward_spread.toFixed(2),
       r.reverse_spread.toFixed(2),
-      r.buy_price.toFixed(2),
-      r.sell_price.toFixed(2)
+      r.binance_bid.toFixed(2),
+      r.binance_ask.toFixed(2),
+      r.bybit_bid.toFixed(2),
+      r.bybit_ask.toFixed(2)
     ])
   ].map(row => row.join(',')).join('\n')
 
