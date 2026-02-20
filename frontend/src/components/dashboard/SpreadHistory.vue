@@ -111,6 +111,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import dayjs from 'dayjs'
+import api from '@/services/api'
 
 const loading = ref(false)
 const spreadHistory = ref([])
@@ -127,22 +128,15 @@ onMounted(() => {
 async function fetchSpreadHistory() {
   loading.value = true
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(
-      `http://localhost:8000/api/v1/market/spread/history?limit=100&binance_symbol=XAUUSDT&bybit_symbol=XAUUSDT`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+    const response = await api.get('/api/v1/market/spread/history', {
+      params: {
+        limit: 100,
+        binance_symbol: 'XAUUSDT',
+        bybit_symbol: 'XAUUSDT'
       }
-    )
+    })
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch spread history')
-    }
-
-    const data = await response.json()
+    const data = response.data
 
     // Transform backend data to component format
     const transformedData = data.map((item, index) => {

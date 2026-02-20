@@ -66,6 +66,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import api from '@/services/api'
 
 const riskData = ref({
   marginRate: 35,
@@ -93,22 +94,8 @@ onUnmounted(() => {
 
 async function fetchRiskData() {
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(
-      'http://localhost:8000/api/v1/accounts/dashboard/aggregated',
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    )
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch risk data')
-    }
-
-    const data = await response.json()
+    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const data = response.data
 
     // Extract risk data from aggregated account data
     const binanceAccounts = data.accounts?.filter(acc => acc.platform_id === 1) || []
