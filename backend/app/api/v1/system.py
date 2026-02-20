@@ -474,7 +474,7 @@ async def get_version_history(
             ["git", "log", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
             capture_output=True,
             text=True,
-            cwd="C:\\app\\hustle2026"
+            cwd="."
         )
 
         if result.returncode != 0:
@@ -514,7 +514,7 @@ async def push_to_github(
             ["git", "status", "--porcelain"],
             capture_output=True,
             text=True,
-            cwd="C:\\app\\hustle2026"
+            cwd="."
         )
 
         if status_result.stdout.strip():
@@ -527,7 +527,7 @@ async def push_to_github(
                 ["git", "add", "."],
                 capture_output=True,
                 text=True,
-                cwd="C:\\app\\hustle2026"
+                cwd="."
             )
 
             if add_result.returncode != 0:
@@ -538,7 +538,7 @@ async def push_to_github(
                 ["git", "commit", "-m", commit_message],
                 capture_output=True,
                 text=True,
-                cwd="C:\\app\\hustle2026"
+                cwd="."
             )
 
             if commit_result.returncode != 0:
@@ -549,7 +549,7 @@ async def push_to_github(
             ["git", "push"],
             capture_output=True,
             text=True,
-            cwd="C:\\app\\hustle2026"
+            cwd="."
         )
 
         if push_result.returncode != 0:
@@ -588,7 +588,7 @@ async def rollback_version(
             ["git", "reset", "--hard", target],
             capture_output=True,
             text=True,
-            cwd="C:\\app\\hustle2026"
+            cwd="."
         )
 
         if reset_result.returncode != 0:
@@ -621,7 +621,7 @@ async def delete_version(
             ["git", "revert", "--no-edit", version_hash],
             capture_output=True,
             text=True,
-            cwd="C:\\app\\hustle2026"
+            cwd="."
         )
 
         if revert_result.returncode != 0:
