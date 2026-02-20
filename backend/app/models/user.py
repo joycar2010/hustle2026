@@ -26,6 +26,7 @@ class User(Base):
     strategy_configs = relationship("StrategyConfig", back_populates="user", cascade="all, delete-orphan")
     arbitrage_tasks = relationship("ArbitrageTask", back_populates="user", cascade="all, delete-orphan")
     risk_alerts = relationship("RiskAlert", back_populates="user", cascade="all, delete-orphan")
+    risk_settings = relationship("RiskSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(user_id={self.user_id}, username={self.username})>"

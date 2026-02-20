@@ -5,10 +5,12 @@ from sqlalchemy import select
 from typing import List, Dict, Any
 from uuid import UUID
 from pydantic import BaseModel
+from datetime import datetime
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.account import Account
 from app.models.risk_alert import RiskAlert
+from app.models.risk_settings import RiskSettings
 from app.services.risk_monitor import risk_monitor
 
 router = APIRouter()
@@ -30,10 +32,6 @@ class AlertSettings(BaseModel):
     forwardOpenSyncCount: int = 3
     forwardClosePrice: float = 0.2
     forwardCloseSyncCount: int = 3
-
-
-# In-memory storage for alert settings (in production, use database)
-_alert_settings_storage: Dict[str, AlertSettings] = {}
 
 
 @router.get("/status")
@@ -59,12 +57,36 @@ async def get_risk_status(
 @router.get("/alert-settings")
 async def get_alert_settings(
     user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
 ) -> AlertSettings:
-    """Get alert settings for current user"""
+    """Get alert settings for current user from database"""
     try:
-        # Return stored settings or default
-        if user_id in _alert_settings_storage:
-            return _alert_settings_storage[user_id]
+        # Query database for user's risk settings
+        result = await db.execute(
+            select(RiskSettings).where(RiskSettings.user_id == UUID(user_id))
+        )
+        settings = result.scalar_one_or_none()
+
+        if settings:
+            # Convert database model to response model
+            return AlertSettings(
+                binanceNetAsset=settings.binance_net_asset,
+                bybitMT5NetAsset=settings.bybit_mt5_net_asset,
+                totalNetAsset=settings.total_net_asset,
+                binanceLiquidationPrice=settings.binance_liquidation_price,
+                bybitMT5LiquidationPrice=settings.bybit_mt5_liquidation_price,
+                mt5LagCount=settings.mt5_lag_count,
+                reverseOpenPrice=settings.reverse_open_price,
+                reverseOpenSyncCount=settings.reverse_open_sync_count,
+                reverseClosePrice=settings.reverse_close_price,
+                reverseCloseSyncCount=settings.reverse_close_sync_count,
+                forwardOpenPrice=settings.forward_open_price,
+                forwardOpenSyncCount=settings.forward_open_sync_count,
+                forwardClosePrice=settings.forward_close_price,
+                forwardCloseSyncCount=settings.forward_close_sync_count,
+            )
+
+        # Return default settings if none exist
         return AlertSettings()
     except Exception as e:
         raise HTTPException(
@@ -77,13 +99,58 @@ async def get_alert_settings(
 async def save_alert_settings(
     settings: AlertSettings,
     user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
 ) -> Dict[str, str]:
-    """Save alert settings for current user"""
+    """Save alert settings for current user to database"""
     try:
-        # Store settings in memory (in production, save to database)
-        _alert_settings_storage[user_id] = settings
+        # Check if settings already exist
+        result = await db.execute(
+            select(RiskSettings).where(RiskSettings.user_id == UUID(user_id))
+        )
+        existing_settings = result.scalar_one_or_none()
+
+        if existing_settings:
+            # Update existing settings
+            existing_settings.binance_net_asset = settings.binanceNetAsset
+            existing_settings.bybit_mt5_net_asset = settings.bybitMT5NetAsset
+            existing_settings.total_net_asset = settings.totalNetAsset
+            existing_settings.binance_liquidation_price = settings.binanceLiquidationPrice
+            existing_settings.bybit_mt5_liquidation_price = settings.bybitMT5LiquidationPrice
+            existing_settings.mt5_lag_count = settings.mt5LagCount
+            existing_settings.reverse_open_price = settings.reverseOpenPrice
+            existing_settings.reverse_open_sync_count = settings.reverseOpenSyncCount
+            existing_settings.reverse_close_price = settings.reverseClosePrice
+            existing_settings.reverse_close_sync_count = settings.reverseCloseSyncCount
+            existing_settings.forward_open_price = settings.forwardOpenPrice
+            existing_settings.forward_open_sync_count = settings.forwardOpenSyncCount
+            existing_settings.forward_close_price = settings.forwardClosePrice
+            existing_settings.forward_close_sync_count = settings.forwardCloseSyncCount
+            existing_settings.update_time = datetime.utcnow()
+        else:
+            # Create new settings
+            new_settings = RiskSettings(
+                user_id=UUID(user_id),
+                binance_net_asset=settings.binanceNetAsset,
+                bybit_mt5_net_asset=settings.bybitMT5NetAsset,
+                total_net_asset=settings.totalNetAsset,
+                binance_liquidation_price=settings.binanceLiquidationPrice,
+                bybit_mt5_liquidation_price=settings.bybitMT5LiquidationPrice,
+                mt5_lag_count=settings.mt5LagCount,
+                reverse_open_price=settings.reverseOpenPrice,
+                reverse_open_sync_count=settings.reverseOpenSyncCount,
+                reverse_close_price=settings.reverseClosePrice,
+                reverse_close_sync_count=settings.reverseCloseSyncCount,
+                forward_open_price=settings.forwardOpenPrice,
+                forward_open_sync_count=settings.forwardOpenSyncCount,
+                forward_close_price=settings.forwardClosePrice,
+                forward_close_sync_count=settings.forwardCloseSyncCount,
+            )
+            db.add(new_settings)
+
+        await db.commit()
         return {"message": "Alert settings saved successfully"}
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
