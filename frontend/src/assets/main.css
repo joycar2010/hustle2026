@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-300 text-text-primary font-sans;
+  }
+}
+
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply bg-primary text-dark-300 px-4 py-2 rounded font-medium hover:bg-primary-hover transition-all duration-200;
+  }
+
+  .btn-success {
+    @apply bg-success text-white px-4 py-2 rounded font-medium hover:bg-success-dark transition-all duration-200;
+  }
+
+  .btn-danger {
+    @apply bg-danger text-white px-4 py-2 rounded font-medium hover:bg-danger-dark transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-dark-100 text-text-primary px-4 py-2 rounded font-medium hover:bg-dark-50 transition-all duration-200 border border-border-primary;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-dark-200 rounded-lg p-4 border border-border-secondary;
+  }
+
+  .card-elevated {
+    @apply bg-dark-100 rounded-lg p-4 border border-border-primary shadow-lg;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply bg-dark-200 border border-border-primary rounded px-3 py-2 w-full text-text-primary focus:border-primary focus:outline-none transition-colors;
+  }
+
+  /* Tables */
+  .table-header {
+    @apply text-text-tertiary text-sm font-medium uppercase tracking-wider;
+  }
+
+  .table-row {
+    @apply border-b border-border-secondary hover:bg-dark-50 transition-colors;
+  }
+
+  /* Price displays */
+  .price-up {
+    @apply text-success font-mono;
+  }
+
+  .price-down {
+    @apply text-danger font-mono;
+  }
+
+  .price-neutral {
+    @apply text-text-primary font-mono;
+  }
+
+  /* Status badges */
+  .badge {
+    @apply px-2 py-1 rounded text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/20 text-success;
+  }
+
+  .badge-danger {
+    @apply badge bg-danger/20 text-danger;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/20 text-warning;
+  }
+
+  .badge-info {
+    @apply badge bg-info/20 text-info;
+  }
+}

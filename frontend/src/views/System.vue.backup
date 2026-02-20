@@ -1,0 +1,46 @@
+<template>
+  <div class="container mx-auto px-4 py-6">
+    <h1 class="text-3xl font-bold mb-6">系统管理</h1>
+
+    <!-- Tab Navigation -->
+    <div class="flex space-x-2 mb-6 border-b border-border-primary">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        @click="activeTab = tab.id"
+        :class="[
+          'px-4 py-2 font-medium transition-colors relative',
+          activeTab === tab.id
+            ? 'text-primary'
+            : 'text-text-secondary hover:text-text-primary'
+        ]"
+      >
+        {{ tab.label }}
+        <div
+          v-if="activeTab === tab.id"
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"
+        ></div>
+      </button>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="tab-content">
+      <!-- Frontend User Management -->
+      <div v-if="activeTab === 'users'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">前端用户管理</h2>
+            <button @click="openAddUserModal" class="btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              添加用户
+            </button>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">用户名</th>
+                  <th class="text-left py-3 px-4">邮箱</th>
