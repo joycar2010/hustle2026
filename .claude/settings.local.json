@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(psql:*)",
+      "Bash(alembic upgrade:*)",
+      "Bash(python -c:*)",
+      "Bash(\"C:/Program Files/PostgreSQL/16/bin/psql.exe\" -U postgres -c:*)",
+      "Bash(timeout 5 uvicorn:*)",
+      "Bash(python:*)",
+      "Bash(cmd //c \"start /min cmd /k start_backend.bat\")",
+      "Bash(alembic current:*)",
+      "Bash(tasklist:*)",
+      "Bash(cmd //c:*)"
+    ]
+  }
+}
