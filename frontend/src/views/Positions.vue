@@ -196,18 +196,18 @@ let reverseChart = null
 // Computed Statistics
 const averageSpread = computed(() => {
   if (spreadRecords.value.length === 0) return 0
-  const sum = spreadRecords.value.reduce((acc, r) => acc + r.forward_spread + r.reverse_spread, 0)
+  const sum = spreadRecords.value.reduce((acc, r) => acc + Math.abs(r.forward_spread) + Math.abs(r.reverse_spread), 0)
   return sum / (spreadRecords.value.length * 2)
 })
 
 const maxSpread = computed(() => {
   if (spreadRecords.value.length === 0) return 0
-  return Math.max(...spreadRecords.value.map(r => Math.max(r.forward_spread, r.reverse_spread)))
+  return Math.max(...spreadRecords.value.map(r => Math.max(Math.abs(r.forward_spread), Math.abs(r.reverse_spread))))
 })
 
 const minSpread = computed(() => {
   if (spreadRecords.value.length === 0) return 0
-  return Math.min(...spreadRecords.value.map(r => Math.min(r.forward_spread, r.reverse_spread)))
+  return Math.min(...spreadRecords.value.map(r => Math.min(Math.abs(r.forward_spread), Math.abs(r.reverse_spread))))
 })
 
 const totalPages = computed(() => Math.ceil(spreadRecords.value.length / pageSize.value))
@@ -261,39 +261,43 @@ async function querySpreadData() {
     let start_time, end_time
 
     if (queryType.value === 'day') {
-      // Query for selected day
-      const startDate = new Date(selectedDate.value)
-      startDate.setHours(0, 0, 0, 0)
-      start_time = startDate.toISOString()
-
-      const endDate = new Date(selectedDate.value)
-      endDate.setHours(23, 59, 59, 999)
-      end_time = endDate.toISOString()
+      // Query for selected day (use UTC to avoid timezone issues)
+      const dateStr = selectedDate.value
+      start_time = `${dateStr}T00:00:00.000Z`
+      end_time = `${dateStr}T23:59:59.999Z`
     } else if (queryType.value === 'week') {
       // Query for selected week
+      if (!selectedWeek.value) {
+        alert('请选择周')
+        return
+      }
       const [year, week] = selectedWeek.value.split('-W')
       const firstDay = getFirstDayOfWeek(parseInt(year), parseInt(week))
-      firstDay.setHours(0, 0, 0, 0)
-      start_time = firstDay.toISOString()
-
       const lastDay = new Date(firstDay)
       lastDay.setDate(lastDay.getDate() + 6)
-      lastDay.setHours(23, 59, 59, 999)
-      end_time = lastDay.toISOString()
+
+      start_time = `${firstDay.toISOString().split('T')[0]}T00:00:00.000Z`
+      end_time = `${lastDay.toISOString().split('T')[0]}T23:59:59.999Z`
     } else if (queryType.value === 'month') {
       // Query for selected month
+      if (!selectedMonth.value) {
+        alert('请选择月份')
+        return
+      }
       const [year, month] = selectedMonth.value.split('-')
-      const startDate = new Date(parseInt(year), parseInt(month) - 1, 1, 0, 0, 0, 0)
-      start_time = startDate.toISOString()
+      const firstDay = `${year}-${month}-01`
+      const lastDayOfMonth = new Date(parseInt(year), parseInt(month), 0).getDate()
+      const lastDay = `${year}-${month}-${lastDayOfMonth.toString().padStart(2, '0')}`
 
-      const endDate = new Date(parseInt(year), parseInt(month), 0, 23, 59, 59, 999)
-      end_time = endDate.toISOString()
+      start_time = `${firstDay}T00:00:00.000Z`
+      end_time = `${lastDay}T23:59:59.999Z`
     } else if (queryType.value === 'custom') {
       // Query for custom date range
       if (!startDate.value || !endDate.value) {
         alert('请选择开始时间和结束时间')
         return
       }
+      // For datetime-local input, convert to ISO string
       start_time = new Date(startDate.value).toISOString()
       end_time = new Date(endDate.value).toISOString()
     }
