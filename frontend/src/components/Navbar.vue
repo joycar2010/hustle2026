@@ -3,8 +3,55 @@
     <div class="container mx-auto px-4">
       <div class="flex items-center justify-between h-16">
         <!-- Logo -->
-        <div class="flex items-center space-x-8">
-          <router-link to="/" class="flex items-center space-x-3">
+        <div class="flex items-center space-x-6">
+          <!-- Alert Switches -->
+          <div class="hidden xl:flex items-center space-x-2 mr-8">
+            <!-- Alert Sound Switch -->
+            <div class="flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
+              <svg class="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              </svg>
+              <span class="text-sm text-text-secondary whitespace-nowrap">提醒音</span>
+              <button
+                @click="toggleAlertSound"
+                :class="[
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0',
+                  notificationStore.alertSoundEnabled ? 'bg-primary' : 'bg-gray-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
+                    notificationStore.alertSoundEnabled ? 'translate-x-5' : 'translate-x-1'
+                  ]"
+                />
+              </button>
+            </div>
+
+            <!-- Single-Leg Alert Switch -->
+            <div class="flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
+              <svg class="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span class="text-sm text-text-secondary whitespace-nowrap">单腿提醒</span>
+              <button
+                @click="toggleSingleLegAlert"
+                :class="[
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0',
+                  notificationStore.singleLegAlertEnabled ? 'bg-primary' : 'bg-gray-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
+                    notificationStore.singleLegAlertEnabled ? 'translate-x-5' : 'translate-x-1'
+                  ]"
+                />
+              </button>
+            </div>
+          </div>
+
+          <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
             <div class="w-10 h-10 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center shadow-lg">
               <span class="text-dark-300 font-bold text-xl">H</span>
             </div>
@@ -22,7 +69,7 @@
               :to="item.path"
               class="nav-link"
             >
-              <component :is="item.icon" class="w-4 h-4" />
+              <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
               <span>{{ item.label }}</span>
             </router-link>
           </div>
@@ -158,11 +205,14 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useNotificationStore } from '@/stores/notification'
 import EditProfileModal from '@/components/modals/EditProfileModal.vue'
 import ChangePasswordModal from '@/components/modals/ChangePasswordModal.vue'
+import api from '@/services/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const notificationStore = useNotificationStore()
 const mobileMenuOpen = ref(false)
 const userMenuOpen = ref(false)
 const userMenuRef = ref(null)
@@ -176,7 +226,7 @@ const userInitial = computed(() => user.value?.username?.charAt(0).toUpperCase()
 const navItems = [
   {
     path: '/',
-    label: '主控台',
+    label: '控制面板',
     icon: 'DashboardIcon',
   },
   {
@@ -248,6 +298,14 @@ function handleProfileUpdated() {
 function handlePasswordChanged() {
   // Password was successfully changed
   console.log('Password changed successfully')
+}
+
+function toggleAlertSound() {
+  notificationStore.toggleAlertSound(!notificationStore.alertSoundEnabled)
+}
+
+function toggleSingleLegAlert() {
+  notificationStore.toggleSingleLegAlert(!notificationStore.singleLegAlertEnabled)
 }
 
 // Icon components

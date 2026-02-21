@@ -9,6 +9,22 @@ export const useNotificationStore = defineStore('notification', () => {
   const audioContext = ref(null)
   const isAudioPlaying = ref(false)
 
+  // Alert switches with localStorage persistence
+  const alertSoundEnabled = ref(localStorage.getItem('alertSoundEnabled') !== 'false')
+  const singleLegAlertEnabled = ref(localStorage.getItem('singleLegAlertEnabled') !== 'false')
+
+  // Toggle alert sound
+  function toggleAlertSound(enabled) {
+    alertSoundEnabled.value = enabled
+    localStorage.setItem('alertSoundEnabled', enabled)
+  }
+
+  // Toggle single-leg alert
+  function toggleSingleLegAlert(enabled) {
+    singleLegAlertEnabled.value = enabled
+    localStorage.setItem('singleLegAlertEnabled', enabled)
+  }
+
   // Load alert settings from backend
   async function loadAlertSettings() {
     try {
@@ -157,20 +173,60 @@ export const useNotificationStore = defineStore('notification', () => {
   // Trigger popup notification
   function triggerPopup(alert) {
     activePopup.value = alert
-    playAlertSound()
+    playAlertSound(alert)
   }
 
-  // Play "Hello Moto" ringtone 3 times for 10 seconds
-  async function playAlertSound() {
+  // Play alert sound based on alert type
+  async function playAlertSound(alert) {
+    // Check if alert sound is enabled
+    if (!alertSoundEnabled.value) return
     if (isAudioPlaying.value) return
+    if (!alertSettings.value) return
+
     isAudioPlaying.value = true
 
     try {
-      // Try to play audio file first, fallback to Web Audio API
-      const audio = new Audio('/sounds/hello-moto.mp3')
+      // Determine which sound file and repeat count to use based on alert type
+      let soundFile = null
+      let repeatCount = 3
 
-      // Play 3 times
-      for (let i = 0; i < 3; i++) {
+      // Map alert types to sound settings
+      if (alert.type.includes('single_leg')) {
+        // Single-leg trading alerts
+        soundFile = alertSettings.value.singleLegAlertSound
+        repeatCount = alertSettings.value.singleLegAlertRepeatCount || 3
+      } else if (alert.type.includes('forward') || alert.type.includes('reverse')) {
+        // Spread alerts (forward_open, forward_close, reverse_open, reverse_close)
+        soundFile = alertSettings.value.spreadAlertSound
+        repeatCount = alertSettings.value.spreadAlertRepeatCount || 3
+      } else if (alert.type.includes('asset')) {
+        // Net asset alerts (binance_asset, bybit_asset, total_asset)
+        soundFile = alertSettings.value.netAssetAlertSound
+        repeatCount = alertSettings.value.netAssetAlertRepeatCount || 3
+      } else if (alert.type.includes('mt5')) {
+        // MT5 lag alerts
+        soundFile = alertSettings.value.mt5AlertSound
+        repeatCount = alertSettings.value.mt5AlertRepeatCount || 3
+      } else if (alert.type.includes('liquidation')) {
+        // Liquidation alerts
+        soundFile = alertSettings.value.liquidationAlertSound
+        repeatCount = alertSettings.value.liquidationAlertRepeatCount || 3
+      }
+
+      // If no custom sound file is set, use default
+      if (!soundFile) {
+        soundFile = '/sounds/hello-moto.mp3'
+      }
+
+      // Construct full URL for uploaded sound files
+      const soundUrl = soundFile.startsWith('/uploads/')
+        ? `http://13.115.21.77:8000${soundFile}`
+        : soundFile
+
+      // Play the sound file the specified number of times
+      const audio = new Audio(soundUrl)
+
+      for (let i = 0; i < repeatCount; i++) {
         try {
           audio.currentTime = 0
           await audio.play()
@@ -182,7 +238,7 @@ export const useNotificationStore = defineStore('notification', () => {
           await playHelloMotoTone()
         }
 
-        if (i < 2) {
+        if (i < repeatCount - 1) {
           await new Promise(resolve => setTimeout(resolve, 500)) // 0.5s pause between plays
         }
       }
@@ -246,11 +302,15 @@ export const useNotificationStore = defineStore('notification', () => {
     alertSettings,
     activePopup,
     isAudioPlaying,
+    alertSoundEnabled,
+    singleLegAlertEnabled,
     loadAlertSettings,
     checkMarketAlerts,
     checkAccountAlerts,
     checkMT5LagAlert,
     dismissAlert,
-    dismissPopup
+    dismissPopup,
+    toggleAlertSound,
+    toggleSingleLegAlert
   }
 })

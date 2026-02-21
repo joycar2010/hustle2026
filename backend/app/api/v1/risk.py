@@ -1,11 +1,14 @@
 """Risk control API endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 from pydantic import BaseModel
 from datetime import datetime
+import os
+import shutil
+from pathlib import Path
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.account import Account
@@ -32,6 +35,16 @@ class AlertSettings(BaseModel):
     forwardOpenSyncCount: int = 3
     forwardClosePrice: float = 0.2
     forwardCloseSyncCount: int = 3
+    singleLegAlertSound: Optional[str] = None
+    singleLegAlertRepeatCount: int = 3
+    spreadAlertSound: Optional[str] = None
+    spreadAlertRepeatCount: int = 3
+    netAssetAlertSound: Optional[str] = None
+    netAssetAlertRepeatCount: int = 3
+    mt5AlertSound: Optional[str] = None
+    mt5AlertRepeatCount: int = 3
+    liquidationAlertSound: Optional[str] = None
+    liquidationAlertRepeatCount: int = 3
 
 
 @router.get("/status")
@@ -84,6 +97,16 @@ async def get_alert_settings(
                 forwardOpenSyncCount=settings.forward_open_sync_count,
                 forwardClosePrice=settings.forward_close_price,
                 forwardCloseSyncCount=settings.forward_close_sync_count,
+                singleLegAlertSound=settings.single_leg_alert_sound,
+                singleLegAlertRepeatCount=settings.single_leg_alert_repeat_count,
+                spreadAlertSound=settings.spread_alert_sound,
+                spreadAlertRepeatCount=settings.spread_alert_repeat_count,
+                netAssetAlertSound=settings.net_asset_alert_sound,
+                netAssetAlertRepeatCount=settings.net_asset_alert_repeat_count,
+                mt5AlertSound=settings.mt5_alert_sound,
+                mt5AlertRepeatCount=settings.mt5_alert_repeat_count,
+                liquidationAlertSound=settings.liquidation_alert_sound,
+                liquidationAlertRepeatCount=settings.liquidation_alert_repeat_count,
             )
 
         # Return default settings if none exist
@@ -125,6 +148,16 @@ async def save_alert_settings(
             existing_settings.forward_open_sync_count = settings.forwardOpenSyncCount
             existing_settings.forward_close_price = settings.forwardClosePrice
             existing_settings.forward_close_sync_count = settings.forwardCloseSyncCount
+            existing_settings.single_leg_alert_sound = settings.singleLegAlertSound
+            existing_settings.single_leg_alert_repeat_count = settings.singleLegAlertRepeatCount
+            existing_settings.spread_alert_sound = settings.spreadAlertSound
+            existing_settings.spread_alert_repeat_count = settings.spreadAlertRepeatCount
+            existing_settings.net_asset_alert_sound = settings.netAssetAlertSound
+            existing_settings.net_asset_alert_repeat_count = settings.netAssetAlertRepeatCount
+            existing_settings.mt5_alert_sound = settings.mt5AlertSound
+            existing_settings.mt5_alert_repeat_count = settings.mt5AlertRepeatCount
+            existing_settings.liquidation_alert_sound = settings.liquidationAlertSound
+            existing_settings.liquidation_alert_repeat_count = settings.liquidationAlertRepeatCount
             existing_settings.update_time = datetime.utcnow()
         else:
             # Create new settings
@@ -144,6 +177,16 @@ async def save_alert_settings(
                 forward_open_sync_count=settings.forwardOpenSyncCount,
                 forward_close_price=settings.forwardClosePrice,
                 forward_close_sync_count=settings.forwardCloseSyncCount,
+                single_leg_alert_sound=settings.singleLegAlertSound,
+                single_leg_alert_repeat_count=settings.singleLegAlertRepeatCount,
+                spread_alert_sound=settings.spreadAlertSound,
+                spread_alert_repeat_count=settings.spreadAlertRepeatCount,
+                net_asset_alert_sound=settings.netAssetAlertSound,
+                net_asset_alert_repeat_count=settings.netAssetAlertRepeatCount,
+                mt5_alert_sound=settings.mt5AlertSound,
+                mt5_alert_repeat_count=settings.mt5AlertRepeatCount,
+                liquidation_alert_sound=settings.liquidationAlertSound,
+                liquidation_alert_repeat_count=settings.liquidationAlertRepeatCount,
             )
             db.add(new_settings)
 
@@ -290,6 +333,62 @@ async def get_emergency_stop_status():
         return {
             "active": is_active,
         }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.post("/alert-sound/upload")
+async def upload_alert_sound(
+    alert_type: str,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, str]:
+    """Upload alert sound file (MP3)
+
+    Args:
+        alert_type: Type of alert (spread, net_asset, mt5, liquidation)
+        file: MP3 file to upload
+    """
+    try:
+        # Validate alert type
+        valid_types = ["single_leg", "spread", "net_asset", "mt5", "liquidation"]
+        if alert_type not in valid_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid alert type. Must be one of: {', '.join(valid_types)}"
+            )
+
+        # Validate file type
+        if not file.filename.endswith('.mp3'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only MP3 files are allowed"
+            )
+
+        # Create uploads directory if it doesn't exist
+        upload_dir = Path("uploads/alert_sounds")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate unique filename
+        file_extension = Path(file.filename).suffix
+        filename = f"{user_id}_{alert_type}{file_extension}"
+        file_path = upload_dir / filename
+
+        # Save file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Return relative path for storage in database
+        relative_path = f"/uploads/alert_sounds/{filename}"
+        return {
+            "message": "File uploaded successfully",
+            "file_path": relative_path
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

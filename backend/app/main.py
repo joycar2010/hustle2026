@@ -2,8 +2,10 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
+from pathlib import Path
 import logging
 from app.core.config import settings
 from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading
@@ -93,6 +95,11 @@ app.include_router(automation.router, prefix="/api/v1/automation", tags=["Automa
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
 app.include_router(websocket.router, tags=["WebSocket"])
+
+# Mount static files for uploaded alert sounds
+uploads_dir = Path("uploads")
+uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/")

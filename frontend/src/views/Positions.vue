@@ -11,6 +11,7 @@
           <label class="block text-sm text-gray-400 mb-2">查询类型</label>
           <select v-model="queryType" @change="handleQueryTypeChange"
                   class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
+            <option value="recent">近2小时</option>
             <option value="day">按日</option>
             <option value="week">按周</option>
             <option value="month">按月</option>
@@ -52,8 +53,12 @@
 
         <!-- Query Button -->
         <div class="flex items-end">
-          <button @click="querySpreadData" class="btn-primary w-full">
-            查询
+          <button @click="querySpreadData" :disabled="loading" class="btn-primary w-full flex items-center justify-center">
+            <svg v-if="loading" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {{ loading ? '查询中...' : '查询' }}
           </button>
         </div>
       </div>
@@ -175,12 +180,13 @@ import api from '@/services/api'
 Chart.register(...registerables)
 
 // Query Controls
-const queryType = ref('day')
+const queryType = ref('recent')
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const selectedWeek = ref('')
 const selectedMonth = ref('')
 const startDate = ref('')
 const endDate = ref('')
+const loading = ref(false)
 
 // Data
 const spreadRecords = ref([])
@@ -256,11 +262,21 @@ function getWeekNumber(date) {
 }
 
 async function querySpreadData() {
+  console.log('querySpreadData called, queryType:', queryType.value)
+  console.log('startDate:', startDate.value, 'endDate:', endDate.value)
+
   try {
+    loading.value = true
     // Calculate start and end time based on query type
     let start_time, end_time
 
-    if (queryType.value === 'day') {
+    if (queryType.value === 'recent') {
+      // Query for last 2 hours
+      const now = new Date()
+      const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000)
+      start_time = twoHoursAgo.toISOString()
+      end_time = now.toISOString()
+    } else if (queryType.value === 'day') {
       // Query for selected day (use UTC to avoid timezone issues)
       const dateStr = selectedDate.value
       start_time = `${dateStr}T00:00:00.000Z`
@@ -269,6 +285,12 @@ async function querySpreadData() {
       // Query for selected week
       if (!selectedWeek.value) {
         alert('请选择周')
+        loading.value = false
+        return
+      }
+      // Warn about large data query
+      if (!confirm('查询一周的数据可能需要较长时间，是否继续？')) {
+        loading.value = false
         return
       }
       const [year, week] = selectedWeek.value.split('-W')
@@ -282,6 +304,12 @@ async function querySpreadData() {
       // Query for selected month
       if (!selectedMonth.value) {
         alert('请选择月份')
+        loading.value = false
+        return
+      }
+      // Warn about large data query
+      if (!confirm('查询一个月的数据可能需要较长时间且数据量较大，是否继续？')) {
+        loading.value = false
         return
       }
       const [year, month] = selectedMonth.value.split('-')
@@ -293,24 +321,51 @@ async function querySpreadData() {
       end_time = `${lastDay}T23:59:59.999Z`
     } else if (queryType.value === 'custom') {
       // Query for custom date range
+      console.log('Custom query - startDate:', startDate.value, 'endDate:', endDate.value)
+
       if (!startDate.value || !endDate.value) {
         alert('请选择开始时间和结束时间')
+        loading.value = false
         return
       }
-      // For datetime-local input, convert to ISO string
-      start_time = new Date(startDate.value).toISOString()
-      end_time = new Date(endDate.value).toISOString()
+      // For datetime-local input, format without timezone conversion
+      // datetime-local gives us "YYYY-MM-DDTHH:mm" which is already in local time
+      // Backend expects ISO format without timezone (database uses TIMESTAMP WITHOUT TIME ZONE)
+      const start = new Date(startDate.value)
+      const end = new Date(endDate.value)
+      console.log('Parsed dates - start:', start, 'end:', end)
+
+      const daysDiff = (end - start) / (1000 * 60 * 60 * 24)
+      console.log('Days difference:', daysDiff)
+
+      // Warn if custom range is more than 7 days
+      if (daysDiff > 7 && !confirm(`您选择的时间跨度为${daysDiff.toFixed(1)}天，数据量可能较大，查询可能需要较长时间，是否继续？`)) {
+        loading.value = false
+        return
+      }
+
+      // Format as ISO string without timezone conversion
+      // Use the datetime-local value directly and append seconds
+      start_time = `${startDate.value}:00`
+      end_time = `${endDate.value}:59`
+      console.log('ISO times - start_time:', start_time, 'end_time:', end_time)
     }
 
-    // Fetch spread records from database
+    // Fetch spread records from database with extended timeout for large queries
     const response = await api.get('/api/v1/market/spread/history', {
       params: {
         start_time,
         end_time,
         binance_symbol: 'XAUUSDT',
         bybit_symbol: 'XAUUSDT'
-      }
+      },
+      timeout: 60000 // 60 seconds timeout for large data queries
     })
+
+    // Show warning if data count is large
+    if (response.data.length > 10000) {
+      alert(`查询返回${response.data.length}条记录，数据量较大，页面渲染可能需要一些时间`)
+    }
 
     // Map the response data to the expected format
     spreadRecords.value = response.data.map((item, index) => ({
@@ -329,6 +384,8 @@ async function querySpreadData() {
     console.error('Failed to query spread data:', error)
     alert('获取点差数据失败: ' + (error.response?.data?.detail || error.message))
     spreadRecords.value = []
+  } finally {
+    loading.value = false
   }
 }
 

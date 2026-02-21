@@ -171,7 +171,7 @@ class MarketDataService:
         """Get historical spread data from PostgreSQL database
 
         Args:
-            limit: Maximum number of records to return
+            limit: Maximum number of records to return (ignored if time filters are provided)
             binance_symbol: Binance trading symbol
             bybit_symbol: Bybit trading symbol
             start_time: Start time in ISO format (optional)
@@ -197,8 +197,13 @@ class MarketDataService:
                 end_dt = end_dt.replace(tzinfo=None)
                 query = query.where(SpreadRecord.timestamp <= end_dt)
 
-            # Order by timestamp descending and limit
-            query = query.order_by(SpreadRecord.timestamp.desc()).limit(limit)
+            # Order by timestamp descending
+            query = query.order_by(SpreadRecord.timestamp.desc())
+
+            # Only apply limit if no time filters are provided
+            # When time filters are provided, return all matching records
+            if not start_time and not end_time:
+                query = query.limit(limit)
 
             result = await session.execute(query)
             records = result.scalars().all()

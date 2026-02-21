@@ -210,6 +210,181 @@
           </div>
         </div>
       </div>
+
+      <div v-if="activeTab === 'alerts'" class="space-y-6">
+        <div class="card">
+          <h2 class="text-xl font-bold mb-4">提醒声音设置</h2>
+          <p class="text-text-secondary mb-6">为不同类型的提醒设置自定义MP3声音文件</p>
+
+          <div class="space-y-6">
+            <!-- Single-leg Alert Sound -->
+            <div class="bg-dark-200 rounded p-4">
+              <h3 class="font-bold mb-3">单腿提醒声音</h3>
+              <div class="flex items-center space-x-4 mb-3">
+                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'single_leg')" ref="singleLegFileInput" class="hidden" />
+                <button @click="$refs.singleLegFileInput.click()" class="btn-secondary">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  选择文件
+                </button>
+                <span v-if="alertSounds.singleLeg" class="text-sm text-text-secondary">{{ getFileName(alertSounds.singleLeg) }}</span>
+                <button v-if="alertSounds.singleLeg" @click="playSound(alertSounds.singleLeg)" class="btn-secondary">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
+              <div class="flex items-center space-x-3">
+                <label class="text-sm text-text-secondary">提醒次数:</label>
+                <input
+                  type="number"
+                  v-model.number="alertRepeatCounts.singleLeg"
+                  min="1"
+                  max="10"
+                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
+                />
+                <span class="text-xs text-text-tertiary">次</span>
+              </div>
+            </div>
+
+            <!-- Spread Alert Sound -->
+            <div class="bg-dark-200 rounded p-4">
+              <h3 class="font-bold mb-3">点差提醒声音</h3>
+              <div class="flex items-center space-x-4 mb-3">
+                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'spread')" ref="spreadFileInput" class="hidden" />
+                <button @click="$refs.spreadFileInput.click()" class="btn-secondary">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  选择文件
+                </button>
+                <span v-if="alertSounds.spread" class="text-sm text-text-secondary">{{ getFileName(alertSounds.spread) }}</span>
+                <button v-if="alertSounds.spread" @click="playSound(alertSounds.spread)" class="btn-secondary">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
+              <div class="flex items-center space-x-3">
+                <label class="text-sm text-text-secondary">提醒次数:</label>
+                <input
+                  type="number"
+                  v-model.number="alertRepeatCounts.spread"
+                  min="1"
+                  max="10"
+                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
+                />
+                <span class="text-xs text-text-tertiary">次</span>
+              </div>
+            </div>
+
+            <!-- Net Asset Alert Sound -->
+            <div class="bg-dark-200 rounded p-4">
+              <h3 class="font-bold mb-3">净资产提醒声音</h3>
+              <div class="flex items-center space-x-4 mb-3">
+                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'net_asset')" ref="netAssetFileInput" class="hidden" />
+                <button @click="$refs.netAssetFileInput.click()" class="btn-secondary">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  选择文件
+                </button>
+                <span v-if="alertSounds.netAsset" class="text-sm text-text-secondary">{{ getFileName(alertSounds.netAsset) }}</span>
+                <button v-if="alertSounds.netAsset" @click="playSound(alertSounds.netAsset)" class="btn-secondary">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
+              <div class="flex items-center space-x-3">
+                <label class="text-sm text-text-secondary">提醒次数:</label>
+                <input
+                  type="number"
+                  v-model.number="alertRepeatCounts.netAsset"
+                  min="1"
+                  max="10"
+                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
+                />
+                <span class="text-xs text-text-tertiary">次</span>
+              </div>
+            </div>
+
+            <!-- MT5 Alert Sound -->
+            <div class="bg-dark-200 rounded p-4">
+              <h3 class="font-bold mb-3">MT5状态提醒声音</h3>
+              <div class="flex items-center space-x-4 mb-3">
+                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'mt5')" ref="mt5FileInput" class="hidden" />
+                <button @click="$refs.mt5FileInput.click()" class="btn-secondary">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  选择文件
+                </button>
+                <span v-if="alertSounds.mt5" class="text-sm text-text-secondary">{{ getFileName(alertSounds.mt5) }}</span>
+                <button v-if="alertSounds.mt5" @click="playSound(alertSounds.mt5)" class="btn-secondary">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
+              <div class="flex items-center space-x-3">
+                <label class="text-sm text-text-secondary">提醒次数:</label>
+                <input
+                  type="number"
+                  v-model.number="alertRepeatCounts.mt5"
+                  min="1"
+                  max="10"
+                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
+                />
+                <span class="text-xs text-text-tertiary">次</span>
+              </div>
+            </div>
+
+            <!-- Liquidation Alert Sound -->
+            <div class="bg-dark-200 rounded p-4">
+              <h3 class="font-bold mb-3">爆仓提醒声音</h3>
+              <div class="flex items-center space-x-4 mb-3">
+                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'liquidation')" ref="liquidationFileInput" class="hidden" />
+                <button @click="$refs.liquidationFileInput.click()" class="btn-secondary">
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  选择文件
+                </button>
+                <span v-if="alertSounds.liquidation" class="text-sm text-text-secondary">{{ getFileName(alertSounds.liquidation) }}</span>
+                <button v-if="alertSounds.liquidation" @click="playSound(alertSounds.liquidation)" class="btn-secondary">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
+              <div class="flex items-center space-x-3">
+                <label class="text-sm text-text-secondary">提醒次数:</label>
+                <input
+                  type="number"
+                  v-model.number="alertRepeatCounts.liquidation"
+                  min="1"
+                  max="10"
+                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
+                />
+                <span class="text-xs text-text-tertiary">次</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-6">
+            <button @click="saveAlertSounds" class="btn-primary">
+              保存设置
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-if="showUserModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="closeUserModal">
@@ -274,7 +449,8 @@ const activeTab = ref('users')
 const tabs = [
   { id: 'users', label: '前端用户管理' },
   { id: 'version', label: '系统版本管理' },
-  { id: 'database', label: 'PostgreSQL数据库管理' }
+  { id: 'database', label: 'PostgreSQL数据库管理' },
+  { id: 'alerts', label: '提醒声音设置' }
 ]
 
 const users = ref([])
@@ -301,11 +477,28 @@ const systemInfo = ref({
 const dbStats = ref({ size: '0 MB', tables: 0, connections: 0 })
 const dbTables = ref([])
 
+const alertSounds = ref({
+  singleLeg: null,
+  spread: null,
+  netAsset: null,
+  mt5: null,
+  liquidation: null
+})
+
+const alertRepeatCounts = ref({
+  singleLeg: 3,
+  spread: 3,
+  netAsset: 3,
+  mt5: 3,
+  liquidation: 3
+})
+
 onMounted(async () => {
   await loadUsers()
   await loadSystemInfo()
   await loadDbStats()
   await loadVersionHistory()
+  await loadAlertSounds()
 })
 
 async function loadUsers() {
@@ -572,6 +765,109 @@ function formatDate(dateString) {
   const date = new Date(dateString)
   return date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
+
+async function loadAlertSounds() {
+  try {
+    const response = await api.get('/api/v1/risk/alert-settings')
+    alertSounds.value = {
+      singleLeg: response.data.singleLegAlertSound,
+      spread: response.data.spreadAlertSound,
+      netAsset: response.data.netAssetAlertSound,
+      mt5: response.data.mt5AlertSound,
+      liquidation: response.data.liquidationAlertSound
+    }
+    alertRepeatCounts.value = {
+      singleLeg: response.data.singleLegAlertRepeatCount || 3,
+      spread: response.data.spreadAlertRepeatCount || 3,
+      netAsset: response.data.netAssetAlertRepeatCount || 3,
+      mt5: response.data.mt5AlertRepeatCount || 3,
+      liquidation: response.data.liquidationAlertRepeatCount || 3
+    }
+  } catch (error) {
+    console.error('Failed to load alert sounds:', error)
+  }
+}
+
+async function handleFileUpload(event, alertType) {
+  const file = event.target.files[0]
+  if (!file) return
+
+  if (!file.name.endsWith('.mp3')) {
+    alert('只支持MP3文件')
+    return
+  }
+
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('alert_type', alertType)
+
+    const response = await api.post('/api/v1/risk/alert-sound/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      params: {
+        alert_type: alertType
+      }
+    })
+
+    // Update the alert sound path
+    const fieldMap = {
+      'single_leg': 'singleLeg',
+      'spread': 'spread',
+      'net_asset': 'netAsset',
+      'mt5': 'mt5',
+      'liquidation': 'liquidation'
+    }
+    alertSounds.value[fieldMap[alertType]] = response.data.file_path
+
+    alert('文件上传成功')
+  } catch (error) {
+    console.error('Failed to upload file:', error)
+    alert('上传失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function saveAlertSounds() {
+  try {
+    // Load current settings first
+    const currentSettings = await api.get('/api/v1/risk/alert-settings')
+
+    // Merge with new sound settings and repeat counts
+    await api.post('/api/v1/risk/alert-settings', {
+      ...currentSettings.data,
+      singleLegAlertSound: alertSounds.value.singleLeg,
+      singleLegAlertRepeatCount: alertRepeatCounts.value.singleLeg,
+      spreadAlertSound: alertSounds.value.spread,
+      spreadAlertRepeatCount: alertRepeatCounts.value.spread,
+      netAssetAlertSound: alertSounds.value.netAsset,
+      netAssetAlertRepeatCount: alertRepeatCounts.value.netAsset,
+      mt5AlertSound: alertSounds.value.mt5,
+      mt5AlertRepeatCount: alertRepeatCounts.value.mt5,
+      liquidationAlertSound: alertSounds.value.liquidation,
+      liquidationAlertRepeatCount: alertRepeatCounts.value.liquidation
+    })
+    alert('设置保存成功')
+  } catch (error) {
+    console.error('Failed to save alert sounds:', error)
+    alert('保存失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function playSound(soundPath) {
+  if (!soundPath) return
+  const audio = new Audio(`http://13.115.21.77:8000${soundPath}`)
+  audio.play().catch(error => {
+    console.error('Failed to play sound:', error)
+    alert('播放失败')
+  })
+}
+
+function getFileName(path) {
+  if (!path) return ''
+  return path.split('/').pop()
+}
+
 </script>
 
 <style scoped>
