@@ -130,6 +130,9 @@ const systemAlerts = ref([])
 
 // Persist disconnected state across page refreshes
 const STORAGE_KEY = 'disconnectedAccounts'
+const RECONNECT_COOLDOWN_KEY = 'lastReconnectTime'
+const RECONNECT_COOLDOWN_MS = 10000 // 10 seconds cooldown to prevent Binance ban
+
 function loadDisconnected() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
@@ -138,6 +141,15 @@ function loadDisconnected() {
 }
 function saveDisconnected(set) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]))
+}
+function canReconnect() {
+  const lastReconnect = localStorage.getItem(RECONNECT_COOLDOWN_KEY)
+  if (!lastReconnect) return true
+  const timeSinceLastReconnect = Date.now() - parseInt(lastReconnect)
+  return timeSinceLastReconnect >= RECONNECT_COOLDOWN_MS
+}
+function setReconnectTime() {
+  localStorage.setItem(RECONNECT_COOLDOWN_KEY, Date.now().toString())
 }
 const disconnectedAccounts = ref(loadDisconnected())
 
@@ -255,12 +267,21 @@ function generateSystemAlerts(data) {
 
 function toggleConnection(accountId) {
   if (disconnectedAccounts.value.has(accountId)) {
+    // Reconnecting - check cooldown to prevent Binance ban
+    if (!canReconnect()) {
+      const lastReconnect = parseInt(localStorage.getItem(RECONNECT_COOLDOWN_KEY))
+      const remaining = Math.ceil((RECONNECT_COOLDOWN_MS - (Date.now() - lastReconnect)) / 1000)
+      alert(`请等待 ${remaining} 秒后再重新连接，以避免触发 Binance 限制`)
+      return
+    }
     disconnectedAccounts.value.delete(accountId)
     disconnectedAccounts.value = new Set(disconnectedAccounts.value)
     saveDisconnected(disconnectedAccounts.value)
+    setReconnectTime()
     // Reconnect market WebSocket
     marketStore.connect()
   } else {
+    // Disconnecting
     disconnectedAccounts.value.add(accountId)
     disconnectedAccounts.value = new Set(disconnectedAccounts.value)
     saveDisconnected(disconnectedAccounts.value)

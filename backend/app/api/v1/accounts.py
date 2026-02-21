@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 from app.core.database import get_db
@@ -16,6 +16,7 @@ router = APIRouter()
 
 class AccountSecretResponse(BaseModel):
     api_secret: str
+    mt5_primary_pwd: Optional[str] = None
 
 
 @router.get("", response_model=List[AccountResponse])
@@ -116,7 +117,10 @@ async def get_account_secret(
             detail="Account not found",
         )
 
-    return AccountSecretResponse(api_secret=account.api_secret)
+    return AccountSecretResponse(
+        api_secret=account.api_secret,
+        mt5_primary_pwd=account.mt5_primary_pwd
+    )
 
 
 @router.put("/{account_id}", response_model=AccountResponse)

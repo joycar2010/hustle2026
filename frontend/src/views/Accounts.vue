@@ -75,6 +75,10 @@
                 <span class="text-gray-500">MT5 ID:</span>
                 <span class="font-mono text-xs">{{ account.mt5_id || 'N/A' }}</span>
               </div>
+              <div class="flex justify-between items-center mb-1">
+                <span class="text-gray-500">MT5 Password:</span>
+                <span class="font-mono text-xs">{{ maskSecret(account.mt5_primary_pwd) }}</span>
+              </div>
               <div class="flex justify-between items-center">
                 <span class="text-gray-500">Server:</span>
                 <span class="font-mono text-xs">{{ account.mt5_server || 'N/A' }}</span>
@@ -212,9 +216,19 @@
 
                 <div>
                   <label class="block text-sm text-gray-400 mb-2">MT5 Password *</label>
-                  <input type="password" v-model="accountForm.mt5_primary_pwd" :required="accountForm.is_mt5_account"
-                         class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         placeholder="输入 MT5 密码" />
+                  <div class="flex gap-2">
+                    <input :type="showMt5Password ? 'text' : 'password'"
+                           v-model="accountForm.mt5_primary_pwd"
+                           :required="accountForm.is_mt5_account"
+                           class="flex-1 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
+                           :placeholder="isEditMode ? '留空表示不修改' : '输入 MT5 密码'" />
+                    <button v-if="isEditMode"
+                            type="button"
+                            @click="requestViewMt5Password"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm whitespace-nowrap">
+                      查看密码
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -301,6 +315,8 @@ const showModal = ref(false)
 const isEditMode = ref(false)
 const showPasswordModal = ref(false)
 const showApiSecret = ref(false)
+const showMt5Password = ref(false)
+const viewingSecretType = ref('') // 'api' or 'mt5'
 const verificationPassword = ref('')
 const passwordError = ref('')
 const accountForm = ref({
@@ -377,6 +393,7 @@ function openAddModal() {
 function openEditModal(account) {
   isEditMode.value = true
   showApiSecret.value = false
+  showMt5Password.value = false
   accountForm.value = {
     account_id: account.account_id,
     account_name: account.account_name,
@@ -385,7 +402,7 @@ function openEditModal(account) {
     api_secret: '********', // Show masked secret
     passphrase: '',
     mt5_id: account.mt5_id || '',
-    mt5_primary_pwd: '', // Don't populate password for security
+    mt5_primary_pwd: account.mt5_primary_pwd ? '********' : '', // Show masked password if exists
     mt5_server: account.mt5_server || '',
     is_mt5_account: account.is_mt5_account,
     is_default: account.is_default,
@@ -445,6 +462,19 @@ async function saveAccount() {
       }
       if (accountForm.value.passphrase) {
         updateData.passphrase = accountForm.value.passphrase
+      }
+
+      // Only include MT5 password if it was changed (not empty and not masked)
+      if (accountForm.value.is_mt5_account) {
+        if (accountForm.value.mt5_id) {
+          updateData.mt5_id = accountForm.value.mt5_id
+        }
+        if (accountForm.value.mt5_primary_pwd && accountForm.value.mt5_primary_pwd !== '********') {
+          updateData.mt5_primary_pwd = accountForm.value.mt5_primary_pwd
+        }
+        if (accountForm.value.mt5_server) {
+          updateData.mt5_server = accountForm.value.mt5_server
+        }
       }
 
       await api.put(`/api/v1/accounts/${accountForm.value.account_id}`, updateData)
@@ -511,6 +541,14 @@ async function deleteAccount(accountId) {
 }
 
 function requestViewSecret() {
+  viewingSecretType.value = 'api'
+  showPasswordModal.value = true
+  verificationPassword.value = ''
+  passwordError.value = ''
+}
+
+function requestViewMt5Password() {
+  viewingSecretType.value = 'mt5'
   showPasswordModal.value = true
   verificationPassword.value = ''
   passwordError.value = ''
@@ -520,22 +558,30 @@ function closePasswordModal() {
   showPasswordModal.value = false
   verificationPassword.value = ''
   passwordError.value = ''
+  viewingSecretType.value = ''
 }
 
 async function verifyPasswordAndViewSecret() {
   try {
     passwordError.value = ''
 
-    // Call backend API to verify password and get the secret
+    // Call backend API to verify password
     const response = await api.post('/api/v1/auth/verify-password', {
       password: verificationPassword.value
     })
 
     if (response.data.valid) {
-      // Fetch the actual API secret
-      const secretResponse = await api.get(`/api/v1/accounts/${accountForm.value.account_id}/secret`)
-      accountForm.value.api_secret = secretResponse.data.api_secret
-      showApiSecret.value = true
+      if (viewingSecretType.value === 'api') {
+        // Fetch the actual API secret
+        const secretResponse = await api.get(`/api/v1/accounts/${accountForm.value.account_id}/secret`)
+        accountForm.value.api_secret = secretResponse.data.api_secret
+        showApiSecret.value = true
+      } else if (viewingSecretType.value === 'mt5') {
+        // Fetch the actual MT5 password
+        const secretResponse = await api.get(`/api/v1/accounts/${accountForm.value.account_id}/secret`)
+        accountForm.value.mt5_primary_pwd = secretResponse.data.mt5_primary_pwd || ''
+        showMt5Password.value = true
+      }
       closePasswordModal()
     } else {
       passwordError.value = '密码错误，请重试'

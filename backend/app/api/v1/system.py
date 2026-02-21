@@ -474,7 +474,7 @@ async def get_version_history(
             ["git", "fetch", "origin"],
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         # Don't fail if fetch fails (might be offline), just log it
@@ -486,7 +486,7 @@ async def get_version_history(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         if branch_result.returncode != 0:
@@ -499,24 +499,27 @@ async def get_version_history(
             ["git", "log", current_branch, "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
             capture_output=True,
             text=True,
-            cwd="."
+            encoding='utf-8',
+            errors='replace',
+            cwd=".."
         )
 
         if result.returncode != 0:
             raise Exception(f"Git command failed: {result.stderr}")
 
         versions = []
-        for line in result.stdout.strip().split('\n'):
-            if line:
-                parts = line.split('|')
-                if len(parts) >= 5:
-                    versions.append({
-                        "hash": parts[0],
-                        "author": parts[1],
-                        "email": parts[2],
-                        "date": parts[3],
-                        "message": parts[4]
-                    })
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split('|')
+                    if len(parts) >= 5:
+                        versions.append({
+                            "hash": parts[0],
+                            "author": parts[1],
+                            "email": parts[2],
+                            "date": parts[3],
+                            "message": parts[4]
+                        })
 
         return versions
     except Exception as e:
@@ -539,7 +542,7 @@ async def push_to_github(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         if branch_result.returncode != 0:
@@ -552,7 +555,7 @@ async def push_to_github(
             ["git", "status", "--porcelain"],
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         if status_result.stdout.strip():
@@ -565,7 +568,7 @@ async def push_to_github(
                 ["git", "add", "."],
                 capture_output=True,
                 text=True,
-                cwd="."
+                cwd=".."
             )
 
             if add_result.returncode != 0:
@@ -576,7 +579,7 @@ async def push_to_github(
                 ["git", "commit", "-m", commit_message],
                 capture_output=True,
                 text=True,
-                cwd="."
+                cwd=".."
             )
 
             if commit_result.returncode != 0:
@@ -594,7 +597,7 @@ async def push_to_github(
             push_args,
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         if push_result.returncode != 0:
@@ -634,7 +637,7 @@ async def rollback_version(
             ["git", "reset", "--hard", target],
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         if reset_result.returncode != 0:
@@ -667,7 +670,7 @@ async def delete_version(
             ["git", "revert", "--no-edit", version_hash],
             capture_output=True,
             text=True,
-            cwd="."
+            cwd=".."
         )
 
         if revert_result.returncode != 0:
