@@ -55,6 +55,18 @@ const routes = [
     name: 'System',
     component: () => import('@/views/System.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/test',
+    name: 'BinanceTest',
+    component: () => import('@/views/BinanceTest.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/test1',
+    name: 'BybitTest',
+    component: () => import('@/views/BybitTest.vue'),
+    meta: { requiresAuth: false }
   }
 ]
 

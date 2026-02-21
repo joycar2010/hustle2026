@@ -25,23 +25,20 @@
             </div>
             <div class="flex space-x-1 self-center">
               <button
-                @click="toggleConnection(account.account_id, account.is_active)"
+                @click="toggleConnection(account.account_id)"
                 class="px-2 py-1 text-xs rounded transition-colors"
-                :class="account.is_active ? 'bg-[#f6465d] hover:bg-[#e03d52]' : 'bg-[#0ecb81] hover:bg-[#0db774]'"
+                :class="disconnectedAccounts.has(account.account_id) ? 'bg-[#0ecb81] hover:bg-[#0db774]' : 'bg-[#f6465d] hover:bg-[#e03d52]'"
               >
-                {{ account.is_active ? '断开' : '连接' }}
+                {{ disconnectedAccounts.has(account.account_id) ? '连接' : '断开' }}
               </button>
               <button
-                @click="toggleDisable(account.account_id, account.is_active)"
-                class="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-700 rounded transition-colors"
+                @click="toggleDisable(account.account_id)"
+                class="px-2 py-1 text-xs rounded transition-colors"
+                :class="disconnectedAccounts.has(account.account_id) ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gray-500 opacity-50 cursor-not-allowed'"
+                :disabled="!disconnectedAccounts.has(account.account_id)"
+                :title="!disconnectedAccounts.has(account.account_id) ? '请先断开连接再禁用' : ''"
               >
-                {{ account.is_active ? '禁用' : '启用' }}
-              </button>
-              <button
-                @click="deleteAccount(account.account_id, account.account_name)"
-                class="px-2 py-1 text-xs bg-[#f6465d] hover:bg-[#e03d52] rounded transition-colors"
-              >
-                删除
+                禁用
               </button>
             </div>
           </div>
@@ -54,44 +51,44 @@
         <div class="p-3 space-y-1.5 text-xs">
           <div class="flex justify-between">
             <span class="text-gray-400">账户总资产</span>
-            <span class="font-mono">{{ formatNumber(account.balance?.total_assets || 0) }} USDT</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'total_assets') }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">可用总资产</span>
-            <span class="font-mono">{{ formatNumber(account.balance?.available_balance || 0) }} USDT</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'available_balance') }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">净资产</span>
-            <span class="font-mono">{{ formatNumber(account.balance?.net_assets || 0) }} USDT</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'net_assets') }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">总持仓</span>
-            <span class="font-mono">{{ formatNumber(account.balance?.margin_balance || 0) }} USDT</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'total_positions') }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">冻结资产</span>
-            <span class="font-mono">{{ formatNumber(account.balance?.frozen_assets || 0) }} USDT</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'frozen_assets') }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">当日盈亏</span>
-            <span class="font-mono" :class="account.daily_pnl >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-              {{ account.daily_pnl >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(account.daily_pnl || 0)) }} USDT
+            <span class="font-mono" :class="getValueColor(account, 'daily_pnl')">
+              {{ getDisplayValue(account, 'daily_pnl', true) }}
             </span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">保证金余额</span>
-            <span class="font-mono">{{ formatNumber(account.balance?.margin_balance || 0) }} USDT</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'margin_balance') }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">风险率</span>
             <span class="font-mono" :class="getRiskColor(account.balance?.risk_ratio || 0)">
-              {{ (account.balance?.risk_ratio || 0).toFixed(2) }}%
+              {{ getDisplayValue(account, 'risk_ratio', false, true) }}
             </span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">{{ account.platform_id === 1 ? '掉期费(Binance)' : '资金费(Bybit)' }}</span>
-            <span class="font-mono text-gray-400">
-              0.00 USDT
+            <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
+              {{ getDisplayValue(account, 'funding_fee', true) }}
             </span>
           </div>
         </div>
@@ -123,22 +120,42 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
+import { useMarketStore } from '@/stores/market'
+
+const marketStore = useMarketStore()
 
 const totalProfit = ref(0)
 const activeAccounts = ref([])
 const systemAlerts = ref([])
 
+// Persist disconnected state across page refreshes
+const STORAGE_KEY = 'disconnectedAccounts'
+function loadDisconnected() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    return saved ? new Set(JSON.parse(saved)) : new Set()
+  } catch { return new Set() }
+}
+function saveDisconnected(set) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]))
+}
+const disconnectedAccounts = ref(loadDisconnected())
+
 let updateInterval = null
 
 onMounted(() => {
   fetchAccountData()
-  updateInterval = setInterval(fetchAccountData, 5000)
+  updateInterval = setInterval(fetchAccountData, 30000)
+  // Restore WS state based on persisted disconnected accounts
+  // If any accounts were disconnected before, WS may have been stopped —
+  // only connect if there are no disconnected accounts saved
+  if (disconnectedAccounts.value.size === 0) {
+    marketStore.connect()
+  }
 })
 
 onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
+  if (updateInterval) clearInterval(updateInterval)
 })
 
 async function fetchAccountData() {
@@ -147,22 +164,18 @@ async function fetchAccountData() {
     const data = response.data
 
     if (data.summary) {
-      // Update total profit (daily P&L)
       totalProfit.value = data.summary.daily_pnl || 0
     }
 
-    // Combine successful and failed accounts
     const allAccounts = []
 
-    // Add successful accounts with balance data
     if (data.accounts && data.accounts.length > 0) {
       allAccounts.push(...data.accounts.map(acc => ({
         ...acc,
-        is_active: acc.is_active !== undefined ? acc.is_active : true  // Use backend's is_active value
+        is_active: acc.is_active !== undefined ? acc.is_active : true
       })))
     }
 
-    // Add failed accounts with placeholder data
     if (data.failed_accounts && data.failed_accounts.length > 0) {
       for (const failedAcc of data.failed_accounts) {
         allAccounts.push({
@@ -177,17 +190,19 @@ async function fetchAccountData() {
             net_assets: 0,
             margin_balance: 0,
             frozen_assets: 0,
+            total_positions: 0,
+            daily_pnl: 0,
+            funding_fee: 0,
             risk_ratio: 0
           },
-          daily_pnl: 0,
           error: failedAcc.error
         })
       }
     }
 
+    // Always update all accounts with fresh data
     activeAccounts.value = allAccounts
 
-    // Generate system alerts based on real data
     systemAlerts.value = generateSystemAlerts(data)
   } catch (error) {
     console.error('Failed to fetch account data:', error)
@@ -238,73 +253,36 @@ function generateSystemAlerts(data) {
   return alerts
 }
 
-async function toggleConnection(accountId, currentStatus) {
-  console.log('[toggleConnection] Called with:', { accountId, currentStatus })
-
-  if (!accountId) {
-    console.error('[toggleConnection] Account ID is missing')
-    alert('错误: 账户ID缺失')
-    return
-  }
-
-  try {
-    const newStatus = !currentStatus
-    console.log('[toggleConnection] Sending API request:', {
-      url: `/api/v1/accounts/${accountId}`,
-      data: { is_active: newStatus }
-    })
-
-    const response = await api.put(`/api/v1/accounts/${accountId}`, {
-      is_active: newStatus
-    })
-
-    console.log('[toggleConnection] API response:', response.data)
-
-    // Refresh account data immediately
-    await fetchAccountData()
-
-    console.log(`[toggleConnection] Account ${accountId} ${newStatus ? 'connected' : 'disconnected'}`)
-    alert(`账户已${newStatus ? '连接' : '断开'}`)
-  } catch (error) {
-    console.error('[toggleConnection] Error:', error)
-    console.error('[toggleConnection] Error response:', error.response)
-    alert(`操作失败: ${error.response?.data?.detail || error.message}`)
+function toggleConnection(accountId) {
+  if (disconnectedAccounts.value.has(accountId)) {
+    disconnectedAccounts.value.delete(accountId)
+    disconnectedAccounts.value = new Set(disconnectedAccounts.value)
+    saveDisconnected(disconnectedAccounts.value)
+    // Reconnect market WebSocket
+    marketStore.connect()
+  } else {
+    disconnectedAccounts.value.add(accountId)
+    disconnectedAccounts.value = new Set(disconnectedAccounts.value)
+    saveDisconnected(disconnectedAccounts.value)
+    // Disconnect market WebSocket only if all accounts are disconnected
+    if (disconnectedAccounts.value.size >= activeAccounts.value.length) {
+      marketStore.disconnect()
+    }
   }
 }
 
-async function toggleDisable(accountId, currentStatus) {
+async function toggleDisable(accountId) {
+  if (!disconnectedAccounts.value.has(accountId)) return
+
   try {
-    const newStatus = !currentStatus
-    await api.put(`/api/v1/accounts/${accountId}`, {
-      is_active: newStatus
-    })
-
-    // Refresh account data immediately
+    await api.put(`/api/v1/accounts/${accountId}`, { is_active: false })
+    disconnectedAccounts.value.delete(accountId)
+    disconnectedAccounts.value = new Set(disconnectedAccounts.value)
+    saveDisconnected(disconnectedAccounts.value)
     await fetchAccountData()
-
-    console.log(`Account ${accountId} ${newStatus ? 'enabled' : 'disabled'}`)
   } catch (error) {
-    console.error('Failed to toggle disable:', error)
+    console.error('Failed to disable account:', error)
     alert(`操作失败: ${error.response?.data?.detail || error.message}`)
-  }
-}
-
-async function deleteAccount(accountId, accountName) {
-  if (!confirm(`确定要删除账户 "${accountName}" 吗？此操作不可恢复。`)) {
-    return
-  }
-
-  try {
-    await api.delete(`/api/v1/accounts/${accountId}`)
-
-    // Refresh account data immediately
-    await fetchAccountData()
-
-    console.log(`Account ${accountId} deleted`)
-    alert('账户已成功删除')
-  } catch (error) {
-    console.error('Failed to delete account:', error)
-    alert(`删除失败: ${error.response?.data?.detail || error.message}`)
   }
 }
 
@@ -334,5 +312,79 @@ function getAlertColor(type) {
     info: 'bg-[#2196F3]'
   }
   return colors[type] || 'bg-gray-500'
+}
+
+function getBanInfo(account) {
+  if (!account.error) return null
+
+  // Check if error is a rate limit ban
+  if (account.error.startsWith('RATE_LIMIT:')) {
+    const banUntilMs = parseInt(account.error.split(':')[1])
+    if (banUntilMs && banUntilMs > 0) {
+      const banUntilDate = new Date(banUntilMs)
+      const now = new Date()
+      const minutesLeft = Math.ceil((banUntilDate - now) / 1000 / 60)
+
+      if (minutesLeft > 0) {
+        const hours = banUntilDate.getHours()
+        const minutes = banUntilDate.getMinutes()
+        const ampm = hours >= 12 ? 'PM' : 'AM'
+        const displayHours = hours % 12 || 12
+        const displayMinutes = minutes.toString().padStart(2, '0')
+
+        return `限制至${displayHours}:${displayMinutes} ${ampm} (${minutesLeft}分钟)`
+      }
+    }
+  }
+
+  return null
+}
+
+function getDisplayValue(account, field, showSign = false, isPercent = false) {
+  // Check if account has rate limit ban
+  const banInfo = getBanInfo(account)
+  if (banInfo) {
+    return banInfo
+  }
+
+  // Check if account has error
+  if (account.error) {
+    return '暂无'
+  }
+
+  // All fields live inside account.balance
+  const value = account.balance ? account.balance[field] : null
+
+  // Handle null/undefined values
+  if (value == null) {
+    return '暂无'
+  }
+
+  // Format the value
+  if (isPercent) {
+    return value.toFixed(2) + '%'
+  }
+
+  if (showSign) {
+    const sign = value >= 0 ? '+' : ''
+    return sign + formatNumber(Math.abs(value)) + ' USDT'
+  }
+
+  return formatNumber(value) + ' USDT'
+}
+
+function getValueColor(account, field) {
+  // Check if account has error
+  if (account.error) {
+    return 'text-gray-400'
+  }
+
+  const value = account.balance ? account.balance[field] : null
+
+  if (value == null) {
+    return 'text-gray-400'
+  }
+
+  return value >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'
 }
 </script>

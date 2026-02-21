@@ -113,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 
 const marketStore = useMarketStore()
@@ -121,88 +121,65 @@ const marketStore = useMarketStore()
 const bybitConnected = ref(false)
 const binanceConnected = ref(false)
 
-const bybit = ref({
-  bid: 0,
-  ask: 0,
-  mid: 0,
-  prevBid: 0,
-  prevAsk: 0,
-  prevMid: 0,
-})
-
-const binance = ref({
-  bid: 0,
-  ask: 0,
-  mid: 0,
-  prevBid: 0,
-  prevAsk: 0,
-  prevMid: 0,
-})
+const bybit = ref({ bid: 0, ask: 0, mid: 0, prevBid: 0, prevAsk: 0, prevMid: 0 })
+const binance = ref({ bid: 0, ask: 0, mid: 0, prevBid: 0, prevAsk: 0, prevMid: 0 })
 
 const bybitLagCount = ref(0)
 const binanceLagCount = ref(0)
-const lastUpdateTime = ref(Date.now())
+let lastUpdateTime = Date.now()
+let lagTimer = null
 
 const bybitLagLevel = computed(() => Math.min(Math.floor(bybitLagCount.value / 10), 5))
 const binanceLagLevel = computed(() => Math.min(Math.floor(binanceLagCount.value / 10), 5))
 
-let updateInterval = null
-
-onMounted(() => {
-  fetchPrices()
-  updateInterval = setInterval(fetchPrices, 1000)
-})
-
-onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
-})
-
-async function fetchPrices() {
-  try {
-    const data = await marketStore.fetchMarketData()
-
-    if (data) {
-      const now = Date.now()
-      const timeSinceLastUpdate = now - lastUpdateTime.value
-
-      // Check for lag (if update takes more than 2 seconds)
-      if (timeSinceLastUpdate > 2000) {
-        bybitLagCount.value++
-        binanceLagCount.value++
-      }
-      lastUpdateTime.value = now
-
-      // Store previous values
-      bybit.value.prevBid = bybit.value.bid
-      bybit.value.prevAsk = bybit.value.ask
-      bybit.value.prevMid = bybit.value.mid
-      binance.value.prevBid = binance.value.bid
-      binance.value.prevAsk = binance.value.ask
-      binance.value.prevMid = binance.value.mid
-
-      // Update Bybit values
-      bybit.value.bid = data.bybit_bid || 0
-      bybit.value.ask = data.bybit_ask || 0
-      bybit.value.mid = data.bybit_mid || ((bybit.value.bid + bybit.value.ask) / 2)
-
-      // Update Binance values
-      binance.value.bid = data.binance_bid || 0
-      binance.value.ask = data.binance_ask || 0
-      binance.value.mid = data.binance_mid || ((binance.value.bid + binance.value.ask) / 2)
-
-      bybitConnected.value = true
-      binanceConnected.value = true
-    }
-  } catch (error) {
-    console.error('Failed to fetch prices:', error)
-    bybitConnected.value = false
-    binanceConnected.value = false
+watch(() => marketStore.marketData, (data) => {
+  if (!data) return
+  const now = Date.now()
+  if (now - lastUpdateTime > 2000) {
     bybitLagCount.value++
     binanceLagCount.value++
   }
-}
+  lastUpdateTime = now
+
+  bybit.value.prevBid = bybit.value.bid
+  bybit.value.prevAsk = bybit.value.ask
+  bybit.value.prevMid = bybit.value.mid
+  binance.value.prevBid = binance.value.bid
+  binance.value.prevAsk = binance.value.ask
+  binance.value.prevMid = binance.value.mid
+
+  bybit.value.bid = data.bybit_bid || 0
+  bybit.value.ask = data.bybit_ask || 0
+  bybit.value.mid = data.bybit_mid || ((bybit.value.bid + bybit.value.ask) / 2)
+
+  binance.value.bid = data.binance_bid || 0
+  binance.value.ask = data.binance_ask || 0
+  binance.value.mid = data.binance_mid || ((binance.value.bid + binance.value.ask) / 2)
+
+  bybitConnected.value = true
+  binanceConnected.value = true
+})
+
+watch(() => marketStore.connected, (val) => {
+  if (!val) {
+    bybitConnected.value = false
+    binanceConnected.value = false
+  }
+})
+
+onMounted(() => {
+  marketStore.connect()
+  lagTimer = setInterval(() => {
+    if (Date.now() - lastUpdateTime > 2000) {
+      bybitLagCount.value++
+      binanceLagCount.value++
+    }
+  }, 2000)
+})
+
+onUnmounted(() => {
+  if (lagTimer) clearInterval(lagTimer)
+})
 
 function formatPrice(price) {
   return price ? price.toFixed(2) : '0.00'

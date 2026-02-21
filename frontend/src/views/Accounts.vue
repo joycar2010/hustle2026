@@ -62,7 +62,7 @@
               </div>
               <div class="flex justify-between items-center">
                 <span class="text-gray-500">API Secret:</span>
-                <span class="font-mono text-xs">{{ maskString(account.api_secret) }}</span>
+                <span class="font-mono text-xs">{{ maskSecret(account.api_secret) }}</span>
               </div>
             </div>
           </div>
@@ -174,9 +174,19 @@
 
                 <div>
                   <label class="block text-sm text-gray-400 mb-2">API Secret *</label>
-                  <input type="password" v-model="accountForm.api_secret" required
-                         class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         :placeholder="`输入 ${accountForm.platform_id === 1 ? 'Binance' : 'Bybit'} API Secret`" />
+                  <div class="flex gap-2">
+                    <input :type="showApiSecret ? 'text' : 'password'"
+                           v-model="accountForm.api_secret"
+                           :required="!isEditMode"
+                           class="flex-1 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
+                           :placeholder="isEditMode ? '留空表示不修改' : `输入 ${accountForm.platform_id === 1 ? 'Binance' : 'Bybit'} API Secret`" />
+                    <button v-if="isEditMode"
+                            type="button"
+                            @click="requestViewSecret"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm whitespace-nowrap">
+                      查看密钥
+                    </button>
+                  </div>
                 </div>
 
                 <div v-if="accountForm.platform_id === 2">
@@ -243,6 +253,41 @@
         </div>
       </div>
     </div>
+
+    <!-- Password Verification Modal -->
+    <div v-if="showPasswordModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div class="bg-gray-900 rounded-lg max-w-md w-full">
+        <div class="p-6">
+          <h2 class="text-xl font-bold mb-4">验证用户密码</h2>
+          <p class="text-sm text-gray-400 mb-4">为了安全，查看API密钥需要验证您的登录密码</p>
+
+          <form @submit.prevent="verifyPasswordAndViewSecret" class="space-y-4">
+            <div>
+              <label class="block text-sm text-gray-400 mb-2">登录密码</label>
+              <input type="password"
+                     v-model="verificationPassword"
+                     required
+                     autofocus
+                     class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                     placeholder="输入您的登录密码" />
+            </div>
+
+            <div v-if="passwordError" class="text-red-500 text-sm">
+              {{ passwordError }}
+            </div>
+
+            <div class="flex gap-3">
+              <button type="submit" class="btn-primary flex-1">
+                验证并查看
+              </button>
+              <button type="button" @click="closePasswordModal" class="btn-secondary flex-1">
+                取消
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -254,6 +299,10 @@ import api from '@/services/api'
 const accounts = ref([])
 const showModal = ref(false)
 const isEditMode = ref(false)
+const showPasswordModal = ref(false)
+const showApiSecret = ref(false)
+const verificationPassword = ref('')
+const passwordError = ref('')
 const accountForm = ref({
   account_id: null,
   account_name: '',
@@ -327,12 +376,13 @@ function openAddModal() {
 
 function openEditModal(account) {
   isEditMode.value = true
+  showApiSecret.value = false
   accountForm.value = {
     account_id: account.account_id,
     account_name: account.account_name,
     platform_id: account.platform_id,
     api_key: account.api_key || '',
-    api_secret: '', // Don't populate secret for security
+    api_secret: '********', // Show masked secret
     passphrase: '',
     mt5_id: account.mt5_id || '',
     mt5_primary_pwd: '', // Don't populate password for security
@@ -386,11 +436,11 @@ async function saveAccount() {
         is_active: accountForm.value.is_active
       }
 
-      // Only include API credentials if they were changed (not empty)
+      // Only include API credentials if they were changed (not empty and not masked)
       if (accountForm.value.api_key) {
         updateData.api_key = accountForm.value.api_key
       }
-      if (accountForm.value.api_secret) {
+      if (accountForm.value.api_secret && accountForm.value.api_secret !== '********') {
         updateData.api_secret = accountForm.value.api_secret
       }
       if (accountForm.value.passphrase) {
@@ -458,6 +508,48 @@ async function deleteAccount(accountId) {
     console.error('Failed to delete account:', error)
     alert('删除失败: ' + (error.response?.data?.detail || error.message))
   }
+}
+
+function requestViewSecret() {
+  showPasswordModal.value = true
+  verificationPassword.value = ''
+  passwordError.value = ''
+}
+
+function closePasswordModal() {
+  showPasswordModal.value = false
+  verificationPassword.value = ''
+  passwordError.value = ''
+}
+
+async function verifyPasswordAndViewSecret() {
+  try {
+    passwordError.value = ''
+
+    // Call backend API to verify password and get the secret
+    const response = await api.post('/api/v1/auth/verify-password', {
+      password: verificationPassword.value
+    })
+
+    if (response.data.valid) {
+      // Fetch the actual API secret
+      const secretResponse = await api.get(`/api/v1/accounts/${accountForm.value.account_id}/secret`)
+      accountForm.value.api_secret = secretResponse.data.api_secret
+      showApiSecret.value = true
+      closePasswordModal()
+    } else {
+      passwordError.value = '密码错误，请重试'
+    }
+  } catch (error) {
+    console.error('Failed to verify password:', error)
+    passwordError.value = error.response?.data?.detail || '验证失败，请重试'
+  }
+}
+
+function maskSecret(str) {
+  if (!str) return 'N/A'
+  // Return all asterisks for secrets
+  return '****************************************'.substring(0, Math.max(str.length, 16))
 }
 
 function maskString(str) {

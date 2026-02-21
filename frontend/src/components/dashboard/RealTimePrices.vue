@@ -126,25 +126,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 
 const marketStore = useMarketStore()
-const isConnected = ref(false)
+const isConnected = computed(() => marketStore.connected)
 
-const binance = ref({
-  bid: 0,
-  ask: 0,
-  prevBid: 0,
-  prevAsk: 0,
-})
-
-const bybit = ref({
-  bid: 0,
-  ask: 0,
-  prevBid: 0,
-  prevAsk: 0,
-})
+const binance = ref({ bid: 0, ask: 0, prevBid: 0, prevAsk: 0 })
+const bybit = ref({ bid: 0, ask: 0, prevBid: 0, prevAsk: 0 })
 
 const arbitrageOpportunity = computed(() => {
   const forwardSpread = bybit.value.bid - binance.value.ask
@@ -166,43 +155,23 @@ const arbitrageOpportunity = computed(() => {
   return null
 })
 
-let updateInterval = null
+watch(() => marketStore.marketData, (data) => {
+  if (!data) return
 
-onMounted(async () => {
-  await fetchPrices()
-  updateInterval = setInterval(fetchPrices, 1000)
+  binance.value.prevBid = binance.value.bid
+  binance.value.prevAsk = binance.value.ask
+  bybit.value.prevBid = bybit.value.bid
+  bybit.value.prevAsk = bybit.value.ask
+
+  binance.value.bid = data.binance_bid || 0
+  binance.value.ask = data.binance_ask || 0
+  bybit.value.bid = data.bybit_bid || 0
+  bybit.value.ask = data.bybit_ask || 0
 })
 
-onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
+onMounted(() => {
+  marketStore.connect()
 })
-
-async function fetchPrices() {
-  try {
-    const data = await marketStore.fetchMarketData()
-
-    if (data) {
-      // Store previous values
-      binance.value.prevBid = binance.value.bid
-      binance.value.prevAsk = binance.value.ask
-      bybit.value.prevBid = bybit.value.bid
-      bybit.value.prevAsk = bybit.value.ask
-
-      // Update current values
-      binance.value.bid = data.binance_bid || 0
-      binance.value.ask = data.binance_ask || 0
-      bybit.value.bid = data.bybit_bid || 0
-      bybit.value.ask = data.bybit_ask || 0
-
-      isConnected.value = true
-    }
-  } catch (error) {
-    console.error('Failed to fetch prices:', error)
-    isConnected.value = false
-  }
-}
 
 function formatPrice(price) {
   return price ? price.toFixed(2) : '0.00'
