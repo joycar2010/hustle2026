@@ -14,6 +14,7 @@ class BinanceFuturesClient:
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = settings.BINANCE_API_BASE
+        self.spot_base_url = "https://api.binance.com"  # Spot API base URL
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -27,9 +28,8 @@ class BinanceFuturesClient:
         if self.session and not self.session.closed:
             await self.session.close()
 
-    def _sign(self, params: Dict[str, Any]) -> str:
-        """Generate HMAC SHA256 signature"""
-        query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+    def _sign(self, query_string: str) -> str:
+        """Generate HMAC SHA256 signature for a query string"""
         return hmac.new(
             self.api_secret.encode("utf-8"),
             query_string.encode("utf-8"),
@@ -41,18 +41,31 @@ class BinanceFuturesClient:
         method: str,
         endpoint: str,
         signed: bool = False,
+        use_spot_api: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Make HTTP request to Binance API"""
-        url = f"{self.base_url}{endpoint}"
+        base_url = self.spot_base_url if use_spot_api else self.base_url
+        url = f"{base_url}{endpoint}"
         headers = {}
 
         if signed:
             headers["X-MBX-APIKEY"] = self.api_key
-            params = kwargs.get("params", {})
+            params = kwargs.pop("params", {})
             params["timestamp"] = int(time.time() * 1000)
-            params["signature"] = self._sign(params)
-            kwargs["params"] = params
+            # Build query string preserving insertion order, timestamp last
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            signature = self._sign(query_string)
+            full_url = f"{url}?{query_string}&signature={signature}"
+            session = await self._get_session()
+            try:
+                async with session.request(method, full_url, headers=headers, **kwargs) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        raise Exception(f"Binance API error: {data}")
+                    return data
+            except aiohttp.ClientError as e:
+                raise Exception(f"Network error: {str(e)}")
 
         session = await self._get_session()
 
@@ -145,6 +158,24 @@ class BinanceFuturesClient:
             params["endTime"] = end_time
 
         return await self._request("GET", "/fapi/v1/income", signed=True, params=params)
+
+    # Spot API endpoints
+
+    async def get_spot_account(self) -> Dict[str, Any]:
+        """Get spot account information"""
+        return await self._request("GET", "/api/v3/account", signed=True, use_spot_api=True)
+
+    async def get_margin_account(self) -> Dict[str, Any]:
+        """Get cross margin account information - /sapi/v1/margin/account"""
+        return await self._request("GET", "/sapi/v1/margin/account", signed=True, use_spot_api=True)
+
+    async def get_spot_prices(self) -> list:
+        """Get all spot ticker prices"""
+        return await self._request("GET", "/api/v3/ticker/price", use_spot_api=True)
+
+    async def get_spot_price(self, symbol: str) -> Dict[str, Any]:
+        """Get spot price for a specific symbol"""
+        return await self._request("GET", "/api/v3/ticker/price", params={"symbol": symbol}, use_spot_api=True)
 
     async def place_order(
         self,

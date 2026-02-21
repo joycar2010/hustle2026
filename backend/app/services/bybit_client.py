@@ -64,12 +64,12 @@ class BybitV5Client:
             # Prepare params string for signature
             if method == "GET":
                 params = kwargs.get("params", {})
-                # Sort parameters alphabetically by key for Bybit V5 API signature
+                # Convert all parameter values to strings and sort alphabetically
                 sorted_params = sorted(params.items(), key=lambda x: x[0])
                 param_str = "&".join([f"{k}={v}" for k, v in sorted_params])
-                # Replace params in kwargs with sorted OrderedDict to maintain order
+                # Ensure all values in params are strings for the actual request
                 from collections import OrderedDict
-                kwargs["params"] = OrderedDict(sorted_params)
+                kwargs["params"] = OrderedDict([(k, str(v)) for k, v in sorted_params])
             else:
                 import json
                 param_str = json.dumps(kwargs.get("json", {})) if kwargs.get("json") else ""
@@ -96,6 +96,14 @@ class BybitV5Client:
                 logger.info(f"Bybit API Request: {method} {url}")
                 logger.info(f"Request params: {kwargs.get('params', {})}")
                 logger.info(f"Response: {data}")
+
+                # Handle None response
+                if data is None:
+                    logger.error(f"Bybit API returned None response")
+                    logger.error(f"Request URL: {url}")
+                    logger.error(f"Request params: {kwargs.get('params', {})}")
+                    logger.error(f"Response status: {resp.status}")
+                    raise Exception("Bybit API returned empty response")
 
                 # Log Bybit API response for debugging
                 if data.get("retCode") != 0:
@@ -168,33 +176,43 @@ class BybitV5Client:
 
     # Private endpoints (authentication required)
 
-    async def get_wallet_balance(self, account_type: str = "UNIFIED") -> Dict[str, Any]:
+    async def get_wallet_balance(self, account_type: str = "UNIFIED", coin: str = "USDT") -> Dict[str, Any]:
         """Get wallet balance
 
         Args:
             account_type: Account type (UNIFIED, CONTRACT, SPOT)
+            coin: Coin name (default: USDT)
         """
-        params = {"accountType": account_type}
+        params = {"accountType": account_type, "coin": coin}
         return await self._request("GET", "/v5/account/wallet-balance", signed=True, params=params)
 
     async def get_positions(
         self,
         category: str,
         symbol: Optional[str] = None,
-        settle_coin: Optional[str] = None,
+        settle_coin: str = "USDT",
     ) -> Dict[str, Any]:
-        """Get position information"""
-        params = {"category": category}
+        """Get position information
+
+        Args:
+            category: Product type (linear, inverse)
+            symbol: Symbol name (optional)
+            settle_coin: Settle coin (default: USDT)
+        """
+        params = {"category": category, "settleCoin": settle_coin}
         if symbol:
             params["symbol"] = symbol
-        if settle_coin:
-            params["settleCoin"] = settle_coin
 
         return await self._request("GET", "/v5/position/list", signed=True, params=params)
 
-    async def get_account_info(self) -> Dict[str, Any]:
-        """Get account information including risk ratio"""
-        return await self._request("GET", "/v5/account/info", signed=True)
+    async def get_account_info(self, coin: str = "USDT") -> Dict[str, Any]:
+        """Get account information including risk ratio
+
+        Args:
+            coin: Coin name (default: USDT)
+        """
+        params = {"coin": coin}
+        return await self._request("GET", "/v5/account/info", signed=True, params=params)
 
     async def get_transaction_log(
         self,
@@ -323,6 +341,7 @@ class BybitV5Client:
         category: str,
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
+        settle_coin: str = "USDT",
         limit: int = 50,
     ) -> Dict[str, Any]:
         """Get closed P&L records from /v5/position/closed-pnl
@@ -331,9 +350,10 @@ class BybitV5Client:
             category: Product type (linear, inverse)
             start_time: Start timestamp in milliseconds
             end_time: End timestamp in milliseconds
+            settle_coin: Settle coin (default: USDT)
             limit: Limit for data size per page. [1, 100]. Default: 50
         """
-        params = {"category": category, "limit": limit}
+        params = {"category": category, "settleCoin": settle_coin, "limit": limit}
         if start_time:
             params["startTime"] = start_time
         if end_time:
@@ -346,20 +366,22 @@ class BybitV5Client:
         category: str,
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
+        settle_coin: str = "USDT",
         limit: int = 50,
     ) -> Dict[str, Any]:
-        """Get funding fee history from /v5/account/fee-rate
+        """Get funding fee history from /v5/account/funding-fee
 
         Args:
             category: Product type (linear, inverse)
             start_time: Start timestamp in milliseconds
             end_time: End timestamp in milliseconds
+            settle_coin: Settle coin (default: USDT)
             limit: Limit for data size per page. [1, 200]. Default: 50
         """
-        params = {"category": category, "limit": limit}
+        params = {"category": category, "settleCoin": settle_coin, "limit": limit}
         if start_time:
             params["startTime"] = start_time
         if end_time:
             params["endTime"] = end_time
 
-        return await self._request("GET", "/v5/account/fee-rate", signed=True, params=params)
+        return await self._request("GET", "/v5/account/funding-fee", signed=True, params=params)

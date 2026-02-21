@@ -4,14 +4,17 @@ Fetches and stores real-time market data from Binance and Bybit
 """
 import asyncio
 import logging
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, time
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.binance_client import BinanceFuturesClient
+from app.services.binance_ws_client import binance_ws
 from app.services.mt5_client import MT5Client
 from app.models.market_data import MarketData, SpreadRecord
+from app.models.account import Account
+from app.models.platform import Platform
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,60 @@ class RealTimeMarketDataService:
         )
         self.running = False
         self.update_task: Optional[asyncio.Task] = None
+
+    def check_active_accounts(self, db: Session) -> Dict[str, bool]:
+        """Check if there are any enabled accounts for each platform
+
+        Returns:
+            Dict with platform names as keys and boolean values indicating if any account is enabled
+        """
+        try:
+            # Query for enabled accounts grouped by platform
+            # Join Account with Platform to filter by platform_name
+            binance_enabled = db.query(Account).join(Platform).filter(
+                Platform.platform_name == "binance",
+                Account.is_active.is_(True)
+            ).first() is not None
+
+            bybit_enabled = db.query(Account).join(Platform).filter(
+                Platform.platform_name == "bybit",
+                Account.is_active.is_(True)
+            ).first() is not None
+
+            return {
+                "binance": binance_enabled,
+                "bybit": bybit_enabled
+            }
+        except Exception as e:
+            logger.error(f"Error checking active accounts: {e}")
+            # Return False for both platforms on error to avoid unnecessary API calls
+            return {"binance": False, "bybit": False}
+
+    def is_mt5_market_open(self) -> bool:
+        """Check if MT5 market is open (traditional finance trading hours)
+
+        MT5 follows traditional finance market hours:
+        - Trading: Monday 00:00 UTC to Friday 23:59 UTC
+        - Closed: Saturday and Sunday
+
+        Returns:
+            True if market is open, False if closed
+        """
+        try:
+            now = datetime.utcnow()
+            weekday = now.weekday()  # 0=Monday, 6=Sunday
+
+            # Market is closed on Saturday (5) and Sunday (6)
+            if weekday >= 5:
+                logger.debug(f"MT5 market is closed (weekend): {now.strftime('%A')}")
+                return False
+
+            # Market is open Monday-Friday
+            return True
+        except Exception as e:
+            logger.error(f"Error checking MT5 market hours: {e}")
+            # Return False on error to avoid unnecessary API calls
+            return False
 
     async def start(self):
         """Start the real-time market data service"""
@@ -68,7 +125,15 @@ class RealTimeMarketDataService:
                 await asyncio.sleep(5)  # Wait before retrying
 
     async def fetch_binance_ticker(self, symbol: str = "XAUUSDT") -> Optional[Dict[str, Any]]:
-        """Fetch ticker data from Binance"""
+        """Fetch ticker data from Binance WebSocket stream (no REST call)"""
+        if binance_ws.connected and binance_ws.bid and binance_ws.ask:
+            return {
+                "bid_price": binance_ws.bid,
+                "ask_price": binance_ws.ask,
+                "bid_qty": 0,
+                "ask_qty": 0,
+            }
+        # Fallback to REST if WS not yet connected
         try:
             ticker = await self.binance_client.get_book_ticker(symbol)
             return {
@@ -106,28 +171,63 @@ class RealTimeMarketDataService:
 
         Note: Binance uses XAUUSDT, Bybit MT5 uses XAUUSD.s for gold
         """
-        # Map symbols for different exchanges
-        bybit_symbol = "XAUUSD.s" if symbol == "XAUUSDT" else symbol
-
-        # Fetch data from both exchanges concurrently
-        binance_data, bybit_data = await asyncio.gather(
-            self.fetch_binance_ticker(symbol),
-            self.fetch_bybit_ticker(bybit_symbol),
-            return_exceptions=True
-        )
-
-        # Handle exceptions
-        if isinstance(binance_data, Exception):
-            logger.error(f"Binance fetch error: {binance_data}")
-            binance_data = None
-
-        if isinstance(bybit_data, Exception):
-            logger.error(f"Bybit fetch error: {bybit_data}")
-            bybit_data = None
-
-        # Store data in database
+        # Create database session for account checking
         db = SessionLocal()
         try:
+            # Check which platforms have enabled accounts
+            active_accounts = self.check_active_accounts(db)
+
+            # Check if MT5 market is open
+            mt5_market_open = self.is_mt5_market_open()
+
+            # Determine which APIs to call
+            should_call_binance = active_accounts["binance"]
+            should_call_bybit = active_accounts["bybit"] and mt5_market_open
+
+            # Log skipped API calls
+            if not should_call_binance:
+                logger.debug("Skipping Binance API call: no enabled accounts")
+            if active_accounts["bybit"] and not mt5_market_open:
+                logger.debug("Skipping Bybit MT5 API call: market is closed")
+            elif not active_accounts["bybit"]:
+                logger.debug("Skipping Bybit MT5 API call: no enabled accounts")
+
+            # If no APIs should be called, return early
+            if not should_call_binance and not should_call_bybit:
+                logger.debug("No API calls needed: no enabled accounts or market closed")
+                return
+
+            # Map symbols for different exchanges
+            bybit_symbol = "XAUUSD.s" if symbol == "XAUUSDT" else symbol
+
+            # Fetch data only from platforms with enabled accounts
+            binance_data = None
+            bybit_data = None
+
+            if should_call_binance and should_call_bybit:
+                # Fetch from both platforms concurrently
+                binance_data, bybit_data = await asyncio.gather(
+                    self.fetch_binance_ticker(symbol),
+                    self.fetch_bybit_ticker(bybit_symbol),
+                    return_exceptions=True
+                )
+            elif should_call_binance:
+                # Fetch only from Binance
+                binance_data = await self.fetch_binance_ticker(symbol)
+            elif should_call_bybit:
+                # Fetch only from Bybit
+                bybit_data = await self.fetch_bybit_ticker(bybit_symbol)
+
+            # Handle exceptions
+            if isinstance(binance_data, Exception):
+                logger.error(f"Binance fetch error: {binance_data}")
+                binance_data = None
+
+            if isinstance(bybit_data, Exception):
+                logger.error(f"Bybit fetch error: {bybit_data}")
+                bybit_data = None
+
+            # Store data in database
             timestamp = datetime.utcnow()
 
             # Store Binance data

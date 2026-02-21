@@ -6,6 +6,7 @@ import redis.asyncio as redis
 import json
 from app.core.config import settings
 from app.services.binance_client import BinanceFuturesClient
+from app.services.binance_ws_client import binance_ws
 from app.services.mt5_client import MT5Client
 from app.schemas.market import MarketQuote, SpreadData
 
@@ -41,10 +42,19 @@ class MarketDataService:
             await self.redis_client.close()
 
     async def get_binance_quote(self, symbol: str = "XAUUSDT") -> MarketQuote:
-        """Get Binance market quote"""
+        """Get Binance market quote from WebSocket stream (real-time)"""
+        if binance_ws.connected and binance_ws.bid and binance_ws.ask:
+            return MarketQuote(
+                symbol=symbol,
+                bid_price=binance_ws.bid,
+                bid_qty=0,
+                ask_price=binance_ws.ask,
+                ask_qty=0,
+                timestamp=binance_ws.timestamp or int(time.time() * 1000),
+            )
+        # Fallback: WebSocket not yet connected, use REST once
         try:
             data = await self.binance_client.get_book_ticker(symbol)
-
             return MarketQuote(
                 symbol=symbol,
                 bid_price=float(data["bidPrice"]),

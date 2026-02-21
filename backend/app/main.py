@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 from app.core.config import settings
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test
 from app.tasks.market_data import market_streamer
 from app.services.position_monitor import position_monitor
 from app.services.realtime_market_service import market_data_service
+from app.services.binance_ws_client import binance_ws
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +21,16 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
+    binance_ws.start()
     await market_streamer.start()
     await position_monitor.start_monitoring()
-    await market_data_service.start()  # Start real-time market data service
+    await market_data_service.start()
     yield
     # Shutdown
+    await binance_ws.stop()
     await market_streamer.stop()
     await position_monitor.stop_monitoring()
-    await market_data_service.stop()  # Stop real-time market data service
+    await market_data_service.stop()
 
 
 # Create FastAPI app
@@ -94,6 +97,7 @@ app.include_router(risk.router, prefix="/api/v1/risk", tags=["Risk Control"])
 app.include_router(automation.router, prefix="/api/v1/automation", tags=["Automation"])
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
+app.include_router(test.router, prefix="/api/v1/test", tags=["Test"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds

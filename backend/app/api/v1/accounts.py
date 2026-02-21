@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
+from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.account import Account
@@ -11,6 +12,10 @@ from app.schemas.account import AccountCreate, AccountUpdate, AccountResponse
 from app.services.account_service import account_data_service
 
 router = APIRouter()
+
+
+class AccountSecretResponse(BaseModel):
+    api_secret: str
 
 
 @router.get("", response_model=List[AccountResponse])
@@ -88,6 +93,30 @@ async def get_account(
         )
 
     return account
+
+
+@router.get("/{account_id}/secret", response_model=AccountSecretResponse)
+async def get_account_secret(
+    account_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get account API secret (requires password verification first)"""
+    result = await db.execute(
+        select(Account).where(
+            Account.account_id == account_id,
+            Account.user_id == UUID(user_id),
+        )
+    )
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found",
+        )
+
+    return AccountSecretResponse(api_secret=account.api_secret)
 
 
 @router.put("/{account_id}", response_model=AccountResponse)

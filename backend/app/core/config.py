@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Market Data Configuration
-    MARKET_DATA_UPDATE_INTERVAL: int = 1  # seconds
+    MARKET_DATA_UPDATE_INTERVAL: int = 5  # seconds (optimized from 1s to reduce API calls)
     SPREAD_RECORD_INTERVAL: int = 1  # seconds
     ACCOUNT_SYNC_INTERVAL: int = 5  # seconds
 
