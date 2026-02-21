@@ -55,8 +55,8 @@ export const useMarketStore = defineStore('market', () => {
     ws.onclose = () => {
       connected.value = false
       ws = null
-      // Reconnect after 2 seconds
-      reconnectTimer = setTimeout(connect, 2000)
+      // Reconnect after 10 seconds to prevent rate limiting
+      reconnectTimer = setTimeout(connect, 10000)
     }
 
     ws.onerror = () => {

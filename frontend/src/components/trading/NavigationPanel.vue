@@ -1,6 +1,6 @@
 <template>
   <div class="p-4 space-y-2 border-t border-[#2b3139]">
-    <h3 class="text-sm font-bold mb-3 text-gray-400">系统导航</h3>
+    <h3 class="text-sm font-bold mb-3 text-gray-400">系统状态</h3>
 
     <button
       v-for="item in navItems"
@@ -30,7 +30,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const activeNav = ref('dashboard')
+const activeNav = ref('strategy')
 
 // Icon components
 const DashboardIcon = {
@@ -74,18 +74,6 @@ const iconComponents = {
 
 const navItems = [
   {
-    id: 'dashboard',
-    label: '主控台',
-    icon: 'DashboardIcon',
-    route: '/',
-  },
-  {
-    id: 'history',
-    label: '交易历史数据',
-    icon: 'HistoryIcon',
-    route: '/positions',
-  },
-  {
     id: 'strategy',
     label: '策略控制',
     icon: 'StrategyIcon',
@@ -94,30 +82,12 @@ const navItems = [
     badgeClass: 'bg-[#0ecb81] text-white',
   },
   {
-    id: 'spread',
-    label: '点差记录分析',
-    icon: 'SpreadIcon',
-    route: '/spread-analysis',
-  },
-  {
-    id: 'accounts',
-    label: '账户管理',
-    icon: 'AccountIcon',
-    route: '/accounts',
-  },
-  {
     id: 'risk',
     label: '风控提醒',
     icon: 'RiskIcon',
     route: '/risk',
     badge: '正常',
     badgeClass: 'bg-[#0ecb81] text-white',
-  },
-  {
-    id: 'system',
-    label: '系统管理',
-    icon: 'SystemIcon',
-    route: '/system',
   },
 ]
 
