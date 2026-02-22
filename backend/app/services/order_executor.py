@@ -319,24 +319,51 @@ class OrderExecutor:
         retry_count = 0
 
         while retry_count < max_retries and not (binance_filled and bybit_filled):
+            # Get filled quantities
+            binance_filled_qty = binance_status.get("filled_qty", 0)
+            bybit_filled_qty = bybit_status.get("filled_qty", 0)
+
+            # Calculate remaining quantities
+            binance_remaining = quantity - binance_filled_qty
+            bybit_remaining = quantity - bybit_filled_qty
+
+            # Determine chase quantity based on the filled side
+            # If one side is fully filled, chase the remaining quantity on the other side
+            # If both sides are partially filled, use the max filled quantity as target
+            if binance_filled and not bybit_filled:
+                # Binance fully filled, chase Bybit with Binance's filled quantity
+                chase_qty = min(binance_filled_qty, quantity)
+            elif bybit_filled and not binance_filled:
+                # Bybit fully filled, chase Binance with Bybit's filled quantity
+                chase_qty = min(bybit_filled_qty, quantity)
+            elif binance_filled_qty > 0 or bybit_filled_qty > 0:
+                # Both partially filled, use max filled quantity as target
+                target_qty = max(binance_filled_qty, bybit_filled_qty)
+                chase_qty = target_qty
+            else:
+                # Neither filled, use original quantity
+                chase_qty = quantity
+
             # Cancel and retry unfilled orders with market orders
             tasks = []
 
             if not binance_filled:
+                binance_chase_qty = chase_qty if bybit_filled or bybit_filled_qty > 0 else quantity
                 tasks.append(self._chase_binance_order(
                     binance_account,
                     binance_symbol,
                     binance_side,
-                    quantity,
+                    binance_chase_qty,
                     binance_order_id,
                 ))
 
             if not bybit_filled:
+                bybit_chase_qty = chase_qty if binance_filled or binance_filled_qty > 0 else quantity
                 tasks.append(self._chase_bybit_order(
                     bybit_account,
                     bybit_symbol,
                     bybit_side,
-                    quantity,
+                    bybit_chase_qty,
                     bybit_order_id,
                 ))
 

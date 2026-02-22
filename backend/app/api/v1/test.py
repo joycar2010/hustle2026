@@ -1,9 +1,11 @@
 """Test API endpoints for account data"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from app.services.mt5_client import MT5Client
+from app.services.binance_client import BinanceFuturesClient
 from app.core.config import settings
 import logging
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -55,3 +57,136 @@ async def get_mt5_balance():
     except Exception as e:
         logger.error(f"Error getting MT5 balance: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/binance/spot")
+async def get_binance_spot_account(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+) -> Dict[str, Any]:
+    """Get Binance Spot account data"""
+    client = BinanceFuturesClient(api_key, api_secret)
+    try:
+        data = await client.get_spot_account()
+        return data
+    except Exception as e:
+        logger.error(f"Error getting Binance Spot account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await client.close()
+
+
+@router.get("/binance/margin")
+async def get_binance_margin_account(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+) -> Dict[str, Any]:
+    """Get Binance Cross Margin account data"""
+    client = BinanceFuturesClient(api_key, api_secret)
+    try:
+        data = await client.get_margin_account()
+        return data
+    except Exception as e:
+        logger.error(f"Error getting Binance Margin account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await client.close()
+
+
+@router.get("/binance/futures")
+async def get_binance_futures_account(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+) -> Dict[str, Any]:
+    """Get Binance USDT-M Futures account data"""
+    client = BinanceFuturesClient(api_key, api_secret)
+    try:
+        data = await client.get_account()
+        return data
+    except Exception as e:
+        logger.error(f"Error getting Binance Futures account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await client.close()
+
+
+@router.get("/binance/options")
+async def get_binance_options_account(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+) -> Dict[str, Any]:
+    """Get Binance Options account data (EAPI)"""
+    # Note: Options API is not implemented yet
+    # This endpoint returns a placeholder response
+    return {
+        "msg": "Options account data is not available in this implementation",
+        "totalAsset": "0",
+        "availableBalance": "0"
+    }
+
+
+@router.get("/binance/position-risk")
+async def get_binance_position_risk(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+):
+    """Get Binance Futures position risk data"""
+    client = BinanceFuturesClient(api_key, api_secret)
+    try:
+        data = await client.get_position_risk()
+        return data
+    except Exception as e:
+        logger.error(f"Error getting Binance position risk: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await client.close()
+
+
+@router.get("/binance/daily-pnl")
+async def get_binance_daily_pnl(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+):
+    """Get Binance Futures daily P&L"""
+    client = BinanceFuturesClient(api_key, api_secret)
+    try:
+        from datetime import datetime
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = int(today.timestamp() * 1000)
+
+        data = await client.get_income(
+            income_type="REALIZED_PNL",
+            start_time=start_time,
+            limit=1000
+        )
+        return data
+    except Exception as e:
+        logger.error(f"Error getting Binance daily P&L: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await client.close()
+
+
+@router.get("/binance/funding-fees")
+async def get_binance_funding_fees(
+    api_key: str = Query(..., description="Binance API Key"),
+    api_secret: str = Query(..., description="Binance API Secret")
+):
+    """Get Binance Futures funding fees"""
+    client = BinanceFuturesClient(api_key, api_secret)
+    try:
+        from datetime import datetime
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = int(today.timestamp() * 1000)
+
+        data = await client.get_income(
+            income_type="FUNDING_FEE",
+            start_time=start_time,
+            limit=1000
+        )
+        return data
+    except Exception as e:
+        logger.error(f"Error getting Binance funding fees: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await client.close()

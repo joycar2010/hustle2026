@@ -239,11 +239,13 @@ async def get_account_balance(
                 account.api_secret,
             )
         elif account.platform_id == 2:  # Bybit
-            account_type = "UNIFIED" if not account.is_mt5_account else "CONTRACT"
             balance = await account_data_service.get_bybit_balance(
                 account.api_key,
                 account.api_secret,
-                account_type,
+                "UNIFIED",
+                mt5_id=account.mt5_id if account.is_mt5_account else None,
+                mt5_password=account.mt5_primary_pwd if account.is_mt5_account else None,
+                mt5_server=account.mt5_server if account.is_mt5_account else None,
             )
         else:
             raise HTTPException(

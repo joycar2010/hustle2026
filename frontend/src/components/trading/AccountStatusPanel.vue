@@ -131,6 +131,7 @@ const systemAlerts = ref([])
 // Persist disconnected state across page refreshes
 const STORAGE_KEY = 'disconnectedAccounts'
 const RECONNECT_COOLDOWN_KEY = 'lastReconnectTime'
+const WS_CONNECTED_KEY = 'wsConnectedState'
 const RECONNECT_COOLDOWN_MS = 10000 // 10 seconds cooldown to prevent Binance ban
 
 function loadDisconnected() {
@@ -151,6 +152,15 @@ function canReconnect() {
 function setReconnectTime() {
   localStorage.setItem(RECONNECT_COOLDOWN_KEY, Date.now().toString())
 }
+function getWsConnectedState() {
+  try {
+    const saved = localStorage.getItem(WS_CONNECTED_KEY)
+    return saved === 'true'
+  } catch { return false }
+}
+function setWsConnectedState(connected) {
+  localStorage.setItem(WS_CONNECTED_KEY, connected.toString())
+}
 const disconnectedAccounts = ref(loadDisconnected())
 
 let updateInterval = null
@@ -158,10 +168,10 @@ let updateInterval = null
 onMounted(() => {
   fetchAccountData()
   updateInterval = setInterval(fetchAccountData, 30000)
-  // Restore WS state based on persisted disconnected accounts
-  // If any accounts were disconnected before, WS may have been stopped —
-  // only connect if there are no disconnected accounts saved
-  if (disconnectedAccounts.value.size === 0) {
+  // Restore WebSocket connection state from localStorage
+  // Only auto-connect if it was connected before the page refresh
+  const wasConnected = getWsConnectedState()
+  if (wasConnected && disconnectedAccounts.value.size === 0) {
     marketStore.connect()
   }
 })
@@ -278,8 +288,9 @@ function toggleConnection(accountId) {
     disconnectedAccounts.value = new Set(disconnectedAccounts.value)
     saveDisconnected(disconnectedAccounts.value)
     setReconnectTime()
-    // Reconnect market WebSocket
+    // Reconnect market WebSocket and save state
     marketStore.connect()
+    setWsConnectedState(true)
   } else {
     // Disconnecting
     disconnectedAccounts.value.add(accountId)
@@ -288,6 +299,7 @@ function toggleConnection(accountId) {
     // Disconnect market WebSocket only if all accounts are disconnected
     if (disconnectedAccounts.value.size >= activeAccounts.value.length) {
       marketStore.disconnect()
+      setWsConnectedState(false)
     }
   }
 }

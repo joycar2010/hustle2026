@@ -8,6 +8,7 @@ from sqlalchemy import select
 from uuid import UUID
 from app.services.binance_client import BinanceFuturesClient
 from app.services.bybit_client import BybitV5Client
+from app.services.mt5_client import MT5Client
 from app.models.account import Account
 from app.schemas.account import AccountBalance, AccountPosition
 
@@ -261,15 +262,19 @@ class AccountDataService:
         api_key: str,
         api_secret: str,
         account_type: str = "UNIFIED",
+        mt5_id: int = None,
+        mt5_password: str = None,
+        mt5_server: str = None,
     ) -> AccountBalance:
-        """Fetch Bybit account balance using V5 API mappings per requirements"""
+        """Fetch Bybit account balance using V5 API mappings per requirements.
+        Combines Unified account + MT5 account balances if MT5 credentials provided."""
         client = BybitV5Client(api_key, api_secret)
 
         try:
             logger.info(f"Fetching Bybit wallet balance for account_type: {account_type}")
 
             # 1. Get wallet balance from /v5/account/wallet-balance?coin=USDT
-            wallet_data = await client.get_wallet_balance(account_type, coin="USDT")
+            wallet_data = await client.get_wallet_balance("UNIFIED", coin="USDT")
             logger.info(f"Bybit wallet data received: {wallet_data}")
 
             account_list = wallet_data.get("list", [])
@@ -287,6 +292,38 @@ class AccountDataService:
             total_margin_balance = float(account.get("totalMarginBalance", 0))  # 保证金余额
             total_maintenance_margin = float(account.get("totalMaintenanceMargin", 0))  # 维持保证金
 
+            # 2. Add MT5 account balance if credentials provided
+            if mt5_id and mt5_password and mt5_server:
+                try:
+                    logger.info(f"Fetching MT5 balance for account {mt5_id}")
+                    # Use shared MT5 client from realtime_market_service to avoid connection conflicts
+                    from app.services.realtime_market_service import market_data_service
+                    mt5 = market_data_service.mt5_client
+                    if mt5 and mt5.connected:
+                        mt5_info = mt5.get_account_info()
+                    else:
+                        # Fallback: create temporary client
+                        temp_mt5 = MT5Client(
+                            login=int(mt5_id),
+                            password=mt5_password,
+                            server=mt5_server
+                        )
+                        if temp_mt5.connect():
+                            mt5_info = temp_mt5.get_account_info()
+                            temp_mt5.disconnect()
+                        else:
+                            mt5_info = None
+                    if mt5_info:
+                        mt5_equity = float(mt5_info.get("equity", 0))
+                        mt5_balance = float(mt5_info.get("balance", 0))
+                        mt5_free_margin = float(mt5_info.get("margin_free", 0))
+                        total_equity += mt5_equity
+                        total_wallet_balance += mt5_balance
+                        total_available_balance += mt5_free_margin
+                        logger.info(f"MT5 balance added: equity={mt5_equity}, balance={mt5_balance}")
+                except Exception as e:
+                    logger.error(f"Failed to fetch MT5 balance: {str(e)}")
+
             # Calculate risk ratio: (totalMaintenanceMargin / totalMarginBalance) × 100
             risk_ratio = 0
             if total_margin_balance > 0:
@@ -303,7 +340,7 @@ class AccountDataService:
             total_unrealized_pnl = 0  # Track unrealized PnL from positions
             try:
                 logger.info("Fetching Bybit positions")
-                positions_data = await client.get_positions(category=account_type.lower(), settle_coin="USDT")
+                positions_data = await client.get_positions(category="linear", settle_coin="USDT")
                 if isinstance(positions_data, dict):
                     positions_list = positions_data.get("list", [])
                     # Sum up position values and unrealized PnL
@@ -326,7 +363,7 @@ class AccountDataService:
 
                 logger.info(f"Fetching Bybit daily P&L from {start_time} to {end_time}")
                 pnl_data = await client.get_profit_loss(
-                    category=account_type.lower(),
+                    category="linear",
                     start_time=start_time,
                     end_time=end_time,
                     settle_coin="USDT"
@@ -346,7 +383,7 @@ class AccountDataService:
             try:
                 logger.info("Fetching Bybit funding fee")
                 funding_data = await client.get_funding_fee(
-                    category=account_type.lower(),
+                    category="linear",
                     start_time=start_time,
                     end_time=end_time,
                     settle_coin="USDT"
@@ -566,7 +603,14 @@ class AccountDataService:
                 # Bybit V5 API only supports UNIFIED account type
                 account_type = "UNIFIED"
                 balance, positions, daily_pnl = await asyncio.gather(
-                    self.get_bybit_balance(account.api_key, account.api_secret, account_type),
+                    self.get_bybit_balance(
+                        account.api_key,
+                        account.api_secret,
+                        account_type,
+                        mt5_id=account.mt5_id if account.is_mt5_account else None,
+                        mt5_password=account.mt5_primary_pwd if account.is_mt5_account else None,
+                        mt5_server=account.mt5_server if account.is_mt5_account else None,
+                    ),
                     self.get_bybit_positions(account.api_key, account.api_secret),
                     self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
                 )

@@ -137,11 +137,13 @@ class RiskMonitor:
                 )
             elif account.platform_id == 2:  # Bybit
                 # Bybit V5 API only supports UNIFIED account type
-                account_type = "UNIFIED"
                 balance = await account_data_service.get_bybit_balance(
                     account.api_key,
                     account.api_secret,
-                    account_type,
+                    "UNIFIED",
+                    mt5_id=account.mt5_id if account.is_mt5_account else None,
+                    mt5_password=account.mt5_primary_pwd if account.is_mt5_account else None,
+                    mt5_server=account.mt5_server if account.is_mt5_account else None,
                 )
             else:
                 return {"error": "Unknown platform"}

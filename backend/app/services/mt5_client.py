@@ -80,25 +80,16 @@ class MT5Client:
         self.last_connection_attempt = datetime.now()
 
         try:
-            # Initialize MT5 connection
-            if self.path:
-                if not mt5.initialize(path=str(self.path)):
-                    error = mt5.last_error()
-                    logger.error(f"MT5 initialize failed: {error}")
-                    self.connection_failures += 1
-                    return False
-            else:
-                if not mt5.initialize():
-                    error = mt5.last_error()
-                    logger.error(f"MT5 initialize failed: {error}")
-                    self.connection_failures += 1
-                    return False
-
-            # Login to account
-            if not mt5.login(self.login, self.password, self.server):
+            # Initialize MT5 connection with credentials
+            terminal_path = str(self.path) if self.path else "C:/Program Files/MetaTrader 5/terminal64.exe"
+            if not mt5.initialize(
+                path=terminal_path,
+                login=self.login,
+                password=self.password,
+                server=self.server,
+            ):
                 error = mt5.last_error()
-                logger.error(f"MT5 login failed: {error}")
-                mt5.shutdown()
+                logger.error(f"MT5 initialize failed: {error}")
                 self.connection_failures += 1
                 return False
 

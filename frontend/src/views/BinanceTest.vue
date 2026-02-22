@@ -37,6 +37,11 @@
           </div>
         </div>
 
+        <!-- Note about Options account -->
+        <div v-if="results.optionsTotal > 0" class="info-message">
+          <strong>说明:</strong> 期权账户 ({{ formatUsdt(results.optionsTotal) }}) 仅供参考，不计入账户总资产（与后端算法保持一致）
+        </div>
+
         <div v-if="results.error" class="error-message">
           <strong>合约账户错误:</strong> {{ results.error }}
         </div>
@@ -47,7 +52,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import CryptoJS from 'crypto-js'
+import api from '@/services/api'
 
 const API_KEY = 'Ym1OIwyoadLOL6f4GbNOyH52F7P0tllmp5gBjbOiS9nxKtk340QUCt4qTds7dVr2'
 const API_SECRET = 'DtM28kn5K5Oi4HAf7WLVV3KLWaUQmZKX3gcsrRdoIlueHbm9aCmMsDxdzFPcns5c'
@@ -107,8 +112,9 @@ const apiStatuses = computed(() => {
   ]
 })
 
-function generateSignature(queryString) {
-  return CryptoJS.HmacSHA256(queryString, API_SECRET).toString()
+function formatUsdt(val) {
+  if (val == null) return '0.00 USDT'
+  return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDT'
 }
 
 function getBanInfo(error) {
@@ -288,14 +294,20 @@ async function runTest() {
       marginTotal,
       futuresTotal,
       optionsTotal,
-      // aggregated metrics
-      totalAssets: spotTotal + marginTotal + futuresTotal + optionsTotal,
-      availableBalance: spotFree + marginFree + futuresAvailable + optionsFree,
+      // aggregated metrics (matching backend algorithm)
+      // 账户总资产 = 现货USDT + 杠杆USDT + 合约totalWalletBalance
+      totalAssets: spotTotal + marginTotal + futuresTotal,
+      // 可用总资产 = 现货free + 杠杆free + 合约availableBalance
+      availableBalance: spotFree + marginFree + futuresAvailable,
+      // 净资产 = 合约totalWalletBalance（钱包余额，不含未实现盈亏）
       netAssets: futuresTotal,
       totalPositions,
+      // 冻结资产 = 现货locked + 杠杆locked + (合约总额 - 合约可用)
       frozenAssets: spotLocked + marginLocked + (futuresTotal - futuresAvailable),
+      // 当日盈亏 = 已实现盈亏 + 未实现盈亏
       dailyPnl,
       marginBalance,
+      // 风险率 = (维持保证金 / 保证金余额) × 100
       riskRatio,
       fundingFee,
       hasError,
@@ -314,156 +326,106 @@ async function runTest() {
 
 async function testSpotAccount() {
   try {
-    const timestamp = Date.now()
-    const queryString = `timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/spot', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Spot account error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 
 async function testMarginAccount() {
   try {
-    const timestamp = Date.now()
-    const queryString = `timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://api.binance.com/sapi/v1/margin/account?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/margin', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Margin account error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 
 async function testOptionsAccount() {
   try {
-    const timestamp = Date.now()
-    const queryString = `timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://eapi.binance.com/eapi/v1/account?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/options', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Options account error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 
 async function testFuturesAccount() {
   try {
-    const timestamp = Date.now()
-    const queryString = `timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://fapi.binance.com/fapi/v2/account?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/futures', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Futures account error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 
 async function testPositionRisk() {
   try {
-    const timestamp = Date.now()
-    const queryString = `timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://fapi.binance.com/fapi/v2/positionRisk?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/position-risk', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Position risk error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 
 async function testDailyPnL() {
   try {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const startTime = today.getTime()
-
-    const timestamp = Date.now()
-    const queryString = `incomeType=REALIZED_PNL&startTime=${startTime}&timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://fapi.binance.com/fapi/v1/income?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/daily-pnl', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Daily P&L error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 
 async function testFundingFees() {
   try {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const startTime = today.getTime()
-
-    const timestamp = Date.now()
-    const queryString = `incomeType=FUNDING_FEE&startTime=${startTime}&timestamp=${timestamp}`
-    const signature = generateSignature(queryString)
-
-    const response = await fetch(`https://fapi.binance.com/fapi/v1/income?${queryString}&signature=${signature}`, {
-      headers: { 'X-MBX-APIKEY': API_KEY }
+    const response = await api.get('/api/v1/test/binance/funding-fees', {
+      params: {
+        api_key: API_KEY,
+        api_secret: API_SECRET
+      }
     })
-
-    if (!response.ok) {
-      const error = await response.json()
-      return { error: error }
-    }
-
-    return await response.json()
+    return response.data
   } catch (error) {
-    return { error: { msg: error.message } }
+    console.error('Funding fees error:', error)
+    return { error: { msg: error.response?.data?.detail || error.message } }
   }
 }
 </script>
@@ -660,6 +622,16 @@ h1 {
   padding: 15px;
   margin-top: 15px;
   color: #f6465d;
+  font-size: 14px;
+}
+
+.info-message {
+  background: rgba(33, 150, 243, 0.1);
+  border: 1px solid #2196F3;
+  border-radius: 8px;
+  padding: 15px;
+  margin-top: 15px;
+  color: #2196F3;
   font-size: 14px;
 }
 </style>

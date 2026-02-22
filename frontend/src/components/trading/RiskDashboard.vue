@@ -6,7 +6,7 @@
       <div class="bg-[#252930] rounded p-3">
         <div class="text-xs text-gray-400 mb-2">保证金率</div>
         <div class="flex items-center justify-between mb-2">
-          <span class="text-2xl font-bold font-mono">{{ riskData.marginRate }}%</span>
+          <span class="text-2xl font-bold font-mono">{{ riskData.marginRate.toFixed(2) }}%</span>
           <span :class="['text-sm font-bold', getRiskColor(riskData.marginRate)]">
             {{ getRiskLevel(riskData.marginRate) }}
           </span>
@@ -23,7 +23,7 @@
       <div class="bg-[#252930] rounded p-3">
         <div class="text-xs text-gray-400 mb-2">风险率</div>
         <div class="flex items-center justify-between mb-2">
-          <span class="text-2xl font-bold font-mono">{{ riskData.riskRate }}%</span>
+          <span class="text-2xl font-bold font-mono">{{ riskData.riskRate.toFixed(2) }}%</span>
           <span :class="['text-sm font-bold', getRiskColor(riskData.riskRate)]">
             {{ getRiskLevel(riskData.riskRate) }}
           </span>
@@ -114,10 +114,12 @@ async function fetchRiskData() {
       ? accountsWithRisk.reduce((sum, acc) => sum + (acc.balance.risk_ratio || 0), 0) / accountsWithRisk.length
       : 0
 
-    // Calculate margin rate (using available balance / total assets ratio)
+    // Calculate margin rate (margin used / total equity * 100)
     const totalAssets = binanceEquity + bybitEquity
     const totalAvailable = allAccounts.reduce((sum, acc) =>
       sum + (acc.balance?.available_balance || 0), 0)
+    // Margin rate = (Total Assets - Available) / Total Assets * 100
+    // This shows the percentage of assets used as margin
     const marginRate = totalAssets > 0 ? ((totalAssets - totalAvailable) / totalAssets * 100) : 0
 
     riskData.value = {
