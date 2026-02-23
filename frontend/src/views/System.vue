@@ -85,6 +85,15 @@
           </div>
           <div class="bg-dark-200 rounded p-4">
             <h3 class="font-bold mb-3">GitHub版本管理</h3>
+            <div class="mb-4">
+              <label class="block text-sm font-medium mb-2">推送备注</label>
+              <input
+                v-model="pushRemark"
+                type="text"
+                placeholder="请输入本次推送的备注信息（可选）"
+                class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              />
+            </div>
             <div class="flex space-x-3 mb-6">
               <button @click="pushToGitHub" class="btn-primary">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -463,6 +472,7 @@ const selectedTable = ref('')
 const showBackupModal = ref(false)
 
 const versionHistory = ref([])
+const pushRemark = ref('')
 
 const systemInfo = ref({
   frontend_version: '1.0.0',
@@ -612,8 +622,11 @@ async function loadSystemInfo() {
 async function pushToGitHub() {
   if (!confirm('确定要推送当前版本到GitHub吗？')) return
   try {
-    await api.post('/api/v1/system/github/push')
+    await api.post('/api/v1/system/github/push', {
+      remark: pushRemark.value || undefined
+    })
     alert('推送成功')
+    pushRemark.value = '' // Clear remark after successful push
     await loadVersionHistory()
   } catch (error) {
     console.error('Failed to push to GitHub:', error)

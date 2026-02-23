@@ -55,7 +55,7 @@ async function fetchSpreadData() {
   try {
     const response = await api.get('/api/v1/market/spread/history', {
       params: {
-        limit: 16,
+        limit: 10,
         binance_symbol: 'XAUUSDT',
         bybit_symbol: 'XAUUSDT'
       }

@@ -45,8 +45,9 @@
 
         <!-- M Coin Setting -->
         <div>
-          <label class="text-xs text-gray-400 mb-1 block">M币设置</label>
+          <label :for="`mCoin-${type}`" class="text-xs text-gray-400 mb-1 block">单次最多手数</label>
           <input
+            :id="`mCoin-${type}`"
             v-model.number="config.mCoin"
             type="number"
             step="1"
@@ -94,8 +95,9 @@
         <!-- Data Sync Quantities -->
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="text-xs text-gray-400 mb-1 block">开仓数据同步数量</label>
+            <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">开仓触发次数</label>
             <input
+              :id="`openingSyncQty-${type}`"
               v-model.number="config.openingSyncQty"
               type="number"
               step="1"
@@ -105,8 +107,9 @@
           </div>
 
           <div>
-            <label class="text-xs text-gray-400 mb-1 block">平仓数据同步数量</label>
+            <label :for="`closingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">平仓触发次数</label>
             <input
+              :id="`closingSyncQty-${type}`"
               v-model.number="config.closingSyncQty"
               type="number"
               step="1"
@@ -152,8 +155,9 @@
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs text-gray-400">阶梯 {{ index + 1 }}</span>
               <div class="flex items-center space-x-2">
-                <label class="flex items-center space-x-1 cursor-pointer">
+                <label :for="`ladder-enabled-${type}-${index}`" class="flex items-center space-x-1 cursor-pointer">
                   <input
+                    :id="`ladder-enabled-${type}-${index}`"
                     v-model="ladder.enabled"
                     type="checkbox"
                     class="w-4 h-4 rounded border-[#2b3139] bg-[#252930] text-[#0ecb81] focus:ring-[#0ecb81]"
@@ -171,28 +175,33 @@
 
             <div class="grid grid-cols-3 gap-2">
               <div>
-                <label class="text-xs text-gray-400 mb-1 block">开仓价</label>
+                <label :for="`openPrice-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">开仓价</label>
                 <input
+                  :id="`openPrice-${type}-${index}`"
                   v-model.number="ladder.openPrice"
                   type="number"
-                  step="1"
+                  step="0.01"
+                  :placeholder="(0).toFixed(2)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label class="text-xs text-gray-400 mb-1 block">阈值</label>
+                <label :for="`threshold-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">平仓价</label>
                 <input
+                  :id="`threshold-${type}-${index}`"
                   v-model.number="ladder.threshold"
                   type="number"
-                  step="0.1"
+                  step="0.01"
+                  :placeholder="(0).toFixed(2)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label class="text-xs text-gray-400 mb-1 block">下单数量限制</label>
+                <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">下单总手数</label>
                 <input
+                  :id="`qtyLimit-${type}-${index}`"
                   v-model.number="ladder.qtyLimit"
                   type="number"
                   step="1"
@@ -235,17 +244,18 @@ const bybitAssets = ref(8500)
 const executing = ref(false)
 const accountsData = ref(null)
 const orderPlaced = ref({ opening: false, closing: false })
+const triggerCount = ref({ opening: 0, closing: 0 })
 
 const config = ref({
-  mCoin: 100,
+  mCoin: 5,
   openingEnabled: false,
   closingEnabled: false,
   openingSyncQty: 3,
   closingSyncQty: 3,
   ladders: [
-    { enabled: true, openPrice: 3, threshold: 2.0, qtyLimit: 3 },
-    { enabled: true, openPrice: 3, threshold: 3.0, qtyLimit: 3 },
-    { enabled: false, openPrice: 3, threshold: 4.0, qtyLimit: 3 },
+    { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3 },
+    { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3 },
+    { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3 },
   ]
 })
 
@@ -316,25 +326,46 @@ async function fetchStrategyData() {
 
     if (!data) return
 
-    // Auto-execute opening: entry spread >= ladder threshold
+    // binance做多值: forward=binance_bid, reverse=binance_ask
+    const binanceLongValue = props.type === 'forward' ? data.binance_bid : data.binance_ask
+
+    // Trigger count logic for opening
+    // 开仓条件: binance做多值 >= 开仓价
     if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
       const enabledLadders = config.value.ladders.filter(l => l.enabled)
-      const matchedLadder = enabledLadders.find(l => currentSpread.value >= l.threshold)
+      const matchedLadder = enabledLadders.find(l => binanceLongValue >= l.openPrice)
+
       if (matchedLadder) {
-        await executeOpening(matchedLadder)
+        triggerCount.value.opening++
+        console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, binanceLongValue=${binanceLongValue}, openPrice=${matchedLadder.openPrice}`)
+
+        if (triggerCount.value.opening >= config.value.openingSyncQty) {
+          await executeBatchOpening(matchedLadder)
+          triggerCount.value.opening = 0
+        }
+      } else {
+        // Reset trigger count if condition no longer met
+        triggerCount.value.opening = 0
       }
     }
 
-    // Auto-execute closing: exit spread <= ladder threshold (spread has narrowed)
+    // Trigger count logic for closing
+    // 平仓条件: binance做多值 <= 阈值
     if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
-      // Exit spread is the reverse of entry spread
-      const exitSpread = props.type === 'forward'
-        ? data.binance_ask - data.bybit_bid   // forward exit: binance_ask - bybit_bid
-        : data.bybit_ask - data.binance_bid   // reverse exit: bybit_ask - binance_bid
       const enabledLadders = config.value.ladders.filter(l => l.enabled)
-      const matchedLadder = enabledLadders.find(l => exitSpread <= l.threshold)
+      const matchedLadder = enabledLadders.find(l => binanceLongValue <= l.threshold)
+
       if (matchedLadder) {
-        await executeClosing(matchedLadder)
+        triggerCount.value.closing++
+        console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, binanceLongValue=${binanceLongValue}, threshold=${matchedLadder.threshold}`)
+
+        if (triggerCount.value.closing >= config.value.closingSyncQty) {
+          await executeBatchClosing(matchedLadder)
+          triggerCount.value.closing = 0
+        }
+      } else {
+        // Reset trigger count if condition no longer met
+        triggerCount.value.closing = 0
       }
     }
   } catch (error) {
@@ -346,8 +377,8 @@ function addLadder() {
   if (config.value.ladders.length < 5) {
     config.value.ladders.push({
       enabled: true,
-      openPrice: 3,
-      threshold: 0,
+      openPrice: 3.00,
+      threshold: 0.00,
       qtyLimit: 3
     })
   }
@@ -371,7 +402,7 @@ async function saveConfig() {
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
     }
 
-    const response = await api.post('/api/v1/strategies/configs', configData)
+    await api.post('/api/v1/strategies/configs', configData)
     alert('配置保存成功！')
   } catch (error) {
     console.error('Failed to save config:', error)
@@ -394,11 +425,11 @@ async function saveConfig() {
 
 function saveStrategy() {
   try {
-    // Ensure all ladder values are integers where needed
+    // Ensure all ladder values are properly formatted
     const ladderData = config.value.ladders.map(ladder => ({
       enabled: ladder.enabled,
-      openPrice: Math.floor(ladder.openPrice),
-      threshold: ladder.threshold,
+      openPrice: Number(ladder.openPrice.toFixed(2)),
+      threshold: Number(ladder.threshold.toFixed(2)),
       qtyLimit: Math.floor(ladder.qtyLimit)
     }))
 
@@ -508,9 +539,51 @@ function validateAccountsForExecution() {
   return { valid: true }
 }
 
+async function waitForOrderFill(orderIds, maxWaitTime = 10000) {
+  if (!orderIds || orderIds.length === 0) {
+    console.log('No order IDs to monitor')
+    return
+  }
+
+  const startTime = Date.now()
+  const pollInterval = 2000 // Poll every 2 seconds
+
+  console.log(`Monitoring orders: ${orderIds.join(', ')}`)
+
+  while (Date.now() - startTime < maxWaitTime) {
+    try {
+      // Fetch current orders
+      const response = await api.get('/api/v1/orders')
+      const orders = response.data.orders || []
+
+      // Check if all orders are filled
+      const allFilled = orderIds.every(orderId => {
+        const order = orders.find(o => o.order_id === orderId)
+        if (!order) return false
+        return order.status === 'filled'
+      })
+
+      if (allFilled) {
+        console.log('All orders filled')
+        return
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
+    } catch (error) {
+      console.error('Error monitoring orders:', error)
+      // Continue polling even if there's an error
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
+    }
+  }
+
+  console.warn('Order monitoring timeout - proceeding anyway')
+}
+
 function toggleOpening() {
   if (config.value.openingEnabled) {
     config.value.openingEnabled = false
+    triggerCount.value.opening = 0
   } else {
     const validation = validateAccountsForExecution()
     if (!validation.valid) {
@@ -524,6 +597,7 @@ function toggleOpening() {
     }
     config.value.openingEnabled = true
     orderPlaced.value.opening = false
+    triggerCount.value.opening = 0
     // closingEnabled is NOT touched — independent control
   }
 }
@@ -531,6 +605,7 @@ function toggleOpening() {
 function toggleClosing() {
   if (config.value.closingEnabled) {
     config.value.closingEnabled = false
+    triggerCount.value.closing = 0
   } else {
     const validation = validateAccountsForExecution()
     if (!validation.valid) {
@@ -544,11 +619,12 @@ function toggleClosing() {
     }
     config.value.closingEnabled = true
     orderPlaced.value.closing = false
+    triggerCount.value.closing = 0
     // openingEnabled is NOT touched — independent control
   }
 }
 
-async function executeOpening(ladder) {
+async function executeBatchOpening(ladder) {
   if (executing.value) return
 
   try {
@@ -564,29 +640,88 @@ async function executeOpening(ladder) {
       return
     }
 
-    const executionData = {
-      binance_account_id: binanceAccount.account_id,
-      bybit_account_id: bybitMT5Account.account_id,
-      quantity: ladder.qtyLimit,
-      target_spread: ladder.threshold
+    const totalQuantity = ladder.qtyLimit
+    const mCoin = config.value.mCoin
+    const numBatches = Math.ceil(totalQuantity / mCoin)
+    let remainingQuantity = totalQuantity
+
+    console.log(`Starting batch opening: total=${totalQuantity}, mCoin=${mCoin}, batches=${numBatches}`)
+
+    for (let i = 0; i < numBatches; i++) {
+      const batchQuantity = Math.min(mCoin, remainingQuantity)
+      console.log(`Batch ${i + 1}/${numBatches}: executing ${batchQuantity} units`)
+
+      const executionData = {
+        binance_account_id: binanceAccount.account_id,
+        bybit_account_id: bybitMT5Account.account_id,
+        quantity: batchQuantity,
+        target_spread: ladder.threshold
+      }
+
+      try {
+        const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
+
+        if (response.data.success) {
+          console.log(`Batch ${i + 1} executed successfully`)
+          remainingQuantity -= batchQuantity
+
+          // Wait for order to be filled before next batch
+          if (i < numBatches - 1) {
+            await waitForOrderFill(response.data.order_ids)
+          }
+        } else {
+          // Extract error message from various possible fields
+          const executionResult = response.data.execution_result || {}
+          // binance_result and bybit_result are nested inside execution_result
+          const binanceResult = executionResult.binance_result || response.data.binance_result || {}
+          const bybitResult = executionResult.bybit_result || response.data.bybit_result || {}
+
+          const errorMsg = response.data.error
+            || response.data.detail
+            || response.data.message
+            || executionResult.error
+            || executionResult.message
+            || JSON.stringify(executionResult)
+            || '未知错误'
+
+          console.error(`Batch ${i + 1} failed:`, errorMsg)
+          console.error('Full response:', response.data)
+          console.error('Execution result:', executionResult)
+          console.error('Binance result:', binanceResult)
+          console.error('Bybit result:', bybitResult)
+
+          // Build detailed error message
+          let detailedError = errorMsg
+          if (binanceResult.error || bybitResult.error) {
+            detailedError += '\n详细信息:'
+            if (binanceResult.error) detailedError += `\nBinance: ${binanceResult.error}`
+            if (bybitResult.error) detailedError += `\nBybit: ${bybitResult.error}`
+          }
+
+          alert(`批次 ${i + 1} 执行失败: ${detailedError}`)
+          break
+        }
+      } catch (error) {
+        console.error(`Batch ${i + 1} error:`, error)
+        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
+        console.error('Full error:', error.response?.data)
+        alert(`批次 ${i + 1} 执行异常: ${errorMsg}`)
+        break
+      }
     }
 
-    const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
-
-    if (response.data.success) {
-      orderPlaced.value.opening = true
-      config.value.openingEnabled = false
-    } else {
-      console.warn(`开仓挂单失败: ${response.data.error || '未知错误'}`)
-    }
+    // Mark as completed and disable
+    orderPlaced.value.opening = true
+    config.value.openingEnabled = false
+    console.log('Batch opening completed')
   } catch (error) {
-    console.error('Failed to execute opening:', error)
+    console.error('Failed to execute batch opening:', error)
   } finally {
     executing.value = false
   }
 }
 
-async function executeClosing(ladder) {
+async function executeBatchClosing(ladder) {
   if (executing.value) return
 
   try {
@@ -602,22 +737,81 @@ async function executeClosing(ladder) {
       return
     }
 
-    const executionData = {
-      binance_account_id: binanceAccount.account_id,
-      bybit_account_id: bybitMT5Account.account_id,
-      quantity: ladder.qtyLimit
+    const totalQuantity = ladder.qtyLimit
+    const mCoin = config.value.mCoin
+    const numBatches = Math.ceil(totalQuantity / mCoin)
+    let remainingQuantity = totalQuantity
+
+    console.log(`Starting batch closing: total=${totalQuantity}, mCoin=${mCoin}, batches=${numBatches}`)
+
+    for (let i = 0; i < numBatches; i++) {
+      const batchQuantity = Math.min(mCoin, remainingQuantity)
+      console.log(`Batch ${i + 1}/${numBatches}: executing ${batchQuantity} units`)
+
+      const executionData = {
+        binance_account_id: binanceAccount.account_id,
+        bybit_account_id: bybitMT5Account.account_id,
+        quantity: batchQuantity
+      }
+
+      try {
+        const response = await api.post(`/api/v1/strategies/close/${props.type}`, executionData)
+
+        if (response.data.success) {
+          console.log(`Batch ${i + 1} executed successfully`)
+          remainingQuantity -= batchQuantity
+
+          // Wait for order to be filled before next batch
+          if (i < numBatches - 1) {
+            await waitForOrderFill(response.data.order_ids)
+          }
+        } else {
+          // Extract error message from various possible fields
+          const executionResult = response.data.execution_result || {}
+          // binance_result and bybit_result are nested inside execution_result
+          const binanceResult = executionResult.binance_result || response.data.binance_result || {}
+          const bybitResult = executionResult.bybit_result || response.data.bybit_result || {}
+
+          const errorMsg = response.data.error
+            || response.data.detail
+            || response.data.message
+            || executionResult.error
+            || executionResult.message
+            || JSON.stringify(executionResult)
+            || '未知错误'
+
+          console.error(`Batch ${i + 1} failed:`, errorMsg)
+          console.error('Full response:', response.data)
+          console.error('Execution result:', executionResult)
+          console.error('Binance result:', binanceResult)
+          console.error('Bybit result:', bybitResult)
+
+          // Build detailed error message
+          let detailedError = errorMsg
+          if (binanceResult.error || bybitResult.error) {
+            detailedError += '\n详细信息:'
+            if (binanceResult.error) detailedError += `\nBinance: ${binanceResult.error}`
+            if (bybitResult.error) detailedError += `\nBybit: ${bybitResult.error}`
+          }
+
+          alert(`批次 ${i + 1} 执行失败: ${detailedError}`)
+          break
+        }
+      } catch (error) {
+        console.error(`Batch ${i + 1} error:`, error)
+        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
+        console.error('Full error:', error.response?.data)
+        alert(`批次 ${i + 1} 执行异常: ${errorMsg}`)
+        break
+      }
     }
 
-    const response = await api.post(`/api/v1/strategies/close/${props.type}`, executionData)
-
-    if (response.data.success) {
-      orderPlaced.value.closing = true
-      config.value.closingEnabled = false
-    } else {
-      console.warn(`平仓挂单失败: ${response.data.error || '未知错误'}`)
-    }
+    // Mark as completed and disable
+    orderPlaced.value.closing = true
+    config.value.closingEnabled = false
+    console.log('Batch closing completed')
   } catch (error) {
-    console.error('Failed to execute closing:', error)
+    console.error('Failed to execute batch closing:', error)
   } finally {
     executing.value = false
   }

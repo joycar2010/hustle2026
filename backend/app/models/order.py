@@ -30,6 +30,8 @@ class OrderRecord(Base):
     price = Column(Float, nullable=False)
     qty = Column(Float, nullable=False)
     filled_qty = Column(Float, default=0.0, nullable=False)
+    fee = Column(Float, default=0.0, nullable=False)  # Actual commission/fee from exchange
+    source = Column(String(20), default="manual", nullable=False)  # manual, strategy, sync
     status = Column(String(20), nullable=False)  # new, filled, canceled, pending
     platform_order_id = Column(String(100))  # Platform's order ID
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)

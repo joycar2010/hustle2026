@@ -41,10 +41,11 @@
     <!-- Main Content -->
     <div class="container mx-auto px-4 py-6">
       <div class="space-y-6">
-        <!-- Asset Dashboard -->\n        <AssetDashboard />
+        <!-- Asset Dashboard -->
+        <AssetDashboard />
 
         <!-- Profit/Loss Curve Chart (Double Height) -->
-        <div class="card-elevated" style="height: 600px;">
+        <div class="card-elevated" style="height: 630px;">
           <SpreadChart />
         </div>
 

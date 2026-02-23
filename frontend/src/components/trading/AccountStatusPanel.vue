@@ -8,7 +8,7 @@
       </div>
     </div>
 
-    <div class="p-4 space-y-4">
+    <div class="p-4 space-y-2">
       <!-- Dynamic Account Cards -->
       <div v-for="account in activeAccounts" :key="account.account_id" class="bg-[#252930] rounded-lg border border-[#2b3139]">
         <div class="p-3 border-b border-[#2b3139]">

@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full flex flex-col p-3">
+  <div class="h-full flex flex-col p-3 min-h-0">
     <h3 class="text-sm font-bold mb-3">保证金风险仪表盘</h3>
-    <div class="space-y-3">
+    <div class="flex-1 overflow-y-auto space-y-3 min-h-0">
       <!-- Margin Rate Card -->
       <div class="bg-[#252930] rounded p-3">
         <div class="text-xs text-gray-400 mb-2">保证金率</div>

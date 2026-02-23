@@ -6,6 +6,12 @@
         <div class="flex items-center space-x-6">
           <!-- Alert Switches -->
           <div class="hidden xl:flex items-center space-x-2 mr-8">
+            <!-- Connection Status -->
+            <div class="flex items-center space-x-2 px-3 py-1.5 bg-dark-200 rounded-lg">
+              <div :class="['w-2 h-2 rounded-full', isConnected ? 'bg-success animate-pulse' : 'bg-danger']"></div>
+              <span class="text-xs text-text-tertiary">{{ isConnected ? 'Connected' : 'Offline' }}</span>
+            </div>
+
             <!-- Alert Sound Switch -->
             <div class="flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
               <svg class="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -77,12 +83,6 @@
 
         <!-- Right Side -->
         <div class="flex items-center space-x-4">
-          <!-- Connection Status -->
-          <div class="hidden md:flex items-center space-x-2 px-3 py-1.5 bg-dark-200 rounded-lg">
-            <div :class="['w-2 h-2 rounded-full', isConnected ? 'bg-success animate-pulse' : 'bg-danger']"></div>
-            <span class="text-xs text-text-tertiary">{{ isConnected ? 'Connected' : 'Offline' }}</span>
-          </div>
-
           <!-- User Menu -->
           <div class="relative" ref="userMenuRef">
             <button
@@ -235,6 +235,11 @@ const navItems = [
     icon: 'TradingIcon',
   },
   {
+    path: '/pending-orders',
+    label: '挂单查询',
+    icon: 'PendingOrdersIcon',
+  },
+  {
     path: '/strategies',
     label: '策略控制',
     icon: 'StrategiesIcon',
@@ -317,6 +322,10 @@ const TradingIcon = {
   template: `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>`
 }
 
+const PendingOrdersIcon = {
+  template: `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>`
+}
+
 const StrategiesIcon = {
   template: `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>`
 }
@@ -340,7 +349,10 @@ const SystemIcon = {
 
 <style scoped>
 .nav-link {
-  @apply flex items-center space-x-2 px-4 py-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-dark-50 transition-all duration-200;
+  @apply flex items-center space-x-1 px-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-dark-50 transition-all duration-200;
+  height: 40px;
+  min-width: fit-content;
+  white-space: nowrap;
 }
 
 .router-link-active.nav-link {
@@ -348,7 +360,9 @@ const SystemIcon = {
 }
 
 .mobile-nav-link {
-  @apply flex items-center space-x-3 px-4 py-3 rounded-lg text-text-secondary hover:text-text-primary hover:bg-dark-50 transition-colors;
+  @apply flex items-center space-x-3 px-4 rounded-lg text-text-secondary hover:text-text-primary hover:bg-dark-50 transition-colors;
+  height: 40px;
+  min-width: fit-content;
 }
 
 .router-link-active.mobile-nav-link {

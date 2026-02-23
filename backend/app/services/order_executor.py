@@ -1,12 +1,12 @@
 """Order executor service for placing and managing orders"""
 import asyncio
+import MetaTrader5 as mt5
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.services.binance_client import BinanceFuturesClient
-from app.services.bybit_client import BybitV5Client
 from app.models.account import Account
 from app.models.order import OrderRecord
 from app.websocket.manager import manager
@@ -23,6 +23,7 @@ class OrderExecutor:
         order_type: str,
         quantity: float,
         price: Optional[float] = None,
+        position_side: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Place order on Binance"""
         client = BinanceFuturesClient(account.api_key, account.api_secret)
@@ -34,6 +35,7 @@ class OrderExecutor:
                 order_type=order_type,
                 quantity=quantity,
                 price=price,
+                position_side=position_side,
             )
             return {
                 "success": True,
@@ -60,25 +62,52 @@ class OrderExecutor:
         order_type: str,
         quantity: str,
         price: Optional[str] = None,
-        category: str = "linear",
+        category: str = "inverse",
     ) -> Dict[str, Any]:
-        """Place order on Bybit"""
-        client = BybitV5Client(account.api_key, account.api_secret)
+        """Place order on Bybit via MT5 terminal"""
+        from app.services.market_service import market_data_service
+
+        mt5_client = market_data_service.mt5_client
 
         try:
-            result = await client.place_order(
-                category=category,
-                symbol=symbol,
-                side=side,
-                order_type=order_type,
-                qty=quantity,
-                price=price,
+            # Map side to MT5 order type
+            if side.lower() == "buy":
+                mt5_order_type = mt5.ORDER_TYPE_BUY_LIMIT if order_type.lower() == "limit" else mt5.ORDER_TYPE_BUY
+            else:
+                mt5_order_type = mt5.ORDER_TYPE_SELL_LIMIT if order_type.lower() == "limit" else mt5.ORDER_TYPE_SELL
+
+            price_val = float(price) if price else None
+            qty_val = float(quantity)
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: mt5_client.send_order(
+                    symbol=symbol,
+                    order_type=mt5_order_type,
+                    volume=qty_val,
+                    price=price_val,
+                )
             )
+
+            if result is None:
+                return {
+                    "success": False,
+                    "platform": "bybit",
+                    "error": "MT5 order failed: no result returned",
+                }
+
+            if result.get("retcode") != mt5.TRADE_RETCODE_DONE:
+                return {
+                    "success": False,
+                    "platform": "bybit",
+                    "error": f"MT5 order error: retcode={result.get('retcode')}, comment={result.get('comment')}",
+                }
+
             return {
                 "success": True,
                 "platform": "bybit",
-                "order_id": result.get("orderId"),
-                "order_link_id": result.get("orderLinkId"),
+                "order_id": str(result.get("order")),
                 "data": result,
             }
         except Exception as e:
@@ -87,8 +116,6 @@ class OrderExecutor:
                 "platform": "bybit",
                 "error": str(e),
             }
-        finally:
-            await client.close()
 
     async def check_binance_order_status(
         self,
@@ -127,47 +154,83 @@ class OrderExecutor:
         account: Account,
         symbol: str,
         order_id: str,
-        category: str = "linear",
+        category: str = "inverse",
     ) -> Dict[str, Any]:
-        """Check Bybit order status"""
-        client = BybitV5Client(account.api_key, account.api_secret)
+        """Check Bybit order status via MT5"""
+        from app.services.market_service import market_data_service
+
+        mt5_client = market_data_service.mt5_client
 
         try:
-            result = await client.get_order(
-                category=category,
-                symbol=symbol,
-                order_id=order_id,
+            ticket = int(order_id)
+            loop = asyncio.get_event_loop()
+
+            # Check open orders first
+            orders = await loop.run_in_executor(
+                None,
+                lambda: mt5.orders_get(ticket=ticket)
             )
 
-            # Extract order from list
-            order_list = result.get("list", [])
-            if not order_list:
+            if orders:
+                order = orders[0]
+                # Order still open/pending
                 return {
-                    "success": False,
-                    "error": "Order not found",
+                    "success": True,
+                    "status": "open",
+                    "filled": False,
+                    "partially_filled": False,
+                    "filled_qty": 0,
+                    "total_qty": order.volume_current,
+                    "data": {"ticket": ticket},
                 }
 
-            order = order_list[0]
-            status = order.get("orderStatus")
-            filled_qty = float(order.get("cumExecQty", 0))
-            total_qty = float(order.get("qty", 0))
+            # Check positions (order filled and became a position)
+            positions = await loop.run_in_executor(
+                None,
+                lambda: mt5.positions_get(symbol=symbol)
+            )
+
+            if positions:
+                for pos in positions:
+                    if pos.ticket == ticket:
+                        return {
+                            "success": True,
+                            "status": "Filled",
+                            "filled": True,
+                            "partially_filled": False,
+                            "filled_qty": pos.volume,
+                            "total_qty": pos.volume,
+                            "data": {"ticket": ticket},
+                        }
+
+            # Order filled and closed (history)
+            history = await loop.run_in_executor(
+                None,
+                lambda: mt5.history_orders_get(ticket=ticket)
+            )
+
+            if history:
+                order = history[0]
+                filled = order.state == mt5.ORDER_STATE_FILLED
+                return {
+                    "success": True,
+                    "status": "Filled" if filled else "cancelled",
+                    "filled": filled,
+                    "partially_filled": False,
+                    "filled_qty": order.volume_current if filled else 0,
+                    "total_qty": order.volume_initial,
+                    "data": {"ticket": ticket},
+                }
 
             return {
-                "success": True,
-                "status": status,
-                "filled": status == "Filled",
-                "partially_filled": filled_qty > 0 and filled_qty < total_qty,
-                "filled_qty": filled_qty,
-                "total_qty": total_qty,
-                "data": order,
+                "success": False,
+                "error": f"Order {order_id} not found in MT5",
             }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
             }
-        finally:
-            await client.close()
 
     async def cancel_binance_order(
         self,
@@ -197,28 +260,28 @@ class OrderExecutor:
         account: Account,
         symbol: str,
         order_id: str,
-        category: str = "linear",
+        category: str = "inverse",
     ) -> Dict[str, Any]:
-        """Cancel Bybit order"""
-        client = BybitV5Client(account.api_key, account.api_secret)
-
+        """Cancel Bybit order via MT5"""
         try:
-            result = await client.cancel_order(
-                category=category,
-                symbol=symbol,
-                order_id=order_id,
+            ticket = int(order_id)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: mt5.order_cancel(ticket)
             )
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                return {"success": True, "data": {"ticket": ticket}}
             return {
-                "success": True,
-                "data": result,
+                "success": False,
+                "error": f"MT5 cancel failed: retcode={result.retcode if result else 'None'}",
             }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
             }
-        finally:
-            await client.close()
+
 
     async def execute_dual_order(
         self,
@@ -268,6 +331,16 @@ class OrderExecutor:
         if bybit_quantity is None:
             bybit_quantity = quantity / 100.0
 
+        # Round prices to 2 decimal places (XAUUSDT precision requirement)
+        if binance_price is not None:
+            binance_price = round(binance_price, 2)
+        if bybit_price is not None:
+            bybit_price = round(bybit_price, 2)
+
+        # Derive positionSide for Binance hedge mode accounts
+        # BUY opens/closes LONG side; SELL opens/closes SHORT side
+        binance_position_side = "LONG" if binance_side.upper() == "BUY" else "SHORT"
+
         # Step 1: Place initial orders on both exchanges
         binance_result, bybit_result = await asyncio.gather(
             self.place_binance_order(
@@ -277,6 +350,7 @@ class OrderExecutor:
                 order_type,
                 quantity,
                 binance_price,
+                position_side=binance_position_side,
             ),
             self.place_bybit_order(
                 bybit_account,
@@ -374,6 +448,7 @@ class OrderExecutor:
                     binance_side,
                     binance_chase_qty,
                     binance_order_id,
+                    position_side=binance_position_side,
                 ))
 
             if not bybit_filled:
@@ -429,6 +504,7 @@ class OrderExecutor:
         side: str,
         quantity: float,
         old_order_id: int,
+        position_side: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Chase Binance order by canceling and placing market order"""
         # Cancel old order
@@ -441,6 +517,7 @@ class OrderExecutor:
             side,
             "MARKET",
             quantity,
+            position_side=position_side,
         )
 
     async def _chase_bybit_order(
@@ -489,6 +566,7 @@ class OrderExecutor:
             price=binance_price,
             qty=quantity,
             status="new",
+            source="strategy",
             platform_order_id=str(binance_order_id),
         )
 
@@ -501,6 +579,7 @@ class OrderExecutor:
             price=bybit_price,
             qty=quantity,
             status="new",
+            source="strategy",
             platform_order_id=bybit_order_id,
         )
 

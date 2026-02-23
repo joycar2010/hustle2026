@@ -27,6 +27,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/pending-orders',
+    name: 'PendingOrders',
+    component: () => import('@/views/PendingOrders.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/strategies',
     name: 'Strategies',
     component: () => import('@/views/Strategies.vue'),

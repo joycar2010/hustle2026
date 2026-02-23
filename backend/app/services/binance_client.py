@@ -186,6 +186,7 @@ class BinanceFuturesClient:
         price: Optional[float] = None,
         time_in_force: str = "GTC",
         reduce_only: bool = False,
+        position_side: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Place a new order"""
         params = {
@@ -203,6 +204,9 @@ class BinanceFuturesClient:
 
         if reduce_only:
             params["reduceOnly"] = "true"
+
+        if position_side:
+            params["positionSide"] = position_side.upper()
 
         return await self._request("POST", "/fapi/v1/order", signed=True, params=params)
 
@@ -227,3 +231,18 @@ class BinanceFuturesClient:
         """Cancel all open orders for a symbol"""
         params = {"symbol": symbol}
         return await self._request("DELETE", "/fapi/v1/allOpenOrders", signed=True, params=params)
+
+    async def get_user_trades(
+        self,
+        symbol: str,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 500,
+    ) -> list:
+        """Get account trade history"""
+        params = {"symbol": symbol, "limit": limit}
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        return await self._request("GET", "/fapi/v1/userTrades", signed=True, params=params)

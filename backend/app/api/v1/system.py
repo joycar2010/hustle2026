@@ -1,9 +1,9 @@
 """System management API endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 from app.core.database import get_db
 from app.core.security import get_current_user_id
@@ -531,6 +531,7 @@ async def get_version_history(
 
 @router.post("/github/push")
 async def push_to_github(
+    remark: Optional[str] = Body(None, embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, str]:
     """Push current version to GitHub"""
@@ -561,7 +562,10 @@ async def push_to_github(
         if status_result.stdout.strip():
             # There are uncommitted changes - commit them
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            commit_message = f"Backup: {timestamp}"
+            if remark:
+                commit_message = f"Backup: {timestamp} - {remark}"
+            else:
+                commit_message = f"Backup: {timestamp}"
 
             # Add all changes
             add_result = subprocess.run(
