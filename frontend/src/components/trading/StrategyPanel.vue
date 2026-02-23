@@ -234,6 +234,7 @@ const binanceAssets = ref(10000)
 const bybitAssets = ref(8500)
 const executing = ref(false)
 const accountsData = ref(null)
+const orderPlaced = ref({ opening: false, closing: false })
 
 const config = ref({
   mCoin: 100,
@@ -275,7 +276,7 @@ onMounted(() => {
   }
 
   fetchStrategyData()
-  updateInterval = setInterval(fetchStrategyData, 5000)
+  updateInterval = setInterval(fetchStrategyData, 1000)
 })
 
 onUnmounted(() => {
@@ -290,14 +291,11 @@ async function fetchStrategyData() {
     const data = await marketStore.fetchMarketData()
 
     if (data) {
-      // Calculate spread based on strategy type
-      // 做多Binance点差 (Forward, Green) = Bybit ASK - Binance BID
-      // 做多Bybit点差 (Reverse, Red) = Binance ASK - Bybit BID
       if (props.type === 'forward') {
-        // Forward strategy: 做多Binance
+        // Forward entry spread: bybit_ask - binance_bid
         currentSpread.value = data.bybit_ask - data.binance_bid
       } else {
-        // Reverse strategy: 做多Bybit
+        // Reverse entry spread: binance_ask - bybit_bid
         currentSpread.value = data.binance_ask - data.bybit_bid
       }
     }
@@ -306,10 +304,8 @@ async function fetchStrategyData() {
     const accountResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
     const accountData = accountResponse.data
 
-    // Store account data for validation
     accountsData.value = accountData
 
-    // Calculate available assets for each platform
     const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
     const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
 
@@ -317,6 +313,30 @@ async function fetchStrategyData() {
       sum + (acc.balance?.available_balance || 0), 0)
     bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
       sum + (acc.balance?.available_balance || 0), 0)
+
+    if (!data) return
+
+    // Auto-execute opening: entry spread >= ladder threshold
+    if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
+      const enabledLadders = config.value.ladders.filter(l => l.enabled)
+      const matchedLadder = enabledLadders.find(l => currentSpread.value >= l.threshold)
+      if (matchedLadder) {
+        await executeOpening(matchedLadder)
+      }
+    }
+
+    // Auto-execute closing: exit spread <= ladder threshold (spread has narrowed)
+    if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
+      // Exit spread is the reverse of entry spread
+      const exitSpread = props.type === 'forward'
+        ? data.binance_ask - data.bybit_bid   // forward exit: binance_ask - bybit_bid
+        : data.bybit_ask - data.binance_bid   // reverse exit: bybit_ask - binance_bid
+      const enabledLadders = config.value.ladders.filter(l => l.enabled)
+      const matchedLadder = enabledLadders.find(l => exitSpread <= l.threshold)
+      if (matchedLadder) {
+        await executeClosing(matchedLadder)
+      }
+    }
   } catch (error) {
     console.error('Failed to fetch strategy data:', error)
   }
@@ -488,170 +508,116 @@ function validateAccountsForExecution() {
   return { valid: true }
 }
 
-async function toggleOpening() {
-  console.log('toggleOpening called, current state:', config.value.openingEnabled)
-
+function toggleOpening() {
   if (config.value.openingEnabled) {
-    // If already enabled, just disable
-    console.log('Disabling opening')
     config.value.openingEnabled = false
   } else {
-    // If disabled, validate accounts first
-    console.log('Validating accounts before enabling')
     const validation = validateAccountsForExecution()
-    console.log('Validation result:', validation)
-
     if (!validation.valid) {
       alert(validation.message)
       return
     }
-    // Then execute the opening strategy
-    await executeOpening()
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    if (enabledLadders.length === 0) {
+      alert('请至少启用一个阶梯配置')
+      return
+    }
+    config.value.openingEnabled = true
+    orderPlaced.value.opening = false
+    // closingEnabled is NOT touched — independent control
   }
 }
 
-async function toggleClosing() {
-  console.log('toggleClosing called, current state:', config.value.closingEnabled)
-
+function toggleClosing() {
   if (config.value.closingEnabled) {
-    // If already enabled, just disable
-    console.log('Disabling closing')
     config.value.closingEnabled = false
   } else {
-    // If disabled, validate accounts first
-    console.log('Validating accounts before enabling')
     const validation = validateAccountsForExecution()
-    console.log('Validation result:', validation)
-
     if (!validation.valid) {
       alert(validation.message)
       return
     }
-    // Then execute the closing strategy
-    await executeClosing()
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    if (enabledLadders.length === 0) {
+      alert('请至少启用一个阶梯配置')
+      return
+    }
+    config.value.closingEnabled = true
+    orderPlaced.value.closing = false
+    // openingEnabled is NOT touched — independent control
   }
 }
 
-async function executeOpening() {
+async function executeOpening(ladder) {
   if (executing.value) return
 
   try {
     executing.value = true
 
-    // Get enabled ladders
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-
-    if (enabledLadders.length === 0) {
-      alert('请至少启用一个阶梯配置')
-      return
-    }
-
-    // Get account IDs from accountsData
     const accounts = accountsData.value?.accounts || []
     const binanceAccount = accounts.find(acc => acc.platform_id === 1)
     const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
 
     if (!binanceAccount || !bybitMT5Account) {
       alert('无法找到账户信息，请刷新页面重试')
+      config.value.openingEnabled = false
       return
     }
 
-    // Use the first enabled ladder's values for the execution
-    const firstLadder = enabledLadders[0]
-
-    // Execute opening strategy
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-      quantity: firstLadder.qtyLimit,
-      target_spread: firstLadder.threshold
+      quantity: ladder.qtyLimit,
+      target_spread: ladder.threshold
     }
 
     const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
 
     if (response.data.success) {
-      config.value.openingEnabled = true
-      alert(`${props.type === 'forward' ? '正向' : '反向'}开仓执行成功！`)
+      orderPlaced.value.opening = true
+      config.value.openingEnabled = false
     } else {
-      alert(`执行失败: ${response.data.error || '未知错误'}`)
+      console.warn(`开仓挂单失败: ${response.data.error || '未知错误'}`)
     }
   } catch (error) {
     console.error('Failed to execute opening:', error)
-    let errorMessage = '未知错误'
-    if (error.response?.data?.detail) {
-      if (typeof error.response.data.detail === 'string') {
-        errorMessage = error.response.data.detail
-      } else if (Array.isArray(error.response.data.detail)) {
-        errorMessage = error.response.data.detail.map(err => `${err.loc?.join('.')}: ${err.msg}`).join(', ')
-      } else {
-        errorMessage = JSON.stringify(error.response.data.detail)
-      }
-    } else if (error.message) {
-      errorMessage = error.message
-    }
-    alert(`执行失败: ${errorMessage}`)
   } finally {
     executing.value = false
   }
 }
 
-async function executeClosing() {
+async function executeClosing(ladder) {
   if (executing.value) return
 
   try {
     executing.value = true
 
-    // Get enabled ladders
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-
-    if (enabledLadders.length === 0) {
-      alert('请至少启用一个阶梯配置')
-      return
-    }
-
-    // Get account IDs from accountsData
     const accounts = accountsData.value?.accounts || []
     const binanceAccount = accounts.find(acc => acc.platform_id === 1)
     const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
 
     if (!binanceAccount || !bybitMT5Account) {
       alert('无法找到账户信息，请刷新页面重试')
+      config.value.closingEnabled = false
       return
     }
 
-    // Use the first enabled ladder's values for the execution
-    const firstLadder = enabledLadders[0]
-
-    // Execute closing strategy
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-      quantity: firstLadder.qtyLimit
+      quantity: ladder.qtyLimit
     }
 
     const response = await api.post(`/api/v1/strategies/close/${props.type}`, executionData)
 
     if (response.data.success) {
-      config.value.closingEnabled = true
-      alert(`${props.type === 'forward' ? '正向' : '反向'}平仓执行成功！`)
+      orderPlaced.value.closing = true
+      config.value.closingEnabled = false
     } else {
-      alert(`执行失败: ${response.data.error || '未知错误'}`)
+      console.warn(`平仓挂单失败: ${response.data.error || '未知错误'}`)
     }
   } catch (error) {
     console.error('Failed to execute closing:', error)
-    let errorMessage = '未知错误'
-    if (error.response?.data?.detail) {
-      if (typeof error.response.data.detail === 'string') {
-        errorMessage = error.response.data.detail
-      } else if (Array.isArray(error.response.data.detail)) {
-        errorMessage = error.response.data.detail.map(err => `${err.loc?.join('.')}: ${err.msg}`).join(', ')
-      } else {
-        errorMessage = JSON.stringify(error.response.data.detail)
-      }
-    } else if (error.message) {
-      errorMessage = error.message
-    }
-    alert(`执行失败: ${errorMessage}`)
   } finally {
     executing.value = false
   }

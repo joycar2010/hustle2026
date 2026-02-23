@@ -235,6 +235,7 @@ class OrderExecutor:
         max_retries: int = 3,
         retry_delay: int = 3,
         db: Optional[AsyncSession] = None,
+        bybit_quantity: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Execute dual orders on both exchanges with chase logic
 
@@ -242,20 +243,31 @@ class OrderExecutor:
             binance_account: Binance account
             bybit_account: Bybit account
             binance_symbol: Binance symbol (e.g., XAUUSDT)
-            bybit_symbol: Bybit symbol (e.g., XAUUSDT)
+            bybit_symbol: Bybit symbol (e.g., XAUUSD.s)
             binance_side: Binance order side (BUY/SELL)
             bybit_side: Bybit order side (Buy/Sell)
-            quantity: Order quantity
+            quantity: Binance order quantity (in contracts)
             binance_price: Binance order price (for LIMIT orders)
             bybit_price: Bybit order price (for LIMIT orders)
             order_type: Order type (LIMIT/MARKET)
             max_retries: Maximum retry attempts
             retry_delay: Delay between retries in seconds
             db: Database session for order persistence
+            bybit_quantity: Bybit order quantity (in lots). If None, calculated as quantity/100
 
         Returns:
             Dict with execution results
+
+        Note:
+            Binance XAUUSDT: 1 contract = 1 XAU (ounce)
+            Bybit XAUUSD.s: 1 lot = 100 XAU (ounces)
+            Therefore: bybit_quantity = binance_quantity / 100
         """
+        # Calculate Bybit quantity if not provided
+        # Binance XAUUSDT: 1 contract = 1 XAU; Bybit XAUUSD.s: 1 lot = 100 XAU
+        if bybit_quantity is None:
+            bybit_quantity = quantity / 100.0
+
         # Step 1: Place initial orders on both exchanges
         binance_result, bybit_result = await asyncio.gather(
             self.place_binance_order(
@@ -271,7 +283,7 @@ class OrderExecutor:
                 bybit_symbol,
                 bybit_side,
                 "Limit" if order_type == "LIMIT" else "Market",
-                str(quantity),
+                str(bybit_quantity),
                 str(bybit_price) if bybit_price else None,
             ),
         )
@@ -323,32 +335,39 @@ class OrderExecutor:
             binance_filled_qty = binance_status.get("filled_qty", 0)
             bybit_filled_qty = bybit_status.get("filled_qty", 0)
 
+            # Convert Bybit filled quantity to Binance equivalent for comparison
+            # Bybit: 1 lot = 100 XAU, Binance: 1 contract = 1 XAU
+            bybit_filled_qty_in_binance_units = bybit_filled_qty * 100
+
             # Calculate remaining quantities
             binance_remaining = quantity - binance_filled_qty
-            bybit_remaining = quantity - bybit_filled_qty
+            bybit_remaining = bybit_quantity - bybit_filled_qty
 
             # Determine chase quantity based on the filled side
             # If one side is fully filled, chase the remaining quantity on the other side
             # If both sides are partially filled, use the max filled quantity as target
             if binance_filled and not bybit_filled:
                 # Binance fully filled, chase Bybit with Binance's filled quantity
-                chase_qty = min(binance_filled_qty, quantity)
+                binance_chase_qty = binance_filled_qty
+                bybit_chase_qty = binance_filled_qty / 100.0
             elif bybit_filled and not binance_filled:
                 # Bybit fully filled, chase Binance with Bybit's filled quantity
-                chase_qty = min(bybit_filled_qty, quantity)
+                binance_chase_qty = bybit_filled_qty_in_binance_units
+                bybit_chase_qty = bybit_filled_qty
             elif binance_filled_qty > 0 or bybit_filled_qty > 0:
                 # Both partially filled, use max filled quantity as target
-                target_qty = max(binance_filled_qty, bybit_filled_qty)
-                chase_qty = target_qty
+                target_qty_binance = max(binance_filled_qty, bybit_filled_qty_in_binance_units)
+                binance_chase_qty = target_qty_binance
+                bybit_chase_qty = target_qty_binance / 100.0
             else:
                 # Neither filled, use original quantity
-                chase_qty = quantity
+                binance_chase_qty = quantity
+                bybit_chase_qty = bybit_quantity
 
             # Cancel and retry unfilled orders with market orders
             tasks = []
 
             if not binance_filled:
-                binance_chase_qty = chase_qty if bybit_filled or bybit_filled_qty > 0 else quantity
                 tasks.append(self._chase_binance_order(
                     binance_account,
                     binance_symbol,
@@ -358,7 +377,6 @@ class OrderExecutor:
                 ))
 
             if not bybit_filled:
-                bybit_chase_qty = chase_qty if binance_filled or binance_filled_qty > 0 else quantity
                 tasks.append(self._chase_bybit_order(
                     bybit_account,
                     bybit_symbol,

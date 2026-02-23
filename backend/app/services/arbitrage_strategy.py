@@ -62,7 +62,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSDT",
+            bybit_symbol="XAUUSD.s",
             binance_side="BUY",
             bybit_side="Sell",
             quantity=quantity,
@@ -117,11 +117,11 @@ class ArbitrageStrategy:
             use_cache=False
         )
 
-        # Check if spread meets target (reverse spread should be negative)
-        if spread_data.reverse_entry_spread > -target_spread:
+        # Check if spread meets target (reverse_entry_spread = binance_ask - bybit_bid, should be >= target)
+        if spread_data.reverse_entry_spread < target_spread:
             return {
                 "success": False,
-                "error": f"Spread {spread_data.reverse_entry_spread} not favorable for reverse arbitrage",
+                "error": f"Spread {spread_data.reverse_entry_spread} below target {target_spread}",
             }
 
         # Calculate order prices
@@ -145,7 +145,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSDT",
+            bybit_symbol="XAUUSD.s",
             binance_side="SELL",
             bybit_side="Buy",
             quantity=quantity,
@@ -218,7 +218,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSDT",
+            bybit_symbol="XAUUSD.s",
             binance_side="SELL",  # Close long position
             bybit_side="Buy",  # Close short position
             quantity=quantity,
@@ -282,7 +282,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSDT",
+            bybit_symbol="XAUUSD.s",
             binance_side="BUY",  # Close short position
             bybit_side="Sell",  # Close long position
             quantity=quantity,
@@ -297,8 +297,8 @@ class ArbitrageStrategy:
             task.status = "closed"
             task.close_spread = spread_data.reverse_exit_spread
             task.close_time = datetime.utcnow()
-            # Calculate profit
-            task.profit = (spread_data.reverse_exit_spread - task.open_spread) * quantity
+            # Calculate profit: open_spread (binance_ask - bybit_bid) minus exit cost (bybit_ask - binance_bid)
+            task.profit = (task.open_spread - spread_data.reverse_exit_spread) * quantity
 
         await db.commit()
 

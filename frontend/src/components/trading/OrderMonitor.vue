@@ -7,6 +7,7 @@
           <tr class="text-left text-gray-400 border-b border-[#2b3139]">
             <th class="p-2">时间</th>
             <th class="p-2">平台</th>
+            <th class="p-2">品种</th>
             <th class="p-2">方向</th>
             <th class="p-2">数量</th>
             <th class="p-2">价格</th>
@@ -15,7 +16,7 @@
         </thead>
         <tbody>
           <tr v-if="orders.length === 0">
-            <td colspan="6" class="p-4 text-center text-gray-400">暂无挂单数据</td>
+            <td colspan="7" class="p-4 text-center text-gray-400">暂无挂单数据</td>
           </tr>
           <tr
             v-for="order in orders"
@@ -24,13 +25,14 @@
           >
             <td class="p-2 text-gray-400">{{ formatTime(order.timestamp) }}</td>
             <td class="p-2">{{ order.exchange }}</td>
+            <td class="p-2 font-mono">{{ order.symbol }}</td>
             <td class="p-2">
               <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ order.side === 'buy' ? '买入' : '卖出' }}
               </span>
             </td>
             <td class="p-2 font-mono">{{ order.quantity }}</td>
-            <td class="p-2 font-mono">{{ order.price.toFixed(2) }} USDT</td>
+            <td class="p-2 font-mono">{{ order.price != null ? Number(order.price).toFixed(2) : '-' }} USDT</td>
             <td class="p-2">
               <span :class="getStatusClass(order.status)">
                 {{ getStatusText(order.status) }}
@@ -52,7 +54,7 @@ let updateInterval = null
 
 onMounted(() => {
   fetchOrders()
-  updateInterval = setInterval(fetchOrders, 5000)
+  updateInterval = setInterval(fetchOrders, 3000)
 })
 
 onUnmounted(() => {
@@ -69,11 +71,11 @@ async function fetchOrders() {
     orders.value = response.data
   } catch (error) {
     console.error('Failed to fetch orders:', error)
-    // Keep existing orders on error
   }
 }
 
 function formatTime(timestamp) {
+  if (!timestamp) return '-'
   const date = new Date(timestamp)
   return date.toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -85,8 +87,10 @@ function formatTime(timestamp) {
 
 function getStatusClass(status) {
   const classes = {
+    new: 'text-[#f0b90b]',
     pending: 'text-[#f0b90b]',
     filled: 'text-[#0ecb81]',
+    canceled: 'text-[#f6465d]',
     cancelled: 'text-[#f6465d]',
   }
   return classes[status] || 'text-gray-400'
@@ -94,8 +98,10 @@ function getStatusClass(status) {
 
 function getStatusText(status) {
   const texts = {
+    new: '挂单中',
     pending: '挂单中',
     filled: '已成交',
+    canceled: '已取消',
     cancelled: '已取消',
   }
   return texts[status] || status
