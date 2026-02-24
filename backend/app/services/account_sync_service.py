@@ -79,20 +79,26 @@ class AccountSyncService:
             # Get account information
             account_data = await self.binance_client.get_account()
             if account_data:
-                # Update account balance
-                account.balance = float(account_data.get('totalWalletBalance', 0))
-                account.available_balance = float(account_data.get('availableBalance', 0))
-                account.margin_used = float(account_data.get('totalInitialMargin', 0))
-                account.unrealized_pnl = float(account_data.get('totalUnrealizedProfit', 0))
-                account.updated_at = datetime.utcnow()
+                # Get balance data
+                total_wallet_balance = float(account_data.get('totalWalletBalance', 0))
+                available_balance = float(account_data.get('availableBalance', 0))
+                margin_used = float(account_data.get('totalInitialMargin', 0))
+                unrealized_pnl = float(account_data.get('totalUnrealizedProfit', 0))
 
                 # Create account snapshot
                 snapshot = AccountSnapshot(
                     account_id=account.account_id,
-                    total_balance=account.balance,
-                    available_balance=account.available_balance,
-                    margin_used=account.margin_used,
-                    unrealized_pnl=account.unrealized_pnl,
+                    total_assets=total_wallet_balance,
+                    available_assets=available_balance,
+                    net_assets=total_wallet_balance + unrealized_pnl,
+                    total_position=0.0,  # Will be calculated from positions
+                    frozen_assets=margin_used,
+                    margin_balance=total_wallet_balance,
+                    margin_used=margin_used,
+                    margin_available=available_balance,
+                    unrealized_pnl=unrealized_pnl,
+                    daily_pnl=0.0,  # Not available from this API
+                    risk_ratio=0.0 if total_wallet_balance == 0 else (margin_used / total_wallet_balance),
                     timestamp=datetime.utcnow()
                 )
                 db.add(snapshot)
@@ -112,20 +118,26 @@ class AccountSyncService:
             balance_data = await self.bybit_client.get_wallet_balance("UNIFIED")
             if balance_data and 'list' in balance_data and len(balance_data['list']) > 0:
                 wallet = balance_data['list'][0]
-                # Update account balance
-                account.balance = float(wallet.get('totalEquity', 0))
-                account.available_balance = float(wallet.get('totalAvailableBalance', 0))
-                account.margin_used = float(wallet.get('totalInitialMargin', 0))
-                account.unrealized_pnl = float(wallet.get('totalPerpUPL', 0))
-                account.updated_at = datetime.utcnow()
+                # Get balance data
+                total_equity = float(wallet.get('totalEquity', 0))
+                total_available = float(wallet.get('totalAvailableBalance', 0))
+                margin_used = float(wallet.get('totalInitialMargin', 0))
+                unrealized_pnl = float(wallet.get('totalPerpUPL', 0))
 
                 # Create account snapshot
                 snapshot = AccountSnapshot(
                     account_id=account.account_id,
-                    total_balance=account.balance,
-                    available_balance=account.available_balance,
-                    margin_used=account.margin_used,
-                    unrealized_pnl=account.unrealized_pnl,
+                    total_assets=total_equity,
+                    available_assets=total_available,
+                    net_assets=total_equity,
+                    total_position=0.0,  # Will be calculated from positions
+                    frozen_assets=margin_used,
+                    margin_balance=total_equity,
+                    margin_used=margin_used,
+                    margin_available=total_available,
+                    unrealized_pnl=unrealized_pnl,
+                    daily_pnl=0.0,  # Not available from this API
+                    risk_ratio=0.0 if total_equity == 0 else (margin_used / total_equity),
                     timestamp=datetime.utcnow()
                 )
                 db.add(snapshot)

@@ -13,10 +13,17 @@ class AccountSnapshot(Base):
 
     snapshot_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.account_id"), nullable=False, index=True)
-    total_balance = Column(Float, nullable=False)
-    available_balance = Column(Float, nullable=False)
+    total_assets = Column(Float, nullable=False)
+    available_assets = Column(Float, nullable=False)
+    net_assets = Column(Float, nullable=False)
+    total_position = Column(Float, default=0.0, nullable=False)
+    frozen_assets = Column(Float, default=0.0, nullable=False)
+    margin_balance = Column(Float, default=0.0, nullable=False)
     margin_used = Column(Float, default=0.0, nullable=False)
+    margin_available = Column(Float, default=0.0, nullable=False)
     unrealized_pnl = Column(Float, default=0.0, nullable=False)
+    daily_pnl = Column(Float, default=0.0, nullable=False)
+    risk_ratio = Column(Float, default=0.0, nullable=False)
     timestamp = Column(TIMESTAMP, default=datetime.utcnow, nullable=False, index=True)
 
     # Relationships
@@ -27,4 +34,4 @@ class AccountSnapshot(Base):
     )
 
     def __repr__(self):
-        return f"<AccountSnapshot(account_id={self.account_id}, balance={self.total_balance}, time={self.timestamp})>"
+        return f"<AccountSnapshot(account_id={self.account_id}, total_assets={self.total_assets}, time={self.timestamp})>"
