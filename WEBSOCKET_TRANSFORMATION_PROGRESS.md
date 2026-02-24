@@ -66,6 +66,15 @@ Successfully completed transformation of all high-frequency polling components (
 - Components can now watch for specific message types (order_update, risk_alert, etc.)
 - File: [frontend/src/stores/market.js](frontend/src/stores/market.js)
 
+### WebSocket Monitoring Component ✓
+- Real-time connection status and health monitoring
+- Message statistics: total count, rate (msg/s), uptime
+- Message type breakdown with color coding
+- Recent message log (last 10 messages)
+- Connection controls (reconnect/disconnect/clear stats)
+- Integrated into System view as dedicated tab
+- File: [frontend/src/components/system/WebSocketMonitor.vue](frontend/src/components/system/WebSocketMonitor.vue)
+
 ### Backend WebSocket Support ✓
 - Extended ConnectionManager with 4 new broadcast methods:
   - `broadcast_strategy_status()`
@@ -102,8 +111,8 @@ Successfully completed transformation of all high-frequency polling components (
 - Components with >5s intervals (to be identified)
 
 ### Additional Tasks
-1. Implement unified data subscription mechanism
-2. Create WebSocket monitoring component
+1. ~~Implement unified data subscription mechanism~~ (Completed via market store)
+2. ~~Create WebSocket monitoring component~~ ✓ Completed
 3. Establish regression prevention mechanisms (pre-commit hooks)
 4. Configure CI/CD checks for polling detection
 
@@ -113,6 +122,8 @@ Successfully completed transformation of all high-frequency polling components (
 2. `df7d0a1` - 扩展WebSocket推送类型和快速实施指南 (2 files, 615 insertions)
 3. `5cb263a` - Transform high-frequency components to WebSocket (7 files, 520 insertions)
 4. `752ffc5` - Transform medium-frequency components to WebSocket (4 files, 257 insertions)
+5. `3e510f9` - Update WebSocket transformation progress report
+6. `6d91246` - Add WebSocket monitoring component (2 files, 272 insertions)
 
 ## Next Steps
 
@@ -163,8 +174,20 @@ watch(() => marketStore.lastMessage, (message) => {
 ## Success Criteria
 
 - [x] All high-frequency components transformed
-- [ ] All medium-frequency components transformed
+- [ ] All medium-frequency components transformed (4/11 complete)
 - [ ] All low-frequency components transformed
-- [ ] WebSocket monitoring dashboard created
+- [x] WebSocket monitoring dashboard created
 - [ ] Regression prevention mechanisms in place
 - [ ] Zero polling remnants in production code
+
+## Current Status: 36% Complete
+
+**Components Transformed**: 8/22
+- High-frequency (≤1s): 4/4 (100%) ✓
+- Medium-frequency (1-5s): 4/11 (36%)
+- Low-frequency (>5s): 0/5 (0%)
+
+**Infrastructure**: Complete ✓
+- Market store with multi-message support
+- WebSocket monitoring dashboard
+- Backend broadcast methods ready
