@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useNotificationStore } from '@/stores/notification'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
@@ -10,6 +10,8 @@ export function useAlertMonitoring() {
   let marketCheckInterval = null
   let accountCheckInterval = null
   let mt5CheckInterval = null
+  let unwatchMarket = null
+  let unwatchAccount = null
 
   // Monitor market data for spread alerts
   async function checkMarketData() {
@@ -60,14 +62,38 @@ export function useAlertMonitoring() {
     // Load alert settings first
     notificationStore.loadAlertSettings()
 
-    // Check market data every 5 seconds
-    marketCheckInterval = setInterval(checkMarketData, 5000)
+    // Connect to WebSocket if not already connected
+    if (!marketStore.connected) {
+      marketStore.connect()
+    }
 
-    // Check account data every 10 seconds
-    accountCheckInterval = setInterval(checkAccountData, 10000)
+    // Watch for market_data WebSocket messages
+    unwatchMarket = watch(() => marketStore.lastMessage, (message) => {
+      if (message && message.type === 'market_data') {
+        notificationStore.checkMarketAlerts(message.data)
+      }
+    })
 
-    // Check MT5 status every 15 seconds
-    mt5CheckInterval = setInterval(checkMT5Status, 15000)
+    // Watch for account_balance WebSocket messages
+    unwatchAccount = watch(() => marketStore.lastMessage, (message) => {
+      if (message && message.type === 'account_balance') {
+        const accountData = {
+          binance_net_asset: message.data.summary?.binance_net_asset || 0,
+          bybit_mt5_net_asset: message.data.summary?.bybit_mt5_net_asset || 0,
+          total_net_asset: message.data.summary?.total_assets || 0
+        }
+        notificationStore.checkAccountAlerts(accountData)
+      }
+    })
+
+    // Reduced polling frequency as fallback (30s instead of 5s)
+    marketCheckInterval = setInterval(checkMarketData, 30000)
+
+    // Reduced polling frequency as fallback (60s instead of 10s)
+    accountCheckInterval = setInterval(checkAccountData, 60000)
+
+    // Check MT5 status every 30 seconds (reduced from 15s)
+    mt5CheckInterval = setInterval(checkMT5Status, 30000)
 
     // Initial checks
     checkMarketData()
@@ -80,6 +106,8 @@ export function useAlertMonitoring() {
     if (marketCheckInterval) clearInterval(marketCheckInterval)
     if (accountCheckInterval) clearInterval(accountCheckInterval)
     if (mt5CheckInterval) clearInterval(mt5CheckInterval)
+    if (unwatchMarket) unwatchMarket()
+    if (unwatchAccount) unwatchAccount()
   }
 
   // Auto-start on mount and cleanup on unmount
