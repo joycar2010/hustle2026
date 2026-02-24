@@ -225,7 +225,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 
@@ -259,9 +259,7 @@ const config = ref({
   ]
 })
 
-let updateInterval = null
-
-onMounted(() => {
+onMounted(async () => {
   // Explicitly reset enabled states to false on mount
   config.value.openingEnabled = false
   config.value.closingEnabled = false
@@ -285,32 +283,72 @@ onMounted(() => {
     }
   }
 
-  fetchStrategyData()
-  updateInterval = setInterval(fetchStrategyData, 1000)
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  // Initial account data fetch
+  await fetchAccountData()
 })
 
 onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
+  // No cleanup needed - WebSocket stays connected for other components
+})
+
+// Watch for market data updates via WebSocket
+watch(() => marketStore.marketData, (newData) => {
+  if (!newData) return
+
+  // Update spread based on strategy type
+  if (props.type === 'forward') {
+    currentSpread.value = newData.bybit_ask - newData.binance_bid
+  } else {
+    currentSpread.value = newData.binance_ask - newData.bybit_bid
+  }
+
+  // binance做多值: forward=binance_bid, reverse=binance_ask
+  const binanceLongValue = props.type === 'forward' ? newData.binance_bid : newData.binance_ask
+
+  // Trigger count logic for opening
+  if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    const matchedLadder = enabledLadders.find(l => binanceLongValue >= l.openPrice)
+
+    if (matchedLadder) {
+      triggerCount.value.opening++
+      console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, binanceLongValue=${binanceLongValue}, openPrice=${matchedLadder.openPrice}`)
+
+      if (triggerCount.value.opening >= config.value.openingSyncQty) {
+        executeBatchOpening(matchedLadder)
+        triggerCount.value.opening = 0
+      }
+    } else {
+      triggerCount.value.opening = 0
+    }
+  }
+
+  // Trigger count logic for closing
+  if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    const matchedLadder = enabledLadders.find(l => binanceLongValue <= l.threshold)
+
+    if (matchedLadder) {
+      triggerCount.value.closing++
+      console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, binanceLongValue=${binanceLongValue}, threshold=${matchedLadder.threshold}`)
+
+      if (triggerCount.value.closing >= config.value.closingSyncQty) {
+        executeBatchClosing(matchedLadder)
+        triggerCount.value.closing = 0
+      }
+    } else {
+      triggerCount.value.closing = 0
+    }
   }
 })
 
-async function fetchStrategyData() {
+async function fetchAccountData() {
   try {
-    // Fetch market data for spread calculation
-    const data = await marketStore.fetchMarketData()
-
-    if (data) {
-      if (props.type === 'forward') {
-        // Forward entry spread: bybit_ask - binance_bid
-        currentSpread.value = data.bybit_ask - data.binance_bid
-      } else {
-        // Reverse entry spread: binance_ask - bybit_bid
-        currentSpread.value = data.binance_ask - data.bybit_bid
-      }
-    }
-
-    // Fetch real account asset data
     const accountResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
     const accountData = accountResponse.data
 
@@ -323,53 +361,8 @@ async function fetchStrategyData() {
       sum + (acc.balance?.available_balance || 0), 0)
     bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
       sum + (acc.balance?.available_balance || 0), 0)
-
-    if (!data) return
-
-    // binance做多值: forward=binance_bid, reverse=binance_ask
-    const binanceLongValue = props.type === 'forward' ? data.binance_bid : data.binance_ask
-
-    // Trigger count logic for opening
-    // 开仓条件: binance做多值 >= 开仓价
-    if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
-      const enabledLadders = config.value.ladders.filter(l => l.enabled)
-      const matchedLadder = enabledLadders.find(l => binanceLongValue >= l.openPrice)
-
-      if (matchedLadder) {
-        triggerCount.value.opening++
-        console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, binanceLongValue=${binanceLongValue}, openPrice=${matchedLadder.openPrice}`)
-
-        if (triggerCount.value.opening >= config.value.openingSyncQty) {
-          await executeBatchOpening(matchedLadder)
-          triggerCount.value.opening = 0
-        }
-      } else {
-        // Reset trigger count if condition no longer met
-        triggerCount.value.opening = 0
-      }
-    }
-
-    // Trigger count logic for closing
-    // 平仓条件: binance做多值 <= 阈值
-    if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
-      const enabledLadders = config.value.ladders.filter(l => l.enabled)
-      const matchedLadder = enabledLadders.find(l => binanceLongValue <= l.threshold)
-
-      if (matchedLadder) {
-        triggerCount.value.closing++
-        console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, binanceLongValue=${binanceLongValue}, threshold=${matchedLadder.threshold}`)
-
-        if (triggerCount.value.closing >= config.value.closingSyncQty) {
-          await executeBatchClosing(matchedLadder)
-          triggerCount.value.closing = 0
-        }
-      } else {
-        // Reset trigger count if condition no longer met
-        triggerCount.value.closing = 0
-      }
-    }
   } catch (error) {
-    console.error('Failed to fetch strategy data:', error)
+    console.error('Failed to fetch account data:', error)
   }
 }
 

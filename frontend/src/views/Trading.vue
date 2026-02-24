@@ -85,6 +85,12 @@
               <div class="text-lg font-bold text-red-500">{{ stats.totalFees.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">已实现盈亏</div>
+              <div class="text-lg font-bold" :class="(stats.realizedPnL || 0) >= 0 ? 'text-green-500' : 'text-red-500'">
+                {{ (stats.realizedPnL || 0) >= 0 ? '+' : '' }}{{ (stats.realizedPnL || 0).toFixed(2) }} USDT
+              </div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">过夜费汇总</div>
               <div class="text-lg font-bold text-red-500">{{ stats.overnightFees.toFixed(2) }} USDT</div>
             </div>
@@ -237,11 +243,13 @@ const stats = ref({
   buySellAmount: 0,
   taskAmount: 0,
   totalFees: 0,
+  realizedPnL: 0,
   overnightFees: 0,
   marketFundingRate: 0,
   mt5OvernightFee: 0,
   marketFee: 0,
   mt5Fee: 0,
+  mt5RealizedPnL: 0,
   peRatio: 0,
   mt5TodayReturn: 0,
   totalReturnProfit: 0
@@ -318,11 +326,13 @@ function clearData() {
     buySellAmount: 0,
     taskAmount: 0,
     totalFees: 0,
+    realizedPnL: 0,
     overnightFees: 0,
     marketFundingRate: 0,
     mt5OvernightFee: 0,
     marketFee: 0,
     mt5Fee: 0,
+    mt5RealizedPnL: 0,
     peRatio: 0,
     mt5TodayReturn: 0,
     totalReturnProfit: 0

@@ -56,16 +56,45 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/services/api'
+import { useMarketStore } from '@/stores/market'
 
+const marketStore = useMarketStore()
 const orders = ref([])
 
-onMounted(() => {
-  fetchOrders()
-  setInterval(fetchOrders, 5000)
+onMounted(async () => {
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  // Initial fetch
+  await fetchOrders()
 })
+
+onUnmounted(() => {
+  // No cleanup needed - WebSocket stays connected
+})
+
+// Watch for order updates via WebSocket
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'order_update') {
+    handleOrderUpdate(message.data)
+  }
+})
+
+function handleOrderUpdate(orderData) {
+  // Update or add order in the list
+  const index = orders.value.findIndex(o => o.order_id === orderData.order_id)
+  if (index !== -1) {
+    orders.value[index] = { ...orders.value[index], ...orderData }
+  } else {
+    // New order, fetch full list to ensure consistency
+    fetchOrders()
+  }
+}
 
 async function fetchOrders() {
   try {

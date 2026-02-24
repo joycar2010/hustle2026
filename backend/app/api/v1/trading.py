@@ -14,25 +14,44 @@ from app.services.order_executor import order_executor
 from app.services.market_service import market_data_service
 import asyncio
 import MetaTrader5 as mt5
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
-def _build_stats(orders, accounts_map):
-    """Build stats dict from a list of OrderRecord"""
+def _build_stats(orders, accounts_map, enable_logging=True):
+    """Build stats dict from a list of OrderRecord
+
+    Args:
+        orders: List of OrderRecord objects
+        accounts_map: Dict mapping account_id to Account objects
+        enable_logging: Whether to log detailed PnL calculation process
+
+    Returns:
+        Tuple of (stats_dict, account_trades, mt5_trades)
+    """
     # Separate totals for Binance and MT5
     binance_volume = 0
     binance_amount = 0.0
     binance_buy_sell_amount = 0.0  # manual + strategy
     binance_task_amount = 0.0      # sync
     binance_fees = 0.0
+    binance_realized_pnl = 0.0     # Realized profit/loss
 
     mt5_volume = 0
     mt5_amount = 0.0
     mt5_fees = 0.0
+    mt5_realized_pnl = 0.0
 
     account_trades = []
     mt5_trades = []
+
+    # Track positions for PnL calculation (支持做多和做空)
+    # position structure: {qty: float, cost: float}
+    # qty > 0: long position (做多), qty < 0: short position (做空)
+    binance_positions = {}  # symbol -> {qty, cost}
+    mt5_positions = {}
 
     # Valid order types for trading (exclude transfers and other non-trade types)
     valid_order_types = ['limit', 'market', 'stop', 'stop_limit', 'take_profit', 'take_profit_limit']
@@ -40,6 +59,9 @@ def _build_stats(orders, accounts_map):
     # Exclude transfer-related order types and sides
     excluded_types = ['transfer', 'deposit', 'withdrawal', 'internal_transfer', 'funding', 'rebate']
     excluded_sides = ['transfer', 'deposit', 'withdrawal', 'funding']
+
+    if enable_logging:
+        logger.info(f"开始计算统计数据，共 {len(orders)} 笔订单")
 
     for order in orders:
         # Skip non-trade orders (transfers, deposits, withdrawals, etc.)
@@ -88,17 +110,100 @@ def _build_stats(orders, accounts_map):
             continue
 
         # Use actual fee from database if available, otherwise estimate
-        if order.fee and order.fee > 0:
-            fee = order.fee
+        # Check if fee exists and is a valid positive number
+        if order.fee is not None and order.fee > 0:
+            fee = float(order.fee)
         else:
             # Binance maker fee ~0.02%, Bybit MT5 ~0.01% estimate
             fee = amount * 0.0002 if is_binance else amount * 0.0001
+
+        # Determine if this is a buy or sell order
+        is_buy = order.order_side.lower() == 'buy'
+        is_sell = order.order_side.lower() == 'sell'
 
         # Accumulate separately for each platform
         if is_mt5:
             mt5_volume += qty
             mt5_amount += amount
             mt5_fees += fee
+
+            # Calculate MT5 realized PnL using FIFO method (支持做多和做空)
+            symbol_key = order.symbol
+            if symbol_key not in mt5_positions:
+                mt5_positions[symbol_key] = {'qty': 0, 'cost': 0}
+
+            position = mt5_positions[symbol_key]
+            old_qty = position['qty']
+            old_cost = position['cost']
+
+            if is_buy:
+                if position['qty'] >= 0:
+                    # 做多：买入增加仓位
+                    position['cost'] += amount
+                    position['qty'] += qty
+                    if enable_logging:
+                        logger.info(f"[MT5] 做多买入 {order.symbol}: qty={qty}, price={order.price}, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty']:.4f}")
+                else:
+                    # 做空平仓：买入平掉空头仓位
+                    close_qty = min(qty, abs(position['qty']))
+                    avg_cost_price = abs(position['cost'] / position['qty']) if position['qty'] != 0 else 0
+                    # 做空盈亏 = (开仓价 - 平仓价) × 数量 - 手续费
+                    realized_pnl = (avg_cost_price - order.price) * close_qty - fee
+                    mt5_realized_pnl += realized_pnl
+
+                    if enable_logging:
+                        logger.info(f"[MT5] 做空平仓 {order.symbol}: 平仓qty={close_qty}, 开仓均价={avg_cost_price:.2f}, "
+                                  f"平仓价={order.price}, 盈亏={realized_pnl:.2f} USDT, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty'] + close_qty:.4f}")
+
+                    # Update position
+                    position['cost'] += avg_cost_price * close_qty
+                    position['qty'] += close_qty
+
+                    # 如果买入数量大于空头仓位，剩余部分转为做多
+                    if qty > close_qty:
+                        remaining_qty = qty - close_qty
+                        position['cost'] += remaining_qty * order.price
+                        position['qty'] += remaining_qty
+                        if enable_logging:
+                            logger.info(f"[MT5] 空头平仓后转做多 {order.symbol}: 剩余qty={remaining_qty}, "
+                                      f"仓位 -> {position['qty']:.4f}")
+
+            else:  # sell
+                if position['qty'] <= 0:
+                    # 做空：卖出增加空头仓位
+                    position['cost'] -= amount
+                    position['qty'] -= qty
+                    if enable_logging:
+                        logger.info(f"[MT5] 做空卖出 {order.symbol}: qty={qty}, price={order.price}, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty']:.4f}")
+                else:
+                    # 做多平仓：卖出平掉多头仓位
+                    close_qty = min(qty, position['qty'])
+                    avg_cost_price = position['cost'] / position['qty'] if position['qty'] > 0 else 0
+                    # 做多盈亏 = (平仓价 - 开仓价) × 数量 - 手续费
+                    realized_pnl = (order.price - avg_cost_price) * close_qty - fee
+                    mt5_realized_pnl += realized_pnl
+
+                    if enable_logging:
+                        logger.info(f"[MT5] 做多平仓 {order.symbol}: 平仓qty={close_qty}, 开仓均价={avg_cost_price:.2f}, "
+                                  f"平仓价={order.price}, 盈亏={realized_pnl:.2f} USDT, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty'] - close_qty:.4f}")
+
+                    # Update position
+                    position['cost'] -= avg_cost_price * close_qty
+                    position['qty'] -= close_qty
+
+                    # 如果卖出数量大于多头仓位，剩余部分转为做空
+                    if qty > close_qty:
+                        remaining_qty = qty - close_qty
+                        position['cost'] -= remaining_qty * order.price
+                        position['qty'] -= remaining_qty
+                        if enable_logging:
+                            logger.info(f"[MT5] 多头平仓后转做空 {order.symbol}: 剩余qty={remaining_qty}, "
+                                      f"仓位 -> {position['qty']:.4f}")
+
         elif is_binance:
             binance_volume += qty
             binance_amount += amount
@@ -109,6 +214,83 @@ def _build_stats(orders, accounts_map):
                 binance_buy_sell_amount += amount
             elif order.source == 'sync':
                 binance_task_amount += amount
+
+            # Calculate Binance realized PnL using FIFO method (支持做多和做空)
+            symbol_key = order.symbol
+            if symbol_key not in binance_positions:
+                binance_positions[symbol_key] = {'qty': 0, 'cost': 0}
+
+            position = binance_positions[symbol_key]
+            old_qty = position['qty']
+            old_cost = position['cost']
+
+            if is_buy:
+                if position['qty'] >= 0:
+                    # 做多：买入增加仓位
+                    position['cost'] += amount
+                    position['qty'] += qty
+                    if enable_logging:
+                        logger.info(f"[Binance] 做多买入 {order.symbol}: qty={qty}, price={order.price}, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty']:.4f}")
+                else:
+                    # 做空平仓：买入平掉空头仓位
+                    close_qty = min(qty, abs(position['qty']))
+                    avg_cost_price = abs(position['cost'] / position['qty']) if position['qty'] != 0 else 0
+                    # 做空盈亏 = (开仓价 - 平仓价) × 数量 - 手续费
+                    realized_pnl = (avg_cost_price - order.price) * close_qty - fee
+                    binance_realized_pnl += realized_pnl
+
+                    if enable_logging:
+                        logger.info(f"[Binance] 做空平仓 {order.symbol}: 平仓qty={close_qty}, 开仓均价={avg_cost_price:.2f}, "
+                                  f"平仓价={order.price}, 盈亏={realized_pnl:.2f} USDT, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty'] + close_qty:.4f}")
+
+                    # Update position
+                    position['cost'] += avg_cost_price * close_qty
+                    position['qty'] += close_qty
+
+                    # 如果买入数量大于空头仓位，剩余部分转为做多
+                    if qty > close_qty:
+                        remaining_qty = qty - close_qty
+                        position['cost'] += remaining_qty * order.price
+                        position['qty'] += remaining_qty
+                        if enable_logging:
+                            logger.info(f"[Binance] 空头平仓后转做多 {order.symbol}: 剩余qty={remaining_qty}, "
+                                      f"仓位 -> {position['qty']:.4f}")
+
+            else:  # sell
+                if position['qty'] <= 0:
+                    # 做空：卖出增加空头仓位
+                    position['cost'] -= amount
+                    position['qty'] -= qty
+                    if enable_logging:
+                        logger.info(f"[Binance] 做空卖出 {order.symbol}: qty={qty}, price={order.price}, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty']:.4f}")
+                else:
+                    # 做多平仓：卖出平掉多头仓位
+                    close_qty = min(qty, position['qty'])
+                    avg_cost_price = position['cost'] / position['qty'] if position['qty'] > 0 else 0
+                    # 做多盈亏 = (平仓价 - 开仓价) × 数量 - 手续费
+                    realized_pnl = (order.price - avg_cost_price) * close_qty - fee
+                    binance_realized_pnl += realized_pnl
+
+                    if enable_logging:
+                        logger.info(f"[Binance] 做多平仓 {order.symbol}: 平仓qty={close_qty}, 开仓均价={avg_cost_price:.2f}, "
+                                  f"平仓价={order.price}, 盈亏={realized_pnl:.2f} USDT, "
+                                  f"仓位 {old_qty:.4f} -> {position['qty'] - close_qty:.4f}")
+
+                    # Update position
+                    position['cost'] -= avg_cost_price * close_qty
+                    position['qty'] -= close_qty
+
+                    # 如果卖出数量大于多头仓位，剩余部分转为做空
+                    if qty > close_qty:
+                        remaining_qty = qty - close_qty
+                        position['cost'] -= remaining_qty * order.price
+                        position['qty'] -= remaining_qty
+                        if enable_logging:
+                            logger.info(f"[Binance] 多头平仓后转做空 {order.symbol}: 剩余qty={remaining_qty}, "
+                                      f"仓位 -> {position['qty']:.4f}")
 
         trade = {
             "id": str(order.order_id),
@@ -130,6 +312,26 @@ def _build_stats(orders, accounts_map):
     binance_return = binance_amount * 0.001  # simplified estimate
     mt5_return = mt5_amount * 0.001
 
+    if enable_logging:
+        logger.info(f"统计计算完成:")
+        logger.info(f"  [Binance] 总交易量={binance_volume:.4f}, 总金额={binance_amount:.2f} USDT, "
+                   f"手续费={binance_fees:.2f} USDT, 已实现盈亏={binance_realized_pnl:.2f} USDT")
+        logger.info(f"  [MT5] 总交易量={mt5_volume:.4f}, 总金额={mt5_amount:.2f} USDT, "
+                   f"手续费={mt5_fees:.2f} USDT, 已实现盈亏={mt5_realized_pnl:.2f} USDT")
+
+        # Log remaining positions
+        for symbol, pos in binance_positions.items():
+            if abs(pos['qty']) > 0.0001:
+                position_type = "做多" if pos['qty'] > 0 else "做空"
+                logger.info(f"  [Binance] {symbol} 剩余{position_type}仓位: {abs(pos['qty']):.4f}, "
+                           f"成本: {abs(pos['cost']):.2f} USDT")
+
+        for symbol, pos in mt5_positions.items():
+            if abs(pos['qty']) > 0.0001:
+                position_type = "做多" if pos['qty'] > 0 else "做空"
+                logger.info(f"  [MT5] {symbol} 剩余{position_type}仓位: {abs(pos['qty']):.4f}, "
+                           f"成本: {abs(pos['cost']):.2f} USDT")
+
     stats = {
         # Binance statistics
         "totalVolume": round(binance_volume, 4),
@@ -137,12 +339,14 @@ def _build_stats(orders, accounts_map):
         "buySellAmount": round(binance_buy_sell_amount, 2),
         "taskAmount": round(binance_task_amount, 2),
         "totalFees": round(binance_fees, 2),
+        "realizedPnL": round(binance_realized_pnl, 2),  # 已实现盈亏
         "overnightFees": 0.0,
         # MT5 statistics
         "marketFundingRate": 0.0,
         "mt5OvernightFee": 0.0,
         "marketFee": round(binance_fees, 2),
         "mt5Fee": round(mt5_fees, 2),
+        "mt5RealizedPnL": round(mt5_realized_pnl, 2),  # MT5已实现盈亏
         "peRatio": round((binance_return / binance_amount * 100) if binance_amount else 0, 2),
         "mt5TodayReturn": round(mt5_return, 2),
         "totalReturnProfit": round(binance_return + mt5_return, 2),
@@ -168,7 +372,7 @@ async def get_trading_history(
     try:
         accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
         if not accounts:
-            return {"stats": _build_stats([], {})[0], "accountTrades": [], "mt5Trades": []}
+            return {"stats": _build_stats([], {}, enable_logging=False)[0], "accountTrades": [], "mt5Trades": []}
 
         account_ids = [acc.account_id for acc in accounts]
         query = select(OrderRecord).filter(
@@ -188,13 +392,15 @@ async def get_trading_history(
             except ValueError:
                 pass
 
-        query = query.order_by(OrderRecord.create_time.desc())
+        query = query.order_by(OrderRecord.create_time.asc())  # 升序：FIFO计算需要按时间顺序
         result = await db.execute(query)
         orders = result.scalars().all()
 
-        stats, account_trades, mt5_trades = _build_stats(orders, accounts_map)
+        # Enable logging for single date queries (usually smaller dataset)
+        stats, account_trades, mt5_trades = _build_stats(orders, accounts_map, enable_logging=True)
         return {"stats": stats, "accountTrades": account_trades, "mt5Trades": mt5_trades}
     except Exception as e:
+        logger.error(f"Error in get_trading_history: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -203,25 +409,63 @@ async def get_all_trading_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all trading history"""
+    """Get all trading history with performance optimization for large datasets"""
     try:
         accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
         if not accounts:
-            return {"stats": _build_stats([], {})[0], "accountTrades": [], "mt5Trades": []}
+            return {"stats": _build_stats([], {}, enable_logging=False)[0], "accountTrades": [], "mt5Trades": []}
 
         account_ids = [acc.account_id for acc in accounts]
-        result = await db.execute(
-            select(OrderRecord)
-            .filter(
-                OrderRecord.account_id.in_(account_ids),
-            )
-            .order_by(OrderRecord.create_time.desc())
-        )
-        orders = result.scalars().all()
 
-        stats, account_trades, mt5_trades = _build_stats(orders, accounts_map)
+        # First, count total orders to determine if we need batch processing
+        count_query = select(func.count(OrderRecord.order_id)).filter(
+            OrderRecord.account_id.in_(account_ids),
+        )
+        count_result = await db.execute(count_query)
+        total_orders = count_result.scalar()
+
+        logger.info(f"查询全部交易历史，共 {total_orders} 笔订单")
+
+        # Performance optimization: Use batch processing for large datasets
+        BATCH_SIZE = 5000  # Process 5000 orders at a time
+
+        if total_orders > BATCH_SIZE:
+            logger.info(f"数据量较大 ({total_orders} 笔)，启用分批处理模式 (批次大小: {BATCH_SIZE})")
+
+            # Process in batches using offset/limit
+            all_orders = []
+            for offset in range(0, total_orders, BATCH_SIZE):
+                batch_query = select(OrderRecord).filter(
+                    OrderRecord.account_id.in_(account_ids),
+                ).order_by(OrderRecord.create_time.asc()).offset(offset).limit(BATCH_SIZE)
+
+                batch_result = await db.execute(batch_query)
+                batch_orders = batch_result.scalars().all()
+                all_orders.extend(batch_orders)
+
+                logger.info(f"已加载 {len(all_orders)}/{total_orders} 笔订单")
+
+            # Disable detailed logging for large datasets to improve performance
+            stats, account_trades, mt5_trades = _build_stats(all_orders, accounts_map, enable_logging=False)
+            logger.info(f"大数据集处理完成: Binance盈亏={stats['realizedPnL']:.2f} USDT, "
+                       f"MT5盈亏={stats['mt5RealizedPnL']:.2f} USDT")
+        else:
+            # For smaller datasets, load all at once with detailed logging
+            result = await db.execute(
+                select(OrderRecord)
+                .filter(
+                    OrderRecord.account_id.in_(account_ids),
+                )
+                .order_by(OrderRecord.create_time.asc())
+            )
+            orders = result.scalars().all()
+
+            # Enable detailed logging for smaller datasets
+            stats, account_trades, mt5_trades = _build_stats(orders, accounts_map, enable_logging=True)
+
         return {"stats": stats, "accountTrades": account_trades, "mt5Trades": mt5_trades}
     except Exception as e:
+        logger.error(f"Error in get_all_trading_history: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -506,6 +750,21 @@ async def sync_trades_from_exchanges(
                         )
 
                         for trade in trades:
+                            # Skip non-XAUUSDT trades (including transfers)
+                            symbol = trade.get("symbol", "")
+                            if symbol.upper() != "XAUUSDT":
+                                continue
+
+                            # Skip if side indicates a transfer
+                            side = trade.get("side", "").lower()
+                            if side in ["transfer", "deposit", "withdrawal", "funding"]:
+                                continue
+
+                            # Skip if type indicates a transfer
+                            trade_type = trade.get("type", "").lower()
+                            if trade_type in ["transfer", "deposit", "withdrawal", "internal_transfer", "funding", "rebate"]:
+                                continue
+
                             # Check if trade already exists
                             existing = await db.execute(
                                 select(OrderRecord).filter(
@@ -530,9 +789,9 @@ async def sync_trades_from_exchanges(
                             # Create order record
                             order_record = OrderRecord(
                                 account_id=account.account_id,
-                                symbol=trade.get("symbol"),
-                                order_side=trade.get("side", "").lower(),
-                                order_type=trade.get("type", "").lower(),
+                                symbol=symbol,
+                                order_side=side,
+                                order_type=trade_type,
                                 price=float(trade.get("price", 0)),
                                 qty=float(trade.get("qty", 0)),
                                 filled_qty=float(trade.get("qty", 0)),

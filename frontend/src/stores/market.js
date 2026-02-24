@@ -6,6 +6,7 @@ const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://13.115.21.77:8000') + '/ws'
 export const useMarketStore = defineStore('market', () => {
   const marketData = ref(null)
   const connected = ref(false)
+  const lastMessage = ref(null)
 
   let ws = null
   let reconnectTimer = null
@@ -34,6 +35,10 @@ export const useMarketStore = defineStore('market', () => {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
+
+        // Store last message for components to watch
+        lastMessage.value = msg
+
         if (msg.type === 'market_data' && msg.data) {
           const d = msg.data
           // Normalise field names from SpreadData model
@@ -85,6 +90,7 @@ export const useMarketStore = defineStore('market', () => {
   return {
     marketData,
     connected,
+    lastMessage,
     connect,
     disconnect,
     fetchMarketData,

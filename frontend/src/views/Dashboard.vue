@@ -145,7 +145,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import AssetDashboard from '@/components/dashboard/AssetDashboard.vue'
 import SpreadChart from '@/components/trading/SpreadChart.vue'
@@ -175,21 +175,32 @@ const reverseSpread = computed(() => {
 })
 
 let updateInterval = null
-let priceInterval = null
 
 onMounted(() => {
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  // Update timestamp every second
   updateLastUpdated()
-  fetchPrices()
   updateInterval = setInterval(updateLastUpdated, 1000)
-  priceInterval = setInterval(fetchPrices, 1000)
 })
 
 onUnmounted(() => {
   if (updateInterval) {
     clearInterval(updateInterval)
   }
-  if (priceInterval) {
-    clearInterval(priceInterval)
+})
+
+// Watch for WebSocket market data updates
+watch(() => marketStore.marketData, (newData) => {
+  if (newData) {
+    binancePrice.value.bid = newData.binance_bid || 0
+    binancePrice.value.ask = newData.binance_ask || 0
+    bybitPrice.value.bid = newData.bybit_bid || 0
+    bybitPrice.value.ask = newData.bybit_ask || 0
+    updateLastUpdated()
   }
 })
 
