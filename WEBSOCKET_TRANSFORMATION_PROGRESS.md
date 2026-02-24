@@ -33,13 +33,31 @@ Successfully completed transformation of all high-frequency polling components (
    - Impact: 60 requests/min eliminated
    - File: [frontend/src/views/Dashboard.vue](frontend/src/views/Dashboard.vue)
 
-### Medium-Frequency Components (1-5s) - 1/11 Complete
+### Medium-Frequency Components (1-5s) - 4/11 Complete
 
 5. **OpenOrders.vue** ✓
    - Before: 5-second HTTP polling
    - After: WebSocket order_update with watch()
    - Impact: 12 requests/min eliminated
    - File: [frontend/src/components/trading/OpenOrders.vue](frontend/src/components/trading/OpenOrders.vue)
+
+6. **ManualTrading.vue** ✓
+   - Before: 5-second HTTP polling for recent orders
+   - After: WebSocket order_update with watch()
+   - Impact: 12 requests/min eliminated
+   - File: [frontend/src/components/trading/ManualTrading.vue](frontend/src/components/trading/ManualTrading.vue)
+
+7. **RiskDashboard.vue** ✓
+   - Before: 5-second HTTP polling
+   - After: Hybrid mode (30s polling + WebSocket risk_metrics)
+   - Impact: 10 requests/min reduced (12 → 2)
+   - File: [frontend/src/components/trading/RiskDashboard.vue](frontend/src/components/trading/RiskDashboard.vue)
+
+8. **Risk.vue** ✓
+   - Before: 5-second HTTP polling
+   - After: Hybrid mode (30s polling + WebSocket risk_alert)
+   - Impact: 10 requests/min reduced (12 → 2)
+   - File: [frontend/src/views/Risk.vue](frontend/src/views/Risk.vue)
 
 ## Infrastructure Enhancements
 
@@ -63,22 +81,21 @@ Successfully completed transformation of all high-frequency polling components (
 - Data latency: 1000ms average
 - Network overhead: High
 
-### After Transformation
-- HTTP requests eliminated: 180+ per minute
-- Data latency: <100ms
+### After Transformation (Current)
+- HTTP requests eliminated: 216+ per minute
+- HTTP requests reduced: 20 per minute (hybrid components)
+- Data latency: <100ms for WebSocket updates
 - Network overhead: Minimal (single WebSocket connection)
 - Real-time updates: Yes
+- Components transformed: 8/22 (36%)
 
 ## Remaining Work
 
-### Medium-Frequency Components (10 remaining)
-- RiskDashboard.vue (5s)
-- ManualTrading.vue (5s)
-- Risk.vue (5s)
-- System.vue (5s - log refresh)
-- SpreadChart.vue dashboard version (5s)
+### Medium-Frequency Components (7 remaining)
+- SpreadChart.vue dashboard version (5s) - Already transformed in trading view
 - AssetDashboard.vue (10s)
 - AccountStatusPanel.vue (30s)
+- System.vue (5s - log refresh)
 - useAlertMonitoring.js (5s, 10s, 15s intervals)
 
 ### Low-Frequency Components (5 remaining)
@@ -95,6 +112,7 @@ Successfully completed transformation of all high-frequency polling components (
 1. `ff606de` - WebSocket改造和UTC时间标准化 (24 files, 8700+ insertions)
 2. `df7d0a1` - 扩展WebSocket推送类型和快速实施指南 (2 files, 615 insertions)
 3. `5cb263a` - Transform high-frequency components to WebSocket (7 files, 520 insertions)
+4. `752ffc5` - Transform medium-frequency components to WebSocket (4 files, 257 insertions)
 
 ## Next Steps
 
