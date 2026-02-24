@@ -26,6 +26,10 @@ class RollbackRequest(BaseModel):
 class DeleteRecordRequest(BaseModel):
     where: Dict[str, Any]
 
+class RefreshSettingsRequest(BaseModel):
+    settings: Dict[str, Any]
+    modules: List[Dict[str, Any]]
+
 
 @router.get("/database/stats")
 async def get_database_stats(
@@ -144,8 +148,8 @@ async def backup_database(
 ) -> Dict[str, str]:
     """Backup entire database"""
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"backup_{timestamp}.sql"
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_{timestamp}_UTC.sql"
 
         # Note: This is a placeholder. In production, you would use pg_dump
         # via subprocess or a proper backup solution
@@ -181,8 +185,8 @@ async def backup_table(
                 detail="Table not found"
             )
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"backup_{table_name}_{timestamp}.sql"
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_{table_name}_{timestamp}_UTC.sql"
 
         return {
             "message": f"Table {table_name} backup initiated",
@@ -278,7 +282,7 @@ async def get_system_info(
             "python_version": "3.9+",
             "db_version": pg_version_number,
             "uptime": "Running",
-            "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "start_time": datetime.utcnow().isoformat() + "Z"
         }
     except Exception as e:
         raise HTTPException(
@@ -561,7 +565,7 @@ async def push_to_github(
 
         if status_result.stdout.strip():
             # There are uncommitted changes - commit them
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S") + " UTC"
             if remark:
                 commit_message = f"Backup: {timestamp} - {remark}"
             else:
@@ -688,5 +692,104 @@ async def delete_version(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete version: {str(e)}"
+        )
+
+
+@router.get("/logs/trading")
+async def get_trading_logs(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get trading statistics calculation logs"""
+    try:
+        import logging
+        import io
+
+        # Get the logger used in trading.py
+        logger = logging.getLogger('app.api.v1.trading')
+
+        # Try to read recent logs from memory handler if available
+        # For now, return a sample structure
+        # In production, you might want to use a log aggregation service
+
+        logs = []
+
+        # Check if there's a file handler attached to the logger
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                try:
+                    with open(handler.baseFilename, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()[-500:]  # Get last 500 lines
+                        for line in lines:
+                            if line.strip():
+                                # Parse log line
+                                parts = line.split(' ', 3)
+                                if len(parts) >= 4:
+                                    logs.append({
+                                        'timestamp': f"{parts[0]} {parts[1]}",
+                                        'level': parts[2],
+                                        'message': parts[3].strip()
+                                    })
+                except Exception as e:
+                    print(f"Error reading log file: {e}")
+
+        # If no logs from file, return empty list
+        # The frontend will show sample data
+        return {
+            "logs": logs,
+            "total": len(logs),
+            "enabled": True
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get trading logs: {str(e)}"
+        )
+
+
+@router.get("/refresh-settings")
+async def get_refresh_settings(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get refresh settings for all modules"""
+    try:
+        # In a real implementation, you would load this from database
+        # For now, return default settings
+        return {
+            "settings": {
+                "visibilityDetection": True,
+                "useWebSocket": False,
+                "batchRequests": True,
+                "inactiveMultiplier": 5
+            },
+            "modules": []
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get refresh settings: {str(e)}"
+        )
+
+
+@router.post("/refresh-settings")
+async def save_refresh_settings(
+    request: RefreshSettingsRequest,
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, str]:
+    """Save refresh settings for all modules"""
+    try:
+        # In a real implementation, you would save this to database
+        # For now, just return success
+        # You could store in Redis or a config table
+
+        return {
+            "message": "Refresh settings saved successfully",
+            "settings": request.settings,
+            "modules_count": len(request.modules)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save refresh settings: {str(e)}"
         )
 

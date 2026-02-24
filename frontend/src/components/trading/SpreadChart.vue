@@ -71,10 +71,12 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Chart, registerables } from 'chart.js'
+import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 
 Chart.register(...registerables)
 
+const marketStore = useMarketStore()
 const chartCanvas = ref(null)
 let chartInstance = null
 
@@ -106,26 +108,81 @@ const stats = computed(() => {
   }
 })
 
-let updateInterval = null
-
 onMounted(() => {
   initChart()
-  fetchProfitData()
-  updateInterval = setInterval(fetchProfitData, 1000)
+  // 首次加载历史数据
+  fetchInitialData()
+
+  // 建立WebSocket连接
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
 })
 
 onUnmounted(() => {
   if (chartInstance) {
     chartInstance.destroy()
   }
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
 })
 
+// 监听WebSocket实时数据更新
+watch(() => marketStore.marketData, (newData) => {
+  if (newData && profitData.value.length > 0) {
+    // 计算新的点差数据
+    const forwardSpread = newData.bybit_ask - newData.binance_bid  // 做多Binance
+    const reverseSpread = newData.binance_ask - newData.bybit_bid  // 做多Bybit
+
+    const newPoint = {
+      timestamp: newData.timestamp || new Date().toISOString(),
+      bybit: reverseSpread,
+      binance: forwardSpread
+    }
+
+    // 添加新数据点并保持数据点数量
+    const maxPoints = getPeriodDataPoints(selectedPeriod.value)
+    profitData.value = [...profitData.value, newPoint].slice(-maxPoints)
+
+    updateChart()
+  }
+}, { immediate: false })
+
 watch(selectedPeriod, () => {
-  fetchProfitData()
+  fetchInitialData()
 })
+
+// 首次加载历史数据
+async function fetchInitialData() {
+  try {
+    const dataPoints = getPeriodDataPoints(selectedPeriod.value)
+
+    const response = await api.get('/api/v1/market/spread/history', {
+      params: {
+        limit: dataPoints,
+        binance_symbol: 'XAUUSDT',
+        bybit_symbol: 'XAUUSDT'
+      }
+    })
+
+    const data = response.data
+
+    // Transform spread data to profit/loss format
+    const newData = data.map(item => {
+      const forwardSpread = item.bybit_quote.ask - item.binance_quote.bid  // 做多Binance
+      const reverseSpread = item.binance_quote.ask - item.bybit_quote.bid  // 做多Bybit
+
+      return {
+        timestamp: item.timestamp,
+        bybit: reverseSpread,
+        binance: forwardSpread,
+      }
+    }).reverse() // Reverse to show oldest to newest
+
+    profitData.value = newData
+    updateChart()
+  } catch (error) {
+    console.error('Failed to fetch initial data:', error)
+  }
+}
 
 function initChart() {
   if (!chartCanvas.value) return
@@ -216,41 +273,6 @@ function initChart() {
       },
     },
   })
-}
-
-async function fetchProfitData() {
-  try {
-    const dataPoints = getPeriodDataPoints(selectedPeriod.value)
-
-    const response = await api.get('/api/v1/market/spread/history', {
-      params: {
-        limit: dataPoints,
-        binance_symbol: 'XAUUSDT',
-        bybit_symbol: 'XAUUSDT'
-      }
-    })
-
-    const data = response.data
-
-    // Transform spread data to profit/loss format
-    // 做多Binance点差 (Forward, Green) = Bybit ASK - Binance BID
-    // 做多Bybit点差 (Reverse, Red) = Binance ASK - Bybit BID
-    const newData = data.map(item => {
-      const forwardSpread = item.bybit_quote.ask - item.binance_quote.bid  // 做多Binance
-      const reverseSpread = item.binance_quote.ask - item.bybit_quote.bid  // 做多Bybit
-
-      return {
-        timestamp: item.timestamp,
-        bybit: reverseSpread, // Bybit做多 (Red)
-        binance: forwardSpread, // Binance做多 (Green)
-      }
-    }).reverse() // Reverse to show oldest to newest
-
-    profitData.value = newData
-    updateChart()
-  } catch (error) {
-    console.error('Failed to fetch profit data:', error)
-  }
 }
 
 function getPeriodDataPoints(period) {

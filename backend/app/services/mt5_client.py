@@ -48,7 +48,7 @@ class MT5Client:
             return False
 
         # Check if connection is stale (no successful requests in timeout period)
-        time_since_last_request = (datetime.now() - self.last_successful_request).total_seconds()
+        time_since_last_request = (datetime.utcnow() - self.last_successful_request).total_seconds()
         if time_since_last_request > self.connection_timeout:
             logger.warning(f"MT5 connection appears stale (no activity for {time_since_last_request:.1f}s)")
             return False
@@ -67,7 +67,7 @@ class MT5Client:
             return False
 
         if self.last_connection_attempt:
-            time_since_attempt = (datetime.now() - self.last_connection_attempt).total_seconds()
+            time_since_attempt = (datetime.utcnow() - self.last_connection_attempt).total_seconds()
             required_delay = self._calculate_reconnect_delay()
 
             if time_since_attempt < required_delay:
@@ -77,7 +77,7 @@ class MT5Client:
 
     def connect(self) -> bool:
         """Connect to MT5 terminal with retry logic"""
-        self.last_connection_attempt = datetime.now()
+        self.last_connection_attempt = datetime.utcnow()
 
         try:
             # Initialize MT5 connection with credentials
@@ -95,7 +95,7 @@ class MT5Client:
 
             self.connected = True
             self.connection_failures = 0  # Reset failure count on successful connection
-            self.last_successful_request = datetime.now()
+            self.last_successful_request = datetime.utcnow()
             logger.info(f"MT5 connected successfully to account {self.login}")
             return True
 
@@ -156,7 +156,7 @@ class MT5Client:
                 return None
 
             # Update last successful request timestamp
-            self.last_successful_request = datetime.now()
+            self.last_successful_request = datetime.utcnow()
 
             return {
                 'symbol': symbol,
@@ -188,7 +188,7 @@ class MT5Client:
                 return None
 
             # Update last successful request timestamp
-            self.last_successful_request = datetime.now()
+            self.last_successful_request = datetime.utcnow()
 
             return {
                 'login': account_info.login,

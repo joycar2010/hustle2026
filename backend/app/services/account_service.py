@@ -30,13 +30,13 @@ class AccountDataService:
         """Get data from cache if not expired"""
         if cache_key in self._cache:
             data, timestamp = self._cache[cache_key]
-            if (datetime.now() - timestamp).total_seconds() < self._cache_ttl:
+            if (datetime.utcnow() - timestamp).total_seconds() < self._cache_ttl:
                 return data
         return None
 
     def _set_cached_data(self, cache_key: str, data: Any):
         """Store data in cache with timestamp"""
-        self._cache[cache_key] = (data, datetime.now())
+        self._cache[cache_key] = (data, datetime.utcnow())
 
     async def get_binance_balance(self, api_key: str, api_secret: str) -> AccountBalance:
         """Fetch Binance account balance including spot, margin and futures data"""
@@ -44,7 +44,7 @@ class AccountDataService:
 
         try:
             # Get today's start timestamp for daily calculations
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             start_time = int(today_start.timestamp() * 1000)
 
             # First, fetch spot account to see which assets we need prices for
@@ -523,7 +523,7 @@ class AccountDataService:
 
         try:
             # Get today's start timestamp
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             start_time = int(today_start.timestamp() * 1000)
 
             # Fetch realized P&L for today
@@ -553,7 +553,7 @@ class AccountDataService:
 
         try:
             # Get today's start timestamp
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             start_time = int(today_start.timestamp() * 1000)
 
             # Fetch transaction log for today

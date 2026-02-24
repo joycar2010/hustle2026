@@ -34,61 +34,42 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import api from '@/services/api'
+import { ref, onMounted, watch } from 'vue'
+import { useMarketStore } from '@/stores/market'
 
+const marketStore = useMarketStore()
 const spreadHistory = ref([])
-let updateInterval = null
 
 onMounted(() => {
-  fetchSpreadData()
-  updateInterval = setInterval(fetchSpreadData, 1000)
-})
-
-onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
+  // 建立WebSocket连接
+  if (!marketStore.connected) {
+    marketStore.connect()
   }
 })
 
-async function fetchSpreadData() {
-  try {
-    const response = await api.get('/api/v1/market/spread/history', {
-      params: {
-        limit: 10,
-        binance_symbol: 'XAUUSDT',
-        bybit_symbol: 'XAUUSDT'
-      }
-    })
-
-    const data = response.data
-
-    // Transform API data to component format
-    // 做多Bybit点差 (Reverse spread, Red) = Binance ASK - Bybit BID
-    // 做多Binance点差 (Forward spread, Green) = Bybit ASK - Binance BID
-    const newData = data.map(item => ({
-      id: item.id || Date.now() + Math.random(),
-      timestamp: new Date(item.timestamp).getTime(),
-      bybitSpread: item.binance_quote.ask - item.bybit_quote.bid, // 做多Bybit (Reverse)
-      binanceSpread: item.bybit_quote.ask - item.binance_quote.bid, // 做多Binance (Forward)
-      isNew: false
-    }))
-
-    // Mark the first item as new if it's different from current first item
-    if (newData.length > 0 && spreadHistory.value.length > 0) {
-      if (newData[0].timestamp !== spreadHistory.value[0].timestamp) {
-        newData[0].isNew = true
-        setTimeout(() => {
-          newData[0].isNew = false
-        }, 1000)
-      }
+// 监听WebSocket市场数据更新
+watch(() => marketStore.marketData, (newData) => {
+  if (newData) {
+    // 计算点差
+    // 做多Bybit点差 (Reverse spread) = Binance ASK - Bybit BID
+    // 做多Binance点差 (Forward spread) = Bybit ASK - Binance BID
+    const spreadItem = {
+      id: Date.now() + Math.random(),
+      timestamp: new Date(newData.timestamp || Date.now()).getTime(),
+      bybitSpread: newData.binance_ask - newData.bybit_bid,  // 做多Bybit (Reverse)
+      binanceSpread: newData.bybit_ask - newData.binance_bid,  // 做多Binance (Forward)
+      isNew: true
     }
 
-    spreadHistory.value = newData
-  } catch (error) {
-    console.error('Failed to fetch spread data:', error)
+    // 添加到历史记录（保持最新10条）
+    spreadHistory.value = [spreadItem, ...spreadHistory.value].slice(0, 10)
+
+    // 移除新标记
+    setTimeout(() => {
+      spreadItem.isNew = false
+    }, 1000)
   }
-}
+}, { immediate: false })
 
 function formatTime(timestamp) {
   const date = new Date(timestamp)
