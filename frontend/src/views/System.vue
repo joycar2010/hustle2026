@@ -660,6 +660,11 @@
           </div>
         </div>
       </div>
+
+      <!-- WebSocket Monitoring Tab -->
+      <div v-if="activeTab === 'websocket'" class="space-y-6">
+        <WebSocketMonitor />
+      </div>
     </div>
 
     <div v-if="showUserModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="closeUserModal">
@@ -719,6 +724,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import api from '@/services/api'
 import TableDetailModal from '@/components/modals/TableDetailModal.vue'
 import BackupSelectModal from '@/components/modals/BackupSelectModal.vue'
+import WebSocketMonitor from '@/components/system/WebSocketMonitor.vue'
 import { useMarketStore } from '@/stores/market'
 
 // 引入market store以获取WebSocket连接状态
@@ -731,7 +737,8 @@ const tabs = [
   { id: 'database', label: 'PostgreSQL数据库管理' },
   { id: 'alerts', label: '提醒声音设置' },
   { id: 'logs', label: '日志管理' },
-  { id: 'refresh', label: '刷新管理' }
+  { id: 'refresh', label: '刷新管理' },
+  { id: 'websocket', label: 'WebSocket监控' }
 ]
 
 const users = ref([])
