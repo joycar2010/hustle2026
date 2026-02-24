@@ -10,22 +10,25 @@ router = APIRouter()
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: str = Query(None, description="JWT token for authentication"),
+    token: str = Query(..., description="JWT token for authentication (required)"),
 ):
     """WebSocket endpoint for real-time updates
 
+    SECURITY: Token authentication is required
     Connect with: ws://localhost:8000/ws?token=YOUR_JWT_TOKEN
     """
     user_id = None
 
-    # Authenticate if token provided
-    if token:
-        try:
-            payload = decode_access_token(token)
-            user_id = payload.get("sub")
-        except Exception:
-            await websocket.close(code=1008, reason="Invalid token")
+    # Authenticate token (REQUIRED)
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            await websocket.close(code=1008, reason="Invalid token: missing user_id")
             return
+    except Exception as e:
+        await websocket.close(code=1008, reason=f"Authentication failed: {str(e)}")
+        return
 
     # Accept connection
     await manager.connect(websocket, user_id)

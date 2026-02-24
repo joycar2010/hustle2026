@@ -48,13 +48,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS
+# Configure CORS (Security: Explicit methods and headers)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-CSRF-Token",
+        "X-Request-ID",
+        "X-Timestamp",
+        "X-Nonce",
+        "X-Signature"
+    ],
+    expose_headers=["X-Request-ID", "X-RateLimit-Remaining"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Add request logging middleware

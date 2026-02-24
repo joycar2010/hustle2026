@@ -1,0 +1,158 @@
+name: WebSocket Polling Detection
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/**/*.vue'
+      - 'frontend/src/**/*.js'
+      - 'frontend/src/**/*.ts'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'frontend/src/**/*.vue'
+      - 'frontend/src/**/*.js'
+      - 'frontend/src/**/*.ts'
+
+jobs:
+  check-polling:
+    runs-on: ubuntu-latest
+    name: Check for HTTP Polling Patterns
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Check for polling patterns
+        id: check
+        run: |
+          echo "🔍 Checking for HTTP polling patterns..."
+
+          # Define patterns to detect
+          POLLING_FOUND=0
+          VIOLATIONS=""
+
+          # Check for setInterval with API calls
+          echo "Checking for setInterval with API calls..."
+          FILES=$(find frontend/src -name "*.vue" -o -name "*.js" -o -name "*.ts" 2>/dev/null)
+
+          for FILE in $FILES; do
+            # Skip node_modules
+            if [[ "$FILE" == *"node_modules"* ]]; then
+              continue
+            fi
+
+            # Check for setInterval with fetch/api/axios
+            if grep -q "setInterval.*fetch\|setInterval.*api\.\|setInterval.*axios\." "$FILE"; then
+              echo "⚠️  WARNING: Potential HTTP polling in $FILE"
+              VIOLATIONS="${VIOLATIONS}\n- $FILE: setInterval with API calls"
+              POLLING_FOUND=1
+            fi
+
+            # Check for short interval timers (< 10s) with API calls
+            if grep -E "setInterval\([^,]+,\s*[1-9][0-9]{3}\)" "$FILE" | grep -v "1000\|2000\|3000" > /dev/null; then
+              if grep -q "api\.\|axios\.\|fetch(" "$FILE"; then
+                echo "⚠️  WARNING: Short interval timer with API calls in $FILE"
+                VIOLATIONS="${VIOLATIONS}\n- $FILE: Short interval timer with API calls"
+                POLLING_FOUND=1
+              fi
+            fi
+          done
+
+          if [ $POLLING_FOUND -eq 1 ]; then
+            echo "violations<<EOF" >> $GITHUB_OUTPUT
+            echo -e "$VIOLATIONS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No polling patterns found"
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        if: steps.check.outputs.found == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const violations = `${{ steps.check.outputs.violations }}`;
+            const body = `## ⚠️ HTTP Polling Pattern Detected
+
+This PR introduces HTTP polling patterns that should use WebSocket instead.
+
+### Violations Found:
+${violations}
+
+### Why This Matters
+This project uses WebSocket for real-time updates to:
+- Reduce server load by 93% (240+ → 16 requests/min)
+- Improve data latency by 10x (<100ms vs 1000ms)
+- Provide true real-time updates
+
+### How to Fix
+Use WebSocket patterns instead of polling:
+
+**❌ Bad (Polling):**
+\`\`\`javascript
+setInterval(() => {
+  api.get('/api/v1/market/data')
+}, 5000)
+\`\`\`
+
+**✅ Good (WebSocket):**
+\`\`\`javascript
+import { useMarketStore } from '@/stores/market'
+
+const marketStore = useMarketStore()
+
+onMounted(() => {
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+})
+
+watch(() => marketStore.lastMessage, (message) => {
+  if (message?.type === 'market_data') {
+    handleUpdate(message.data)
+  }
+})
+\`\`\`
+
+### Resources
+- [WebSocket Transformation Progress](../WEBSOCKET_TRANSFORMATION_PROGRESS.md)
+- [Regression Prevention Guide](../WEBSOCKET_REGRESSION_PREVENTION.md)
+- [Backend Broadcast Tasks](../WEBSOCKET_BACKEND_BROADCAST.md)
+
+### Allowed Patterns
+- UI-only timers (timestamp updates, animations)
+- File-based operations (log refresh)
+- Lag detection timers
+- Hybrid mode with 30s+ fallback polling
+
+If this is intentional, please document why WebSocket cannot be used.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Fail if polling found
+        if: steps.check.outputs.found == 'true'
+        run: |
+          echo "❌ HTTP polling patterns detected. Please use WebSocket instead."
+          echo ""
+          echo "Violations:"
+          echo -e "${{ steps.check.outputs.violations }}"
+          echo ""
+          echo "See WEBSOCKET_REGRESSION_PREVENTION.md for guidance."
+          exit 1
+
+      - name: Success message
+        if: steps.check.outputs.found == 'false'
+        run: |
+          echo "✅ No HTTP polling patterns detected"
+          echo "✅ WebSocket best practices maintained"

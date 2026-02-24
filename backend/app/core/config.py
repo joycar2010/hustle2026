@@ -24,9 +24,23 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
     # JWT
-    SECRET_KEY: str = "your-secret-key-here-change-in-production"
+    SECRET_KEY: str  # Required from environment variable
+    ENCRYPTION_KEY: str  # Required for API key encryption
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.SECRET_KEY or self.SECRET_KEY == "your-secret-key-here-change-in-production":
+            raise ValueError(
+                "SECRET_KEY must be set in environment variables. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        if not self.ENCRYPTION_KEY:
+            raise ValueError(
+                "ENCRYPTION_KEY must be set in environment variables for API key encryption. "
+                "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
 
     # Binance API
     BINANCE_API_KEY: str = ""

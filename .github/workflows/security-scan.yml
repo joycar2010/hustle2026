@@ -1,0 +1,98 @@
+name: Security Dependency Scan
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/requirements.txt'
+      - 'frontend/package.json'
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly on Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+
+jobs:
+  python-security-scan:
+    runs-on: ubuntu-latest
+    name: Python Dependency Security Scan
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install safety
+        run: pip install safety
+
+      - name: Run safety check
+        run: |
+          cd backend
+          safety check --file requirements.txt --json > safety-report.json || true
+          safety check --file requirements.txt
+
+      - name: Upload safety report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: safety-report
+          path: backend/safety-report.json
+
+  npm-security-scan:
+    runs-on: ubuntu-latest
+    name: NPM Dependency Security Scan
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Run npm audit
+        run: |
+          cd frontend
+          npm audit --json > npm-audit-report.json || true
+          npm audit
+
+      - name: Upload npm audit report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm-audit-report
+          path: frontend/npm-audit-report.json
+
+  bandit-scan:
+    runs-on: ubuntu-latest
+    name: Python Code Security Scan (Bandit)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run bandit
+        run: |
+          cd backend
+          bandit -r app/ -f json -o bandit-report.json || true
+          bandit -r app/
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bandit-report
+          path: backend/bandit-report.json
