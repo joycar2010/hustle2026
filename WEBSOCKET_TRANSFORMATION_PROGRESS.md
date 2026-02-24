@@ -33,7 +33,7 @@ Successfully completed transformation of all high-frequency polling components (
    - Impact: 60 requests/min eliminated
    - File: [frontend/src/views/Dashboard.vue](frontend/src/views/Dashboard.vue)
 
-### Medium-Frequency Components (1-5s) - 8/11 Complete
+### Medium-Frequency Components (1-5s) - 9/11 Complete
 
 5. **OpenOrders.vue** ✓
    - Before: 5-second HTTP polling
@@ -83,6 +83,12 @@ Successfully completed transformation of all high-frequency polling components (
     - Impact: 18 requests/min reduced (20 → 2)
     - File: [frontend/src/components/trading/OrderMonitor.vue](frontend/src/components/trading/OrderMonitor.vue)
 
+13. **SpreadChart.vue (dashboard)** ✓
+    - Before: 5-second HTTP polling for historical spread data
+    - After: Reduced polling to 30s (historical data doesn't need real-time updates)
+    - Impact: 10 requests/min reduced (12 → 2)
+    - File: [frontend/src/components/dashboard/SpreadChart.vue](frontend/src/components/dashboard/SpreadChart.vue)
+
 ## Infrastructure Enhancements
 
 ### Market Store Extension ✓
@@ -116,16 +122,15 @@ Successfully completed transformation of all high-frequency polling components (
 
 ### After Transformation (Current)
 - HTTP requests eliminated: 216+ per minute
-- HTTP requests reduced: 60 per minute (hybrid components)
+- HTTP requests reduced: 70 per minute (hybrid components)
 - Data latency: <100ms for WebSocket updates
 - Network overhead: Minimal (single WebSocket connection)
 - Real-time updates: Yes
-- Components transformed: 12/22 (55%)
+- Components transformed: 13/22 (59%)
 
 ## Remaining Work
 
-### Medium-Frequency Components (3 remaining)
-- SpreadChart.vue dashboard version (5s) - Historical data, can reduce frequency
+### Medium-Frequency Components (2 remaining)
 - System.vue (5s - log refresh) - Keep as-is (file-based, not network)
 
 ### Low-Frequency Components (5 remaining)
@@ -200,17 +205,17 @@ watch(() => marketStore.lastMessage, (message) => {
 ## Success Criteria
 
 - [x] All high-frequency components transformed
-- [ ] All medium-frequency components transformed (8/11 complete - 73%)
+- [ ] All medium-frequency components transformed (9/11 complete - 82%)
 - [ ] All low-frequency components transformed
 - [x] WebSocket monitoring dashboard created
 - [ ] Regression prevention mechanisms in place
 - [ ] Zero polling remnants in production code
 
-## Current Status: 55% Complete
+## Current Status: 59% Complete
 
-**Components Transformed**: 12/22
+**Components Transformed**: 13/22
 - High-frequency (≤1s): 4/4 (100%) ✓
-- Medium-frequency (1-5s): 8/11 (73%)
+- Medium-frequency (1-5s): 9/11 (82%)
 - Low-frequency (>5s): 0/5 (0%)
 
 **Infrastructure**: Complete ✓

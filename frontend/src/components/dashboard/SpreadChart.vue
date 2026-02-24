@@ -91,7 +91,8 @@ let updateInterval = null
 onMounted(() => {
   initChart()
   fetchSpreadData()
-  updateInterval = setInterval(fetchSpreadData, 5000)
+  // Reduced polling frequency for historical data (30s instead of 5s)
+  updateInterval = setInterval(fetchSpreadData, 30000)
 })
 
 onUnmounted(() => {
@@ -229,16 +230,6 @@ function getDataPointsForPeriod(period) {
     '24h': 96,
   }
   return points[period] || 60
-}
-
-function getPeriodInterval(period) {
-  const intervals = {
-    '15m': 30 * 1000, // 30 seconds
-    '1h': 60 * 1000, // 1 minute
-    '4h': 5 * 60 * 1000, // 5 minutes
-    '24h': 15 * 60 * 1000, // 15 minutes
-  }
-  return intervals[period] || 60 * 1000
 }
 
 function formatTime(timestamp) {
