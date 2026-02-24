@@ -10,6 +10,7 @@ import logging
 from app.core.config import settings
 from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test
 from app.tasks.market_data import market_streamer
+from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer
 from app.services.position_monitor import position_monitor
 from app.services.realtime_market_service import market_data_service
 from app.services.binance_ws_client import binance_ws
@@ -23,12 +24,16 @@ async def lifespan(app: FastAPI):
     # Startup
     binance_ws.start()
     await market_streamer.start()
+    await account_balance_streamer.start()
+    await risk_metrics_streamer.start()
     await position_monitor.start_monitoring()
     await market_data_service.start()
     yield
     # Shutdown
     await binance_ws.stop()
     await market_streamer.stop()
+    await account_balance_streamer.stop()
+    await risk_metrics_streamer.stop()
     await position_monitor.stop_monitoring()
     await market_data_service.stop()
 
