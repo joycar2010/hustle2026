@@ -118,7 +118,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 
@@ -166,19 +166,52 @@ const disconnectedAccounts = ref(loadDisconnected())
 let updateInterval = null
 
 onMounted(() => {
-  fetchAccountData()
-  updateInterval = setInterval(fetchAccountData, 30000)
-  // Restore WebSocket connection state from localStorage
-  // Only auto-connect if it was connected before the page refresh
-  const wasConnected = getWsConnectedState()
-  if (wasConnected && disconnectedAccounts.value.size === 0) {
-    marketStore.connect()
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    const wasConnected = getWsConnectedState()
+    if (wasConnected && disconnectedAccounts.value.size === 0) {
+      marketStore.connect()
+    }
   }
+
+  fetchAccountData()
+  // Reduced polling frequency (60s instead of 30s)
+  updateInterval = setInterval(fetchAccountData, 60000)
 })
 
 onUnmounted(() => {
   if (updateInterval) clearInterval(updateInterval)
 })
+
+// Watch for account balance updates via WebSocket (when backend implements it)
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'account_balance') {
+    handleAccountBalanceUpdate(message.data)
+  }
+})
+
+function handleAccountBalanceUpdate(data) {
+  if (data.summary) {
+    totalProfit.value = data.summary.daily_pnl || totalProfit.value
+  }
+
+  if (data.accounts && data.accounts.length > 0) {
+    // Update existing accounts with new balance data
+    data.accounts.forEach(updatedAcc => {
+      const index = activeAccounts.value.findIndex(acc => acc.account_id === updatedAcc.account_id)
+      if (index !== -1) {
+        activeAccounts.value[index] = {
+          ...activeAccounts.value[index],
+          ...updatedAcc,
+          balance: { ...activeAccounts.value[index].balance, ...updatedAcc.balance }
+        }
+      }
+    })
+
+    // Regenerate alerts with updated data
+    systemAlerts.value = generateSystemAlerts(data)
+  }
+}
 
 async function fetchAccountData() {
   try {

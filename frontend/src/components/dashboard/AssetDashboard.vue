@@ -161,8 +161,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
+import { useMarketStore } from '@/stores/market'
+
+const marketStore = useMarketStore()
 
 const assets = ref({
   total: 0,
@@ -202,10 +205,16 @@ const risk = ref({
 
 let refreshInterval = null
 
-onMounted(() => {
-  fetchDashboardData()
-  // Refresh every 10 seconds
-  refreshInterval = setInterval(fetchDashboardData, 10000)
+onMounted(async () => {
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  await fetchDashboardData()
+
+  // Reduced polling frequency (60s instead of 10s) since account data changes less frequently
+  refreshInterval = setInterval(fetchDashboardData, 60000)
 })
 
 onUnmounted(() => {
@@ -213,6 +222,33 @@ onUnmounted(() => {
     clearInterval(refreshInterval)
   }
 })
+
+// Watch for account balance updates via WebSocket (when backend implements it)
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'account_balance') {
+    updateAccountData(message.data)
+  }
+})
+
+function updateAccountData(data) {
+  if (data.summary) {
+    assets.value.total = data.summary.total_assets || assets.value.total
+    assets.value.net = data.summary.net_assets || assets.value.net
+    assets.value.available = data.summary.available_balance || assets.value.available
+
+    positions.value.count = data.summary.position_count || positions.value.count
+    positions.value.volume = data.summary.margin_balance || positions.value.volume
+
+    pnl.value.today = data.summary.daily_pnl || pnl.value.today
+    pnl.value.todayPercent = data.summary.total_assets > 0
+      ? (data.summary.daily_pnl / data.summary.total_assets) * 100
+      : pnl.value.todayPercent
+
+    risk.value.ratio = data.summary.risk_ratio || risk.value.ratio
+    risk.value.marginUsed = data.summary.margin_balance || risk.value.marginUsed
+    risk.value.marginAvailable = data.summary.available_balance || risk.value.marginAvailable
+  }
+}
 
 async function fetchDashboardData() {
   try {
