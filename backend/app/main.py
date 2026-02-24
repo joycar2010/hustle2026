@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 from app.core.config import settings
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer
 from app.services.position_monitor import position_monitor
@@ -113,6 +113,9 @@ app.include_router(automation.router, prefix="/api/v1/automation", tags=["Automa
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
 app.include_router(test.router, prefix="/api/v1/test", tags=["Test"])
+app.include_router(rbac.router, prefix="/api/v1/rbac", tags=["RBAC权限管理"])
+app.include_router(security_components.router, prefix="/api/v1/security", tags=["安全组件管理"])
+app.include_router(ssl_certificates.router, prefix="/api/v1/ssl", tags=["SSL证书管理"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds
