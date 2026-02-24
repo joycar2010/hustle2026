@@ -96,25 +96,46 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 
+const marketStore = useMarketStore()
 const orders = ref([])
 const pendingOrders = ref([])
 const filterSource = ref('')
 let updateInterval = null
+let unwatchOrders = null
 
 onMounted(() => {
+  // Connect to WebSocket if not already connected
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  // Initial fetch
   fetchOrders()
   fetchPendingOrders()
+
+  // Watch for order_update WebSocket messages
+  unwatchOrders = watch(() => marketStore.lastMessage, (message) => {
+    if (message && message.type === 'order_update') {
+      handleOrderUpdate(message.data)
+    }
+  })
+
+  // Reduced polling frequency as fallback (30s instead of 3s)
   updateInterval = setInterval(() => {
     fetchOrders()
     fetchPendingOrders()
-  }, 3000)
+  }, 30000)
 })
 
 onUnmounted(() => {
   if (updateInterval) {
     clearInterval(updateInterval)
+  }
+  if (unwatchOrders) {
+    unwatchOrders()
   }
 })
 
@@ -143,6 +164,42 @@ async function fetchPendingOrders() {
     pendingOrders.value = response.data
   } catch (error) {
     console.error('Failed to fetch pending orders:', error)
+  }
+}
+
+function handleOrderUpdate(data) {
+  // Update orders list with new order data
+  if (data.order) {
+    const order = data.order
+
+    // Update main orders list
+    const orderIndex = orders.value.findIndex(o => o.id === order.id)
+    if (orderIndex !== -1) {
+      orders.value[orderIndex] = order
+    } else {
+      // Add new order to the beginning
+      orders.value.unshift(order)
+      // Keep only last 10 orders
+      if (orders.value.length > 10) {
+        orders.value = orders.value.slice(0, 10)
+      }
+    }
+
+    // Update pending orders list
+    if (order.status === 'new' || order.status === 'pending') {
+      const pendingIndex = pendingOrders.value.findIndex(o => o.id === order.id)
+      if (pendingIndex !== -1) {
+        pendingOrders.value[pendingIndex] = order
+      } else if (order.source === 'strategy') {
+        pendingOrders.value.unshift(order)
+        if (pendingOrders.value.length > 10) {
+          pendingOrders.value = pendingOrders.value.slice(0, 10)
+        }
+      }
+    } else {
+      // Remove from pending if status changed
+      pendingOrders.value = pendingOrders.value.filter(o => o.id !== order.id)
+    }
   }
 }
 

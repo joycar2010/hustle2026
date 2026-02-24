@@ -33,7 +33,7 @@ Successfully completed transformation of all high-frequency polling components (
    - Impact: 60 requests/min eliminated
    - File: [frontend/src/views/Dashboard.vue](frontend/src/views/Dashboard.vue)
 
-### Medium-Frequency Components (1-5s) - 7/11 Complete
+### Medium-Frequency Components (1-5s) - 8/11 Complete
 
 5. **OpenOrders.vue** ✓
    - Before: 5-second HTTP polling
@@ -77,6 +77,12 @@ Successfully completed transformation of all high-frequency polling components (
     - Impact: 16 requests/min reduced (20 → 4)
     - File: [frontend/src/composables/useAlertMonitoring.js](frontend/src/composables/useAlertMonitoring.js)
 
+12. **OrderMonitor.vue** ✓
+    - Before: 3-second HTTP polling for orders
+    - After: Hybrid mode (30s polling + WebSocket order_update)
+    - Impact: 18 requests/min reduced (20 → 2)
+    - File: [frontend/src/components/trading/OrderMonitor.vue](frontend/src/components/trading/OrderMonitor.vue)
+
 ## Infrastructure Enhancements
 
 ### Market Store Extension ✓
@@ -110,16 +116,16 @@ Successfully completed transformation of all high-frequency polling components (
 
 ### After Transformation (Current)
 - HTTP requests eliminated: 216+ per minute
-- HTTP requests reduced: 42 per minute (hybrid components)
+- HTTP requests reduced: 60 per minute (hybrid components)
 - Data latency: <100ms for WebSocket updates
 - Network overhead: Minimal (single WebSocket connection)
 - Real-time updates: Yes
-- Components transformed: 11/22 (50%)
+- Components transformed: 12/22 (55%)
 
 ## Remaining Work
 
-### Medium-Frequency Components (4 remaining)
-- SpreadChart.vue dashboard version (5s) - Already transformed in trading view
+### Medium-Frequency Components (3 remaining)
+- SpreadChart.vue dashboard version (5s) - Historical data, can reduce frequency
 - System.vue (5s - log refresh) - Keep as-is (file-based, not network)
 
 ### Low-Frequency Components (5 remaining)
@@ -143,6 +149,7 @@ Successfully completed transformation of all high-frequency polling components (
 8. `40f90ad` - Add WebSocket transformation executive summary
 9. `c626d30` - Transform AssetDashboard and AccountStatusPanel to hybrid mode (2 files, 82 insertions)
 10. `5a76383` - Update progress report to 45% completion
+11. `feab879` - Transform useAlertMonitoring.js to hybrid WebSocket mode (2 files, 50 insertions)
 
 ## Next Steps
 
@@ -193,17 +200,17 @@ watch(() => marketStore.lastMessage, (message) => {
 ## Success Criteria
 
 - [x] All high-frequency components transformed
-- [ ] All medium-frequency components transformed (7/11 complete - 64%)
+- [ ] All medium-frequency components transformed (8/11 complete - 73%)
 - [ ] All low-frequency components transformed
 - [x] WebSocket monitoring dashboard created
 - [ ] Regression prevention mechanisms in place
 - [ ] Zero polling remnants in production code
 
-## Current Status: 50% Complete
+## Current Status: 55% Complete
 
-**Components Transformed**: 11/22
+**Components Transformed**: 12/22
 - High-frequency (≤1s): 4/4 (100%) ✓
-- Medium-frequency (1-5s): 7/11 (64%)
+- Medium-frequency (1-5s): 8/11 (73%)
 - Low-frequency (>5s): 0/5 (0%)
 
 **Infrastructure**: Complete ✓
