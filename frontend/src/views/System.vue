@@ -58,6 +58,226 @@
         </div>
       </div>
 
+      <!-- 角色权限管理 -->
+      <div v-if="activeTab === 'rbac'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">角色权限管理</h2>
+            <button @click="navigateToRbac" class="btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              打开完整管理页面
+            </button>
+          </div>
+          <div class="bg-dark-200 rounded p-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">系统角色</div>
+                <div class="text-2xl font-bold text-primary">5</div>
+                <div class="text-xs text-text-secondary mt-1">super_admin, system_admin, security_admin, trader, observer</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">权限总数</div>
+                <div class="text-2xl font-bold text-success">20+</div>
+                <div class="text-xs text-text-secondary mt-1">涵盖RBAC、安全组件、SSL证书管理</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">权限缓存</div>
+                <div class="text-2xl font-bold text-warning">Redis</div>
+                <div class="text-xs text-text-secondary mt-1">1小时TTL，自动刷新</div>
+              </div>
+            </div>
+            <div class="space-y-3">
+              <h3 class="font-bold text-lg mb-3">功能特性</h3>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">角色管理</div>
+                  <div class="text-sm text-text-secondary">创建、编辑、删除、复制角色，支持角色状态切换</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">权限分配</div>
+                  <div class="text-sm text-text-secondary">为角色分配权限，为用户分配角色，支持权限继承</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">权限拦截</div>
+                  <div class="text-sm text-text-secondary">自动API权限验证，支持路径模式匹配和白名单配置</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 安全组件管理 -->
+      <div v-if="activeTab === 'security'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">安全组件管理</h2>
+            <button @click="navigateToSecurity" class="btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              打开完整管理页面
+            </button>
+          </div>
+          <div class="bg-dark-200 rounded p-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">安全组件总数</div>
+                <div class="text-2xl font-bold text-primary">12</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">已启用</div>
+                <div class="text-2xl font-bold text-success">8</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">中间件</div>
+                <div class="text-2xl font-bold text-info">4</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">防护层</div>
+                <div class="text-2xl font-bold text-warning">5</div>
+              </div>
+            </div>
+            <div class="space-y-3">
+              <h3 class="font-bold text-lg mb-3">预定义安全组件</h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="bg-dark-300 rounded p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">CSRF保护</span>
+                    <span class="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-400">中间件</span>
+                  </div>
+                  <div class="text-xs text-text-secondary">防止跨站请求伪造攻击</div>
+                </div>
+                <div class="bg-dark-300 rounded p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">请求签名验证</span>
+                    <span class="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-400">中间件</span>
+                  </div>
+                  <div class="text-xs text-text-secondary">HMAC-SHA256签名防重放</div>
+                </div>
+                <div class="bg-dark-300 rounded p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">SQL注入防护</span>
+                    <span class="px-2 py-1 rounded text-xs bg-purple-500/20 text-purple-400">防护</span>
+                  </div>
+                  <div class="text-xs text-text-secondary">自动检测和阻止SQL注入</div>
+                </div>
+                <div class="bg-dark-300 rounded p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">WebSocket认证</span>
+                    <span class="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-400">中间件</span>
+                  </div>
+                  <div class="text-xs text-text-secondary">强制WebSocket连接认证</div>
+                </div>
+                <div class="bg-dark-300 rounded p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">日志脱敏</span>
+                    <span class="px-2 py-1 rounded text-xs bg-green-500/20 text-green-400">服务</span>
+                  </div>
+                  <div class="text-xs text-text-secondary">自动脱敏敏感信息</div>
+                </div>
+                <div class="bg-dark-300 rounded p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium">数据加密服务</span>
+                    <span class="px-2 py-1 rounded text-xs bg-green-500/20 text-green-400">服务</span>
+                  </div>
+                  <div class="text-xs text-text-secondary">Fernet加密API密钥</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SSL证书管理 -->
+      <div v-if="activeTab === 'ssl'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">SSL证书管理</h2>
+            <button @click="navigateToSsl" class="btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              打开完整管理页面
+            </button>
+          </div>
+          <div class="bg-dark-200 rounded p-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">证书总数</div>
+                <div class="text-2xl font-bold text-primary">0</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">有效证书</div>
+                <div class="text-2xl font-bold text-success">0</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">即将过期</div>
+                <div class="text-2xl font-bold text-warning">0</div>
+              </div>
+              <div class="bg-dark-300 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">已过期</div>
+                <div class="text-2xl font-bold text-danger">0</div>
+              </div>
+            </div>
+            <div class="space-y-3">
+              <h3 class="font-bold text-lg mb-3">功能特性</h3>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">证书上传</div>
+                  <div class="text-sm text-text-secondary">支持PEM格式证书、私钥和证书链上传</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">一键部署</div>
+                  <div class="text-sm text-text-secondary">自动部署到Nginx，支持备份和回滚</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">过期监控</div>
+                  <div class="text-sm text-text-secondary">自动检查证书过期状态，支持定时任务和告警</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-3">
+                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <div class="font-medium">证书类型</div>
+                  <div class="text-sm text-text-secondary">支持自签名、CA签名和Let's Encrypt证书</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div v-if="activeTab === 'version'" class="space-y-6">
         <div class="card">
           <h2 class="text-xl font-bold mb-4">系统版本管理</h2>
@@ -721,6 +941,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import TableDetailModal from '@/components/modals/TableDetailModal.vue'
 import BackupSelectModal from '@/components/modals/BackupSelectModal.vue'
@@ -729,10 +950,14 @@ import { useMarketStore } from '@/stores/market'
 
 // 引入market store以获取WebSocket连接状态
 const marketStore = useMarketStore()
+const router = useRouter()
 
 const activeTab = ref('users')
 const tabs = [
   { id: 'users', label: '前端用户管理' },
+  { id: 'rbac', label: '角色权限管理' },
+  { id: 'security', label: '安全组件管理' },
+  { id: 'ssl', label: 'SSL证书管理' },
   { id: 'version', label: '系统版本管理' },
   { id: 'database', label: 'PostgreSQL数据库管理' },
   { id: 'alerts', label: '提醒声音设置' },
@@ -836,6 +1061,19 @@ async function loadUsers() {
     console.error('Failed to load users:', error)
     users.value = []
   }
+}
+
+// 导航到管理页面
+function navigateToRbac() {
+  router.push('/rbac')
+}
+
+function navigateToSecurity() {
+  router.push('/security')
+}
+
+function navigateToSsl() {
+  router.push('/ssl')
 }
 
 function openAddUserModal() {
