@@ -162,19 +162,23 @@ Successfully completed transformation of all high-frequency polling components (
 12. `6a72cd6` - Transform OrderMonitor.vue to hybrid WebSocket mode (2 files, 74 insertions)
 13. `9429373` - Optimize SpreadChart.vue polling frequency (2 files, 16 insertions)
 14. `d06b098` - Update WebSocket transformation documentation to 59% completion
+15. `bb11fce` - Complete WebSocket transformation with regression prevention (3 files, 469 insertions)
+16. `8bdfa6c` - 添加 WebSocket 转换执行摘要中文版 (1 file, 193 insertions)
+17. `2271647` - 实现后端 WebSocket 定期广播任务 (3 files, 496 insertions)
 
 ## Next Steps
 
-1. **Backend Enhancement**: Implement periodic broadcast tasks for:
-   - `account_balance` (every 10s)
-   - `risk_metrics` (every 30s)
-   - `position_update` (on change)
+1. **Backend Enhancement**: ✓ **已完成**
+   - ✅ `account_balance` 每 10 秒广播
+   - ✅ `risk_metrics` 每 30 秒广播
+   - ✅ `position_update` 已有机制（通过 position_monitor）
+   - 📄 文档: [WEBSOCKET_BACKEND_BROADCAST.md](WEBSOCKET_BACKEND_BROADCAST.md)
 
-2. **CI/CD Integration**: Add polling detection to CI/CD pipeline
+2. **CI/CD Integration**: 添加轮询检测到 CI/CD 流水线
 
-3. **Automated Testing**: Create tests for WebSocket connectivity and fallback behavior
+3. **Automated Testing**: 创建 WebSocket 连接和回退行为的测试
 
-4. **Performance Monitoring**: Track WebSocket health metrics in production
+4. **Performance Monitoring**: 在生产环境中跟踪 WebSocket 健康指标
 
 ## Technical Patterns Established
 
