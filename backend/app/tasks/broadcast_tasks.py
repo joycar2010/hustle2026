@@ -1,7 +1,7 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
 from app.websocket.manager import manager
-from app.database import get_db_context
+from app.core.database import get_db_context
 from app.models.account import Account
 from app.services.account_service import account_data_service
 from sqlalchemy import select

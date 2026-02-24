@@ -49,3 +49,8 @@ async def get_db():
             raise
         finally:
             await session.close()
+
+
+def get_db_context():
+    """Context manager for getting database session in background tasks"""
+    return AsyncSessionLocal()
