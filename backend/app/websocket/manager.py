@@ -94,6 +94,38 @@ class ConnectionManager:
         }
         await self.send_to_user(message, user_id)
 
+    async def broadcast_strategy_status(self, strategy_data: dict):
+        """Broadcast strategy status to all connections"""
+        message = {
+            "type": "strategy_status",
+            "data": strategy_data,
+        }
+        await self.broadcast(message)
+
+    async def broadcast_account_balance(self, balance_data: dict):
+        """Broadcast account balance to all connections"""
+        message = {
+            "type": "account_balance",
+            "data": balance_data,
+        }
+        await self.broadcast(message)
+
+    async def broadcast_position_update(self, position_data: dict):
+        """Broadcast position update to all connections"""
+        message = {
+            "type": "position_update",
+            "data": position_data,
+        }
+        await self.broadcast(message)
+
+    async def broadcast_risk_metrics(self, risk_data: dict):
+        """Broadcast risk metrics to all connections"""
+        message = {
+            "type": "risk_metrics",
+            "data": risk_data,
+        }
+        await self.broadcast(message)
+
     def get_connection_count(self) -> int:
         """Get total number of active connections"""
         return len(self.all_connections)
