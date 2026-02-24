@@ -259,10 +259,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/services/api'
+import { useMarketStore } from '@/stores/market'
 
+const marketStore = useMarketStore()
 const emergencyStopActive = ref(false)
 const riskMetrics = ref({
   accountRisk: 45,
@@ -294,11 +296,46 @@ const alertSettings = ref({
   forwardCloseSyncCount: 3
 })
 
-onMounted(() => {
-  fetchRiskData()
-  fetchAlertSettings()
-  setInterval(fetchRiskData, 5000)
+onMounted(async () => {
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  await fetchRiskData()
+  await fetchAlertSettings()
+
+  // Reduced polling frequency (30s instead of 5s)
+  setInterval(fetchRiskData, 30000)
 })
+
+// Watch for risk alerts via WebSocket
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'risk_alert') {
+    handleRiskAlert(message.data)
+  } else if (message && message.type === 'risk_metrics') {
+    updateRiskMetrics(message.data)
+  }
+})
+
+function handleRiskAlert(alertData) {
+  // Add new alert to the list
+  alerts.value = [
+    {
+      id: Date.now(),
+      level: alertData.level || 'warning',
+      message: alertData.message,
+      time: alertData.timestamp || new Date().toISOString()
+    },
+    ...alerts.value
+  ].slice(0, 10) // Keep only last 10 alerts
+}
+
+function updateRiskMetrics(data) {
+  if (data.emergency_stop_active !== undefined) {
+    emergencyStopActive.value = data.emergency_stop_active
+  }
+}
 
 async function fetchRiskData() {
   try {

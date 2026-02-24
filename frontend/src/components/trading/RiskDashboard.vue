@@ -65,8 +65,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import api from '@/services/api'
+import { useMarketStore } from '@/stores/market'
+
+const marketStore = useMarketStore()
 
 const riskData = ref({
   marginRate: 35,
@@ -81,9 +84,17 @@ riskData.value.totalEquity = totalEquity.value
 
 let updateInterval = null
 
-onMounted(() => {
-  fetchRiskData()
-  updateInterval = setInterval(fetchRiskData, 5000)
+onMounted(async () => {
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  // Initial fetch
+  await fetchRiskData()
+
+  // Reduced polling frequency (30s instead of 5s) since risk data changes less frequently
+  updateInterval = setInterval(fetchRiskData, 30000)
 })
 
 onUnmounted(() => {
@@ -91,6 +102,23 @@ onUnmounted(() => {
     clearInterval(updateInterval)
   }
 })
+
+// Watch for risk metrics updates via WebSocket (when backend implements it)
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'risk_metrics') {
+    updateRiskData(message.data)
+  }
+})
+
+function updateRiskData(data) {
+  riskData.value = {
+    marginRate: data.margin_rate || riskData.value.marginRate,
+    riskRate: data.risk_rate || riskData.value.riskRate,
+    binanceEquity: data.binance_equity || riskData.value.binanceEquity,
+    bybitEquity: data.bybit_equity || riskData.value.bybitEquity,
+    totalEquity: (data.binance_equity || 0) + (data.bybit_equity || 0)
+  }
+}
 
 async function fetchRiskData() {
   try {

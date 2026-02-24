@@ -115,29 +115,53 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
+import { useMarketStore } from '@/stores/market'
 
 const router = useRouter()
+const marketStore = useMarketStore()
 const exchange = ref('binance')
 const quantity = ref(0.01)
 const loading = ref(false)
 const statusMsg = ref('')
 const statusOk = ref(true)
 const recentOrders = ref([])
-let updateInterval = null
 
-onMounted(() => {
-  fetchRecentOrders()
-  updateInterval = setInterval(fetchRecentOrders, 5000)
+onMounted(async () => {
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
+    marketStore.connect()
+  }
+
+  // Initial fetch
+  await fetchRecentOrders()
 })
 
 onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
+  // No cleanup needed - WebSocket stays connected
+})
+
+// Watch for order updates via WebSocket
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'order_update') {
+    handleOrderUpdate(message.data)
   }
 })
+
+function handleOrderUpdate(orderData) {
+  // If it's a manual order, update the recent orders list
+  if (orderData.source === 'manual') {
+    const index = recentOrders.value.findIndex(o => o.id === orderData.id)
+    if (index !== -1) {
+      recentOrders.value[index] = { ...recentOrders.value[index], ...orderData }
+    } else {
+      // New order, add to top and keep only 4
+      recentOrders.value = [orderData, ...recentOrders.value].slice(0, 4)
+    }
+  }
+}
 
 async function fetchRecentOrders() {
   try {
