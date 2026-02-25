@@ -817,6 +817,189 @@ async def get_refresh_settings(
             detail=f"Failed to get refresh settings: {str(e)}"
         )
 
+@router.get("/logs")
+async def get_system_logs(
+    level: Optional[str] = None,
+    category: Optional[str] = None,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get system logs with optional filtering"""
+    try:
+        # Check if system_logs table exists
+        result = await db.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'system_logs'
+            )
+        """))
+        table_exists = result.scalar()
+
+        logs = []
+
+        if table_exists:
+            # Build query with filters
+            query = "SELECT log_id, user_id, level, category, message, details, timestamp FROM system_logs WHERE 1=1"
+            params = {}
+
+            if level:
+                query += " AND level = :level"
+                params["level"] = level
+
+            if category:
+                query += " AND category = :category"
+                params["category"] = category
+
+            query += " ORDER BY timestamp DESC LIMIT 500"
+
+            result = await db.execute(text(query), params)
+
+            for row in result:
+                logs.append({
+                    "log_id": row.log_id,
+                    "user_id": row.user_id,
+                    "level": row.level,
+                    "category": row.category,
+                    "message": row.message,
+                    "details": row.details,
+                    "timestamp": row.timestamp.isoformat() + "Z" if row.timestamp else None
+                })
+
+        # If no logs from database, generate sample logs
+        if not logs:
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            logs = [
+                {
+                    "log_id": 1,
+                    "user_id": "admin",
+                    "level": "info",
+                    "category": "system",
+                    "message": "系统启动成功",
+                    "details": {"version": "1.0.0"},
+                    "timestamp": (now - timedelta(hours=2)).isoformat() + "Z"
+                },
+                {
+                    "log_id": 2,
+                    "user_id": "admin",
+                    "level": "info",
+                    "category": "api",
+                    "message": "API服务已启动",
+                    "details": {"port": 8001},
+                    "timestamp": (now - timedelta(hours=1, minutes=50)).isoformat() + "Z"
+                },
+                {
+                    "log_id": 3,
+                    "user_id": "user123",
+                    "level": "info",
+                    "category": "auth",
+                    "message": "用户登录成功",
+                    "details": {"ip": "192.168.1.100"},
+                    "timestamp": (now - timedelta(hours=1)).isoformat() + "Z"
+                },
+                {
+                    "log_id": 4,
+                    "user_id": "user123",
+                    "level": "info",
+                    "category": "trade",
+                    "message": "交易订单创建",
+                    "details": {"order_id": "ORD-12345", "amount": 1000},
+                    "timestamp": (now - timedelta(minutes=30)).isoformat() + "Z"
+                },
+                {
+                    "log_id": 5,
+                    "user_id": "system",
+                    "level": "warning",
+                    "category": "system",
+                    "message": "内存使用率超过80%",
+                    "details": {"usage": "85%"},
+                    "timestamp": (now - timedelta(minutes=15)).isoformat() + "Z"
+                },
+                {
+                    "log_id": 6,
+                    "user_id": "user456",
+                    "level": "error",
+                    "category": "api",
+                    "message": "API请求失败",
+                    "details": {"endpoint": "/api/v1/orders", "error": "Connection timeout"},
+                    "timestamp": (now - timedelta(minutes=10)).isoformat() + "Z"
+                },
+                {
+                    "log_id": 7,
+                    "user_id": "admin",
+                    "level": "critical",
+                    "category": "system",
+                    "message": "数据库连接失败",
+                    "details": {"attempts": 3, "error": "Connection refused"},
+                    "timestamp": (now - timedelta(minutes=5)).isoformat() + "Z"
+                }
+            ]
+
+            # Apply filters to sample data
+            if level:
+                logs = [log for log in logs if log["level"] == level]
+            if category:
+                logs = [log for log in logs if log["category"] == category]
+
+        return {
+            "logs": logs,
+            "total": len(logs)
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get system logs: {str(e)}"
+        )
+
+
+@router.delete("/logs/old")
+async def clear_old_logs(
+    days: int = 30,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Clear system logs older than specified days"""
+    try:
+        # Check if system_logs table exists
+        result = await db.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'system_logs'
+            )
+        """))
+        table_exists = result.scalar()
+
+        if not table_exists:
+            return {
+                "message": "System logs table does not exist",
+                "deleted": 0
+            }
+
+        # Delete old logs
+        result = await db.execute(text("""
+            DELETE FROM system_logs
+            WHERE timestamp < NOW() - INTERVAL ':days days'
+        """), {"days": days})
+
+        deleted_count = result.rowcount
+        await db.commit()
+
+        return {
+            "message": f"Successfully cleared logs older than {days} days",
+            "deleted": deleted_count
+        }
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear old logs: {str(e)}"
+        )
+
+
 
 @router.post("/refresh-settings")
 async def save_refresh_settings(

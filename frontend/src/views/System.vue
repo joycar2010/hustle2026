@@ -592,6 +592,243 @@
         </div>
       </div>
 
+
+      <!-- 用户管理 Tab -->
+      <div v-if="activeTab === 'users'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">用户管理</h2>
+            <div class="flex space-x-3">
+              <button @click="openAddUserModal" class="btn-primary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                添加用户
+              </button>
+              <button @click="loadUsers" class="btn-secondary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                刷新
+              </button>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">用户名</th>
+                  <th class="text-left py-3 px-4">邮箱</th>
+                  <th class="text-left py-3 px-4">RBAC角色</th>
+                  <th class="text-left py-3 px-4">状态</th>
+                  <th class="text-left py-3 px-4">创建时间</th>
+                  <th class="text-left py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="user in users" :key="user.user_id" class="border-b border-border-secondary hover:bg-dark-50">
+                  <td class="py-3 px-4 font-medium">{{ user.username }}</td>
+                  <td class="py-3 px-4 text-text-secondary text-sm">{{ user.email }}</td>
+                  <td class="py-3 px-4">
+                    <div class="flex flex-wrap gap-1">
+                      <span
+                        v-for="rbacRole in user.rbac_roles"
+                        :key="rbacRole.role_id"
+                        class="px-2 py-1 rounded text-xs bg-success text-white"
+                      >
+                        {{ rbacRole.role_name }}
+                      </span>
+                      <span v-if="!user.rbac_roles || user.rbac_roles.length === 0" class="text-xs text-text-secondary">
+                        未分配
+                      </span>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span :class="user.is_active ? 'text-success' : 'text-danger'">
+                      {{ user.is_active ? '启用' : '禁用' }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-text-secondary text-sm">
+                    {{ formatDate(user.create_time) }}
+                  </td>
+                  <td class="py-3 px-4">
+                    <button @click="editUser(user)" class="text-primary hover:text-blue-400 mr-2">编辑</button>
+                    <button @click="assignUserRoles(user)" class="text-success hover:text-green-400 mr-2">分配角色</button>
+                    <button @click="toggleUserStatus(user)" :class="user.is_active ? 'text-warning hover:text-yellow-400 mr-2' : 'text-success hover:text-green-400 mr-2'">
+                      {{ user.is_active ? '禁用' : '启用' }}
+                    </button>
+                    <button @click="deleteUser(user)" class="text-danger hover:text-red-400">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="users.length === 0" class="text-center py-8 text-text-secondary">
+              暂无用户数据
+            </div>
+          </div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">总用户数</div>
+            <div class="text-2xl font-bold">{{ users.length }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">启用用户</div>
+            <div class="text-2xl font-bold text-success">{{ activeUsersCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">禁用用户</div>
+            <div class="text-2xl font-bold text-danger">{{ inactiveUsersCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">管理员</div>
+            <div class="text-2xl font-bold text-warning">{{ adminUsersCount }}</div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- 系统日志管理 Tab -->
+      <div v-if="activeTab === 'systemlogs'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">系统日志管理</h2>
+            <div class="flex space-x-3">
+              <button @click="clearOldLogs" class="btn-secondary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                清理旧日志
+              </button>
+              <button @click="loadSystemLogs" class="btn-secondary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                刷新
+              </button>
+            </div>
+          </div>
+
+          <!-- Filters -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label class="block text-sm font-medium mb-2">日志级别</label>
+              <select
+                v-model="logFilters.level"
+                @change="loadSystemLogs"
+                class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              >
+                <option value="">全部</option>
+                <option value="info">INFO</option>
+                <option value="warning">WARNING</option>
+                <option value="error">ERROR</option>
+                <option value="critical">CRITICAL</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-2">日志类别</label>
+              <select
+                v-model="logFilters.category"
+                @change="loadSystemLogs"
+                class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              >
+                <option value="">全部</option>
+                <option value="api">API</option>
+                <option value="trade">交易</option>
+                <option value="system">系统</option>
+                <option value="auth">认证</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-2">显示数量</label>
+              <select
+                v-model="logFilters.limit"
+                @change="loadSystemLogs"
+                class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              >
+                <option :value="50">50条</option>
+                <option :value="100">100条</option>
+                <option :value="200">200条</option>
+                <option :value="500">500条</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">时间</th>
+                  <th class="text-left py-3 px-4">级别</th>
+                  <th class="text-left py-3 px-4">类别</th>
+                  <th class="text-left py-3 px-4">消息</th>
+                  <th class="text-left py-3 px-4">用户</th>
+                  <th class="text-left py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="log in systemLogs" :key="log.log_id" class="border-b border-border-secondary hover:bg-dark-50">
+                  <td class="py-3 px-4 text-sm text-text-secondary whitespace-nowrap">
+                    {{ formatDate(log.timestamp) }}
+                  </td>
+                  <td class="py-3 px-4">
+                    <span :class="getLogLevelClass(log.level)" class="px-2 py-1 rounded text-xs font-medium">
+                      {{ log.level.toUpperCase() }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span :class="getLogCategoryClass(log.category)" class="px-2 py-1 rounded text-xs">
+                      {{ getLogCategoryLabel(log.category) }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-sm">
+                    <div class="max-w-md truncate">{{ log.message }}</div>
+                  </td>
+                  <td class="py-3 px-4 text-sm text-text-secondary">
+                    {{ log.user_id ? log.user_id.substring(0, 8) : '-' }}
+                  </td>
+                  <td class="py-3 px-4">
+                    <button @click="viewLogDetails(log)" class="text-primary hover:text-blue-400">
+                      详情
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="systemLogs.length === 0" class="text-center py-8 text-text-secondary">
+              暂无日志数据
+            </div>
+          </div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">总日志数</div>
+            <div class="text-2xl font-bold">{{ systemLogs.length }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">INFO</div>
+            <div class="text-2xl font-bold text-primary">{{ infoLogsCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">WARNING</div>
+            <div class="text-2xl font-bold text-warning">{{ warningLogsCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">ERROR</div>
+            <div class="text-2xl font-bold text-danger">{{ errorLogsCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">CRITICAL</div>
+            <div class="text-2xl font-bold text-danger">{{ criticalLogsCount }}</div>
+          </div>
+        </div>
+      </div>
+
       <div v-if="activeTab === 'refresh'" class="space-y-6">
         <div class="card">
           <h2 class="text-xl font-bold mb-4">刷新频率管理</h2>
@@ -1059,6 +1296,160 @@
       </div>
     </div>
 
+
+    <!-- User Modal -->
+    <div v-if="showUserModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-xl font-bold mb-4">{{ isEditingUser ? '编辑用户' : '添加用户' }}</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">用户名</label>
+            <input
+              v-model="userForm.username"
+              type="text"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              placeholder="请输入用户名"
+              :disabled="isEditingUser"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">邮箱</label>
+            <input
+              v-model="userForm.email"
+              type="email"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              placeholder="请输入邮箱"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">密码{{ isEditingUser ? '（留空则不修改）' : '' }}</label>
+            <input
+              v-model="userForm.password"
+              type="password"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              :placeholder="isEditingUser ? '留空则不修改密码' : '请输入密码'"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">角色</label>
+            <select
+              v-model="userForm.role"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+            >
+              <option value="管理员">管理员</option>
+              <option value="交易员">交易员</option>
+              <option value="观察员">观察员</option>
+            </select>
+          </div>
+          <div class="flex items-center">
+            <input
+              v-model="userForm.is_active"
+              type="checkbox"
+              id="user-active"
+              class="mr-2"
+            />
+            <label for="user-active" class="text-sm">启用此用户</label>
+          </div>
+        </div>
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="showUserModal = false" class="btn-secondary">取消</button>
+          <button @click="saveUser" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- User Roles Assignment Modal -->
+    <div v-if="showUserRolesModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-bold mb-4">分配角色 - {{ currentUser?.username }}</h3>
+
+        <div class="mb-4 text-sm text-text-secondary">
+          已选择 {{ selectedUserRoles.length }} 个角色
+        </div>
+
+        <div class="space-y-3">
+          <div v-for="role in roles" :key="role.role_id" class="flex items-start p-3 bg-dark-200 rounded hover:bg-dark-300">
+            <input
+              type="checkbox"
+              :id="'user-role-' + role.role_id"
+              :value="role.role_id"
+              v-model="selectedUserRoles"
+              class="mt-1 mr-3"
+            />
+            <label :for="'user-role-' + role.role_id" class="flex-1 cursor-pointer">
+              <div class="font-medium">{{ role.role_name }}</div>
+              <div class="text-xs text-text-secondary">{{ role.role_code }}</div>
+              <div v-if="role.description" class="text-xs text-text-secondary mt-1">{{ role.description }}</div>
+            </label>
+            <span :class="role.is_active ? 'text-success' : 'text-text-secondary'" class="text-xs">
+              {{ role.is_active ? '启用' : '禁用' }}
+            </span>
+          </div>
+        </div>
+
+        <div v-if="roles.length === 0" class="text-center py-8 text-text-secondary">
+          暂无可用角色
+        </div>
+
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="showUserRolesModal = false" class="btn-secondary">取消</button>
+          <button @click="saveUserRoles" class="btn-primary">保存角色</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- System Log Detail Modal -->
+    <div v-if="showSystemLogDetailModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click="showSystemLogDetailModal = false">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto" @click.stop>
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-xl font-bold">日志详情</h3>
+          <button @click="showSystemLogDetailModal = false" class="text-text-secondary hover:text-text-primary text-2xl leading-none">&times;</button>
+        </div>
+        <div v-if="selectedSystemLog" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-1">日志ID</label>
+              <div class="text-text-primary">{{ selectedSystemLog.log_id }}</div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-1">时间</label>
+              <div class="text-text-primary">{{ formatDate(selectedSystemLog.timestamp) }}</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-1">级别</label>
+              <span :class="getLogLevelClass(selectedSystemLog.level)" class="inline-block px-3 py-1 rounded text-sm font-medium">
+                {{ selectedSystemLog.level.toUpperCase() }}
+              </span>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-1">分类</label>
+              <span :class="getLogCategoryClass(selectedSystemLog.category)" class="inline-block px-3 py-1 rounded text-sm">
+                {{ getLogCategoryLabel(selectedSystemLog.category) }}
+              </span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1">用户</label>
+            <div class="text-text-primary">{{ selectedSystemLog.user_id || 'System' }}</div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1">消息</label>
+            <div class="text-text-primary">{{ selectedSystemLog.message }}</div>
+          </div>
+          <div v-if="selectedSystemLog.details">
+            <label class="block text-sm font-medium text-text-secondary mb-1">详细信息</label>
+            <pre class="bg-dark-300 p-4 rounded text-sm overflow-x-auto">{{ JSON.stringify(selectedSystemLog.details, null, 2) }}</pre>
+          </div>
+        </div>
+        <div class="flex justify-end mt-6">
+          <button @click="showSystemLogDetailModal = false" class="btn-secondary">关闭</button>
+        </div>
+      </div>
+    </div>
+
 </template>
 
 <script setup>
@@ -1155,6 +1546,63 @@ const errorComponentsCount = computed(() =>
 )
 
 
+
+// User Management state
+const users = ref([])
+const showUserModal = ref(false)
+const showUserRolesModal = ref(false)
+const isEditingUser = ref(false)
+const currentUser = ref(null)
+const userForm = ref({
+  username: '',
+  email: '',
+  password: '',
+  role: '交易员',
+  is_active: true
+})
+const selectedUserRoles = ref([])
+
+const activeUsersCount = computed(() =>
+  users.value.filter(u => u.is_active).length
+)
+
+const inactiveUsersCount = computed(() =>
+  users.value.filter(u => !u.is_active).length
+)
+
+const adminUsersCount = computed(() =>
+  users.value.filter(u => u.role === '管理员').length
+)
+
+
+// System Logs state
+const systemLogs = ref([])
+const showSystemLogDetailModal = ref(false)
+const selectedSystemLog = ref(null)
+const showLogDetailModal = ref(false)
+const currentLog = ref(null)
+const logFilters = ref({
+  level: '',
+  category: '',
+  limit: 100
+})
+
+const infoLogsCount = computed(() =>
+  systemLogs.value.filter(l => l.level === 'info').length
+)
+
+const warningLogsCount = computed(() =>
+  systemLogs.value.filter(l => l.level === 'warning').length
+)
+
+const errorLogsCount = computed(() =>
+  systemLogs.value.filter(l => l.level === 'error').length
+)
+
+const criticalLogsCount = computed(() =>
+  systemLogs.value.filter(l => l.level === 'critical').length
+)
+
 const componentConfigJson = computed({
   get: () => JSON.stringify(componentConfig.value, null, 2),
   set: (value) => {
@@ -1167,14 +1615,16 @@ const componentConfigJson = computed({
 })
 
 const tabs = [
-  { id: 'version', label: '系统版本管理' },
-  { id: 'database', label: 'PostgreSQL数据库管理' },
-  { id: 'alerts', label: '提醒声音设置' },
-  { id: 'rbac', label: 'RBAC权限管理' },
-  { id: 'ssl', label: 'SSL证书管理' },
-  { id: 'security', label: '安全组件管理' },
+  { id: 'users', label: '用户管理' },
+  { id: 'rbac', label: '角色权限管理' },
   { id: 'refresh', label: '刷新管理' },
-  { id: 'websocket', label: 'WebSocket监控' }
+  { id: 'websocket', label: 'WebSocket监控' },
+  { id: 'alerts', label: '提醒声音设置' },
+  { id: 'security', label: '安全组件管理' },
+  { id: 'ssl', label: 'SSL证书管理' },
+  { id: 'systemlogs', label: '系统日志' },
+  { id: 'version', label: '系统版本管理' },
+  { id: 'database', label: 'PostgreSQL数据库管理' }
 ]
 
 
@@ -1342,6 +1792,207 @@ function getCertStatusClass(status) {
 
 
 
+
+
+
+// System Logs Functions
+async function loadSystemLogs() {
+  try {
+    const params = new URLSearchParams()
+    if (logFilters.value.level) params.append('level', logFilters.value.level)
+    if (logFilters.value.category) params.append('category', logFilters.value.category)
+    params.append('limit', logFilters.value.limit)
+
+    const response = await api.get(`/api/v1/system/logs?${params.toString()}`)
+    systemLogs.value = response.data.logs || []
+  } catch (error) {
+    console.error('Failed to load system logs:', error)
+    alert('加载系统日志失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function clearOldLogs() {
+  if (!confirm('确定要清理7天前的旧日志吗？此操作不可恢复！')) return
+
+  try {
+    await api.delete('/api/v1/system/logs/old')
+    alert('旧日志清理成功')
+    await loadSystemLogs()
+  } catch (error) {
+    console.error('Failed to clear old logs:', error)
+    alert('清理日志失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function viewLogDetails(log) {
+  selectedSystemLog.value = log
+  showSystemLogDetailModal.value = true
+}
+
+function getLogLevelClass(level) {
+  const classes = {
+    'info': 'bg-primary text-white',
+    'warning': 'bg-warning text-dark-100',
+    'error': 'bg-danger text-white',
+    'critical': 'bg-danger text-white'
+  }
+  return classes[level] || 'bg-dark-300 text-text-secondary'
+}
+
+function getLogCategoryClass(category) {
+  const classes = {
+    'api': 'bg-blue-500 text-white',
+    'trade': 'bg-green-500 text-white',
+    'system': 'bg-purple-500 text-white',
+    'auth': 'bg-yellow-500 text-dark-100'
+  }
+  return classes[category] || 'bg-dark-300 text-text-secondary'
+}
+
+function getLogCategoryLabel(category) {
+  const labels = {
+    'api': 'API',
+    'trade': '交易',
+    'system': '系统',
+    'auth': '认证'
+  }
+  return labels[category] || category
+}
+
+// User Management Functions
+async function loadUsers() {
+  try {
+    const response = await api.get('/api/v1/users/')
+    users.value = response.data
+  } catch (error) {
+    console.error('Failed to load users:', error)
+    alert('加载用户失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function openAddUserModal() {
+  userForm.value = {
+    username: '',
+    email: '',
+    password: '',
+    role: '交易员',
+    is_active: true
+  }
+  isEditingUser.value = false
+  showUserModal.value = true
+}
+
+function editUser(user) {
+  userForm.value = {
+    username: user.username,
+    email: user.email,
+    password: '',
+    role: user.role,
+    is_active: user.is_active
+  }
+  currentUser.value = user
+  isEditingUser.value = true
+  showUserModal.value = true
+}
+
+async function saveUser() {
+  try {
+    if (!userForm.value.username || !userForm.value.email) {
+      alert('请填写用户名和邮箱')
+      return
+    }
+
+    if (!isEditingUser.value && !userForm.value.password) {
+      alert('请填写密码')
+      return
+    }
+
+    if (isEditingUser.value) {
+      const updateData = {
+        email: userForm.value.email,
+        role: userForm.value.role,
+        is_active: userForm.value.is_active
+      }
+      if (userForm.value.password) {
+        updateData.password = userForm.value.password
+      }
+      await api.put(`/api/v1/users/${currentUser.value.user_id}`, updateData)
+      alert('用户更新成功')
+    } else {
+      await api.post('/api/v1/users/', userForm.value)
+      alert('用户创建成功')
+    }
+
+    showUserModal.value = false
+    await loadUsers()
+  } catch (error) {
+    console.error('Failed to save user:', error)
+    alert('保存用户失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function toggleUserStatus(user) {
+  const action = user.is_active ? '禁用' : '启用'
+  if (!confirm(`确定要${action}用户"${user.username}"吗？`)) return
+
+  try {
+    await api.put(`/api/v1/users/${user.user_id}`, {
+      is_active: !user.is_active
+    })
+    alert(`用户${action}成功`)
+    await loadUsers()
+  } catch (error) {
+    console.error('Failed to toggle user status:', error)
+    alert(`${action}用户失败: ` + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function deleteUser(user) {
+  if (!confirm(`确定要删除用户"${user.username}"吗？此操作不可恢复！`)) return
+
+  try {
+    await api.delete(`/api/v1/users/${user.user_id}`)
+    alert('用户删除成功')
+    await loadUsers()
+  } catch (error) {
+    console.error('Failed to delete user:', error)
+    alert('删除用户失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function assignUserRoles(user) {
+  try {
+    currentUser.value = user
+
+    // Load all roles if not loaded
+    if (roles.value.length === 0) {
+      await loadRoles()
+    }
+
+    // Set selected roles
+    selectedUserRoles.value = user.rbac_roles ? user.rbac_roles.map(r => r.role_id) : []
+
+    showUserRolesModal.value = true
+  } catch (error) {
+    console.error('Failed to load user roles:', error)
+    alert('加载用户角色失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function saveUserRoles() {
+  try {
+    await api.post(`/api/v1/rbac/users/${currentUser.value.user_id}/roles`, {
+      role_ids: selectedUserRoles.value
+    })
+
+    alert('角色分配成功')
+    showUserRolesModal.value = false
+    await loadUsers()
+  } catch (error) {
+    console.error('Failed to save user roles:', error)
+    alert('保存用户角色失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
 
 // Security Component Functions
 async function loadSecurityComponents() {
@@ -1580,6 +2231,8 @@ onMounted(async () => {
   loadCertificates()
   loadAllPermissions()
   loadSecurityComponents()
+  loadUsers()
+  loadSystemLogs()
   // 确保WebSocket连接已建立（如果配置启用）
   if (refreshSettings.value.useWebSocket && !marketStore.connected) {
     marketStore.connect()
@@ -2050,4 +2703,127 @@ function resetToDefaults() {
 .card {
   @apply bg-dark-200 rounded-lg p-6 shadow-lg;
 }
+
+/* System Logs Styles */
+.log-detail-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detail-row.full-width {
+  flex-direction: column;
+}
+
+.detail-label {
+  font-weight: 600;
+  color: #666;
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.detail-value {
+  color: #333;
+  word-break: break-word;
+}
+
+.detail-json {
+  background: #f5f5f5;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  width: 100%;
+}
+
+.log-level-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.log-level-info {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.log-level-warning {
+  background: #fff3e0;
+  color: #f57c00;
+}
+
+.log-level-error {
+  background: #ffebee;
+  color: #d32f2f;
+}
+
+.log-level-critical {
+  background: #fce4ec;
+  color: #c2185b;
+}
+
+.log-category-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.log-category-api {
+  background: #e8f5e9;
+  color: #388e3c;
+}
+
+.log-category-trade {
+  background: #fff9c4;
+  color: #f57f17;
+}
+
+.log-category-system {
+  background: #e1f5fe;
+  color: #0277bd;
+}
+
+.log-category-auth {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.logs-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stat-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.stat-card .stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+}
+
 </style>

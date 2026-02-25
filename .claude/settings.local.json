@@ -12,7 +12,8 @@
       "Bash(cmd //c \"start /min cmd /k start_backend.bat\")",
       "Bash(alembic current:*)",
       "Bash(tasklist:*)",
-      "Bash(cmd //c:*)"
+      "Bash(cmd //c:*)",
+      "Bash(pm2 list)"
     ]
   }
 }
