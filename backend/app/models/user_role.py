@@ -20,7 +20,7 @@ class UserRole(Base):
     expires_at = Column(TIMESTAMP)  # NULL表示永久有效
 
     # Relationships
-    user = relationship("User", foreign_keys=[user_id], backref="user_roles")
+    user = relationship("User", foreign_keys=[user_id], back_populates="user_roles")
     role = relationship("Role", back_populates="user_roles")
     assigner = relationship("User", foreign_keys=[assigned_by])
 

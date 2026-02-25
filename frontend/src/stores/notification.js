@@ -220,7 +220,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
       // Construct full URL for uploaded sound files
       const soundUrl = soundFile.startsWith('/uploads/')
-        ? `http://13.115.21.77:8000${soundFile}`
+        ? `http://13.115.21.77:8001${soundFile}`
         : soundFile
 
       // Play the sound file the specified number of times

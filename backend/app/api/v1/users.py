@@ -274,24 +274,25 @@ async def delete_user(
         uid = str(target_user_id)
 
         # Step 2: Null out soft FK references (roles, security_components, ssl_certificates)
-        await db.execute(text("UPDATE role_permissions SET granted_by = NULL WHERE granted_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("UPDATE roles SET created_by = NULL WHERE created_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("UPDATE roles SET updated_by = NULL WHERE updated_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("UPDATE security_components SET created_by = NULL WHERE created_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("UPDATE security_components SET updated_by = NULL WHERE updated_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("UPDATE ssl_certificates SET uploaded_by = NULL WHERE uploaded_by = :uid::uuid"), {"uid": uid})
+        # 修复说明：将 ::uuid 改为 CAST(:uid AS uuid) 避免SQLAlchemy参数绑定冲突
+        await db.execute(text("UPDATE role_permissions SET granted_by = NULL WHERE granted_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("UPDATE roles SET created_by = NULL WHERE created_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("UPDATE roles SET updated_by = NULL WHERE updated_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("UPDATE security_components SET created_by = NULL WHERE created_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("UPDATE security_components SET updated_by = NULL WHERE updated_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("UPDATE ssl_certificates SET uploaded_by = NULL WHERE uploaded_by = CAST(:uid AS uuid)"), {"uid": uid})
 
         # Step 3: Delete log/audit records referencing this user
-        await db.execute(text("DELETE FROM security_component_logs WHERE performed_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("DELETE FROM ssl_certificate_logs WHERE performed_by = :uid::uuid"), {"uid": uid})
-        await db.execute(text("DELETE FROM trades WHERE user_id = :uid::uuid"), {"uid": uid})
-        await db.execute(text("DELETE FROM system_alerts WHERE user_id = :uid::uuid"), {"uid": uid})
+        await db.execute(text("DELETE FROM security_component_logs WHERE performed_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("DELETE FROM ssl_certificate_logs WHERE performed_by = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("DELETE FROM trades WHERE user_id = CAST(:uid AS uuid)"), {"uid": uid})
+        await db.execute(text("DELETE FROM system_alerts WHERE user_id = CAST(:uid AS uuid)"), {"uid": uid})
 
         # Step 4: Delete positions (FK -> users.user_id, NO ACTION, no ORM cascade)
         await db.execute(delete(Position).where(Position.user_id == target_user_id))
 
         # Step 5: Null out user_roles.assigned_by (self-referential FK)
-        await db.execute(text("UPDATE user_roles SET assigned_by = NULL WHERE assigned_by = :uid::uuid"), {"uid": uid})
+        await db.execute(text("UPDATE user_roles SET assigned_by = NULL WHERE assigned_by = CAST(:uid AS uuid)"), {"uid": uid})
 
         # Step 6: Delete user - ORM cascade handles accounts, strategies, strategy_configs,
         # arbitrage_tasks, risk_alerts, risk_settings, user_roles

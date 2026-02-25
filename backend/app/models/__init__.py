@@ -12,8 +12,17 @@ from app.models.position import Position
 from app.models.strategy_performance import StrategyPerformance
 from app.models.account_snapshot import AccountSnapshot
 from app.models.system_log import SystemLog
-from app.models.api_credential import ApiCredential
 from app.models.notification import Notification
+from app.models.risk_settings import RiskSettings
+from app.models.role import Role
+from app.models.permission import Permission
+from app.models.user_role import UserRole
+from app.models.role_permission import RolePermission
+from app.models.security_component import SecurityComponent, SecurityComponentLog
+from app.models.ssl_certificate import SSLCertificate, SSLCertificateLog
+from app.models.system_alert import SystemAlert
+from app.models.trade import Trade
+from app.models.version_backup import VersionBackup
 
 __all__ = [
     "Base",
@@ -30,6 +39,17 @@ __all__ = [
     "StrategyPerformance",
     "AccountSnapshot",
     "SystemLog",
-    "ApiCredential",
     "Notification",
+    "RiskSettings",
+    "Role",
+    "Permission",
+    "UserRole",
+    "RolePermission",
+    "SecurityComponent",
+    "SSLCertificate",
+    "SecurityComponentLog",
+    "SSLCertificateLog",
+    "SystemAlert",
+    "Trade",
+    "VersionBackup",
 ]
