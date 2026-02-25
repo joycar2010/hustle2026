@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Integer, TIMESTAMP, ForeignKey, Index
+from sqlalchemy import Column, String, Float, Integer, TIMESTAMP, ForeignKey, Index, Date
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -11,19 +11,16 @@ class StrategyPerformance(Base):
 
     __tablename__ = "strategy_performance"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    performance_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategy_configs.config_id"), nullable=False, index=True)
-    date = Column(TIMESTAMP, nullable=False, index=True)
+    today_trades = Column(Integer, default=0, nullable=False)
+    today_profit = Column(Float, default=0.0, nullable=False)
     total_trades = Column(Integer, default=0, nullable=False)
-    winning_trades = Column(Integer, default=0, nullable=False)
-    losing_trades = Column(Integer, default=0, nullable=False)
     total_profit = Column(Float, default=0.0, nullable=False)
-    total_loss = Column(Float, default=0.0, nullable=False)
     win_rate = Column(Float, default=0.0, nullable=False)
-    avg_profit = Column(Float, default=0.0, nullable=False)
     max_drawdown = Column(Float, default=0.0, nullable=False)
-    sharpe_ratio = Column(Float)
-    created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
+    date = Column(TIMESTAMP, nullable=False, index=True)
+    timestamp = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
 
     # Relationships
     strategy = relationship("StrategyConfig", backref="performance_records")
