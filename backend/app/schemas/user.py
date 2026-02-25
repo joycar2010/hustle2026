@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from uuid import UUID
 import re
@@ -63,6 +63,7 @@ class UserResponse(BaseModel):
     username: str
     email: Optional[str]
     role: str
+    rbac_roles: Optional[List[dict]] = []  # RBAC角色列表
     is_active: bool
     create_time: datetime
     update_time: datetime

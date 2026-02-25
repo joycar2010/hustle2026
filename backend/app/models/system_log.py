@@ -20,7 +20,9 @@ class SystemLog(Base):
     timestamp = Column(TIMESTAMP, default=datetime.utcnow, nullable=False, index=True)
 
     # Relationships
-    user = relationship("User", backref="logs")
+    # Note: No backref to avoid loading logs when deleting users
+    # since system_logs table may not exist in all deployments
+    user = relationship("User", foreign_keys=[user_id])
 
     __table_args__ = (
         Index('idx_system_logs_level_time', 'level', 'timestamp'),

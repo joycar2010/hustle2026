@@ -8,7 +8,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 from app.core.config import settings
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates
+from app.core.redis_client import redis_client
+from app.middleware.permission_interceptor import PermissionInterceptor
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer
 from app.services.position_monitor import position_monitor
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
+    await redis_client.connect()
     binance_ws.start()
     await market_streamer.start()
     await account_balance_streamer.start()
@@ -36,6 +39,7 @@ async def lifespan(app: FastAPI):
     await risk_metrics_streamer.stop()
     await position_monitor.stop_monitoring()
     await market_data_service.stop()
+    await redis_client.disconnect()
 
 
 # Create FastAPI app
@@ -66,6 +70,9 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-RateLimit-Remaining"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# Add permission interceptor middleware (temporarily disabled for RBAC setup)
+# app.add_middleware(PermissionInterceptor, redis_client=redis_client.client)
 
 # Add request logging middleware
 @app.middleware("http")
@@ -116,6 +123,7 @@ app.include_router(test.router, prefix="/api/v1/test", tags=["Test"])
 app.include_router(rbac.router, prefix="/api/v1/rbac", tags=["RBAC权限管理"])
 app.include_router(security_components.router, prefix="/api/v1/security", tags=["安全组件管理"])
 app.include_router(ssl_certificates.router, prefix="/api/v1/ssl", tags=["SSL证书管理"])
+app.include_router(key_management.router, prefix="/api/v1/keys", tags=["密钥管理"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds

@@ -45,3 +45,30 @@ class EncryptionService:
 
 # Global encryption service instance
 encryption_service = EncryptionService()
+
+
+# Convenience functions for API key encryption
+def encrypt_api_key(api_key: str) -> str:
+    """
+    Encrypt API key using Fernet encryption
+
+    Args:
+        api_key: Plain text API key
+
+    Returns:
+        Encrypted API key (base64 encoded)
+    """
+    return encryption_service.encrypt(api_key)
+
+
+def decrypt_api_key(encrypted_key: str) -> str:
+    """
+    Decrypt API key using Fernet encryption
+
+    Args:
+        encrypted_key: Encrypted API key (base64 encoded)
+
+    Returns:
+        Decrypted plain text API key
+    """
+    return encryption_service.decrypt(encrypted_key)

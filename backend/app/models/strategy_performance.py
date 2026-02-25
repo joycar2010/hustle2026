@@ -12,7 +12,7 @@ class StrategyPerformance(Base):
     __tablename__ = "strategy_performance"
 
     performance_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategy_configs.config_id"), nullable=False, index=True)
+    strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True)
     today_trades = Column(Integer, default=0, nullable=False)
     today_profit = Column(Float, default=0.0, nullable=False)
     total_trades = Column(Integer, default=0, nullable=False)
@@ -23,7 +23,7 @@ class StrategyPerformance(Base):
     timestamp = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
 
     # Relationships
-    strategy = relationship("StrategyConfig", backref="performance_records")
+    strategy = relationship("Strategy", backref="performance_records")
 
     __table_args__ = (
         Index('idx_strategy_performance_date', 'strategy_id', 'date'),

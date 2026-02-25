@@ -7,14 +7,15 @@ from uuid import UUID
 import logging
 
 from app.core.database import get_db
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user_id_optional
 from app.models.role import Role
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.models.user_role import UserRole
 from app.schemas.rbac import (
     RoleCreate, RoleUpdate, RoleResponse, RoleWithPermissions,
-    PermissionResponse, RolePermissionAssign, UserRoleAssign,
+    PermissionResponse, PermissionCreate, PermissionUpdate,
+    RolePermissionAssign, UserRoleAssign,
     RoleCopy
 )
 from app.services.permission_cache import permission_cache
@@ -30,8 +31,8 @@ async def get_roles(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     is_active: Optional[bool] = None,
-    db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    db: AsyncSession = Depends(get_db)
+    # current_user_id: Optional[str] = Depends(get_current_user_id_optional)  # Temporarily disabled
 ):
     """获取角色列表"""
     try:
@@ -55,7 +56,7 @@ async def get_roles(
 async def get_role(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取角色详情（包含权限）"""
     try:
@@ -89,7 +90,7 @@ async def get_role(
 async def create_role(
     role_data: RoleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """创建角色"""
     try:
@@ -126,7 +127,7 @@ async def update_role(
     role_id: UUID,
     role_data: RoleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """更新角色"""
     try:
@@ -169,7 +170,7 @@ async def update_role(
 async def delete_role(
     role_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """删除角色"""
     try:
@@ -207,7 +208,7 @@ async def copy_role(
     role_id: UUID,
     copy_data: RoleCopy,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """复制角色（包含权限）"""
     try:
@@ -269,7 +270,7 @@ async def get_permissions(
     resource_type: Optional[str] = None,
     is_active: Optional[bool] = None,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取权限列表"""
     try:
@@ -291,6 +292,154 @@ async def get_permissions(
         raise HTTPException(status_code=500, detail="获取权限列表失败")
 
 
+@router.get("/permissions/{permission_id}", response_model=PermissionResponse)
+async def get_permission(
+    permission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """获取权限详情"""
+    try:
+        result = await db.execute(select(Permission).where(Permission.permission_id == permission_id))
+        permission = result.scalar_one_or_none()
+
+        if not permission:
+            raise HTTPException(status_code=404, detail="权限不存在")
+
+        return permission
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取权限详情失败: {e}")
+        raise HTTPException(status_code=500, detail="获取权限详情失败")
+
+
+@router.post("/permissions", response_model=PermissionResponse, status_code=status.HTTP_201_CREATED)
+async def create_permission(
+    permission_data: PermissionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """创建权限"""
+    try:
+        # 检查权限代码是否已存在
+        result = await db.execute(select(Permission).where(Permission.permission_code == permission_data.permission_code))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="权限代码已存在")
+
+        # 如果有父权限，检查父权限是否存在
+        if permission_data.parent_id:
+            result = await db.execute(select(Permission).where(Permission.permission_id == permission_data.parent_id))
+            if not result.scalar_one_or_none():
+                raise HTTPException(status_code=404, detail="父权限不存在")
+
+        # 创建权限
+        new_permission = Permission(
+            permission_name=permission_data.permission_name,
+            permission_code=permission_data.permission_code,
+            resource_type=permission_data.resource_type,
+            resource_path=permission_data.resource_path,
+            http_method=permission_data.http_method,
+            description=permission_data.description,
+            parent_id=permission_data.parent_id,
+            sort_order=permission_data.sort_order,
+            is_active=permission_data.is_active
+        )
+
+        db.add(new_permission)
+        await db.commit()
+        await db.refresh(new_permission)
+
+        logger.info(f"权限创建成功: {new_permission.permission_code}")
+        return new_permission
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"创建权限失败: {e}")
+        raise HTTPException(status_code=500, detail="创建权限失败")
+
+
+@router.put("/permissions/{permission_id}", response_model=PermissionResponse)
+async def update_permission(
+    permission_id: UUID,
+    permission_data: PermissionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """更新权限"""
+    try:
+        result = await db.execute(select(Permission).where(Permission.permission_id == permission_id))
+        permission = result.scalar_one_or_none()
+
+        if not permission:
+            raise HTTPException(status_code=404, detail="权限不存在")
+
+        # 更新字段
+        if permission_data.permission_name is not None:
+            permission.permission_name = permission_data.permission_name
+        if permission_data.description is not None:
+            permission.description = permission_data.description
+        if permission_data.sort_order is not None:
+            permission.sort_order = permission_data.sort_order
+        if permission_data.is_active is not None:
+            permission.is_active = permission_data.is_active
+
+        await db.commit()
+        await db.refresh(permission)
+
+        # 清除相关缓存
+        await permission_cache.clear_all_user_permissions()
+
+        logger.info(f"权限更新成功: {permission.permission_code}")
+        return permission
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新权限失败: {e}")
+        raise HTTPException(status_code=500, detail="更新权限失败")
+
+
+@router.delete("/permissions/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_permission(
+    permission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """删除权限"""
+    try:
+        result = await db.execute(select(Permission).where(Permission.permission_id == permission_id))
+        permission = result.scalar_one_or_none()
+
+        if not permission:
+            raise HTTPException(status_code=404, detail="权限不存在")
+
+        # 检查是否有子权限
+        result = await db.execute(select(Permission).where(Permission.parent_id == permission_id).limit(1))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="该权限存在子权限，无法删除")
+
+        # 检查是否有角色使用该权限
+        result = await db.execute(select(RolePermission).where(RolePermission.permission_id == permission_id).limit(1))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="该权限正在被角色使用，无法删除")
+
+        await db.delete(permission)
+        await db.commit()
+
+        # 清除缓存
+        await permission_cache.clear_all_user_permissions()
+
+        logger.info(f"权限删除成功: {permission.permission_code}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"删除权限失败: {e}")
+        raise HTTPException(status_code=500, detail="删除权限失败")
+
+
 # ==================== 角色权限分配 ====================
 
 @router.post("/roles/{role_id}/permissions", status_code=status.HTTP_204_NO_CONTENT)
@@ -298,7 +447,7 @@ async def assign_permissions_to_role(
     role_id: UUID,
     assign_data: RolePermissionAssign,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """为角色分配权限（批量）"""
     try:
@@ -320,7 +469,7 @@ async def assign_permissions_to_role(
             role_permission = RolePermission(
                 role_id=role_id,
                 permission_id=permission_id,
-                granted_by=UUID(current_user_id)
+                granted_by=UUID(current_user_id) if current_user_id else None
             )
             db.add(role_permission)
 
@@ -335,8 +484,8 @@ async def assign_permissions_to_role(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"分配角色权限失败: {e}")
-        raise HTTPException(status_code=500, detail="分配角色权限失败")
+        logger.error(f"分配角色权限失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"分配角色权限失败: {str(e)}")
 
 
 # ==================== 用户角色分配 ====================
@@ -346,7 +495,7 @@ async def assign_roles_to_user(
     user_id: UUID,
     assign_data: UserRoleAssign,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """为用户分配角色（批量）"""
     try:
@@ -358,7 +507,7 @@ async def assign_roles_to_user(
             user_role = UserRole(
                 user_id=user_id,
                 role_id=role_id,
-                assigned_by=UUID(current_user_id),
+                assigned_by=UUID(current_user_id) if current_user_id else None,
                 expires_at=assign_data.expires_at
             )
             db.add(user_role)
@@ -379,7 +528,7 @@ async def assign_roles_to_user(
 async def get_user_permissions(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取用户的所有权限（通过角色）"""
     try:

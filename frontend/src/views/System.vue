@@ -10,274 +10,6 @@
     </div>
 
     <div class="tab-content">
-      <div v-if="activeTab === 'users'" class="space-y-6">
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">前端用户管理</h2>
-            <button @click="openAddUserModal" class="btn-primary">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-              添加用户
-            </button>
-          </div>
-
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b border-border-primary">
-                  <th class="text-left py-3 px-4">用户名</th>
-                  <th class="text-left py-3 px-4">邮箱</th>
-                  <th class="text-left py-3 px-4">角色</th>
-                  <th class="text-left py-3 px-4">状态</th>
-                  <th class="text-left py-3 px-4">创建时间</th>
-                  <th class="text-left py-3 px-4">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in users" :key="user.user_id" class="border-b border-border-secondary hover:bg-dark-50">
-                  <td class="py-3 px-4">{{ user.username }}</td>
-                  <td class="py-3 px-4 text-text-secondary">{{ user.email }}</td>
-                  <td class="py-3 px-4">
-                    <span class="px-2 py-1 rounded text-xs bg-primary/20 text-primary">{{ user.role }}</span>
-                  </td>
-                  <td class="py-3 px-4">
-                    <button @click="toggleUserStatus(user)" :class="['px-2 py-1 rounded text-xs', user.is_active ? 'bg-success/20 text-success' : 'bg-danger/20 text-danger']">
-                      {{ user.is_active ? '激活' : '禁用' }}
-                    </button>
-                  </td>
-                  <td class="py-3 px-4 text-text-secondary">{{ formatDate(user.create_time) }}</td>
-                  <td class="py-3 px-4">
-                    <button @click="openEditUserModal(user)" class="text-primary hover:text-primary-hover mr-2">编辑</button>
-                    <button @click="deleteUser(user.user_id)" class="text-danger hover:text-red-400">删除</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 角色权限管理 -->
-      <div v-if="activeTab === 'rbac'" class="space-y-6">
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">角色权限管理</h2>
-            <button @click="navigateToRbac" class="btn-primary">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-              打开完整管理页面
-            </button>
-          </div>
-          <div class="bg-dark-200 rounded p-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">系统角色</div>
-                <div class="text-2xl font-bold text-primary">5</div>
-                <div class="text-xs text-text-secondary mt-1">super_admin, system_admin, security_admin, trader, observer</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">权限总数</div>
-                <div class="text-2xl font-bold text-success">20+</div>
-                <div class="text-xs text-text-secondary mt-1">涵盖RBAC、安全组件、SSL证书管理</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">权限缓存</div>
-                <div class="text-2xl font-bold text-warning">Redis</div>
-                <div class="text-xs text-text-secondary mt-1">1小时TTL，自动刷新</div>
-              </div>
-            </div>
-            <div class="space-y-3">
-              <h3 class="font-bold text-lg mb-3">功能特性</h3>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">角色管理</div>
-                  <div class="text-sm text-text-secondary">创建、编辑、删除、复制角色，支持角色状态切换</div>
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">权限分配</div>
-                  <div class="text-sm text-text-secondary">为角色分配权限，为用户分配角色，支持权限继承</div>
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">权限拦截</div>
-                  <div class="text-sm text-text-secondary">自动API权限验证，支持路径模式匹配和白名单配置</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 安全组件管理 -->
-      <div v-if="activeTab === 'security'" class="space-y-6">
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">安全组件管理</h2>
-            <button @click="navigateToSecurity" class="btn-primary">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-              打开完整管理页面
-            </button>
-          </div>
-          <div class="bg-dark-200 rounded p-6">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">安全组件总数</div>
-                <div class="text-2xl font-bold text-primary">12</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">已启用</div>
-                <div class="text-2xl font-bold text-success">8</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">中间件</div>
-                <div class="text-2xl font-bold text-info">4</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">防护层</div>
-                <div class="text-2xl font-bold text-warning">5</div>
-              </div>
-            </div>
-            <div class="space-y-3">
-              <h3 class="font-bold text-lg mb-3">预定义安全组件</h3>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div class="bg-dark-300 rounded p-3">
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium">CSRF保护</span>
-                    <span class="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-400">中间件</span>
-                  </div>
-                  <div class="text-xs text-text-secondary">防止跨站请求伪造攻击</div>
-                </div>
-                <div class="bg-dark-300 rounded p-3">
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium">请求签名验证</span>
-                    <span class="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-400">中间件</span>
-                  </div>
-                  <div class="text-xs text-text-secondary">HMAC-SHA256签名防重放</div>
-                </div>
-                <div class="bg-dark-300 rounded p-3">
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium">SQL注入防护</span>
-                    <span class="px-2 py-1 rounded text-xs bg-purple-500/20 text-purple-400">防护</span>
-                  </div>
-                  <div class="text-xs text-text-secondary">自动检测和阻止SQL注入</div>
-                </div>
-                <div class="bg-dark-300 rounded p-3">
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium">WebSocket认证</span>
-                    <span class="px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-400">中间件</span>
-                  </div>
-                  <div class="text-xs text-text-secondary">强制WebSocket连接认证</div>
-                </div>
-                <div class="bg-dark-300 rounded p-3">
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium">日志脱敏</span>
-                    <span class="px-2 py-1 rounded text-xs bg-green-500/20 text-green-400">服务</span>
-                  </div>
-                  <div class="text-xs text-text-secondary">自动脱敏敏感信息</div>
-                </div>
-                <div class="bg-dark-300 rounded p-3">
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium">数据加密服务</span>
-                    <span class="px-2 py-1 rounded text-xs bg-green-500/20 text-green-400">服务</span>
-                  </div>
-                  <div class="text-xs text-text-secondary">Fernet加密API密钥</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SSL证书管理 -->
-      <div v-if="activeTab === 'ssl'" class="space-y-6">
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">SSL证书管理</h2>
-            <button @click="navigateToSsl" class="btn-primary">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-              打开完整管理页面
-            </button>
-          </div>
-          <div class="bg-dark-200 rounded p-6">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">证书总数</div>
-                <div class="text-2xl font-bold text-primary">0</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">有效证书</div>
-                <div class="text-2xl font-bold text-success">0</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">即将过期</div>
-                <div class="text-2xl font-bold text-warning">0</div>
-              </div>
-              <div class="bg-dark-300 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">已过期</div>
-                <div class="text-2xl font-bold text-danger">0</div>
-              </div>
-            </div>
-            <div class="space-y-3">
-              <h3 class="font-bold text-lg mb-3">功能特性</h3>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">证书上传</div>
-                  <div class="text-sm text-text-secondary">支持PEM格式证书、私钥和证书链上传</div>
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">一键部署</div>
-                  <div class="text-sm text-text-secondary">自动部署到Nginx，支持备份和回滚</div>
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">过期监控</div>
-                  <div class="text-sm text-text-secondary">自动检查证书过期状态，支持定时任务和告警</div>
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <svg class="w-5 h-5 text-success mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <div class="font-medium">证书类型</div>
-                  <div class="text-sm text-text-secondary">支持自签名、CA签名和Let's Encrypt证书</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div v-if="activeTab === 'version'" class="space-y-6">
         <div class="card">
           <h2 class="text-xl font-bold mb-4">系统版本管理</h2>
@@ -615,124 +347,247 @@
         </div>
       </div>
 
-      <div v-if="activeTab === 'logs'" class="space-y-6">
+
+
+      <!-- RBAC权限管理 Tab -->
+      <div v-if="activeTab === 'rbac'" class="space-y-6">
         <div class="card">
           <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">交易统计日志</h2>
+            <h2 class="text-xl font-bold">角色权限管理</h2>
             <div class="flex space-x-3">
-              <button @click="toggleLogging" :class="['btn-primary', loggingEnabled ? 'bg-success' : 'bg-danger']">
+              <button @click="openAddRoleModal" class="btn-primary">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
-                {{ loggingEnabled ? '日志已启用' : '日志已禁用' }}
+                添加角色
               </button>
-              <button @click="refreshLogs" class="btn-secondary">
+              <button @click="loadRoles" class="btn-secondary">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                刷新日志
+                刷新
               </button>
-              <button @click="clearLogs" class="btn-secondary">
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">角色名称</th>
+                  <th class="text-left py-3 px-4">角色代码</th>
+                  <th class="text-left py-3 px-4">描述</th>
+                  <th class="text-left py-3 px-4">状态</th>
+                  <th class="text-left py-3 px-4">创建时间</th>
+                  <th class="text-left py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="role in roles" :key="role.role_id" class="border-b border-border-secondary hover:bg-dark-50">
+                  <td class="py-3 px-4">{{ role.role_name }}</td>
+                  <td class="py-3 px-4 font-mono text-sm">{{ role.role_code }}</td>
+                  <td class="py-3 px-4 text-text-secondary text-sm">{{ role.description || '-' }}</td>
+                  <td class="py-3 px-4">
+                    <span :class="role.is_active ? 'text-success' : 'text-danger'">
+                      {{ role.is_active ? '启用' : '禁用' }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-text-secondary text-sm">{{ formatDate(role.created_at) }}</td>
+                  <td class="py-3 px-4">
+                    <button @click="editRole(role)" class="text-primary hover:text-blue-400 mr-2">编辑</button>
+                    <button @click="managePermissions(role)" class="text-success hover:text-green-400 mr-2">权限</button>
+                    <button v-if="!role.is_system" @click="deleteRole(role.role_id)" class="text-danger hover:text-red-400">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="roles.length === 0" class="text-center py-8 text-text-secondary">
+              暂无角色数据
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SSL证书管理 Tab -->
+      <div v-if="activeTab === 'ssl'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">SSL证书管理</h2>
+            <div class="flex space-x-3">
+              <button @click="openUploadCertModal" class="btn-primary">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
-                清空日志
+                上传证书
+              </button>
+              <button @click="loadCertificates" class="btn-secondary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                刷新
               </button>
             </div>
           </div>
 
-          <div class="mb-4">
-            <p class="text-text-secondary text-sm mb-2">
-              日志功能记录每笔交易的盈亏计算过程，包括开仓、平仓、做多、做空等详细信息。
-            </p>
-            <div class="bg-dark-100 rounded p-3 text-sm">
-              <div class="flex items-center space-x-4">
-                <span class="text-text-secondary">日志级别:</span>
-                <span class="text-primary font-mono">INFO</span>
-                <span class="text-text-secondary">|</span>
-                <span class="text-text-secondary">日志位置:</span>
-                <span class="text-primary font-mono">后端控制台输出</span>
-              </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">证书名称</th>
+                  <th class="text-left py-3 px-4">域名</th>
+                  <th class="text-left py-3 px-4">类型</th>
+                  <th class="text-left py-3 px-4">状态</th>
+                  <th class="text-left py-3 px-4">过期时间</th>
+                  <th class="text-left py-3 px-4">剩余天数</th>
+                  <th class="text-left py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="cert in certificates" :key="cert.cert_id" class="border-b border-border-secondary hover:bg-dark-50">
+                  <td class="py-3 px-4">{{ cert.cert_name }}</td>
+                  <td class="py-3 px-4 font-mono text-sm">{{ cert.domain_name }}</td>
+                  <td class="py-3 px-4 text-sm">{{ getCertTypeLabel(cert.cert_type) }}</td>
+                  <td class="py-3 px-4">
+                    <span :class="getCertStatusClass(cert.status)">
+                      {{ getCertStatusLabel(cert.status) }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-text-secondary text-sm">{{ formatDate(cert.expires_at) }}</td>
+                  <td class="py-3 px-4">
+                    <span :class="cert.days_before_expiry <= 30 ? 'text-danger' : 'text-success'">
+                      {{ cert.days_before_expiry }} 天
+                    </span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <button @click="viewCertDetails(cert)" class="text-primary hover:text-blue-400 mr-2">详情</button>
+                    <button @click="deleteCertificate(cert.cert_id)" class="text-danger hover:text-red-400">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="certificates.length === 0" class="text-center py-8 text-text-secondary">
+              暂无证书数据
             </div>
           </div>
+        </div>
+      </div>
 
-          <div class="bg-dark-100 rounded p-4">
-            <div class="flex justify-between items-center mb-3">
-              <h3 class="font-bold">实时日志输出</h3>
-              <div class="flex items-center space-x-3">
-                <label class="text-sm text-text-secondary">显示行数:</label>
-                <select v-model="logDisplayLines" class="px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm">
-                  <option value="50">50行</option>
-                  <option value="100">100行</option>
-                  <option value="200">200行</option>
-                  <option value="500">500行</option>
-                </select>
-              </div>
-            </div>
 
-            <div class="bg-dark-300 rounded p-4 font-mono text-xs overflow-auto" style="max-height: 500px;">
-              <div v-if="tradingLogs.length === 0" class="text-center text-text-secondary py-8">
-                暂无日志记录
-              </div>
-              <div v-else>
-                <div v-for="(log, index) in displayedLogs" :key="index" :class="getLogClass(log)" class="py-1 border-b border-border-secondary last:border-0">
-                  <span class="text-text-tertiary mr-2">{{ log.timestamp }}</span>
-                  <span :class="getLogLevelClass(log.level)" class="mr-2">[{{ log.level }}]</span>
-                  <span>{{ log.message }}</span>
-                </div>
-              </div>
-            </div>
+      <!-- 安全组件管理 Tab -->
+      <div v-if="activeTab === 'security'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">安全组件管理</h2>
+            <button @click="loadSecurityComponents" class="btn-secondary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              刷新
+            </button>
           </div>
 
-          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">总日志条数</div>
-              <div class="text-2xl font-bold">{{ tradingLogs.length }}</div>
-            </div>
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">最后更新时间</div>
-              <div class="text-lg font-mono">{{ lastLogUpdate }}</div>
-            </div>
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">日志状态</div>
-              <div class="text-lg font-bold" :class="loggingEnabled ? 'text-success' : 'text-danger'">
-                {{ loggingEnabled ? '运行中' : '已停止' }}
-              </div>
-            </div>
+          <!-- Component Type Filters -->
+          <div class="flex space-x-2 mb-4">
+            <button
+              v-for="type in componentTypes"
+              :key="type.value"
+              @click="filterComponentType = type.value"
+              :class="[
+                'px-4 py-2 rounded text-sm font-medium transition-colors',
+                filterComponentType === type.value
+                  ? 'bg-primary text-white'
+                  : 'bg-dark-200 text-text-secondary hover:bg-dark-300'
+              ]"
+            >
+              {{ type.label }}
+            </button>
           </div>
 
-          <div class="mt-6 bg-dark-200 rounded p-4">
-            <h3 class="font-bold mb-3">日志说明</h3>
-            <div class="space-y-2 text-sm text-text-secondary">
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">[Binance]</strong> - Binance平台交易日志</span>
-              </div>
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">[MT5]</strong> - MT5平台交易日志</span>
-              </div>
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">做多买入</strong> - 开仓或增加多头仓位</span>
-              </div>
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">做多平仓</strong> - 卖出平掉多头仓位，显示盈亏</span>
-              </div>
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">做空卖出</strong> - 开仓或增加空头仓位</span>
-              </div>
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">做空平仓</strong> - 买入平掉空头仓位，显示盈亏</span>
-              </div>
-              <div class="flex items-start">
-                <span class="text-primary mr-2">•</span>
-                <span><strong class="text-text-primary">统计计算完成</strong> - 显示最终统计汇总和剩余持仓</span>
-              </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">组件名称</th>
+                  <th class="text-left py-3 px-4">组件代码</th>
+                  <th class="text-left py-3 px-4">类型</th>
+                  <th class="text-left py-3 px-4">状态</th>
+                  <th class="text-left py-3 px-4">优先级</th>
+                  <th class="text-left py-3 px-4">最后检查</th>
+                  <th class="text-left py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="component in filteredComponents" :key="component.component_id" class="border-b border-border-secondary hover:bg-dark-50">
+                  <td class="py-3 px-4">
+                    <div class="font-medium">{{ component.component_name }}</div>
+                    <div class="text-xs text-text-secondary">{{ component.description }}</div>
+                  </td>
+                  <td class="py-3 px-4 font-mono text-sm">{{ component.component_code }}</td>
+                  <td class="py-3 px-4">
+                    <span class="px-2 py-1 rounded text-xs" :class="getComponentTypeClass(component.component_type)">
+                      {{ getComponentTypeLabel(component.component_type) }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <div class="flex items-center space-x-2">
+                      <span :class="component.is_enabled ? 'text-success' : 'text-text-secondary'">
+                        {{ component.is_enabled ? '已启用' : '已禁用' }}
+                      </span>
+                      <span v-if="component.status === 'error'" class="text-danger text-xs">(错误)</span>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4">{{ component.priority }}</td>
+                  <td class="py-3 px-4 text-text-secondary text-sm">
+                    {{ component.last_check_at ? formatDate(component.last_check_at) : '-' }}
+                  </td>
+                  <td class="py-3 px-4">
+                    <button
+                      v-if="!component.is_enabled"
+                      @click="enableComponent(component)"
+                      class="text-success hover:text-green-400 mr-2"
+                    >
+                      启用
+                    </button>
+                    <button
+                      v-if="component.is_enabled"
+                      @click="disableComponent(component)"
+                      class="text-warning hover:text-yellow-400 mr-2"
+                    >
+                      禁用
+                    </button>
+                    <button @click="configureComponent(component)" class="text-primary hover:text-blue-400 mr-2">
+                      配置
+                    </button>
+                    <button @click="viewComponentLogs(component)" class="text-text-secondary hover:text-text-primary">
+                      日志
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="filteredComponents.length === 0" class="text-center py-8 text-text-secondary">
+              暂无安全组件数据
             </div>
+          </div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">总组件数</div>
+            <div class="text-2xl font-bold">{{ securityComponents.length }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">已启用</div>
+            <div class="text-2xl font-bold text-success">{{ enabledComponentsCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">已禁用</div>
+            <div class="text-2xl font-bold text-text-secondary">{{ disabledComponentsCount }}</div>
+          </div>
+          <div class="bg-dark-200 rounded p-4">
+            <div class="text-sm text-text-secondary mb-1">错误状态</div>
+            <div class="text-2xl font-bold text-danger">{{ errorComponentsCount }}</div>
           </div>
         </div>
       </div>
@@ -887,43 +742,6 @@
       </div>
     </div>
 
-    <div v-if="showUserModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="closeUserModal">
-      <div class="bg-dark-200 rounded-lg p-6 w-full max-w-md">
-        <h3 class="text-xl font-bold mb-4">{{ isEditMode ? '编辑用户' : '添加用户' }}</h3>
-        <form @submit.prevent="saveUser">
-          <div class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium mb-1">用户名</label>
-              <input v-model="userForm.username" type="text" required class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium mb-1">邮箱</label>
-              <input v-model="userForm.email" type="email" required class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
-            </div>
-            <div v-if="!isEditMode">
-              <label class="block text-sm font-medium mb-1">密码</label>
-              <input v-model="userForm.password" type="password" required class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium mb-1">角色</label>
-              <select v-model="userForm.role" class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
-                <option value="管理员">管理员</option>
-                <option value="交易员">交易员</option>
-                <option value="观察员">观察员</option>
-              </select>
-            </div>
-            <div class="flex items-center">
-              <input v-model="userForm.is_active" type="checkbox" id="is_active" class="mr-2" />
-              <label for="is_active" class="text-sm">激活用户</label>
-            </div>
-          </div>
-          <div class="flex justify-end space-x-3 mt-6">
-            <button type="button" @click="closeUserModal" class="btn-secondary">取消</button>
-            <button type="submit" class="btn-primary">保存</button>
-          </div>
-        </form>
-      </div>
-    </div>
 
     <TableDetailModal
       :show="showTableModal"
@@ -937,6 +755,310 @@
       @select="restoreDatabaseFromBackup"
     />
   </div>
+
+    <!-- RBAC Role Modal -->
+    <div v-if="showRoleModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-xl font-bold mb-4">{{ isEditingRole ? '编辑角色' : '添加角色' }}</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">角色名称</label>
+            <input
+              v-model="roleForm.role_name"
+              type="text"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              placeholder="请输入角色名称"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">角色代码</label>
+            <input
+              v-model="roleForm.role_code"
+              type="text"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              placeholder="请输入角色代码（如：admin, user）"
+              :disabled="isEditingRole"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">描述</label>
+            <textarea
+              v-model="roleForm.description"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              rows="3"
+              placeholder="请输入角色描述"
+            ></textarea>
+          </div>
+          <div class="flex items-center">
+            <input
+              v-model="roleForm.is_active"
+              type="checkbox"
+              id="role-active"
+              class="mr-2"
+            />
+            <label for="role-active" class="text-sm">启用此角色</label>
+          </div>
+        </div>
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="showRoleModal = false" class="btn-secondary">取消</button>
+          <button @click="saveRole" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SSL Certificate Upload Modal -->
+    <div v-if="showCertModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-xl font-bold mb-4">上传SSL证书</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">证书名称</label>
+            <input
+              v-model="certForm.cert_name"
+              type="text"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              placeholder="请输入证书名称"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">域名</label>
+            <input
+              v-model="certForm.domain_name"
+              type="text"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+              placeholder="例如：example.com"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">证书类型</label>
+            <select
+              v-model="certForm.cert_type"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+            >
+              <option value="self_signed">自签名</option>
+              <option value="ca_signed">CA签名</option>
+              <option value="letsencrypt">Let's Encrypt</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">证书内容（PEM格式）</label>
+            <textarea
+              v-model="certForm.cert_content"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-xs"
+              rows="6"
+              placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+            ></textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">私钥内容（PEM格式）</label>
+            <textarea
+              v-model="certForm.key_content"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-xs"
+              rows="6"
+              placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+            ></textarea>
+          </div>
+          <div class="flex items-center">
+            <input
+              v-model="certForm.auto_renew"
+              type="checkbox"
+              id="cert-auto-renew"
+              class="mr-2"
+            />
+            <label for="cert-auto-renew" class="text-sm">自动续期</label>
+          </div>
+        </div>
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="closeCertModal" class="btn-secondary">取消</button>
+          <button @click="uploadCertificate" class="btn-primary">上传</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Permission Management Modal -->
+    <div v-if="showPermissionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-bold mb-4">权限管理 - {{ currentRole?.role_name }}</h3>
+
+        <div class="mb-4 flex justify-between items-center">
+          <div class="text-sm text-text-secondary">
+            已选择 {{ selectedPermissions.length }} 个权限
+          </div>
+          <div class="flex space-x-2">
+            <button @click="selectAllPermissions" class="btn-secondary text-sm">全选</button>
+            <button @click="clearAllPermissions" class="btn-secondary text-sm">清空</button>
+          </div>
+        </div>
+
+        <!-- Permission Categories -->
+        <div class="space-y-4">
+          <!-- API Permissions -->
+          <div class="bg-dark-200 rounded p-4">
+            <h4 class="font-bold mb-3 flex items-center">
+              <svg class="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              API接口权限
+            </h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div v-for="perm in apiPermissions" :key="perm.permission_id" class="flex items-start">
+                <input
+                  type="checkbox"
+                  :id="'perm-' + perm.permission_id"
+                  :value="perm.permission_id"
+                  v-model="selectedPermissions"
+                  class="mt-1 mr-2"
+                />
+                <label :for="'perm-' + perm.permission_id" class="text-sm cursor-pointer">
+                  <div class="font-medium">{{ perm.permission_name }}</div>
+                  <div class="text-xs text-text-secondary">{{ perm.description || perm.resource_path }}</div>
+                </label>
+              </div>
+            </div>
+            <div v-if="apiPermissions.length === 0" class="text-sm text-text-secondary text-center py-4">
+              暂无API权限
+            </div>
+          </div>
+
+          <!-- Menu Permissions -->
+          <div class="bg-dark-200 rounded p-4">
+            <h4 class="font-bold mb-3 flex items-center">
+              <svg class="w-5 h-5 mr-2 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              菜单导航权限
+            </h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div v-for="perm in menuPermissions" :key="perm.permission_id" class="flex items-start">
+                <input
+                  type="checkbox"
+                  :id="'perm-' + perm.permission_id"
+                  :value="perm.permission_id"
+                  v-model="selectedPermissions"
+                  class="mt-1 mr-2"
+                />
+                <label :for="'perm-' + perm.permission_id" class="text-sm cursor-pointer">
+                  <div class="font-medium">{{ perm.permission_name }}</div>
+                  <div class="text-xs text-text-secondary">{{ perm.description || perm.resource_path }}</div>
+                </label>
+              </div>
+            </div>
+            <div v-if="menuPermissions.length === 0" class="text-sm text-text-secondary text-center py-4">
+              暂无菜单权限
+            </div>
+          </div>
+
+          <!-- Button Permissions -->
+          <div class="bg-dark-200 rounded p-4">
+            <h4 class="font-bold mb-3 flex items-center">
+              <svg class="w-5 h-5 mr-2 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+              </svg>
+              按钮操作权限
+            </h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div v-for="perm in buttonPermissions" :key="perm.permission_id" class="flex items-start">
+                <input
+                  type="checkbox"
+                  :id="'perm-' + perm.permission_id"
+                  :value="perm.permission_id"
+                  v-model="selectedPermissions"
+                  class="mt-1 mr-2"
+                />
+                <label :for="'perm-' + perm.permission_id" class="text-sm cursor-pointer">
+                  <div class="font-medium">{{ perm.permission_name }}</div>
+                  <div class="text-xs text-text-secondary">{{ perm.description || perm.resource_path }}</div>
+                </label>
+              </div>
+            </div>
+            <div v-if="buttonPermissions.length === 0" class="text-sm text-text-secondary text-center py-4">
+              暂无按钮权限
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="closePermissionModal" class="btn-secondary">取消</button>
+          <button @click="savePermissions" class="btn-primary">保存权限</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Security Component Config Modal -->
+    <div v-if="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-bold mb-4">组件配置 - {{ currentComponent?.component_name }}</h3>
+
+        <div class="mb-4 p-3 bg-dark-200 rounded">
+          <div class="text-sm text-text-secondary mb-2">组件描述</div>
+          <div class="text-sm">{{ currentComponent?.description || '无描述' }}</div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">配置JSON</label>
+            <textarea
+              v-model="componentConfigJson"
+              class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
+              rows="15"
+              placeholder='{"key": "value"}'
+            ></textarea>
+            <div class="text-xs text-text-secondary mt-1">
+              请输入有效的JSON格式配置
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="showConfigModal = false" class="btn-secondary">取消</button>
+          <button @click="saveComponentConfig" class="btn-primary">保存配置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security Component Logs Modal -->
+    <div v-if="showLogsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-bold mb-4">操作日志 - {{ currentComponent?.component_name }}</h3>
+
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-border-primary">
+                <th class="text-left py-2 px-3 text-sm">时间</th>
+                <th class="text-left py-2 px-3 text-sm">操作</th>
+                <th class="text-left py-2 px-3 text-sm">结果</th>
+                <th class="text-left py-2 px-3 text-sm">操作者</th>
+                <th class="text-left py-2 px-3 text-sm">IP地址</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="log in componentLogs" :key="log.log_id" class="border-b border-border-secondary hover:bg-dark-50">
+                <td class="py-2 px-3 text-sm text-text-secondary">{{ formatDate(log.performed_at) }}</td>
+                <td class="py-2 px-3 text-sm">{{ getActionLabel(log.action) }}</td>
+                <td class="py-2 px-3 text-sm">
+                  <span :class="log.result === 'success' ? 'text-success' : 'text-danger'">
+                    {{ log.result === 'success' ? '成功' : '失败' }}
+                  </span>
+                </td>
+                <td class="py-2 px-3 text-sm text-text-secondary">{{ log.performed_by || '-' }}</td>
+                <td class="py-2 px-3 text-sm font-mono text-xs">{{ log.ip_address || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="componentLogs.length === 0" class="text-center py-8 text-text-secondary">
+            暂无日志记录
+          </div>
+        </div>
+
+        <div class="flex justify-end mt-6">
+          <button @click="showLogsModal = false" class="btn-secondary">关闭</button>
+        </div>
+      </div>
+    </div>
+
 </template>
 
 <script setup>
@@ -952,24 +1074,109 @@ import { useMarketStore } from '@/stores/market'
 const marketStore = useMarketStore()
 const router = useRouter()
 
-const activeTab = ref('users')
+const activeTab = ref('version')
+
+// RBAC state
+const roles = ref([])
+const showRoleModal = ref(false)
+const roleForm = ref({
+  role_name: '',
+  role_code: '',
+  description: '',
+  is_active: true
+})
+const isEditingRole = ref(false)
+const editingRoleId = ref(null)
+
+// SSL Certificate state
+const certificates = ref([])
+const showCertModal = ref(false)
+
+const certForm = ref({
+  cert_name: '',
+  domain_name: '',
+  cert_type: 'ca_signed',
+  cert_content: '',
+  key_content: '',
+  auto_renew: false
+})
+
+
+// Permission management state
+const showPermissionModal = ref(false)
+const currentRole = ref(null)
+const allPermissions = ref([])
+const selectedPermissions = ref([])
+
+const apiPermissions = computed(() =>
+  allPermissions.value.filter(p => p.resource_type === 'api')
+)
+const menuPermissions = computed(() =>
+  allPermissions.value.filter(p => p.resource_type === 'menu')
+)
+const buttonPermissions = computed(() =>
+  allPermissions.value.filter(p => p.resource_type === 'button')
+)
+
+
+// Security Component state
+const securityComponents = ref([])
+const filterComponentType = ref('all')
+const showConfigModal = ref(false)
+const showLogsModal = ref(false)
+const currentComponent = ref(null)
+const componentConfig = ref({})
+const componentLogs = ref([])
+
+const componentTypes = [
+  { value: 'all', label: '全部' },
+  { value: 'middleware', label: '中间件' },
+  { value: 'service', label: '服务' },
+  { value: 'protection', label: '防护' }
+]
+
+const filteredComponents = computed(() => {
+  if (filterComponentType.value === 'all') {
+    return securityComponents.value
+  }
+  return securityComponents.value.filter(c => c.component_type === filterComponentType.value)
+})
+
+const enabledComponentsCount = computed(() =>
+  securityComponents.value.filter(c => c.is_enabled).length
+)
+
+const disabledComponentsCount = computed(() =>
+  securityComponents.value.filter(c => !c.is_enabled).length
+)
+
+const errorComponentsCount = computed(() =>
+  securityComponents.value.filter(c => c.status === 'error').length
+)
+
+
+const componentConfigJson = computed({
+  get: () => JSON.stringify(componentConfig.value, null, 2),
+  set: (value) => {
+    try {
+      componentConfig.value = JSON.parse(value)
+    } catch (e) {
+      // Keep the string value if invalid JSON
+    }
+  }
+})
+
 const tabs = [
-  { id: 'users', label: '前端用户管理' },
-  { id: 'rbac', label: '角色权限管理' },
-  { id: 'security', label: '安全组件管理' },
-  { id: 'ssl', label: 'SSL证书管理' },
   { id: 'version', label: '系统版本管理' },
   { id: 'database', label: 'PostgreSQL数据库管理' },
   { id: 'alerts', label: '提醒声音设置' },
-  { id: 'logs', label: '日志管理' },
+  { id: 'rbac', label: 'RBAC权限管理' },
+  { id: 'ssl', label: 'SSL证书管理' },
+  { id: 'security', label: '安全组件管理' },
   { id: 'refresh', label: '刷新管理' },
   { id: 'websocket', label: 'WebSocket监控' }
 ]
 
-const users = ref([])
-const showUserModal = ref(false)
-const isEditMode = ref(false)
-const userForm = ref({ user_id: null, username: '', email: '', password: '', role: '交易员', is_active: true })
 
 const showTableModal = ref(false)
 const selectedTable = ref('')
@@ -1008,11 +1215,341 @@ const alertRepeatCounts = ref({
 })
 
 // Logging state
-const loggingEnabled = ref(true)
-const tradingLogs = ref([])
-const logDisplayLines = ref(100)
-const lastLogUpdate = ref('-')
-let logRefreshInterval = null
+
+
+// RBAC Functions
+async function loadRoles() {
+  try {
+    const response = await api.get('/api/v1/rbac/roles')
+    roles.value = response.data
+  } catch (error) {
+    console.error('Failed to load roles:', error)
+    alert('加载角色失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function openAddRoleModal() {
+  roleForm.value = {
+    role_name: '',
+    role_code: '',
+    description: '',
+    is_active: true
+  }
+  isEditingRole.value = false
+  showRoleModal.value = true
+}
+
+function editRole(role) {
+  roleForm.value = {
+    role_name: role.role_name,
+    role_code: role.role_code,
+    description: role.description || '',
+    is_active: role.is_active
+  }
+  editingRoleId.value = role.role_id
+  isEditingRole.value = true
+  showRoleModal.value = true
+}
+
+async function saveRole() {
+  try {
+    if (isEditingRole.value) {
+      await api.put(`/api/v1/rbac/roles/${editingRoleId.value}`, roleForm.value)
+      alert('角色更新成功')
+    } else {
+      await api.post('/api/v1/rbac/roles', roleForm.value)
+      alert('角色创建成功')
+    }
+    showRoleModal.value = false
+    await loadRoles()
+  } catch (error) {
+    console.error('Failed to save role:', error)
+    alert('保存角色失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function deleteRole(roleId) {
+  if (!confirm('确定要删除此角色吗？')) return
+  try {
+    await api.delete(`/api/v1/rbac/roles/${roleId}`)
+    alert('角色删除成功')
+    await loadRoles()
+  } catch (error) {
+    console.error('Failed to delete role:', error)
+    alert('删除角色失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+// SSL Certificate Functions
+async function loadCertificates() {
+  try {
+    const response = await api.get('/api/v1/ssl/certificates')
+    certificates.value = response.data
+  } catch (error) {
+    console.error('Failed to load certificates:', error)
+    alert('加载证书失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function openUploadCertModal() {
+  showCertModal.value = true
+}
+
+async function deleteCertificate(certId) {
+  if (!confirm('确定要删除此证书吗？')) return
+  try {
+    await api.delete(`/api/v1/ssl/certificates/${certId}`)
+    alert('证书删除成功')
+    await loadCertificates()
+  } catch (error) {
+    console.error('Failed to delete certificate:', error)
+    alert('删除证书失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function viewCertDetails(cert) {
+  alert(`证书详情:\n域名: ${cert.domain_name}\n颁发者: ${cert.issuer || 'N/A'}\n主题: ${cert.subject || 'N/A'}\n序列号: ${cert.serial_number || 'N/A'}`)
+}
+
+function getCertTypeLabel(type) {
+  const labels = {
+    'self_signed': '自签名',
+    'ca_signed': 'CA签名',
+    'letsencrypt': "Let's Encrypt"
+  }
+  return labels[type] || type
+}
+
+function getCertStatusLabel(status) {
+  const labels = {
+    'active': '已激活',
+    'inactive': '未激活',
+    'expired': '已过期',
+    'expiring_soon': '即将过期'
+  }
+  return labels[status] || status
+}
+
+function getCertStatusClass(status) {
+  const classes = {
+    'active': 'text-success',
+    'inactive': 'text-text-secondary',
+    'expired': 'text-danger',
+    'expiring_soon': 'text-warning'
+  }
+  return classes[status] || 'text-text-secondary'
+}
+
+
+
+
+// Security Component Functions
+async function loadSecurityComponents() {
+  try {
+    const response = await api.get('/api/v1/security/components')
+    securityComponents.value = response.data
+  } catch (error) {
+    console.error('Failed to load security components:', error)
+    alert('加载安全组件失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function enableComponent(component) {
+  if (!confirm(`确定要启用组件"${component.component_name}"吗？`)) return
+  try {
+    await api.post(`/api/v1/security/components/${component.component_id}/enable`, {
+      reason: '手动启用'
+    })
+    alert('组件启用成功')
+    await loadSecurityComponents()
+  } catch (error) {
+    console.error('Failed to enable component:', error)
+    alert('启用组件失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function disableComponent(component) {
+  if (!confirm(`确定要禁用组件"${component.component_name}"吗？`)) return
+  try {
+    await api.post(`/api/v1/security/components/${component.component_id}/disable`, {
+      reason: '手动禁用'
+    })
+    alert('组件禁用成功')
+    await loadSecurityComponents()
+  } catch (error) {
+    console.error('Failed to disable component:', error)
+    alert('禁用组件失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function configureComponent(component) {
+  currentComponent.value = component
+  componentConfig.value = component.config_json || {}
+  showConfigModal.value = true
+}
+
+async function saveComponentConfig() {
+  try {
+    await api.put(`/api/v1/security/components/${currentComponent.value.component_id}/config`, {
+      config_json: componentConfig.value
+    })
+    alert('配置保存成功')
+    showConfigModal.value = false
+    await loadSecurityComponents()
+  } catch (error) {
+    console.error('Failed to save config:', error)
+    alert('保存配置失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function viewComponentLogs(component) {
+  try {
+    currentComponent.value = component
+    const response = await api.get(`/api/v1/security/components/${component.component_id}/logs`)
+    componentLogs.value = response.data
+    showLogsModal.value = true
+  } catch (error) {
+    console.error('Failed to load logs:', error)
+    alert('加载日志失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+
+function getActionLabel(action) {
+  const labels = {
+    'enable': '启用',
+    'disable': '禁用',
+    'config_update': '配置更新',
+    'error': '错误'
+  }
+  return labels[action] || action
+}
+
+function getComponentTypeLabel(type) {
+  const labels = {
+    'middleware': '中间件',
+    'service': '服务',
+    'protection': '防护'
+  }
+  return labels[type] || type
+}
+
+function getComponentTypeClass(type) {
+  const classes = {
+    'middleware': 'bg-primary text-white',
+    'service': 'bg-success text-white',
+    'protection': 'bg-warning text-dark-100'
+  }
+  return classes[type] || 'bg-dark-300 text-text-secondary'
+}
+
+// Permission Management Functions
+async function loadAllPermissions() {
+  try {
+    const response = await api.get('/api/v1/rbac/permissions')
+    allPermissions.value = response.data
+  } catch (error) {
+    console.error('Failed to load permissions:', error)
+  }
+}
+
+async function managePermissions(role) {
+  try {
+    currentRole.value = role
+
+    // Load all permissions if not loaded
+    if (allPermissions.value.length === 0) {
+      await loadAllPermissions()
+    }
+
+    // Load role's current permissions
+    const response = await api.get(`/api/v1/rbac/roles/${role.role_id}`)
+    selectedPermissions.value = response.data.permissions.map(p => p.permission_id)
+
+    showPermissionModal.value = true
+  } catch (error) {
+    console.error('Failed to load role permissions:', error)
+    alert('加载角色权限失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+async function savePermissions() {
+  try {
+    await api.post(`/api/v1/rbac/roles/${currentRole.value.role_id}/permissions`, {
+      permission_ids: selectedPermissions.value
+    })
+
+    alert('权限保存成功')
+    closePermissionModal()
+  } catch (error) {
+    console.error('Failed to save permissions:', error)
+    alert('保存权限失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function closePermissionModal() {
+  showPermissionModal.value = false
+  currentRole.value = null
+  selectedPermissions.value = []
+}
+
+function selectAllPermissions() {
+  selectedPermissions.value = allPermissions.value.map(p => p.permission_id)
+}
+
+function clearAllPermissions() {
+  selectedPermissions.value = []
+}
+
+async function uploadCertificate() {
+  try {
+    if (!certForm.value.cert_name || !certForm.value.domain_name || !certForm.value.cert_content || !certForm.value.key_content) {
+      alert('请填写所有必填字段')
+      return
+    }
+
+    await api.post('/api/v1/ssl/certificates/upload', {
+      cert_name: certForm.value.cert_name,
+      domain_name: certForm.value.domain_name,
+      cert_type: certForm.value.cert_type,
+      cert_content: certForm.value.cert_content,
+      key_content: certForm.value.key_content,
+      auto_renew: certForm.value.auto_renew
+    })
+
+    alert('证书上传成功')
+    closeCertModal()
+    await loadCertificates()
+  } catch (error) {
+    console.error('Failed to upload certificate:', error)
+    alert('上传证书失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+function closeCertModal() {
+  showCertModal.value = false
+  certForm.value = {
+    cert_name: '',
+    domain_name: '',
+    cert_type: 'ca_signed',
+    cert_content: '',
+    key_content: '',
+    auto_renew: false
+  }
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 
 // Refresh management state
 const refreshSettings = ref({
@@ -1030,7 +1567,6 @@ const refreshModules = ref([
   { id: 'risk_management', name: '风险管理', description: '风险指标监控', interval: 5000, enabled: true, default: 5000 },
   { id: 'open_orders', name: '未平仓订单', description: '订单列表更新', interval: 5000, enabled: true, default: 5000 },
   { id: 'manual_trading', name: '手动交易', description: '最近订单刷新', interval: 5000, enabled: true, default: 5000 },
-  { id: 'logs', name: '日志管理', description: '交易统计日志', interval: 5000, enabled: true, default: 5000 },
   { id: 'spread_history', name: '点差历史图表', description: '历史数据展示', interval: 5000, enabled: true, default: 5000 },
   { id: 'asset_dashboard', name: '资产仪表盘', description: '资产数据刷新', interval: 10000, enabled: true, default: 10000 },
   { id: 'account_status', name: '账户状态面板', description: '账户信息更新', interval: 30000, enabled: true, default: 30000 }
@@ -1040,12 +1576,15 @@ const refreshModules = ref([
 const wsConnected = computed(() => marketStore.connected)
 
 onMounted(async () => {
+  loadRoles()
+  loadCertificates()
+  loadAllPermissions()
+  loadSecurityComponents()
   // 确保WebSocket连接已建立（如果配置启用）
   if (refreshSettings.value.useWebSocket && !marketStore.connected) {
     marketStore.connect()
   }
 
-  await loadUsers()
   await loadSystemInfo()
   await loadDbStats()
   await loadVersionHistory()
@@ -1053,117 +1592,16 @@ onMounted(async () => {
   await loadRefreshSettings()
 })
 
-async function loadUsers() {
-  try {
-    const response = await api.get('/api/v1/users')
-    users.value = response.data
-  } catch (error) {
-    console.error('Failed to load users:', error)
-    users.value = []
-  }
-}
 
 // 导航到管理页面
-function navigateToRbac() {
-  router.push('/rbac')
-}
 
-function navigateToSecurity() {
-  router.push('/security')
-}
 
-function navigateToSsl() {
-  router.push('/ssl')
-}
 
-function openAddUserModal() {
-  isEditMode.value = false
-  userForm.value = { user_id: null, username: '', email: '', password: '', role: '交易员', is_active: true }
-  showUserModal.value = true
-}
 
-function openEditUserModal(user) {
-  isEditMode.value = true
-  userForm.value = { ...user, password: '' }
-  showUserModal.value = true
-}
 
-function closeUserModal() {
-  showUserModal.value = false
-}
 
-async function saveUser() {
-  try {
-    if (isEditMode.value) {
-      await api.put(`/api/v1/users/${userForm.value.user_id}`, userForm.value)
-      alert('用户更新成功')
-    } else {
-      // For creating new user, only send fields expected by backend
-      const createPayload = {
-        username: userForm.value.username,
-        email: userForm.value.email,
-        password: userForm.value.password,
-        role: userForm.value.role,
-        is_active: userForm.value.is_active
-      }
-      await api.post('/api/v1/users/', createPayload)
-      alert('用户添加成功')
-    }
-    await loadUsers()
-    closeUserModal()
-  } catch (error) {
-    console.error('Failed to save user:', error)
-    console.error('Error response:', error.response)
-    console.error('Error data:', error.response?.data)
 
-    let errorMessage = '操作失败: '
-    if (error.response?.data) {
-      if (typeof error.response.data === 'string') {
-        errorMessage += error.response.data
-      } else if (error.response.data.detail) {
-        if (typeof error.response.data.detail === 'string') {
-          errorMessage += error.response.data.detail
-        } else if (Array.isArray(error.response.data.detail)) {
-          // Handle FastAPI validation errors (array of error objects)
-          errorMessage += error.response.data.detail.map(err => `${err.loc?.join('.')}: ${err.msg}`).join(', ')
-        } else {
-          errorMessage += JSON.stringify(error.response.data.detail)
-        }
-      } else {
-        errorMessage += JSON.stringify(error.response.data)
-      }
-    } else if (error.message) {
-      errorMessage += error.message
-    } else {
-      errorMessage += '未知错误'
-    }
 
-    alert(errorMessage)
-  }
-}
-
-async function toggleUserStatus(user) {
-  try {
-    await api.put(`/api/v1/users/${user.user_id}`, { ...user, is_active: !user.is_active })
-    await loadUsers()
-    alert('用户状态已更新')
-  } catch (error) {
-    console.error('Failed to toggle user status:', error)
-    alert('操作失败')
-  }
-}
-
-async function deleteUser(userId) {
-  if (!confirm('确定要删除此用户吗？')) return
-  try {
-    await api.delete(`/api/v1/users/${userId}`)
-    await loadUsers()
-    alert('用户已删除')
-  } catch (error) {
-    console.error('Failed to delete user:', error)
-    alert('删除失败')
-  }
-}
 
 async function loadSystemInfo() {
   try {
@@ -1328,12 +1766,6 @@ async function backupTable(tableName) {
   }
 }
 
-function formatDate(dateString) {
-  if (!dateString) return '-'
-  const date = new Date(dateString)
-  return date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
-
 async function loadAlertSounds() {
   try {
     const response = await api.get('/api/v1/risk/alert-settings')
@@ -1437,98 +1869,6 @@ function getFileName(path) {
 }
 
 // Logging functions
-const displayedLogs = computed(() => {
-  return tradingLogs.value.slice(-logDisplayLines.value)
-})
-
-async function toggleLogging() {
-  loggingEnabled.value = !loggingEnabled.value
-  if (loggingEnabled.value) {
-    startLogRefresh()
-    alert('日志记录已启用')
-  } else {
-    stopLogRefresh()
-    alert('日志记录已禁用')
-  }
-}
-
-async function refreshLogs() {
-  try {
-    const response = await api.get('/api/v1/system/logs/trading')
-    if (response.data && response.data.logs) {
-      tradingLogs.value = response.data.logs
-      lastLogUpdate.value = new Date().toLocaleTimeString('zh-CN')
-    }
-  } catch (error) {
-    console.error('Failed to refresh logs:', error)
-    // 如果后端还没有实现日志API，使用模拟数据
-    tradingLogs.value = [
-      {
-        timestamp: new Date().toLocaleTimeString('zh-CN'),
-        level: 'INFO',
-        message: '开始计算统计数据，共 2 笔订单'
-      },
-      {
-        timestamp: new Date().toLocaleTimeString('zh-CN'),
-        level: 'INFO',
-        message: '[Binance] 做多买入 XAUUSDT: qty=0.01, price=2650.50, 仓位 0.0000 -> 0.0100'
-      },
-      {
-        timestamp: new Date().toLocaleTimeString('zh-CN'),
-        level: 'INFO',
-        message: '[Binance] 做多平仓 XAUUSDT: 平仓qty=0.01, 开仓均价=2650.50, 平仓价=2655.00, 盈亏=0.04 USDT, 仓位 0.0100 -> 0.0000'
-      },
-      {
-        timestamp: new Date().toLocaleTimeString('zh-CN'),
-        level: 'INFO',
-        message: '统计计算完成: [Binance] 总交易量=0.0200, 总金额=53.05 USDT, 手续费=0.03 USDT, 已实现盈亏=0.04 USDT'
-      }
-    ]
-    lastLogUpdate.value = new Date().toLocaleTimeString('zh-CN')
-  }
-}
-
-function clearLogs() {
-  if (!confirm('确定要清空所有日志吗？')) return
-  tradingLogs.value = []
-  lastLogUpdate.value = '-'
-  alert('日志已清空')
-}
-
-function startLogRefresh() {
-  if (logRefreshInterval) return
-  refreshLogs() // 立即刷新一次
-  logRefreshInterval = setInterval(refreshLogs, 5000) // 每5秒刷新一次
-}
-
-function stopLogRefresh() {
-  if (logRefreshInterval) {
-    clearInterval(logRefreshInterval)
-    logRefreshInterval = null
-  }
-}
-
-function getLogClass(log) {
-  if (log.message.includes('盈亏=') && log.message.includes('-')) {
-    return 'text-danger'
-  } else if (log.message.includes('盈亏=')) {
-    return 'text-success'
-  }
-  return 'text-text-primary'
-}
-
-function getLogLevelClass(level) {
-  switch (level) {
-    case 'ERROR':
-      return 'text-danger font-bold'
-    case 'WARNING':
-      return 'text-warning'
-    case 'INFO':
-      return 'text-primary'
-    default:
-      return 'text-text-secondary'
-  }
-}
 
 // Cleanup on unmount
 onUnmounted(() => {

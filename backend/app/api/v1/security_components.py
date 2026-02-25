@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 from app.core.database import get_db
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user_id_optional
 from app.models.security_component import SecurityComponent, SecurityComponentLog
 from app.schemas.security import (
     SecurityComponentResponse, SecurityComponentUpdate,
@@ -16,6 +16,7 @@ from app.schemas.security import (
     ComponentEnableRequest, ComponentConfigUpdate
 )
 from app.services.permission_cache import permission_cache
+from app.services.security_health_check import SecurityComponentHealthCheck
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ async def log_component_action(
         new_config=new_config,
         result=result,
         error_message=error_message,
-        performed_by=UUID(user_id),
+        performed_by=UUID(user_id) if user_id else None,
         ip_address=ip_address
     )
     db.add(log)
@@ -62,7 +63,7 @@ async def get_security_components(
     component_type: Optional[str] = Query(None, description="组件类型: middleware, service, protection"),
     is_enabled: Optional[bool] = None,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取安全组件列表"""
     try:
@@ -89,7 +90,7 @@ async def get_security_components(
 async def get_security_component(
     component_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取安全组件详情"""
     try:
@@ -117,7 +118,7 @@ async def enable_security_component(
     enable_data: ComponentEnableRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """启用安全组件"""
     try:
@@ -138,7 +139,8 @@ async def enable_security_component(
         component.status = 'active'
         component.last_check_at = datetime.utcnow()
         component.error_message = None
-        component.updated_by = UUID(current_user_id)
+        if current_user_id:
+            component.updated_by = UUID(current_user_id)
 
         await db.commit()
         await db.refresh(component)
@@ -193,7 +195,7 @@ async def disable_security_component(
     component_id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """禁用安全组件"""
     try:
@@ -213,7 +215,8 @@ async def disable_security_component(
         component.is_enabled = False
         component.status = 'inactive'
         component.last_check_at = datetime.utcnow()
-        component.updated_by = UUID(current_user_id)
+        if current_user_id:
+            component.updated_by = UUID(current_user_id)
 
         await db.commit()
         await db.refresh(component)
@@ -271,7 +274,7 @@ async def update_component_config(
     config_data: ComponentConfigUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """更新安全组件配置"""
     try:
@@ -290,7 +293,8 @@ async def update_component_config(
         component.config_json = config_data.config_json
         if config_data.priority is not None:
             component.priority = config_data.priority
-        component.updated_by = UUID(current_user_id)
+        if current_user_id:
+            component.updated_by = UUID(current_user_id)
 
         await db.commit()
         await db.refresh(component)
@@ -346,7 +350,7 @@ async def update_component_config(
 async def get_component_status(
     component_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取安全组件运行状态"""
     try:
@@ -388,7 +392,7 @@ async def get_component_logs(
     limit: int = Query(50, ge=1, le=500),
     action: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取安全组件操作日志"""
     try:
@@ -409,3 +413,112 @@ async def get_component_logs(
     except Exception as e:
         logger.error(f"获取组件日志失败: {e}")
         raise HTTPException(status_code=500, detail="获取组件日志失败")
+
+
+# ==================== 健康检查 ====================
+
+@router.get("/health/all")
+async def check_all_components_health(
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """检查所有安全组件健康状态"""
+    try:
+        health_checker = SecurityComponentHealthCheck(db)
+        health_results = await health_checker.check_all_components()
+
+        return {
+            "total_components": health_results["total"],
+            "healthy_components": health_results["healthy"],
+            "unhealthy_components": health_results["unhealthy"],
+            "disabled_components": 0,  # Will be calculated separately if needed
+            "overall_status": "healthy" if health_results["unhealthy"] == 0 else "degraded",
+            "components": health_results["components"],
+            "checked_at": datetime.utcnow()
+        }
+
+    except Exception as e:
+        logger.error(f"检查所有组件健康状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"检查所有组件健康状态失败: {str(e)}")
+
+
+@router.get("/components/{component_id}/health")
+async def check_component_health(
+    component_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """检查单个安全组件健康状态"""
+    try:
+        result = await db.execute(
+            select(SecurityComponent).where(SecurityComponent.component_id == component_id)
+        )
+        component = result.scalar_one_or_none()
+
+        if not component:
+            raise HTTPException(status_code=404, detail="安全组件不存在")
+
+        health_checker = SecurityComponentHealthCheck(db)
+        health_result = await health_checker.check_component_health(component)
+
+        return health_result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"检查组件健康状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"检查组件健康状态失败: {str(e)}")
+
+
+@router.post("/components/{component_id}/health/check")
+async def trigger_health_check(
+    component_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+):
+    """手动触发组件健康检查"""
+    try:
+        result = await db.execute(
+            select(SecurityComponent).where(SecurityComponent.component_id == component_id)
+        )
+        component = result.scalar_one_or_none()
+
+        if not component:
+            raise HTTPException(status_code=404, detail="安全组件不存在")
+
+        health_checker = SecurityComponentHealthCheck(db)
+        health_result = await health_checker.check_component_health(component)
+
+        # 记录操作日志
+        await log_component_action(
+            db=db,
+            component_id=component_id,
+            action="health_check",
+            result="success" if health_result["is_healthy"] else "warning",
+            user_id=current_user_id,
+            ip_address=get_client_ip(request),
+            new_config={"health_status": health_result["status"], "message": health_result["message"]}
+        )
+
+        logger.info(f"手动健康检查完成: {component.component_code}, 状态: {health_result['status']}")
+        return health_result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"触发健康检查失败: {e}")
+
+        # 记录失败日志
+        await log_component_action(
+            db=db,
+            component_id=component_id,
+            action="health_check",
+            result="failure",
+            user_id=current_user_id,
+            ip_address=get_client_ip(request),
+            error_message=str(e)
+        )
+
+        raise HTTPException(status_code=500, detail=f"触发健康检查失败: {str(e)}")

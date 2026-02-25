@@ -13,7 +13,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 from app.core.database import get_db
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user_id_optional
 from app.models.ssl_certificate import SSLCertificate, SSLCertificateLog
 from app.schemas.ssl import (
     SSLCertificateResponse, SSLCertificateUpload, SSLCertificateUpdate,
@@ -104,7 +104,7 @@ async def get_ssl_certificates(
     status: Optional[str] = Query(None, description="证书状态: active, inactive, expired, expiring_soon"),
     domain_name: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取SSL证书列表"""
     try:
@@ -131,7 +131,7 @@ async def get_ssl_certificates(
 async def get_ssl_certificate(
     cert_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取SSL证书详情"""
     try:
@@ -158,7 +158,7 @@ async def upload_ssl_certificate(
     cert_data: SSLCertificateUpload,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """上传SSL证书"""
     try:
@@ -277,7 +277,7 @@ async def deploy_ssl_certificate(
     deploy_data: CertificateDeployRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """部署SSL证书到Nginx"""
     try:
@@ -355,7 +355,7 @@ async def delete_ssl_certificate(
     cert_id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """删除SSL证书"""
     try:
@@ -411,7 +411,7 @@ async def delete_ssl_certificate(
 async def get_certificate_status(
     cert_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取SSL证书状态"""
     try:
@@ -462,7 +462,7 @@ async def get_certificate_logs(
     limit: int = Query(50, ge=1, le=500),
     action: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
     """获取SSL证书操作日志"""
     try:

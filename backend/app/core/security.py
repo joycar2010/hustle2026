@@ -65,6 +65,20 @@ async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depend
     return user_id
 
 
+async def get_current_user_id_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))) -> Optional[str]:
+    """Extract user ID from JWT token (optional - returns None if no token provided)"""
+    if credentials is None:
+        return None
+
+    try:
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        user_id: str = payload.get("sub")
+        return user_id
+    except:
+        return None
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db = Depends(lambda: None)  # Placeholder, will be overridden
