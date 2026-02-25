@@ -1,12 +1,13 @@
 """User management API endpoints"""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from uuid import UUID
 from typing import List
 from app.core.database import get_db
 from app.core.security import get_current_user_id, get_password_hash
 from app.models.user import User
+from app.models.position import Position
 from app.schemas.user import UserResponse, UserUpdate, UserCreate
 
 router = APIRouter()
@@ -188,6 +189,12 @@ async def delete_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+    # Delete related data not covered by cascade
+    from sqlalchemy import text
+    await db.execute(text("DELETE FROM positions WHERE user_id = :uid"), {"uid": target_user_id})
+    await db.execute(text("DELETE FROM trades WHERE user_id = :uid"), {"uid": target_user_id})
+    await db.execute(text("DELETE FROM system_alerts WHERE user_id = :uid"), {"uid": target_user_id})
 
     await db.delete(user)
     await db.commit()
