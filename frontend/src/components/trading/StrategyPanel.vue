@@ -45,7 +45,10 @@
 
         <!-- M Coin Setting -->
         <div>
-          <label :for="`mCoin-${type}`" class="text-xs text-gray-400 mb-1 block">单次最多手数</label>
+          <label :for="`mCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
+            单次最多手数 (XAU)
+            <span class="text-[#0ecb81] ml-1">≈ {{ (config.mCoin / 100).toFixed(2) }} Lot</span>
+          </label>
           <input
             :id="`mCoin-${type}`"
             v-model.number="config.mCoin"
@@ -199,7 +202,10 @@
               </div>
 
               <div>
-                <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">下单总手数</label>
+                <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
+                  下单总手数 (XAU)
+                  <span class="text-[#0ecb81] ml-1">≈ {{ (ladder.qtyLimit / 100).toFixed(2) }} Lot</span>
+                </label>
                 <input
                   :id="`qtyLimit-${type}-${index}`"
                   v-model.number="ladder.qtyLimit"

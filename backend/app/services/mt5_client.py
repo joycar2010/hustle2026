@@ -275,8 +275,18 @@ class MT5Client:
             if price is not None:
                 price = round(price, digits)
 
+            # Determine trade action based on order type
+            # Limit orders require TRADE_ACTION_PENDING (pending order)
+            # Market orders use TRADE_ACTION_DEAL (immediate execution)
+            if order_type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT,
+                             mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_SELL_STOP,
+                             mt5.ORDER_TYPE_BUY_STOP_LIMIT, mt5.ORDER_TYPE_SELL_STOP_LIMIT]:
+                trade_action = mt5.TRADE_ACTION_PENDING
+            else:
+                trade_action = mt5.TRADE_ACTION_DEAL
+
             request = {
-                "action": mt5.TRADE_ACTION_DEAL,
+                "action": trade_action,
                 "symbol": symbol,
                 "volume": volume,
                 "type": order_type,

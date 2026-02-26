@@ -10,6 +10,7 @@ from app.services.binance_client import BinanceFuturesClient
 from app.models.account import Account
 from app.models.order import OrderRecord
 from app.websocket.manager import manager
+from app.utils.trading_time import is_bybit_trading_hours
 
 
 class OrderExecutor:
@@ -326,6 +327,42 @@ class OrderExecutor:
             Bybit XAUUSD.s: 1 lot = 100 XAU (ounces)
             Therefore: bybit_quantity = binance_quantity / 100
         """
+        # Check fund sufficiency before placing orders
+        try:
+            from app.services.account_service import account_data_service
+
+            # Get Binance account balance
+            binance_balance_data = await account_data_service.get_account_balance(binance_account)
+            if binance_balance_data:
+                binance_available = binance_balance_data.get("available_balance", 0)
+                # Estimate required margin: price * quantity / leverage
+                binance_leverage = binance_account.leverage or 20
+                binance_required_margin = (binance_price or 2700) * quantity / binance_leverage
+
+                if binance_available < binance_required_margin:
+                    return {
+                        "success": False,
+                        "error": f"Binance资金不足: 可用 {binance_available:.2f} USDT < 所需保证金 {binance_required_margin:.2f} USDT",
+                    }
+
+            # Get Bybit account balance
+            bybit_balance_data = await account_data_service.get_account_balance(bybit_account)
+            if bybit_balance_data:
+                bybit_available = bybit_balance_data.get("available_balance", 0)
+                # Estimate required margin: price * quantity * 100 / leverage (convert lots to XAU)
+                bybit_leverage = bybit_account.leverage or 100
+                bybit_qty = bybit_quantity or (quantity / 100.0)
+                bybit_required_margin = (bybit_price or 2700) * bybit_qty * 100 / bybit_leverage
+
+                if bybit_available < bybit_required_margin:
+                    return {
+                        "success": False,
+                        "error": f"Bybit资金不足: 可用 {bybit_available:.2f} USDT < 所需保证金 {bybit_required_margin:.2f} USDT",
+                    }
+        except Exception as e:
+            # If balance check fails, log warning but continue (don't block trading)
+            print(f"Warning: Fund sufficiency check failed: {e}")
+
         # Calculate Bybit quantity if not provided
         # Binance XAUUSDT: 1 contract = 1 XAU; Bybit XAUUSD.s: 1 lot = 100 XAU
         if bybit_quantity is None:
@@ -336,6 +373,29 @@ class OrderExecutor:
         quantity = round(quantity, 3)
         # Bybit MT5 XAUUSD.s: min 0.01 lot, step 0.01 → 2 decimal places
         bybit_quantity = round(bybit_quantity, 2)
+
+        # Validate minimum quantities
+        # Binance XAUUSDT: minimum 0.001 XAU
+        if quantity < 0.001:
+            return {
+                "success": False,
+                "error": f"Binance数量不足: {quantity} XAU < 0.001 XAU (最小交易量)",
+            }
+
+        # Bybit MT5 XAUUSD.s: minimum 0.01 Lot
+        if bybit_quantity < 0.01:
+            return {
+                "success": False,
+                "error": f"Bybit数量不足: {bybit_quantity} Lot < 0.01 Lot (最小交易量)",
+            }
+
+        # Check Bybit trading hours
+        is_open, time_message = is_bybit_trading_hours()
+        if not is_open:
+            return {
+                "success": False,
+                "error": f"Bybit交易时间限制: {time_message}",
+            }
 
         # Round prices to correct precision
         # Binance XAUUSDT: 2 decimal places

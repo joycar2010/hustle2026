@@ -240,6 +240,17 @@
               </div>
             </div>
 
+            <!-- Leverage Setting -->
+            <div class="border-t border-gray-700 pt-4">
+              <label class="block text-sm text-gray-400 mb-2">杠杆倍数</label>
+              <input type="number" v-model.number="accountForm.leverage" min="1" max="500"
+                     class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                     :placeholder="accountForm.platform_id === 1 ? '默认: 20x' : '默认: 100x'" />
+              <div class="text-xs text-gray-500 mt-1">
+                {{ accountForm.platform_id === 1 ? 'Binance 推荐杠杆: 20x' : 'Bybit 推荐杠杆: 100x' }}
+              </div>
+            </div>
+
             <!-- Default Account Toggle -->
             <div class="border-t border-gray-700 pt-4 flex items-center gap-3">
               <label class="relative inline-flex items-center cursor-pointer">
@@ -331,7 +342,8 @@ const accountForm = ref({
   mt5_server: '',
   is_mt5_account: false,
   is_default: false,
-  is_active: true
+  is_active: true,
+  leverage: 100  // Default leverage: Binance 20x, Bybit 100x
 })
 
 // Initialize
@@ -385,7 +397,8 @@ function openAddModal() {
     mt5_server: '',
     is_mt5_account: false,
     is_default: false,
-    is_active: true
+    is_active: true,
+    leverage: 100  // Default: Bybit 100x
   }
   showModal.value = true
 }
@@ -406,7 +419,8 @@ function openEditModal(account) {
     mt5_server: account.mt5_server || '',
     is_mt5_account: account.is_mt5_account,
     is_default: account.is_default,
-    is_active: account.is_active
+    is_active: account.is_active,
+    leverage: account.leverage || (account.platform_id === 1 ? 20 : 100)
   }
   showModal.value = true
 }
@@ -422,6 +436,9 @@ function onPlatformChange() {
     accountForm.value.mt5_id = ''
     accountForm.value.mt5_primary_pwd = ''
     accountForm.value.mt5_server = ''
+    accountForm.value.leverage = 20  // Binance default 20x
+  } else {
+    accountForm.value.leverage = 100  // Bybit default 100x
   }
 }
 
@@ -435,7 +452,8 @@ async function saveAccount() {
       api_secret: accountForm.value.api_secret,
       passphrase: accountForm.value.passphrase || null,
       is_mt5_account: accountForm.value.is_mt5_account,
-      is_default: accountForm.value.is_default
+      is_default: accountForm.value.is_default,
+      leverage: accountForm.value.leverage || (accountForm.value.platform_id === 1 ? 20 : 100)
     }
 
     // Add MT5 fields if it's an MT5 account
@@ -450,7 +468,8 @@ async function saveAccount() {
       const updateData = {
         account_name: accountForm.value.account_name,
         is_default: accountForm.value.is_default,
-        is_active: accountForm.value.is_active
+        is_active: accountForm.value.is_active,
+        leverage: accountForm.value.leverage
       }
 
       // Only include API credentials if they were changed (not empty and not masked)

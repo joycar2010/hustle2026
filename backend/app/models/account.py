@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, TIMESTAMP, SmallInteger, ForeignKey
+from sqlalchemy import Column, String, Boolean, TIMESTAMP, SmallInteger, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -24,6 +24,9 @@ class Account(Base):
     mt5_server = Column(String(100))  # MT5 server address
     mt5_primary_pwd = Column(String(256))  # Encrypted MT5 primary password
     is_mt5_account = Column(Boolean, default=False, nullable=False)
+
+    # Leverage settings
+    leverage = Column(Integer, nullable=True)  # Leverage multiplier (e.g., 20, 100)
 
     # Account status
     is_default = Column(Boolean, default=False, nullable=False)

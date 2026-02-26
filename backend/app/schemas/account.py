@@ -20,6 +20,7 @@ class AccountCreate(BaseModel):
     is_mt5_account: bool = False
 
     is_default: bool = False
+    leverage: Optional[int] = Field(None, ge=1, le=500)  # Leverage multiplier
 
 
 class AccountUpdate(BaseModel):
@@ -31,6 +32,7 @@ class AccountUpdate(BaseModel):
     passphrase: Optional[str] = Field(None, max_length=100)
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
+    leverage: Optional[int] = Field(None, ge=1, le=500)  # Leverage multiplier
 
 
 class AccountResponse(BaseModel):
@@ -49,6 +51,7 @@ class AccountResponse(BaseModel):
     is_mt5_account: bool
     is_default: bool
     is_active: bool
+    leverage: Optional[int] = None  # Leverage multiplier
     create_time: datetime
     update_time: datetime
 

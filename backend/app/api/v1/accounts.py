@@ -63,6 +63,7 @@ async def create_account(
         mt5_primary_pwd=account_data.mt5_primary_pwd,
         is_mt5_account=account_data.is_mt5_account,
         is_default=account_data.is_default,
+        leverage=account_data.leverage or (20 if account_data.platform_id == 1 else 100),
     )
 
     db.add(new_account)
@@ -177,6 +178,9 @@ async def update_account(
 
     if account_update.is_active is not None:
         account.is_active = account_update.is_active
+
+    if account_update.leverage is not None:
+        account.leverage = account_update.leverage
 
     await db.commit()
     await db.refresh(account)

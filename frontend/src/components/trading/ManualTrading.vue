@@ -22,15 +22,18 @@
 
       <!-- Quantity -->
       <div>
-        <label class="text-xs text-gray-400 mb-1 block">数量</label>
+        <label class="text-xs text-gray-400 mb-1 block">下单总手数 (XAU)</label>
         <input
           v-model.number="quantity"
           type="number"
-          step="0.01"
-          min="0.01"
+          step="1"
+          min="1"
           class="w-full bg-[#252930] border border-[#2b3139] rounded px-3 py-2 text-sm focus:border-[#f0b90b] focus:outline-none"
-          placeholder="0.01"
+          placeholder="1"
         />
+        <div class="text-xs text-gray-500 mt-1">
+          Bybit 实际下单量: {{ (quantity / 100).toFixed(2) }} Lot
+        </div>
       </div>
 
       <!-- Action Buttons -->
@@ -123,7 +126,7 @@ import { useMarketStore } from '@/stores/market'
 const router = useRouter()
 const marketStore = useMarketStore()
 const exchange = ref('binance')
-const quantity = ref(0.01)
+const quantity = ref(1)
 const loading = ref(false)
 const statusMsg = ref('')
 const statusOk = ref(true)
@@ -184,10 +187,15 @@ async function executeTrade(side) {
   if (loading.value) return
   loading.value = true
   try {
+    // 根据平台转换数量
+    // Binance: 1 XAU = 1 合约
+    // Bybit: 1 Lot = 100 XAU，所以需要除以 100
+    const actualQuantity = exchange.value === 'bybit' ? quantity.value / 100 : quantity.value
+
     await api.post('/api/v1/trading/manual/order', {
       exchange: exchange.value,
       side,
-      quantity: quantity.value,
+      quantity: actualQuantity,
     })
     showStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送`, true)
     await fetchRecentOrders()

@@ -312,10 +312,20 @@ function updateData(data) {
     stats.value = data.stats
   }
   if (data.accountTrades) {
-    accountTrades.value = data.accountTrades
+    // Sort by timestamp descending (newest first)
+    accountTrades.value = data.accountTrades.sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime()
+      const timeB = new Date(b.timestamp).getTime()
+      return timeB - timeA
+    })
   }
   if (data.mt5Trades) {
-    mt5Trades.value = data.mt5Trades
+    // Sort by timestamp descending (newest first)
+    mt5Trades.value = data.mt5Trades.sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime()
+      const timeB = new Date(b.timestamp).getTime()
+      return timeB - timeA
+    })
   }
 }
 
