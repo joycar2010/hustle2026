@@ -97,12 +97,47 @@ class MT5Client:
             self.connection_failures = 0  # Reset failure count on successful connection
             self.last_successful_request = datetime.utcnow()
             logger.info(f"MT5 connected successfully to account {self.login}")
+
+            # Initialize default symbols (ensure XAUUSD.s is visible and ready)
+            self._initialize_default_symbols()
+
             return True
 
         except Exception as e:
             logger.error(f"Error connecting to MT5: {e}")
             self.connection_failures += 1
             return False
+
+    def _initialize_default_symbols(self):
+        """Initialize and activate default trading symbols"""
+        from app.core.config import settings
+
+        default_symbols = settings.MT5_DEFAULT_SYMBOLS
+        logger.info(f"Initializing default MT5 symbols: {default_symbols}")
+
+        for symbol in default_symbols:
+            try:
+                # Check if symbol exists
+                symbol_info = mt5.symbol_info(symbol)
+                if symbol_info is None:
+                    logger.warning(f"Symbol {symbol} not found in MT5")
+                    continue
+
+                # Ensure symbol is visible
+                if not symbol_info.visible:
+                    if mt5.symbol_select(symbol, True):
+                        logger.info(f"Symbol {symbol} activated successfully")
+                    else:
+                        logger.error(f"Failed to activate symbol {symbol}: {mt5.last_error()}")
+                else:
+                    logger.info(f"Symbol {symbol} already visible")
+
+                # Subscribe to market data
+                if not mt5.market_book_add(symbol):
+                    logger.warning(f"Failed to subscribe to market book for {symbol}: {mt5.last_error()}")
+
+            except Exception as e:
+                logger.error(f"Error initializing symbol {symbol}: {e}")
 
     def ensure_connection(self) -> bool:
         """Ensure connection is active, reconnect if necessary"""
@@ -324,11 +359,14 @@ class MT5Client:
                              mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_SELL_STOP,
                              mt5.ORDER_TYPE_BUY_STOP_LIMIT, mt5.ORDER_TYPE_SELL_STOP_LIMIT]:
                 trade_action = mt5.TRADE_ACTION_PENDING
-                # For arbitrage strategies, use FOK to ensure full execution or cancel
-                # This prevents partial fills that could break arbitrage logic
-                type_filling = mt5.ORDER_FILLING_FOK
+                # CRITICAL FIX: For pending limit orders, MUST use RETURN
+                # FOK (Fill or Kill) is incompatible with TRADE_ACTION_PENDING
+                # Using FOK causes MT5 retcode=10015 (Invalid price) error
+                # RETURN allows partial fills and keeps remaining order in book
+                type_filling = mt5.ORDER_FILLING_RETURN
             else:
                 trade_action = mt5.TRADE_ACTION_DEAL
+                # For market orders, use IOC (Immediate or Cancel)
                 type_filling = mt5.ORDER_FILLING_IOC
 
             # ========== Step 5: Build request ==========
@@ -488,6 +526,49 @@ class MT5Client:
         if tick:
             return tick['last']
         return None
+
+    def get_default_symbol(self) -> str:
+        """
+        Get the default trading symbol from configuration
+
+        Returns:
+            Default symbol string (e.g., "XAUUSD.s")
+        """
+        from app.core.config import settings
+        return settings.MT5_DEFAULT_SYMBOL
+
+    def get_default_symbol_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Get symbol info for the default trading symbol
+
+        Returns:
+            Dict with symbol information, or None if failed
+        """
+        default_symbol = self.get_default_symbol()
+        if not self.connected:
+            if not self.connect():
+                return None
+
+        try:
+            symbol_info = mt5.symbol_info(default_symbol)
+            if symbol_info is None:
+                logger.error(f"Failed to get info for default symbol {default_symbol}: {mt5.last_error()}")
+                return None
+
+            return {
+                'symbol': default_symbol,
+                'digits': symbol_info.digits,
+                'point': symbol_info.point,
+                'volume_min': symbol_info.volume_min,
+                'volume_max': symbol_info.volume_max,
+                'volume_step': symbol_info.volume_step,
+                'contract_size': symbol_info.trade_contract_size,
+                'visible': symbol_info.visible,
+                'spread': symbol_info.spread
+            }
+        except Exception as e:
+            logger.error(f"Error getting default symbol info: {e}")
+            return None
             ]
 
         except Exception as e:
