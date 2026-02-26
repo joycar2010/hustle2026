@@ -59,6 +59,91 @@ async def create_strategy_config(
     return new_config
 
 
+@router.post("/configs/upsert", response_model=StrategyConfigResponse)
+async def upsert_strategy_config(
+    config_data: StrategyConfigCreate,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create or update strategy config by type (upsert)"""
+    result = await db.execute(
+        select(StrategyConfig).where(
+            StrategyConfig.user_id == UUID(user_id),
+            StrategyConfig.strategy_type == config_data.strategy_type,
+        ).order_by(StrategyConfig.create_time.desc())
+    )
+    config = result.scalars().first()
+
+    # If duplicates exist, delete them and keep only the first one
+    if config:
+        dup_result = await db.execute(
+            select(StrategyConfig).where(
+                StrategyConfig.user_id == UUID(user_id),
+                StrategyConfig.strategy_type == config_data.strategy_type,
+                StrategyConfig.config_id != config.config_id,
+            )
+        )
+        duplicates = dup_result.scalars().all()
+        for dup in duplicates:
+            await db.delete(dup)
+
+    ladders_data = [l.model_dump() for l in config_data.ladders]
+
+    if config:
+        config.target_spread = config_data.target_spread
+        config.order_qty = config_data.order_qty
+        config.retry_times = config_data.retry_times
+        config.mt5_stuck_threshold = config_data.mt5_stuck_threshold
+        config.opening_sync_count = config_data.opening_sync_count
+        config.closing_sync_count = config_data.closing_sync_count
+        config.m_coin = config_data.m_coin
+        config.ladders = ladders_data
+        config.is_enabled = config_data.is_enabled
+    else:
+        config = StrategyConfig(
+            user_id=UUID(user_id),
+            strategy_type=config_data.strategy_type,
+            target_spread=config_data.target_spread,
+            order_qty=config_data.order_qty,
+            retry_times=config_data.retry_times,
+            mt5_stuck_threshold=config_data.mt5_stuck_threshold,
+            opening_sync_count=config_data.opening_sync_count,
+            closing_sync_count=config_data.closing_sync_count,
+            m_coin=config_data.m_coin,
+            ladders=ladders_data,
+            is_enabled=config_data.is_enabled,
+        )
+        db.add(config)
+
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+@router.get("/configs/by-type/{strategy_type}", response_model=StrategyConfigResponse)
+async def get_strategy_config_by_type(
+    strategy_type: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get strategy config by type (forward/reverse)"""
+    result = await db.execute(
+        select(StrategyConfig).where(
+            StrategyConfig.user_id == UUID(user_id),
+            StrategyConfig.strategy_type == strategy_type,
+        )
+    )
+    config = result.scalar_one_or_none()
+
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy configuration not found",
+        )
+
+    return config
+
+
 @router.get("/configs/{config_id}", response_model=StrategyConfigResponse)
 async def get_strategy_config(
     config_id: UUID,
@@ -108,16 +193,20 @@ async def update_strategy_config(
     # Update fields
     if config_update.target_spread is not None:
         config.target_spread = config_update.target_spread
-
     if config_update.order_qty is not None:
         config.order_qty = config_update.order_qty
-
     if config_update.retry_times is not None:
         config.retry_times = config_update.retry_times
-
     if config_update.mt5_stuck_threshold is not None:
         config.mt5_stuck_threshold = config_update.mt5_stuck_threshold
-
+    if config_update.opening_sync_count is not None:
+        config.opening_sync_count = config_update.opening_sync_count
+    if config_update.closing_sync_count is not None:
+        config.closing_sync_count = config_update.closing_sync_count
+    if config_update.m_coin is not None:
+        config.m_coin = config_update.m_coin
+    if config_update.ladders is not None:
+        config.ladders = [l.model_dump() for l in config_update.ladders]
     if config_update.is_enabled is not None:
         config.is_enabled = config_update.is_enabled
 

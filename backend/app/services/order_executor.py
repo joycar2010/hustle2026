@@ -331,11 +331,17 @@ class OrderExecutor:
         if bybit_quantity is None:
             bybit_quantity = quantity / 100.0
 
-        # Round prices to 2 decimal places (XAUUSDT precision requirement)
+        # Round quantities to correct precision
+        # Binance XAUUSDT: min 0.001, step 0.001 → 3 decimal places
+        quantity = round(quantity, 3)
+        # Bybit MT5 XAUUSD.s: min 0.01 lot, step 0.01 → 2 decimal places
+        bybit_quantity = round(bybit_quantity, 2)
+
+        # Round prices to correct precision
+        # Binance XAUUSDT: 2 decimal places
         if binance_price is not None:
             binance_price = round(binance_price, 2)
-        if bybit_price is not None:
-            bybit_price = round(bybit_price, 2)
+        # Bybit MT5 price precision is handled by send_order via symbol_info.digits
 
         # Derive positionSide for Binance hedge mode accounts
         # BUY opens/closes LONG side; SELL opens/closes SHORT side

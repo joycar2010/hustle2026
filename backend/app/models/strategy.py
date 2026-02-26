@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Float, Integer, Boolean, TIMESTAMP, ForeignKey, JSON, Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 import enum
@@ -51,6 +51,8 @@ class StrategyConfig(Base):
     mt5_stuck_threshold = Column(Integer, default=5, nullable=False)  # MT5 stuck detection threshold
     opening_sync_count = Column(Integer, default=3, nullable=False)  # Opening position data sync count
     closing_sync_count = Column(Integer, default=3, nullable=False)  # Closing position data sync count
+    m_coin = Column(Float, default=5, nullable=False)  # Max lots per batch order
+    ladders = Column(JSONB, default=list, nullable=False)  # Ladder configs array
     is_enabled = Column(Boolean, default=False, nullable=False)
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     update_time = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

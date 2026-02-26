@@ -259,29 +259,14 @@ const config = ref({
   ]
 })
 
+const configId = ref(null)
+
 onMounted(async () => {
-  // Explicitly reset enabled states to false on mount
   config.value.openingEnabled = false
   config.value.closingEnabled = false
 
-  // Load saved strategy from localStorage
-  const savedStrategy = localStorage.getItem(`strategy_${props.type}`)
-  if (savedStrategy) {
-    try {
-      const strategyData = JSON.parse(savedStrategy)
-      if (strategyData.ladders) {
-        config.value.ladders = strategyData.ladders
-      }
-      if (strategyData.opening_sync_count) {
-        config.value.openingSyncQty = strategyData.opening_sync_count
-      }
-      if (strategyData.closing_sync_count) {
-        config.value.closingSyncQty = strategyData.closing_sync_count
-      }
-    } catch (error) {
-      console.error('Failed to load saved strategy:', error)
-    }
-  }
+  // Load config from database
+  await loadConfigFromDB()
 
   // Ensure WebSocket connection
   if (!marketStore.connected) {
@@ -291,6 +276,25 @@ onMounted(async () => {
   // Initial account data fetch
   await fetchAccountData()
 })
+
+async function loadConfigFromDB() {
+  try {
+    const response = await api.get(`/api/v1/strategies/configs/by-type/${props.type}`)
+    const data = response.data
+    configId.value = data.config_id
+    config.value.mCoin = data.m_coin
+    config.value.openingSyncQty = data.opening_sync_count
+    config.value.closingSyncQty = data.closing_sync_count
+    if (data.ladders && data.ladders.length > 0) {
+      config.value.ladders = data.ladders
+    }
+  } catch (error) {
+    if (error.response?.status !== 404) {
+      console.error('Failed to load config from DB:', error)
+    }
+    // 404 means no config yet, use defaults
+  }
+}
 
 onUnmounted(() => {
   // No cleanup needed - WebSocket stays connected for other components
@@ -383,25 +387,31 @@ function removeLadder(index) {
 
 async function saveConfig() {
   try {
-    // Ensure sync quantities are integers
     const configData = {
       strategy_type: props.type,
-      target_spread: 1.0, // Default value for ladder strategy
-      order_qty: 1.0, // Default value for ladder strategy
+      target_spread: 1.0,
+      order_qty: 1.0,
       retry_times: 3,
       mt5_stuck_threshold: 5,
       opening_sync_count: Math.floor(config.value.openingSyncQty),
       closing_sync_count: Math.floor(config.value.closingSyncQty),
+      m_coin: Number(config.value.mCoin),
+      ladders: config.value.ladders.map(l => ({
+        enabled: l.enabled,
+        openPrice: Number(Number(l.openPrice).toFixed(2)),
+        threshold: Number(Number(l.threshold).toFixed(2)),
+        qtyLimit: Number(l.qtyLimit)
+      })),
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
     }
 
-    await api.post('/api/v1/strategies/configs', configData)
+    const response = await api.post('/api/v1/strategies/configs/upsert', configData)
+    configId.value = response.data.config_id
     alert('配置保存成功！')
   } catch (error) {
     console.error('Failed to save config:', error)
     let errorMessage = '未知错误'
     if (error.response?.data?.detail) {
-      // Handle FastAPI validation errors
       if (Array.isArray(error.response.data.detail)) {
         errorMessage = error.response.data.detail.map(err => `${err.loc.join('.')}: ${err.msg}`).join(', ')
       } else if (typeof error.response.data.detail === 'string') {
@@ -416,30 +426,8 @@ async function saveConfig() {
   }
 }
 
-function saveStrategy() {
-  try {
-    // Ensure all ladder values are properly formatted
-    const ladderData = config.value.ladders.map(ladder => ({
-      enabled: ladder.enabled,
-      openPrice: Number(ladder.openPrice.toFixed(2)),
-      threshold: Number(ladder.threshold.toFixed(2)),
-      qtyLimit: Math.floor(ladder.qtyLimit)
-    }))
-
-    const strategyData = {
-      strategy_type: props.type,
-      ladders: ladderData,
-      opening_sync_count: Math.floor(config.value.openingSyncQty),
-      closing_sync_count: Math.floor(config.value.closingSyncQty)
-    }
-
-    // Save to localStorage
-    localStorage.setItem(`strategy_${props.type}`, JSON.stringify(strategyData))
-    alert('策略保存成功！')
-  } catch (error) {
-    console.error('Failed to save strategy:', error)
-    alert(`策略保存失败: ${error.message}`)
-  }
+async function saveStrategy() {
+  await saveConfig()
 }
 
 function validateAccountsForExecution() {

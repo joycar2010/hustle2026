@@ -262,6 +262,19 @@ class MT5Client:
                 return None
 
         try:
+            # Get symbol info to determine correct price precision
+            symbol_info = mt5.symbol_info(symbol)
+            if symbol_info is not None:
+                digits = symbol_info.digits
+                point = symbol_info.point
+            else:
+                digits = 2
+                point = 0.01
+
+            # Round price to symbol's required precision
+            if price is not None:
+                price = round(price, digits)
+
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
