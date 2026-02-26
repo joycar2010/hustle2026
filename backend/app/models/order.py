@@ -15,6 +15,7 @@ class OrderStatus(str, enum.Enum):
     PENDING = "pending"
     PARTIALLY_FILLED = "partially_filled"
     REJECTED = "rejected"
+    MANUALLY_PROCESSED = "manually_processed"
 
 
 class OrderRecord(Base):

@@ -50,11 +50,12 @@
               <th class="pb-3">价格</th>
               <th class="pb-3">状态</th>
               <th class="pb-3">来源</th>
+              <th class="pb-3">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="orders.length === 0">
-              <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
+              <td colspan="9" class="text-center py-8 text-gray-500">暂无数据</td>
             </tr>
             <tr v-for="order in orders" :key="order.id" class="border-b border-gray-800">
               <td class="py-3">{{ formatDateTime(order.timestamp) }}</td>
@@ -76,6 +77,16 @@
                 <span class="text-xs px-2 py-1 rounded" :class="getSourceClass(order.source)">
                   {{ getSourceText(order.source) }}
                 </span>
+              </td>
+              <td>
+                <button
+                  v-if="order.status === 'new' || order.status === 'pending'"
+                  @click="manualProcessOrder(order.id)"
+                  class="text-xs px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
+                >
+                  人工补单
+                </button>
+                <span v-else class="text-xs text-gray-500">-</span>
               </td>
             </tr>
           </tbody>
@@ -117,6 +128,19 @@ async function fetchOrders() {
   }
 }
 
+async function manualProcessOrder(orderId) {
+  if (!confirm('确定要将此订单标记为已人工处理吗？')) return
+
+  try {
+    await api.post(`/api/v1/trading/orders/${orderId}/manual-process`)
+    alert('订单已标记为人工处理')
+    await fetchOrders()
+  } catch (error) {
+    console.error('Failed to process order:', error)
+    alert('操作失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
 function formatDateTime(timestamp) {
   if (!timestamp) return '-'
   const date = new Date(timestamp)
@@ -137,6 +161,7 @@ function getStatusClass(status) {
     filled: 'text-green-500',
     canceled: 'text-red-500',
     cancelled: 'text-red-500',
+    manually_processed: 'text-blue-500',
   }
   return classes[status] || 'text-gray-400'
 }
@@ -148,6 +173,7 @@ function getStatusText(status) {
     filled: '已成交',
     canceled: '已取消',
     cancelled: '已取消',
+    manually_processed: '已人工处理',
   }
   return texts[status] || status
 }

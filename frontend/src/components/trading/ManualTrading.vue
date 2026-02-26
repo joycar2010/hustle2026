@@ -249,6 +249,7 @@ function getStatusClass(status) {
     filled: 'text-[#0ecb81]',
     canceled: 'text-[#f6465d]',
     cancelled: 'text-[#f6465d]',
+    manually_processed: 'text-[#3b82f6]',
   }
   return classes[status] || 'text-gray-400'
 }
@@ -260,6 +261,7 @@ function getStatusText(status) {
     filled: '成交',
     canceled: '取消',
     cancelled: '取消',
+    manually_processed: '人工处理',
   }
   return texts[status] || status
 }

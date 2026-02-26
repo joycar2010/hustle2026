@@ -15,6 +15,7 @@ from app.services.market_service import market_data_service
 import asyncio
 import MetaTrader5 as mt5
 import logging
+import uuid
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -869,7 +870,7 @@ async def cancel_all_orders(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cancel all pending orders on both exchanges"""
+    """Cancel all pending orders on both exchanges and mark database orders as manually processed"""
     try:
         accounts, _ = await _get_user_accounts(db, current_user.user_id)
         results = []
@@ -901,7 +902,56 @@ async def cancel_all_orders(
                 else:
                     results.append({"exchange": "bybit", "account": account.account_name, "success": True, "data": "no orders"})
 
-        return {"success": True, "results": results}
+        # Mark all pending/new orders in database as manually_processed
+        account_ids = [acc.account_id for acc in accounts if acc.is_active]
+        if account_ids:
+            pending_orders_result = await db.execute(
+                select(OrderRecord).filter(
+                    OrderRecord.account_id.in_(account_ids),
+                    OrderRecord.status.in_(["new", "pending"])
+                )
+            )
+            pending_orders = pending_orders_result.scalars().all()
+            for order in pending_orders:
+                order.status = "manually_processed"
+            await db.commit()
+
+        return {"success": True, "results": results, "db_orders_processed": len(pending_orders) if account_ids else 0}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/orders/{order_id}/manual-process")
+async def manual_process_order(
+    order_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a specific order as manually processed"""
+    try:
+        # Get user accounts to verify ownership
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        account_ids = list(accounts_map.keys())
+
+        # Find the order
+        result = await db.execute(
+            select(OrderRecord).filter(
+                OrderRecord.order_id == uuid.UUID(order_id),
+                OrderRecord.account_id.in_(account_ids)
+            )
+        )
+        order = result.scalar_one_or_none()
+
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Update status to manually_processed
+        order.status = "manually_processed"
+        await db.commit()
+
+        return {"success": True, "order_id": order_id, "new_status": "manually_processed"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
