@@ -5,8 +5,12 @@ from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+from pathlib import Path
+import subprocess
+import os
 from app.core.database import get_db
 from app.core.security import get_current_user_id
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -146,17 +150,42 @@ async def backup_database(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, str]:
-    """Backup entire database"""
+    """Backup entire database to C:\\app\\hustle2026\\backend\\backups"""
     try:
+        backup_dir = Path(r"C:\app\hustle2026\backend\backups")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"backup_{timestamp}_UTC.sql"
+        file_path = backup_dir / filename
 
-        # Note: This is a placeholder. In production, you would use pg_dump
-        # via subprocess or a proper backup solution
+        # Parse DB connection info from settings
+        db_host = settings.DB_HOST
+        db_port = settings.DB_PORT
+        db_name = settings.DB_NAME
+        db_user = settings.DB_USER
+        db_password = settings.DB_PASSWORD
+
+        env = os.environ.copy()
+        env["PGPASSWORD"] = db_password
+
+        pg_dump = r"C:\Program Files\PostgreSQL\16\bin\pg_dump.exe"
+        result = subprocess.run(
+            [pg_dump, "-h", db_host, "-p", str(db_port), "-U", db_user, "-d", db_name, "-f", str(file_path)],
+            capture_output=True,
+            text=True,
+            env=env
+        )
+
+        if result.returncode != 0:
+            raise Exception(f"pg_dump failed: {result.stderr}")
+
+        size_mb = file_path.stat().st_size / 1024 / 1024
         return {
-            "message": "Database backup initiated",
+            "message": "Database backup successful",
             "filename": filename,
-            "note": "Backup functionality requires pg_dump configuration"
+            "path": str(file_path),
+            "size": f"{size_mb:.2f} MB"
         }
     except Exception as e:
         raise HTTPException(
@@ -210,13 +239,41 @@ async def restore_database(
 ) -> Dict[str, str]:
     """Restore database from backup"""
     try:
-        filename = request.filename
-        # Note: This is a placeholder. In production, you would use pg_restore
+        backup_dir = Path(r"C:\app\hustle2026\backend\backups")
+        file_path = backup_dir / request.filename
+
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Backup file not found: {request.filename}"
+            )
+
+        db_host = settings.DB_HOST
+        db_port = settings.DB_PORT
+        db_name = settings.DB_NAME
+        db_user = settings.DB_USER
+        db_password = settings.DB_PASSWORD
+
+        env = os.environ.copy()
+        env["PGPASSWORD"] = db_password
+
+        psql = r"C:\Program Files\PostgreSQL\16\bin\psql.exe"
+        result = subprocess.run(
+            [psql, "-h", db_host, "-p", str(db_port), "-U", db_user, "-d", db_name, "-f", str(file_path)],
+            capture_output=True,
+            text=True,
+            env=env
+        )
+
+        if result.returncode != 0:
+            raise Exception(f"psql restore failed: {result.stderr}")
+
         return {
-            "message": "Database restore initiated",
-            "filename": filename,
-            "note": "Restore functionality requires pg_restore configuration"
+            "message": "Database restore successful",
+            "filename": request.filename
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -297,14 +354,9 @@ async def get_backup_history(
 ) -> List[Dict[str, Any]]:
     """Get backup history"""
     try:
-        # In a real implementation, this would read from a backups directory
-        # For now, return a mock list
-        import os
-        from pathlib import Path
-        
-        backup_dir = Path("backups")
+        backup_dir = Path(r"C:\app\hustle2026\backend\backups")
         backups = []
-        
+
         if backup_dir.exists():
             for file in backup_dir.glob("*.sql"):
                 stat = file.stat()
@@ -313,10 +365,8 @@ async def get_backup_history(
                     "size": f"{stat.st_size / 1024 / 1024:.2f} MB",
                     "created_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
                 })
-        
-        # Sort by creation time (newest first)
+
         backups.sort(key=lambda x: x["created_at"], reverse=True)
-        
         return backups
     except Exception as e:
         raise HTTPException(

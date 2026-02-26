@@ -1021,6 +1021,28 @@
       @close="showBackupModal = false"
       @select="restoreDatabaseFromBackup"
     />
+
+    <BackupActionModal
+      :show="showBackupActionModal"
+      title="备份数据库"
+      githubLabel="备份至 GitHub"
+      githubDesc="将数据库备份推送到 GitHub 仓库"
+      serverLabel="备份至服务器"
+      serverDesc="将数据库备份保存到本地服务器"
+      @close="showBackupActionModal = false"
+      @select="handleBackupSelect"
+    />
+
+    <BackupActionModal
+      :show="showRestoreActionModal"
+      title="恢复数据库"
+      githubLabel="从 GitHub 还原"
+      githubDesc="从 GitHub 仓库的历史版本还原"
+      serverLabel="从服务器还原"
+      serverDesc="从本地服务器的备份文件还原"
+      @close="showRestoreActionModal = false"
+      @select="handleRestoreSelect"
+    />
   </div>
 
     <!-- RBAC Role Modal -->
@@ -1488,6 +1510,7 @@ import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import TableDetailModal from '@/components/modals/TableDetailModal.vue'
 import BackupSelectModal from '@/components/modals/BackupSelectModal.vue'
+import BackupActionModal from '@/components/modals/BackupActionModal.vue'
 import WebSocketMonitor from '@/components/system/WebSocketMonitor.vue'
 import { useMarketStore } from '@/stores/market'
 
@@ -1661,6 +1684,8 @@ const tabs = [
 const showTableModal = ref(false)
 const selectedTable = ref('')
 const showBackupModal = ref(false)
+const showBackupActionModal = ref(false)
+const showRestoreActionModal = ref(false)
 
 const versionHistory = ref([])
 const pushRemark = ref('')
@@ -2399,18 +2424,46 @@ async function loadDbStats() {
 }
 
 async function backupDatabase() {
-  if (!confirm('确定要备份整个数据库吗？')) return
-  try {
-    const response = await api.post('/api/v1/system/database/backup')
-    alert(`备份成功: ${response.data.filename}`)
-  } catch (error) {
-    console.error('Failed to backup database:', error)
-    alert('备份失败: ' + (error.response?.data?.detail || error.message))
+  showBackupActionModal.value = true
+}
+
+async function handleBackupSelect(type) {
+  if (type === 'github') {
+    if (!confirm('确定要备份数据库至 GitHub 吗？')) return
+    try {
+      const response = await api.post('/api/v1/system/github/push', { remark: '数据库备份' })
+      alert(`备份至 GitHub 成功: ${response.data.branch}`)
+    } catch (error) {
+      console.error('Failed to backup to GitHub:', error)
+      alert('备份失败: ' + (error.response?.data?.detail || error.message))
+    }
+  } else {
+    if (!confirm('确定要备份数据库至服务器吗？')) return
+    try {
+      const response = await api.post('/api/v1/system/database/backup')
+      alert(`备份至服务器成功: ${response.data.filename}`)
+    } catch (error) {
+      console.error('Failed to backup to server:', error)
+      alert('备份失败: ' + (error.response?.data?.detail || error.message))
+    }
   }
 }
 
 function restoreDatabase() {
-  showBackupModal.value = true
+  showRestoreActionModal.value = true
+}
+
+function handleRestoreSelect(type) {
+  if (type === 'github') {
+    // Show GitHub version history for restore
+    showRestoreActionModal.value = false
+    // Navigate to version management tab or show GitHub restore modal
+    alert('请在下方"版本管理"区域选择要还原的 GitHub 版本')
+  } else {
+    // Show server backup list for restore
+    showRestoreActionModal.value = false
+    showBackupModal.value = true
+  }
 }
 
 async function restoreDatabaseFromBackup(filename) {
