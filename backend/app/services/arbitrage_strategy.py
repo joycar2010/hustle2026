@@ -41,9 +41,14 @@ class ArbitrageStrategy:
                 "error": f"Spread {spread_data.forward_entry_spread} below target {target_spread}",
             }
 
-        # Calculate order prices (adjust by 0.01 for better fill rate)
-        binance_buy_price = spread_data.binance_quote.bid_price + 0.01
-        bybit_sell_price = spread_data.bybit_quote.ask_price - 0.01
+        # Calculate order prices (adjust by 0.01 for better fill rate, with precision handling)
+        # MT5 limit order rules:
+        # - BUY limit: price must be BELOW current ask
+        # - SELL limit: price must be ABOVE current bid
+        # For Binance BUY limit, use ask - 0.01 to ensure price is below ask
+        binance_buy_price = round(spread_data.binance_quote.ask_price - 0.01, 2)
+        # For Bybit SELL limit, use bid + 0.01 to ensure price is above bid
+        bybit_sell_price = round(spread_data.bybit_quote.bid_price + 0.01, 2)
 
         # Create arbitrage task
         task = ArbitrageTask(
@@ -124,9 +129,13 @@ class ArbitrageStrategy:
                 "error": f"Spread {spread_data.reverse_entry_spread} below target {target_spread}",
             }
 
-        # Calculate order prices
-        binance_sell_price = spread_data.binance_quote.ask_price - 0.01
-        bybit_buy_price = spread_data.bybit_quote.bid_price + 0.01
+        # Calculate order prices (with precision handling to avoid floating point errors)
+        # MT5 limit order rules:
+        # - BUY limit: price must be BELOW current ask
+        # - SELL limit: price must be ABOVE current bid
+        binance_sell_price = round(spread_data.binance_quote.ask_price - 0.01, 2)
+        # For Bybit BUY limit, use ask - 0.01 to ensure price is below ask
+        bybit_buy_price = round(spread_data.bybit_quote.ask_price - 0.01, 2)
 
         # Create arbitrage task
         task = ArbitrageTask(
@@ -209,9 +218,14 @@ class ArbitrageStrategy:
         # Get current market data
         spread_data = await market_data_service.get_current_spread(use_cache=False)
 
-        # Calculate exit prices
-        binance_sell_price = spread_data.binance_quote.ask_price - 0.01
-        bybit_buy_price = spread_data.bybit_quote.bid_price + 0.01
+        # Calculate exit prices (with precision handling)
+        # MT5 limit order rules:
+        # - BUY limit: price must be BELOW current ask
+        # - SELL limit: price must be ABOVE current bid
+        # For Binance SELL limit, use bid + 0.01 to ensure price is above bid
+        binance_sell_price = round(spread_data.binance_quote.bid_price + 0.01, 2)
+        # For Bybit BUY limit, use ask - 0.01 to ensure price is below ask
+        bybit_buy_price = round(spread_data.bybit_quote.ask_price - 0.01, 2)
 
         # Execute closing orders (reverse of opening)
         result = await order_executor.execute_dual_order(
@@ -273,9 +287,14 @@ class ArbitrageStrategy:
         # Get current market data
         spread_data = await market_data_service.get_current_spread(use_cache=False)
 
-        # Calculate exit prices
-        binance_buy_price = spread_data.binance_quote.bid_price + 0.01
-        bybit_sell_price = spread_data.bybit_quote.ask_price - 0.01
+        # Calculate exit prices (with precision handling)
+        # MT5 limit order rules:
+        # - BUY limit: price must be BELOW current ask
+        # - SELL limit: price must be ABOVE current bid
+        # For Binance BUY limit, use ask - 0.01 to ensure price is below ask
+        binance_buy_price = round(spread_data.binance_quote.ask_price - 0.01, 2)
+        # For Bybit SELL limit, use bid + 0.01 to ensure price is above bid
+        bybit_sell_price = round(spread_data.bybit_quote.bid_price + 0.01, 2)
 
         # Execute closing orders
         result = await order_executor.execute_dual_order(

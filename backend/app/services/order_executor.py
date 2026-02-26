@@ -67,6 +67,8 @@ class OrderExecutor:
     ) -> Dict[str, Any]:
         """Place order on Bybit via MT5 terminal"""
         from app.services.market_service import market_data_service
+        import logging
+        logger = logging.getLogger(__name__)
 
         mt5_client = market_data_service.mt5_client
 
@@ -79,6 +81,10 @@ class OrderExecutor:
 
             price_val = float(price) if price else None
             qty_val = float(quantity)
+
+            # 添加详细日志
+            logger.info(f"Bybit order params BEFORE MT5: symbol={symbol}, side={side}, type={order_type}, "
+                       f"quantity={quantity}, price={price}, price_val={price_val}, qty_val={qty_val}")
 
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
@@ -400,8 +406,18 @@ class OrderExecutor:
         # Round prices to correct precision
         # Binance XAUUSDT: 2 decimal places
         if binance_price is not None:
+            original_binance_price = binance_price
             binance_price = round(binance_price, 2)
-        # Bybit MT5 price precision is handled by send_order via symbol_info.digits
+            if original_binance_price != binance_price:
+                print(f"WARNING: Binance price rounded from {original_binance_price} to {binance_price}")
+        # Bybit MT5 XAUUSD.s: 2 decimal places (强制精度处理，防止浮点数精度问题)
+        if bybit_price is not None:
+            original_bybit_price = bybit_price
+            bybit_price = round(bybit_price, 2)
+            if original_bybit_price != bybit_price:
+                print(f"WARNING: Bybit price rounded from {original_bybit_price} to {bybit_price}")
+
+        print(f"DEBUG: execute_dual_order prices AFTER rounding: binance_price={binance_price}, bybit_price={bybit_price}")
 
         # Derive positionSide for Binance hedge mode accounts
         # BUY opens/closes LONG side; SELL opens/closes SHORT side

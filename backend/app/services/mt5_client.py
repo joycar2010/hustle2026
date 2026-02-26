@@ -239,83 +239,170 @@ class MT5Client:
         sl: Optional[float] = None,
         tp: Optional[float] = None,
         deviation: int = 10,
-        comment: str = ""
+        comment: str = "",
+        max_retry: int = 2
     ) -> Optional[Dict[str, Any]]:
         """
-        Send trading order
+        Send trading order with enhanced validation and retry logic
 
         Args:
             symbol: Trading symbol
             order_type: Order type (mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL)
-            volume: Order volume
-            price: Order price (for limit orders)
+            volume: Order volume (raw, will be normalized)
+            price: Order price (for limit orders, raw, will be normalized)
             sl: Stop loss price
             tp: Take profit price
             deviation: Maximum price deviation
             comment: Order comment
+            max_retry: Maximum retry attempts for recoverable errors
 
         Returns:
-            Order result dict
+            Order result dict with retcode, order, volume, price, comment
         """
         if not self.connected:
             if not self.connect():
                 return None
 
         try:
-            # Get symbol info to determine correct price precision
+            # ========== Step 1: Get and validate symbol info ==========
             symbol_info = mt5.symbol_info(symbol)
-            if symbol_info is not None:
-                digits = symbol_info.digits
-                point = symbol_info.point
-            else:
-                digits = 2
-                point = 0.01
+            if symbol_info is None:
+                logger.error(f"Failed to get symbol info for {symbol}: {mt5.last_error()}")
+                return None
 
-            # Round price to symbol's required precision
+            # Ensure symbol is visible (XAUUSD.s may be hidden by default)
+            if not symbol_info.visible:
+                if not mt5.symbol_select(symbol, True):
+                    logger.error(f"Failed to activate symbol {symbol}: {mt5.last_error()}")
+                    return None
+                # Refresh symbol info after activation
+                symbol_info = mt5.symbol_info(symbol)
+
+            digits = symbol_info.digits
+            point = symbol_info.point
+            volume_min = symbol_info.volume_min
+            volume_max = symbol_info.volume_max
+            volume_step = symbol_info.volume_step
+
+            logger.info(f"MT5 symbol_info for {symbol}: digits={digits}, point={point}, "
+                       f"volume_min={volume_min}, volume_max={volume_max}, volume_step={volume_step}")
+
+            # ========== Step 2: Normalize volume ==========
+            # Align to volume_step and enforce min/max constraints
+            normalized_volume = round(volume / volume_step) * volume_step
+            normalized_volume = max(normalized_volume, volume_min)
+            normalized_volume = min(normalized_volume, volume_max)
+
+            if abs(volume - normalized_volume) > volume_step * 0.01:
+                logger.warning(f"Volume normalized: {volume} -> {normalized_volume}")
+
+            # ========== Step 3: Normalize and validate price ==========
             if price is not None:
-                price = round(price, digits)
+                original_price = price
+                normalized_price = round(price, digits)
 
-            # Determine trade action based on order type
-            # Limit orders require TRADE_ACTION_PENDING (pending order)
-            # Market orders use TRADE_ACTION_DEAL (immediate execution)
+                # XAUUSD.s specific validation: price range 1000-5000
+                if symbol.upper() == "XAUUSD.S":
+                    if normalized_price < 1000 or normalized_price > 5000:
+                        logger.error(f"XAUUSD.s price out of valid range: {normalized_price}")
+                        return {
+                            'retcode': 10015,  # Invalid price
+                            'deal': 0,
+                            'order': 0,
+                            'volume': 0,
+                            'price': 0,
+                            'comment': f'Price out of range: {normalized_price}'
+                        }
+
+                if abs(original_price - normalized_price) > point * 0.1:
+                    logger.warning(f"Price normalized: {original_price} -> {normalized_price}")
+
+                price = normalized_price
+
+            # ========== Step 4: Determine trade action and filling type ==========
             if order_type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT,
                              mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_SELL_STOP,
                              mt5.ORDER_TYPE_BUY_STOP_LIMIT, mt5.ORDER_TYPE_SELL_STOP_LIMIT]:
                 trade_action = mt5.TRADE_ACTION_PENDING
+                # For arbitrage strategies, use FOK to ensure full execution or cancel
+                # This prevents partial fills that could break arbitrage logic
+                type_filling = mt5.ORDER_FILLING_FOK
             else:
                 trade_action = mt5.TRADE_ACTION_DEAL
+                type_filling = mt5.ORDER_FILLING_IOC
 
+            # ========== Step 5: Build request ==========
             request = {
                 "action": trade_action,
                 "symbol": symbol,
-                "volume": volume,
+                "volume": normalized_volume,
                 "type": order_type,
                 "deviation": deviation,
                 "magic": self.login,
-                "comment": comment,
+                "comment": comment[:255],  # MT5 limits comment to 255 chars
                 "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": type_filling,
             }
 
             if price is not None:
                 request["price"] = price
             if sl is not None:
-                request["sl"] = sl
+                request["sl"] = round(sl, digits)
             if tp is not None:
-                request["tp"] = tp
+                request["tp"] = round(tp, digits)
 
-            result = mt5.order_send(request)
-            if result is None:
-                logger.error(f"Order send failed: {mt5.last_error()}")
-                return None
+            # ========== Step 6: Send order with retry logic ==========
+            retry_count = 0
+            while retry_count < max_retry:
+                result = mt5.order_send(request)
 
+                if result is None:
+                    logger.error(f"Order send failed: {mt5.last_error()}")
+                    return None
+
+                # Success
+                if result.retcode == mt5.TRADE_RETCODE_DONE:
+                    logger.info(f"Order sent successfully | Symbol: {symbol} | Type: {order_type} | "
+                               f"Price: {price} | Volume: {normalized_volume} | Order ID: {result.order}")
+                    return {
+                        'retcode': result.retcode,
+                        'deal': result.deal,
+                        'order': result.order,
+                        'volume': result.volume,
+                        'price': result.price,
+                        'comment': result.comment
+                    }
+
+                # Recoverable errors: requote (10030), insufficient liquidity (10018)
+                retry_errors = [10030, 10018]
+                if result.retcode in retry_errors and retry_count < max_retry - 1:
+                    retry_count += 1
+                    logger.warning(f"Order failed with recoverable error | Retry: {retry_count}/{max_retry} | "
+                                 f"retcode: {result.retcode} | error: {mt5.last_error()}")
+                    continue
+
+                # Non-recoverable error
+                logger.error(f"Order failed | retcode: {result.retcode} | error: {mt5.last_error()} | "
+                           f"request: {request}")
+                return {
+                    'retcode': result.retcode,
+                    'deal': result.deal,
+                    'order': result.order,
+                    'volume': result.volume,
+                    'price': result.price,
+                    'comment': result.comment
+                }
+
+            # Retry exhausted
+            logger.error(f"Order retry exhausted ({max_retry} attempts) | Symbol: {symbol} | "
+                        f"Price: {price} | Volume: {normalized_volume}")
             return {
-                'retcode': result.retcode,
-                'deal': result.deal,
-                'order': result.order,
-                'volume': result.volume,
-                'price': result.price,
-                'comment': result.comment
+                'retcode': -2,  # Custom code for retry exhausted
+                'deal': 0,
+                'order': 0,
+                'volume': 0,
+                'price': 0,
+                'comment': f'Retry exhausted after {max_retry} attempts'
             }
 
         except Exception as e:
@@ -350,6 +437,57 @@ class MT5Client:
                     'tp': pos.tp
                 }
                 for pos in positions
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get positions: {e}")
+            return []
+
+    def get_latest_tick(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Get latest tick data for a symbol
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Dict with bid, ask, last prices and timestamp, or None if failed
+        """
+        if not self.connected:
+            if not self.connect():
+                return None
+
+        try:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                logger.error(f"Failed to get tick for {symbol}: {mt5.last_error()}")
+                return None
+
+            return {
+                'symbol': symbol,
+                'bid': tick.bid,
+                'ask': tick.ask,
+                'last': tick.last,
+                'time': datetime.fromtimestamp(tick.time),
+                'volume': tick.volume
+            }
+        except Exception as e:
+            logger.error(f"Failed to get latest tick for {symbol}: {e}")
+            return None
+
+    def get_latest_price(self, symbol: str) -> Optional[float]:
+        """
+        Get latest last price for a symbol (convenience method)
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Latest last price, or None if failed
+        """
+        tick = self.get_latest_tick(symbol)
+        if tick:
+            return tick['last']
+        return None
             ]
 
         except Exception as e:
