@@ -219,25 +219,40 @@ export const useNotificationStore = defineStore('notification', () => {
       }
 
       // Construct full URL for uploaded sound files
+      // Use environment variable for API base URL
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://13.115.21.77:8000'
       const soundUrl = soundFile.startsWith('/uploads/')
-        ? `http://13.115.21.77:8001${soundFile}`
+        ? `${apiBaseUrl}${soundFile}`
         : soundFile
 
-      // Play the sound file the specified number of times
-      const audio = new Audio(soundUrl)
+      console.log('Playing alert sound:', soundUrl)
 
+      // Play the sound file the specified number of times
       for (let i = 0; i < repeatCount; i++) {
         try {
-          audio.currentTime = 0
-          await audio.play()
-          await new Promise(resolve => setTimeout(resolve, 10000)) // 10 seconds
-          audio.pause()
+          // Create a new Audio instance for each play to avoid conflicts
+          const audio = new Audio(soundUrl)
+
+          // Wait for audio to be ready
+          await new Promise((resolve, reject) => {
+            audio.addEventListener('canplaythrough', resolve, { once: true })
+            audio.addEventListener('error', reject, { once: true })
+            audio.load()
+          })
+
+          // Play and wait for completion
+          await new Promise((resolve, reject) => {
+            audio.addEventListener('ended', resolve, { once: true })
+            audio.addEventListener('error', reject, { once: true })
+            audio.play().catch(reject)
+          })
         } catch (audioError) {
-          // Fallback to Web Audio API if file not found
-          console.log('Audio file not found, using Web Audio API')
+          // Fallback to Web Audio API if file not found or play failed
+          console.log('Audio file error, using Web Audio API:', audioError.message)
           await playHelloMotoTone()
         }
 
+        // Pause between repetitions
         if (i < repeatCount - 1) {
           await new Promise(resolve => setTimeout(resolve, 500)) // 0.5s pause between plays
         }

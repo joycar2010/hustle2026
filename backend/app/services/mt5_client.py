@@ -569,7 +569,6 @@ class MT5Client:
         except Exception as e:
             logger.error(f"Error getting default symbol info: {e}")
             return None
-            ]
 
         except Exception as e:
             logger.error(f"Error getting positions: {e}")

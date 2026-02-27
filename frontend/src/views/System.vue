@@ -2599,8 +2599,9 @@ function playSound(soundPath) {
 
   console.log('playSound called with:', soundPath)
 
-  // If this sound is already playing, stop it
+  // If this sound is already playing, stop it (toggle behavior)
   if (playingSound.value === soundPath && currentAudio.value) {
+    console.log('Stopping currently playing sound')
     currentAudio.value.pause()
     currentAudio.value.currentTime = 0
     currentAudio.value = null
@@ -2610,13 +2611,15 @@ function playSound(soundPath) {
 
   // Stop any currently playing sound
   if (currentAudio.value) {
+    console.log('Stopping previous sound')
     currentAudio.value.pause()
     currentAudio.value.currentTime = 0
+    currentAudio.value = null
   }
 
   // Construct full URL for uploaded sound files
   const soundUrl = soundPath.startsWith('/uploads/')
-    ? `http://13.115.21.77:8001${soundPath}`
+    ? `${import.meta.env.VITE_API_BASE_URL}${soundPath}`
     : soundPath
 
   console.log('Constructed soundUrl:', soundUrl)
@@ -2628,15 +2631,27 @@ function playSound(soundPath) {
 
   // Clear state when audio ends
   audio.onended = () => {
+    console.log('Audio playback ended')
     currentAudio.value = null
     playingSound.value = null
   }
 
+  // Handle errors
+  audio.onerror = (error) => {
+    console.error('Audio error:', error)
+    console.error('Sound path was:', soundPath)
+    console.error('Sound URL was:', soundUrl)
+    alert(`播放失败: 无法加载音频文件\n路径: ${soundUrl}`)
+    currentAudio.value = null
+    playingSound.value = null
+  }
+
+  // Play the audio
   audio.play().catch(error => {
     console.error('Failed to play sound:', error)
     console.error('Sound path was:', soundPath)
     console.error('Sound URL was:', soundUrl)
-    alert('播放失败: ' + error.message)
+    alert(`播放失败: ${error.message}\n路径: ${soundUrl}`)
     currentAudio.value = null
     playingSound.value = null
   })
