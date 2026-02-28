@@ -11,16 +11,6 @@
       <!-- Top Info Bar -->
       <div class="bg-[#252930] rounded p-3">
         <div class="grid grid-cols-3 gap-3">
-          <!-- Spread Display -->
-          <div class="text-center">
-            <div class="text-xs text-gray-400 mb-1">
-              {{ type === 'reverse' ? '做多Bybit点差' : '做多Binance点差' }}
-            </div>
-            <div :class="['text-2xl font-mono font-bold', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
-              {{ currentSpread.toFixed(2) }} USDT
-            </div>
-          </div>
-
           <!-- Binance Available Assets -->
           <div>
             <div class="text-xs text-gray-400 mb-1">Binance可用资产</div>
@@ -34,6 +24,16 @@
             <div class="text-xs text-gray-400 mb-1">Bybit MT5可用资产</div>
             <div class="text-base font-mono font-bold">
               {{ formatNumber(bybitAssets) }} USDT
+            </div>
+          </div>
+
+          <!-- Spread Display -->
+          <div class="text-center">
+            <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">
+              {{ type === 'reverse' ? '做多Bybit点差' : '做多Binance点差' }}
+            </div>
+            <div :class="['text-xl font-mono font-bold whitespace-nowrap', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
+              {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
             </div>
           </div>
         </div>
@@ -245,6 +245,7 @@ const props = defineProps({
 
 const marketStore = useMarketStore()
 const currentSpread = ref(0)
+const closingSpread = ref(0)
 const binanceAssets = ref(10000)
 const bybitAssets = ref(8500)
 const executing = ref(false)
@@ -313,8 +314,10 @@ watch(() => marketStore.marketData, (newData) => {
   // Update spread based on strategy type
   if (props.type === 'forward') {
     currentSpread.value = newData.bybit_ask - newData.binance_bid
+    closingSpread.value = newData.binance_bid - newData.bybit_ask
   } else {
     currentSpread.value = newData.binance_ask - newData.bybit_bid
+    closingSpread.value = newData.bybit_bid - newData.binance_ask
   }
 
   // binance做多值: forward=binance_bid, reverse=binance_ask
