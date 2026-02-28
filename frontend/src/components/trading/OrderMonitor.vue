@@ -1,7 +1,7 @@
 <template>
   <div class="h-full flex gap-3 p-3 min-h-0">
-    <!-- Left: Strategy Pending Orders -->
-    <div class="w-1/3 flex flex-col min-h-0">
+    <!-- Left: Strategy Pending Orders - Increased width by 40% -->
+    <div class="w-[47%] flex flex-col min-h-0 flex-shrink-0">
       <h3 class="text-sm font-bold mb-3">策略挂单</h3>
       <div class="flex-1 overflow-y-auto">
         <table class="w-full text-xs">
@@ -36,60 +36,9 @@
       </div>
     </div>
 
-    <!-- Right: Order Records -->
+    <!-- Right: Spread Data Table -->
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold">订单记录</h3>
-        <select
-          v-model="filterSource"
-          class="bg-[#252930] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
-        >
-          <option value="">全部类型</option>
-          <option value="strategy">策略交易</option>
-          <option value="manual">人工操作</option>
-        </select>
-      </div>
-      <div class="flex-1 overflow-y-auto">
-        <table class="w-full text-xs">
-          <thead class="sticky top-0 bg-[#1e2329]">
-            <tr class="text-left text-gray-400 border-b border-[#2b3139]">
-              <th class="p-2">时间</th>
-              <th class="p-2">平台</th>
-              <th class="p-2">品种</th>
-              <th class="p-2">方向</th>
-              <th class="p-2">数量</th>
-              <th class="p-2">价格</th>
-              <th class="p-2">状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="orders.length === 0">
-              <td colspan="7" class="p-4 text-center text-gray-400">暂无记录</td>
-            </tr>
-            <tr
-              v-for="order in orders"
-              :key="order.id"
-              class="border-b border-[#2b3139] hover:bg-[#252930]"
-            >
-              <td class="p-2 text-gray-400">{{ formatTime(order.timestamp) }}</td>
-              <td class="p-2">{{ order.exchange }}</td>
-              <td class="p-2 font-mono">{{ order.symbol }}</td>
-              <td class="p-2">
-                <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                  {{ order.side === 'buy' ? '买入' : '卖出' }}
-                </span>
-              </td>
-              <td class="p-2 font-mono">{{ order.quantity }}</td>
-              <td class="p-2 font-mono">{{ order.price != null ? Number(order.price).toFixed(2) : '-' }}</td>
-              <td class="p-2">
-                <span :class="getStatusClass(order.status)">
-                  {{ getStatusText(order.status) }}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <SpreadDataTable />
     </div>
   </div>
 </template>
@@ -98,6 +47,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
+import SpreadDataTable from './SpreadDataTable.vue'
 
 const marketStore = useMarketStore()
 const orders = ref([])

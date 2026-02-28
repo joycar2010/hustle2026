@@ -1,14 +1,14 @@
 <template>
-  <div class="flex flex-col h-full overflow-y-auto">
+  <div class="flex flex-col h-full">
     <!-- Total Profit Header -->
-    <div class="p-4 bg-[#252930] border-b border-[#2b3139]">
+    <div class="p-4 bg-[#252930] border-b border-[#2b3139] flex-shrink-0">
       <div class="text-xs text-gray-400 mb-1">当前用户总盈利</div>
       <div class="text-2xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
         {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }} USDT
       </div>
     </div>
 
-    <div class="p-4 space-y-2">
+    <div class="flex-1 overflow-y-auto p-4 space-y-2">
       <!-- Dynamic Account Cards -->
       <div v-for="account in activeAccounts" :key="account.account_id" class="bg-[#252930] rounded-lg border border-[#2b3139]">
         <div class="p-3 border-b border-[#2b3139]">
@@ -98,20 +98,6 @@
       <div v-if="activeAccounts.length === 0" class="bg-[#252930] rounded-lg border border-[#2b3139] p-6 text-center">
         <div class="text-gray-400 text-sm">暂无启用的账户</div>
         <div class="text-gray-500 text-xs mt-2">请前往账户管理页面添加账户</div>
-      </div>
-
-      <!-- System Alerts -->
-      <div class="bg-[#252930] rounded-lg border border-[#2b3139] p-3">
-        <div class="text-sm font-semibold mb-3 text-[#f0b90b]">系统提醒</div>
-        <div class="space-y-2">
-          <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-2 text-xs">
-            <div class="w-1.5 h-1.5 rounded-full mt-1 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
-            <div class="flex-1">
-              <div class="text-gray-300">{{ alert.message }}</div>
-              <div v-if="alert.value" class="text-gray-500 mt-0.5">{{ alert.value }}</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>

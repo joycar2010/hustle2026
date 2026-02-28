@@ -22,15 +22,105 @@
         {{ item.badge }}
       </div>
     </button>
+
+    <!-- System Alerts -->
+    <div class="mt-4 bg-[#252930] rounded-lg border border-[#2b3139] p-3">
+      <div class="text-sm font-semibold mb-3 text-[#f0b90b]">系统提醒</div>
+      <div class="space-y-2">
+        <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-2 text-xs">
+          <div class="w-1.5 h-1.5 rounded-full mt-1 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
+          <div class="flex-1">
+            <div class="text-gray-300">{{ alert.message }}</div>
+            <div v-if="alert.value" class="text-gray-500 mt-0.5">{{ alert.value }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import api from '@/services/api'
 
 const router = useRouter()
 const activeNav = ref('strategy')
+const systemAlerts = ref([])
+
+onMounted(async () => {
+  await fetchSystemAlerts()
+  // Refresh alerts every 60 seconds
+  setInterval(fetchSystemAlerts, 60000)
+})
+
+async function fetchSystemAlerts() {
+  try {
+    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const data = response.data
+    systemAlerts.value = generateSystemAlerts(data)
+  } catch (error) {
+    console.error('Failed to fetch system alerts:', error)
+  }
+}
+
+function generateSystemAlerts(data) {
+  const alerts = []
+
+  if (data.summary) {
+    // Net value alert
+    alerts.push({
+      id: 1,
+      type: 'warning',
+      message: '账户净值提醒',
+      value: `当前净值: $${formatNumber(data.summary.net_assets || 0)}`
+    })
+
+    // Risk status
+    const riskRatio = data.summary.risk_ratio || 0
+    if (riskRatio > 60) {
+      alerts.push({
+        id: 2,
+        type: 'danger',
+        message: '风险率过高',
+        value: `当前风险率: ${riskRatio.toFixed(2)}%`
+      })
+    } else {
+      alerts.push({
+        id: 2,
+        type: 'success',
+        message: '风控状态',
+        value: '正常运行'
+      })
+    }
+
+    // Position count
+    if (data.summary.position_count > 0) {
+      alerts.push({
+        id: 3,
+        type: 'info',
+        message: '持仓提醒',
+        value: `当前持仓: ${data.summary.position_count} 个`
+      })
+    }
+  }
+
+  return alerts
+}
+
+function formatNumber(num) {
+  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function getAlertColor(type) {
+  const colors = {
+    success: 'bg-[#0ecb81]',
+    warning: 'bg-[#f0b90b]',
+    danger: 'bg-[#f6465d]',
+    info: 'bg-[#2196F3]'
+  }
+  return colors[type] || 'bg-gray-500'
+}
 
 // Icon components
 const DashboardIcon = {

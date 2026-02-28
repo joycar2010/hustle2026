@@ -4,11 +4,12 @@
       <h3 class="text-xs font-bold text-center">实时行情</h3>
     </div>
 
-    <div class="flex-1 overflow-hidden p-2 space-y-2">
+    <div class="flex-1 overflow-y-auto p-3">
+      <div class="grid grid-cols-2 gap-3 h-full">
       <!-- Bybit MT5 Card -->
-      <div class="bg-[#252930] rounded p-2">
-        <div class="flex items-center justify-between mb-1.5">
-          <div class="flex items-center space-x-1.5">
+      <div class="bg-[#252930] rounded p-3 flex flex-col border border-[#2b3139]">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center space-x-2">
             <div class="w-5 h-5 bg-[#ff9800] rounded flex items-center justify-center">
               <span class="text-white font-bold text-xs">B</span>
             </div>
@@ -17,28 +18,27 @@
               <div class="text-[10px] text-gray-400">XAUUSD.s</div>
             </div>
           </div>
-          <div :class="['w-1.5 h-1.5 rounded-full', bybitConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
+          <div :class="['w-2 h-2 rounded-full', bybitConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
         </div>
 
-        <!-- Real-time Price (Large) -->
+        <!-- Real-time Price (Compact) -->
         <div class="mb-2 text-center py-1.5 bg-[#1e2329] rounded">
           <div class="text-[10px] text-gray-400 mb-0.5">实时价格</div>
-          <div :class="['text-xl font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
+          <div :class="['text-lg font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
             {{ formatPrice(bybit.mid) }}
           </div>
         </div>
 
-        <!-- ASK and BID -->
-        <div class="space-y-1 mb-2">
-          <div class="flex justify-between items-center">
-            <span class="text-[10px] text-gray-400">ASK</span>
+        <!-- ASK and BID in one row -->
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
+            <div class="text-[10px] text-gray-400 mb-0.5">ASK</div>
             <div :class="['text-xs font-mono font-bold', getPriceClass(bybit.ask, bybit.prevAsk)]">
               {{ formatPrice(bybit.ask) }}
             </div>
           </div>
-
-          <div class="flex justify-between items-center">
-            <span class="text-[10px] text-gray-400">BID</span>
+          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
+            <div class="text-[10px] text-gray-400 mb-0.5">BID</div>
             <div :class="['text-xs font-mono font-bold', getPriceClass(bybit.bid, bybit.prevBid)]">
               {{ formatPrice(bybit.bid) }}
             </div>
@@ -50,7 +50,7 @@
           <span class="text-[10px] text-gray-400">卡顿</span>
           <div class="flex items-center space-x-1.5">
             <div class="flex space-x-0.5">
-              <div v-for="i in 5" :key="i" :class="['w-0.5 h-2 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
+              <div v-for="i in 5" :key="i" :class="['w-1 h-2 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
             <span class="text-[10px] font-mono">{{ bybitLagCount }}</span>
           </div>
@@ -58,9 +58,9 @@
       </div>
 
       <!-- Binance Card -->
-      <div class="bg-[#252930] rounded p-2">
-        <div class="flex items-center justify-between mb-1.5">
-          <div class="flex items-center space-x-1.5">
+      <div class="bg-[#252930] rounded p-3 flex flex-col border border-[#2b3139]">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center space-x-2">
             <div class="w-5 h-5 bg-[#f0b90b] rounded flex items-center justify-center">
               <span class="text-[#1a1d21] font-bold text-xs">B</span>
             </div>
@@ -69,28 +69,27 @@
               <div class="text-[10px] text-gray-400">XAUUSDT</div>
             </div>
           </div>
-          <div :class="['w-1.5 h-1.5 rounded-full', binanceConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
+          <div :class="['w-2 h-2 rounded-full', binanceConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
         </div>
 
-        <!-- Real-time Price (Large) -->
+        <!-- Real-time Price (Compact) -->
         <div class="mb-2 text-center py-1.5 bg-[#1e2329] rounded">
           <div class="text-[10px] text-gray-400 mb-0.5">实时价格</div>
-          <div :class="['text-xl font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
+          <div :class="['text-lg font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
             {{ formatPrice(binance.mid) }}
           </div>
         </div>
 
-        <!-- ASK and BID -->
-        <div class="space-y-1 mb-2">
-          <div class="flex justify-between items-center">
-            <span class="text-[10px] text-gray-400">ASK</span>
+        <!-- ASK and BID in one row -->
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
+            <div class="text-[10px] text-gray-400 mb-0.5">ASK</div>
             <div :class="['text-xs font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
               {{ formatPrice(binance.ask) }}
             </div>
           </div>
-
-          <div class="flex justify-between items-center">
-            <span class="text-[10px] text-gray-400">BID</span>
+          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
+            <div class="text-[10px] text-gray-400 mb-0.5">BID</div>
             <div :class="['text-xs font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
               {{ formatPrice(binance.bid) }}
             </div>
@@ -102,11 +101,12 @@
           <span class="text-[10px] text-gray-400">卡顿</span>
           <div class="flex items-center space-x-1.5">
             <div class="flex space-x-0.5">
-              <div v-for="i in 5" :key="i" :class="['w-0.5 h-2 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
+              <div v-for="i in 5" :key="i" :class="['w-1 h-2 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
             <span class="text-[10px] font-mono">{{ binanceLagCount }}</span>
           </div>
         </div>
+      </div>
       </div>
     </div>
   </div>

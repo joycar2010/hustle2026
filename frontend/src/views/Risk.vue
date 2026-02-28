@@ -1,257 +1,266 @@
 <template>
-  <div class="container mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6">风险控制</h1>
-
-    <!-- Emergency Stop -->
-    <div class="card mb-6">
-      <div class="flex justify-between items-center">
-        <div>
-          <h2 class="text-xl font-bold mb-2">紧急停止</h2>
-          <p class="text-sm text-gray-400">立即停止所有交易活动</p>
-        </div>
-        <button
-          @click="toggleEmergencyStop"
-          :class="['px-6 py-3 rounded font-bold', emergencyStopActive ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-600 hover:bg-gray-700']"
-        >
-          {{ emergencyStopActive ? '停止激活' : '激活紧急停止' }}
-        </button>
-      </div>
+  <div class="h-full flex flex-col overflow-hidden">
+    <!-- Header -->
+    <div class="px-3 py-3 border-b border-[#2b3139] flex-shrink-0">
+      <h1 class="text-lg font-bold">风险控制</h1>
     </div>
 
-    <!-- Risk Metrics -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="card">
-        <div class="text-sm text-gray-400 mb-1">账户风险比率</div>
-        <div class="text-2xl font-bold">{{ riskMetrics.accountRisk }}%</div>
-        <div class="text-xs" :class="riskMetrics.accountRisk > 80 ? 'text-red-500' : 'text-green-500'">
-          {{ riskMetrics.accountRisk > 80 ? '高风险' : '正常' }}
+    <!-- Scrollable Content -->
+    <div class="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+      <!-- Emergency Stop -->
+      <div class="card p-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold">紧急停止</h2>
+          <button
+            @click="toggleEmergencyStop"
+            :class="['px-4 py-2 rounded text-sm font-bold', emergencyStopActive ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-600 hover:bg-gray-700']"
+          >
+            {{ emergencyStopActive ? '停止激活' : '激活紧急停止' }}
+          </button>
         </div>
       </div>
 
-      <div class="card">
-        <div class="text-sm text-gray-400 mb-1">MT5状态</div>
-        <div class="text-2xl font-bold">{{ riskMetrics.mt5Status }}</div>
-        <div class="text-xs text-gray-400">连接状态</div>
-      </div>
-
-      <div class="card">
-        <div class="text-sm text-gray-400 mb-1">活动警报</div>
-        <div class="text-2xl font-bold text-red-500">{{ riskMetrics.activeAlerts }}</div>
-        <div class="text-xs text-gray-400">需要注意</div>
-      </div>
-    </div>
-
-    <!-- Alert Settings -->
-    <div class="card mb-6">
-      <h2 class="text-xl font-bold mb-4">警报设置</h2>
-
-      <!-- Account Net Asset Alerts -->
-      <div class="mb-6">
-        <h3 class="text-lg font-semibold mb-3 text-primary">账户净资产提醒设置</h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-sm mb-2">Binance 净资产提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.binanceNetAsset"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
+      <!-- Risk Metrics -->
+      <div class="space-y-2">
+        <div class="card p-2">
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] text-gray-400">账户风险比率</div>
+            <div class="flex items-center space-x-2">
+              <div class="text-base font-bold">{{ riskMetrics.accountRisk }}%</div>
+              <div class="text-[10px]" :class="riskMetrics.accountRisk > 80 ? 'text-red-500' : 'text-green-500'">
+                {{ riskMetrics.accountRisk > 80 ? '高风险' : '正常' }}
+              </div>
+            </div>
           </div>
-          <div>
-            <label class="block text-sm mb-2">Bybit MT5 净资产提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.bybitMT5NetAsset"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
+        </div>
+
+        <div class="card p-2">
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] text-gray-400">MT5状态</div>
+            <div class="flex items-center space-x-2">
+              <div class="text-base font-bold">{{ riskMetrics.mt5Status }}</div>
+              <div class="text-[10px] text-gray-400">连接状态</div>
+            </div>
           </div>
-          <div>
-            <label class="block text-sm mb-2">总资产提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.totalNetAsset"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
+        </div>
+
+        <div class="card p-2">
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] text-gray-400">活动警报</div>
+            <div class="flex items-center space-x-2">
+              <div class="text-base font-bold text-red-500">{{ riskMetrics.activeAlerts }}</div>
+              <div class="text-[10px] text-gray-400">需要注意</div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Liquidation Price Alerts -->
-      <div class="mb-6 border-t border-gray-700 pt-6">
-        <h3 class="text-lg font-semibold mb-3 text-primary">爆仓价位提醒设置</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm mb-2">Binance 爆仓价位提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.binanceLiquidationPrice"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">Bybit MT5 爆仓价位提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.bybitMT5LiquidationPrice"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
+      <!-- Alert Settings -->
+      <div class="card p-3">
+        <!-- Account Net Asset Alerts -->
+        <div class="mb-4">
+          <h3 class="text-xs font-semibold mb-2 text-primary">净资产提醒</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] mb-1">Binance 净资</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.binanceNetAsset"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">Bybit 净资</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.bybitMT5NetAsset"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-[10px] mb-1">总资产</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.totalNetAsset"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- MT5 Lag Count Setting -->
-      <div class="mb-6 border-t border-gray-700 pt-6">
-        <h3 class="text-lg font-semibold mb-3 text-primary">MT5卡顿次数设置</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Liquidation Price Alerts -->
+        <div class="mb-4 border-t border-gray-700 pt-3">
+          <h3 class="text-xs font-semibold mb-2 text-primary">爆仓价位提醒</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] mb-1">Binance 爆仓价</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.binanceLiquidationPrice"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">Bybit 爆仓价</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.bybitMT5LiquidationPrice"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- MT5 Lag Count Setting -->
+        <div class="mb-4 border-t border-gray-700 pt-3">
+          <h3 class="text-xs font-semibold mb-2 text-primary">MT5卡顿</h3>
           <div>
-            <label class="block text-sm mb-2">MT5卡顿次数提醒值</label>
+            <label class="block text-[10px] mb-1">MT5卡</label>
             <input
               type="number"
               v-model.number="alertSettings.mt5LagCount"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+              class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
               placeholder="输入卡顿次数"
             />
           </div>
         </div>
-      </div>
 
-      <!-- Reverse Arbitrage Alerts (Long Bybit) -->
-      <div class="mb-6 border-t border-gray-700 pt-6">
-        <h3 class="text-lg font-semibold mb-3 text-primary">反向套利（做多Bybit）提醒</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm mb-2">开仓价提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.reverseOpenPrice"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">持续开仓点差记录数据同步条数</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.reverseOpenSyncCount"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入条数"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">平仓价提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.reverseClosePrice"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">持续平仓点差记录数据同步条数</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.reverseCloseSyncCount"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入条数"
-            />
+        <!-- Reverse Arbitrage Alerts (Long Bybit) -->
+        <div class="mb-4 border-t border-gray-700 pt-3">
+          <h3 class="text-xs font-semibold mb-2 text-primary">反向提醒</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] mb-1">反向开仓点差值</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.reverseOpenPrice"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">反向开仓同步</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.reverseOpenSyncCount"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入条数"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">反向平仓点差值</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.reverseClosePrice"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">反向平仓同步</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.reverseCloseSyncCount"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入条数"
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Forward Arbitrage Alerts (Long Binance) -->
-      <div class="mb-6 border-t border-gray-700 pt-6">
-        <h3 class="text-lg font-semibold mb-3 text-primary">正向套利（做多Binance）提醒</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm mb-2">开仓价提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.forwardOpenPrice"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">持续开仓点差记录数据同步条数</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.forwardOpenSyncCount"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入条数"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">平仓价提醒值 (USDT)</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.forwardClosePrice"
-              step="0.01"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入提醒值"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-2">持续平仓点差记录数据同步条数</label>
-            <input
-              type="number"
-              v-model.number="alertSettings.forwardCloseSyncCount"
-              class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="输入条数"
-            />
+        <!-- Forward Arbitrage Alerts (Long Binance) -->
+        <div class="mb-4 border-t border-gray-700 pt-3">
+          <h3 class="text-xs font-semibold mb-2 text-primary">正向提醒</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] mb-1">正向开仓点差值</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.forwardOpenPrice"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">正向开仓同步</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.forwardOpenSyncCount"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入条数"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">正向平仓点差值</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.forwardClosePrice"
+                step="0.01"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入提醒值"
+              />
+            </div>
+            <div>
+              <label class="block text-[10px] mb-1">正向平仓同步</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.forwardCloseSyncCount"
+                class="w-full px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="输入条数"
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Save Button -->
-      <div class="flex justify-end">
+        <!-- Save Button -->
         <button
           @click="saveAlertSettings"
-          class="px-6 py-2 bg-primary hover:bg-primary-dark rounded font-semibold"
+          class="w-full px-4 py-2 bg-primary hover:bg-primary-dark rounded text-sm font-semibold"
         >
           保存设置
         </button>
       </div>
-    </div>
 
-    <!-- Risk Alerts -->
-    <div class="card">
-      <h2 class="text-xl font-bold mb-4">风险警报</h2>
-      <div class="space-y-3">
-        <div v-for="alert in alerts" :key="alert.id" class="bg-dark-200 rounded p-4">
-          <div class="flex justify-between items-start">
-            <div>
-              <div class="flex items-center space-x-2 mb-1">
-                <span :class="['px-2 py-1 rounded text-xs', getAlertClass(alert.level)]">
-                  {{ alert.level }}
-                </span>
-                <span class="font-bold">{{ alert.title }}</span>
+      <!-- Risk Alerts -->
+      <div class="card p-3">
+        <h2 class="text-sm font-bold mb-3">风险警报</h2>
+        <div class="space-y-2">
+          <div v-for="alert in alerts" :key="alert.id" class="bg-dark-200 rounded p-2">
+            <div class="flex justify-between items-start gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center space-x-1 mb-1">
+                  <span :class="['px-1.5 py-0.5 rounded text-xs', getAlertClass(alert.level)]">
+                    {{ alert.level }}
+                  </span>
+                  <span class="font-bold text-xs truncate">{{ alert.title }}</span>
+                </div>
+                <p class="text-xs text-gray-400 break-words">{{ alert.message }}</p>
+                <p class="text-xs text-gray-500 mt-1">{{ formatTime(alert.time) }}</p>
               </div>
-              <p class="text-sm text-gray-400">{{ alert.message }}</p>
-              <p class="text-xs text-gray-500 mt-1">{{ formatTime(alert.time) }}</p>
+              <button @click="dismissAlert(alert.id)" class="text-gray-400 hover:text-white flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-            <button @click="dismissAlert(alert.id)" class="text-gray-400 hover:text-white">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
           </div>
-        </div>
 
-        <div v-if="!alerts.length" class="text-center text-gray-400 py-8">
-          无活动警报
+          <div v-if="!alerts.length" class="text-center text-gray-400 py-6 text-xs">
+            无活动警报
+          </div>
         </div>
       </div>
     </div>

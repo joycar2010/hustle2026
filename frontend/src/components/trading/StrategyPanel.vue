@@ -1,13 +1,13 @@
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="p-3 border-b border-[#2b3139]">
+    <div class="p-3 border-b border-[#2b3139] flex-shrink-0">
       <h3 :class="['text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
         {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
       </h3>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-3 space-y-3">
+    <div class="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
       <!-- Top Info Bar -->
       <div class="bg-[#252930] rounded p-3">
         <div class="grid grid-cols-3 gap-3">
