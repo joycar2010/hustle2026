@@ -2327,10 +2327,17 @@ async function loadSystemInfo() {
 async function pushToGitHub() {
   if (!confirm('确定要推送当前版本到GitHub吗？')) return
   try {
-    await api.post('/api/v1/system/github/push', {
+    const response = await api.post('/api/v1/system/github/push', {
       remark: pushRemark.value || undefined
     })
-    alert('推送成功')
+
+    // Check if there's a warning about excluded large files
+    if (response.data.warning) {
+      alert('推送成功\n\n' + response.data.warning)
+    } else {
+      alert('推送成功')
+    }
+
     pushRemark.value = '' // Clear remark after successful push
     await loadVersionHistory()
   } catch (error) {

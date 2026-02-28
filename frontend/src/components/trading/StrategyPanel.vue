@@ -43,19 +43,35 @@
       <div class="bg-[#252930] rounded p-3 space-y-3">
         <div class="text-xs font-bold mb-2">策略配置</div>
 
-        <!-- M Coin Setting -->
-        <div>
-          <label :for="`mCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
-            单次最多手数 (XAU)
-            <span class="text-[#0ecb81] ml-1">≈ {{ (config.mCoin / 100).toFixed(2) }} Lot</span>
-          </label>
-          <input
-            :id="`mCoin-${type}`"
-            v-model.number="config.mCoin"
-            type="number"
-            step="1"
-            class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
-          />
+        <!-- M Coin Settings -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label :for="`openingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
+              {{ type === 'forward' ? '正向开仓单次下单手数' : '反向开仓单次下单手数' }} (XAU)
+              <span class="text-[#0ecb81] ml-1">≈ {{ (config.openingMCoin / 100).toFixed(2) }} Lot</span>
+            </label>
+            <input
+              :id="`openingMCoin-${type}`"
+              v-model.number="config.openingMCoin"
+              type="number"
+              step="1"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label :for="`closingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
+              {{ type === 'forward' ? '正向平仓单次下单手数' : '反向平仓单次下单手数' }} (XAU)
+              <span class="text-[#0ecb81] ml-1">≈ {{ (config.closingMCoin / 100).toFixed(2) }} Lot</span>
+            </label>
+            <input
+              :id="`closingMCoin-${type}`"
+              v-model.number="config.closingMCoin"
+              type="number"
+              step="1"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
+            />
+          </div>
         </div>
 
         <!-- Opening/Closing Position Toggles -->
@@ -98,7 +114,9 @@
         <!-- Data Sync Quantities -->
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">开仓触发次数</label>
+            <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
+              {{ type === 'forward' ? '正向开仓触发次数' : '反向开仓触发次数' }}
+            </label>
             <input
               :id="`openingSyncQty-${type}`"
               v-model.number="config.openingSyncQty"
@@ -110,7 +128,9 @@
           </div>
 
           <div>
-            <label :for="`closingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">平仓触发次数</label>
+            <label :for="`closingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
+              {{ type === 'forward' ? '正向平仓触发次数' : '反向平仓触发次数' }}
+            </label>
             <input
               :id="`closingSyncQty-${type}`"
               v-model.number="config.closingSyncQty"
@@ -178,7 +198,9 @@
 
             <div class="grid grid-cols-3 gap-2">
               <div>
-                <label :for="`openPrice-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">开仓价</label>
+                <label :for="`openPrice-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
+                  {{ type === 'forward' ? '正向开仓点差值' : '反向开仓点差值' }}
+                </label>
                 <input
                   :id="`openPrice-${type}-${index}`"
                   v-model.number="ladder.openPrice"
@@ -190,7 +212,9 @@
               </div>
 
               <div>
-                <label :for="`threshold-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">平仓价</label>
+                <label :for="`threshold-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
+                  {{ type === 'forward' ? '正向平仓点差值' : '反向平仓点差值' }}
+                </label>
                 <input
                   :id="`threshold-${type}-${index}`"
                   v-model.number="ladder.threshold"
@@ -203,7 +227,7 @@
 
               <div>
                 <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
-                  下单总手数 (XAU)
+                  {{ type === 'forward' ? '正向下单总手数' : '反向下单总手数' }} (XAU)
                   <span class="text-[#0ecb81] ml-1">≈ {{ (ladder.qtyLimit / 100).toFixed(2) }} Lot</span>
                 </label>
                 <input
@@ -254,7 +278,8 @@ const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
 
 const config = ref({
-  mCoin: 5,
+  openingMCoin: 5,
+  closingMCoin: 5,
   openingEnabled: false,
   closingEnabled: false,
   openingSyncQty: 3,
@@ -289,7 +314,8 @@ async function loadConfigFromDB() {
     const response = await api.get(`/api/v1/strategies/configs/by-type/${props.type}`)
     const data = response.data
     configId.value = data.config_id
-    config.value.mCoin = data.m_coin
+    config.value.openingMCoin = data.opening_m_coin || data.m_coin || 5
+    config.value.closingMCoin = data.closing_m_coin || data.m_coin || 5
     config.value.openingSyncQty = data.opening_sync_count
     config.value.closingSyncQty = data.closing_sync_count
     if (data.ladders && data.ladders.length > 0) {
@@ -404,7 +430,8 @@ async function saveConfig() {
       mt5_stuck_threshold: 5,
       opening_sync_count: Math.floor(config.value.openingSyncQty),
       closing_sync_count: Math.floor(config.value.closingSyncQty),
-      m_coin: Number(config.value.mCoin),
+      opening_m_coin: Number(config.value.openingMCoin),
+      closing_m_coin: Number(config.value.closingMCoin),
       ladders: config.value.ladders.map(l => ({
         enabled: l.enabled,
         openPrice: Number(Number(l.openPrice).toFixed(2)),
@@ -631,7 +658,7 @@ async function executeBatchOpening(ladder) {
     }
 
     const totalQuantity = ladder.qtyLimit
-    const mCoin = config.value.mCoin
+    const mCoin = config.value.openingMCoin
     const numBatches = Math.ceil(totalQuantity / mCoin)
     let remainingQuantity = totalQuantity
 
@@ -728,7 +755,7 @@ async function executeBatchClosing(ladder) {
     }
 
     const totalQuantity = ladder.qtyLimit
-    const mCoin = config.value.mCoin
+    const mCoin = config.value.closingMCoin
     const numBatches = Math.ceil(totalQuantity / mCoin)
     let remainingQuantity = totalQuantity
 

@@ -605,6 +605,9 @@ async def push_to_github(
 
         current_branch = branch_result.stdout.strip()
 
+        # Initialize warning message
+        warning_msg = None
+
         # Check if there are changes to commit
         status_result = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -621,16 +624,82 @@ async def push_to_github(
             else:
                 commit_message = f"Backup: {timestamp}"
 
-            # Add all changes
-            add_result = subprocess.run(
-                ["git", "add", "."],
-                capture_output=True,
-                text=True,
-                cwd=".."
-            )
+            # Check for large files before adding (GitHub limit is 100MB)
+            import os
+            large_files = []
+            max_size = 100 * 1024 * 1024  # 100MB in bytes
 
-            if add_result.returncode != 0:
-                raise Exception(f"Git add failed: {add_result.stderr}")
+            # Get list of files that would be added
+            files_to_check = []
+            for line in status_result.stdout.strip().split('\n'):
+                if line:
+                    # Parse git status output (format: XY filename)
+                    status_code = line[:2]
+                    filename = line[3:].strip()
+                    # Remove quotes if present
+                    if filename.startswith('"') and filename.endswith('"'):
+                        filename = filename[1:-1]
+                    files_to_check.append(filename)
+
+            # Check file sizes
+            for filename in files_to_check:
+                filepath = os.path.join("..", filename)
+                if os.path.isfile(filepath):
+                    try:
+                        file_size = os.path.getsize(filepath)
+                        if file_size > max_size:
+                            large_files.append({
+                                "name": filename,
+                                "size": file_size,
+                                "size_mb": round(file_size / (1024 * 1024), 2)
+                            })
+                    except Exception as e:
+                        # Skip files that can't be accessed
+                        pass
+
+            # If there are large files, exclude them and warn
+            if large_files:
+                # Add files individually, excluding large ones
+                for filename in files_to_check:
+                    filepath = os.path.join("..", filename)
+                    try:
+                        if os.path.isfile(filepath):
+                            file_size = os.path.getsize(filepath)
+                            if file_size <= max_size:
+                                add_result = subprocess.run(
+                                    ["git", "add", filename],
+                                    capture_output=True,
+                                    text=True,
+                                    cwd=".."
+                                )
+                                if add_result.returncode != 0:
+                                    raise Exception(f"Git add failed for {filename}: {add_result.stderr}")
+                        else:
+                            # Add directories or deleted files
+                            add_result = subprocess.run(
+                                ["git", "add", filename],
+                                capture_output=True,
+                                text=True,
+                                cwd=".."
+                            )
+                    except Exception as e:
+                        # Skip files that cause errors
+                        print(f"Warning: Could not add {filename}: {str(e)}")
+
+                # Create warning message
+                large_files_msg = ", ".join([f"{f['name']} ({f['size_mb']}MB)" for f in large_files])
+                warning_msg = f"警告: 以下文件超过100MB已被排除: {large_files_msg}"
+            else:
+                # No large files, add all changes normally
+                add_result = subprocess.run(
+                    ["git", "add", "."],
+                    capture_output=True,
+                    text=True,
+                    cwd=".."
+                )
+
+                if add_result.returncode != 0:
+                    raise Exception(f"Git add failed: {add_result.stderr}")
 
             # Commit changes
             commit_result = subprocess.run(
@@ -661,11 +730,17 @@ async def push_to_github(
         if push_result.returncode != 0:
             raise Exception(f"Git push failed: {push_result.stderr}")
 
-        return {
+        response_data = {
             "message": f"Successfully pushed to GitHub branch: {current_branch}",
             "branch": current_branch,
             "output": push_result.stdout
         }
+
+        # Add warning message if large files were excluded
+        if warning_msg:
+            response_data["warning"] = warning_msg
+
+        return response_data
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -20,7 +20,9 @@ class StrategyConfigCreate(BaseModel):
     mt5_stuck_threshold: int = Field(default=5, ge=1, le=20)
     opening_sync_count: int = Field(default=3, ge=1, le=100)
     closing_sync_count: int = Field(default=3, ge=1, le=100)
-    m_coin: float = Field(default=5.0, gt=0)
+    m_coin: Optional[float] = Field(default=None, gt=0)  # Deprecated, kept for backward compatibility
+    opening_m_coin: float = Field(default=5.0, gt=0)
+    closing_m_coin: float = Field(default=5.0, gt=0)
     ladders: List[LadderConfig] = Field(default_factory=lambda: [
         LadderConfig(enabled=True, openPrice=3.0, threshold=2.0, qtyLimit=3.0),
         LadderConfig(enabled=True, openPrice=3.0, threshold=3.0, qtyLimit=3.0),
@@ -37,7 +39,9 @@ class StrategyConfigUpdate(BaseModel):
     mt5_stuck_threshold: Optional[int] = Field(None, ge=1, le=20)
     opening_sync_count: Optional[int] = Field(None, ge=1, le=100)
     closing_sync_count: Optional[int] = Field(None, ge=1, le=100)
-    m_coin: Optional[float] = Field(None, gt=0)
+    m_coin: Optional[float] = Field(None, gt=0)  # Deprecated
+    opening_m_coin: Optional[float] = Field(None, gt=0)
+    closing_m_coin: Optional[float] = Field(None, gt=0)
     ladders: Optional[List[LadderConfig]] = None
     is_enabled: Optional[bool] = None
 
@@ -53,7 +57,9 @@ class StrategyConfigResponse(BaseModel):
     mt5_stuck_threshold: int
     opening_sync_count: int
     closing_sync_count: int
-    m_coin: float
+    m_coin: float  # Kept for backward compatibility
+    opening_m_coin: float
+    closing_m_coin: float
     ladders: List[Any]
     is_enabled: bool
     create_time: datetime

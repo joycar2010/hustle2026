@@ -96,10 +96,28 @@ async def upsert_strategy_config(
         config.mt5_stuck_threshold = config_data.mt5_stuck_threshold
         config.opening_sync_count = config_data.opening_sync_count
         config.closing_sync_count = config_data.closing_sync_count
-        config.m_coin = config_data.m_coin
+        # Handle backward compatibility
+        if config_data.m_coin is not None:
+            config.m_coin = config_data.m_coin
+            config.opening_m_coin = config_data.m_coin
+            config.closing_m_coin = config_data.m_coin
+        else:
+            config.opening_m_coin = config_data.opening_m_coin
+            config.closing_m_coin = config_data.closing_m_coin
+            config.m_coin = config_data.opening_m_coin  # Keep m_coin for backward compatibility
         config.ladders = ladders_data
         config.is_enabled = config_data.is_enabled
     else:
+        # Handle backward compatibility for new records
+        if config_data.m_coin is not None:
+            opening_m_coin = config_data.m_coin
+            closing_m_coin = config_data.m_coin
+            m_coin = config_data.m_coin
+        else:
+            opening_m_coin = config_data.opening_m_coin
+            closing_m_coin = config_data.closing_m_coin
+            m_coin = config_data.opening_m_coin
+
         config = StrategyConfig(
             user_id=UUID(user_id),
             strategy_type=config_data.strategy_type,
@@ -109,7 +127,9 @@ async def upsert_strategy_config(
             mt5_stuck_threshold=config_data.mt5_stuck_threshold,
             opening_sync_count=config_data.opening_sync_count,
             closing_sync_count=config_data.closing_sync_count,
-            m_coin=config_data.m_coin,
+            m_coin=m_coin,
+            opening_m_coin=opening_m_coin,
+            closing_m_coin=closing_m_coin,
             ladders=ladders_data,
             is_enabled=config_data.is_enabled,
         )
