@@ -948,6 +948,15 @@
                     @change="saveRefreshSettings"
                     class="px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
                   >
+                    <option :value="100">0.1秒</option>
+                    <option :value="200">0.2秒</option>
+                    <option :value="300">0.3秒</option>
+                    <option :value="400">0.4秒</option>
+                    <option :value="500">0.5秒</option>
+                    <option :value="600">0.6秒</option>
+                    <option :value="700">0.7秒</option>
+                    <option :value="800">0.8秒</option>
+                    <option :value="900">0.9秒</option>
                     <option :value="1000">1秒</option>
                     <option :value="2000">2秒</option>
                     <option :value="3000">3秒</option>
@@ -2273,7 +2282,7 @@ const refreshModules = ref([
   { id: 'dashboard_price', name: 'Dashboard 价格数据', description: '实时市场价格和点差', interval: 1000, enabled: true, default: 1000 },
   { id: 'spread_table', name: '点差数据表', description: '实时点差监控', interval: 1000, enabled: true, default: 1000 },
   { id: 'spread_chart', name: '点差图表', description: '盈利数据可视化', interval: 1000, enabled: true, default: 1000 },
-  { id: 'strategy_panel', name: '策略面板', description: '策略状态更新', interval: 1000, enabled: true, default: 1000 },
+  { id: 'strategy_panel', name: '策略面板', description: '策略持仓数据更新（包含点差和持仓统计）', interval: 1000, enabled: true, default: 1000 },
   { id: 'risk_management', name: '风险管理', description: '风险指标监控', interval: 5000, enabled: true, default: 5000 },
   { id: 'open_orders', name: '未平仓订单', description: '订单列表更新', interval: 5000, enabled: true, default: 5000 },
   { id: 'manual_trading', name: '手动交易', description: '最近订单刷新', interval: 5000, enabled: true, default: 5000 },

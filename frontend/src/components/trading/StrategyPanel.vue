@@ -369,6 +369,7 @@ const config = ref({
 const configId = ref(null)
 const validationErrors = ref([])
 const positionSummary = ref(null)
+let positionRefreshInterval = null
 
 onMounted(async () => {
   config.value.openingEnabled = false
@@ -387,6 +388,9 @@ onMounted(async () => {
 
   // Initial position data fetch
   await refreshPositions()
+
+  // Setup auto-refresh for position data based on system settings
+  setupPositionRefresh()
 })
 
 async function loadConfigFromDB() {
@@ -410,6 +414,10 @@ async function loadConfigFromDB() {
 }
 
 onUnmounted(() => {
+  // Clear position refresh interval
+  if (positionRefreshInterval) {
+    clearInterval(positionRefreshInterval)
+  }
   // No cleanup needed - WebSocket stays connected for other components
 })
 
@@ -499,6 +507,40 @@ async function refreshPositions() {
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     // Don't show error to user, just log it
+  }
+}
+
+function setupPositionRefresh() {
+  // Clear existing interval if any
+  if (positionRefreshInterval) {
+    clearInterval(positionRefreshInterval)
+  }
+
+  // Get refresh settings from localStorage
+  try {
+    const saved = localStorage.getItem('refresh-settings')
+    if (saved) {
+      const data = JSON.parse(saved)
+      const strategyModule = data.modules?.find(m => m.id === 'strategy_panel')
+
+      if (strategyModule && strategyModule.enabled && strategyModule.interval > 0) {
+        // Setup interval based on saved settings
+        positionRefreshInterval = setInterval(() => {
+          refreshPositions()
+        }, strategyModule.interval)
+      }
+    } else {
+      // Default: refresh every 1 second if no settings found
+      positionRefreshInterval = setInterval(() => {
+        refreshPositions()
+      }, 1000)
+    }
+  } catch (error) {
+    console.error('Failed to load refresh settings:', error)
+    // Fallback to default 1 second refresh
+    positionRefreshInterval = setInterval(() => {
+      refreshPositions()
+    }, 1000)
   }
 }
 
