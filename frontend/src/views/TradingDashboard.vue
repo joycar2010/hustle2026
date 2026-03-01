@@ -19,9 +19,9 @@
           <StrategyPanel type="reverse" />
         </div>
 
-        <!-- Manual Trading (Middle) -->
+        <!-- Market Cards (Middle) - Changed from ManualTrading -->
         <div class="w-96 bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
-          <ManualTrading />
+          <MarketCards />
         </div>
 
         <!-- Forward Strategy Panel -->
@@ -37,9 +37,9 @@
           <OrderMonitor />
         </div>
 
-        <!-- Market Cards (Right) - Decreased width to 55% -->
+        <!-- Manual Trading (Right) - Changed from MarketCards, Decreased width to 55% -->
         <div class="w-[55%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
-          <MarketCards />
+          <ManualTrading />
         </div>
       </section>
     </main>

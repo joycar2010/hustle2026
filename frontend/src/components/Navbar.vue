@@ -255,11 +255,6 @@ const navItems = [
     icon: 'AccountsIcon',
   },
   {
-    path: '/risk',
-    label: '风控提醒',
-    icon: 'RiskIcon',
-  },
-  {
     path: '/system',
     label: '系统管理',
     icon: 'SystemIcon',

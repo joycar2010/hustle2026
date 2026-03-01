@@ -51,13 +51,14 @@ onMounted(() => {
 watch(() => marketStore.marketData, (newData) => {
   if (newData) {
     // 计算点差
-    // 做多Bybit点差 (Reverse spread) = Binance ASK - Bybit BID
-    // 做多Binance点差 (Forward spread) = Bybit ASK - Binance BID
+    // 新公式：
+    // 反向开仓: bybit做多点差 = binance_ask - bybit_ask
+    // 正向开仓: binance做多点差 = bybit_bid - binance_bid
     const spreadItem = {
       id: Date.now() + Math.random(),
       timestamp: new Date(newData.timestamp || Date.now()).getTime(),
-      bybitSpread: newData.binance_ask - newData.bybit_bid,  // 做多Bybit (Reverse)
-      binanceSpread: newData.bybit_ask - newData.binance_bid,  // 做多Binance (Forward)
+      bybitSpread: newData.binance_ask - newData.bybit_ask,  // 做多Bybit (反向开仓)
+      binanceSpread: newData.bybit_bid - newData.binance_bid,  // 做多Binance (正向开仓)
       isNew: true
     }
 

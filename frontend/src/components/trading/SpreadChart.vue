@@ -129,8 +129,11 @@ onUnmounted(() => {
 watch(() => marketStore.marketData, (newData) => {
   if (newData && profitData.value.length > 0) {
     // 计算新的点差数据
-    const forwardSpread = newData.bybit_ask - newData.binance_bid  // 做多Binance
-    const reverseSpread = newData.binance_ask - newData.bybit_bid  // 做多Bybit
+    // 新公式：
+    // 正向开仓: binance做多点差 = bybit_bid - binance_bid
+    // 反向开仓: bybit做多点差 = binance_ask - bybit_ask
+    const forwardSpread = newData.bybit_bid - newData.binance_bid  // 做多Binance (正向开仓)
+    const reverseSpread = newData.binance_ask - newData.bybit_ask  // 做多Bybit (反向开仓)
 
     const newPoint = {
       timestamp: newData.timestamp || new Date().toISOString(),

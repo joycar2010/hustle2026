@@ -104,19 +104,19 @@ class MarketDataService:
     ) -> SpreadData:
         """Calculate arbitrage spreads
 
-        Forward arbitrage (long Binance):
-        - Entry: Sell Bybit (bybit_ask) - Buy Binance (binance_bid)
-        - Exit: Sell Binance (binance_ask) - Buy Bybit (bybit_bid)
-
-        Reverse arbitrage (long Bybit):
-        - Entry: Sell Binance (binance_ask) - Buy Bybit (bybit_bid)
-        - Exit: Sell Bybit (bybit_ask) - Buy Binance (binance_bid)
+        新公式：
+        正向开仓 (binance做多点差): bybit_bid - binance_bid
+        正向平仓 (binance平仓点差): bybit_ask - binance_ask
+        反向开仓 (bybit做多点差): binance_ask - bybit_ask
+        反向平仓 (bybit平仓点差): binance_bid - bybit_bid
         """
-        forward_entry_spread = bybit_quote.ask_price - binance_quote.bid_price
-        forward_exit_spread = binance_quote.ask_price - bybit_quote.bid_price
+        # 正向套利
+        forward_entry_spread = bybit_quote.bid_price - binance_quote.bid_price  # 正向开仓
+        forward_exit_spread = bybit_quote.ask_price - binance_quote.ask_price   # 正向平仓
 
-        reverse_entry_spread = binance_quote.ask_price - bybit_quote.bid_price
-        reverse_exit_spread = bybit_quote.ask_price - binance_quote.bid_price
+        # 反向套利
+        reverse_entry_spread = binance_quote.ask_price - bybit_quote.ask_price  # 反向开仓
+        reverse_exit_spread = binance_quote.bid_price - bybit_quote.bid_price   # 反向平仓
 
         return SpreadData(
             binance_quote=binance_quote,

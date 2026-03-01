@@ -8,6 +8,55 @@
     </div>
 
     <div class="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
+      <!-- Validation Errors Display -->
+      <div v-if="validationErrors.length > 0" class="bg-[#f6465d] bg-opacity-10 border border-[#f6465d] rounded p-3">
+        <div class="flex items-start space-x-2">
+          <span class="text-[#f6465d] text-lg">⚠</span>
+          <div class="flex-1">
+            <div class="text-sm font-bold text-[#f6465d] mb-1">配置验证失败</div>
+            <ul class="text-xs text-[#f6465d] space-y-1">
+              <li v-for="(error, index) in validationErrors" :key="index">• {{ error }}</li>
+            </ul>
+          </div>
+          <button @click="validationErrors = []" class="text-[#f6465d] hover:text-white transition-colors">
+            <span class="text-lg">×</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Position Summary -->
+      <div v-if="positionSummary" class="bg-[#252930] rounded p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold">持仓统计</span>
+          <button
+            @click="refreshPositions"
+            class="px-2 py-1 text-xs bg-[#2b3139] hover:bg-[#3b4149] rounded transition-colors"
+          >
+            刷新
+          </button>
+        </div>
+        <div class="grid grid-cols-3 gap-3 text-xs">
+          <div>
+            <div class="text-gray-400 mb-1">当前持仓</div>
+            <div class="font-mono font-bold text-[#0ecb81]">
+              {{ positionSummary.total_current_position.toFixed(2) }}
+            </div>
+          </div>
+          <div>
+            <div class="text-gray-400 mb-1">累计开仓</div>
+            <div class="font-mono font-bold">
+              {{ positionSummary.total_opened.toFixed(2) }}
+            </div>
+          </div>
+          <div>
+            <div class="text-gray-400 mb-1">累计平仓</div>
+            <div class="font-mono font-bold">
+              {{ positionSummary.total_closed.toFixed(2) }}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Top Info Bar -->
       <div class="bg-[#252930] rounded p-3">
         <div class="grid grid-cols-3 gap-3">
@@ -91,6 +140,19 @@
             >
               {{ executing ? '执行中...' : (config.openingEnabled ? '停用开仓' : (type === 'forward' ? '启用正向开仓' : '启用反向开仓')) }}
             </button>
+            <!-- Trigger Progress for Opening -->
+            <div v-if="config.openingEnabled" class="mt-2 text-xs">
+              <div class="flex justify-between text-gray-400 mb-1">
+                <span>触发进度</span>
+                <span>{{ triggerCount.opening }} / {{ config.openingSyncQty }}</span>
+              </div>
+              <div class="w-full bg-[#1a1d21] rounded-full h-2">
+                <div
+                  class="bg-[#0ecb81] h-2 rounded-full transition-all duration-300"
+                  :style="{ width: `${Math.min(100, (triggerCount.opening / config.openingSyncQty) * 100)}%` }"
+                ></div>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -108,6 +170,19 @@
             >
               {{ executing ? '执行中...' : (config.closingEnabled ? '停用平仓' : (type === 'forward' ? '启用正向平仓' : '启用反向平仓')) }}
             </button>
+            <!-- Trigger Progress for Closing -->
+            <div v-if="config.closingEnabled" class="mt-2 text-xs">
+              <div class="flex justify-between text-gray-400 mb-1">
+                <span>触发进度</span>
+                <span>{{ triggerCount.closing }} / {{ config.closingSyncQty }}</span>
+              </div>
+              <div class="w-full bg-[#1a1d21] rounded-full h-2">
+                <div
+                  class="bg-[#f6465d] h-2 rounded-full transition-all duration-300"
+                  :style="{ width: `${Math.min(100, (triggerCount.closing / config.closingSyncQty) * 100)}%` }"
+                ></div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -292,6 +367,8 @@ const config = ref({
 })
 
 const configId = ref(null)
+const validationErrors = ref([])
+const positionSummary = ref(null)
 
 onMounted(async () => {
   config.value.openingEnabled = false
@@ -307,6 +384,9 @@ onMounted(async () => {
 
   // Initial account data fetch
   await fetchAccountData()
+
+  // Initial position data fetch
+  await refreshPositions()
 })
 
 async function loadConfigFromDB() {
@@ -338,12 +418,17 @@ watch(() => marketStore.marketData, (newData) => {
   if (!newData) return
 
   // Update spread based on strategy type
+  // 新公式：
+  // 正向开仓: binance做多点差 = bybit_bid - binance_bid
+  // 正向平仓: binance平仓点差 = bybit_ask - binance_ask
+  // 反向开仓: bybit做多点差 = binance_ask - bybit_ask
+  // 反向平仓: bybit平仓点差 = binance_bid - bybit_bid
   if (props.type === 'forward') {
-    currentSpread.value = newData.bybit_ask - newData.binance_bid
-    closingSpread.value = newData.binance_bid - newData.bybit_ask
+    currentSpread.value = newData.bybit_bid - newData.binance_bid  // 正向开仓
+    closingSpread.value = newData.bybit_ask - newData.binance_ask  // 正向平仓
   } else {
-    currentSpread.value = newData.binance_ask - newData.bybit_bid
-    closingSpread.value = newData.bybit_bid - newData.binance_ask
+    currentSpread.value = newData.binance_ask - newData.bybit_ask  // 反向开仓
+    closingSpread.value = newData.binance_bid - newData.bybit_bid  // 反向平仓
   }
 
   // binance做多值: forward=binance_bid, reverse=binance_ask
@@ -402,6 +487,18 @@ async function fetchAccountData() {
       sum + (acc.balance?.available_balance || 0), 0)
   } catch (error) {
     console.error('Failed to fetch account data:', error)
+  }
+}
+
+async function refreshPositions() {
+  if (!configId.value) return
+
+  try {
+    const response = await api.get(`/api/v1/strategies/positions/${configId.value}`)
+    positionSummary.value = response.data.summary
+  } catch (error) {
+    console.error('Failed to fetch positions:', error)
+    // Don't show error to user, just log it
   }
 }
 
@@ -601,17 +698,25 @@ function toggleOpening() {
   if (config.value.openingEnabled) {
     config.value.openingEnabled = false
     triggerCount.value.opening = 0
+    validationErrors.value = []
   } else {
-    const validation = validateAccountsForExecution()
-    if (!validation.valid) {
-      alert(validation.message)
+    // Clear previous errors
+    validationErrors.value = []
+
+    // Validate accounts
+    const accountValidation = validateAccountsForExecution()
+    if (!accountValidation.valid) {
+      validationErrors.value = [accountValidation.message]
       return
     }
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    if (enabledLadders.length === 0) {
-      alert('请至少启用一个阶梯配置')
+
+    // Validate ladder configuration
+    const configValidation = validateLadderConfig('opening')
+    if (!configValidation.valid) {
+      validationErrors.value = configValidation.errors
       return
     }
+
     config.value.openingEnabled = true
     orderPlaced.value.opening = false
     triggerCount.value.opening = 0
@@ -619,21 +724,36 @@ function toggleOpening() {
   }
 }
 
-function toggleClosing() {
+async function toggleClosing() {
   if (config.value.closingEnabled) {
     config.value.closingEnabled = false
     triggerCount.value.closing = 0
+    validationErrors.value = []
   } else {
-    const validation = validateAccountsForExecution()
-    if (!validation.valid) {
-      alert(validation.message)
+    // Clear previous errors
+    validationErrors.value = []
+
+    // Validate accounts
+    const accountValidation = validateAccountsForExecution()
+    if (!accountValidation.valid) {
+      validationErrors.value = [accountValidation.message]
       return
     }
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    if (enabledLadders.length === 0) {
-      alert('请至少启用一个阶梯配置')
+
+    // Validate ladder configuration
+    const configValidation = validateLadderConfig('closing')
+    if (!configValidation.valid) {
+      validationErrors.value = configValidation.errors
       return
     }
+
+    // Check position sufficiency
+    const positionCheck = await checkPositionForClosing()
+    if (!positionCheck.valid) {
+      validationErrors.value = [positionCheck.message]
+      return
+    }
+
     config.value.closingEnabled = true
     orderPlaced.value.closing = false
     triggerCount.value.closing = 0
@@ -831,6 +951,113 @@ async function executeBatchClosing(ladder) {
     console.error('Failed to execute batch closing:', error)
   } finally {
     executing.value = false
+  }
+}
+
+async function checkPositionForClosing() {
+  try {
+    // Get current positions
+    const response = await api.get('/api/v1/positions')
+    const positions = response.data.positions || []
+
+    // Calculate total required quantity from enabled ladders
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    const totalRequiredQty = enabledLadders.reduce((sum, ladder) => sum + (ladder.qtyLimit || 0), 0)
+
+    // Find positions for the current strategy type
+    // For reverse: Bybit long position (platform_id=2, side='BUY')
+    // For forward: Binance long position (platform_id=1, side='BUY')
+    const platformId = props.type === 'reverse' ? 2 : 1
+    const relevantPositions = positions.filter(p =>
+      p.platform_id === platformId &&
+      p.symbol === 'XAUUSD' &&
+      p.quantity > 0
+    )
+
+    const currentPosition = relevantPositions.reduce((sum, p) => sum + (p.quantity || 0), 0)
+
+    if (currentPosition < totalRequiredQty) {
+      return {
+        valid: false,
+        message: `持仓不足:\n当前持仓: ${currentPosition.toFixed(2)}\n需要平仓: ${totalRequiredQty.toFixed(2)}\n差额: ${(totalRequiredQty - currentPosition).toFixed(2)}\n\n请调整阶梯配置或等待持仓增加`
+      }
+    }
+
+    return { valid: true }
+  } catch (error) {
+    console.error('Failed to check position:', error)
+    return {
+      valid: false,
+      message: '无法获取持仓信息，请稍后再试'
+    }
+  }
+}
+
+function validateLadderConfig(action) {
+  const errors = []
+
+  // Check if there are enabled ladders
+  const enabledLadders = config.value.ladders.filter(l => l.enabled)
+  if (enabledLadders.length === 0) {
+    errors.push('至少需要启用一个阶梯')
+    return { valid: false, errors }
+  }
+
+  // Check each enabled ladder
+  enabledLadders.forEach((ladder) => {
+    const ladderNum = config.value.ladders.indexOf(ladder) + 1
+
+    if (action === 'opening') {
+      // Check opening spread value
+      if (!ladder.openPrice || ladder.openPrice <= 0) {
+        errors.push(`阶梯${ladderNum}: 开仓点差值必须大于0`)
+      }
+
+      // Check opening trigger count (config level)
+      if (!config.value.openingSyncQty || config.value.openingSyncQty < 1) {
+        errors.push(`开仓触发次数必须至少为1`)
+      }
+
+      // Check opening m_coin
+      if (!config.value.openingMCoin || config.value.openingMCoin <= 0) {
+        errors.push(`开仓单次下单手数必须大于0`)
+      }
+
+      // Check m_coin doesn't exceed total quantity
+      if (config.value.openingMCoin > ladder.qtyLimit) {
+        errors.push(`阶梯${ladderNum}: 开仓单次下单手数(${config.value.openingMCoin})不能超过总手数(${ladder.qtyLimit})`)
+      }
+    } else if (action === 'closing') {
+      // Check closing spread value
+      if (ladder.threshold === undefined || ladder.threshold === null) {
+        errors.push(`阶梯${ladderNum}: 平仓点差值未配置`)
+      }
+
+      // Check closing trigger count (config level)
+      if (!config.value.closingSyncQty || config.value.closingSyncQty < 1) {
+        errors.push(`平仓触发次数必须至少为1`)
+      }
+
+      // Check closing m_coin
+      if (!config.value.closingMCoin || config.value.closingMCoin <= 0) {
+        errors.push(`平仓单次下单手数必须大于0`)
+      }
+
+      // Check m_coin doesn't exceed total quantity
+      if (config.value.closingMCoin > ladder.qtyLimit) {
+        errors.push(`阶梯${ladderNum}: 平仓单次下单手数(${config.value.closingMCoin})不能超过总手数(${ladder.qtyLimit})`)
+      }
+    }
+
+    // Check total quantity
+    if (!ladder.qtyLimit || ladder.qtyLimit <= 0) {
+      errors.push(`阶梯${ladderNum}: 总手数必须大于0`)
+    }
+  })
+
+  return {
+    valid: errors.length === 0,
+    errors
   }
 }
 

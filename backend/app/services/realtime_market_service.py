@@ -167,9 +167,13 @@ class RealTimeMarketDataService:
             return None
 
     async def fetch_and_store_market_data(self, symbol: str = "XAUUSDT"):
-        """Fetch market data from both exchanges and store in database
+        """Fetch market data from both exchanges and store spread data only
 
-        Note: Binance uses XAUUSDT, Bybit MT5 uses XAUUSD.s for gold
+        Note:
+        - Binance uses XAUUSDT, Bybit MT5 uses XAUUSD.s for gold
+        - Market data (MarketData) is NOT stored to database anymore
+        - Only spread records (SpreadRecord) are stored
+        - Old spread records (>24 hours) are automatically cleaned up
         """
         # Create database session for account checking
         db = SessionLocal()
@@ -227,34 +231,8 @@ class RealTimeMarketDataService:
                 logger.error(f"Bybit fetch error: {bybit_data}")
                 bybit_data = None
 
-            # Store data in database
+            # Store spread data ONLY (no market data stored)
             timestamp = datetime.utcnow()
-
-            # Store Binance data
-            if binance_data:
-                binance_mid = (binance_data["bid_price"] + binance_data["ask_price"]) / 2
-                binance_market_data = MarketData(
-                    symbol=symbol,
-                    platform="binance",
-                    bid_price=binance_data["bid_price"],
-                    ask_price=binance_data["ask_price"],
-                    mid_price=binance_mid,
-                    timestamp=timestamp
-                )
-                db.add(binance_market_data)
-
-            # Store Bybit data
-            if bybit_data:
-                bybit_mid = (bybit_data["bid_price"] + bybit_data["ask_price"]) / 2
-                bybit_market_data = MarketData(
-                    symbol=symbol,
-                    platform="bybit",
-                    bid_price=bybit_data["bid_price"],
-                    ask_price=bybit_data["ask_price"],
-                    mid_price=bybit_mid,
-                    timestamp=timestamp
-                )
-                db.add(bybit_market_data)
 
             # Calculate and store spread if both data available
             if binance_data and bybit_data:
@@ -273,47 +251,56 @@ class RealTimeMarketDataService:
                 )
                 db.add(spread_record)
 
+                # Clean up old spread records (older than 24 hours)
+                # This runs every time to keep database size small
+                from datetime import timedelta
+                cutoff_time = timestamp - timedelta(days=1)
+                deleted_count = db.query(SpreadRecord).filter(
+                    SpreadRecord.timestamp < cutoff_time
+                ).delete(synchronize_session=False)
+
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} old spread records (>24h)")
+
             db.commit()
-            logger.debug(f"Market data stored successfully for {symbol}")
+            logger.debug(f"Spread data stored successfully for {symbol}")
 
         except Exception as e:
-            logger.error(f"Error storing market data: {e}")
+            logger.error(f"Error storing spread data: {e}")
             db.rollback()
         finally:
             db.close()
 
     async def get_latest_market_data(self, symbol: str = "XAUUSDT") -> Optional[Dict[str, Any]]:
-        """Get the latest market data from database"""
+        """Get the latest market data from database (spread records only)
+
+        Note: Market data is no longer stored in database.
+        This method now reads from spread_records table only.
+        """
         db = SessionLocal()
         try:
-            # Get latest data from both platforms
-            binance_data = db.query(MarketData).filter(
-                MarketData.symbol == symbol,
-                MarketData.platform == "binance"
-            ).order_by(MarketData.timestamp.desc()).first()
+            # Get latest spread record
+            spread_record = db.query(SpreadRecord).filter(
+                SpreadRecord.symbol == symbol
+            ).order_by(SpreadRecord.timestamp.desc()).first()
 
-            bybit_data = db.query(MarketData).filter(
-                MarketData.symbol == symbol,
-                MarketData.platform == "bybit"
-            ).order_by(MarketData.timestamp.desc()).first()
-
-            if not binance_data or not bybit_data:
+            if not spread_record:
                 return None
 
-            # Calculate spreads
-            forward_spread = bybit_data.bid_price - binance_data.ask_price
-            reverse_spread = binance_data.bid_price - bybit_data.ask_price
+            # Calculate mid prices
+            binance_mid = (spread_record.binance_bid + spread_record.binance_ask) / 2
+            bybit_mid = (spread_record.bybit_bid + spread_record.bybit_ask) / 2
 
             return {
-                "binance_bid": binance_data.bid_price,
-                "binance_ask": binance_data.ask_price,
-                "binance_mid": binance_data.mid_price,
-                "bybit_bid": bybit_data.bid_price,
-                "bybit_ask": bybit_data.ask_price,
-                "bybit_mid": bybit_data.mid_price,
-                "forward_spread": forward_spread,
-                "reverse_spread": reverse_spread,
-                "timestamp": binance_data.timestamp.isoformat()
+                "binance_bid": spread_record.binance_bid,
+                "binance_ask": spread_record.binance_ask,
+                "binance_mid": binance_mid,
+                "bybit_bid": spread_record.bybit_bid,
+                "bybit_ask": spread_record.bybit_ask,
+                "bybit_mid": bybit_mid,
+                "forward_spread": spread_record.forward_spread,
+                "reverse_spread": spread_record.reverse_spread,
+                "timestamp": spread_record.timestamp.isoformat()
             }
 
         except Exception as e:

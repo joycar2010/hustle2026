@@ -5,7 +5,7 @@
     </div>
 
     <div class="flex-1 overflow-y-auto p-3">
-      <div class="grid grid-cols-2 gap-3 h-full">
+      <div class="grid grid-cols-1 gap-3 h-full">
       <!-- Bybit MT5 Card -->
       <div class="bg-[#252930] rounded p-3 flex flex-col border border-[#2b3139]">
         <div class="flex items-center justify-between mb-2">
