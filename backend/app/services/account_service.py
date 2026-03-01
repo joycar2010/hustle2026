@@ -198,10 +198,20 @@ class AccountDataService:
             # Add unrealized PnL to daily PnL as per Binance documentation
             daily_pnl += futures_unrealized_pnl
 
-            # Calculate funding fees
+            # Calculate funding fees (separate long and short)
             funding_fee = 0.0
+            long_funding_rate = 0.0
+            short_funding_rate = 0.0
             if not isinstance(funding_fee_data, Exception):
-                funding_fee = sum(float(item.get("income", 0)) for item in funding_fee_data)
+                for item in funding_fee_data:
+                    fee_amount = float(item.get("income", 0))
+                    funding_fee += fee_amount
+                    # Positive funding fee means paying (short position)
+                    # Negative funding fee means receiving (long position)
+                    if fee_amount > 0:
+                        short_funding_rate += fee_amount
+                    else:
+                        long_funding_rate += fee_amount
             else:
                 logger.warning(f"Failed to fetch funding fee data: {funding_fee_data}")
 
@@ -235,6 +245,8 @@ class AccountDataService:
                 total_positions=total_positions,
                 daily_pnl=daily_pnl,
                 funding_fee=funding_fee,
+                long_funding_rate=long_funding_rate,
+                short_funding_rate=short_funding_rate,
             )
         except Exception as e:
             error_msg = str(e)
@@ -380,6 +392,9 @@ class AccountDataService:
 
             # 4. Get funding fee from /v5/account/funding-fee?settleCoin=USDT (today)
             funding_fee = 0
+            long_swap_fee = 0
+            short_swap_fee = 0
+            commission_fee = 0
             try:
                 logger.info("Fetching Bybit funding fee")
                 funding_data = await client.get_funding_fee(
@@ -391,8 +406,16 @@ class AccountDataService:
                 if isinstance(funding_data, dict) and funding_data.get("list"):
                     funding_list = funding_data.get("list", [])
                     for fee in funding_list:
-                        funding_fee += float(fee.get("fundingFee", 0))
-                logger.info(f"Funding fee calculated: {funding_fee}")
+                        fee_amount = float(fee.get("fundingFee", 0))
+                        funding_fee += fee_amount
+                        # Separate long and short swap fees
+                        # Positive funding fee means paying (short position)
+                        # Negative funding fee means receiving (long position)
+                        if fee_amount > 0:
+                            short_swap_fee += fee_amount
+                        else:
+                            long_swap_fee += fee_amount
+                logger.info(f"Funding fee calculated: {funding_fee}, long: {long_swap_fee}, short: {short_swap_fee}")
             except Exception as e:
                 logger.error(f"Failed to fetch Bybit funding fee: {str(e)}")
                 # Don't fail the entire request if funding fee fetch fails
@@ -411,6 +434,9 @@ class AccountDataService:
                 total_positions=total_positions,  # 总持仓
                 daily_pnl=daily_pnl,  # 当日盈亏 (closedPnl + unrealizedPnl)
                 funding_fee=funding_fee,  # 资金费
+                long_swap_fee=long_swap_fee,  # 做多掉期费
+                short_swap_fee=short_swap_fee,  # 做空掉期费
+                commission_fee=commission_fee,  # 手续费(佣金) - placeholder for now
             )
             logger.info(f"Bybit balance calculated: {balance}")
             return balance

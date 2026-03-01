@@ -1,13 +1,5 @@
 <template>
   <div class="flex flex-col h-full">
-    <!-- Total Profit Header -->
-    <div class="p-4 bg-[#252930] border-b border-[#2b3139] flex-shrink-0">
-      <div class="text-xs text-gray-400 mb-1">当前用户总盈利</div>
-      <div class="text-2xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-        {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }} USDT
-      </div>
-    </div>
-
     <div class="flex-1 overflow-y-auto p-4 space-y-2">
       <!-- Dynamic Account Cards -->
       <div v-for="account in activeAccounts" :key="account.account_id" class="bg-[#252930] rounded-lg border border-[#2b3139]">
@@ -85,6 +77,36 @@
               {{ getDisplayValue(account, 'risk_ratio', false, true) }}
             </span>
           </div>
+          <div v-if="account.platform_id === 2" class="flex justify-between">
+            <span class="text-gray-400">做多掉期费</span>
+            <span class="font-mono" :class="getValueColor(account, 'long_swap_fee')">
+              {{ getDisplayValue(account, 'long_swap_fee', true) }}
+            </span>
+          </div>
+          <div v-if="account.platform_id === 2" class="flex justify-between">
+            <span class="text-gray-400">做空掉期费</span>
+            <span class="font-mono" :class="getValueColor(account, 'short_swap_fee')">
+              {{ getDisplayValue(account, 'short_swap_fee', true) }}
+            </span>
+          </div>
+          <div v-if="account.platform_id === 2" class="flex justify-between">
+            <span class="text-gray-400">手续费(佣金)</span>
+            <span class="font-mono" :class="getValueColor(account, 'commission_fee')">
+              {{ getDisplayValue(account, 'commission_fee', true) }}
+            </span>
+          </div>
+          <div v-if="account.platform_id === 1" class="flex justify-between">
+            <span class="text-gray-400">做多资金费</span>
+            <span class="font-mono" :class="getValueColor(account, 'long_funding_rate')">
+              {{ getDisplayValue(account, 'long_funding_rate', true) }}
+            </span>
+          </div>
+          <div v-if="account.platform_id === 1" class="flex justify-between">
+            <span class="text-gray-400">做空资金费</span>
+            <span class="font-mono" :class="getValueColor(account, 'short_funding_rate')">
+              {{ getDisplayValue(account, 'short_funding_rate', true) }}
+            </span>
+          </div>
           <div class="flex justify-between">
             <span class="text-gray-400">{{ account.platform_id === 1 ? '掉期费(Binance)' : '资金费(Bybit)' }}</span>
             <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
@@ -110,7 +132,6 @@ import { useMarketStore } from '@/stores/market'
 
 const marketStore = useMarketStore()
 
-const totalProfit = ref(0)
 const activeAccounts = ref([])
 const systemAlerts = ref([])
 
@@ -177,10 +198,6 @@ watch(() => marketStore.lastMessage, (message) => {
 })
 
 function handleAccountBalanceUpdate(data) {
-  if (data.summary) {
-    totalProfit.value = data.summary.daily_pnl || totalProfit.value
-  }
-
   if (data.accounts && data.accounts.length > 0) {
     // Update existing accounts with new balance data
     data.accounts.forEach(updatedAcc => {
@@ -203,10 +220,6 @@ async function fetchAccountData() {
   try {
     const response = await api.get('/api/v1/accounts/dashboard/aggregated')
     const data = response.data
-
-    if (data.summary) {
-      totalProfit.value = data.summary.daily_pnl || 0
-    }
 
     const allAccounts = []
 

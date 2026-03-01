@@ -1,117 +1,120 @@
 <template>
-  <div class="h-full flex flex-col p-3 min-h-0">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-bold">紧急手动交易</h3>
-      <div class="flex items-center space-x-1">
-        <div class="w-2 h-2 rounded-full bg-[#f6465d] animate-pulse"></div>
-        <span class="text-xs text-[#f6465d] font-bold">紧急模式</span>
-      </div>
-    </div>
-    <div class="flex-1 overflow-y-auto space-y-3 min-h-0">
-      <!-- Exchange Selection -->
-      <div>
-        <label class="text-xs text-gray-400 mb-1 block">交易平台</label>
-        <select
-          v-model="exchange"
-          class="w-full bg-[#252930] border border-[#2b3139] rounded px-3 py-2 text-sm focus:border-[#f0b90b] focus:outline-none"
+  <div class="h-full flex p-3 gap-3 min-h-0">
+    <!-- Left Side - Recent Trades -->
+    <div class="w-[45%] flex flex-col border-r border-[#2b3139] pr-3">
+      <div class="text-xs text-gray-400 mb-2">最近交易记录</div>
+      <div class="flex-1 overflow-y-auto space-y-1">
+        <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-2">
+          暂无记录
+        </div>
+        <div
+          v-for="order in recentOrders"
+          :key="order.id"
+          class="flex items-center justify-between text-xs bg-[#252930] rounded px-2 py-1.5"
         >
-          <option value="binance">Binance (XAUUSDT)</option>
-          <option value="bybit">Bybit MT5 (XAUUSD.s)</option>
-        </select>
-      </div>
-
-      <!-- Quantity -->
-      <div>
-        <label class="text-xs text-gray-400 mb-1 block">下单总手数 (XAU)</label>
-        <input
-          v-model.number="quantity"
-          type="number"
-          step="1"
-          min="1"
-          class="w-full bg-[#252930] border border-[#2b3139] rounded px-3 py-2 text-sm focus:border-[#f0b90b] focus:outline-none"
-          placeholder="1"
-        />
-        <div class="text-xs text-gray-500 mt-1">
-          Bybit 实际下单量: {{ (quantity / 100).toFixed(2) }} Lot
+          <div class="flex items-center gap-2">
+            <span class="text-gray-500">{{ formatTime(order.timestamp) }}</span>
+            <span class="text-gray-400">{{ order.exchange }}</span>
+            <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+              {{ order.side === 'buy' ? '买' : '卖' }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="font-mono">{{ order.quantity }}</span>
+            <span :class="getStatusClass(order.status)" class="text-xs">
+              {{ getStatusText(order.status) }}
+            </span>
+          </div>
         </div>
       </div>
+      <button
+        @click="viewMore"
+        class="w-full mt-2 text-xs text-[#f0b90b] hover:text-[#f0b90b]/80 transition-colors"
+      >
+        查看更多 →
+      </button>
+    </div>
 
-      <!-- Action Buttons -->
-      <div class="grid grid-cols-2 gap-2">
-        <button
-          @click="executeTrade('buy')"
-          :disabled="loading"
-          class="px-4 py-0.5 bg-[#0ecb81] text-white rounded text-sm font-bold hover:bg-[#0db774] transition-colors disabled:opacity-50"
-        >
-          买入开多
-        </button>
-        <button
-          @click="executeTrade('sell')"
-          :disabled="loading"
-          class="px-4 py-0.5 bg-[#f6465d] text-white rounded text-sm font-bold hover:bg-[#e03d52] transition-colors disabled:opacity-50"
-        >
-          卖出开空
-        </button>
+    <!-- Right Side - Trading Controls -->
+    <div class="flex-1 flex flex-col min-h-0">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-bold">紧急手动交易</h3>
+        <div class="flex items-center space-x-1">
+          <div class="w-2 h-2 rounded-full bg-[#f6465d] animate-pulse"></div>
+          <span class="text-xs text-[#f6465d] font-bold">紧急模式</span>
+        </div>
       </div>
+      <div class="flex-1 overflow-y-auto space-y-3 min-h-0">
+        <!-- Exchange Selection -->
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">交易平台</label>
+          <select
+            v-model="exchange"
+            class="w-full bg-[#252930] border border-[#2b3139] rounded px-3 py-2 text-sm focus:border-[#f0b90b] focus:outline-none"
+          >
+            <option value="binance">Binance (XAUUSDT)</option>
+            <option value="bybit">Bybit MT5 (XAUUSD.s)</option>
+          </select>
+        </div>
 
-      <!-- Status message -->
-      <div v-if="statusMsg" :class="['text-xs px-2 py-1 rounded', statusOk ? 'text-[#0ecb81] bg-[#0ecb81]/10' : 'text-[#f6465d] bg-[#f6465d]/10']">
-        {{ statusMsg }}
-      </div>
+        <!-- Quantity -->
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">下单总手数 (XAU)</label>
+          <input
+            v-model.number="quantity"
+            type="number"
+            step="1"
+            min="1"
+            class="w-full bg-[#252930] border border-[#2b3139] rounded px-3 py-2 text-sm focus:border-[#f0b90b] focus:outline-none"
+            placeholder="1"
+          />
+          <div class="text-xs text-gray-500 mt-1">
+            Bybit 实际下单量: {{ (quantity / 100).toFixed(2) }} Lot
+          </div>
+        </div>
 
-      <!-- Quick Actions -->
-      <div class="pt-3 border-t border-[#2b3139]">
+        <!-- Action Buttons -->
         <div class="grid grid-cols-2 gap-2">
           <button
-            @click="closeAllPositions"
+            @click="executeTrade('buy')"
             :disabled="loading"
-            class="px-4 py-1.5 bg-[#f6465d] text-white rounded text-sm font-bold hover:bg-[#e03d52] transition-colors disabled:opacity-50"
+            class="px-4 py-0.5 bg-[#0ecb81] text-white rounded text-sm font-bold hover:bg-[#0db774] transition-colors disabled:opacity-50"
           >
-            ⚠️ 平仓所有持仓
+            买入开多
           </button>
           <button
-            @click="cancelAllOrders"
+            @click="executeTrade('sell')"
             :disabled="loading"
-            class="px-4 py-1.5 bg-[#252930] text-white rounded text-sm hover:bg-[#2b3139] transition-colors disabled:opacity-50"
+            class="px-4 py-0.5 bg-[#f6465d] text-white rounded text-sm font-bold hover:bg-[#e03d52] transition-colors disabled:opacity-50"
           >
-            取消所有挂单
+            卖出开空
           </button>
         </div>
-      </div>
 
-      <!-- Recent Trades -->
-      <div class="pt-3 border-t border-[#2b3139]">
-        <div class="text-xs text-gray-400 mb-2">最近交易记录</div>
-        <div class="space-y-1">
-          <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-2">
-            暂无记录
-          </div>
-          <div
-            v-for="order in recentOrders"
-            :key="order.id"
-            class="flex items-center justify-between text-xs bg-[#252930] rounded px-2 py-1.5"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-gray-500">{{ formatTime(order.timestamp) }}</span>
-              <span class="text-gray-400">{{ order.exchange }}</span>
-              <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ order.side === 'buy' ? '买' : '卖' }}
-              </span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="font-mono">{{ order.quantity }}</span>
-              <span :class="getStatusClass(order.status)" class="text-xs">
-                {{ getStatusText(order.status) }}
-              </span>
-            </div>
+        <!-- Status message -->
+        <div v-if="statusMsg" :class="['text-xs px-2 py-1 rounded', statusOk ? 'text-[#0ecb81] bg-[#0ecb81]/10' : 'text-[#f6465d] bg-[#f6465d]/10']">
+          {{ statusMsg }}
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="pt-3 border-t border-[#2b3139]">
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              @click="closeAllPositions"
+              :disabled="loading"
+              class="px-4 py-1.5 bg-[#f6465d] text-white rounded text-sm font-bold hover:bg-[#e03d52] transition-colors disabled:opacity-50"
+            >
+              ⚠️ 平仓所有持仓
+            </button>
+            <button
+              @click="cancelAllOrders"
+              :disabled="loading"
+              class="px-4 py-1.5 bg-[#252930] text-white rounded text-sm hover:bg-[#2b3139] transition-colors disabled:opacity-50"
+            >
+              取消所有挂单
+            </button>
           </div>
         </div>
-        <button
-          @click="viewMore"
-          class="w-full mt-2 text-xs text-[#f0b90b] hover:text-[#f0b90b]/80 transition-colors"
-        >
-          查看更多 →
-        </button>
       </div>
     </div>
   </div>
@@ -160,8 +163,8 @@ function handleOrderUpdate(orderData) {
     if (index !== -1) {
       recentOrders.value[index] = { ...recentOrders.value[index], ...orderData }
     } else {
-      // New order, add to top and keep only 4
-      recentOrders.value = [orderData, ...recentOrders.value].slice(0, 4)
+      // New order, add to top and keep only 11
+      recentOrders.value = [orderData, ...recentOrders.value].slice(0, 11)
     }
   }
 }
@@ -169,7 +172,7 @@ function handleOrderUpdate(orderData) {
 async function fetchRecentOrders() {
   try {
     const response = await api.get('/api/v1/trading/orders', {
-      params: { limit: 4, source: 'manual' }
+      params: { limit: 11, source: 'manual' }
     })
     recentOrders.value = response.data
   } catch (e) {

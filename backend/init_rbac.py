@@ -57,7 +57,6 @@ PERMISSIONS = [
     {"code": "menu:strategies", "name": "策略菜单", "type": "menu", "path": "/strategies"},
     {"code": "menu:positions", "name": "持仓菜单", "type": "menu", "path": "/positions"},
     {"code": "menu:accounts", "name": "账户菜单", "type": "menu", "path": "/accounts"},
-    {"code": "menu:risk", "name": "风控菜单", "type": "menu", "path": "/risk"},
     {"code": "menu:system", "name": "系统管理菜单", "type": "menu", "path": "/system"},
     {"code": "menu:rbac", "name": "权限管理菜单", "type": "menu", "path": "/rbac"},
     {"code": "menu:security", "name": "安全组件菜单", "type": "menu", "path": "/security"},
@@ -81,11 +80,11 @@ ROLE_PERMISSIONS = {
     "trader": [
         "trading:execute", "trading:list",
         "strategy:list", "strategy:create", "strategy:update", "strategy:delete",
-        "menu:dashboard", "menu:trading", "menu:strategies", "menu:positions", "menu:accounts", "menu:risk",
+        "menu:dashboard", "menu:trading", "menu:strategies", "menu:positions", "menu:accounts",
     ],
     "observer": [
         "trading:list", "strategy:list",
-        "menu:dashboard", "menu:trading", "menu:strategies", "menu:positions", "menu:accounts", "menu:risk",
+        "menu:dashboard", "menu:trading", "menu:strategies", "menu:positions", "menu:accounts",
     ],
 }
 
@@ -153,7 +152,7 @@ async def init_rbac():
 
             print(f"  + {role_code}: assigned {len(perm_list)} permissions")
 
-        print("\n✓ RBAC initialization completed successfully!")
+        print("\nRBAC initialization completed successfully!")
 
         # 显示统计
         perm_count = await conn.fetchval("SELECT COUNT(*) FROM permissions")

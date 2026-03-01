@@ -2,10 +2,10 @@
   <div class="flex h-screen bg-[#1a1d21] text-white overflow-hidden">
     <!-- Left Sidebar - Account Status -->
     <aside class="w-80 bg-[#1e2329] border-r border-[#2b3139] flex flex-col overflow-hidden">
-      <div class="flex-[2] overflow-y-auto">
+      <div class="flex-[7] overflow-y-auto">
         <AccountStatusPanel />
       </div>
-      <div class="flex-1 overflow-y-auto">
+      <div class="flex-[3] overflow-y-auto">
         <NavigationPanel />
       </div>
     </aside>

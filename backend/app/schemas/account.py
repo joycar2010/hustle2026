@@ -73,6 +73,15 @@ class AccountBalance(BaseModel):
     daily_pnl: Optional[float] = None  # 当日盈亏 (from profit-loss)
     funding_fee: Optional[float] = None  # 资金费 (from funding-fee)
 
+    # Bybit-specific fees
+    long_swap_fee: Optional[float] = None  # Bybit做多掉期费
+    short_swap_fee: Optional[float] = None  # Bybit做空掉期费
+    commission_fee: Optional[float] = None  # Bybit手续费(佣金)
+
+    # Binance-specific fees
+    long_funding_rate: Optional[float] = None  # Binance做多资金费
+    short_funding_rate: Optional[float] = None  # Binance做空资金费
+
 
 class AccountPosition(BaseModel):
     """Schema for account position data"""
