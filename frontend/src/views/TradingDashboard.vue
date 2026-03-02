@@ -14,18 +14,18 @@
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- Top Section - Strategy Configuration -->
       <section class="h-auto md:h-[60%] border-b border-[#2b3139] flex flex-col md:flex-row gap-2 p-2">
-        <!-- Reverse Strategy Panel -->
-        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
+        <!-- Reverse Strategy Panel - Order 1 on mobile, 1 on desktop -->
+        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0 order-1">
           <StrategyPanel type="reverse" />
         </div>
 
-        <!-- Market Cards (Middle) - Changed from ManualTrading -->
-        <div class="w-full md:w-80 lg:w-96 bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
+        <!-- Market Cards (Middle) - Order 2 on mobile, 2 on desktop -->
+        <div class="w-full md:w-80 lg:w-96 bg-[#1e2329] rounded overflow-hidden flex-shrink-0 order-2">
           <MarketCards />
         </div>
 
-        <!-- Forward Strategy Panel -->
-        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
+        <!-- Forward Strategy Panel - Order 3 on mobile, 3 on desktop -->
+        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0 order-3">
           <StrategyPanel type="forward" />
         </div>
       </section>

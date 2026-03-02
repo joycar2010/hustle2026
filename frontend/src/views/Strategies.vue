@@ -38,7 +38,7 @@
                   {{ getStatusText(strategy.status) }}
                 </span>
               </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <span class="text-text-secondary">类型:</span>
                   <span class="ml-2 font-medium">{{ strategy.type === 'reverse' ? '反向套利' : '正向套利' }}</span>
@@ -91,7 +91,7 @@
             </div>
           </div>
 
-          <div class="mt-3 pt-3 border-t border-border-secondary grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div class="mt-3 pt-3 border-t border-border-secondary grid grid-cols-3 gap-4 text-sm">
             <div>
               <span class="text-text-secondary">今日交易:</span>
               <span class="ml-2 font-bold">{{ strategy.today_trades || 0 }}</span>
@@ -170,7 +170,7 @@
                     </div>
                     <button type="button" @click="removeLadder(index)" class="text-danger text-sm hover:text-red-400">删除</button>
                   </div>
-                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div class="grid grid-cols-3 gap-3">
                     <div>
                       <label class="block text-xs text-text-secondary mb-1">开仓价</label>
                       <input v-model.number="ladder.open_price" type="number" step="0.01" class="w-full px-2 py-1 text-sm bg-dark-200 border border-border-primary rounded focus:outline-none focus:border-primary" />

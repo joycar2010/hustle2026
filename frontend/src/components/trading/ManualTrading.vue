@@ -1,42 +1,7 @@
 <template>
   <div class="h-full flex flex-col md:flex-row p-2 md:p-3 gap-2 md:gap-3 min-h-0">
-    <!-- Left Side - Recent Trades -->
-    <div class="w-full md:w-[45%] flex flex-col border-b md:border-b-0 md:border-r border-[#2b3139] pb-2 md:pb-0 md:pr-3">
-      <div class="text-xs text-gray-400 mb-2">最近交易记录</div>
-      <div class="flex-1 overflow-y-auto space-y-1">
-        <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-2">
-          暂无记录
-        </div>
-        <div
-          v-for="order in recentOrders"
-          :key="order.id"
-          class="flex items-center justify-between text-xs bg-[#252930] rounded px-2 py-1.5"
-        >
-          <div class="flex items-center gap-2">
-            <span class="text-gray-500">{{ formatTime(order.timestamp) }}</span>
-            <span class="text-gray-400">{{ order.exchange }}</span>
-            <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-              {{ order.side === 'buy' ? '买' : '卖' }}
-            </span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="font-mono">{{ order.quantity }}</span>
-            <span :class="getStatusClass(order.status)" class="text-xs">
-              {{ getStatusText(order.status) }}
-            </span>
-          </div>
-        </div>
-      </div>
-      <button
-        @click="viewMore"
-        class="w-full mt-2 text-xs text-[#f0b90b] hover:text-[#f0b90b]/80 transition-colors"
-      >
-        查看更多 →
-      </button>
-    </div>
-
-    <!-- Right Side - Trading Controls -->
-    <div class="flex-1 flex flex-col min-h-0">
+    <!-- Emergency Trading Controls - Order 1 on mobile, 2 on desktop (right) -->
+    <div class="flex-1 flex flex-col min-h-0 order-1 md:order-2">
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-sm font-bold">紧急手动交易</h3>
         <div class="flex items-center space-x-1">
@@ -74,7 +39,7 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div class="grid grid-cols-2 gap-2">
           <button
             @click="executeTrade('buy')"
             :disabled="loading"
@@ -98,7 +63,7 @@
 
         <!-- Quick Actions -->
         <div class="pt-3 border-t border-[#2b3139]">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div class="grid grid-cols-2 gap-2">
             <button
               @click="closeAllPositions"
               :disabled="loading"
@@ -116,6 +81,41 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Recent Trades - Order 2 on mobile, 1 on desktop (left) -->
+    <div class="w-full md:w-[45%] flex flex-col border-t md:border-t-0 md:border-r border-[#2b3139] pt-2 md:pt-0 md:pr-3 order-2 md:order-1">
+      <div class="text-xs text-gray-400 mb-2">最近交易记录</div>
+      <div class="flex-1 overflow-y-auto space-y-1">
+        <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-2">
+          暂无记录
+        </div>
+        <div
+          v-for="order in recentOrders"
+          :key="order.id"
+          class="flex items-center justify-between text-xs bg-[#252930] rounded px-2 py-1.5"
+        >
+          <div class="flex items-center gap-2">
+            <span class="text-gray-500">{{ formatTime(order.timestamp) }}</span>
+            <span class="text-gray-400">{{ order.exchange }}</span>
+            <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+              {{ order.side === 'buy' ? '买' : '卖' }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="font-mono">{{ order.quantity }}</span>
+            <span :class="getStatusClass(order.status)" class="text-xs">
+              {{ getStatusText(order.status) }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <button
+        @click="viewMore"
+        class="w-full mt-2 text-xs text-[#f0b90b] hover:text-[#f0b90b]/80 transition-colors"
+      >
+        查看更多 →
+      </button>
     </div>
   </div>
 </template>
