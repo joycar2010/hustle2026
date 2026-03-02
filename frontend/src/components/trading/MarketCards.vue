@@ -4,7 +4,7 @@
     <div class="p-2 md:p-3 bg-[#252930] border-b border-[#2b3139]">
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
         <!-- Left: Bybit Fees -->
-        <div class="bg-[#1e2329] rounded p-2">
+        <div class="bg-[#1e2329] rounded p-2 sm:order-1 order-2">
           <div class="text-xs text-gray-400 mb-1 text-center">Bybit 掉期费</div>
           <div class="flex flex-col space-y-1">
             <div class="flex justify-between text-xs">
@@ -22,8 +22,17 @@
           </div>
         </div>
 
-        <!-- Center: Binance Fees (moved from right) -->
-        <div class="bg-[#1e2329] rounded p-2 sm:order-2 order-2">
+        <!-- Center: Total Profit -->
+        <div class="bg-[#1e2329] rounded p-2 flex flex-col items-center justify-center sm:order-2 order-first">
+          <div class="text-xs text-gray-400 mb-1">总盈利</div>
+          <div class="text-lg md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
+          </div>
+          <div class="text-xs text-gray-400">USDT</div>
+        </div>
+
+        <!-- Right: Binance Fees -->
+        <div class="bg-[#1e2329] rounded p-2 sm:order-3 order-3">
           <div class="text-xs text-gray-400 mb-1 text-center">Binance 资金费</div>
           <div class="flex flex-col space-y-1">
             <div class="flex justify-between text-xs">
@@ -39,15 +48,6 @@
               </span>
             </div>
           </div>
-        </div>
-
-        <!-- Right: Total Profit (moved from center) -->
-        <div class="bg-[#1e2329] rounded p-2 flex flex-col items-center justify-center sm:order-3 order-first">
-          <div class="text-xs text-gray-400 mb-1">总盈利</div>
-          <div class="text-lg md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-            {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
-          </div>
-          <div class="text-xs text-gray-400">USDT</div>
         </div>
       </div>
 
