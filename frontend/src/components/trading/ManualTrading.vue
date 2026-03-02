@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full flex p-3 gap-3 min-h-0">
+  <div class="h-full flex flex-col md:flex-row p-2 md:p-3 gap-2 md:gap-3 min-h-0">
     <!-- Left Side - Recent Trades -->
-    <div class="w-[45%] flex flex-col border-r border-[#2b3139] pr-3">
+    <div class="w-full md:w-[45%] flex flex-col border-b md:border-b-0 md:border-r border-[#2b3139] pb-2 md:pb-0 md:pr-3">
       <div class="text-xs text-gray-400 mb-2">最近交易记录</div>
       <div class="flex-1 overflow-y-auto space-y-1">
         <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-2">

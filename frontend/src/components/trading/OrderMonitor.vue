@@ -1,8 +1,8 @@
 <template>
-  <div class="h-full flex gap-3 p-3 min-h-0">
+  <div class="h-full flex flex-col md:flex-row gap-2 md:gap-3 p-2 md:p-3 min-h-0">
     <!-- Left: Strategy Pending Orders - Increased width by 40% -->
-    <div class="w-[47%] flex flex-col min-h-0 flex-shrink-0">
-      <h3 class="text-sm font-bold mb-3">策略挂单</h3>
+    <div class="w-full md:w-[47%] flex flex-col min-h-0 flex-shrink-0 mb-2 md:mb-0">
+      <h3 class="text-xs md:text-sm font-bold mb-2 md:mb-3">策略挂单</h3>
       <div class="flex-1 overflow-y-auto">
         <table class="w-full text-xs">
           <thead class="sticky top-0 bg-[#1e2329]">
@@ -162,29 +162,5 @@ function formatTime(timestamp) {
     second: '2-digit',
     hour12: false
   })
-}
-
-function getStatusClass(status) {
-  const classes = {
-    new: 'text-[#f0b90b]',
-    pending: 'text-[#f0b90b]',
-    filled: 'text-[#0ecb81]',
-    canceled: 'text-[#f6465d]',
-    cancelled: 'text-[#f6465d]',
-    manually_processed: 'text-[#3b82f6]',
-  }
-  return classes[status] || 'text-gray-400'
-}
-
-function getStatusText(status) {
-  const texts = {
-    new: '挂单中',
-    pending: '挂单中',
-    filled: '已成交',
-    canceled: '已取消',
-    cancelled: '已取消',
-    manually_processed: '已人工处理',
-  }
-  return texts[status] || status
 }
 </script>

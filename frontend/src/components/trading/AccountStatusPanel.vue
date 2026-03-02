@@ -1,11 +1,11 @@
 <template>
   <div class="flex flex-col h-full">
-    <div class="flex-1 overflow-y-auto p-4 space-y-2">
+    <div class="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
       <!-- Dynamic Account Cards -->
       <div v-for="account in activeAccounts" :key="account.account_id" class="bg-[#252930] rounded-lg border border-[#2b3139]">
-        <div class="p-3 border-b border-[#2b3139]">
+        <div class="p-2 md:p-3 border-b border-[#2b3139]">
           <div class="flex items-center justify-between">
-            <div class="flex flex-col items-start space-y-3">
+            <div class="flex flex-col items-start space-y-2 md:space-y-3">
               <div class="flex items-center space-x-2">
                 <div class="w-2 h-2 rounded-full" :class="account.error ? 'bg-[#f0b90b]' : (account.is_active ? 'bg-[#0ecb81]' : 'bg-[#f6465d]')"></div>
                 <span class="text-base font-bold text-[#D4B106]">{{ account.account_name }}</span>
@@ -40,7 +40,7 @@
           </div>
         </div>
 
-        <div class="p-3 space-y-1.5 text-xs">
+        <div class="p-2 md:p-3 space-y-1 md:space-y-[6px] text-xs">
           <div class="flex justify-between">
             <span class="text-gray-400">账户总资产</span>
             <span class="font-mono">{{ getDisplayValue(account, 'total_assets') }}</span>
@@ -170,8 +170,6 @@ function setWsConnectedState(connected) {
 }
 const disconnectedAccounts = ref(loadDisconnected())
 
-let updateInterval = null
-
 onMounted(() => {
   // Ensure WebSocket connection
   if (!marketStore.connected) {
@@ -181,13 +179,12 @@ onMounted(() => {
     }
   }
 
+  // Initial fetch only
   fetchAccountData()
-  // Reduced polling frequency (60s instead of 30s)
-  updateInterval = setInterval(fetchAccountData, 60000)
 })
 
 onUnmounted(() => {
-  if (updateInterval) clearInterval(updateInterval)
+  // Cleanup if needed
 })
 
 // Watch for account balance updates via WebSocket (when backend implements it)

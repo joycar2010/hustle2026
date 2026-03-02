@@ -1,44 +1,92 @@
 <template>
   <div class="h-full flex flex-col">
-    <!-- Total Profit and Strategy Positions Header -->
-    <div class="p-3 bg-[#252930] border-b border-[#2b3139]">
-      <div class="text-xs text-gray-400 mb-1">当前用户总盈利</div>
-      <div class="text-xl font-bold font-mono mb-3" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-        {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }} USDT
-      </div>
-
-      <!-- Arbitrage Strategy Position Data -->
-      <div class="grid grid-cols-2 gap-2">
-        <!-- Forward Arbitrage -->
+    <!-- Total Profit and Fees Header -->
+    <div class="p-2 md:p-3 bg-[#252930] border-b border-[#2b3139]">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
+        <!-- Left: Bybit Fees -->
         <div class="bg-[#1e2329] rounded p-2">
-          <div class="text-xs text-gray-400 mb-1">正向套利策略</div>
-          <div class="flex justify-between text-xs">
-            <span class="text-gray-400">开仓持仓:</span>
-            <span class="font-mono text-white">{{ forwardOpenPosition }}</span>
-          </div>
-          <div class="flex justify-between text-xs mt-1">
-            <span class="text-gray-400">平仓持仓:</span>
-            <span class="font-mono text-white">{{ forwardClosePosition }}</span>
+          <div class="text-xs text-gray-400 mb-1 text-center">Bybit 掉期费</div>
+          <div class="flex flex-col space-y-1">
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">做多:</span>
+              <span class="font-mono" :class="bybitLongSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                {{ bybitLongSwapFee >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitLongSwapFee)) }}
+              </span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">做空:</span>
+              <span class="font-mono" :class="bybitShortSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                {{ bybitShortSwapFee >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitShortSwapFee)) }}
+              </span>
+            </div>
           </div>
         </div>
 
+        <!-- Center: Total Profit -->
+        <div class="bg-[#1e2329] rounded p-2 flex flex-col items-center justify-center sm:order-2 order-first">
+          <div class="text-xs text-gray-400 mb-1">总盈利</div>
+          <div class="text-lg md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
+          </div>
+          <div class="text-xs text-gray-400">USDT</div>
+        </div>
+
+        <!-- Right: Binance Fees -->
+        <div class="bg-[#1e2329] rounded p-2">
+          <div class="text-xs text-gray-400 mb-1 text-center">Binance 资金费</div>
+          <div class="flex flex-col space-y-1">
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">做多:</span>
+              <span class="font-mono" :class="binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                {{ binanceLongFundingRate >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceLongFundingRate)) }}
+              </span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-gray-400">做空:</span>
+              <span class="font-mono" :class="binanceShortFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                {{ binanceShortFundingRate >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceShortFundingRate)) }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arbitrage Strategy Position Data -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <!-- Reverse Arbitrage -->
         <div class="bg-[#1e2329] rounded p-2">
-          <div class="text-xs text-gray-400 mb-1">反向套利策略</div>
+          <div class="text-xs text-gray-400 mb-1">反向持仓</div>
           <div class="flex justify-between text-xs">
-            <span class="text-gray-400">开仓持仓:</span>
-            <span class="font-mono text-white">{{ reverseOpenPosition }}</span>
+            <div class="flex items-center space-x-2">
+              <span class="text-gray-400">开仓:</span>
+              <span class="font-mono text-white">{{ reverseOpenPosition }}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-gray-400">平仓:</span>
+              <span class="font-mono text-white">{{ reverseClosePosition }}</span>
+            </div>
           </div>
-          <div class="flex justify-between text-xs mt-1">
-            <span class="text-gray-400">平仓持仓:</span>
-            <span class="font-mono text-white">{{ reverseClosePosition }}</span>
+        </div>
+
+        <!-- Forward Arbitrage -->
+        <div class="bg-[#1e2329] rounded p-2">
+          <div class="text-xs text-gray-400 mb-1">正向持仓</div>
+          <div class="flex justify-between text-xs">
+            <div class="flex items-center space-x-2">
+              <span class="text-gray-400">开仓:</span>
+              <span class="font-mono text-white">{{ forwardOpenPosition }}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-gray-400">平仓:</span>
+              <span class="font-mono text-white">{{ forwardClosePosition }}</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-3">
-      <div class="grid grid-cols-1 gap-3 h-full">
+    <div class="flex-1 overflow-y-auto p-2 md:p-3">
+      <div class="grid grid-cols-1 gap-2 md:gap-3 h-full">
       <!-- Bybit MT5 Card -->
       <div class="bg-[#252930] rounded p-3 flex flex-col border border-[#2b3139]">
         <div class="flex items-center justify-between mb-2">
@@ -168,6 +216,12 @@ const forwardClosePosition = ref(0)
 const reverseOpenPosition = ref(0)
 const reverseClosePosition = ref(0)
 
+// Fee data
+const bybitLongSwapFee = ref(0)
+const bybitShortSwapFee = ref(0)
+const binanceLongFundingRate = ref(0)
+const binanceShortFundingRate = ref(0)
+
 let updateInterval = null
 
 const bybitLagLevel = computed(() => Math.min(Math.floor(bybitLagCount.value / 10), 5))
@@ -208,6 +262,73 @@ watch(() => marketStore.connected, (val) => {
   }
 })
 
+// Watch for account balance updates via WebSocket
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'account_balance') {
+    handleAccountBalanceUpdate(message.data)
+  }
+})
+
+function handleAccountBalanceUpdate(data) {
+  // Update total profit
+  if (data.summary) {
+    totalProfit.value = data.summary.daily_pnl || 0
+  }
+
+  // Extract fee data from accounts
+  if (data.accounts && data.accounts.length > 0) {
+    // Reset fee values
+    bybitLongSwapFee.value = 0
+    bybitShortSwapFee.value = 0
+    binanceLongFundingRate.value = 0
+    binanceShortFundingRate.value = 0
+
+    // Aggregate fees from all accounts
+    data.accounts.forEach(account => {
+      if (account.platform_id === 2) {
+        // Bybit accounts
+        bybitLongSwapFee.value += account.balance?.long_swap_fee || 0
+        bybitShortSwapFee.value += account.balance?.short_swap_fee || 0
+      } else if (account.platform_id === 1) {
+        // Binance accounts
+        binanceLongFundingRate.value += account.balance?.long_funding_rate || 0
+        binanceShortFundingRate.value += account.balance?.short_funding_rate || 0
+      }
+    })
+  }
+
+  // Update position data if available
+  if (data.positions) {
+    updatePositionData(data.positions)
+  }
+}
+
+function updatePositionData(positions) {
+  forwardOpenPosition.value = 0
+  forwardClosePosition.value = 0
+  reverseOpenPosition.value = 0
+  reverseClosePosition.value = 0
+
+  positions.forEach(position => {
+    const isForward = position.strategy_type?.includes('forward')
+    const isReverse = position.strategy_type?.includes('reverse')
+    const isOpening = position.action_type === 'opening'
+    const isClosing = position.action_type === 'closing'
+
+    const currentPos = position.current_position || 0
+
+    if (isForward && isOpening) {
+      forwardOpenPosition.value += currentPos
+    } else if (isForward && isClosing) {
+      forwardClosePosition.value += currentPos
+    } else if (isReverse && isOpening) {
+      reverseOpenPosition.value += currentPos
+    } else if (isReverse && isClosing) {
+      reverseClosePosition.value += currentPos
+    }
+  })
+}
+
 onMounted(() => {
   marketStore.connect()
   lagTimer = setInterval(() => {
@@ -217,19 +338,13 @@ onMounted(() => {
     }
   }, 2000)
 
-  // Fetch profit and position data
+  // Initial fetch
   fetchAccountData()
   fetchStrategyPositions()
-  // Update every 60 seconds
-  updateInterval = setInterval(() => {
-    fetchAccountData()
-    fetchStrategyPositions()
-  }, 60000)
 })
 
 onUnmounted(() => {
   if (lagTimer) clearInterval(lagTimer)
-  if (updateInterval) clearInterval(updateInterval)
 })
 
 function formatPrice(price) {
@@ -251,6 +366,28 @@ async function fetchAccountData() {
     const data = response.data
     if (data.summary) {
       totalProfit.value = data.summary.daily_pnl || 0
+    }
+
+    // Extract fee data from accounts
+    if (data.accounts && data.accounts.length > 0) {
+      // Reset fee values
+      bybitLongSwapFee.value = 0
+      bybitShortSwapFee.value = 0
+      binanceLongFundingRate.value = 0
+      binanceShortFundingRate.value = 0
+
+      // Aggregate fees from all accounts
+      data.accounts.forEach(account => {
+        if (account.platform_id === 2) {
+          // Bybit accounts
+          bybitLongSwapFee.value += account.balance?.long_swap_fee || 0
+          bybitShortSwapFee.value += account.balance?.short_swap_fee || 0
+        } else if (account.platform_id === 1) {
+          // Binance accounts
+          binanceLongFundingRate.value += account.balance?.long_funding_rate || 0
+          binanceShortFundingRate.value += account.balance?.short_funding_rate || 0
+        }
+      })
     }
   } catch (error) {
     console.error('Failed to fetch account data:', error)

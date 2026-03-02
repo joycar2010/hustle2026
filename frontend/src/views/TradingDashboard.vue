@@ -1,7 +1,7 @@
 <template>
-  <div class="flex h-screen bg-[#1a1d21] text-white overflow-hidden">
-    <!-- Left Sidebar - Account Status -->
-    <aside class="w-80 bg-[#1e2329] border-r border-[#2b3139] flex flex-col overflow-hidden">
+  <div class="flex flex-col lg:flex-row h-screen bg-[#1a1d21] text-white overflow-hidden">
+    <!-- Left Sidebar - Account Status (Hidden on mobile, shown on tablet+) -->
+    <aside class="hidden md:flex md:w-64 lg:w-80 bg-[#1e2329] border-r border-[#2b3139] flex-col overflow-hidden">
       <div class="flex-[7] overflow-y-auto">
         <AccountStatusPanel />
       </div>
@@ -13,39 +13,39 @@
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- Top Section - Strategy Configuration -->
-      <section class="h-[60%] border-b border-[#2b3139] flex gap-2 p-2">
+      <section class="h-auto md:h-[60%] border-b border-[#2b3139] flex flex-col md:flex-row gap-2 p-2">
         <!-- Reverse Strategy Panel -->
-        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden">
+        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
           <StrategyPanel type="reverse" />
         </div>
 
         <!-- Market Cards (Middle) - Changed from ManualTrading -->
-        <div class="w-96 bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
+        <div class="w-full md:w-80 lg:w-96 bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
           <MarketCards />
         </div>
 
         <!-- Forward Strategy Panel -->
-        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden">
+        <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
           <StrategyPanel type="forward" />
         </div>
       </section>
 
-      <!-- Bottom Section - Order Monitor & Market Cards -->
-      <section class="flex-1 flex gap-2 p-2 min-h-0">
-        <!-- Order Monitor (Left) - Increased width to 45% -->
-        <div class="w-[45%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
+      <!-- Bottom Section - Order Monitor & Manual Trading -->
+      <section class="flex-1 flex flex-col md:flex-row gap-2 p-2 min-h-0">
+        <!-- Order Monitor (Left) -->
+        <div class="w-full md:w-[45%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0 min-h-[300px] md:min-h-0">
           <OrderMonitor />
         </div>
 
-        <!-- Manual Trading (Right) - Changed from MarketCards, Decreased width to 55% -->
-        <div class="w-[55%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0">
+        <!-- Manual Trading (Right) -->
+        <div class="w-full md:w-[55%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0 min-h-[300px] md:min-h-0">
           <ManualTrading />
         </div>
       </section>
     </main>
 
-    <!-- Right Sidebar - Risk Management -->
-    <aside class="w-80 bg-[#1e2329] border-l border-[#2b3139] flex flex-col overflow-hidden">
+    <!-- Right Sidebar - Risk Management (Hidden on mobile/tablet, shown on large screens) -->
+    <aside class="hidden lg:flex lg:w-80 bg-[#1e2329] border-l border-[#2b3139] flex-col overflow-hidden">
       <Risk />
     </aside>
   </div>

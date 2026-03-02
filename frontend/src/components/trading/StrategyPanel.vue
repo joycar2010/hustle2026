@@ -1,13 +1,13 @@
 <template>
   <div class="h-full flex flex-col">
     <!-- Header -->
-    <div class="p-3 border-b border-[#2b3139] flex-shrink-0">
-      <h3 :class="['text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
+    <div class="p-2 md:p-3 border-b border-[#2b3139] flex-shrink-0">
+      <h3 :class="['text-base md:text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
         {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
       </h3>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
+    <div class="flex-1 overflow-y-auto p-2 md:p-3 space-y-2 min-h-0">
       <!-- Validation Errors Display -->
       <div v-if="validationErrors.length > 0" class="bg-[#f6465d] bg-opacity-10 border border-[#f6465d] rounded p-3">
         <div class="flex items-start space-x-2">
@@ -25,7 +25,7 @@
       </div>
 
       <!-- Position Summary -->
-      <div v-if="positionSummary" class="bg-[#252930] rounded p-3">
+      <div v-if="positionSummary" class="bg-[#252930] rounded p-2 md:p-3">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-bold">持仓统计</span>
           <button
@@ -35,7 +35,7 @@
             刷新
           </button>
         </div>
-        <div class="grid grid-cols-3 gap-3 text-xs">
+        <div class="grid grid-cols-3 gap-2 md:gap-3 text-xs">
           <div>
             <div class="text-gray-400 mb-1">当前持仓</div>
             <div class="font-mono font-bold text-[#0ecb81]">
@@ -58,8 +58,8 @@
       </div>
 
       <!-- Top Info Bar -->
-      <div class="bg-[#252930] rounded p-3">
-        <div class="grid grid-cols-3 gap-3">
+      <div class="bg-[#252930] rounded p-2 md:p-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
           <!-- Binance Available Assets -->
           <div>
             <div class="text-xs text-gray-400 mb-1">Binance可用资产</div>
@@ -414,10 +414,6 @@ async function loadConfigFromDB() {
 }
 
 onUnmounted(() => {
-  // Clear position refresh interval
-  if (positionRefreshInterval) {
-    clearInterval(positionRefreshInterval)
-  }
   // No cleanup needed - WebSocket stays connected for other components
 })
 
@@ -479,6 +475,26 @@ watch(() => marketStore.marketData, (newData) => {
   }
 })
 
+// Watch for account balance updates via WebSocket
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'account_balance') {
+    handleAccountBalanceUpdate(message.data)
+  }
+})
+
+function handleAccountBalanceUpdate(data) {
+  // Update available assets from WebSocket data
+  if (data.accounts && data.accounts.length > 0) {
+    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1) || []
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2) || []
+
+    binanceAssets.value = binanceAccounts.reduce((sum, acc) =>
+      sum + (acc.balance?.available_balance || 0), 0)
+    bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
+      sum + (acc.balance?.available_balance || 0), 0)
+  }
+}
+
 async function fetchAccountData() {
   try {
     const accountResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
@@ -507,40 +523,6 @@ async function refreshPositions() {
   } catch (error) {
     console.error('Failed to fetch positions:', error)
     // Don't show error to user, just log it
-  }
-}
-
-function setupPositionRefresh() {
-  // Clear existing interval if any
-  if (positionRefreshInterval) {
-    clearInterval(positionRefreshInterval)
-  }
-
-  // Get refresh settings from localStorage
-  try {
-    const saved = localStorage.getItem('refresh-settings')
-    if (saved) {
-      const data = JSON.parse(saved)
-      const strategyModule = data.modules?.find(m => m.id === 'strategy_panel')
-
-      if (strategyModule && strategyModule.enabled && strategyModule.interval > 0) {
-        // Setup interval based on saved settings
-        positionRefreshInterval = setInterval(() => {
-          refreshPositions()
-        }, strategyModule.interval)
-      }
-    } else {
-      // Default: refresh every 1 second if no settings found
-      positionRefreshInterval = setInterval(() => {
-        refreshPositions()
-      }, 1000)
-    }
-  } catch (error) {
-    console.error('Failed to load refresh settings:', error)
-    // Fallback to default 1 second refresh
-    positionRefreshInterval = setInterval(() => {
-      refreshPositions()
-    }, 1000)
   }
 }
 
