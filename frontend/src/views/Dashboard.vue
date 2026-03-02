@@ -49,8 +49,8 @@
           <SpreadChart />
         </div>
 
-        <!-- Real-Time Market Data and Spread (Single Row) -->
-        <div class="grid grid-cols-3 gap-4">
+        <!-- Real-Time Market Data and Spread (Single Row on desktop, Single Column on mobile) -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <!-- Bybit MT5 Real-Time Market (Green) -->
           <div class="card-elevated">
             <div class="flex items-center justify-between mb-4">

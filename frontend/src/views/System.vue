@@ -1468,7 +1468,7 @@
           <button @click="showSystemLogDetailModal = false" class="text-text-secondary hover:text-text-primary text-2xl leading-none">&times;</button>
         </div>
         <div v-if="selectedSystemLog" class="space-y-4">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-text-secondary mb-1">日志ID</label>
               <div class="text-text-primary">{{ selectedSystemLog.log_id }}</div>
@@ -1478,7 +1478,7 @@
               <div class="text-text-primary">{{ formatDate(selectedSystemLog.timestamp) }}</div>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-text-secondary mb-1">级别</label>
               <span :class="getLogLevelClass(selectedSystemLog.level)" class="inline-block px-3 py-1 rounded text-sm font-medium">
