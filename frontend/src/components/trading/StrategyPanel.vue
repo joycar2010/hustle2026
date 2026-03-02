@@ -344,6 +344,28 @@ const props = defineProps({
   }
 })
 
+// LocalStorage keys for persisting strategy enabled states
+const STORAGE_KEY_OPENING = `strategy_${props.type}_opening_enabled`
+const STORAGE_KEY_CLOSING = `strategy_${props.type}_closing_enabled`
+
+// Helper functions for localStorage
+function loadEnabledState(key, defaultValue = false) {
+  try {
+    const saved = localStorage.getItem(key)
+    return saved !== null ? saved === 'true' : defaultValue
+  } catch {
+    return defaultValue
+  }
+}
+
+function saveEnabledState(key, value) {
+  try {
+    localStorage.setItem(key, value.toString())
+  } catch (error) {
+    console.error('Failed to save enabled state:', error)
+  }
+}
+
 const marketStore = useMarketStore()
 const currentSpread = ref(0)
 const closingSpread = ref(0)
@@ -357,8 +379,8 @@ const triggerCount = ref({ opening: 0, closing: 0 })
 const config = ref({
   openingMCoin: 5,
   closingMCoin: 5,
-  openingEnabled: false,
-  closingEnabled: false,
+  openingEnabled: loadEnabledState(STORAGE_KEY_OPENING, false),
+  closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING, false),
   openingSyncQty: 3,
   closingSyncQty: 3,
   ladders: [
@@ -386,10 +408,7 @@ const ladderProgress = ref({
 })
 
 onMounted(async () => {
-  config.value.openingEnabled = false
-  config.value.closingEnabled = false
-
-  // Load config from database
+  // Load config from database (including enabled states)
   await loadConfigFromDB()
 
   // Ensure WebSocket connection
@@ -416,6 +435,15 @@ async function loadConfigFromDB() {
     config.value.closingMCoin = data.closing_m_coin || data.m_coin || 5
     config.value.openingSyncQty = data.opening_sync_count
     config.value.closingSyncQty = data.closing_sync_count
+
+    // 保留策略启用状态（如果数据库中有保存）
+    if (data.opening_enabled !== undefined) {
+      config.value.openingEnabled = data.opening_enabled
+    }
+    if (data.closing_enabled !== undefined) {
+      config.value.closingEnabled = data.closing_enabled
+    }
+
     if (data.ladders && data.ladders.length > 0) {
       config.value.ladders = data.ladders
     }
@@ -423,7 +451,9 @@ async function loadConfigFromDB() {
     if (error.response?.status !== 404) {
       console.error('Failed to load config from DB:', error)
     }
-    // 404 means no config yet, use defaults
+    // 404 means no config yet, use defaults (disabled by default)
+    config.value.openingEnabled = false
+    config.value.closingEnabled = false
   }
 }
 
@@ -753,6 +783,7 @@ function toggleOpening() {
     config.value.openingEnabled = false
     triggerCount.value.opening = 0
     validationErrors.value = []
+    saveEnabledState(STORAGE_KEY_OPENING, false)
   } else {
     // Clear previous errors
     validationErrors.value = []
@@ -774,6 +805,7 @@ function toggleOpening() {
     config.value.openingEnabled = true
     orderPlaced.value.opening = false
     triggerCount.value.opening = 0
+    saveEnabledState(STORAGE_KEY_OPENING, true)
     // closingEnabled is NOT touched — independent control
   }
 }
@@ -783,6 +815,7 @@ async function toggleClosing() {
     config.value.closingEnabled = false
     triggerCount.value.closing = 0
     validationErrors.value = []
+    saveEnabledState(STORAGE_KEY_CLOSING, false)
   } else {
     // Clear previous errors
     validationErrors.value = []
@@ -811,6 +844,7 @@ async function toggleClosing() {
     config.value.closingEnabled = true
     orderPlaced.value.closing = false
     triggerCount.value.closing = 0
+    saveEnabledState(STORAGE_KEY_CLOSING, true)
     // openingEnabled is NOT touched — independent control
   }
 }
