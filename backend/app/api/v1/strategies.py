@@ -14,7 +14,8 @@ from app.schemas.strategy import (
     StrategyConfigUpdate,
     StrategyConfigResponse,
 )
-from app.services.arbitrage_strategy import arbitrage_strategy
+# Strategy services removed - functionality disabled
+# from app.services.arbitrage_strategy import arbitrage_strategy
 from app.services.position_manager import position_manager
 
 router = APIRouter()
@@ -369,44 +370,10 @@ async def execute_forward_arbitrage(
     db: AsyncSession = Depends(get_db),
 ):
     """Execute forward arbitrage strategy (long Binance, short Bybit)"""
-    # Get accounts
-    binance_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.binance_account_id,
-            Account.user_id == UUID(user_id),
-        )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
     )
-    binance_account = binance_result.scalar_one_or_none()
-
-    bybit_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.bybit_account_id,
-            Account.user_id == UUID(user_id),
-        )
-    )
-    bybit_account = bybit_result.scalar_one_or_none()
-
-    if not binance_account or not bybit_account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
-        )
-
-    try:
-        result = await arbitrage_strategy.execute_forward_arbitrage(
-            user_id=UUID(user_id),
-            binance_account=binance_account,
-            bybit_account=bybit_account,
-            quantity=request.quantity,
-            target_spread=request.target_spread,
-            db=db,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
 
 
 @router.post("/execute/reverse")
@@ -416,44 +383,10 @@ async def execute_reverse_arbitrage(
     db: AsyncSession = Depends(get_db),
 ):
     """Execute reverse arbitrage strategy (short Binance, long Bybit)"""
-    # Get accounts
-    binance_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.binance_account_id,
-            Account.user_id == UUID(user_id),
-        )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
     )
-    binance_account = binance_result.scalar_one_or_none()
-
-    bybit_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.bybit_account_id,
-            Account.user_id == UUID(user_id),
-        )
-    )
-    bybit_account = bybit_result.scalar_one_or_none()
-
-    if not binance_account or not bybit_account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
-        )
-
-    try:
-        result = await arbitrage_strategy.execute_reverse_arbitrage(
-            user_id=UUID(user_id),
-            binance_account=binance_account,
-            bybit_account=bybit_account,
-            quantity=request.quantity,
-            target_spread=request.target_spread,
-            db=db,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
 
 
 @router.post("/close/forward")
@@ -463,43 +396,10 @@ async def close_forward_position(
     db: AsyncSession = Depends(get_db),
 ):
     """Close forward arbitrage position"""
-    # Get accounts
-    binance_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.binance_account_id,
-            Account.user_id == UUID(user_id),
-        )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
     )
-    binance_account = binance_result.scalar_one_or_none()
-
-    bybit_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.bybit_account_id,
-            Account.user_id == UUID(user_id),
-        )
-    )
-    bybit_account = bybit_result.scalar_one_or_none()
-
-    if not binance_account or not bybit_account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
-        )
-
-    try:
-        result = await arbitrage_strategy.close_forward_arbitrage(
-            task_id=request.task_id,
-            binance_account=binance_account,
-            bybit_account=bybit_account,
-            quantity=request.quantity,
-            db=db,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
 
 
 @router.post("/close/reverse")
@@ -509,43 +409,10 @@ async def close_reverse_position(
     db: AsyncSession = Depends(get_db),
 ):
     """Close reverse arbitrage position"""
-    # Get accounts
-    binance_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.binance_account_id,
-            Account.user_id == UUID(user_id),
-        )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
     )
-    binance_account = binance_result.scalar_one_or_none()
-
-    bybit_result = await db.execute(
-        select(Account).where(
-            Account.account_id == request.bybit_account_id,
-            Account.user_id == UUID(user_id),
-        )
-    )
-    bybit_account = bybit_result.scalar_one_or_none()
-
-    if not binance_account or not bybit_account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
-        )
-
-    try:
-        result = await arbitrage_strategy.close_reverse_arbitrage(
-            task_id=request.task_id,
-            binance_account=binance_account,
-            bybit_account=bybit_account,
-            quantity=request.quantity,
-            db=db,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
 
 
 # Position management endpoints

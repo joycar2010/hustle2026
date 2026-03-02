@@ -234,19 +234,17 @@ class RealTimeMarketDataService:
             # Store spread data ONLY (no market data stored)
             timestamp = datetime.utcnow()
 
-            # Calculate and store spread if both data available
+            # Spread calculation logic removed
+            # Store raw price data only (no spread calculation)
             if binance_data and bybit_data:
-                forward_spread = bybit_data["bid_price"] - binance_data["ask_price"]
-                reverse_spread = binance_data["bid_price"] - bybit_data["ask_price"]
-
                 spread_record = SpreadRecord(
                     symbol=symbol,
                     binance_bid=binance_data["bid_price"],
                     binance_ask=binance_data["ask_price"],
                     bybit_bid=bybit_data["bid_price"],
                     bybit_ask=bybit_data["ask_price"],
-                    forward_spread=forward_spread,
-                    reverse_spread=reverse_spread,
+                    forward_spread=0.0,  # Removed calculation
+                    reverse_spread=0.0,  # Removed calculation
                     timestamp=timestamp
                 )
                 db.add(spread_record)
