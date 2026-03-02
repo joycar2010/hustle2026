@@ -74,7 +74,7 @@ export function useAlertMonitoring() {
       }
     })
 
-    // Watch for account_balance WebSocket messages
+    // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
     unwatchAccount = watch(() => marketStore.lastMessage, (message) => {
       if (message && message.type === 'account_balance') {
         const accountData = {
@@ -86,13 +86,7 @@ export function useAlertMonitoring() {
       }
     })
 
-    // Reduced polling frequency as fallback (30s instead of 5s)
-    marketCheckInterval = setInterval(checkMarketData, 30000)
-
-    // Reduced polling frequency as fallback (60s instead of 10s)
-    accountCheckInterval = setInterval(checkAccountData, 60000)
-
-    // Check MT5 status every 30 seconds (reduced from 15s)
+    // Keep MT5 status polling (30s) - no WebSocket alternative yet
     mt5CheckInterval = setInterval(checkMT5Status, 30000)
 
     // Initial checks
@@ -103,8 +97,6 @@ export function useAlertMonitoring() {
 
   // Stop monitoring
   function stopMonitoring() {
-    if (marketCheckInterval) clearInterval(marketCheckInterval)
-    if (accountCheckInterval) clearInterval(accountCheckInterval)
     if (mt5CheckInterval) clearInterval(mt5CheckInterval)
     if (unwatchMarket) unwatchMarket()
     if (unwatchAccount) unwatchAccount()

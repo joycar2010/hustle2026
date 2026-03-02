@@ -40,18 +40,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 
 const router = useRouter()
+const marketStore = useMarketStore()
 const activeNav = ref('strategy')
 const systemAlerts = ref([])
 
 onMounted(async () => {
   await fetchSystemAlerts()
-  // Refresh alerts every 60 seconds
-  setInterval(fetchSystemAlerts, 60000)
+
+  // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
+  watch(() => marketStore.lastMessage, (message) => {
+    if (message && message.type === 'account_balance') {
+      systemAlerts.value = generateSystemAlerts(message.data)
+    }
+  })
 })
 
 async function fetchSystemAlerts() {

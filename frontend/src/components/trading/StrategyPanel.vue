@@ -1307,11 +1307,14 @@ function formatNumber(num) {
 }
 
 function setupPositionRefresh() {
-  // 从系统设置获取刷新间隔（默认30秒）
-  const refreshInterval = 30000
-
-  positionRefreshInterval = setInterval(async () => {
-    await refreshPositions()
-  }, refreshInterval)
+  // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
+  watch(() => marketStore.lastMessage, (message) => {
+    if (message && message.type === 'account_balance') {
+      // Refresh positions when account balance updates
+      if (configId.value) {
+        refreshPositions()
+      }
+    }
+  })
 }
 </script>

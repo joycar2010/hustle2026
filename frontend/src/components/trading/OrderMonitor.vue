@@ -73,11 +73,7 @@ onMounted(() => {
     }
   })
 
-  // Reduced polling frequency as fallback (30s instead of 3s)
-  updateInterval = setInterval(() => {
-    fetchOrders()
-    fetchPendingOrders()
-  }, 30000)
+  // Removed polling - rely entirely on WebSocket
 })
 
 onUnmounted(() => {
