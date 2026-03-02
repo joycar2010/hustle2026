@@ -333,6 +333,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
+import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 
 const props = defineProps({
   type: {
@@ -370,6 +371,18 @@ const configId = ref(null)
 const validationErrors = ref([])
 const positionSummary = ref(null)
 let positionRefreshInterval = null
+
+// 阶梯执行进度跟踪
+const ladderProgress = ref({
+  opening: {
+    currentLadderIndex: 0,  // 当前执行的阶梯索引
+    completedQty: 0         // 当前阶梯已完成数量
+  },
+  closing: {
+    currentLadderIndex: 0,
+    completedQty: 0
+  }
+})
 
 onMounted(async () => {
   config.value.openingEnabled = false
@@ -414,25 +427,27 @@ async function loadConfigFromDB() {
 }
 
 onUnmounted(() => {
-  // No cleanup needed - WebSocket stays connected for other components
+  // Cleanup position refresh interval
+  if (positionRefreshInterval) {
+    clearInterval(positionRefreshInterval)
+  }
+  // No cleanup needed for WebSocket - stays connected for other components
 })
 
 // Watch for market data updates via WebSocket
 watch(() => marketStore.marketData, (newData) => {
   if (!newData) return
 
+  // 使用统一的点差计算器
+  const spreads = calculateAllSpreads(newData)
+
   // Update spread based on strategy type
-  // 新公式：
-  // 正向开仓: binance做多点差 = bybit_bid - binance_bid
-  // 正向平仓: binance平仓点差 = bybit_ask - binance_ask
-  // 反向开仓: bybit做多点差 = binance_ask - bybit_ask
-  // 反向平仓: bybit平仓点差 = binance_bid - bybit_bid
   if (props.type === 'forward') {
-    currentSpread.value = newData.bybit_bid - newData.binance_bid  // 正向开仓
-    closingSpread.value = newData.bybit_ask - newData.binance_ask  // 正向平仓
+    currentSpread.value = spreads.forwardOpening  // 正向开仓点差
+    closingSpread.value = spreads.forwardClosing  // 正向平仓点差
   } else {
-    currentSpread.value = newData.binance_ask - newData.bybit_ask  // 反向开仓
-    closingSpread.value = newData.binance_bid - newData.bybit_bid  // 反向平仓
+    currentSpread.value = spreads.reverseOpening  // 反向开仓点差
+    closingSpread.value = spreads.reverseClosing  // 反向平仓点差
   }
 
   // binance做多值: forward=binance_bid, reverse=binance_ask
@@ -441,42 +456,50 @@ watch(() => marketStore.marketData, (newData) => {
   // Trigger count logic for opening
   if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    // 修正：应该比较点差值，而不是原始价格
-    // 正向开仓：当 currentSpread >= openPrice 时触发
-    // 反向开仓：当 currentSpread >= openPrice 时触发
-    const matchedLadder = enabledLadders.find(l => currentSpread.value >= l.openPrice)
+    const currentLadderIdx = ladderProgress.value.opening.currentLadderIndex
 
-    if (matchedLadder) {
-      triggerCount.value.opening++
-      console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, currentSpread=${currentSpread.value}, openPrice=${matchedLadder.openPrice}`)
+    // 只检查当前阶梯（严格顺序执行）
+    if (currentLadderIdx < enabledLadders.length) {
+      const currentLadder = enabledLadders[currentLadderIdx]
 
-      if (triggerCount.value.opening >= config.value.openingSyncQty) {
-        executeBatchOpening(matchedLadder)
+      // 检查是否满足触发条件
+      if (currentSpread.value >= currentLadder.openPrice) {
+        triggerCount.value.opening++
+        console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, currentSpread=${currentSpread.value}, openPrice=${currentLadder.openPrice}, ladder=${currentLadderIdx + 1}`)
+
+        if (triggerCount.value.opening >= config.value.openingSyncQty) {
+          // 执行当前阶梯
+          executeLadderOpening(currentLadderIdx, currentLadder)
+          triggerCount.value.opening = 0
+        }
+      } else {
         triggerCount.value.opening = 0
       }
-    } else {
-      triggerCount.value.opening = 0
     }
   }
 
   // Trigger count logic for closing
   if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    // 修正：应该比较点差值，而不是原始价格
-    // 正向平仓：当 closingSpread <= threshold 时触发
-    // 反向平仓：当 closingSpread <= threshold 时触发
-    const matchedLadder = enabledLadders.find(l => closingSpread.value <= l.threshold)
+    const currentLadderIdx = ladderProgress.value.closing.currentLadderIndex
 
-    if (matchedLadder) {
-      triggerCount.value.closing++
-      console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, closingSpread=${closingSpread.value}, threshold=${matchedLadder.threshold}`)
+    // 只检查当前阶梯（严格顺序执行）
+    if (currentLadderIdx < enabledLadders.length) {
+      const currentLadder = enabledLadders[currentLadderIdx]
 
-      if (triggerCount.value.closing >= config.value.closingSyncQty) {
-        executeBatchClosing(matchedLadder)
+      // 检查是否满足触发条件
+      if (closingSpread.value <= currentLadder.threshold) {
+        triggerCount.value.closing++
+        console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, closingSpread=${closingSpread.value}, threshold=${currentLadder.threshold}, ladder=${currentLadderIdx + 1}`)
+
+        if (triggerCount.value.closing >= config.value.closingSyncQty) {
+          // 执行当前阶梯
+          executeLadderClosing(currentLadderIdx, currentLadder)
+          triggerCount.value.closing = 0
+        }
+      } else {
         triggerCount.value.closing = 0
       }
-    } else {
-      triggerCount.value.closing = 0
     }
   }
 })
@@ -791,6 +814,159 @@ async function toggleClosing() {
   }
 }
 
+async function executeLadderOpening(ladderIndex, ladder) {
+  if (executing.value) return
+
+  try {
+    executing.value = true
+
+    const accounts = accountsData.value?.accounts || []
+    const binanceAccount = accounts.find(acc => acc.platform_id === 1)
+    const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
+
+    if (!binanceAccount || !bybitMT5Account) {
+      alert('无法找到账户信息，请刷新页面重试')
+      config.value.openingEnabled = false
+      return
+    }
+
+    const remainingQty = ladder.qtyLimit - ladderProgress.value.opening.completedQty
+    const mCoin = config.value.openingMCoin
+    const batchQty = Math.min(mCoin, remainingQty)
+
+    console.log(`Executing ladder ${ladderIndex + 1} opening: batch=${batchQty}, remaining=${remainingQty}, total=${ladder.qtyLimit}`)
+
+    const executionData = {
+      binance_account_id: binanceAccount.account_id,
+      bybit_account_id: bybitMT5Account.account_id,
+      quantity: batchQty,
+      ladder_index: ladderIndex,
+      target_spread: ladder.threshold
+    }
+
+    try {
+      const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
+
+      if (response.data.success) {
+        console.log(`Ladder ${ladderIndex + 1} batch executed successfully`)
+
+        // 更新阶梯进度
+        ladderProgress.value.opening.completedQty += batchQty
+
+        // 检查当前阶梯是否完成
+        if (ladderProgress.value.opening.completedQty >= ladder.qtyLimit) {
+          console.log(`Ladder ${ladderIndex + 1} completed, moving to next ladder`)
+
+          // 移动到下一个阶梯
+          ladderProgress.value.opening.currentLadderIndex++
+          ladderProgress.value.opening.completedQty = 0
+
+          // 检查是否所有阶梯都完成
+          const enabledLadders = config.value.ladders.filter(l => l.enabled)
+          if (ladderProgress.value.opening.currentLadderIndex >= enabledLadders.length) {
+            // 所有阶梯完成，停止策略
+            console.log('All ladders completed, stopping opening strategy')
+            config.value.openingEnabled = false
+            ladderProgress.value.opening.currentLadderIndex = 0
+            alert('所有阶梯开仓完成')
+          }
+        }
+
+        // 刷新持仓数据
+        await refreshPositions()
+      } else {
+        const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
+        console.error(`Ladder ${ladderIndex + 1} execution failed:`, errorMsg)
+        alert(`阶梯 ${ladderIndex + 1} 执行失败: ${errorMsg}`)
+        config.value.openingEnabled = false
+      }
+    } catch (error) {
+      console.error(`Ladder ${ladderIndex + 1} execution error:`, error)
+      const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
+      alert(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`)
+      config.value.openingEnabled = false
+    }
+  } finally {
+    executing.value = false
+  }
+}
+
+async function executeLadderClosing(ladderIndex, ladder) {
+  if (executing.value) return
+
+  try {
+    executing.value = true
+
+    const accounts = accountsData.value?.accounts || []
+    const binanceAccount = accounts.find(acc => acc.platform_id === 1)
+    const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
+
+    if (!binanceAccount || !bybitMT5Account) {
+      alert('无法找到账户信息，请刷新页面重试')
+      config.value.closingEnabled = false
+      return
+    }
+
+    const remainingQty = ladder.qtyLimit - ladderProgress.value.closing.completedQty
+    const mCoin = config.value.closingMCoin
+    const batchQty = Math.min(mCoin, remainingQty)
+
+    console.log(`Executing ladder ${ladderIndex + 1} closing: batch=${batchQty}, remaining=${remainingQty}, total=${ladder.qtyLimit}`)
+
+    const executionData = {
+      binance_account_id: binanceAccount.account_id,
+      bybit_account_id: bybitMT5Account.account_id,
+      quantity: batchQty,
+      ladder_index: ladderIndex
+    }
+
+    try {
+      const response = await api.post(`/api/v1/strategies/close/${props.type}`, executionData)
+
+      if (response.data.success) {
+        console.log(`Ladder ${ladderIndex + 1} batch closed successfully`)
+
+        // 更新阶梯进度
+        ladderProgress.value.closing.completedQty += batchQty
+
+        // 检查当前阶梯是否完成
+        if (ladderProgress.value.closing.completedQty >= ladder.qtyLimit) {
+          console.log(`Ladder ${ladderIndex + 1} closing completed, moving to next ladder`)
+
+          // 移动到下一个阶梯
+          ladderProgress.value.closing.currentLadderIndex++
+          ladderProgress.value.closing.completedQty = 0
+
+          // 检查是否所有阶梯都完成
+          const enabledLadders = config.value.ladders.filter(l => l.enabled)
+          if (ladderProgress.value.closing.currentLadderIndex >= enabledLadders.length) {
+            // 所有阶梯完成，停止策略
+            console.log('All ladders closing completed, stopping closing strategy')
+            config.value.closingEnabled = false
+            ladderProgress.value.closing.currentLadderIndex = 0
+            alert('所有阶梯平仓完成')
+          }
+        }
+
+        // 刷新持仓数据
+        await refreshPositions()
+      } else {
+        const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
+        console.error(`Ladder ${ladderIndex + 1} closing failed:`, errorMsg)
+        alert(`阶梯 ${ladderIndex + 1} 平仓失败: ${errorMsg}`)
+        config.value.closingEnabled = false
+      }
+    } catch (error) {
+      console.error(`Ladder ${ladderIndex + 1} closing error:`, error)
+      const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
+      alert(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`)
+      config.value.closingEnabled = false
+    }
+  } finally {
+    executing.value = false
+  }
+}
+
 async function executeBatchOpening(ladder) {
   if (executing.value) return
 
@@ -1093,5 +1269,14 @@ function validateLadderConfig(action) {
 
 function formatNumber(num) {
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function setupPositionRefresh() {
+  // 从系统设置获取刷新间隔（默认30秒）
+  const refreshInterval = 30000
+
+  positionRefreshInterval = setInterval(async () => {
+    await refreshPositions()
+  }, refreshInterval)
 }
 </script>

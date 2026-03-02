@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 from app.core.database import get_db
@@ -14,11 +14,28 @@ from app.schemas.strategy import (
     StrategyConfigUpdate,
     StrategyConfigResponse,
 )
-# Strategy services removed - functionality disabled
-# from app.services.arbitrage_strategy import arbitrage_strategy
 from app.services.position_manager import position_manager
+from app.services.order_executor_v2 import OrderExecutorV2
+from app.services.market_data_service import market_data_service
 
 router = APIRouter()
+order_executor_v2 = OrderExecutorV2()
+
+
+# Request models for strategy execution
+class ExecuteStrategyRequest(BaseModel):
+    binance_account_id: UUID
+    bybit_account_id: UUID
+    quantity: float
+    ladder_index: int = 0
+    target_spread: Optional[float] = None
+
+
+class ClosePositionRequest(BaseModel):
+    binance_account_id: UUID
+    bybit_account_id: UUID
+    quantity: float
+    ladder_index: int = 0
 
 
 @router.get("/configs", response_model=List[StrategyConfigResponse])
@@ -363,43 +380,140 @@ async def validate_strategy_config(
     )
 
 
-@router.post("/execute/forward")
-async def execute_forward_arbitrage(
-    request: ExecuteStrategyRequest,
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """Execute forward arbitrage strategy (long Binance, short Bybit)"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
-    )
-
-
 @router.post("/execute/reverse")
 async def execute_reverse_arbitrage(
     request: ExecuteStrategyRequest,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Execute reverse arbitrage strategy (short Binance, long Bybit)"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
-    )
+    """Execute reverse arbitrage strategy (Binance short, Bybit long)"""
+    try:
+        # 1. Get accounts
+        binance_result = await db.execute(
+            select(Account).where(Account.account_id == request.binance_account_id)
+        )
+        binance_account = binance_result.scalar_one_or_none()
+
+        bybit_result = await db.execute(
+            select(Account).where(Account.account_id == request.bybit_account_id)
+        )
+        bybit_account = bybit_result.scalar_one_or_none()
+
+        if not binance_account or not bybit_account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # 2. Check position limits
+        strategy_id = f"{user_id}_reverse"
+        can_open = position_manager.check_can_open(
+            strategy_id=strategy_id,
+            ladder_index=request.ladder_index,
+            quantity=request.quantity,
+            max_position=request.quantity
+        )
+
+        if not can_open:
+            raise HTTPException(status_code=400, detail="Position limit exceeded for this ladder")
+
+        # 3. Get current market prices (use ask for sell, bid for buy)
+        # For reverse opening: Binance SELL (use bid+0.01), Bybit BUY (market)
+        from app.services.market_service import market_data_service
+        market_data = await market_data_service.get_aggregated_quotes()
+
+        binance_price = market_data.binance_quote.bid_price + 0.01  # Maker price
+        bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
+
+        # 4. Execute order using OrderExecutorV2
+        result = await order_executor_v2.execute_reverse_opening(
+            binance_account=binance_account,
+            bybit_account=bybit_account,
+            quantity=request.quantity,
+            binance_price=binance_price,
+            bybit_price=bybit_price,
+            db=db
+        )
+
+        # 5. Record position if successful
+        if result.get("success"):
+            position_manager.record_opening(
+                strategy_id=strategy_id,
+                ladder_index=request.ladder_index,
+                quantity=result.get("binance_filled_qty", 0)
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
 
-@router.post("/close/forward")
-async def close_forward_position(
-    request: ClosePositionRequest,
+@router.post("/execute/forward")
+async def execute_forward_arbitrage(
+    request: ExecuteStrategyRequest,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Close forward arbitrage position"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
-    )
+    """Execute forward arbitrage strategy (Binance long, Bybit short)"""
+    try:
+        # 1. Get accounts
+        binance_result = await db.execute(
+            select(Account).where(Account.account_id == request.binance_account_id)
+        )
+        binance_account = binance_result.scalar_one_or_none()
+
+        bybit_result = await db.execute(
+            select(Account).where(Account.account_id == request.bybit_account_id)
+        )
+        bybit_account = bybit_result.scalar_one_or_none()
+
+        if not binance_account or not bybit_account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # 2. Check position limits
+        strategy_id = f"{user_id}_forward"
+        can_open = position_manager.check_can_open(
+            strategy_id=strategy_id,
+            ladder_index=request.ladder_index,
+            quantity=request.quantity,
+            max_position=request.quantity
+        )
+
+        if not can_open:
+            raise HTTPException(status_code=400, detail="Position limit exceeded for this ladder")
+
+        # 3. Get current market prices
+        # For forward opening: Binance BUY (use ask-0.01), Bybit SELL (market)
+        from app.services.market_service import market_data_service
+        market_data = await market_data_service.get_aggregated_quotes()
+
+        binance_price = market_data.binance_quote.ask_price - 0.01  # Maker price
+        bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
+
+        # 4. Execute order using OrderExecutorV2
+        result = await order_executor_v2.execute_forward_opening(
+            binance_account=binance_account,
+            bybit_account=bybit_account,
+            quantity=request.quantity,
+            binance_price=binance_price,
+            bybit_price=bybit_price,
+            db=db
+        )
+
+        # 5. Record position if successful
+        if result.get("success"):
+            position_manager.record_opening(
+                strategy_id=strategy_id,
+                ladder_index=request.ladder_index,
+                quantity=result.get("binance_filled_qty", 0)
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
 
 @router.post("/close/reverse")
@@ -408,11 +522,132 @@ async def close_reverse_position(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Close reverse arbitrage position"""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Strategy execution has been disabled. All strategy calculation logic has been removed.",
-    )
+    """Close reverse arbitrage position (Binance buy to close short, Bybit sell to close long)"""
+    try:
+        # 1. Get accounts
+        binance_result = await db.execute(
+            select(Account).where(Account.account_id == request.binance_account_id)
+        )
+        binance_account = binance_result.scalar_one_or_none()
+
+        bybit_result = await db.execute(
+            select(Account).where(Account.account_id == request.bybit_account_id)
+        )
+        bybit_account = bybit_result.scalar_one_or_none()
+
+        if not binance_account or not bybit_account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # 2. Check if can close
+        strategy_id = f"{user_id}_reverse"
+        can_close = position_manager.check_can_close(
+            strategy_id=strategy_id,
+            ladder_index=request.ladder_index,
+            quantity=request.quantity
+        )
+
+        if not can_close:
+            raise HTTPException(status_code=400, detail="Insufficient position to close")
+
+        # 3. Get current market prices
+        # For reverse closing: Binance BUY (use ask-0.01), Bybit SELL (market)
+        from app.services.market_service import market_data_service
+        market_data = await market_data_service.get_aggregated_quotes()
+
+        binance_price = market_data.binance_quote.ask_price - 0.01  # Maker price
+        bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
+
+        # 4. Execute order using OrderExecutorV2
+        result = await order_executor_v2.execute_reverse_closing(
+            binance_account=binance_account,
+            bybit_account=bybit_account,
+            quantity=request.quantity,
+            binance_price=binance_price,
+            bybit_price=bybit_price,
+            db=db
+        )
+
+        # 5. Record position if successful
+        if result.get("success"):
+            position_manager.record_closing(
+                strategy_id=strategy_id,
+                ladder_index=request.ladder_index,
+                quantity=result.get("binance_filled_qty", 0)
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
+
+
+@router.post("/close/forward")
+async def close_forward_position(
+    request: ClosePositionRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Close forward arbitrage position (Binance sell to close long, Bybit buy to close short)"""
+    try:
+        # 1. Get accounts
+        binance_result = await db.execute(
+            select(Account).where(Account.account_id == request.binance_account_id)
+        )
+        binance_account = binance_result.scalar_one_or_none()
+
+        bybit_result = await db.execute(
+            select(Account).where(Account.account_id == request.bybit_account_id)
+        )
+        bybit_account = bybit_result.scalar_one_or_none()
+
+        if not binance_account or not bybit_account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # 2. Check if can close
+        strategy_id = f"{user_id}_forward"
+        can_close = position_manager.check_can_close(
+            strategy_id=strategy_id,
+            ladder_index=request.ladder_index,
+            quantity=request.quantity
+        )
+
+        if not can_close:
+            raise HTTPException(status_code=400, detail="Insufficient position to close")
+
+        # 3. Get current market prices
+        # For forward closing: Binance SELL (use bid+0.01), Bybit BUY (market)
+        from app.services.market_service import market_data_service
+        market_data = await market_data_service.get_aggregated_quotes()
+
+        binance_price = market_data.binance_quote.bid_price + 0.01  # Maker price
+        bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
+
+        # 4. Execute order using OrderExecutorV2
+        result = await order_executor_v2.execute_forward_closing(
+            binance_account=binance_account,
+            bybit_account=bybit_account,
+            quantity=request.quantity,
+            binance_price=binance_price,
+            bybit_price=bybit_price,
+            db=db
+        )
+
+        # 5. Record position if successful
+        if result.get("success"):
+            position_manager.record_closing(
+                strategy_id=strategy_id,
+                ladder_index=request.ladder_index,
+                quantity=result.get("binance_filled_qty", 0)
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
 
 # Position management endpoints
