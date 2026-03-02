@@ -97,7 +97,7 @@
           <div>
             <label :for="`openingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
               {{ type === 'forward' ? '正向开仓单次下单手数' : '反向开仓单次下单手数' }} (XAU)
-              <span class="text-[#0ecb81] ml-1">≈ {{ (config.openingMCoin / 100).toFixed(2) }} Lot</span>
+              <span class="text-[#0ecb81] ml-1">≈ {{ xauToLot(config.openingMCoin).toFixed(2) }} Lot</span>
             </label>
             <input
               :id="`openingMCoin-${type}`"
@@ -111,7 +111,7 @@
           <div>
             <label :for="`closingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
               {{ type === 'forward' ? '正向平仓单次下单手数' : '反向平仓单次下单手数' }} (XAU)
-              <span class="text-[#0ecb81] ml-1">≈ {{ (config.closingMCoin / 100).toFixed(2) }} Lot</span>
+              <span class="text-[#0ecb81] ml-1">≈ {{ xauToLot(config.closingMCoin).toFixed(2) }} Lot</span>
             </label>
             <input
               :id="`closingMCoin-${type}`"
@@ -303,7 +303,7 @@
               <div>
                 <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
                   {{ type === 'forward' ? '正向下单总手数' : '反向下单总手数' }} (XAU)
-                  <span class="text-[#0ecb81] ml-1">≈ {{ (ladder.qtyLimit / 100).toFixed(2) }} Lot</span>
+                  <span class="text-[#0ecb81] ml-1">≈ {{ xauToLot(ladder.qtyLimit).toFixed(2) }} Lot</span>
                 </label>
                 <input
                   :id="`qtyLimit-${type}-${index}`"
@@ -334,6 +334,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
+import { xauToLot } from '@/composables/useQuantityConverter'
 
 const props = defineProps({
   type: {

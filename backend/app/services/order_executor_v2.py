@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.account import Account
 from app.services.order_executor import order_executor as base_executor
+from app.utils.quantity_converter import quantity_converter
 
 
 class OrderExecutorV2:
@@ -81,7 +82,7 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity
-        bybit_quantity = binance_filled_qty / 100.0  # Convert to lots
+        bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             "XAUUSD.s",
@@ -154,7 +155,7 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity
-        bybit_quantity = binance_filled_qty / 100.0  # Convert to lots
+        bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             "XAUUSD.s",
@@ -227,7 +228,7 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity
-        bybit_quantity = binance_filled_qty / 100.0  # Convert to lots
+        bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             "XAUUSD.s",
@@ -300,7 +301,7 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity
-        bybit_quantity = binance_filled_qty / 100.0  # Convert to lots
+        bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             "XAUUSD.s",

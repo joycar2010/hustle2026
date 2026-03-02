@@ -69,7 +69,7 @@
             placeholder="1"
           />
           <div class="text-xs text-gray-500 mt-1">
-            Bybit 实际下单量: {{ (quantity / 100).toFixed(2) }} Lot
+            Bybit 实际下单量: {{ xauToLot(quantity).toFixed(2) }} Lot
           </div>
         </div>
 
@@ -125,6 +125,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
+import { xauToLot, convertForPlatform } from '@/composables/useQuantityConverter'
 
 const router = useRouter()
 const marketStore = useMarketStore()
@@ -190,10 +191,8 @@ async function executeTrade(side) {
   if (loading.value) return
   loading.value = true
   try {
-    // 根据平台转换数量
-    // Binance: 1 XAU = 1 合约
-    // Bybit: 1 Lot = 100 XAU，所以需要除以 100
-    const actualQuantity = exchange.value === 'bybit' ? quantity.value / 100 : quantity.value
+    // 使用统一的转换组件
+    const actualQuantity = convertForPlatform(quantity.value, exchange.value)
 
     await api.post('/api/v1/trading/manual/order', {
       exchange: exchange.value,
