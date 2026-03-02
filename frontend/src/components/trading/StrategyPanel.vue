@@ -35,7 +35,7 @@
             刷新
           </button>
         </div>
-        <div class="grid grid-cols-3 gap-2 md:gap-3 text-xs">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3 text-xs">
           <div>
             <div class="text-gray-400 mb-1">当前持仓</div>
             <div class="font-mono font-bold text-[#0ecb81]">
@@ -93,7 +93,7 @@
         <div class="text-xs font-bold mb-2">策略配置</div>
 
         <!-- M Coin Settings -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label :for="`openingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
               {{ type === 'forward' ? '正向开仓单次下单手数' : '反向开仓单次下单手数' }} (XAU)
@@ -124,7 +124,7 @@
         </div>
 
         <!-- Opening/Closing Position Toggles -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="text-xs text-gray-400 mb-1 block">开仓控制</label>
             <button
@@ -187,7 +187,7 @@
         </div>
 
         <!-- Data Sync Quantities -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
               {{ type === 'forward' ? '正向开仓触发次数' : '反向开仓触发次数' }}
@@ -271,7 +271,7 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div>
                 <label :for="`openPrice-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
                   {{ type === 'forward' ? '正向开仓点差值' : '反向开仓点差值' }}

@@ -74,7 +74,7 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             @click="executeTrade('buy')"
             :disabled="loading"
@@ -98,7 +98,7 @@
 
         <!-- Quick Actions -->
         <div class="pt-3 border-t border-[#2b3139]">
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               @click="closeAllPositions"
               :disabled="loading"
