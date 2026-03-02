@@ -128,6 +128,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
+import { calculateAllSpreads, calculateBidAskSpread } from '@/composables/useSpreadCalculator'
 
 const marketStore = useMarketStore()
 const isConnected = computed(() => marketStore.connected)
@@ -136,20 +137,28 @@ const binance = ref({ bid: 0, ask: 0, prevBid: 0, prevAsk: 0 })
 const bybit = ref({ bid: 0, ask: 0, prevBid: 0, prevAsk: 0 })
 
 const arbitrageOpportunity = computed(() => {
-  const forwardSpread = bybit.value.bid - binance.value.ask
-  const reverseSpread = binance.value.bid - bybit.value.ask
+  // 使用统一的点差计算管理组件
+  const spreads = calculateAllSpreads({
+    binance_bid: binance.value.bid,
+    binance_ask: binance.value.ask,
+    bybit_bid: bybit.value.bid,
+    bybit_ask: bybit.value.ask
+  })
 
-  if (forwardSpread > 0.5) {
+  // 正向开仓：binance做多点差 = bybit_bid - binance_bid
+  if (spreads.forwardOpening > 0.5) {
     return {
-      spread: forwardSpread,
+      spread: spreads.forwardOpening,
       direction: 'forward',
-      profitPercent: ((forwardSpread / binance.value.ask) * 100).toFixed(3)
+      profitPercent: ((spreads.forwardOpening / binance.value.ask) * 100).toFixed(3)
     }
-  } else if (reverseSpread > 0.5) {
+  }
+  // 反向开仓：bybit做多点差 = binance_ask - bybit_ask
+  else if (spreads.reverseOpening > 0.5) {
     return {
-      spread: reverseSpread,
+      spread: spreads.reverseOpening,
       direction: 'reverse',
-      profitPercent: ((reverseSpread / bybit.value.ask) * 100).toFixed(3)
+      profitPercent: ((spreads.reverseOpening / bybit.value.ask) * 100).toFixed(3)
     }
   }
   return null

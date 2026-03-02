@@ -112,6 +112,7 @@
 import { ref, onMounted, computed } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/services/api'
+import { calculateSpreadsFromHistoryItem } from '@/composables/useSpreadCalculator'
 
 const loading = ref(false)
 const spreadHistory = ref([])
@@ -138,21 +139,22 @@ async function fetchSpreadHistory() {
 
     const data = response.data
 
-    // Transform backend data to component format
+    // Transform backend data to component format using unified spread calculator
     const transformedData = data.map((item, index) => {
-      const forwardSpread = item.bybit_quote.ask - item.binance_quote.bid
-      const reverseSpread = item.binance_quote.bid - item.bybit_quote.ask
-      const isForward = Math.abs(forwardSpread) > Math.abs(reverseSpread)
-      const spread = isForward ? forwardSpread : reverseSpread
+      const spreads = calculateSpreadsFromHistoryItem(item)
+
+      // 选择绝对值较大的点差
+      const isForward = Math.abs(spreads.forwardOpening) > Math.abs(spreads.reverseOpening)
+      const spread = isForward ? spreads.forwardOpening : spreads.reverseOpening
 
       return {
         id: index + 1,
         timestamp: item.timestamp,
-        binance_bid: item.binance_quote.bid,
-        bybit_ask: item.bybit_quote.ask,
+        binance_bid: item.binance_quote.bid || item.binance_quote.bid_price,
+        bybit_ask: item.bybit_quote.ask || item.bybit_quote.ask_price,
         spread: Math.abs(spread),
         direction: isForward ? 'forward' : 'reverse',
-        profit_percent: (Math.abs(spread) / item.binance_quote.bid) * 100,
+        profit_percent: (Math.abs(spread) / (item.binance_quote.bid || item.binance_quote.bid_price)) * 100,
         status: Math.abs(spread) > 3 ? 'opportunity' : 'normal',
       }
     })

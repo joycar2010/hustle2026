@@ -36,6 +36,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
+import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 
 const marketStore = useMarketStore()
 const spreadHistory = ref([])
@@ -50,15 +51,14 @@ onMounted(() => {
 // 监听WebSocket市场数据更新
 watch(() => marketStore.marketData, (newData) => {
   if (newData) {
-    // 计算点差
-    // 新公式：
-    // 反向开仓: bybit做多点差 = binance_ask - bybit_ask
-    // 正向开仓: binance做多点差 = bybit_bid - binance_bid
+    // 使用统一的点差计算管理组件
+    const spreads = calculateAllSpreads(newData)
+
     const spreadItem = {
       id: Date.now() + Math.random(),
       timestamp: new Date(newData.timestamp || Date.now()).getTime(),
-      bybitSpread: newData.binance_ask - newData.bybit_ask,  // 做多Bybit (反向开仓)
-      binanceSpread: newData.bybit_bid - newData.binance_bid,  // 做多Binance (正向开仓)
+      bybitSpread: spreads.reverseOpening,  // 反向开仓：bybit做多点差 = binance_ask - bybit_ask
+      binanceSpread: spreads.forwardOpening,  // 正向开仓：binance做多点差 = bybit_bid - binance_bid
       isNew: true
     }
 

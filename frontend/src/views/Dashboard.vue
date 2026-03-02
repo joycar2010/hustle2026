@@ -148,9 +148,9 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import AssetDashboard from '@/components/dashboard/AssetDashboard.vue'
-import SpreadChart from '@/components/trading/SpreadChart.vue'
 import SpreadHistory from '@/components/dashboard/SpreadHistory.vue'
 import { useMarketStore } from '@/stores/market'
+import { calculateAllSpreads, calculateBidAskSpread } from '@/composables/useSpreadCalculator'
 
 const marketStore = useMarketStore()
 const lastUpdated = ref('')
@@ -167,11 +167,25 @@ const bybitPrice = ref({
 })
 
 const forwardSpread = computed(() => {
-  return bybitPrice.value.bid - binancePrice.value.ask
+  // 正向开仓：binance做多点差 = bybit_bid - binance_bid
+  const spreads = calculateAllSpreads({
+    binance_bid: binancePrice.value.bid,
+    binance_ask: binancePrice.value.ask,
+    bybit_bid: bybitPrice.value.bid,
+    bybit_ask: bybitPrice.value.ask
+  })
+  return spreads.forwardOpening
 })
 
 const reverseSpread = computed(() => {
-  return binancePrice.value.bid - bybitPrice.value.ask
+  // 反向开仓：bybit做多点差 = binance_ask - bybit_ask
+  const spreads = calculateAllSpreads({
+    binance_bid: binancePrice.value.bid,
+    binance_ask: binancePrice.value.ask,
+    bybit_bid: bybitPrice.value.bid,
+    bybit_ask: bybitPrice.value.ask
+  })
+  return spreads.reverseOpening
 })
 
 let updateInterval = null
