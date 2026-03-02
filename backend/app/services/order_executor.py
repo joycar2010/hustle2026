@@ -424,6 +424,7 @@ class OrderExecutor:
         binance_position_side = "LONG" if binance_side.upper() == "BUY" else "SHORT"
 
         # Step 1: Place initial orders on both exchanges
+        # Binance: LIMIT (Maker), Bybit: MARKET (Taker)
         binance_result, bybit_result = await asyncio.gather(
             self.place_binance_order(
                 binance_account,
@@ -438,9 +439,9 @@ class OrderExecutor:
                 bybit_account,
                 bybit_symbol,
                 bybit_side,
-                "Limit" if order_type == "LIMIT" else "Market",
+                "Market",  # Always use Market orders for Bybit (Taker)
                 str(bybit_quantity),
-                str(bybit_price) if bybit_price else None,
+                None,  # Market orders don't need price
             ),
         )
 
@@ -472,111 +473,16 @@ class OrderExecutor:
                 bybit_order_id,
             )
 
-        # Step 2: Wait and check if both orders filled
-        await asyncio.sleep(retry_delay)
-
-        binance_status, bybit_status = await asyncio.gather(
-            self.check_binance_order_status(binance_account, binance_symbol, binance_order_id),
-            self.check_bybit_order_status(bybit_account, bybit_symbol, bybit_order_id),
-        )
-
-        binance_filled = binance_status.get("filled", False)
-        bybit_filled = bybit_status.get("filled", False)
-
-        # Step 3: Chase unfilled orders
-        retry_count = 0
-
-        while retry_count < max_retries and not (binance_filled and bybit_filled):
-            # Get filled quantities
-            binance_filled_qty = binance_status.get("filled_qty", 0)
-            bybit_filled_qty = bybit_status.get("filled_qty", 0)
-
-            # Convert Bybit filled quantity to Binance equivalent for comparison
-            # Bybit: 1 lot = 100 XAU, Binance: 1 contract = 1 XAU
-            bybit_filled_qty_in_binance_units = bybit_filled_qty * 100
-
-            # Calculate remaining quantities
-            binance_remaining = quantity - binance_filled_qty
-            bybit_remaining = bybit_quantity - bybit_filled_qty
-
-            # Determine chase quantity based on the filled side
-            # If one side is fully filled, chase the remaining quantity on the other side
-            # If both sides are partially filled, use the max filled quantity as target
-            if binance_filled and not bybit_filled:
-                # Binance fully filled, chase Bybit with Binance's filled quantity
-                binance_chase_qty = binance_filled_qty
-                bybit_chase_qty = binance_filled_qty / 100.0
-            elif bybit_filled and not binance_filled:
-                # Bybit fully filled, chase Binance with Bybit's filled quantity
-                binance_chase_qty = bybit_filled_qty_in_binance_units
-                bybit_chase_qty = bybit_filled_qty
-            elif binance_filled_qty > 0 or bybit_filled_qty > 0:
-                # Both partially filled, use max filled quantity as target
-                target_qty_binance = max(binance_filled_qty, bybit_filled_qty_in_binance_units)
-                binance_chase_qty = target_qty_binance
-                bybit_chase_qty = target_qty_binance / 100.0
-            else:
-                # Neither filled, use original quantity
-                binance_chase_qty = quantity
-                bybit_chase_qty = bybit_quantity
-
-            # Cancel and retry unfilled orders with market orders
-            tasks = []
-
-            if not binance_filled:
-                tasks.append(self._chase_binance_order(
-                    binance_account,
-                    binance_symbol,
-                    binance_side,
-                    binance_chase_qty,
-                    binance_order_id,
-                    position_side=binance_position_side,
-                ))
-
-            if not bybit_filled:
-                tasks.append(self._chase_bybit_order(
-                    bybit_account,
-                    bybit_symbol,
-                    bybit_side,
-                    bybit_chase_qty,
-                    bybit_order_id,
-                ))
-
-            chase_results = await asyncio.gather(*tasks)
-
-            # Update order IDs if new orders placed
-            if not binance_filled and len(chase_results) > 0:
-                if chase_results[0]["success"]:
-                    binance_order_id = chase_results[0]["order_id"]
-
-            if not bybit_filled:
-                chase_idx = 1 if not binance_filled else 0
-                if len(chase_results) > chase_idx and chase_results[chase_idx]["success"]:
-                    bybit_order_id = chase_results[chase_idx]["order_id"]
-
-            # Wait and check status again
-            await asyncio.sleep(retry_delay)
-
-            binance_status, bybit_status = await asyncio.gather(
-                self.check_binance_order_status(binance_account, binance_symbol, binance_order_id),
-                self.check_bybit_order_status(bybit_account, bybit_symbol, bybit_order_id),
-            )
-
-            binance_filled = binance_status.get("filled", False)
-            bybit_filled = bybit_status.get("filled", False)
-
-            retry_count += 1
-
-        # Step 4: Return final status
+        # Return final status (no chase logic, pure maker orders)
         return {
-            "success": binance_filled and bybit_filled,
-            "binance_filled": binance_filled,
-            "bybit_filled": bybit_filled,
+            "success": binance_result["success"] and bybit_result["success"],
+            "binance_filled": False,  # Status unknown without checking
+            "bybit_filled": False,  # Status unknown without checking
             "binance_order_id": binance_order_id,
             "bybit_order_id": bybit_order_id,
-            "binance_status": binance_status,
-            "bybit_status": bybit_status,
-            "retries": retry_count,
+            "binance_result": binance_result,
+            "bybit_result": bybit_result,
+            "retries": 0,
         }
 
     async def _chase_binance_order(

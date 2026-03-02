@@ -57,9 +57,9 @@ class ForwardArbitrageStrategy(BaseStrategy):
         binance_bid = binance_quote.get("bid_price", 0)
         bybit_ask = bybit_quote.get("ask_price", 0)
 
-        # Calculate order prices
-        binance_buy_price = binance_bid + 0.01
-        bybit_sell_price = bybit_ask - 0.01
+        # Use market prices directly for maker orders
+        binance_buy_price = binance_bid
+        bybit_sell_price = bybit_ask
 
         # Execute dual order
         result = await order_executor.execute_dual_order(
@@ -111,9 +111,9 @@ class ForwardArbitrageStrategy(BaseStrategy):
         binance_ask = binance_quote.get("ask_price", 0)
         bybit_bid = bybit_quote.get("bid_price", 0)
 
-        # Calculate order prices
-        binance_sell_price = binance_ask - 0.01
-        bybit_buy_price = bybit_bid + 0.01
+        # Use market prices directly for maker orders
+        binance_sell_price = binance_ask
+        bybit_buy_price = bybit_bid
 
         # Execute dual order
         result = await order_executor.execute_dual_order(

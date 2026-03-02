@@ -441,11 +441,14 @@ watch(() => marketStore.marketData, (newData) => {
   // Trigger count logic for opening
   if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    const matchedLadder = enabledLadders.find(l => binanceLongValue >= l.openPrice)
+    // 修正：应该比较点差值，而不是原始价格
+    // 正向开仓：当 currentSpread >= openPrice 时触发
+    // 反向开仓：当 currentSpread >= openPrice 时触发
+    const matchedLadder = enabledLadders.find(l => currentSpread.value >= l.openPrice)
 
     if (matchedLadder) {
       triggerCount.value.opening++
-      console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, binanceLongValue=${binanceLongValue}, openPrice=${matchedLadder.openPrice}`)
+      console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, currentSpread=${currentSpread.value}, openPrice=${matchedLadder.openPrice}`)
 
       if (triggerCount.value.opening >= config.value.openingSyncQty) {
         executeBatchOpening(matchedLadder)
@@ -459,11 +462,14 @@ watch(() => marketStore.marketData, (newData) => {
   // Trigger count logic for closing
   if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    const matchedLadder = enabledLadders.find(l => binanceLongValue <= l.threshold)
+    // 修正：应该比较点差值，而不是原始价格
+    // 正向平仓：当 closingSpread <= threshold 时触发
+    // 反向平仓：当 closingSpread <= threshold 时触发
+    const matchedLadder = enabledLadders.find(l => closingSpread.value <= l.threshold)
 
     if (matchedLadder) {
       triggerCount.value.closing++
-      console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, binanceLongValue=${binanceLongValue}, threshold=${matchedLadder.threshold}`)
+      console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, closingSpread=${closingSpread.value}, threshold=${matchedLadder.threshold}`)
 
       if (triggerCount.value.closing >= config.value.closingSyncQty) {
         executeBatchClosing(matchedLadder)
