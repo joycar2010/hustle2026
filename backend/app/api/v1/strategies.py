@@ -653,7 +653,7 @@ async def close_forward_position(
 # Position management endpoints
 @router.get("/positions/{strategy_id}")
 async def get_strategy_positions(
-    strategy_id: int,
+    strategy_id: UUID,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -673,11 +673,13 @@ async def get_strategy_positions(
             detail="Strategy not found",
         )
 
-    positions = position_manager.get_all_positions(strategy_id)
-    summary = position_manager.get_strategy_summary(strategy_id)
+    # Convert UUID to string for position_manager
+    strategy_id_str = str(strategy_id)
+    positions = position_manager.get_all_positions(strategy_id_str)
+    summary = position_manager.get_strategy_summary(strategy_id_str)
 
     return {
-        "strategy_id": strategy_id,
+        "strategy_id": str(strategy_id),
         "strategy_type": config.strategy_type,
         "positions": positions,
         "summary": summary,
@@ -686,7 +688,7 @@ async def get_strategy_positions(
 
 @router.get("/positions/{strategy_id}/ladder/{ladder_index}")
 async def get_ladder_position(
-    strategy_id: int,
+    strategy_id: UUID,
     ladder_index: int,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
@@ -707,8 +709,9 @@ async def get_ladder_position(
             detail="Strategy not found",
         )
 
+    strategy_id_str = str(strategy_id)
     position = position_manager.get_position(
-        strategy_id, ladder_index, config.strategy_type
+        strategy_id_str, ladder_index, config.strategy_type
     )
 
     return position
@@ -716,7 +719,7 @@ async def get_ladder_position(
 
 @router.post("/positions/{strategy_id}/reset")
 async def reset_strategy_positions(
-    strategy_id: int,
+    strategy_id: UUID,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -736,14 +739,15 @@ async def reset_strategy_positions(
             detail="Strategy not found",
         )
 
-    position_manager.reset_strategy(strategy_id)
+    strategy_id_str = str(strategy_id)
+    position_manager.reset_strategy(strategy_id_str)
 
     return {"success": True, "message": "Positions reset successfully"}
 
 
 @router.post("/positions/{strategy_id}/ladder/{ladder_index}/reset")
 async def reset_ladder_position(
-    strategy_id: int,
+    strategy_id: UUID,
     ladder_index: int,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
@@ -764,6 +768,7 @@ async def reset_ladder_position(
             detail="Strategy not found",
         )
 
-    position_manager.reset_ladder(strategy_id, ladder_index)
+    strategy_id_str = str(strategy_id)
+    position_manager.reset_ladder(strategy_id_str, ladder_index)
 
     return {"success": True, "message": "Ladder position reset successfully"}
