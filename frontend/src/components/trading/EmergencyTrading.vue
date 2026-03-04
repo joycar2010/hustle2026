@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col p-3 space-y-3 overflow-y-auto">
+  <div class="h-full flex flex-col p-3 space-y-3">
     <!-- Exchange Selection -->
     <div>
       <label class="text-xs text-gray-400 mb-1 block">交易平台</label>

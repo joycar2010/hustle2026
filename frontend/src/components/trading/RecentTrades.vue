@@ -45,20 +45,16 @@ const marketStore = useMarketStore()
 const recentOrders = ref([])
 
 onMounted(async () => {
-  // Ensure WebSocket connection
   if (!marketStore.connected) {
     marketStore.connect()
   }
-
-  // Initial fetch
   await fetchRecentOrders()
 })
 
 onUnmounted(() => {
-  // No cleanup needed - WebSocket stays connected
+  // No cleanup needed
 })
 
-// Watch for order updates via WebSocket
 watch(() => marketStore.lastMessage, (message) => {
   if (message && message.type === 'order_update') {
     handleOrderUpdate(message.data)
@@ -66,13 +62,11 @@ watch(() => marketStore.lastMessage, (message) => {
 })
 
 function handleOrderUpdate(orderData) {
-  // If it's a manual order, update the recent orders list
   if (orderData.source === 'manual') {
     const index = recentOrders.value.findIndex(o => o.id === orderData.id)
     if (index !== -1) {
       recentOrders.value[index] = { ...recentOrders.value[index], ...orderData }
     } else {
-      // New order, add to top and keep only 10
       recentOrders.value = [orderData, ...recentOrders.value].slice(0, 10)
     }
   }

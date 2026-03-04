@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col h-screen bg-[#1a1d21] text-white overflow-hidden">
-    <!-- Mobile Header with Navigation -->
+    <!-- Mobile Header -->
     <div class="md:hidden flex items-center justify-between p-3 border-b border-[#2b3139] bg-[#1e2329]">
       <h1 class="text-lg font-bold">交易控制台</h1>
       <button @click="showMobileMenu = !showMobileMenu" class="p-2">
@@ -12,8 +12,16 @@
 
     <!-- Mobile Menu Overlay -->
     <div v-if="showMobileMenu" class="md:hidden fixed inset-0 bg-black/50 z-50" @click="showMobileMenu = false">
-      <div class="bg-[#1e2329] w-64 h-full p-4" @click.stop>
+      <div class="bg-[#1e2329] w-64 h-full p-4 overflow-y-auto" @click.stop>
         <NavigationPanel @navigate="showMobileMenu = false" />
+        <div class="mt-4 pt-4 border-t border-[#2b3139]">
+          <button @click="showAccountStatus = true; showMobileMenu = false" class="w-full text-left px-3 py-2 hover:bg-[#252930] rounded">
+            账户状态
+          </button>
+          <button @click="showRiskPanel = true; showMobileMenu = false" class="w-full text-left px-3 py-2 hover:bg-[#252930] rounded mt-1">
+            风险控制
+          </button>
+        </div>
       </div>
     </div>
 
@@ -31,10 +39,10 @@
       <!-- Main Content - Scrollable on Mobile -->
       <main class="flex-1 overflow-y-auto md:overflow-hidden">
         <div class="md:h-full md:flex md:flex-col">
-          <!-- Top Section - Strategy Panels -->
+          <!-- Top Section - Strategy Panels (移动端单列，桌面端三列) -->
           <section class="md:h-[60%] md:border-b border-[#2b3139] flex flex-col md:flex-row gap-2 p-2">
             <!-- Reverse Strategy Panel -->
-            <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[400px] md:min-h-0">
+            <div class="w-full md:flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[400px] md:min-h-0">
               <div class="h-full flex flex-col">
                 <div class="px-3 py-2 border-b border-[#2b3139] flex-shrink-0">
                   <h2 class="text-sm font-bold">反向套利策略</h2>
@@ -58,7 +66,7 @@
             </div>
 
             <!-- Forward Strategy Panel -->
-            <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[400px] md:min-h-0">
+            <div class="w-full md:flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[400px] md:min-h-0">
               <div class="h-full flex flex-col">
                 <div class="px-3 py-2 border-b border-[#2b3139] flex-shrink-0">
                   <h2 class="text-sm font-bold">正向套利策略</h2>
@@ -70,10 +78,10 @@
             </div>
           </section>
 
-          <!-- Bottom Section - Order Monitor & Manual Trading -->
-          <section class="md:flex-1 flex flex-col gap-2 p-2 md:min-h-0">
-            <!-- Order Monitor (Left) - 策略挂单 -->
-            <div class="w-full bg-[#1e2329] rounded overflow-hidden flex-shrink-0 min-h-[300px] md:min-h-0">
+          <!-- Bottom Section - Order Monitor & Manual Trading (移动端单列，桌面端双列) -->
+          <section class="md:flex-1 flex flex-col md:flex-row gap-2 p-2 md:min-h-0">
+            <!-- Order Monitor (Left) -->
+            <div class="w-full md:w-[45%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0 min-h-[300px] md:min-h-0">
               <div class="h-full flex flex-col">
                 <div class="px-3 py-2 border-b border-[#2b3139] flex-shrink-0">
                   <h2 class="text-sm font-bold">策略挂单</h2>
@@ -84,10 +92,10 @@
               </div>
             </div>
 
-            <!-- Manual Trading Section - Split into two panels -->
-            <div class="w-full flex flex-col gap-2 flex-shrink-0">
+            <!-- Manual Trading Section (Right) - 移动端单列，桌面端双列 -->
+            <div class="w-full md:w-[55%] flex flex-col md:flex-row gap-2 flex-shrink-0">
               <!-- Emergency Trading Panel -->
-              <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
+              <div class="w-full md:flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
                 <div class="h-full flex flex-col">
                   <div class="px-3 py-2 border-b border-[#2b3139] flex-shrink-0">
                     <div class="flex items-center justify-between">
@@ -105,7 +113,7 @@
               </div>
 
               <!-- Recent Trades Panel -->
-              <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[200px] md:min-h-0">
+              <div class="w-full md:flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[200px] md:min-h-0">
                 <div class="h-full flex flex-col">
                   <div class="px-3 py-2 border-b border-[#2b3139] flex-shrink-0">
                     <h2 class="text-sm font-bold">最近交易记录</h2>
@@ -131,20 +139,29 @@
       </aside>
     </div>
 
-    <!-- Mobile Risk Panel (Show as modal on mobile) -->
-    <button
-      v-if="!showMobileRisk"
-      @click="showMobileRisk = true"
-      class="lg:hidden fixed bottom-4 right-4 bg-[#f0b90b] text-black px-4 py-2 rounded-full shadow-lg z-40 font-bold text-sm"
-    >
-      风险控制
-    </button>
+    <!-- Mobile Account Status Modal -->
+    <div v-if="showAccountStatus" class="md:hidden fixed inset-0 bg-black/50 z-50 flex items-end" @click="showAccountStatus = false">
+      <div class="bg-[#1e2329] w-full max-h-[80vh] overflow-hidden flex flex-col rounded-t-lg" @click.stop>
+        <div class="px-3 py-3 border-b border-[#2b3139] flex items-center justify-between flex-shrink-0">
+          <h2 class="text-sm font-bold">账户状态</h2>
+          <button @click="showAccountStatus = false" class="text-gray-400 hover:text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="flex-1 overflow-y-auto">
+          <AccountStatusPanel />
+        </div>
+      </div>
+    </div>
 
-    <div v-if="showMobileRisk" class="lg:hidden fixed inset-0 bg-black/50 z-50 flex items-end md:items-center md:justify-center" @click="showMobileRisk = false">
-      <div class="bg-[#1e2329] w-full md:w-96 md:rounded-t-lg max-h-[80vh] overflow-hidden flex flex-col" @click.stop>
+    <!-- Mobile Risk Panel Modal -->
+    <div v-if="showRiskPanel" class="md:hidden fixed inset-0 bg-black/50 z-50 flex items-end" @click="showRiskPanel = false">
+      <div class="bg-[#1e2329] w-full max-h-[80vh] overflow-hidden flex flex-col rounded-t-lg" @click.stop>
         <div class="px-3 py-3 border-b border-[#2b3139] flex items-center justify-between flex-shrink-0">
           <h2 class="text-sm font-bold">风险控制</h2>
-          <button @click="showMobileRisk = false" class="text-gray-400 hover:text-white">
+          <button @click="showRiskPanel = false" class="text-gray-400 hover:text-white">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
@@ -170,5 +187,6 @@ import RecentTrades from '@/components/trading/RecentTrades.vue'
 import Risk from '@/views/Risk.vue'
 
 const showMobileMenu = ref(false)
-const showMobileRisk = ref(false)
+const showAccountStatus = ref(false)
+const showRiskPanel = ref(false)
 </script>
