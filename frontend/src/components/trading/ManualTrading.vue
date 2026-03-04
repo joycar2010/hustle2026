@@ -126,6 +126,7 @@ import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 import { xauToLot, convertForPlatform } from '@/composables/useQuantityConverter'
+import { formatTimeBeijing } from '@/utils/timeUtils'
 
 const router = useRouter()
 const marketStore = useMarketStore()
@@ -243,13 +244,7 @@ function viewMore() {
 }
 
 function formatTime(timestamp) {
-  if (!timestamp) return '-'
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  })
+  return formatTimeBeijing(timestamp)
 }
 
 function getStatusClass(status) {

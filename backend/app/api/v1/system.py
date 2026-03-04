@@ -11,6 +11,7 @@ import os
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.core.config import settings
+from app.tasks.redis_monitor import redis_monitor
 
 router = APIRouter()
 
@@ -1147,4 +1148,28 @@ async def save_refresh_settings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save refresh settings: {str(e)}"
         )
+
+
+
+
+@router.get("/redis/status")
+async def get_redis_status(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get Redis/Memurai service status"""
+    try:
+        status = redis_monitor.get_status()
+        return {
+            "service": status["service"],
+            "healthy": status["healthy"],
+            "last_error": status["last_error"],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "service": "Memurai",
+            "healthy": False,
+            "last_error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 

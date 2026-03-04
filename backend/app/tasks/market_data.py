@@ -32,6 +32,7 @@ class MarketDataStreamer:
 
     async def _stream_loop(self):
         """Main streaming loop"""
+        print("Market data streamer started")
         while self.running:
             try:
                 # Fetch current spread data
@@ -44,12 +45,15 @@ class MarketDataStreamer:
 
                 # Broadcast to all connected clients
                 await manager.broadcast_market_data(spread_data.model_dump())
+                print(f"Broadcasted market data: {spread_data.binance_quote.bid_price}")
 
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
 
             except Exception as e:
                 print(f"Error in market data stream: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 await asyncio.sleep(self.interval)
 
 

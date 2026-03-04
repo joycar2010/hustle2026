@@ -114,15 +114,22 @@ watch([filterSource, filterStatus], () => {
 
 async function fetchOrders() {
   try {
-    const params = { limit: 200 }
-    if (filterSource.value) {
-      params.source = filterSource.value
+    // 如果查询挂单中的订单，使用实时API获取Binance挂单
+    if (filterStatus.value === 'new,pending' && !filterSource.value) {
+      const response = await api.get('/api/v1/trading/orders/realtime')
+      orders.value = response.data
+    } else {
+      // 其他情况使用数据库查询（历史数据、已成交、已取消等）
+      const params = { limit: 200 }
+      if (filterSource.value) {
+        params.source = filterSource.value
+      }
+      if (filterStatus.value) {
+        params.status = filterStatus.value
+      }
+      const response = await api.get('/api/v1/trading/orders', { params })
+      orders.value = response.data
     }
-    if (filterStatus.value) {
-      params.status = filterStatus.value
-    }
-    const response = await api.get('/api/v1/trading/orders', { params })
-    orders.value = response.data
   } catch (error) {
     console.error('Failed to fetch orders:', error)
   }

@@ -5,45 +5,36 @@
     <!-- Query Controls -->
     <div class="card mb-6">
       <div class="flex flex-wrap items-center gap-4">
-        <!-- Date Selector -->
+        <!-- DateTime Range Selector -->
         <div class="flex items-center gap-2">
-          <label class="text-sm text-gray-400">查询日期 (UTC):</label>
-          <input type="date" v-model="queryDate"
+          <label class="text-sm text-gray-400">开始时间 (北京时间):</label>
+          <input type="datetime-local" v-model="startTime"
+                 class="px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-400">结束时间 (北京时间):</label>
+          <input type="datetime-local" v-model="endTime"
                  class="px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
         </div>
 
         <!-- Query Button -->
-        <button @click="queryData" class="btn-primary">
-          查询
+        <button @click="queryData" class="btn-primary" :disabled="loading">
+          {{ loading ? '查询中...' : '查询' }}
         </button>
 
-        <!-- Show All Button -->
-        <button @click="showAllData" class="btn-secondary">
-          显示全部
+        <!-- Show Recent 1 Day Button -->
+        <button @click="showRecentDays(1)" class="btn-secondary" :disabled="loading">
+          最近1天
         </button>
 
-        <!-- Sync Trades Button -->
-        <button @click="syncTrades" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded" :disabled="syncing">
-          {{ syncing ? '同步中...' : '同步交易记录' }}
+        <!-- Show Recent 7 Days Button -->
+        <button @click="showRecentDays(7)" class="btn-secondary" :disabled="loading">
+          最近7天
         </button>
 
-        <!-- Accounting Sync Toggle -->
-        <div class="flex items-center gap-2 ml-auto">
-          <label class="text-sm text-gray-400">会计同步型</label>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" v-model="accountingSync" class="sr-only peer">
-            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
-                        peer-checked:after:translate-x-full peer-checked:after:border-white
-                        after:content-[''] after:absolute after:top-[2px] after:left-[2px]
-                        after:bg-white after:border-gray-300 after:border after:rounded-full
-                        after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600">
-            </div>
-          </label>
-        </div>
-
-        <!-- Delete All Button -->
-        <button @click="deleteAllHistory" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">
-          删除所有历史数据
+        <!-- Show Recent 30 Days Button -->
+        <button @click="showRecentDays(30)" class="btn-secondary" :disabled="loading">
+          最近30天
         </button>
       </div>
     </div>
@@ -66,33 +57,33 @@
           <div class="grid grid-cols-2 gap-4">
             <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">成交量汇总</div>
-              <div class="text-lg font-bold">{{ stats.totalVolume }}</div>
+              <div class="text-lg font-bold">{{ stats.totalVolume.toFixed(2) }}</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">成交额汇总</div>
               <div class="text-lg font-bold">{{ stats.totalAmount.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">成交额(买卖)</div>
-              <div class="text-lg font-bold">{{ stats.buySellAmount.toFixed(2) }} USDT</div>
+              <div class="text-xs text-gray-400 mb-1">成交额(吃单)</div>
+              <div class="text-lg font-bold">{{ stats.takerAmount.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">成交额(任务)</div>
-              <div class="text-lg font-bold">{{ stats.taskAmount.toFixed(2) }} USDT</div>
+              <div class="text-xs text-gray-400 mb-1">成交额(挂单)</div>
+              <div class="text-lg font-bold">{{ stats.makerAmount.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">手续费汇总</div>
+              <div class="text-xs text-gray-400 mb-1">手续费汇总(USDT)</div>
               <div class="text-lg font-bold text-red-500">{{ stats.totalFees.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">手续费汇总(BNB)</div>
+              <div class="text-lg font-bold text-red-500">{{ stats.bnbFees.toFixed(4) }} BNB</div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded col-span-2">
               <div class="text-xs text-gray-400 mb-1">已实现盈亏</div>
               <div class="text-lg font-bold" :class="(stats.realizedPnL || 0) >= 0 ? 'text-green-500' : 'text-red-500'">
                 {{ (stats.realizedPnL || 0) >= 0 ? '+' : '' }}{{ (stats.realizedPnL || 0).toFixed(2) }} USDT
               </div>
-            </div>
-            <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">过夜费汇总</div>
-              <div class="text-lg font-bold text-red-500">{{ stats.overnightFees.toFixed(2) }} USDT</div>
             </div>
           </div>
         </div>
@@ -103,44 +94,28 @@
 
           <div class="grid grid-cols-2 gap-4">
             <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">市场资金率</div>
-              <div class="text-lg font-bold text-yellow-500">{{ stats.marketFundingRate.toFixed(2) }} USDT</div>
+              <div class="text-xs text-gray-400 mb-1">成交量汇总</div>
+              <div class="text-lg font-bold">{{ stats.mt5Volume.toFixed(2) }}</div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">成交额汇总</div>
+              <div class="text-lg font-bold">{{ stats.mt5Amount.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">MT5过夜费</div>
               <div class="text-lg font-bold text-red-500">{{ stats.mt5OvernightFee.toFixed(2) }} USDT</div>
             </div>
             <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">市场手续费</div>
-              <div class="text-lg font-bold text-red-500">{{ stats.marketFee.toFixed(2) }} USDT</div>
-            </div>
-            <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">MT5手续费</div>
               <div class="text-lg font-bold text-red-500">{{ stats.mt5Fee.toFixed(2) }} USDT</div>
             </div>
-            <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">市盈率</div>
-              <div class="text-lg font-bold text-green-500">{{ stats.peRatio.toFixed(2) }}%</div>
-            </div>
-            <div class="bg-gray-800 p-3 rounded">
-              <div class="text-xs text-gray-400 mb-1">MT5今返回</div>
-              <div class="text-lg font-bold text-green-500">{{ stats.mt5TodayReturn.toFixed(2) }} USDT</div>
-            </div>
             <div class="bg-gray-800 p-3 rounded col-span-2">
-              <div class="text-xs text-gray-400 mb-1">总回报利润</div>
-              <div class="text-lg font-bold text-green-500">{{ stats.totalReturnProfit.toFixed(2) }} USDT</div>
+              <div class="text-xs text-gray-400 mb-1">MT5已实现盈亏</div>
+              <div class="text-lg font-bold" :class="(stats.mt5RealizedPnL || 0) >= 0 ? 'text-green-500' : 'text-red-500'">
+                {{ (stats.mt5RealizedPnL || 0) >= 0 ? '+' : '' }}{{ (stats.mt5RealizedPnL || 0).toFixed(2) }} USDT
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- Net Profit Summary -->
-      <div class="mt-6 pt-4 border-t border-gray-700">
-        <div class="text-center">
-          <span class="text-gray-400">返佣后净利润汇总: </span>
-          <span class="text-2xl font-bold" :class="netProfit >= 0 ? 'text-green-500' : 'text-red-500'">
-            {{ netProfit.toFixed(2) }} USDT
-          </span>
         </div>
       </div>
       </div>
@@ -155,30 +130,36 @@
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-400 border-b border-gray-700">
-                <th class="pb-2">时间</th>
-                <th class="pb-2">账户</th>
                 <th class="pb-2">交易对</th>
                 <th class="pb-2">方向</th>
-                <th class="pb-2">数量</th>
-                <th class="pb-2">价格</th>
+                <th class="pb-2">成交价</th>
+                <th class="pb-2">成交量</th>
+                <th class="pb-2">成交额</th>
+                <th class="pb-2">类别</th>
+                <th class="pb-2">时间 (北京)</th>
                 <th class="pb-2">手续费</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="accountTrades.length === 0">
-                <td colspan="7" class="text-center py-8 text-gray-500">暂无数据</td>
+                <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
               </tr>
               <tr v-for="trade in accountTrades" :key="trade.id" class="border-b border-gray-800">
-                <td class="py-3">{{ formatDateTime(trade.timestamp) }}</td>
-                <td class="text-xs text-gray-400">{{ trade.account_name }}</td>
-                <td>{{ trade.symbol }}</td>
+                <td class="py-3">{{ trade.symbol }}</td>
                 <td>
                   <span :class="trade.side === 'buy' ? 'text-green-500' : 'text-red-500'">
                     {{ trade.side === 'buy' ? '买入' : '卖出' }}
                   </span>
                 </td>
-                <td>{{ trade.quantity }}</td>
                 <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-' }}</td>
+                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }} USDT</td>
+                <td class="text-xs">
+                  <span :class="trade.maker ? 'text-blue-500' : 'text-orange-500'">
+                    {{ trade.maker ? '挂单' : '吃单' }}
+                  </span>
+                </td>
+                <td class="text-xs text-gray-400">{{ formatDateTime(trade.timestamp) }}</td>
                 <td class="text-red-500">{{ trade.fee != null ? Number(trade.fee).toFixed(2) : '-' }} USDT</td>
               </tr>
             </tbody>
@@ -193,30 +174,32 @@
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-gray-400 border-b border-gray-700">
-                <th class="pb-2">时间</th>
-                <th class="pb-2">账户</th>
                 <th class="pb-2">交易对</th>
                 <th class="pb-2">方向</th>
-                <th class="pb-2">数量</th>
-                <th class="pb-2">价格</th>
+                <th class="pb-2">成交价</th>
+                <th class="pb-2">成交量</th>
+                <th class="pb-2">成交额</th>
+                <th class="pb-2">过夜费</th>
+                <th class="pb-2">时间 (北京)</th>
                 <th class="pb-2">手续费</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="mt5Trades.length === 0">
-                <td colspan="7" class="text-center py-8 text-gray-500">暂无数据</td>
+                <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
               </tr>
               <tr v-for="trade in mt5Trades" :key="trade.id" class="border-b border-gray-800">
-                <td class="py-3">{{ formatDateTime(trade.timestamp) }}</td>
-                <td class="text-xs text-gray-400">{{ trade.account_name }}</td>
-                <td>{{ trade.symbol }}</td>
+                <td class="py-3">{{ trade.symbol }}</td>
                 <td>
                   <span :class="trade.side === 'buy' ? 'text-green-500' : 'text-red-500'">
                     {{ trade.side === 'buy' ? '买入' : '卖出' }}
                   </span>
                 </td>
-                <td>{{ trade.quantity }}</td>
                 <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-' }}</td>
+                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }} USDT</td>
+                <td class="text-red-500">{{ trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00' }} USDT</td>
+                <td class="text-xs text-gray-400">{{ formatDateTime(trade.timestamp) }}</td>
                 <td class="text-red-500">{{ trade.fee != null ? Number(trade.fee).toFixed(2) : '-' }} USDT</td>
               </tr>
             </tbody>
@@ -232,9 +215,20 @@ import { ref, computed, onMounted } from 'vue'
 import api from '@/services/api'
 
 // Query Controls
-const queryDate = ref(new Date().toISOString().split('T')[0])
-const accountingSync = ref(false)
-const syncing = ref(false)
+const startTime = ref('')
+const endTime = ref('')
+const loading = ref(false)
+
+// Initialize with today's date range (00:00:00 to 23:59:59)
+function initializeDateRange() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+
+  startTime.value = `${year}-${month}-${day}T00:00`
+  endTime.value = `${year}-${month}-${day}T23:59`
+}
 
 // Statistics Data
 const stats = ref({
@@ -272,38 +266,74 @@ const hasData = computed(() => {
 // Functions
 async function queryData() {
   try {
-    const response = await api.get('/api/v1/trading/history', {
-      params: { date: queryDate.value }
+    // Validate datetime inputs
+    if (!startTime.value || !endTime.value) {
+      alert('请选择开始时间和结束时间')
+      return
+    }
+
+    loading.value = true
+
+    // Convert datetime-local format to "YYYY-MM-DD HH:MM:SS"
+    const startTimeStr = startTime.value.replace('T', ' ') + ':00'
+    const endTimeStr = endTime.value.replace('T', ' ') + ':59'
+
+    const response = await api.get('/api/v1/trading/history/realtime', {
+      params: {
+        start_time: startTimeStr,
+        end_time: endTimeStr
+      }
     })
     updateData(response.data)
   } catch (error) {
     console.error('Failed to query trading data:', error)
+    alert('查询失败: ' + (error.response?.data?.detail || error.message))
     clearData()
+  } finally {
+    loading.value = false
   }
 }
 
-async function showAllData() {
+async function showRecentDays(days) {
   try {
-    const response = await api.get('/api/v1/trading/history/all')
+    loading.value = true
+
+    const now = new Date()
+    const endDate = new Date(now)
+    const startDate = new Date(now)
+    startDate.setDate(startDate.getDate() - days)
+
+    // Format as "YYYY-MM-DD HH:MM:SS"
+    const formatDateTime = (date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+    }
+
+    const startTimeStr = formatDateTime(startDate)
+    const endTimeStr = formatDateTime(endDate)
+
+    // Update the datetime inputs
+    startTime.value = startTimeStr.replace(' ', 'T').substring(0, 16)
+    endTime.value = endTimeStr.replace(' ', 'T').substring(0, 16)
+
+    const response = await api.get('/api/v1/trading/history/realtime', {
+      params: {
+        start_time: startTimeStr,
+        end_time: endTimeStr
+      }
+    })
     updateData(response.data)
   } catch (error) {
-    console.error('Failed to fetch all trading data:', error)
+    console.error('Failed to query recent data:', error)
+    alert('查询失败: ' + (error.response?.data?.detail || error.message))
     clearData()
-  }
-}
-
-async function deleteAllHistory() {
-  if (!confirm('确定要删除所有历史数据吗？此操作不可恢复！')) {
-    return
-  }
-
-  try {
-    await api.delete('/api/v1/trading/history/all')
-    alert('历史数据已删除')
-    clearData()
-  } catch (error) {
-    console.error('Failed to delete history:', error)
-    alert('删除失败，请重试')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -351,25 +381,9 @@ function clearData() {
   mt5Trades.value = []
 }
 
-async function syncTrades() {
-  syncing.value = true
-  try {
-    const response = await api.post('/api/v1/trading/sync-trades', null, {
-      params: { days: 7 }
-    })
-    alert(`成功同步 ${response.data.synced_count} 条交易记录`)
-    // Refresh data after sync
-    await showAllData()
-  } catch (error) {
-    console.error('Failed to sync trades:', error)
-    alert('同步失败，请重试')
-  } finally {
-    syncing.value = false
-  }
-}
-
 function formatDateTime(timestamp) {
   if (!timestamp) return '-'
+  // Timestamp is already in Beijing time format from backend
   const date = new Date(timestamp)
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
@@ -383,6 +397,7 @@ function formatDateTime(timestamp) {
 
 // Load today's data on mount
 onMounted(() => {
+  initializeDateRange()
   queryData()
 })
 </script>

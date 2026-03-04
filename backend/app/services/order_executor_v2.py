@@ -12,13 +12,13 @@ from app.utils.quantity_converter import quantity_converter
 class OrderExecutorV2:
     """
     Optimized order executor with V2.0 specifications:
-    - Binance timeout: 0.2 seconds
+    - Binance timeout: 0.4 seconds
     - Bybit timeout: 0.1 seconds
     - Single retry for unfilled orders
     """
 
     def __init__(self):
-        self.binance_timeout = 0.2  # 200ms
+        self.binance_timeout = 0.4  # 400ms (从0.2秒增加到0.4秒)
         self.bybit_timeout = 0.1    # 100ms
         self.max_retries = 1        # Only 1 retry (循环一次)
         self.base_executor = base_executor
@@ -37,12 +37,12 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit SELL order (open short)
-        2. Monitor Binance order (0.2s timeout)
+        2. Monitor Binance order (0.4s timeout)
         3. Bybit market BUY order (open long) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
         """
-        # Step 1: Place Binance limit SELL order
+        # Step 1: Place Binance limit SELL order with POST_ONLY (force MAKER)
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
             symbol="XAUUSDT",
@@ -51,12 +51,13 @@ class OrderExecutorV2:
             quantity=quantity,
             price=binance_price,
             position_side="SHORT",
+            post_only=True,  # Force MAKER mode
         )
 
         if not binance_result["success"]:
             return {
                 "success": False,
-                "error": "Binance order failed",
+                "error": "Binance下单失败",
                 "binance_result": binance_result,
             }
 
@@ -71,29 +72,54 @@ class OrderExecutorV2:
         )
 
         if binance_filled_qty == 0:
-            # Binance order not filled at all, cancel and return
+            # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
             return {
-                "success": False,
-                "error": "Binance order not filled within 0.2s",
+                "success": True,
                 "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
             }
 
-        # Step 3: Place Bybit market BUY order with Binance filled quantity
+        # Step 3: Place Bybit market BUY order with Binance filled quantity (open LONG position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             "XAUUSD.s",
-            bybit_quantity
+            bybit_quantity,
+            close_position=False  # Open new LONG position
         )
+
+        # Check if Bybit order not filled at all
+        if bybit_filled_qty == 0:
+            return {
+                "success": False,
+                "error": "Bybit订单未成交",
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": True,
+                "message": "Bybit订单已取消，等待下次重试"
+            }
+
+        # Check for single-leg scenario
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
 
         return {
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
             "binance_order_id": binance_order_id,
+            "is_single_leg": is_single_leg,
+            "single_leg_details": {
+                "binance_filled": binance_filled_qty,
+                "bybit_filled": bybit_filled_qty,
+                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+            } if is_single_leg else None
         }
 
     async def execute_reverse_closing(
@@ -110,12 +136,12 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit BUY order (close short)
-        2. Monitor Binance order (0.2s timeout)
+        2. Monitor Binance order (0.4s timeout)
         3. Bybit market SELL order (close long) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
         """
-        # Step 1: Place Binance limit BUY order
+        # Step 1: Place Binance limit BUY order with POST_ONLY (force MAKER)
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
             symbol="XAUUSDT",
@@ -124,12 +150,13 @@ class OrderExecutorV2:
             quantity=quantity,
             price=binance_price,
             position_side="SHORT",
+            post_only=True,  # Force MAKER mode
         )
 
         if not binance_result["success"]:
             return {
                 "success": False,
-                "error": "Binance order failed",
+                "error": "Binance下单失败",
                 "binance_result": binance_result,
             }
 
@@ -144,29 +171,54 @@ class OrderExecutorV2:
         )
 
         if binance_filled_qty == 0:
-            # Binance order not filled at all, cancel and return
+            # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
             return {
-                "success": False,
-                "error": "Binance order not filled within 0.2s",
+                "success": True,
                 "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
             }
 
-        # Step 3: Place Bybit market SELL order with Binance filled quantity
+        # Step 3: Place Bybit market SELL order with Binance filled quantity (close LONG position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             "XAUUSD.s",
-            bybit_quantity
+            bybit_quantity,
+            close_position=True  # Close existing LONG position
         )
+
+        # Check if Bybit order not filled at all
+        if bybit_filled_qty == 0:
+            return {
+                "success": False,
+                "error": "Bybit订单未成交",
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": True,
+                "message": "Bybit订单已取消，等待下次重试"
+            }
+
+        # Check for single-leg scenario
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
 
         return {
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
             "binance_order_id": binance_order_id,
+            "is_single_leg": is_single_leg,
+            "single_leg_details": {
+                "binance_filled": binance_filled_qty,
+                "bybit_filled": bybit_filled_qty,
+                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+            } if is_single_leg else None
         }
 
     async def execute_forward_opening(
@@ -183,12 +235,12 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit BUY order (open long)
-        2. Monitor Binance order (0.2s timeout)
+        2. Monitor Binance order (0.4s timeout)
         3. Bybit market SELL order (open short) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
         """
-        # Step 1: Place Binance limit BUY order
+        # Step 1: Place Binance limit BUY order with POST_ONLY (force MAKER)
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
             symbol="XAUUSDT",
@@ -197,12 +249,13 @@ class OrderExecutorV2:
             quantity=quantity,
             price=binance_price,
             position_side="LONG",
+            post_only=True,  # Force MAKER mode
         )
 
         if not binance_result["success"]:
             return {
                 "success": False,
-                "error": "Binance order failed",
+                "error": "Binance下单失败",
                 "binance_result": binance_result,
             }
 
@@ -217,29 +270,54 @@ class OrderExecutorV2:
         )
 
         if binance_filled_qty == 0:
-            # Binance order not filled at all, cancel and return
+            # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
             return {
-                "success": False,
-                "error": "Binance order not filled within 0.2s",
+                "success": True,
                 "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
             }
 
-        # Step 3: Place Bybit market SELL order with Binance filled quantity
+        # Step 3: Place Bybit market SELL order with Binance filled quantity (open SHORT position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             "XAUUSD.s",
-            bybit_quantity
+            bybit_quantity,
+            close_position=False  # Open new SHORT position
         )
+
+        # Check if Bybit order not filled at all
+        if bybit_filled_qty == 0:
+            return {
+                "success": False,
+                "error": "Bybit订单未成交",
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": True,
+                "message": "Bybit订单已取消，等待下次重试"
+            }
+
+        # Check for single-leg scenario
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
 
         return {
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
             "binance_order_id": binance_order_id,
+            "is_single_leg": is_single_leg,
+            "single_leg_details": {
+                "binance_filled": binance_filled_qty,
+                "bybit_filled": bybit_filled_qty,
+                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+            } if is_single_leg else None
         }
 
     async def execute_forward_closing(
@@ -256,12 +334,12 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit SELL order (close long)
-        2. Monitor Binance order (0.2s timeout)
+        2. Monitor Binance order (0.4s timeout)
         3. Bybit market BUY order (close short) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
         """
-        # Step 1: Place Binance limit SELL order
+        # Step 1: Place Binance limit SELL order with POST_ONLY (force MAKER)
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
             symbol="XAUUSDT",
@@ -270,12 +348,13 @@ class OrderExecutorV2:
             quantity=quantity,
             price=binance_price,
             position_side="LONG",
+            post_only=True,  # Force MAKER mode
         )
 
         if not binance_result["success"]:
             return {
                 "success": False,
-                "error": "Binance order failed",
+                "error": "Binance下单失败",
                 "binance_result": binance_result,
             }
 
@@ -290,29 +369,54 @@ class OrderExecutorV2:
         )
 
         if binance_filled_qty == 0:
-            # Binance order not filled at all, cancel and return
+            # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
             return {
-                "success": False,
-                "error": "Binance order not filled within 0.2s",
+                "success": True,
                 "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
             }
 
-        # Step 3: Place Bybit market BUY order with Binance filled quantity
+        # Step 3: Place Bybit market BUY order with Binance filled quantity (close SHORT position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             "XAUUSD.s",
-            bybit_quantity
+            bybit_quantity,
+            close_position=True  # Close existing SHORT position
         )
+
+        # Check if Bybit order not filled at all
+        if bybit_filled_qty == 0:
+            return {
+                "success": False,
+                "error": "Bybit订单未成交",
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": True,
+                "message": "Bybit订单已取消，等待下次重试"
+            }
+
+        # Check for single-leg scenario
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
 
         return {
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
             "binance_order_id": binance_order_id,
+            "is_single_leg": is_single_leg,
+            "single_leg_details": {
+                "binance_filled": binance_filled_qty,
+                "bybit_filled": bybit_filled_qty,
+                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+            } if is_single_leg else None
         }
 
     async def _monitor_binance_order(
@@ -355,10 +459,14 @@ class OrderExecutorV2:
         self,
         account: Account,
         symbol: str,
-        quantity: float
+        quantity: float,
+        close_position: bool = True
     ) -> float:
         """
         Execute Bybit market BUY order with retry logic.
+
+        Args:
+            close_position: If True, close existing SHORT position instead of opening new LONG
 
         Returns:
             Total filled quantity
@@ -374,6 +482,7 @@ class OrderExecutorV2:
                 side="Buy",
                 order_type="Market",
                 quantity=str(remaining),
+                close_position=close_position,
             )
 
             if not result["success"]:
@@ -412,10 +521,14 @@ class OrderExecutorV2:
         self,
         account: Account,
         symbol: str,
-        quantity: float
+        quantity: float,
+        close_position: bool = True
     ) -> float:
         """
         Execute Bybit market SELL order with retry logic.
+
+        Args:
+            close_position: If True, close existing LONG position instead of opening new SHORT
 
         Returns:
             Total filled quantity
@@ -431,6 +544,7 @@ class OrderExecutorV2:
                 side="Sell",
                 order_type="Market",
                 quantity=str(remaining),
+                close_position=close_position,
             )
 
             if not result["success"]:

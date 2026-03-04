@@ -55,30 +55,22 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <!-- Reverse Arbitrage -->
         <div class="bg-[#1e2329] rounded p-2">
-          <div class="text-xs text-gray-400 mb-1">反向持仓</div>
-          <div class="flex justify-between text-xs">
+          <div class="text-xs text-gray-400 mb-1">反向持仓 (Bybit MT5)</div>
+          <div class="flex justify-center text-xs">
             <div class="flex items-center space-x-2">
-              <span class="text-gray-400">开仓:</span>
-              <span class="font-mono text-white">{{ reverseOpenPosition }}</span>
-            </div>
-            <div class="flex items-center space-x-2">
-              <span class="text-gray-400">平仓:</span>
-              <span class="font-mono text-white">{{ reverseClosePosition }}</span>
+              <span class="text-gray-400">实际持仓:</span>
+              <span class="font-mono text-white text-lg">{{ reverseActualPosition.toFixed(2) }}</span>
             </div>
           </div>
         </div>
 
         <!-- Forward Arbitrage -->
         <div class="bg-[#1e2329] rounded p-2">
-          <div class="text-xs text-gray-400 mb-1">正向持仓</div>
-          <div class="flex justify-between text-xs">
+          <div class="text-xs text-gray-400 mb-1">正向持仓 (Binance)</div>
+          <div class="flex justify-center text-xs">
             <div class="flex items-center space-x-2">
-              <span class="text-gray-400">开仓:</span>
-              <span class="font-mono text-white">{{ forwardOpenPosition }}</span>
-            </div>
-            <div class="flex items-center space-x-2">
-              <span class="text-gray-400">平仓:</span>
-              <span class="font-mono text-white">{{ forwardClosePosition }}</span>
+              <span class="text-gray-400">实际持仓:</span>
+              <span class="font-mono text-white text-lg">{{ forwardActualPosition.toFixed(2) }}</span>
             </div>
           </div>
         </div>
@@ -211,18 +203,14 @@ let lagTimer = null
 
 // Profit and position data
 const totalProfit = ref(0)
-const forwardOpenPosition = ref(0)
-const forwardClosePosition = ref(0)
-const reverseOpenPosition = ref(0)
-const reverseClosePosition = ref(0)
+const forwardActualPosition = ref(0)
+const reverseActualPosition = ref(0)
 
 // Fee data
 const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
 const binanceLongFundingRate = ref(0)
 const binanceShortFundingRate = ref(0)
-
-let updateInterval = null
 
 const bybitLagLevel = computed(() => Math.min(Math.floor(bybitLagCount.value / 10), 5))
 const binanceLagLevel = computed(() => Math.min(Math.floor(binanceLagCount.value / 10), 5))
@@ -270,6 +258,13 @@ watch(() => marketStore.lastMessage, (message) => {
 })
 
 function handleAccountBalanceUpdate(data) {
+  // Debug: log received data
+  console.log('[MarketCards] Received account_balance data:', {
+    accounts: data.accounts?.length || 0,
+    positions: data.positions?.length || 0,
+    positionsDetail: data.positions
+  })
+
   // Update total profit
   if (data.summary) {
     totalProfit.value = data.summary.daily_pnl || 0
@@ -297,36 +292,57 @@ function handleAccountBalanceUpdate(data) {
     })
   }
 
-  // Update position data if available
-  if (data.positions) {
-    updatePositionData(data.positions)
+  // Extract actual positions from positions array
+  if (data.positions && data.positions.length > 0) {
+    // Reset position values
+    forwardActualPosition.value = 0
+    reverseActualPosition.value = 0
+
+    // Aggregate positions by platform
+    data.positions.forEach(position => {
+      // Find the account for this position to get platform_id
+      const account = data.accounts?.find(acc => acc.account_id === position.account_id)
+      if (!account) {
+        console.warn('[MarketCards] Position without matching account:', position)
+        return
+      }
+
+      console.log('[MarketCards] Processing position:', {
+        symbol: position.symbol,
+        side: position.side,
+        size: position.size,
+        platform_id: account.platform_id,
+        account_name: account.account_name
+      })
+
+      // For Bybit MT5: Sell (short) positions = reverse arbitrage
+      // For Binance: Buy (long) positions = forward arbitrage
+      if (account.platform_id === 2) {
+        // Bybit MT5: count all positions (both Buy and Sell)
+        // Reverse arbitrage uses Bybit short positions
+        if (position.side === 'Sell') {
+          reverseActualPosition.value += Math.abs(position.size || 0)
+          console.log('[MarketCards] Added to reverse position:', position.size, 'Total:', reverseActualPosition.value)
+        }
+      } else if (account.platform_id === 1) {
+        // Binance: count Buy (long) positions for forward arbitrage
+        if (position.side === 'Buy') {
+          forwardActualPosition.value += Math.abs(position.size || 0)
+          console.log('[MarketCards] Added to forward position:', position.size, 'Total:', forwardActualPosition.value)
+        }
+      }
+    })
+
+    console.log('[MarketCards] Final positions:', {
+      reverse: reverseActualPosition.value,
+      forward: forwardActualPosition.value
+    })
+  } else {
+    // No positions, reset to 0
+    forwardActualPosition.value = 0
+    reverseActualPosition.value = 0
+    console.log('[MarketCards] No positions in data')
   }
-}
-
-function updatePositionData(positions) {
-  forwardOpenPosition.value = 0
-  forwardClosePosition.value = 0
-  reverseOpenPosition.value = 0
-  reverseClosePosition.value = 0
-
-  positions.forEach(position => {
-    const isForward = position.strategy_type?.includes('forward')
-    const isReverse = position.strategy_type?.includes('reverse')
-    const isOpening = position.action_type === 'opening'
-    const isClosing = position.action_type === 'closing'
-
-    const currentPos = position.current_position || 0
-
-    if (isForward && isOpening) {
-      forwardOpenPosition.value += currentPos
-    } else if (isForward && isClosing) {
-      forwardClosePosition.value += currentPos
-    } else if (isReverse && isOpening) {
-      reverseOpenPosition.value += currentPos
-    } else if (isReverse && isClosing) {
-      reverseClosePosition.value += currentPos
-    }
-  })
 }
 
 onMounted(() => {
@@ -340,7 +356,6 @@ onMounted(() => {
 
   // Initial fetch
   fetchAccountData()
-  fetchStrategyPositions()
 })
 
 onUnmounted(() => {
@@ -389,50 +404,41 @@ async function fetchAccountData() {
         }
       })
     }
-  } catch (error) {
-    console.error('Failed to fetch account data:', error)
-  }
-}
 
-async function fetchStrategyPositions() {
-  try {
-    const configsResponse = await api.get('/api/v1/strategies/configs')
-    const configs = configsResponse.data
+    // Extract actual positions from positions array
+    if (data.positions && data.positions.length > 0) {
+      // Reset position values
+      forwardActualPosition.value = 0
+      reverseActualPosition.value = 0
 
-    forwardOpenPosition.value = 0
-    forwardClosePosition.value = 0
-    reverseOpenPosition.value = 0
-    reverseClosePosition.value = 0
+      // Aggregate positions by platform
+      data.positions.forEach(position => {
+        // Find the account for this position to get platform_id
+        const account = data.accounts?.find(acc => acc.account_id === position.account_id)
+        if (!account) return
 
-    for (const config of configs) {
-      try {
-        const positionsResponse = await api.get(`/api/v1/strategies/positions/${config.config_id}`)
-        const data = positionsResponse.data
-
-        if (data.summary) {
-          const isForward = config.strategy_type === 'forward_arbitrage'
-          const isReverse = config.strategy_type === 'reverse_arbitrage'
-
-          const openingPositions = data.positions.filter(p => p.strategy_type === 'opening')
-          const closingPositions = data.positions.filter(p => p.strategy_type === 'closing')
-
-          const totalOpening = openingPositions.reduce((sum, p) => sum + (p.current_position || 0), 0)
-          const totalClosing = closingPositions.reduce((sum, p) => sum + (p.current_position || 0), 0)
-
-          if (isForward) {
-            forwardOpenPosition.value += totalOpening
-            forwardClosePosition.value += totalClosing
-          } else if (isReverse) {
-            reverseOpenPosition.value += totalOpening
-            reverseClosePosition.value += totalClosing
+        // For Bybit MT5: Sell (short) positions = reverse arbitrage
+        // For Binance: Buy (long) positions = forward arbitrage
+        if (account.platform_id === 2) {
+          // Bybit MT5: count all positions (both Buy and Sell)
+          // Reverse arbitrage uses Bybit short positions
+          if (position.side === 'Sell') {
+            reverseActualPosition.value += Math.abs(position.size || 0)
+          }
+        } else if (account.platform_id === 1) {
+          // Binance: count Buy (long) positions for forward arbitrage
+          if (position.side === 'Buy') {
+            forwardActualPosition.value += Math.abs(position.size || 0)
           }
         }
-      } catch (error) {
-        console.error(`Failed to fetch positions for strategy ${config.config_id}:`, error)
-      }
+      })
+    } else {
+      // No positions, reset to 0
+      forwardActualPosition.value = 0
+      reverseActualPosition.value = 0
     }
   } catch (error) {
-    console.error('Failed to fetch strategy positions:', error)
+    console.error('Failed to fetch account data:', error)
   }
 }
 </script>

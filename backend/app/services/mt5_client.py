@@ -275,7 +275,8 @@ class MT5Client:
         tp: Optional[float] = None,
         deviation: int = 10,
         comment: str = "",
-        max_retry: int = 2
+        max_retry: int = 2,
+        position_ticket: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Send trading order with enhanced validation and retry logic
@@ -290,6 +291,7 @@ class MT5Client:
             deviation: Maximum price deviation
             comment: Order comment
             max_retry: Maximum retry attempts for recoverable errors
+            position_ticket: Position ticket to close (for closing orders)
 
         Returns:
             Order result dict with retcode, order, volume, price, comment
@@ -381,6 +383,11 @@ class MT5Client:
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": type_filling,
             }
+
+            # Add position ticket for closing orders
+            if position_ticket is not None:
+                request["position"] = position_ticket
+                logger.info(f"Closing position ticket: {position_ticket}")
 
             if price is not None:
                 request["price"] = price
@@ -480,6 +487,50 @@ class MT5Client:
             logger.error(f"Failed to get positions: {e}")
             return []
 
+    def find_position_to_close(self, symbol: str, side: str) -> Optional[int]:
+        """
+        Find a position ticket to close based on symbol and side
+
+        Args:
+            symbol: Trading symbol
+            side: 'Buy' to close SHORT positions, 'Sell' to close LONG positions
+
+        Returns:
+            Position ticket number, or None if no matching position found
+        """
+        if not self.connected:
+            if not self.connect():
+                return None
+
+        try:
+            positions = mt5.positions_get(symbol=symbol)
+
+            if positions is None or len(positions) == 0:
+                logger.warning(f"No positions found for {symbol}")
+                return None
+
+            # MT5 position types: 0=BUY(LONG), 1=SELL(SHORT)
+            # To close LONG position, we SELL
+            # To close SHORT position, we BUY
+            target_type = 1 if side.lower() == 'buy' else 0  # Buy closes SHORT(1), Sell closes LONG(0)
+
+            # Find matching position (prefer oldest/largest)
+            matching_positions = [pos for pos in positions if pos.type == target_type]
+
+            if not matching_positions:
+                logger.warning(f"No {['LONG', 'SHORT'][target_type]} positions found for {symbol}")
+                return None
+
+            # Return the oldest position (first in list)
+            selected_pos = matching_positions[0]
+            logger.info(f"Found position to close: ticket={selected_pos.ticket}, "
+                       f"type={['LONG', 'SHORT'][selected_pos.type]}, volume={selected_pos.volume}")
+            return selected_pos.ticket
+
+        except Exception as e:
+            logger.error(f"Failed to find position to close: {e}")
+            return None
+
     def get_latest_tick(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Get latest tick data for a symbol
@@ -570,6 +621,123 @@ class MT5Client:
             logger.error(f"Error getting default symbol info: {e}")
             return None
 
+    def get_deals_history(
+        self,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        symbol: Optional[str] = None
+    ) -> list:
+        """
+        Get deals history (executed trades) with commission and swap fees
+
+        Args:
+            date_from: Start date for history (default: today 00:00)
+            date_to: End date for history (default: now)
+            symbol: Optional symbol filter
+
+        Returns:
+            List of deals with commission and swap information
+        """
+        if not self.connected:
+            if not self.connect():
+                return []
+
+        try:
+            # Default to today if not specified
+            if date_from is None:
+                date_from = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            if date_to is None:
+                date_to = datetime.utcnow()
+
+            # Get deals history
+            if symbol:
+                deals = mt5.history_deals_get(date_from, date_to, group=symbol)
+            else:
+                deals = mt5.history_deals_get(date_from, date_to)
+
+            if deals is None:
+                logger.warning(f"No deals found or error: {mt5.last_error()}")
+                return []
+
+            result = []
+            for deal in deals:
+                result.append({
+                    'ticket': deal.ticket,
+                    'order': deal.order,
+                    'time': datetime.fromtimestamp(deal.time),
+                    'type': deal.type,  # 0=Buy, 1=Sell
+                    'entry': deal.entry,  # 0=In, 1=Out, 2=InOut, 3=OutBy
+                    'symbol': deal.symbol,
+                    'volume': deal.volume,
+                    'price': deal.price,
+                    'commission': deal.commission,  # Commission fee
+                    'swap': deal.swap,  # Swap fee (overnight interest)
+                    'profit': deal.profit,
+                    'comment': deal.comment
+                })
+
+            return result
+
         except Exception as e:
-            logger.error(f"Error getting positions: {e}")
+            logger.error(f"Failed to get deals history: {e}")
+            return []
+
+    def get_history_orders(
+        self,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        symbol: Optional[str] = None
+    ) -> list:
+        """
+        Get orders history
+
+        Args:
+            date_from: Start date for history (default: today 00:00)
+            date_to: End date for history (default: now)
+            symbol: Optional symbol filter
+
+        Returns:
+            List of historical orders
+        """
+        if not self.connected:
+            if not self.connect():
+                return []
+
+        try:
+            # Default to today if not specified
+            if date_from is None:
+                date_from = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            if date_to is None:
+                date_to = datetime.utcnow()
+
+            # Get orders history
+            if symbol:
+                orders = mt5.history_orders_get(date_from, date_to, group=symbol)
+            else:
+                orders = mt5.history_orders_get(date_from, date_to)
+
+            if orders is None:
+                logger.warning(f"No orders found or error: {mt5.last_error()}")
+                return []
+
+            result = []
+            for order in orders:
+                result.append({
+                    'ticket': order.ticket,
+                    'time_setup': datetime.fromtimestamp(order.time_setup),
+                    'time_done': datetime.fromtimestamp(order.time_done) if order.time_done > 0 else None,
+                    'type': order.type,
+                    'state': order.state,
+                    'symbol': order.symbol,
+                    'volume_initial': order.volume_initial,
+                    'volume_current': order.volume_current,
+                    'price_open': order.price_open,
+                    'price_current': order.price_current,
+                    'comment': order.comment
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get orders history: {e}")
             return []

@@ -48,12 +48,12 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 import SpreadDataTable from './SpreadDataTable.vue'
+import { formatTimeBeijing } from '@/utils/timeUtils'
 
 const marketStore = useMarketStore()
 const orders = ref([])
 const pendingOrders = ref([])
 const filterSource = ref('')
-let updateInterval = null
 let unwatchOrders = null
 
 onMounted(() => {
@@ -77,9 +77,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
   if (unwatchOrders) {
     unwatchOrders()
   }
@@ -104,9 +101,8 @@ async function fetchOrders() {
 
 async function fetchPendingOrders() {
   try {
-    const response = await api.get('/api/v1/trading/orders', {
-      params: { limit: 10, source: 'strategy', status: 'new,pending' }
-    })
+    // 使用实时API获取Binance挂单
+    const response = await api.get('/api/v1/trading/orders/realtime')
     pendingOrders.value = response.data
   } catch (error) {
     console.error('Failed to fetch pending orders:', error)
@@ -150,13 +146,6 @@ function handleOrderUpdate(data) {
 }
 
 function formatTime(timestamp) {
-  if (!timestamp) return '-'
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })
+  return formatTimeBeijing(timestamp)
 }
 </script>

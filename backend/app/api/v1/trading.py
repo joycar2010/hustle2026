@@ -116,8 +116,20 @@ def _build_stats(orders, accounts_map, enable_logging=True):
         if order.fee is not None and order.fee > 0:
             fee = float(order.fee)
         else:
-            # Binance maker fee ~0.02%, Bybit MT5 ~0.01% estimate
-            fee = amount * 0.0002 if is_binance else amount * 0.0001
+            # Estimate fees based on platform and order type
+            if is_binance:
+                # Binance XAUUSDT Perpetual Futures fees (VIP 0)
+                # Maker: 0.02% (0.0002), Taker: 0.04% (0.0004)
+                # Assume Maker for limit orders, Taker for market orders
+                if order.order_type and order.order_type.lower() == 'limit':
+                    # Limit orders are typically Maker (0.02%)
+                    fee = amount * 0.0002
+                else:
+                    # Market orders are Taker (0.04%)
+                    fee = amount * 0.0004
+            else:
+                # Bybit MT5 ~0.01% estimate
+                fee = amount * 0.0001
 
         # Determine if this is a buy or sell order
         is_buy = order.order_side.lower() == 'buy'
@@ -551,6 +563,64 @@ async def get_recent_orders(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/orders/realtime")
+async def get_realtime_pending_orders(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    实时从Binance API获取挂单（不依赖数据库）
+
+    返回所有未成交的挂单
+    """
+    try:
+        from app.utils.time_utils import utc_ms_to_beijing
+
+        # 获取用户账户
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            return []
+
+        # 实时获取 Binance 挂单
+        pending_orders = []
+        for account in accounts:
+            if account.platform_id == 1:  # Binance
+                try:
+                    from app.services.binance_client import BinanceFuturesClient
+                    client = BinanceFuturesClient(account.api_key, account.api_secret)
+                    try:
+                        # 获取所有未成交订单
+                        open_orders = await client.get_open_orders(symbol="XAUUSDT")
+
+                        for order in open_orders:
+                            # 转换时间为北京时间
+                            order_time = order.get("time", 0)
+                            beijing_time = utc_ms_to_beijing(order_time)
+
+                            pending_orders.append({
+                                "id": str(order.get("orderId")),
+                                "timestamp": beijing_time,
+                                "exchange": "Binance",
+                                "side": order.get("side", "").lower(),
+                                "quantity": float(order.get("origQty", 0)),
+                                "price": float(order.get("price", 0)),
+                                "status": order.get("status", "").lower(),
+                                "symbol": order.get("symbol", ""),
+                            })
+                    finally:
+                        await client.close()
+                except Exception as e:
+                    logger.error(f"Failed to fetch Binance open orders: {str(e)}")
+
+        # 按时间降序排序
+        pending_orders.sort(key=lambda x: x["timestamp"], reverse=True)
+
+        return pending_orders
+    except Exception as e:
+        logger.error(f"Realtime pending orders error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class ManualOrderRequest(BaseModel):
     exchange: str  # "binance" or "bybit"
     side: str      # "buy" or "sell"
@@ -643,7 +713,7 @@ async def sync_trades_from_exchanges(
                                 continue
 
                             # Get actual commission from trade
-                            commission = float(trade.get("commission", 0))
+                            commission = abs(float(trade.get("commission", 0)))  # Use abs() to handle negative values
                             commission_asset = trade.get("commissionAsset", "USDT")
 
                             # Convert commission to USDT if needed
@@ -651,7 +721,14 @@ async def sync_trades_from_exchanges(
                                 # For simplicity, if commission is in other asset, estimate in USDT
                                 qty = float(trade.get("qty", 0))
                                 price = float(trade.get("price", 0))
-                                commission = qty * price * 0.0002  # Fallback to estimate
+                                # Estimate based on order type: Maker 0.02%, Taker 0.04%
+                                if trade_type and trade_type.lower() == 'limit':
+                                    commission = qty * price * 0.0002  # Maker
+                                else:
+                                    commission = qty * price * 0.0004  # Taker
+
+                            # Ensure commission is positive
+                            commission = abs(commission)
 
                             # Create order record
                             order_record = OrderRecord(
@@ -675,28 +752,59 @@ async def sync_trades_from_exchanges(
 
                 elif account.platform_id == 2:
                     # Sync Bybit MT5 trades
+                    logger.info(f"开始同步MT5账户 {account.account_name} 的交易记录")
+
+                    # Ensure MT5 is connected
+                    from app.services.market_service import market_data_service
+                    mt5_client = market_data_service.mt5_client
+
+                    if not mt5_client or not mt5_client.connected:
+                        logger.warning(f"MT5未连接，尝试连接...")
+                        if mt5_client and not mt5_client.connect():
+                            logger.error(f"MT5连接失败，跳过账户 {account.account_name}")
+                            errors.append({"account": account.account_name, "error": "MT5 connection failed"})
+                            continue
+
                     loop = asyncio.get_event_loop()
+
+                    # Convert timestamps to datetime objects
+                    start_datetime = datetime.fromtimestamp(start_time / 1000)
+                    end_datetime = datetime.fromtimestamp(end_time / 1000)
+
+                    logger.info(f"MT5同步时间范围: {start_datetime} 到 {end_datetime}")
+
                     history_deals = await loop.run_in_executor(
                         None,
                         lambda: mt5.history_deals_get(
-                            datetime.fromtimestamp(start_time / 1000),
-                            datetime.fromtimestamp(end_time / 1000)
+                            start_datetime,
+                            end_datetime
                         )
                     )
 
                     if history_deals:
+                        logger.info(f"MT5返回 {len(history_deals)} 笔交易记录")
+
+                        # Log first and last deal time for debugging
+                        if len(history_deals) > 0:
+                            first_deal_time = datetime.fromtimestamp(history_deals[0].time)
+                            last_deal_time = datetime.fromtimestamp(history_deals[-1].time)
+                            logger.info(f"MT5交易时间范围: {first_deal_time} 到 {last_deal_time}")
+
+                        xauusd_count = 0
                         for deal in history_deals:
                             if deal.symbol != "XAUUSD.s":
                                 continue
+                            xauusd_count += 1
 
-                            # Check if deal already exists
+                            # Check if deal already exists using deal ticket (unique identifier)
                             existing = await db.execute(
                                 select(OrderRecord).filter(
                                     OrderRecord.account_id == account.account_id,
-                                    OrderRecord.platform_order_id == str(deal.order)
+                                    OrderRecord.platform_order_id == str(deal.ticket)
                                 )
                             )
                             if existing.scalar_one_or_none():
+                                logger.debug(f"MT5交易 {deal.ticket} 已存在，跳过")
                                 continue
 
                             # Create order record
@@ -713,11 +821,18 @@ async def sync_trades_from_exchanges(
                                 fee=mt5_fee,
                                 status="filled",
                                 source="sync",
-                                platform_order_id=str(deal.order),
+                                platform_order_id=str(deal.ticket),  # Use deal.ticket as unique identifier
                                 create_time=datetime.fromtimestamp(deal.time),
                             )
                             db.add(order_record)
                             synced_count += 1
+                            logger.info(f"新增MT5交易记录: ticket={deal.ticket}, symbol={deal.symbol}, "
+                                      f"side={'buy' if deal.type == mt5.DEAL_TYPE_BUY else 'sell'}, "
+                                      f"qty={deal.volume}, price={deal.price}")
+                        logger.info(f"MT5账户 {account.account_name}: 共 {len(history_deals)} 笔交易，"
+                                  f"其中 {xauusd_count} 笔XAUUSD.s交易")
+                    else:
+                        logger.warning(f"MT5账户 {account.account_name} 未返回交易记录，错误: {mt5.last_error()}")
 
             except Exception as e:
                 errors.append({"account": account.account_name, "error": str(e)})
@@ -776,4 +891,243 @@ async def manual_process_order(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ============================================================================
+# 实时交易历史查询（不依赖数据库，直接从平台API获取）
+# ============================================================================
+
+@router.get("/history/realtime")
+async def get_realtime_trading_history(
+    start_time: str = Query(..., description="Start time in Beijing timezone (YYYY-MM-DD HH:MM:SS)"),
+    end_time: str = Query(..., description="End time in Beijing timezone (YYYY-MM-DD HH:MM:SS)"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    实时从平台获取交易历史（不依赖数据库）
+    
+    时间参数：北京时间（UTC+8）
+    返回数据：统一转换为北京时间显示
+    """
+    try:
+        from app.utils.time_utils import beijing_to_utc_ms, utc_ms_to_beijing, mt5_time_to_beijing
+        
+        # 转换查询时间：北京时间 → UTC毫秒时间戳
+        try:
+            start_utc_ms = beijing_to_utc_ms(start_time)
+            end_utc_ms = beijing_to_utc_ms(end_time)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid time format: {str(e)}")
+        
+        # 获取用户账户
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            return {"binanceTrades": [], "mt5Trades": [], "timeZone": "Asia/Shanghai (UTC+8)"}
+        
+        # 实时获取 Binance 订单
+        binance_trades = []
+        for account in accounts:
+            if account.platform_id == 1:
+                try:
+                    trades = await _get_binance_trades_realtime(account, start_utc_ms, end_utc_ms)
+                    binance_trades.extend(trades)
+                except Exception as e:
+                    logger.error(f"Binance trades error: {str(e)}")
+        
+        # 实时获取 MT5 订单
+        mt5_trades = []
+        for account in accounts:
+            if account.platform_id == 2 and account.is_mt5_account:
+                try:
+                    trades = await _get_mt5_trades_realtime(account, start_utc_ms, end_utc_ms)
+                    mt5_trades.extend(trades)
+                except Exception as e:
+                    logger.error(f"MT5 trades error: {str(e)}")
+
+        # 格式化数据
+        formatted_binance = _format_binance_trades(binance_trades)
+        formatted_mt5 = _format_mt5_trades(mt5_trades)
+
+        # 计算统计数据
+        stats = _calculate_stats(formatted_binance, formatted_mt5)
+
+        # 返回数据（字段名与前端期望一致）
+        return {
+            "accountTrades": formatted_binance,  # 前端期望的字段名
+            "mt5Trades": formatted_mt5,
+            "stats": stats,
+            "timeZone": "Asia/Shanghai (UTC+8)"
+        }
+    except Exception as e:
+        logger.error(f"Realtime history error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms):
+    """获取Binance交易历史（使用userTrades API获取准确的手续费）"""
+    from app.services.binance_client import BinanceFuturesClient
+    client = BinanceFuturesClient(account.api_key, account.api_secret)
+    try:
+        # 使用userTrades API获取交易历史（包含准确的手续费信息）
+        trades = await client.get_user_trades(symbol="XAUUSDT", start_time=start_time_ms, end_time=end_time_ms, limit=1000)
+        return [t for t in trades if t.get("symbol", "").upper() == "XAUUSDT"]
+    finally:
+        await client.close()
+
+
+async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms):
+    from app.services.market_service import market_data_service
+    mt5_client = market_data_service.mt5_client
+    if not mt5_client or not mt5_client.connected:
+        if not mt5_client or not mt5_client.connect():
+            return []
+    start_dt = datetime.fromtimestamp(start_time_ms / 1000, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(end_time_ms / 1000, tz=timezone.utc)
+    loop = asyncio.get_event_loop()
+    history_deals = await loop.run_in_executor(None, lambda: mt5.history_deals_get(start_dt, end_dt))
+    return [d for d in history_deals if d.symbol == "XAUUSD.s"] if history_deals else []
+
+
+def _format_binance_trades(trades):
+    """格式化Binance交易数据"""
+    from app.utils.time_utils import utc_ms_to_beijing
+    formatted = []
+    for trade in trades:
+        # 获取交易时间
+        trade_time = trade.get("time", 0)
+        beijing_time = utc_ms_to_beijing(trade_time)
+
+        # 获取手续费（userTrades API返回准确的commission）
+        commission = abs(float(trade.get("commission", 0)))
+
+        # 获取方向（side字段：BUY或SELL）
+        side = trade.get("side", "").lower()
+
+        # 获取价格和数量
+        price = float(trade.get("price", 0))
+        quantity = float(trade.get("qty", 0))
+        amount = price * quantity  # 成交额
+
+        # 判断是否为Maker（挂单）还是Taker（吃单）
+        is_maker = trade.get("maker", False)
+
+        formatted.append({
+            "timestamp": beijing_time,
+            "account_name": "Binance",
+            "symbol": "XAUUSDT",  # 交易对
+            "product": "产品",  # 产品名称
+            "side": side,
+            "price": price,
+            "quantity": quantity,
+            "amount": round(amount, 2),  # 成交额
+            "maker": is_maker,  # True=挂单，False=吃单
+            "fee": round(commission, 2),  # 保留2位小数
+            "id": str(trade.get("id")),
+        })
+
+    # 降序排序（最新的在最上面）
+    return sorted(formatted, key=lambda x: x["timestamp"], reverse=True)
+
+
+def _format_mt5_trades(deals):
+    """格式化MT5交易数据"""
+    from app.utils.time_utils import mt5_time_to_beijing
+    formatted = []
+    for deal in deals:
+        # MT5时间戳转北京时间
+        beijing_time = mt5_time_to_beijing(deal.time)
+
+        # 获取交易方向
+        # MT5的deal.type: 0=BUY, 1=SELL
+        if deal.type == 0:  # mt5.DEAL_TYPE_BUY
+            side = "buy"
+        elif deal.type == 1:  # mt5.DEAL_TYPE_SELL
+            side = "sell"
+        else:
+            side = "unknown"
+
+        # 获取价格和数量
+        price = deal.price
+        quantity = deal.volume
+        amount = price * quantity  # 成交额
+
+        # 获取手续费（优先使用commission字段）
+        if hasattr(deal, 'commission') and deal.commission != 0:
+            fee = abs(float(deal.commission))
+        else:
+            # 如果没有commission字段，显示0.00
+            fee = 0.00
+
+        # 过夜费（暂时设为0，后续可以从其他地方获取）
+        overnight_fee = 0.00
+
+        formatted.append({
+            "timestamp": beijing_time,
+            "account_name": "Bybit MT5",
+            "symbol": "XAUUSD.s",  # 交易对
+            "product": "产品",  # 产品名称
+            "side": side,
+            "price": price,
+            "quantity": quantity,
+            "amount": round(amount, 2),  # 成交额
+            "overnight_fee": round(overnight_fee, 2),  # 过夜费
+            "fee": round(fee, 2),  # 保留2位小数
+            "id": str(deal.ticket),
+        })
+
+    # 降序排序（最新的在最上面）
+    return sorted(formatted, key=lambda x: x["timestamp"], reverse=True)
+
+
+def _calculate_stats(binance_trades, mt5_trades):
+    """计算交易统计数据"""
+    stats = {
+        "totalVolume": 0,
+        "totalAmount": 0,
+        "takerAmount": 0,  # 吃单成交额
+        "makerAmount": 0,  # 挂单成交额
+        "totalFees": 0,
+        "bnbFees": 0,  # BNB手续费
+        "realizedPnL": 0,
+        "mt5Volume": 0,  # MT5成交量
+        "mt5Amount": 0,  # MT5成交额
+        "mt5OvernightFee": 0,
+        "mt5Fee": 0,
+        "mt5RealizedPnL": 0,
+    }
+
+    # 计算Binance统计
+    for trade in binance_trades:
+        qty = trade.get("quantity", 0)
+        amount = trade.get("amount", 0)
+        fee = trade.get("fee", 0)
+        is_maker = trade.get("maker", False)
+
+        stats["totalVolume"] += qty
+        stats["totalAmount"] += amount
+
+        # 区分吃单和挂单成交额
+        if is_maker:
+            stats["makerAmount"] += amount
+        else:
+            stats["takerAmount"] += amount
+
+        stats["totalFees"] += fee
+
+    # 计算MT5统计
+    for trade in mt5_trades:
+        qty = trade.get("quantity", 0)
+        amount = trade.get("amount", 0)
+        fee = trade.get("fee", 0)
+        overnight_fee = trade.get("overnight_fee", 0)
+
+        stats["mt5Volume"] += qty
+        stats["mt5Amount"] += amount
+        stats["mt5Fee"] += fee
+        stats["mt5OvernightFee"] += overnight_fee
+        stats["totalFees"] += fee
+
+    return stats
 

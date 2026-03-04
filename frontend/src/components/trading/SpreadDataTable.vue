@@ -37,6 +37,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
+import { formatTimeBeijing } from '@/utils/timeUtils'
 
 const marketStore = useMarketStore()
 const spreadHistory = ref([])
@@ -73,13 +74,7 @@ watch(() => marketStore.marketData, (newData) => {
 }, { immediate: false })
 
 function formatTime(timestamp) {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })
+  return formatTimeBeijing(timestamp)
 }
 
 function getBybitClass(spread, index) {

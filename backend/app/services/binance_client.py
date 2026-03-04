@@ -187,6 +187,7 @@ class BinanceFuturesClient:
         time_in_force: str = "GTC",
         reduce_only: bool = False,
         position_side: Optional[str] = None,
+        post_only: bool = False,
     ) -> Dict[str, Any]:
         """Place a new order"""
         params = {
@@ -207,6 +208,10 @@ class BinanceFuturesClient:
 
         if position_side:
             params["positionSide"] = position_side.upper()
+
+        # POST_ONLY: Force MAKER mode, reject if order would be TAKER
+        if post_only:
+            params["postOnly"] = "true"
 
         return await self._request("POST", "/fapi/v1/order", signed=True, params=params)
 
@@ -246,3 +251,18 @@ class BinanceFuturesClient:
         if end_time:
             params["endTime"] = end_time
         return await self._request("GET", "/fapi/v1/userTrades", signed=True, params=params)
+
+    async def get_all_orders(
+        self,
+        symbol: str,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 1000,
+    ) -> list:
+        """Get all orders (including filled, canceled, etc.)"""
+        params = {"symbol": symbol, "limit": limit}
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        return await self._request("GET", "/fapi/v1/allOrders", signed=True, params=params)

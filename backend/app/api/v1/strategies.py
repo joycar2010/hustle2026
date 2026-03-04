@@ -2,9 +2,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.strategy import StrategyConfig
@@ -16,7 +16,8 @@ from app.schemas.strategy import (
 )
 from app.services.position_manager import position_manager
 from app.services.order_executor_v2 import OrderExecutorV2
-from app.services.market_data_service import market_data_service
+from app.services.market_service import market_data_service
+from app.websocket.manager import manager
 
 router = APIRouter()
 order_executor_v2 = OrderExecutorV2()
@@ -28,7 +29,7 @@ class ExecuteStrategyRequest(BaseModel):
     bybit_account_id: UUID
     quantity: float
     ladder_index: int = 0
-    target_spread: Optional[float] = None
+    target_spread: float = None
 
 
 class ClosePositionRequest(BaseModel):
@@ -36,6 +37,25 @@ class ClosePositionRequest(BaseModel):
     bybit_account_id: UUID
     quantity: float
     ladder_index: int = 0
+
+
+async def send_single_leg_alert(user_id: str, strategy_type: str, action: str, details: dict):
+    """Send single-leg trade alert via WebSocket"""
+    alert_message = {
+        "type": "single_leg_alert",
+        "data": {
+            "strategy_type": strategy_type,
+            "action": action,
+            "binance_filled": details.get("binance_filled", 0),
+            "bybit_filled": details.get("bybit_filled", 0),
+            "unfilled_qty": details.get("unfilled_qty", 0),
+            "timestamp": details.get("timestamp"),
+            "level": "critical",
+            "title": "单腿交易警告",
+            "message": f"{strategy_type} {action}: Binance成交 {details.get('binance_filled', 0)}, Bybit成交 {details.get('bybit_filled', 0)}, 未成交 {details.get('unfilled_qty', 0)}"
+        }
+    }
+    await manager.send_to_user(alert_message, user_id)
 
 
 @router.get("/configs", response_model=List[StrategyConfigResponse])
@@ -283,18 +303,7 @@ async def delete_strategy_config(
 
 
 # Execution schemas
-class ExecuteStrategyRequest(BaseModel):
-    binance_account_id: UUID
-    bybit_account_id: UUID
-    quantity: float
-    target_spread: float
-
-
-class ClosePositionRequest(BaseModel):
-    task_id: UUID
-    binance_account_id: UUID
-    bybit_account_id: UUID
-    quantity: float
+# (Removed duplicate - using the definition at line 35)
 
 
 class ValidateConfigRequest(BaseModel):
@@ -334,8 +343,8 @@ async def validate_strategy_config(
         if request.action == 'opening':
             # Check opening spread value
             open_price = ladder.get('openPrice')
-            if not open_price or open_price <= 0:
-                errors.append(f'阶梯{ladder_num}: 开仓点差值必须大于0')
+            if open_price is None:
+                errors.append(f'阶梯{ladder_num}: 开仓点差值未配置')
 
             # Check opening trigger count
             if not request.opening_sync_qty or request.opening_sync_qty < 1:
@@ -407,6 +416,7 @@ async def execute_reverse_arbitrage(
         can_open = position_manager.check_can_open(
             strategy_id=strategy_id,
             ladder_index=request.ladder_index,
+            strategy_type="reverse",
             quantity=request.quantity,
             max_position=request.quantity
         )
@@ -415,11 +425,11 @@ async def execute_reverse_arbitrage(
             raise HTTPException(status_code=400, detail="Position limit exceeded for this ladder")
 
         # 3. Get current market prices (use ask for sell, bid for buy)
-        # For reverse opening: Binance SELL (use bid+0.01), Bybit BUY (market)
+        # For reverse opening: Binance SELL (use ask+0.01 for MAKER), Bybit BUY (market)
         from app.services.market_service import market_data_service
-        market_data = await market_data_service.get_aggregated_quotes()
+        market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.bid_price + 0.01  # Maker price
+        binance_price = market_data.binance_quote.ask_price + 0.01  # MAKER: above ask price
         bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
 
         # 4. Execute order using OrderExecutorV2
@@ -437,8 +447,21 @@ async def execute_reverse_arbitrage(
             position_manager.record_opening(
                 strategy_id=strategy_id,
                 ladder_index=request.ladder_index,
+                strategy_type="reverse",
                 quantity=result.get("binance_filled_qty", 0)
             )
+
+            # Check for single-leg trade and send alert
+            if result.get("is_single_leg"):
+                import datetime
+                details = result.get("single_leg_details", {})
+                details["timestamp"] = datetime.datetime.utcnow().isoformat()
+                await send_single_leg_alert(
+                    user_id=user_id,
+                    strategy_type="反向套利",
+                    action="开仓",
+                    details=details
+                )
 
         return result
 
@@ -475,6 +498,7 @@ async def execute_forward_arbitrage(
         can_open = position_manager.check_can_open(
             strategy_id=strategy_id,
             ladder_index=request.ladder_index,
+            strategy_type="forward",
             quantity=request.quantity,
             max_position=request.quantity
         )
@@ -483,11 +507,11 @@ async def execute_forward_arbitrage(
             raise HTTPException(status_code=400, detail="Position limit exceeded for this ladder")
 
         # 3. Get current market prices
-        # For forward opening: Binance BUY (use ask-0.01), Bybit SELL (market)
+        # For forward opening: Binance BUY (use bid-0.01 for MAKER), Bybit SELL (market)
         from app.services.market_service import market_data_service
-        market_data = await market_data_service.get_aggregated_quotes()
+        market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.ask_price - 0.01  # Maker price
+        binance_price = market_data.binance_quote.bid_price - 0.01  # MAKER: below bid price
         bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
 
         # 4. Execute order using OrderExecutorV2
@@ -505,8 +529,21 @@ async def execute_forward_arbitrage(
             position_manager.record_opening(
                 strategy_id=strategy_id,
                 ladder_index=request.ladder_index,
+                strategy_type="forward",
                 quantity=result.get("binance_filled_qty", 0)
             )
+
+            # Check for single-leg trade and send alert
+            if result.get("is_single_leg"):
+                import datetime
+                details = result.get("single_leg_details", {})
+                details["timestamp"] = datetime.datetime.utcnow().isoformat()
+                await send_single_leg_alert(
+                    user_id=user_id,
+                    strategy_type="正向套利",
+                    action="开仓",
+                    details=details
+                )
 
         return result
 
@@ -543,6 +580,7 @@ async def close_reverse_position(
         can_close = position_manager.check_can_close(
             strategy_id=strategy_id,
             ladder_index=request.ladder_index,
+            strategy_type="reverse",
             quantity=request.quantity
         )
 
@@ -550,11 +588,11 @@ async def close_reverse_position(
             raise HTTPException(status_code=400, detail="Insufficient position to close")
 
         # 3. Get current market prices
-        # For reverse closing: Binance BUY (use ask-0.01), Bybit SELL (market)
+        # For reverse closing: Binance BUY (use bid-0.01 for MAKER), Bybit SELL (market)
         from app.services.market_service import market_data_service
-        market_data = await market_data_service.get_aggregated_quotes()
+        market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.ask_price - 0.01  # Maker price
+        binance_price = market_data.binance_quote.bid_price - 0.01  # MAKER: below bid price
         bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
 
         # 4. Execute order using OrderExecutorV2
@@ -572,8 +610,21 @@ async def close_reverse_position(
             position_manager.record_closing(
                 strategy_id=strategy_id,
                 ladder_index=request.ladder_index,
+                strategy_type="reverse",
                 quantity=result.get("binance_filled_qty", 0)
             )
+
+            # Check for single-leg trade and send alert
+            if result.get("is_single_leg"):
+                import datetime
+                details = result.get("single_leg_details", {})
+                details["timestamp"] = datetime.datetime.utcnow().isoformat()
+                await send_single_leg_alert(
+                    user_id=user_id,
+                    strategy_type="反向套利",
+                    action="平仓",
+                    details=details
+                )
 
         return result
 
@@ -610,6 +661,7 @@ async def close_forward_position(
         can_close = position_manager.check_can_close(
             strategy_id=strategy_id,
             ladder_index=request.ladder_index,
+            strategy_type="forward",
             quantity=request.quantity
         )
 
@@ -617,11 +669,11 @@ async def close_forward_position(
             raise HTTPException(status_code=400, detail="Insufficient position to close")
 
         # 3. Get current market prices
-        # For forward closing: Binance SELL (use bid+0.01), Bybit BUY (market)
+        # For forward closing: Binance SELL (use ask+0.01 for MAKER), Bybit BUY (market)
         from app.services.market_service import market_data_service
-        market_data = await market_data_service.get_aggregated_quotes()
+        market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.bid_price + 0.01  # Maker price
+        binance_price = market_data.binance_quote.ask_price + 0.01  # MAKER: above ask price
         bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
 
         # 4. Execute order using OrderExecutorV2
@@ -639,8 +691,21 @@ async def close_forward_position(
             position_manager.record_closing(
                 strategy_id=strategy_id,
                 ladder_index=request.ladder_index,
+                strategy_type="forward",
                 quantity=result.get("binance_filled_qty", 0)
             )
+
+            # Check for single-leg trade and send alert
+            if result.get("is_single_leg"):
+                import datetime
+                details = result.get("single_leg_details", {})
+                details["timestamp"] = datetime.datetime.utcnow().isoformat()
+                await send_single_leg_alert(
+                    user_id=user_id,
+                    strategy_type="正向套利",
+                    action="平仓",
+                    details=details
+                )
 
         return result
 
@@ -772,3 +837,45 @@ async def reset_ladder_position(
     position_manager.reset_ladder(strategy_id_str, ladder_index)
 
     return {"success": True, "message": "Ladder position reset successfully"}
+
+
+@router.post("/positions/{strategy_id}/sync")
+async def sync_positions_from_exchange(
+    strategy_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sync positions from actual exchange (Binance)"""
+    # Verify strategy belongs to user
+    result = await db.execute(
+        select(StrategyConfig).where(
+            StrategyConfig.config_id == strategy_id,
+            StrategyConfig.user_id == UUID(user_id),
+        )
+    )
+    config = result.scalar_one_or_none()
+
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found",
+        )
+
+    # Convert UUID to string for position_manager
+    strategy_id_str = str(strategy_id)
+
+    # Sync from exchange
+    sync_result = await position_manager.sync_from_exchange(
+        strategy_id=strategy_id_str,
+        strategy_type=config.strategy_type,
+        db=db
+    )
+
+    if not sync_result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=sync_result.get("error", "Sync failed"),
+        )
+
+    return sync_result
+

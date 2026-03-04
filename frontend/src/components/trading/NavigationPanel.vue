@@ -49,9 +49,14 @@ const router = useRouter()
 const marketStore = useMarketStore()
 const activeNav = ref('strategy')
 const systemAlerts = ref([])
+const redisStatus = ref({ healthy: false, last_error: null })
 
 onMounted(async () => {
   await fetchSystemAlerts()
+  await fetchRedisStatus()
+
+  // Fetch Redis status every 30 seconds
+  setInterval(fetchRedisStatus, 30000)
 
   // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
   watch(() => marketStore.lastMessage, (message) => {
@@ -68,6 +73,16 @@ async function fetchSystemAlerts() {
     systemAlerts.value = generateSystemAlerts(data)
   } catch (error) {
     console.error('Failed to fetch system alerts:', error)
+  }
+}
+
+async function fetchRedisStatus() {
+  try {
+    const response = await api.get('/api/v1/system/redis/status')
+    redisStatus.value = response.data
+  } catch (error) {
+    console.error('Failed to fetch Redis status:', error)
+    redisStatus.value = { healthy: false, last_error: 'Failed to fetch status' }
   }
 }
 
@@ -110,6 +125,23 @@ function generateSystemAlerts(data) {
         value: `当前持仓: ${data.summary.position_count} 个`
       })
     }
+  }
+
+  // Redis status
+  if (redisStatus.value.healthy) {
+    alerts.push({
+      id: 4,
+      type: 'success',
+      message: 'Redis服务',
+      value: '运行正常'
+    })
+  } else {
+    alerts.push({
+      id: 4,
+      type: 'danger',
+      message: 'Redis服务异常',
+      value: redisStatus.value.last_error || '连接失败'
+    })
   }
 
   return alerts

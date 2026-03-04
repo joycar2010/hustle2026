@@ -6,8 +6,8 @@ from uuid import UUID
 
 class LadderConfig(BaseModel):
     enabled: bool = True
-    openPrice: float = Field(default=3.0, ge=0)
-    threshold: float = Field(default=2.0, ge=0)
+    openPrice: float = Field(default=3.0)
+    threshold: float = Field(default=2.0)
     qtyLimit: float = Field(default=3.0, gt=0)
 
 

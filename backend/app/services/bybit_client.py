@@ -17,6 +17,8 @@ class BybitV5Client:
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = settings.BYBIT_API_BASE
+        # MT5 API 使用相同的域名，只是端点路径不同
+        self.mt5_base_url = settings.BYBIT_API_BASE
         self.session: Optional[aiohttp.ClientSession] = None
         self.recv_window = "5000"
 
@@ -52,10 +54,12 @@ class BybitV5Client:
         method: str,
         endpoint: str,
         signed: bool = False,
+        use_mt5_base: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Make HTTP request to Bybit API"""
-        url = f"{self.base_url}{endpoint}"
+        base = self.mt5_base_url if use_mt5_base else self.base_url
+        url = f"{base}{endpoint}"
         headers = {"Content-Type": "application/json"}
 
         if signed:
@@ -385,3 +389,93 @@ class BybitV5Client:
             params["endTime"] = end_time
 
         return await self._request("GET", "/v5/account/funding-fee", signed=True, params=params)
+
+    # TRADFI MT5 API endpoints
+
+    async def get_mt5_account_balance(self, mt5_account: str) -> Dict[str, Any]:
+        """Get MT5 account balance from TRADFI MT5 API
+
+        Args:
+            mt5_account: MT5 account number
+
+        Returns:
+            Dict with balance, equity, freeMargin, marginUsed, marginBalance, unrealizedPnl, marginLevel
+        """
+        params = {"mt5Account": mt5_account}
+        return await self._request("GET", "/asset/v1/mt5/account/balance", signed=True, use_mt5_base=True, params=params)
+
+    async def get_mt5_position_list(
+        self,
+        mt5_account: str,
+        symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get MT5 position list from TRADFI MT5 API
+
+        Args:
+            mt5_account: MT5 account number
+            symbol: Optional symbol filter (e.g., XAUUSD)
+
+        Returns:
+            Dict with list of positions
+        """
+        params = {"mt5Account": mt5_account}
+        if symbol:
+            params["symbol"] = symbol
+
+        return await self._request("GET", "/asset/v1/mt5/position/list", signed=True, use_mt5_base=True, params=params)
+
+    async def get_mt5_transaction_list(
+        self,
+        mt5_account: str,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        transaction_type: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Get MT5 transaction list (fees, swap, commission) from TRADFI MT5 API
+
+        Args:
+            mt5_account: MT5 account number
+            start_time: Start timestamp in milliseconds
+            end_time: End timestamp in milliseconds
+            transaction_type: Transaction type (SWAP, COMMISSION, FUNDING_FEE)
+            limit: Limit for data size per page
+
+        Returns:
+            Dict with list of transactions
+        """
+        params = {"mt5Account": mt5_account, "limit": limit}
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        if transaction_type:
+            params["type"] = transaction_type
+
+        return await self._request("GET", "/asset/v1/mt5/transaction/list", signed=True, use_mt5_base=True, params=params)
+
+    async def get_mt5_order_history(
+        self,
+        mt5_account: str,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Get MT5 order history from TRADFI MT5 API
+
+        Args:
+            mt5_account: MT5 account number
+            start_time: Start timestamp in milliseconds
+            end_time: End timestamp in milliseconds
+            limit: Limit for data size per page
+
+        Returns:
+            Dict with list of orders
+        """
+        params = {"mt5Account": mt5_account, "limit": limit}
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+
+        return await self._request("GET", "/asset/v1/mt5/order/history", signed=True, use_mt5_base=True, params=params)

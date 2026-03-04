@@ -24,39 +24,6 @@
         </div>
       </div>
 
-      <!-- Position Summary -->
-      <div v-if="positionSummary" class="bg-[#252930] rounded p-2 md:p-3">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-bold">持仓统计</span>
-          <button
-            @click="refreshPositions"
-            class="px-2 py-1 text-xs bg-[#2b3139] hover:bg-[#3b4149] rounded transition-colors"
-          >
-            刷新
-          </button>
-        </div>
-        <div class="grid grid-cols-3 gap-2 md:gap-3 text-xs">
-          <div>
-            <div class="text-gray-400 mb-1">当前持仓</div>
-            <div class="font-mono font-bold text-[#0ecb81]">
-              {{ positionSummary.total_current_position.toFixed(2) }}
-            </div>
-          </div>
-          <div>
-            <div class="text-gray-400 mb-1">累计开仓</div>
-            <div class="font-mono font-bold">
-              {{ positionSummary.total_opened.toFixed(2) }}
-            </div>
-          </div>
-          <div>
-            <div class="text-gray-400 mb-1">累计平仓</div>
-            <div class="font-mono font-bold">
-              {{ positionSummary.total_closed.toFixed(2) }}
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Top Info Bar -->
       <div class="bg-[#252930] rounded p-2 md:p-3">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
@@ -371,7 +338,8 @@ const currentSpread = ref(0)
 const closingSpread = ref(0)
 const binanceAssets = ref(10000)
 const bybitAssets = ref(8500)
-const executing = ref(false)
+const executingOpening = ref(false)
+const executingClosing = ref(false)
 const accountsData = ref(null)
 const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
@@ -392,8 +360,6 @@ const config = ref({
 
 const configId = ref(null)
 const validationErrors = ref([])
-const positionSummary = ref(null)
-let positionRefreshInterval = null
 
 // 阶梯执行进度跟踪
 const ladderProgress = ref({
@@ -419,11 +385,23 @@ onMounted(async () => {
   // Initial account data fetch
   await fetchAccountData()
 
-  // Initial position data fetch
-  await refreshPositions()
-
-  // Setup auto-refresh for position data based on system settings
-  setupPositionRefresh()
+  // Validate enabled states after all data is loaded
+  // If accounts are disconnected, disable strategies and clear localStorage
+  if (config.value.openingEnabled || config.value.closingEnabled) {
+    const accountValidation = validateAccountsForExecution()
+    if (!accountValidation.valid) {
+      console.warn('Disabling strategies due to account validation failure:', accountValidation.message)
+      if (config.value.openingEnabled) {
+        config.value.openingEnabled = false
+        saveEnabledState(STORAGE_KEY_OPENING, false)
+      }
+      if (config.value.closingEnabled) {
+        config.value.closingEnabled = false
+        saveEnabledState(STORAGE_KEY_CLOSING, false)
+      }
+      validationErrors.value = [accountValidation.message]
+    }
+  }
 })
 
 async function loadConfigFromDB() {
@@ -458,10 +436,6 @@ async function loadConfigFromDB() {
 }
 
 onUnmounted(() => {
-  // Cleanup position refresh interval
-  if (positionRefreshInterval) {
-    clearInterval(positionRefreshInterval)
-  }
   // No cleanup needed for WebSocket - stays connected for other components
 })
 
@@ -485,7 +459,7 @@ watch(() => marketStore.marketData, (newData) => {
   const binanceLongValue = props.type === 'forward' ? newData.binance_bid : newData.binance_ask
 
   // Trigger count logic for opening
-  if (config.value.openingEnabled && !executing.value && !orderPlaced.value.opening) {
+  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.opening.currentLadderIndex
 
@@ -510,7 +484,7 @@ watch(() => marketStore.marketData, (newData) => {
   }
 
   // Trigger count logic for closing
-  if (config.value.closingEnabled && !executing.value && !orderPlaced.value.closing) {
+  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.closing.currentLadderIndex
 
@@ -571,18 +545,6 @@ async function fetchAccountData() {
       sum + (acc.balance?.available_balance || 0), 0)
   } catch (error) {
     console.error('Failed to fetch account data:', error)
-  }
-}
-
-async function refreshPositions() {
-  if (!configId.value) return
-
-  try {
-    const response = await api.get(`/api/v1/strategies/positions/${configId.value}`)
-    positionSummary.value = response.data.summary
-  } catch (error) {
-    console.error('Failed to fetch positions:', error)
-    // Don't show error to user, just log it
   }
 }
 
@@ -713,9 +675,11 @@ function validateAccountsForExecution() {
     return { valid: false, message: `Bybit MT5账户连接失败: ${bybitMT5Account.error}` }
   }
 
-  // Check if balances are not zero
-  const binanceBalance = binanceAccount.balance?.available_balance || 0
-  const bybitBalance = bybitMT5Account.balance?.available_balance || 0
+  // Check if balances are not zero (use total_assets instead of available_balance)
+  const binanceBalance = binanceAccount.balance?.total_assets || binanceAccount.balance?.net_assets || 0
+  const bybitBalance = bybitMT5Account.balance?.total_assets || bybitMT5Account.balance?.net_assets || 0
+
+  console.log('Binance balance:', binanceBalance, 'Bybit balance:', bybitBalance)
 
   if (binanceBalance <= 0) {
     return { valid: false, message: 'Binance合约账户余额为0，无法启用策略' }
@@ -850,10 +814,10 @@ async function toggleClosing() {
 }
 
 async function executeLadderOpening(ladderIndex, ladder) {
-  if (executing.value) return
+  if (executingOpening.value) return
 
   try {
-    executing.value = true
+    executingOpening.value = true
 
     const accounts = accountsData.value?.accounts || []
     const binanceAccount = accounts.find(acc => acc.platform_id === 1)
@@ -882,11 +846,29 @@ async function executeLadderOpening(ladderIndex, ladder) {
     try {
       const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
 
+      console.log(`Ladder ${ladderIndex + 1} API response:`, response.data)
+
       if (response.data.success) {
         console.log(`Ladder ${ladderIndex + 1} batch executed successfully`)
+        console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
 
-        // 更新阶梯进度
-        ladderProgress.value.opening.completedQty += batchQty
+        // 检查实际成交数量
+        const binanceFilled = response.data.binance_filled_qty || 0
+        const bybitFilled = response.data.bybit_filled_qty || 0
+
+        // 如果两边都没有成交，停止策略
+        if (binanceFilled === 0 && bybitFilled === 0) {
+          const message = response.data.message || 'Binance未匹配到订单，取消策略执行，下次再试!'
+          console.log(`Ladder ${ladderIndex + 1}: ${message}`)
+          alert(message)
+          config.value.openingEnabled = false
+          saveEnabledState(STORAGE_KEY_OPENING, false)
+          return
+        }
+
+        // 如果有成交，更新阶梯进度（使用实际成交数量）
+        const actualFilled = Math.min(binanceFilled, bybitFilled)
+        ladderProgress.value.opening.completedQty += actualFilled
 
         // 检查当前阶梯是否完成
         if (ladderProgress.value.opening.completedQty >= ladder.qtyLimit) {
@@ -907,30 +889,31 @@ async function executeLadderOpening(ladderIndex, ladder) {
           }
         }
 
-        // 刷新持仓数据
-        await refreshPositions()
+        // Position data will be updated via WebSocket
       } else {
         const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
         console.error(`Ladder ${ladderIndex + 1} execution failed:`, errorMsg)
         alert(`阶梯 ${ladderIndex + 1} 执行失败: ${errorMsg}`)
         config.value.openingEnabled = false
+        saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
       }
     } catch (error) {
       console.error(`Ladder ${ladderIndex + 1} execution error:`, error)
       const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
       alert(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`)
       config.value.openingEnabled = false
+      saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
     }
   } finally {
-    executing.value = false
+    executingOpening.value = false
   }
 }
 
 async function executeLadderClosing(ladderIndex, ladder) {
-  if (executing.value) return
+  if (executingClosing.value) return
 
   try {
-    executing.value = true
+    executingClosing.value = true
 
     const accounts = accountsData.value?.accounts || []
     const binanceAccount = accounts.find(acc => acc.platform_id === 1)
@@ -960,9 +943,25 @@ async function executeLadderClosing(ladderIndex, ladder) {
 
       if (response.data.success) {
         console.log(`Ladder ${ladderIndex + 1} batch closed successfully`)
+        console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
 
-        // 更新阶梯进度
-        ladderProgress.value.closing.completedQty += batchQty
+        // 检查实际成交数量
+        const binanceFilled = response.data.binance_filled_qty || 0
+        const bybitFilled = response.data.bybit_filled_qty || 0
+
+        // 如果两边都没有成交，停止策略
+        if (binanceFilled === 0 && bybitFilled === 0) {
+          const message = response.data.message || 'Binance未匹配到订单，取消策略执行，下次再试!'
+          console.log(`Ladder ${ladderIndex + 1}: ${message}`)
+          alert(message)
+          config.value.closingEnabled = false
+          saveEnabledState(STORAGE_KEY_CLOSING, false)
+          return
+        }
+
+        // 如果有成交，更新阶梯进度（使用实际成交数量）
+        const actualFilled = Math.min(binanceFilled, bybitFilled)
+        ladderProgress.value.closing.completedQty += actualFilled
 
         // 检查当前阶梯是否完成
         if (ladderProgress.value.closing.completedQty >= ladder.qtyLimit) {
@@ -983,30 +982,31 @@ async function executeLadderClosing(ladderIndex, ladder) {
           }
         }
 
-        // 刷新持仓数据
-        await refreshPositions()
+        // Position data will be updated via WebSocket
       } else {
         const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
         console.error(`Ladder ${ladderIndex + 1} closing failed:`, errorMsg)
         alert(`阶梯 ${ladderIndex + 1} 平仓失败: ${errorMsg}`)
         config.value.closingEnabled = false
+        saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
       }
     } catch (error) {
       console.error(`Ladder ${ladderIndex + 1} closing error:`, error)
       const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
       alert(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`)
       config.value.closingEnabled = false
+      saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
     }
   } finally {
-    executing.value = false
+    executingClosing.value = false
   }
 }
 
 async function executeBatchOpening(ladder) {
-  if (executing.value) return
+  if (executingOpening.value) return
 
   try {
-    executing.value = true
+    executingOpening.value = true
 
     const accounts = accountsData.value?.accounts || []
     const binanceAccount = accounts.find(acc => acc.platform_id === 1)
@@ -1095,15 +1095,15 @@ async function executeBatchOpening(ladder) {
   } catch (error) {
     console.error('Failed to execute batch opening:', error)
   } finally {
-    executing.value = false
+    executingOpening.value = false
   }
 }
 
 async function executeBatchClosing(ladder) {
-  if (executing.value) return
+  if (executingClosing.value) return
 
   try {
-    executing.value = true
+    executingClosing.value = true
 
     const accounts = accountsData.value?.accounts || []
     const binanceAccount = accounts.find(acc => acc.platform_id === 1)
@@ -1191,31 +1191,45 @@ async function executeBatchClosing(ladder) {
   } catch (error) {
     console.error('Failed to execute batch closing:', error)
   } finally {
-    executing.value = false
+    executingClosing.value = false
   }
 }
 
 async function checkPositionForClosing() {
   try {
-    // Get current positions
-    const response = await api.get('/api/v1/positions')
-    const positions = response.data.positions || []
+    // Refresh account data to get latest positions
+    await fetchAccountData()
+
+    // Get positions from accountsData
+    const positions = accountsData.value?.positions || []
+
+    console.log('All positions:', positions)
 
     // Calculate total required quantity from enabled ladders
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const totalRequiredQty = enabledLadders.reduce((sum, ladder) => sum + (ladder.qtyLimit || 0), 0)
 
     // Find positions for the current strategy type
-    // For reverse: Bybit long position (platform_id=2, side='BUY')
-    // For forward: Binance long position (platform_id=1, side='BUY')
+    // For reverse: Bybit MT5 long position (platform_id=2, side='Buy')
+    // For forward: Binance long position (platform_id=1, side='Buy')
     const platformId = props.type === 'reverse' ? 2 : 1
-    const relevantPositions = positions.filter(p =>
-      p.platform_id === platformId &&
-      p.symbol === 'XAUUSD' &&
-      p.quantity > 0
-    )
+    const side = 'Buy'  // Both forward and reverse closing need to close long positions
 
-    const currentPosition = relevantPositions.reduce((sum, p) => sum + (p.quantity || 0), 0)
+    const relevantPositions = positions.filter(p => {
+      const matches = p.platform_id === platformId &&
+        (p.symbol === 'XAUUSD' || p.symbol === 'XAUUSDT') &&
+        p.side === side &&
+        p.size > 0
+
+      console.log(`Position check: platform=${p.platform_id}, symbol=${p.symbol}, side=${p.side}, size=${p.size}, matches=${matches}`)
+      return matches
+    })
+
+    console.log('Relevant positions:', relevantPositions)
+
+    const currentPosition = relevantPositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0)
+
+    console.log(`Current position: ${currentPosition}, Required: ${totalRequiredQty}`)
 
     if (currentPosition < totalRequiredQty) {
       return {
@@ -1250,8 +1264,8 @@ function validateLadderConfig(action) {
 
     if (action === 'opening') {
       // Check opening spread value
-      if (!ladder.openPrice || ladder.openPrice <= 0) {
-        errors.push(`阶梯${ladderNum}: 开仓点差值必须大于0`)
+      if (ladder.openPrice === undefined || ladder.openPrice === null) {
+        errors.push(`阶梯${ladderNum}: 开仓点差值未配置`)
       }
 
       // Check opening trigger count (config level)
@@ -1304,17 +1318,5 @@ function validateLadderConfig(action) {
 
 function formatNumber(num) {
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-}
-
-function setupPositionRefresh() {
-  // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
-  watch(() => marketStore.lastMessage, (message) => {
-    if (message && message.type === 'account_balance') {
-      // Refresh positions when account balance updates
-      if (configId.value) {
-        refreshPositions()
-      }
-    }
-  })
 }
 </script>

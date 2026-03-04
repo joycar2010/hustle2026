@@ -88,13 +88,15 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
       <!-- Forward Arbitrage Chart -->
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">正向套利线性分析</h3>
+        <h3 class="text-lg font-semibold mb-4">正向套利分析 (Binance做多)</h3>
+        <div class="text-xs text-gray-400 mb-2">开仓点差 = Bybit卖价 - Binance买价</div>
         <canvas ref="forwardChartRef"></canvas>
       </div>
 
       <!-- Reverse Arbitrage Chart -->
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">反向套利线性分析</h3>
+        <h3 class="text-lg font-semibold mb-4">反向套利分析 (Bybit做多)</h3>
+        <div class="text-xs text-gray-400 mb-2">开仓点差 = Binance卖价 - Bybit卖价</div>
         <canvas ref="reverseChartRef"></canvas>
       </div>
     </div>
@@ -113,8 +115,8 @@
           <thead>
             <tr class="text-left text-gray-400 border-b border-gray-700">
               <th class="pb-2">时间</th>
-              <th class="pb-2">正向点差</th>
-              <th class="pb-2">反向点差</th>
+              <th class="pb-2">正向开仓点差</th>
+              <th class="pb-2">反向开仓点差</th>
               <th class="pb-2">Binance买/卖</th>
               <th class="pb-2">Bybit买/卖</th>
               <th class="pb-2">状态</th>
@@ -373,10 +375,10 @@ async function querySpreadData() {
       timestamp: item.timestamp,
       forward_spread: item.forward_spread || 0,
       reverse_spread: item.reverse_spread || 0,
-      binance_bid: item.binance_quote?.bid || 0,
-      binance_ask: item.binance_quote?.ask || 0,
-      bybit_bid: item.bybit_quote?.bid || 0,
-      bybit_ask: item.bybit_quote?.ask || 0
+      binance_bid: item.binance_quote?.bid || item.binance_bid || 0,
+      binance_ask: item.binance_quote?.ask || item.binance_ask || 0,
+      bybit_bid: item.bybit_quote?.bid || item.bybit_bid || 0,
+      bybit_ask: item.bybit_quote?.ask || item.bybit_ask || 0
     }))
 
     currentPage.value = 1
@@ -414,7 +416,7 @@ function updateCharts() {
       data: {
         labels: labels,
         datasets: [{
-          label: '正向点差',
+          label: '正向开仓点差 (Bybit卖-Binance买)',
           data: forwardData,
           borderColor: 'rgb(34, 197, 94)',
           backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -458,7 +460,7 @@ function updateCharts() {
       data: {
         labels: labels,
         datasets: [{
-          label: '反向点差',
+          label: '反向开仓点差 (Binance卖-Bybit卖)',
           data: reverseData,
           borderColor: 'rgb(239, 68, 68)',
           backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -517,7 +519,7 @@ function formatTime(timestamp) {
 
 function exportData() {
   const csv = [
-    ['时间', '正向点差', '反向点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价'],
+    ['时间', '正向开仓点差', '反向开仓点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价'],
     ...spreadRecords.value.map(r => [
       formatDateTime(r.timestamp),
       r.forward_spread.toFixed(2),

@@ -37,8 +37,8 @@ class SpreadRecord(Base):
     binance_ask = Column(Float, nullable=False)
     bybit_bid = Column(Float, nullable=False)
     bybit_ask = Column(Float, nullable=False)
-    forward_spread = Column(Float, nullable=False)  # bybit_bid - binance_ask
-    reverse_spread = Column(Float, nullable=False)  # binance_bid - bybit_ask
+    forward_spread = Column(Float, nullable=False)  # 正向开仓: bybit_bid - binance_bid
+    reverse_spread = Column(Float, nullable=False)  # 反向开仓: binance_ask - bybit_ask
     timestamp = Column(TIMESTAMP, default=datetime.utcnow, nullable=False, index=True)
 
     __table_args__ = (

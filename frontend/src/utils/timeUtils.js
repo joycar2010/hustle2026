@@ -249,3 +249,85 @@ export function isToday(utcTime) {
 export const formatTime = formatUTCTime
 export const getTimeAgo = timeAgo
 export const parseTime = parseUTCTime
+
+/**
+ * 将UTC时间戳转换为北京时间字符串（完整格式）
+ * 专用于后端返回的UTC时间戳，统一显示为北京时间
+ * @param {string|number|Date} timestamp - UTC时间戳
+ * @returns {string} 北京时间字符串 (YYYY-MM-DD HH:mm:ss)
+ */
+export function formatDateTimeBeijing(timestamp) {
+  if (!timestamp) return '-'
+
+  const date = new Date(timestamp)
+
+  // 检查是否为有效日期
+  if (isNaN(date.getTime())) {
+    console.error('Invalid date:', timestamp)
+    return '-'
+  }
+
+  return date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+}
+
+/**
+ * 将UTC时间戳转换为北京时间字符串（仅时间）
+ * @param {string|number|Date} timestamp - UTC时间戳
+ * @returns {string} 北京时间字符串 (HH:mm:ss)
+ */
+export function formatTimeBeijing(timestamp) {
+  if (!timestamp) return '-'
+
+  const date = new Date(timestamp)
+
+  // 检查是否为有效日期
+  if (isNaN(date.getTime())) {
+    return '-'
+  }
+
+  return date.toLocaleTimeString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+}
+
+/**
+ * 将UTC时间戳转换为北京时间字符串（日期+时间，短格式）
+ * @param {string|number|Date} timestamp - UTC时间戳
+ * @returns {string} 北京时间字符串 (MM-DD HH:mm:ss)
+ */
+export function formatShortDateTimeBeijing(timestamp) {
+  if (!timestamp) return '-'
+
+  const date = new Date(timestamp)
+
+  // 检查是否为有效日期
+  if (isNaN(date.getTime())) {
+    return '-'
+  }
+
+  const formatted = date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+
+  // 格式化为 MM-DD HH:mm:ss
+  return formatted.replace(/\//g, '-')
+}

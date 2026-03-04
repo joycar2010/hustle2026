@@ -26,7 +26,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import dayjs from 'dayjs'
+import { formatTimeBeijing } from '@/utils/timeUtils'
 
 const recentTrades = ref([])
 
@@ -39,6 +39,6 @@ function formatQuantity(qty) {
 }
 
 function formatTime(time) {
-  return dayjs(time).format('HH:mm:ss')
+  return formatTimeBeijing(time)
 }
 </script>

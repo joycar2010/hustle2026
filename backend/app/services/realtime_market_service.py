@@ -234,17 +234,22 @@ class RealTimeMarketDataService:
             # Store spread data ONLY (no market data stored)
             timestamp = datetime.utcnow()
 
-            # Spread calculation logic removed
-            # Store raw price data only (no spread calculation)
+            # Calculate spreads using new formula
+            # 正向开仓 (binance做多点差): bybit_bid - binance_bid
+            # 反向开仓 (bybit做多点差): binance_ask - bybit_ask
             if binance_data and bybit_data:
+                # 计算正向开仓点差和反向开仓点差作为主要指标
+                forward_spread = bybit_data["bid_price"] - binance_data["bid_price"]  # 正向开仓
+                reverse_spread = binance_data["ask_price"] - bybit_data["ask_price"]  # 反向开仓
+
                 spread_record = SpreadRecord(
                     symbol=symbol,
                     binance_bid=binance_data["bid_price"],
                     binance_ask=binance_data["ask_price"],
                     bybit_bid=bybit_data["bid_price"],
                     bybit_ask=bybit_data["ask_price"],
-                    forward_spread=0.0,  # Removed calculation
-                    reverse_spread=0.0,  # Removed calculation
+                    forward_spread=forward_spread,  # 正向开仓点差
+                    reverse_spread=reverse_spread,  # 反向开仓点差
                     timestamp=timestamp
                 )
                 db.add(spread_record)

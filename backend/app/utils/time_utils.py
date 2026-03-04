@@ -209,3 +209,110 @@ def format_filename_time(dt: Optional[datetime] = None) -> str:
 get_utc_now = utc_now
 format_iso_time = format_utc_time
 parse_iso_time = parse_utc_time
+
+
+# ============================================================================
+# 北京时间转换函数（用于交易历史统一显示）
+# ============================================================================
+
+def beijing_to_utc_ms(beijing_time_str: str) -> int:
+    """
+    北京时间字符串 → UTC毫秒时间戳
+
+    Args:
+        beijing_time_str: 北京时间字符串，格式：YYYY-MM-DD HH:MM:SS
+
+    Returns:
+        UTC毫秒时间戳
+
+    Example:
+        >>> beijing_to_utc_ms("2026-03-04 23:20:11")
+        # 对应 2026-03-04 15:20:11 UTC
+    """
+    from datetime import timedelta
+    dt = datetime.strptime(beijing_time_str, "%Y-%m-%d %H:%M:%S")
+    # 北京时间 = UTC + 8小时，所以 UTC = 北京时间 - 8小时
+    utc_dt = dt - timedelta(hours=8)
+    return int(utc_dt.timestamp() * 1000)
+
+
+def utc_ms_to_beijing(timestamp_ms: int) -> str:
+    """
+    UTC毫秒时间戳 → 北京时间字符串
+
+    Args:
+        timestamp_ms: UTC毫秒时间戳
+
+    Returns:
+        北京时间字符串，格式：YYYY-MM-DD HH:MM:SS
+
+    Example:
+        >>> utc_ms_to_beijing(1709582411000)
+        "2026-03-04 23:20:11"
+    """
+    from datetime import timedelta
+    utc_dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+    # 北京时间 = UTC + 8小时
+    beijing_dt = utc_dt + timedelta(hours=8)
+    return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def mt5_time_to_beijing(mt5_timestamp: int) -> str:
+    """
+    MT5时间戳 → 北京时间字符串
+
+    MT5返回的时间戳需要特殊处理：
+    - MT5的时间戳是服务器时间（UTC+2）的Unix时间戳
+    - 需要减去2小时得到真实UTC时间
+    - 再加8小时得到北京时间
+    - 总共是 +6小时
+
+    Args:
+        mt5_timestamp: MT5 Unix时间戳
+
+    Returns:
+        北京时间字符串，格式：YYYY-MM-DD HH:MM:SS
+
+    Example:
+        >>> mt5_time_to_beijing(1709575151)
+        "2024-03-05 00:59:11"  # 北京时间
+    """
+    from datetime import timedelta
+    # MT5时间戳转为datetime（假设为UTC）
+    mt5_dt = datetime.fromtimestamp(mt5_timestamp, tz=timezone.utc)
+    # 减去2小时得到真实UTC时间（因为MT5服务器是UTC+2）
+    utc_dt = mt5_dt - timedelta(hours=2)
+    # 加8小时得到北京时间
+    beijing_dt = utc_dt + timedelta(hours=8)
+    return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def utc_datetime_to_beijing(utc_dt: datetime) -> str:
+    """
+    UTC datetime对象 → 北京时间字符串
+
+    Args:
+        utc_dt: UTC datetime对象
+
+    Returns:
+        北京时间字符串，格式：YYYY-MM-DD HH:MM:SS
+    """
+    from datetime import timedelta
+    beijing_dt = utc_dt + timedelta(hours=8)
+    return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def beijing_to_utc_datetime(beijing_time_str: str) -> datetime:
+    """
+    北京时间字符串 → UTC datetime对象
+
+    Args:
+        beijing_time_str: 北京时间字符串，格式：YYYY-MM-DD HH:MM:SS
+
+    Returns:
+        UTC datetime对象
+    """
+    from datetime import timedelta
+    dt = datetime.strptime(beijing_time_str, "%Y-%m-%d %H:%M:%S")
+    utc_dt = dt - timedelta(hours=8)
+    return utc_dt.replace(tzinfo=timezone.utc)

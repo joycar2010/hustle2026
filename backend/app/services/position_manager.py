@@ -355,6 +355,106 @@ class PositionManager:
             "ladders": positions
         }
 
+    async def sync_from_exchange(
+        self,
+        strategy_id: int,
+        strategy_type: str,
+        db: AsyncSession
+    ) -> Dict:
+        """
+        Sync positions from actual exchange positions.
+
+        Args:
+            strategy_id: Strategy configuration ID
+            strategy_type: Strategy type ('forward' or 'reverse')
+            db: Database session
+
+        Returns:
+            Sync result dictionary
+        """
+        from app.services.binance_client import BinanceFuturesClient
+        from app.models.strategy import StrategyConfig
+
+        # Get strategy config
+        result = await db.execute(
+            select(StrategyConfig).where(StrategyConfig.config_id == strategy_id)
+        )
+        config = result.scalar_one_or_none()
+        if not config:
+            return {"success": False, "error": "Strategy not found"}
+
+        # Get Binance account
+        result = await db.execute(
+            select(Account).where(
+                and_(
+                    Account.user_id == config.user_id,
+                    Account.platform_id == 1,  # Binance
+                    Account.is_active == True
+                )
+            )
+        )
+        binance_account = result.scalar_one_or_none()
+        if not binance_account:
+            return {"success": False, "error": "Binance account not found"}
+
+        # Fetch actual positions from Binance
+        client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+        try:
+            positions_data = await client.get_position_risk(symbol="XAUUSDT")
+
+            # Find XAUUSDT position
+            xauusdt_position = None
+            for pos in positions_data:
+                if pos.get("symbol") == "XAUUSDT":
+                    position_amt = float(pos.get("positionAmt", 0))
+                    if position_amt != 0:
+                        xauusdt_position = abs(position_amt)
+                        break
+
+            if xauusdt_position is None or xauusdt_position == 0:
+                return {
+                    "success": True,
+                    "message": "No active positions found in Binance",
+                    "synced_position": 0
+                }
+
+            # Update position_manager
+            # Distribute position across enabled ladders
+            ladders = config.ladders if config.ladders else []
+            enabled_ladders = [i for i, ladder in enumerate(ladders) if ladder.get("enabled", True)]
+
+            if not enabled_ladders:
+                # If no enabled ladders, put all in ladder 0
+                enabled_ladders = [0]
+
+            # Reset all trackers for this strategy first
+            self.reset_strategy(strategy_id)
+
+            # Distribute position evenly across enabled ladders
+            position_per_ladder = xauusdt_position / len(enabled_ladders)
+
+            for ladder_index in enabled_ladders:
+                tracker = self.get_tracker(strategy_id, ladder_index, strategy_type)
+                tracker.current_position = position_per_ladder
+                tracker.total_opened = position_per_ladder
+                tracker.last_update_time = datetime.utcnow()
+
+            return {
+                "success": True,
+                "message": f"Synced {xauusdt_position} positions from Binance",
+                "synced_position": xauusdt_position,
+                "distributed_to_ladders": len(enabled_ladders),
+                "position_per_ladder": position_per_ladder
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to fetch positions from Binance: {str(e)}"
+            }
+        finally:
+            await client.close()
+
 
 # Global instance
 position_manager = PositionManager()

@@ -170,6 +170,30 @@ export const useNotificationStore = defineStore('notification', () => {
     }
   }
 
+  // Check single-leg trade alert
+  function checkSingleLegAlert(data) {
+    // Check if single-leg alert is enabled
+    if (!singleLegAlertEnabled.value) return
+
+    const alert = {
+      id: Date.now() + '_single_leg',
+      type: 'single_leg_alert',
+      level: 'critical',
+      title: data.title || '单腿交易警告',
+      message: data.message,
+      timestamp: data.timestamp || new Date().toISOString(),
+      details: {
+        strategy_type: data.strategy_type,
+        action: data.action,
+        binance_filled: data.binance_filled,
+        bybit_filled: data.bybit_filled,
+        unfilled_qty: data.unfilled_qty
+      }
+    }
+    alerts.value.push(alert)
+    triggerPopup(alert)
+  }
+
   // Trigger popup notification
   function triggerPopup(alert) {
     activePopup.value = alert
@@ -323,6 +347,7 @@ export const useNotificationStore = defineStore('notification', () => {
     checkMarketAlerts,
     checkAccountAlerts,
     checkMT5LagAlert,
+    checkSingleLegAlert,
     dismissAlert,
     dismissPopup,
     toggleAlertSound,

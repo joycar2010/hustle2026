@@ -66,6 +66,7 @@ class AccountDataService:
                 client.get_position_risk(),     # Futures positions
                 client.get_income(income_type="REALIZED_PNL", start_time=start_time, limit=1000),
                 client.get_income(income_type="FUNDING_FEE", start_time=start_time, limit=1000),
+                client.get_income(income_type="COMMISSION", start_time=start_time, limit=1000),  # Commission fees
                 client.get_margin_account(),    # Cross Margin
             ]
 
@@ -80,12 +81,13 @@ class AccountDataService:
             position_risk_data = results[1]
             daily_pnl_data = results[2]
             funding_fee_data = results[3]
-            margin_account_data = results[4]
+            commission_fee_data = results[4]
+            margin_account_data = results[5]
 
             # Build price map from individual price queries
             price_map = {}
             for i, asset in enumerate(assets_to_price[:10]):
-                price_result = results[5 + i]
+                price_result = results[6 + i]
                 if not isinstance(price_result, Exception):
                     price_map[f"{asset}USDT"] = float(price_result.get("price", 0))
 
@@ -177,14 +179,13 @@ class AccountDataService:
             else:
                 logger.warning(f"Failed to fetch margin account data: {margin_account_data}")
 
-            # Calculate total positions from position risk
+            # Calculate total positions from position risk (sum of position quantities)
             total_positions = 0.0
             if not isinstance(position_risk_data, Exception):
                 for pos in position_risk_data:
                     position_amt = float(pos.get("positionAmt", 0))
-                    mark_price = float(pos.get("markPrice", 0))
                     if position_amt != 0:
-                        total_positions += abs(position_amt * mark_price)
+                        total_positions += abs(position_amt)
             else:
                 logger.warning(f"Failed to fetch position risk data: {position_risk_data}")
 
@@ -198,22 +199,36 @@ class AccountDataService:
             # Add unrealized PnL to daily PnL as per Binance documentation
             daily_pnl += futures_unrealized_pnl
 
-            # Calculate funding fees (separate long and short)
+            # Calculate funding fees (separate long and short based on positionSide)
             funding_fee = 0.0
             long_funding_rate = 0.0
             short_funding_rate = 0.0
             if not isinstance(funding_fee_data, Exception):
                 for item in funding_fee_data:
                     fee_amount = float(item.get("income", 0))
+                    position_side = item.get("positionSide", "")
                     funding_fee += fee_amount
-                    # Positive funding fee means paying (short position)
-                    # Negative funding fee means receiving (long position)
-                    if fee_amount > 0:
+                    # Separate by position side (LONG/SHORT)
+                    if position_side == "LONG":
+                        long_funding_rate += fee_amount
+                    elif position_side == "SHORT":
                         short_funding_rate += fee_amount
                     else:
-                        long_funding_rate += fee_amount
+                        # For BOTH mode or unspecified, use amount sign as fallback
+                        if fee_amount > 0:
+                            short_funding_rate += fee_amount
+                        else:
+                            long_funding_rate += fee_amount
             else:
                 logger.warning(f"Failed to fetch funding fee data: {funding_fee_data}")
+
+            # Calculate commission fees
+            commission_fee = 0.0
+            if not isinstance(commission_fee_data, Exception):
+                for item in commission_fee_data:
+                    commission_fee += abs(float(item.get("income", 0)))
+            else:
+                logger.warning(f"Failed to fetch commission fee data: {commission_fee_data}")
 
             # Calculate final metrics according to Binance API documentation
             # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalWalletBalance
@@ -247,6 +262,7 @@ class AccountDataService:
                 funding_fee=funding_fee,
                 long_funding_rate=long_funding_rate,
                 short_funding_rate=short_funding_rate,
+                commission_fee=commission_fee,
             )
         except Exception as e:
             error_msg = str(e)
@@ -278,168 +294,20 @@ class AccountDataService:
         mt5_password: str = None,
         mt5_server: str = None,
     ) -> AccountBalance:
-        """Fetch Bybit account balance using V5 API mappings per requirements.
-        Combines Unified account + MT5 account balances if MT5 credentials provided."""
+        """Fetch Bybit account balance.
+        - For MT5 accounts: Use direct MT5 connection (MT5Client)
+        - For Unified accounts: Use V5 API (/v5/account/...)
+        """
         client = BybitV5Client(api_key, api_secret)
 
         try:
-            logger.info(f"Fetching Bybit wallet balance for account_type: {account_type}")
-
-            # 1. Get wallet balance from /v5/account/wallet-balance?coin=USDT
-            wallet_data = await client.get_wallet_balance("UNIFIED", coin="USDT")
-            logger.info(f"Bybit wallet data received: {wallet_data}")
-
-            account_list = wallet_data.get("list", [])
-            if not account_list:
-                logger.error("No account data found in Bybit response")
-                raise Exception("No account data found")
-
-            account = account_list[0]
-
-            # Extract balance data using V5 API field names per Bybit V5 documentation
-            total_equity = float(account.get("totalEquity", 0))  # 总资产 (账户总权益)
-            total_wallet_balance = float(account.get("totalWalletBalance", 0))  # 净资产 (钱包余额)
-            total_available_balance = float(account.get("totalAvailableBalance", 0))  # 可用资产
-            total_initial_margin = float(account.get("totalInitialMargin", 0))  # 冻结资产 (初始保证金)
-            total_margin_balance = float(account.get("totalMarginBalance", 0))  # 保证金余额
-            total_maintenance_margin = float(account.get("totalMaintenanceMargin", 0))  # 维持保证金
-
-            # 2. Add MT5 account balance if credentials provided
-            if mt5_id and mt5_password and mt5_server:
-                try:
-                    logger.info(f"Fetching MT5 balance for account {mt5_id}")
-                    # Use shared MT5 client from realtime_market_service to avoid connection conflicts
-                    from app.services.realtime_market_service import market_data_service
-                    mt5 = market_data_service.mt5_client
-                    if mt5 and mt5.connected:
-                        mt5_info = mt5.get_account_info()
-                    else:
-                        # Fallback: create temporary client
-                        temp_mt5 = MT5Client(
-                            login=int(mt5_id),
-                            password=mt5_password,
-                            server=mt5_server
-                        )
-                        if temp_mt5.connect():
-                            mt5_info = temp_mt5.get_account_info()
-                            temp_mt5.disconnect()
-                        else:
-                            mt5_info = None
-                    if mt5_info:
-                        mt5_equity = float(mt5_info.get("equity", 0))
-                        mt5_balance = float(mt5_info.get("balance", 0))
-                        mt5_free_margin = float(mt5_info.get("margin_free", 0))
-                        total_equity += mt5_equity
-                        total_wallet_balance += mt5_balance
-                        total_available_balance += mt5_free_margin
-                        logger.info(f"MT5 balance added: equity={mt5_equity}, balance={mt5_balance}")
-                except Exception as e:
-                    logger.error(f"Failed to fetch MT5 balance: {str(e)}")
-
-            # Calculate risk ratio: (totalMaintenanceMargin / totalMarginBalance) × 100
-            risk_ratio = 0
-            if total_margin_balance > 0:
-                risk_ratio = (total_maintenance_margin / total_margin_balance) * 100
-
-            # Get unrealized PnL from coin data
-            coins = account.get("coin", [])
-            unrealized_pnl = 0
-            if coins:
-                unrealized_pnl = float(coins[0].get("unrealisedPnl", 0))
-
-            # 2. Get total positions from /v5/position/list?settleCoin=USDT
-            total_positions = 0
-            total_unrealized_pnl = 0  # Track unrealized PnL from positions
-            try:
-                logger.info("Fetching Bybit positions")
-                positions_data = await client.get_positions(category="linear", settle_coin="USDT")
-                if isinstance(positions_data, dict):
-                    positions_list = positions_data.get("list", [])
-                    # Sum up position values and unrealized PnL
-                    for pos in positions_list:
-                        size = float(pos.get("size", 0))
-                        mark_price = float(pos.get("markPrice", 0))
-                        total_positions += abs(size * mark_price)
-                        total_unrealized_pnl += float(pos.get("unrealisedPnl", 0))
-                logger.info(f"Total positions calculated: {total_positions}, unrealized PnL: {total_unrealized_pnl}")
-            except Exception as e:
-                logger.error(f"Failed to fetch Bybit positions: {str(e)}")
-
-            # 3. Get daily P&L from /v5/position/closed-pnl?settleCoin=USDT (today)
-            daily_pnl = 0
-            try:
-                from datetime import datetime, timedelta
-                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-                start_time = int(today_start.timestamp() * 1000)
-                end_time = int(datetime.utcnow().timestamp() * 1000)
-
-                logger.info(f"Fetching Bybit daily P&L from {start_time} to {end_time}")
-                pnl_data = await client.get_profit_loss(
-                    category="linear",
-                    start_time=start_time,
-                    end_time=end_time,
-                    settle_coin="USDT"
-                )
-                if isinstance(pnl_data, dict):
-                    pnl_list = pnl_data.get("list", [])
-                    for pnl in pnl_list:
-                        daily_pnl += float(pnl.get("closedPnl", 0))
-                # Add unrealized PnL to daily PnL as per requirements
-                daily_pnl += total_unrealized_pnl
-                logger.info(f"Daily P&L calculated: {daily_pnl} (closed: {daily_pnl - total_unrealized_pnl}, unrealized: {total_unrealized_pnl})")
-            except Exception as e:
-                logger.error(f"Failed to fetch Bybit daily P&L: {str(e)}")
-
-            # 4. Get funding fee from /v5/account/funding-fee?settleCoin=USDT (today)
-            funding_fee = 0
-            long_swap_fee = 0
-            short_swap_fee = 0
-            commission_fee = 0
-            try:
-                logger.info("Fetching Bybit funding fee")
-                funding_data = await client.get_funding_fee(
-                    category="linear",
-                    start_time=start_time,
-                    end_time=end_time,
-                    settle_coin="USDT"
-                )
-                if isinstance(funding_data, dict) and funding_data.get("list"):
-                    funding_list = funding_data.get("list", [])
-                    for fee in funding_list:
-                        fee_amount = float(fee.get("fundingFee", 0))
-                        funding_fee += fee_amount
-                        # Separate long and short swap fees
-                        # Positive funding fee means paying (short position)
-                        # Negative funding fee means receiving (long position)
-                        if fee_amount > 0:
-                            short_swap_fee += fee_amount
-                        else:
-                            long_swap_fee += fee_amount
-                logger.info(f"Funding fee calculated: {funding_fee}, long: {long_swap_fee}, short: {short_swap_fee}")
-            except Exception as e:
-                logger.error(f"Failed to fetch Bybit funding fee: {str(e)}")
-                # Don't fail the entire request if funding fee fetch fails
-                funding_fee = 0
-            except Exception as e:
-                logger.error(f"Failed to fetch Bybit funding fee: {str(e)}")
-
-            balance = AccountBalance(
-                total_assets=total_equity,  # 总资产 = totalEquity
-                available_balance=total_available_balance,  # 可用资产 = totalAvailableBalance
-                net_assets=total_wallet_balance,  # 净资产 = totalWalletBalance
-                frozen_assets=total_initial_margin,  # 冻结资产 = totalInitialMargin
-                margin_balance=total_margin_balance,  # 保证金余额 = totalMarginBalance
-                unrealized_pnl=unrealized_pnl,  # 未实现盈亏
-                risk_ratio=risk_ratio,  # 风险率 = (totalMaintenanceMargin / totalMarginBalance) × 100
-                total_positions=total_positions,  # 总持仓
-                daily_pnl=daily_pnl,  # 当日盈亏 (closedPnl + unrealizedPnl)
-                funding_fee=funding_fee,  # 资金费
-                long_swap_fee=long_swap_fee,  # 做多掉期费
-                short_swap_fee=short_swap_fee,  # 做空掉期费
-                commission_fee=commission_fee,  # 手续费(佣金) - placeholder for now
-            )
-            logger.info(f"Bybit balance calculated: {balance}")
-            return balance
+            # Check if this is an MT5 account
+            if mt5_id:
+                logger.info(f"Fetching Bybit MT5 account balance for account {mt5_id} using direct MT5 connection")
+                return await self._get_bybit_mt5_balance_direct(mt5_id, mt5_password, mt5_server)
+            else:
+                logger.info(f"Fetching Bybit Unified account balance")
+                return await self._get_bybit_unified_balance(client)
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error fetching Bybit balance: {error_msg}", exc_info=True)
@@ -461,6 +329,262 @@ class AccountDataService:
             raise
         finally:
             await client.close()
+
+    async def _get_bybit_mt5_balance_direct(
+        self,
+        mt5_id: int,
+        mt5_password: str,
+        mt5_server: str,
+    ) -> AccountBalance:
+        """Fetch Bybit MT5 account balance using direct MT5 connection"""
+        from datetime import datetime
+
+        mt5_info = None
+        mt5_positions = []
+        mt5_deals = []
+
+        try:
+            logger.info(f"Connecting to MT5 account {mt5_id}")
+            # Use shared MT5 client from realtime_market_service to avoid connection conflicts
+            from app.services.realtime_market_service import market_data_service
+            mt5 = market_data_service.mt5_client
+
+            if mt5 and mt5.connected:
+                logger.info("Using shared MT5 client")
+                mt5_info = mt5.get_account_info()
+                if mt5_info:
+                    mt5_positions = mt5.get_positions()
+                    # Get today's deals history for fees
+                    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                    mt5_deals = mt5.get_deals_history(date_from=today_start)
+                    logger.info(f"Got {len(mt5_deals)} deals from MT5 history")
+                else:
+                    logger.warning("Shared MT5 client returned None for account info, trying temporary client")
+
+            # If shared client failed or not available, use temporary client
+            if not mt5_info:
+                logger.info("Creating temporary MT5 client")
+                temp_mt5 = MT5Client(
+                    login=int(mt5_id),
+                    password=mt5_password,
+                    server=mt5_server
+                )
+                if temp_mt5.connect():
+                    logger.info("Temporary MT5 client connected successfully")
+                    mt5_info = temp_mt5.get_account_info()
+                    if mt5_info:
+                        mt5_positions = temp_mt5.get_positions()
+                        # Get today's deals history for fees
+                        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                        mt5_deals = temp_mt5.get_deals_history(date_from=today_start)
+                        logger.info(f"Got {len(mt5_deals)} deals from MT5 history")
+                    else:
+                        logger.error("Temporary MT5 client get_account_info() returned None")
+                    temp_mt5.disconnect()
+                else:
+                    logger.error("Failed to connect temporary MT5 client")
+                    raise Exception("Failed to connect to MT5")
+
+            if not mt5_info:
+                logger.error("Failed to get MT5 account info from both shared and temporary clients")
+                raise Exception("Failed to get MT5 account info")
+
+            # Extract balance fields from MT5
+            balance = float(mt5_info.get("balance", 0))  # 账户总资产
+            equity = float(mt5_info.get("equity", 0))  # 净资产
+            free_margin = float(mt5_info.get("margin_free", 0))  # 可用总资产
+            margin_used = float(mt5_info.get("margin", 0))  # 冻结资产（已用保证金）
+            margin_balance = equity  # 保证金余额 = 净值
+            unrealized_pnl = equity - balance  # 未实现盈亏 = 净值 - 余额
+
+            # Calculate margin level (risk ratio)
+            margin_level = 0.0
+            if margin_used > 0:
+                margin_level = (equity / margin_used) * 100
+
+            # Calculate total positions (sum of volumes)
+            total_positions = 0.0
+            for pos in mt5_positions:
+                volume = float(pos.get("volume", 0))
+                total_positions += abs(volume)
+
+            # Calculate fees from deals history
+            commission_fee = 0.0
+            long_swap_fee = 0.0
+            short_swap_fee = 0.0
+            daily_pnl = 0.0
+
+            for deal in mt5_deals:
+                # Commission fees (always negative in MT5)
+                commission_fee += abs(float(deal.get("commission", 0)))
+
+                # Swap fees (overnight interest)
+                swap = float(deal.get("swap", 0))
+                deal_type = deal.get("type", 0)  # 0=Buy, 1=Sell
+
+                # Separate swap by position type
+                if deal_type == 0:  # Buy (Long)
+                    long_swap_fee += swap
+                elif deal_type == 1:  # Sell (Short)
+                    short_swap_fee += swap
+
+                # Daily P&L (realized profit from closed positions)
+                profit = float(deal.get("profit", 0))
+                daily_pnl += profit
+
+            # Add unrealized PnL to daily PnL
+            daily_pnl += unrealized_pnl
+
+            logger.info(f"MT5 balance: balance={balance}, equity={equity}, free_margin={free_margin}, "
+                       f"margin_used={margin_used}, positions={total_positions}, "
+                       f"commission={commission_fee}, long_swap={long_swap_fee}, short_swap={short_swap_fee}")
+
+            return AccountBalance(
+                total_assets=balance,  # 账户总资产
+                available_balance=free_margin,  # 可用总资产
+                net_assets=equity,  # 净资产
+                frozen_assets=margin_used,  # 冻结资产
+                margin_balance=margin_balance,  # 保证金余额
+                unrealized_pnl=unrealized_pnl,  # 未实现盈亏
+                risk_ratio=margin_level,  # 风险率
+                total_positions=total_positions,  # 总持仓 (数量)
+                daily_pnl=daily_pnl,  # 当日盈亏
+                funding_fee=0.0,  # 资金费（MT5 无此概念，永续合约资金费体现在 swap 中）
+                long_swap_fee=long_swap_fee,  # 做多掉期费
+                short_swap_fee=short_swap_fee,  # 做空掉期费
+                commission_fee=commission_fee,  # 手续费
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch MT5 balance: {str(e)}")
+            raise
+
+    async def _get_bybit_unified_balance(
+        self,
+        client: "BybitV5Client",
+    ) -> AccountBalance:
+        """Fetch Bybit Unified account balance using V5 API"""
+        from datetime import datetime
+
+        # 1. Get wallet balance from /v5/account/wallet-balance?coin=USDT
+        wallet_data = await client.get_wallet_balance("UNIFIED", coin="USDT")
+        logger.info(f"Bybit wallet data received: {wallet_data}")
+
+        account_list = wallet_data.get("list", [])
+        if not account_list:
+            logger.error("No account data found in Bybit response")
+            raise Exception("No account data found")
+
+        account = account_list[0]
+
+        # Extract balance data using V5 API field names per Bybit V5 documentation
+        total_equity = float(account.get("totalEquity", 0))  # 总资产 (账户总权益)
+        total_wallet_balance = float(account.get("totalWalletBalance", 0))  # 净资产 (钱包余额)
+        total_available_balance = float(account.get("totalAvailableBalance", 0))  # 可用资产
+        total_initial_margin = float(account.get("totalInitialMargin", 0))  # 冻结资产 (初始保证金)
+        total_margin_balance = float(account.get("totalMarginBalance", 0))  # 保证金余额
+        total_maintenance_margin = float(account.get("totalMaintenanceMargin", 0))  # 维持保证金
+
+        # Calculate risk ratio: (totalMaintenanceMargin / totalMarginBalance) × 100
+        risk_ratio = 0
+        if total_margin_balance > 0:
+            risk_ratio = (total_maintenance_margin / total_margin_balance) * 100
+
+        # Get unrealized PnL from coin data
+        coins = account.get("coin", [])
+        unrealized_pnl = 0
+        if coins:
+            unrealized_pnl = float(coins[0].get("unrealisedPnl", 0))
+
+        # 2. Get total positions from /v5/position/list?settleCoin=USDT
+        total_positions = 0
+        total_unrealized_pnl = 0  # Track unrealized PnL from positions
+        try:
+            logger.info("Fetching Bybit positions")
+            positions_data = await client.get_positions(category="linear", settle_coin="USDT")
+            if isinstance(positions_data, dict):
+                positions_list = positions_data.get("list", [])
+                # Sum up position quantities (not values) and unrealized PnL
+                for pos in positions_list:
+                    size = float(pos.get("size", 0))
+                    # Sum position quantity instead of value
+                    total_positions += abs(size)
+                    total_unrealized_pnl += float(pos.get("unrealisedPnl", 0))
+            logger.info(f"Total positions calculated: {total_positions} (quantity), unrealized PnL: {total_unrealized_pnl}")
+        except Exception as e:
+            logger.error(f"Failed to fetch Bybit positions: {str(e)}")
+
+        # 3. Get daily P&L from /v5/position/closed-pnl?settleCoin=USDT (today)
+        daily_pnl = 0
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = int(today_start.timestamp() * 1000)
+        end_time = int(datetime.utcnow().timestamp() * 1000)
+
+        try:
+            logger.info(f"Fetching Bybit daily P&L from {start_time} to {end_time}")
+            pnl_data = await client.get_profit_loss(
+                category="linear",
+                start_time=start_time,
+                end_time=end_time,
+                settle_coin="USDT"
+            )
+            if isinstance(pnl_data, dict):
+                pnl_list = pnl_data.get("list", [])
+                for pnl in pnl_list:
+                    daily_pnl += float(pnl.get("closedPnl", 0))
+            # Add unrealized PnL to daily PnL as per requirements
+            daily_pnl += total_unrealized_pnl
+            logger.info(f"Daily P&L calculated: {daily_pnl} (closed: {daily_pnl - total_unrealized_pnl}, unrealized: {total_unrealized_pnl})")
+        except Exception as e:
+            logger.error(f"Failed to fetch Bybit daily P&L: {str(e)}")
+
+        # 4. Get funding fee from /v5/account/funding-fee?settleCoin=USDT (today)
+        funding_fee = 0
+        long_swap_fee = 0
+        short_swap_fee = 0
+        commission_fee = 0
+        try:
+            logger.info("Fetching Bybit funding fee")
+            funding_data = await client.get_funding_fee(
+                category="linear",
+                start_time=start_time,
+                end_time=end_time,
+                settle_coin="USDT"
+            )
+            if isinstance(funding_data, dict) and funding_data.get("list"):
+                funding_list = funding_data.get("list", [])
+                for fee in funding_list:
+                    fee_amount = float(fee.get("fundingFee", 0))
+                    funding_fee += fee_amount
+                    # Separate long and short swap fees
+                    # Positive funding fee means paying (short position)
+                    # Negative funding fee means receiving (long position)
+                    if fee_amount > 0:
+                        short_swap_fee += fee_amount
+                    else:
+                        long_swap_fee += fee_amount
+            logger.info(f"Funding fee calculated: {funding_fee}, long: {long_swap_fee}, short: {short_swap_fee}")
+        except Exception as e:
+            logger.error(f"Failed to fetch Bybit funding fee: {str(e)}")
+            # Don't fail the entire request if funding fee fetch fails
+            funding_fee = 0
+
+        balance = AccountBalance(
+            total_assets=total_equity,  # 总资产 = totalEquity
+            available_balance=total_available_balance,  # 可用资产 = totalAvailableBalance
+            net_assets=total_wallet_balance,  # 净资产 = totalWalletBalance
+            frozen_assets=total_initial_margin,  # 冻结资产 = totalInitialMargin
+            margin_balance=total_margin_balance,  # 保证金余额 = totalMarginBalance
+            unrealized_pnl=unrealized_pnl,  # 未实现盈亏
+            risk_ratio=risk_ratio,  # 风险率 = (totalMaintenanceMargin / totalMarginBalance) × 100
+            total_positions=total_positions,  # 总持仓
+            daily_pnl=daily_pnl,  # 当日盈亏 (closedPnl + unrealizedPnl)
+            funding_fee=funding_fee,  # 资金费
+            long_swap_fee=long_swap_fee,  # 做多掉期费
+            short_swap_fee=short_swap_fee,  # 做空掉期费
+            commission_fee=commission_fee,  # 手续费(佣金) - placeholder for now
+        )
+        logger.info(f"Bybit balance calculated: {balance}")
+        return balance
 
     async def get_binance_positions(
         self,
@@ -537,6 +661,65 @@ class AccountDataService:
             return positions
         finally:
             await client.close()
+
+    async def get_mt5_positions(
+        self,
+        mt5_id: int,
+        mt5_password: str,
+        mt5_server: str,
+        symbol: Optional[str] = None,
+    ) -> List[AccountPosition]:
+        """Fetch MT5 positions using MT5 client"""
+        try:
+            logger.info(f"Fetching MT5 positions for account {mt5_id}")
+            # Use shared MT5 client from realtime_market_service to avoid connection conflicts
+            from app.services.realtime_market_service import market_data_service
+            mt5 = market_data_service.mt5_client
+
+            positions_data = []
+            if mt5 and mt5.connected:
+                positions_data = mt5.get_positions(symbol)
+            else:
+                # Fallback: create temporary client
+                temp_mt5 = MT5Client(
+                    login=int(mt5_id),
+                    password=mt5_password,
+                    server=mt5_server
+                )
+                if temp_mt5.connect():
+                    positions_data = temp_mt5.get_positions(symbol)
+                    temp_mt5.disconnect()
+
+            positions = []
+            for pos in positions_data:
+                volume = float(pos.get("volume", 0))
+
+                # Skip positions with zero volume
+                if volume == 0:
+                    continue
+
+                # MT5 position type: 0=Buy, 1=Sell
+                pos_type = pos.get("type", 0)
+                side = "Buy" if pos_type == 0 else "Sell"
+
+                positions.append(
+                    AccountPosition(
+                        symbol=pos.get("symbol"),
+                        side=side,
+                        size=volume,
+                        entry_price=float(pos.get("price_open", 0)),
+                        mark_price=float(pos.get("price_current", 0)),
+                        unrealized_pnl=float(pos.get("profit", 0)),
+                        leverage=1,  # MT5 doesn't expose leverage in position data
+                    )
+                )
+
+            logger.info(f"MT5 positions fetched: {len(positions)} positions")
+            return positions
+
+        except Exception as e:
+            logger.error(f"Failed to fetch MT5 positions: {str(e)}")
+            return []
 
     async def get_binance_daily_pnl(
         self,
@@ -628,18 +811,36 @@ class AccountDataService:
             elif platform_id == 2:  # Bybit
                 # Bybit V5 API only supports UNIFIED account type
                 account_type = "UNIFIED"
-                balance, positions, daily_pnl = await asyncio.gather(
-                    self.get_bybit_balance(
-                        account.api_key,
-                        account.api_secret,
-                        account_type,
-                        mt5_id=account.mt5_id if account.is_mt5_account else None,
-                        mt5_password=account.mt5_primary_pwd if account.is_mt5_account else None,
-                        mt5_server=account.mt5_server if account.is_mt5_account else None,
-                    ),
-                    self.get_bybit_positions(account.api_key, account.api_secret),
-                    self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
-                )
+
+                # For MT5 accounts, get positions from MT5 directly
+                if account.is_mt5_account and account.mt5_id and account.mt5_primary_pwd and account.mt5_server:
+                    balance, positions, daily_pnl = await asyncio.gather(
+                        self.get_bybit_balance(
+                            account.api_key,
+                            account.api_secret,
+                            account_type,
+                            mt5_id=account.mt5_id,
+                            mt5_password=account.mt5_primary_pwd,
+                            mt5_server=account.mt5_server,
+                        ),
+                        self.get_mt5_positions(
+                            mt5_id=account.mt5_id,
+                            mt5_password=account.mt5_primary_pwd,
+                            mt5_server=account.mt5_server,
+                        ),
+                        self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                    )
+                else:
+                    # For regular Bybit accounts, use V5 API
+                    balance, positions, daily_pnl = await asyncio.gather(
+                        self.get_bybit_balance(
+                            account.api_key,
+                            account.api_secret,
+                            account_type,
+                        ),
+                        self.get_bybit_positions(account.api_key, account.api_secret),
+                        self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                    )
             else:
                 raise ValueError(f"Unknown platform_id: {platform_id}")
 
@@ -711,6 +912,8 @@ class AccountDataService:
             for pos in acc["positions"]:
                 pos["account_id"] = acc["account_id"]
                 pos["account_name"] = acc["account_name"]
+                pos["platform_id"] = acc["platform_id"]
+                pos["is_mt5_account"] = acc["is_mt5_account"]
                 all_positions.append(pos)
 
         # Calculate average risk ratio (weighted by margin balance)
