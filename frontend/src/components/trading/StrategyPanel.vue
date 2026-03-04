@@ -26,29 +26,29 @@
 
       <!-- Top Info Bar -->
       <div class="bg-[#252930] rounded p-2 md:p-3">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
+        <div class="flex flex-col gap-2 md:grid md:grid-cols-3 md:gap-3">
           <!-- Binance Available Assets -->
-          <div>
-            <div class="text-xs text-gray-400 mb-1">Binance可用资产</div>
-            <div class="text-base font-mono font-bold">
+          <div class="flex justify-between md:block">
+            <div class="text-xs text-gray-400 mb-0 md:mb-1">Binance可用资产</div>
+            <div class="text-sm md:text-base font-mono font-bold">
               {{ formatNumber(binanceAssets) }} USDT
             </div>
           </div>
 
           <!-- Bybit MT5 Available Assets -->
-          <div>
-            <div class="text-xs text-gray-400 mb-1">Bybit MT5可用资产</div>
-            <div class="text-base font-mono font-bold">
+          <div class="flex justify-between md:block">
+            <div class="text-xs text-gray-400 mb-0 md:mb-1">Bybit MT5可用资产</div>
+            <div class="text-sm md:text-base font-mono font-bold">
               {{ formatNumber(bybitAssets) }} USDT
             </div>
           </div>
 
           <!-- Spread Display -->
-          <div class="text-center">
-            <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">
+          <div class="flex justify-between md:block md:text-center pt-2 md:pt-0 border-t md:border-t-0 border-[#2b3139]">
+            <div class="text-xs text-gray-400 mb-0 md:mb-1 md:whitespace-nowrap">
               {{ type === 'reverse' ? '做多Bybit点差' : '做多Binance点差' }}
             </div>
-            <div :class="['text-xl font-mono font-bold whitespace-nowrap', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
+            <div :class="['text-base md:text-xl font-mono font-bold md:whitespace-nowrap', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
               {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
             </div>
           </div>

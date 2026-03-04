@@ -71,9 +71,9 @@
           </section>
 
           <!-- Bottom Section - Order Monitor & Manual Trading -->
-          <section class="md:flex-1 flex flex-col md:flex-row gap-2 p-2 md:min-h-0">
+          <section class="md:flex-1 flex flex-col gap-2 p-2 md:min-h-0">
             <!-- Order Monitor (Left) - 策略挂单 -->
-            <div class="w-full md:w-[45%] bg-[#1e2329] rounded overflow-hidden flex-shrink-0 min-h-[300px] md:min-h-0">
+            <div class="w-full bg-[#1e2329] rounded overflow-hidden flex-shrink-0 min-h-[300px] md:min-h-0">
               <div class="h-full flex flex-col">
                 <div class="px-3 py-2 border-b border-[#2b3139] flex-shrink-0">
                   <h2 class="text-sm font-bold">策略挂单</h2>
@@ -84,8 +84,8 @@
               </div>
             </div>
 
-            <!-- Manual Trading (Right) - Split into two panels -->
-            <div class="w-full md:w-[55%] flex flex-col gap-2 flex-shrink-0">
+            <!-- Manual Trading Section - Split into two panels -->
+            <div class="w-full flex flex-col gap-2 flex-shrink-0">
               <!-- Emergency Trading Panel -->
               <div class="flex-1 bg-[#1e2329] rounded overflow-hidden min-h-[300px] md:min-h-0">
                 <div class="h-full flex flex-col">
