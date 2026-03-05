@@ -74,10 +74,10 @@ onMounted(() => {
     }
   })
 
-  // 添加定时刷新挂单（每5秒刷新一次Binance实时挂单）
+  // 添加定时刷新挂单（每0.5秒刷新一次Binance实时挂单）
   refreshInterval = setInterval(() => {
     fetchPendingOrders()
-  }, 5000)
+  }, 500)
 })
 
 onUnmounted(() => {

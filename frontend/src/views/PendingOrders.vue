@@ -108,10 +108,10 @@ let refreshInterval = null
 onMounted(() => {
   fetchOrders()
 
-  // 添加定时刷新（每5秒刷新一次）
+  // 添加定时刷新（每0.5秒刷新一次）
   refreshInterval = setInterval(() => {
     fetchOrders()
-  }, 5000)
+  }, 500)
 })
 
 onUnmounted(() => {
