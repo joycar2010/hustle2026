@@ -859,6 +859,11 @@
         </div>
       </div>
 
+      <!-- 通知服务 -->
+      <div v-if="activeTab === 'notifications'" class="space-y-6">
+        <NotificationServiceConfig />
+      </div>
+
       <div v-if="activeTab === 'refresh'" class="space-y-6">
         <div class="card">
           <h2 class="text-xl font-bold mb-4">实时推送管理</h2>
@@ -1568,6 +1573,7 @@ import TableDetailModal from '@/components/modals/TableDetailModal.vue'
 import BackupSelectModal from '@/components/modals/BackupSelectModal.vue'
 import BackupActionModal from '@/components/modals/BackupActionModal.vue'
 import WebSocketMonitor from '@/components/system/WebSocketMonitor.vue'
+import NotificationServiceConfig from '@/components/system/NotificationServiceConfig.vue'
 import { useMarketStore } from '@/stores/market'
 
 // 引入market store以获取WebSocket连接状态
@@ -1726,6 +1732,7 @@ const componentConfigJson = computed({
 const tabs = [
   { id: 'users', label: '用户管理' },
   { id: 'rbac', label: '角色权限管理' },
+  { id: 'notifications', label: '通知服务' },
   { id: 'refresh', label: '实时推送管理' },
   { id: 'websocket', label: 'WebSocket监控' },
   { id: 'alerts', label: '提醒声音设置' },
