@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full flex flex-col gap-2 md:gap-3 p-2 md:p-3 min-h-0">
-    <!-- Strategy Pending Orders -->
-    <div class="flex-1 flex flex-col min-h-0 flex-shrink-0">
+  <div class="h-full flex flex-col md:flex-row gap-2 md:gap-3 p-2 md:p-3 min-h-0">
+    <!-- Left: Strategy Pending Orders - Increased width by 40% -->
+    <div class="w-full md:w-[47%] flex flex-col min-h-0 flex-shrink-0 mb-2 md:mb-0">
       <h3 class="text-xs md:text-sm font-bold mb-2 md:mb-3">策略挂单</h3>
       <div class="flex-1 overflow-y-auto">
         <table class="w-full text-xs">
@@ -36,7 +36,7 @@
       </div>
     </div>
 
-    <!-- Spread Data Table -->
+    <!-- Right: Spread Data Table -->
     <div class="flex-1 flex flex-col min-h-0">
       <SpreadDataTable />
     </div>
@@ -55,6 +55,7 @@ const orders = ref([])
 const pendingOrders = ref([])
 const filterSource = ref('')
 let unwatchOrders = null
+let refreshInterval = null
 
 onMounted(() => {
   // Connect to WebSocket if not already connected
@@ -73,12 +74,18 @@ onMounted(() => {
     }
   })
 
-  // Removed polling - rely entirely on WebSocket
+  // 添加定时刷新挂单（每5秒刷新一次Binance实时挂单）
+  refreshInterval = setInterval(() => {
+    fetchPendingOrders()
+  }, 5000)
 })
 
 onUnmounted(() => {
   if (unwatchOrders) {
     unwatchOrders()
+  }
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
   }
 })
 

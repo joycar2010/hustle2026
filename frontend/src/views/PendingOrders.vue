@@ -97,15 +97,27 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 
 const orders = ref([])
 const filterSource = ref('')
 const filterStatus = ref('new,pending')
+let refreshInterval = null
 
 onMounted(() => {
   fetchOrders()
+
+  // 添加定时刷新（每5秒刷新一次）
+  refreshInterval = setInterval(() => {
+    fetchOrders()
+  }, 5000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+  }
 })
 
 watch([filterSource, filterStatus], () => {
