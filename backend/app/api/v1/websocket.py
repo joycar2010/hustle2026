@@ -1,10 +1,17 @@
 """WebSocket endpoint handlers"""
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from app.websocket.manager import manager
 from app.core.security import decode_access_token
+from pydantic import BaseModel, Field
 import asyncio
 
 router = APIRouter()
+
+
+class StreamerConfigUpdate(BaseModel):
+    """Model for updating streamer configuration"""
+    streamer: str = Field(..., description="Streamer name: market_data, account_balance, risk_metrics, mt5_connection")
+    interval: float = Field(..., description="New interval in seconds", gt=0)
 
 
 @router.websocket("/ws")
@@ -63,8 +70,106 @@ async def websocket_endpoint(
 
 @router.get("/ws/stats")
 async def get_websocket_stats():
-    """Get WebSocket connection statistics"""
+    """Get comprehensive WebSocket statistics
+
+    Returns:
+        - Connection statistics
+        - Broadcast streamer statistics
+        - Performance metrics
+    """
+    from app.tasks.market_data import market_streamer
+    from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer
+    from datetime import datetime
+
     return {
-        "total_connections": manager.get_connection_count(),
-        "user_connections": len(manager.active_connections),
+        "connections": {
+            "total": manager.get_connection_count(),
+            "by_user": len(manager.active_connections),
+            "users": list(manager.active_connections.keys())
+        },
+        "streamers": {
+            "market_data": {
+                "running": market_streamer.running,
+                "interval_ms": market_streamer.interval * 1000,
+                "broadcast_count": market_streamer.broadcast_count,
+                "last_broadcast": market_streamer.last_broadcast_time,
+                "error_count": market_streamer.error_count
+            },
+            "account_balance": {
+                "running": account_balance_streamer.running,
+                "interval_ms": account_balance_streamer.interval * 1000,
+                "broadcast_count": account_balance_streamer.broadcast_count,
+                "last_broadcast": account_balance_streamer.last_broadcast_time,
+                "error_count": account_balance_streamer.error_count
+            },
+            "risk_metrics": {
+                "running": risk_metrics_streamer.running,
+                "interval_ms": risk_metrics_streamer.interval * 1000,
+                "broadcast_count": risk_metrics_streamer.broadcast_count,
+                "last_broadcast": risk_metrics_streamer.last_broadcast_time,
+                "error_count": risk_metrics_streamer.error_count
+            },
+            "mt5_connection": {
+                "running": mt5_connection_streamer.running,
+                "interval_ms": mt5_connection_streamer.interval * 1000,
+                "broadcast_count": mt5_connection_streamer.broadcast_count,
+                "last_broadcast": mt5_connection_streamer.last_broadcast_time,
+                "error_count": mt5_connection_streamer.error_count
+            }
+        },
+        "server_time": datetime.now().isoformat()
+    }
+
+
+@router.post("/ws/config")
+async def update_streamer_config(config: StreamerConfigUpdate):
+    """Update streamer configuration (push frequency)
+
+    Args:
+        config: Streamer configuration update
+
+    Returns:
+        Updated configuration
+
+    Raises:
+        HTTPException: If streamer not found or interval out of range
+    """
+    from app.tasks.market_data import market_streamer
+    from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer
+
+    streamers = {
+        "market_data": market_streamer,
+        "account_balance": account_balance_streamer,
+        "risk_metrics": risk_metrics_streamer,
+        "mt5_connection": mt5_connection_streamer
+    }
+
+    if config.streamer not in streamers:
+        raise HTTPException(status_code=404, detail=f"Streamer '{config.streamer}' not found")
+
+    streamer = streamers[config.streamer]
+
+    # Update interval with validation
+    success = streamer.update_interval(config.interval)
+
+    if not success:
+        # Get valid range based on streamer type
+        if config.streamer == "market_data":
+            valid_range = "0.1s - 10s"
+        elif config.streamer == "account_balance":
+            valid_range = "5s - 60s"
+        else:  # risk_metrics, mt5_connection
+            valid_range = "10s - 120s"
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Interval out of range. Valid range for {config.streamer}: {valid_range}"
+        )
+
+    return {
+        "success": True,
+        "streamer": config.streamer,
+        "interval": streamer.interval,
+        "interval_ms": streamer.interval * 1000,
+        "message": f"Updated {config.streamer} interval to {streamer.interval}s"
     }

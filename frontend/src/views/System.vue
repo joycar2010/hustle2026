@@ -861,152 +861,199 @@
 
       <div v-if="activeTab === 'refresh'" class="space-y-6">
         <div class="card">
-          <h2 class="text-xl font-bold mb-4">刷新频率管理</h2>
+          <h2 class="text-xl font-bold mb-4">实时推送管理</h2>
           <p class="text-text-secondary text-sm mb-6">
-            统一管理系统各模块的数据刷新频率，优化性能和网络负载
+            管理WebSocket实时推送设置，监控各消息类型的推送频率和状态
           </p>
 
-          <!-- 全局设置 -->
+          <!-- WebSocket连接状态 -->
           <div class="bg-dark-200 rounded p-4 mb-6">
-            <h3 class="font-bold mb-4">全局设置</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="flex items-center justify-between p-3 bg-dark-100 rounded">
-                <div>
-                  <div class="font-medium">页面可见性检测</div>
-                  <div class="text-sm text-text-secondary">页面不可见时降低刷新频率</div>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" v-model="refreshSettings.visibilityDetection" class="sr-only peer" @change="saveRefreshSettings">
-                  <div class="w-11 h-6 bg-dark-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                </label>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold">连接状态</h3>
+              <div class="flex items-center space-x-2">
+                <div :class="['w-3 h-3 rounded-full', wsConnected ? 'bg-success animate-pulse' : 'bg-danger']"></div>
+                <span :class="['text-sm font-bold', wsConnected ? 'text-success' : 'text-danger']">
+                  {{ wsConnected ? '已连接' : '未连接' }}
+                </span>
               </div>
-
-              <div class="flex items-center justify-between p-3 bg-dark-100 rounded">
-                <div>
-                  <div class="font-medium">WebSocket 连接</div>
-                  <div class="text-sm text-text-secondary">使用WebSocket替代轮询</div>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" v-model="refreshSettings.useWebSocket" class="sr-only peer" @change="saveRefreshSettings">
-                  <div class="w-11 h-6 bg-dark-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                </label>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="bg-dark-100 rounded p-3">
+                <div class="text-xs text-text-secondary mb-1">连接时长</div>
+                <div class="text-lg font-mono font-bold">{{ wsUptime }}</div>
               </div>
-
-              <div class="flex items-center justify-between p-3 bg-dark-100 rounded">
-                <div>
-                  <div class="font-medium">批量请求合并</div>
-                  <div class="text-sm text-text-secondary">合并多个请求减少开销</div>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" v-model="refreshSettings.batchRequests" class="sr-only peer" @change="saveRefreshSettings">
-                  <div class="w-11 h-6 bg-dark-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                </label>
+              <div class="bg-dark-100 rounded p-3">
+                <div class="text-xs text-text-secondary mb-1">消息总数</div>
+                <div class="text-lg font-mono font-bold">{{ wsTotalMessages }}</div>
               </div>
-
-              <div class="p-3 bg-dark-100 rounded">
-                <div class="font-medium mb-2">不可见时刷新倍率</div>
-                <div class="flex items-center space-x-3">
-                  <input
-                    type="range"
-                    v-model="refreshSettings.inactiveMultiplier"
-                    min="2"
-                    max="10"
-                    step="1"
-                    class="flex-1"
-                    @change="saveRefreshSettings"
-                  >
-                  <span class="text-primary font-bold w-12">{{ refreshSettings.inactiveMultiplier }}x</span>
-                </div>
-                <div class="text-xs text-text-secondary mt-1">页面不可见时刷新间隔延长倍数</div>
+              <div class="bg-dark-100 rounded p-3">
+                <div class="text-xs text-text-secondary mb-1">消息速率</div>
+                <div class="text-lg font-mono font-bold">{{ wsMessageRate }}/s</div>
               </div>
             </div>
           </div>
 
-          <!-- 模块刷新频率 -->
+          <!-- 推送频率监控 -->
           <div class="bg-dark-200 rounded p-4 mb-6">
-            <div class="flex justify-between items-center mb-4">
-              <h3 class="font-bold">模块刷新频率</h3>
-              <button @click="resetToDefaults" class="text-sm text-primary hover:text-primary-hover">
-                恢复默认值
-              </button>
-            </div>
-
+            <h3 class="font-bold mb-4">推送频率监控</h3>
             <div class="space-y-3">
-              <div v-for="module in refreshModules" :key="module.id" class="flex items-center justify-between p-3 bg-dark-100 rounded hover:bg-dark-50 transition-colors">
-                <div class="flex-1">
+              <div v-for="stream in pushStreams" :key="stream.type" class="bg-dark-100 rounded p-3">
+                <div class="flex items-center justify-between mb-2">
                   <div class="flex items-center space-x-2">
-                    <span class="font-medium">{{ module.name }}</span>
-                    <span :class="getFrequencyBadgeClass(module.interval)" class="px-2 py-0.5 rounded text-xs">
-                      {{ getFrequencyLabel(module.interval) }}
+                    <div :class="['w-2 h-2 rounded-full', stream.active ? 'bg-success' : 'bg-text-secondary']"></div>
+                    <span class="font-medium">{{ stream.name }}</span>
+                    <span class="text-xs text-text-secondary">({{ stream.type }})</span>
+                  </div>
+                  <div class="flex items-center space-x-3">
+                    <span class="text-xs text-text-secondary">
+                      预期: {{ stream.expectedInterval }}ms
+                    </span>
+                    <span :class="['text-sm font-mono font-bold', getFrequencyStatusClass(stream)]">
+                      实际: {{ stream.actualInterval > 0 ? stream.actualInterval + 'ms' : '-' }}
+                    </span>
+                    <span :class="['px-2 py-0.5 rounded text-xs font-bold', getStreamStatusClass(stream.status)]">
+                      {{ getStreamStatusText(stream.status) }}
                     </span>
                   </div>
-                  <div class="text-sm text-text-secondary">{{ module.description }}</div>
                 </div>
-                <div class="flex items-center space-x-3">
-                  <select
-                    v-model="module.interval"
-                    @change="saveRefreshSettings"
-                    class="px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
+                <div class="text-xs text-text-secondary">{{ stream.description }}</div>
+                <div class="mt-2 flex items-center justify-between text-xs">
+                  <span class="text-text-secondary">消息计数: {{ stream.count }}</span>
+                  <span class="text-text-secondary">最后接收: {{ stream.lastReceived ? formatLastReceived(stream.lastReceived) : '未接收' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 推送频率调整 -->
+          <div class="bg-dark-200 rounded p-4 mb-6">
+            <h3 class="font-bold mb-4">推送频率调整</h3>
+            <p class="text-xs text-text-secondary mb-4">
+              动态调整各推送流的频率，立即生效无需重启服务
+            </p>
+            <div class="space-y-4">
+              <div v-for="stream in adjustableStreams" :key="stream.type" class="bg-dark-100 rounded p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div>
+                    <div class="font-medium">{{ stream.name }}</div>
+                    <div class="text-xs text-text-secondary">{{ stream.description }}</div>
+                  </div>
+                  <div class="text-xs text-text-secondary">
+                    当前: <span class="font-mono font-bold text-primary">{{ stream.currentInterval }}s</span>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                  <div class="flex-1">
+                    <input
+                      type="range"
+                      v-model.number="stream.newInterval"
+                      :min="stream.minInterval"
+                      :max="stream.maxInterval"
+                      :step="stream.step"
+                      class="w-full h-2 bg-dark-300 rounded-lg appearance-none cursor-pointer slider"
+                      @input="updateSliderValue(stream)"
+                    >
+                    <div class="flex justify-between text-xs text-text-secondary mt-1">
+                      <span>{{ stream.minInterval }}s</span>
+                      <span class="font-mono font-bold text-primary">{{ stream.newInterval }}s</span>
+                      <span>{{ stream.maxInterval }}s</span>
+                    </div>
+                  </div>
+                  <button
+                    @click="applyFrequencyChange(stream)"
+                    :disabled="stream.newInterval === stream.currentInterval || stream.updating"
+                    class="px-4 py-2 bg-primary hover:bg-primary-hover disabled:bg-dark-300 disabled:text-text-secondary disabled:cursor-not-allowed rounded text-sm font-bold transition-colors"
                   >
-                    <option :value="100">0.1秒</option>
-                    <option :value="200">0.2秒</option>
-                    <option :value="300">0.3秒</option>
-                    <option :value="400">0.4秒</option>
-                    <option :value="500">0.5秒</option>
-                    <option :value="600">0.6秒</option>
-                    <option :value="700">0.7秒</option>
-                    <option :value="800">0.8秒</option>
-                    <option :value="900">0.9秒</option>
-                    <option :value="1000">1秒</option>
-                    <option :value="2000">2秒</option>
-                    <option :value="3000">3秒</option>
-                    <option :value="5000">5秒</option>
-                    <option :value="10000">10秒</option>
-                    <option :value="30000">30秒</option>
-                    <option :value="60000">60秒</option>
-                    <option :value="0">禁用</option>
-                  </select>
-                  <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="module.enabled" class="sr-only peer" @change="saveRefreshSettings">
-                    <div class="w-11 h-6 bg-dark-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
-                  </label>
+                    {{ stream.updating ? '应用中...' : '应用' }}
+                  </button>
+                </div>
+                <div class="mt-2 text-xs text-text-secondary">
+                  有效范围: {{ stream.minInterval }}s - {{ stream.maxInterval }}s
+                  <span v-if="stream.recommendation" class="ml-2 text-warning">
+                    💡 推荐: {{ stream.recommendation }}
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 统计信息 -->
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">活跃模块</div>
-              <div class="text-2xl font-bold text-primary">{{ activeModulesCount }}</div>
+          <!-- 消息类型过滤 -->
+          <div class="bg-dark-200 rounded p-4 mb-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold">消息类型过滤</h3>
+              <button @click="toggleAllMessageTypes" class="text-sm text-primary hover:text-primary-hover">
+                {{ allMessageTypesEnabled ? '全部禁用' : '全部启用' }}
+              </button>
             </div>
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">每分钟请求</div>
-              <div class="text-2xl font-bold text-warning">{{ requestsPerMinute }}</div>
-            </div>
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">预估流量/小时</div>
-              <div class="text-2xl font-bold text-success">{{ estimatedTrafficPerHour }}</div>
-            </div>
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-1">WebSocket状态</div>
-              <div class="text-lg font-bold" :class="wsConnected ? 'text-success' : 'text-danger'">
-                {{ wsConnected ? '已连接' : '未连接' }}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div v-for="msgType in messageTypeFilters" :key="msgType.type" class="flex items-center justify-between p-3 bg-dark-100 rounded">
+                <div class="flex-1">
+                  <div class="font-medium">{{ msgType.name }}</div>
+                  <div class="text-xs text-text-secondary">{{ msgType.description }}</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" v-model="msgType.enabled" class="sr-only peer" @change="saveMessageTypeFilters">
+                  <div class="w-11 h-6 bg-dark-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
+                </label>
               </div>
             </div>
           </div>
 
-          <!-- 性能建议 -->
-          <div class="bg-dark-200 rounded p-4">
-            <h3 class="font-bold mb-3">性能建议</h3>
-            <div class="space-y-2">
-              <div v-for="(suggestion, index) in performanceSuggestions" :key="index" class="flex items-start space-x-2 text-sm">
-                <svg class="w-5 h-5 text-primary flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span :class="suggestion.type === 'warning' ? 'text-warning' : 'text-text-secondary'">{{ suggestion.message }}</span>
+          <!-- 推送频率趋势 -->
+          <div class="bg-dark-200 rounded p-4 mb-6">
+            <h3 class="font-bold mb-4">推送频率趋势</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-dark-100 rounded p-3">
+                <div class="text-xs font-bold mb-3">消息速率（最近1分钟）</div>
+                <div class="space-y-2">
+                  <div v-for="stream in activeStreams" :key="stream.type" class="flex items-center justify-between text-xs">
+                    <div class="flex items-center space-x-2">
+                      <div :class="['w-2 h-2 rounded-full', getTypeColor(stream.type)]"></div>
+                      <span>{{ stream.name }}</span>
+                    </div>
+                    <span class="font-mono font-bold">{{ stream.count }}/min</span>
+                  </div>
+                </div>
               </div>
+              <div class="bg-dark-100 rounded p-3">
+                <div class="text-xs font-bold mb-3">推送状态概览</div>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-text-secondary">正常推送</span>
+                    <span class="font-mono font-bold text-success">{{ normalStreamsCount }}</span>
+                  </div>
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-text-secondary">警告状态</span>
+                    <span class="font-mono font-bold text-warning">{{ warningStreamsCount }}</span>
+                  </div>
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-text-secondary">异常状态</span>
+                    <span class="font-mono font-bold text-danger">{{ abnormalStreamsCount }}</span>
+                  </div>
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-text-secondary">总消息数</span>
+                    <span class="font-mono font-bold">{{ wsTotalMessages }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mt-4 text-xs text-text-secondary text-center">
+              💡 提示：详细的历史趋势图表请查看 <button @click="activeTab = 'websocket'" class="text-primary hover:underline">WebSocket监控</button> 标签页
+            </div>
+          </div>
+
+          <!-- 页面可见性优化 -->
+          <div class="bg-dark-200 rounded p-4">
+            <h3 class="font-bold mb-4">页面可见性优化</h3>
+            <div class="flex items-center justify-between p-3 bg-dark-100 rounded">
+              <div class="flex-1">
+                <div class="font-medium">页面不可见时降低UI更新频率</div>
+                <div class="text-sm text-text-secondary">页面切换到后台时，降低UI渲染频率以节省资源（不影响WebSocket接收）</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" v-model="refreshSettings.visibilityDetection" class="sr-only peer" @change="saveRefreshSettings">
+                <div class="w-11 h-6 bg-dark-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
             </div>
           </div>
         </div>
@@ -1679,7 +1726,7 @@ const componentConfigJson = computed({
 const tabs = [
   { id: 'users', label: '用户管理' },
   { id: 'rbac', label: '角色权限管理' },
-  { id: 'refresh', label: '刷新管理' },
+  { id: 'refresh', label: '实时推送管理' },
   { id: 'websocket', label: 'WebSocket监控' },
   { id: 'alerts', label: '提醒声音设置' },
   { id: 'security', label: '安全组件管理' },
@@ -2270,26 +2317,140 @@ function formatDate(dateStr) {
 }
 
 
-// Refresh management state
+// Refresh management state (simplified for WebSocket era)
 const refreshSettings = ref({
-  visibilityDetection: true,
-  useWebSocket: false,
-  batchRequests: true,
-  inactiveMultiplier: 5
+  visibilityDetection: true
 })
 
-const refreshModules = ref([
-  { id: 'dashboard_price', name: 'Dashboard 价格数据', description: '实时市场价格和点差', interval: 1000, enabled: true, default: 1000 },
-  { id: 'spread_table', name: '点差数据表', description: '实时点差监控', interval: 1000, enabled: true, default: 1000 },
-  { id: 'spread_chart', name: '点差图表', description: '盈利数据可视化', interval: 1000, enabled: true, default: 1000 },
-  { id: 'strategy_panel', name: '策略面板', description: '策略持仓数据更新（包含点差和持仓统计）', interval: 1000, enabled: true, default: 1000 },
-  { id: 'risk_management', name: '风险管理', description: '风险指标监控', interval: 5000, enabled: true, default: 5000 },
-  { id: 'open_orders', name: '未平仓订单', description: '订单列表更新', interval: 5000, enabled: true, default: 5000 },
-  { id: 'manual_trading', name: '手动交易', description: '最近订单刷新', interval: 5000, enabled: true, default: 5000 },
-  { id: 'spread_history', name: '点差历史图表', description: '历史数据展示', interval: 5000, enabled: true, default: 5000 },
-  { id: 'asset_dashboard', name: '资产仪表盘', description: '资产数据刷新', interval: 10000, enabled: true, default: 10000 },
-  { id: 'account_status', name: '账户状态面板', description: '账户信息更新', interval: 30000, enabled: true, default: 30000 }
+// WebSocket push streams monitoring
+const pushStreams = ref([
+  {
+    type: 'market_data',
+    name: '市场数据',
+    description: '实时市场价格和点差数据',
+    expectedInterval: 1000,
+    actualInterval: 0,
+    count: 0,
+    lastReceived: null,
+    active: false,
+    status: 'unknown'
+  },
+  {
+    type: 'account_balance',
+    name: '账户余额',
+    description: '账户余额和资产数据',
+    expectedInterval: 10000,
+    actualInterval: 0,
+    count: 0,
+    lastReceived: null,
+    active: false,
+    status: 'unknown'
+  },
+  {
+    type: 'risk_metrics',
+    name: '风险指标',
+    description: '风险管理指标数据',
+    expectedInterval: 30000,
+    actualInterval: 0,
+    count: 0,
+    lastReceived: null,
+    active: false,
+    status: 'unknown'
+  },
+  {
+    type: 'mt5_connection_status',
+    name: 'MT5连接状态',
+    description: 'MT5连接健康状态',
+    expectedInterval: 30000,
+    actualInterval: 0,
+    count: 0,
+    lastReceived: null,
+    active: false,
+    status: 'unknown'
+  },
+  {
+    type: 'order_update',
+    name: '订单更新',
+    description: '订单状态变化推送',
+    expectedInterval: 0, // Event-driven
+    actualInterval: 0,
+    count: 0,
+    lastReceived: null,
+    active: false,
+    status: 'unknown'
+  }
 ])
+
+// Message type filters
+const messageTypeFilters = ref([
+  { type: 'market_data', name: '市场数据', description: '实时价格和点差', enabled: true },
+  { type: 'account_balance', name: '账户余额', description: '账户资产数据', enabled: true },
+  { type: 'risk_metrics', name: '风险指标', description: '风险管理数据', enabled: true },
+  { type: 'order_update', name: '订单更新', description: '订单状态变化', enabled: true },
+  { type: 'position_update', name: '持仓更新', description: '持仓数据变化', enabled: true },
+  { type: 'strategy_status', name: '策略状态', description: '策略执行状态', enabled: true },
+  { type: 'mt5_connection_status', name: 'MT5状态', description: 'MT5连接状态', enabled: true }
+])
+
+// WebSocket stats
+const wsUptime = ref('0s')
+const wsTotalMessages = ref(0)
+const wsMessageRate = ref(0)
+
+// Adjustable streams for frequency control
+const adjustableStreams = ref([
+  {
+    type: 'market_data',
+    name: '市场数据推送',
+    description: '实时市场价格和点差数据',
+    currentInterval: 1,
+    newInterval: 1,
+    minInterval: 0.1,
+    maxInterval: 10,
+    step: 0.1,
+    recommendation: '0.2-0.5s 适合高频交易',
+    updating: false
+  },
+  {
+    type: 'account_balance',
+    name: '账户余额推送',
+    description: '账户余额和资产数据',
+    currentInterval: 10,
+    newInterval: 10,
+    minInterval: 5,
+    maxInterval: 60,
+    step: 5,
+    recommendation: '10-15s 平衡性能和实时性',
+    updating: false
+  },
+  {
+    type: 'risk_metrics',
+    name: '风险指标推送',
+    description: '风险管理指标数据',
+    currentInterval: 30,
+    newInterval: 30,
+    minInterval: 10,
+    maxInterval: 120,
+    step: 10,
+    recommendation: '30-60s 适合风险监控',
+    updating: false
+  },
+  {
+    type: 'mt5_connection',
+    name: 'MT5连接状态推送',
+    description: 'MT5连接健康状态',
+    currentInterval: 30,
+    newInterval: 30,
+    minInterval: 10,
+    maxInterval: 120,
+    step: 10,
+    recommendation: '30s 适合连接监控',
+    updating: false
+  }
+])
+
+// Track last message time for each type
+const lastMessageTimes = ref({})
 
 // WebSocket连接状态 - 从market store获取实时状态
 const wsConnected = computed(() => marketStore.connected)
@@ -2301,10 +2462,61 @@ onMounted(async () => {
   loadSecurityComponents()
   loadUsers()
   loadSystemLogs()
-  // 确保WebSocket连接已建立（如果配置启用）
-  if (refreshSettings.value.useWebSocket && !marketStore.connected) {
+  loadCurrentIntervals()  // Load current push frequencies
+
+  // Ensure WebSocket connection
+  if (!marketStore.connected) {
     marketStore.connect()
   }
+
+  // Watch for WebSocket messages to update push stream stats
+  watch(() => marketStore.lastMessage, (message) => {
+    if (!message) return
+
+    const now = Date.now()
+    const type = message.type
+
+    // Update total messages and rate
+    wsTotalMessages.value++
+
+    // Update stream stats
+    const stream = pushStreams.value.find(s => s.type === type)
+    if (stream) {
+      stream.count++
+      stream.active = true
+
+      // Calculate actual interval
+      if (lastMessageTimes.value[type]) {
+        stream.actualInterval = now - lastMessageTimes.value[type]
+      }
+
+      stream.lastReceived = now
+      lastMessageTimes.value[type] = now
+
+      // Determine status
+      if (stream.expectedInterval > 0) {
+        const deviation = Math.abs(stream.actualInterval - stream.expectedInterval) / stream.expectedInterval
+        if (deviation < 0.2) {
+          stream.status = 'normal'
+        } else if (deviation < 0.5) {
+          stream.status = 'warning'
+        } else {
+          stream.status = 'abnormal'
+        }
+      } else {
+        stream.status = 'normal' // Event-driven
+      }
+    }
+  })
+
+  // Update uptime every second
+  setInterval(() => {
+    if (marketStore.connected) {
+      // Calculate uptime (simplified)
+      const seconds = Math.floor(wsTotalMessages.value / wsMessageRate.value)
+      wsUptime.value = formatUptime(seconds * 1000)
+    }
+  }, 1000)
 
   await loadSystemInfo()
   await loadDbStats()
@@ -2685,161 +2897,227 @@ onUnmounted(() => {
   stopLogRefresh()
 })
 
-// Refresh management functions
-const activeModulesCount = computed(() => {
-  return refreshModules.value.filter(m => m.enabled).length
+// Push stream management functions
+const allMessageTypesEnabled = computed(() => {
+  return messageTypeFilters.value.every(m => m.enabled)
 })
 
-const requestsPerMinute = computed(() => {
-  return refreshModules.value
-    .filter(m => m.enabled && m.interval > 0)
-    .reduce((total, m) => total + (60000 / m.interval), 0)
-    .toFixed(0)
+const activeStreams = computed(() => {
+  return pushStreams.value.filter(s => s.active && s.count > 0)
 })
 
-const estimatedTrafficPerHour = computed(() => {
-  const requestsPerHour = requestsPerMinute.value * 60
-  const bytesPerRequest = 10 * 1024 // 10KB per request
-  const totalBytes = requestsPerHour * bytesPerRequest
-  const mb = (totalBytes / (1024 * 1024)).toFixed(1)
-  return `${mb} MB`
+const normalStreamsCount = computed(() => {
+  return pushStreams.value.filter(s => s.status === 'normal').length
 })
 
-const performanceSuggestions = computed(() => {
-  const suggestions = []
-  const highFreqModules = refreshModules.value.filter(m => m.enabled && m.interval <= 1000)
-
-  if (highFreqModules.length > 3) {
-    suggestions.push({
-      type: 'warning',
-      message: `检测到 ${highFreqModules.length} 个高频刷新模块（≤1秒），建议启用WebSocket以减少网络开销`
-    })
-  }
-
-  if (!refreshSettings.value.visibilityDetection) {
-    suggestions.push({
-      type: 'info',
-      message: '建议启用页面可见性检测，可在页面不可见时自动降低刷新频率，节省资源'
-    })
-  }
-
-  if (requestsPerMinute.value > 300) {
-    suggestions.push({
-      type: 'warning',
-      message: `当前每分钟请求数为 ${requestsPerMinute.value}，建议适当降低部分模块的刷新频率`
-    })
-  }
-
-  if (!refreshSettings.value.batchRequests && highFreqModules.length > 2) {
-    suggestions.push({
-      type: 'info',
-      message: '建议启用批量请求合并，可将多个请求合并为一个，提升性能'
-    })
-  }
-
-  if (suggestions.length === 0) {
-    suggestions.push({
-      type: 'success',
-      message: '当前配置良好，系统运行在最佳状态'
-    })
-  }
-
-  return suggestions
+const warningStreamsCount = computed(() => {
+  return pushStreams.value.filter(s => s.status === 'warning').length
 })
 
-function getFrequencyLabel(interval) {
-  if (interval === 0) return '禁用'
-  if (interval < 1000) return '极高频'
-  if (interval === 1000) return '高频'
-  if (interval <= 5000) return '中频'
-  return '低频'
+const abnormalStreamsCount = computed(() => {
+  return pushStreams.value.filter(s => s.status === 'abnormal').length
+})
+
+function getTypeColor(type) {
+  const colorMap = {
+    market_data: 'bg-[#0ecb81]',
+    account_balance: 'bg-[#5AC8FA]',
+    risk_metrics: 'bg-[#FF9500]',
+    order_update: 'bg-[#f0b90b]',
+    mt5_connection_status: 'bg-[#BF5AF2]'
+  }
+  return colorMap[type] || 'bg-gray-500'
 }
 
-function getFrequencyBadgeClass(interval) {
-  if (interval === 0) return 'bg-dark-300 text-text-secondary'
-  if (interval <= 1000) return 'bg-danger/20 text-danger'
-  if (interval <= 5000) return 'bg-warning/20 text-warning'
-  return 'bg-success/20 text-success'
+function toggleAllMessageTypes() {
+  const newState = !allMessageTypesEnabled.value
+  messageTypeFilters.value.forEach(m => m.enabled = newState)
+  saveMessageTypeFilters()
+}
+
+function saveMessageTypeFilters() {
+  try {
+    localStorage.setItem('message-type-filters', JSON.stringify(messageTypeFilters.value))
+    // Dispatch event for components to react
+    window.dispatchEvent(new CustomEvent('message-filters-changed', {
+      detail: messageTypeFilters.value
+    }))
+  } catch (error) {
+    console.error('Failed to save message type filters:', error)
+  }
+}
+
+function getFrequencyStatusClass(stream) {
+  if (stream.expectedInterval === 0) return 'text-text-secondary'
+  if (stream.actualInterval === 0) return 'text-text-secondary'
+
+  const deviation = Math.abs(stream.actualInterval - stream.expectedInterval) / stream.expectedInterval
+  if (deviation < 0.2) return 'text-success'
+  if (deviation < 0.5) return 'text-warning'
+  return 'text-danger'
+}
+
+function getStreamStatusClass(status) {
+  const classMap = {
+    normal: 'bg-success/20 text-success',
+    warning: 'bg-warning/20 text-warning',
+    abnormal: 'bg-danger/20 text-danger',
+    unknown: 'bg-dark-300 text-text-secondary'
+  }
+  return classMap[status] || classMap.unknown
+}
+
+function getStreamStatusText(status) {
+  const textMap = {
+    normal: '正常',
+    warning: '警告',
+    abnormal: '异常',
+    unknown: '未知'
+  }
+  return textMap[status] || '未知'
+}
+
+// Frequency adjustment functions
+function updateSliderValue(stream) {
+  // Real-time slider value update (already handled by v-model)
+}
+
+async function applyFrequencyChange(stream) {
+  if (stream.updating) return
+
+  stream.updating = true
+
+  try {
+    const response = await fetch('/api/v1/ws/config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      },
+      body: JSON.stringify({
+        streamer: stream.type,
+        interval: stream.newInterval
+      })
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || '更新失败')
+    }
+
+    const result = await response.json()
+
+    // Update current interval
+    stream.currentInterval = result.interval
+
+    // Update pushStreams expected interval
+    const pushStream = pushStreams.value.find(s => s.type === stream.type)
+    if (pushStream) {
+      pushStream.expectedInterval = result.interval_ms
+    }
+
+    notificationStore.addNotification({
+      type: 'success',
+      message: `${stream.name}频率已更新为 ${result.interval}s`
+    })
+  } catch (error) {
+    console.error('Failed to update frequency:', error)
+    notificationStore.addNotification({
+      type: 'error',
+      message: `更新失败: ${error.message}`
+    })
+  } finally {
+    stream.updating = false
+  }
+}
+
+// Load current intervals from backend on mount
+async function loadCurrentIntervals() {
+  try {
+    const response = await fetch('/api/v1/ws/stats', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      }
+    })
+
+    if (!response.ok) return
+
+    const stats = await response.json()
+
+    // Update adjustable streams with current intervals
+    adjustableStreams.value.forEach(stream => {
+      const streamerKey = stream.type === 'mt5_connection' ? 'mt5_connection' : stream.type
+      const streamerStats = stats.streamers[streamerKey]
+
+      if (streamerStats) {
+        const intervalSeconds = streamerStats.interval_ms / 1000
+        stream.currentInterval = intervalSeconds
+        stream.newInterval = intervalSeconds
+      }
+    })
+  } catch (error) {
+    console.error('Failed to load current intervals:', error)
+  }
+}
+
+function formatLastReceived(timestamp) {
+  const now = Date.now()
+  const diff = now - timestamp
+  if (diff < 1000) return '刚刚'
+  if (diff < 60000) return `${Math.floor(diff / 1000)}秒前`
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+  return `${Math.floor(diff / 3600000)}小时前`
+}
+
+function formatUptime(ms) {
+  if (!ms) return '0s'
+  const seconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`
+  } else {
+    return `${seconds}s`
+  }
 }
 
 async function loadRefreshSettings() {
   try {
-    // Load from localStorage first
-    const saved = localStorage.getItem('refresh-settings')
+    // Load from localStorage
+    const saved = localStorage.getItem('push-management-settings')
     if (saved) {
       const data = JSON.parse(saved)
       refreshSettings.value = { ...refreshSettings.value, ...data.settings }
-      if (data.modules) {
-        refreshModules.value.forEach(module => {
-          const savedModule = data.modules.find(m => m.id === module.id)
-          if (savedModule) {
-            module.interval = savedModule.interval
-            module.enabled = savedModule.enabled
-          }
-        })
-      }
+    }
+
+    // Load message type filters
+    const savedFilters = localStorage.getItem('message-type-filters')
+    if (savedFilters) {
+      const filters = JSON.parse(savedFilters)
+      messageTypeFilters.value.forEach(filter => {
+        const saved = filters.find(f => f.type === filter.type)
+        if (saved) {
+          filter.enabled = saved.enabled
+        }
+      })
     }
   } catch (error) {
-    console.error('Failed to load refresh settings:', error)
+    console.error('Failed to load push management settings:', error)
   }
 }
 
 async function saveRefreshSettings() {
   try {
-    // Save to localStorage
     const data = {
-      settings: refreshSettings.value,
-      modules: refreshModules.value.map(m => ({
-        id: m.id,
-        interval: m.interval,
-        enabled: m.enabled
-      }))
+      settings: refreshSettings.value
     }
-    localStorage.setItem('refresh-settings', JSON.stringify(data))
-
-    // 实际控制WebSocket连接
-    if (refreshSettings.value.useWebSocket) {
-      // 启用WebSocket - 建立连接
-      if (!marketStore.connected) {
-        marketStore.connect()
-        console.log('WebSocket已启用，正在建立连接...')
-      }
-    } else {
-      // 禁用WebSocket - 断开连接
-      if (marketStore.connected) {
-        marketStore.disconnect()
-        console.log('WebSocket已禁用，连接已断开')
-      }
-    }
-
-    // Broadcast settings change event
-    window.dispatchEvent(new CustomEvent('refresh-settings-changed', {
-      detail: data
-    }))
-
-    alert('刷新设置已保存')
+    localStorage.setItem('push-management-settings', JSON.stringify(data))
   } catch (error) {
-    console.error('Failed to save refresh settings:', error)
-    alert('保存失败: ' + error.message)
+    console.error('Failed to save push management settings:', error)
   }
-}
-
-function resetToDefaults() {
-  if (!confirm('确定要恢复所有模块的默认刷新频率吗？')) return
-
-  refreshModules.value.forEach(module => {
-    module.interval = module.default
-    module.enabled = true
-  })
-
-  refreshSettings.value = {
-    visibilityDetection: true,
-    useWebSocket: false,
-    batchRequests: true,
-    inactiveMultiplier: 5
-  }
-
-  saveRefreshSettings()
 }
 
 </script>
@@ -2859,6 +3137,35 @@ function resetToDefaults() {
 
 .card {
   @apply bg-dark-200 rounded-lg p-6 shadow-lg;
+}
+
+/* Slider Styles */
+input[type="range"].slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+input[type="range"].slider::-webkit-slider-thumb:hover {
+  background: #2563eb;
+}
+
+input[type="range"].slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+input[type="range"].slider::-moz-range-thumb:hover {
+  background: #2563eb;
 }
 
 /* System Logs Styles */

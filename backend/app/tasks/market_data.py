@@ -1,5 +1,6 @@
 """Background tasks for market data streaming"""
 import asyncio
+from datetime import datetime
 from app.services.market_service import market_data_service
 from app.websocket.manager import manager
 
@@ -11,6 +12,16 @@ class MarketDataStreamer:
         self.running = False
         self.task = None
         self.interval = 1  # Update interval in seconds
+        self.broadcast_count = 0
+        self.last_broadcast_time = None
+        self.error_count = 0
+
+    def update_interval(self, new_interval: float):
+        """Update streaming interval (0.1s - 10s)"""
+        if 0.1 <= new_interval <= 10:
+            self.interval = new_interval
+            return True
+        return False
 
     async def start(self):
         """Start the market data streaming task"""
@@ -45,6 +56,8 @@ class MarketDataStreamer:
 
                 # Broadcast to all connected clients
                 await manager.broadcast_market_data(spread_data.model_dump())
+                self.broadcast_count += 1
+                self.last_broadcast_time = datetime.now().isoformat()
                 print(f"Broadcasted market data: {spread_data.binance_quote.bid_price}")
 
                 # Wait for next interval
@@ -54,6 +67,7 @@ class MarketDataStreamer:
                 print(f"Error in market data stream: {str(e)}")
                 import traceback
                 traceback.print_exc()
+                self.error_count += 1
                 await asyncio.sleep(self.interval)
 
 

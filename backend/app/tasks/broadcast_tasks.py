@@ -19,6 +19,16 @@ class AccountBalanceStreamer:
         self.running = False
         self.task = None
         self.interval = 10  # Update interval in seconds (every 10s)
+        self.broadcast_count = 0
+        self.last_broadcast_time = None
+        self.error_count = 0
+
+    def update_interval(self, new_interval: int):
+        """Update streaming interval (5s - 60s)"""
+        if 5 <= new_interval <= 60:
+            self.interval = new_interval
+            return True
+        return False
 
     async def start(self):
         """Start the account balance streaming task"""
@@ -67,12 +77,15 @@ class AccountBalanceStreamer:
 
                     # Broadcast to all connected clients
                     await manager.broadcast_account_balance(aggregated_data)
+                    self.broadcast_count += 1
+                    self.last_broadcast_time = datetime.now().isoformat()
 
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
 
             except Exception as e:
                 logger.error(f"Error in account balance stream: {str(e)}", exc_info=True)
+                self.error_count += 1
                 await asyncio.sleep(self.interval)
 
 
@@ -83,6 +96,16 @@ class RiskMetricsStreamer:
         self.running = False
         self.task = None
         self.interval = 30  # Update interval in seconds (every 30s)
+        self.broadcast_count = 0
+        self.last_broadcast_time = None
+        self.error_count = 0
+
+    def update_interval(self, new_interval: int):
+        """Update streaming interval (10s - 120s)"""
+        if 10 <= new_interval <= 120:
+            self.interval = new_interval
+            return True
+        return False
 
     async def start(self):
         """Start the risk metrics streaming task"""
@@ -138,12 +161,15 @@ class RiskMetricsStreamer:
 
                     # Broadcast to all connected clients
                     await manager.broadcast_risk_metrics(risk_data)
+                    self.broadcast_count += 1
+                    self.last_broadcast_time = datetime.now().isoformat()
 
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
 
             except Exception as e:
                 logger.error(f"Error in risk metrics stream: {str(e)}", exc_info=True)
+                self.error_count += 1
                 await asyncio.sleep(self.interval)
 
 
@@ -154,6 +180,16 @@ class MT5ConnectionStreamer:
         self.running = False
         self.task = None
         self.interval = 30  # Update interval in seconds (every 30s)
+        self.broadcast_count = 0
+        self.last_broadcast_time = None
+        self.error_count = 0
+
+    def update_interval(self, new_interval: int):
+        """Update streaming interval (10s - 120s)"""
+        if 10 <= new_interval <= 120:
+            self.interval = new_interval
+            return True
+        return False
 
     async def start(self):
         """Start the MT5 connection streaming task"""
@@ -192,12 +228,15 @@ class MT5ConnectionStreamer:
                     "type": "mt5_connection_status",
                     "data": mt5_status
                 })
+                self.broadcast_count += 1
+                self.last_broadcast_time = datetime.now().isoformat()
 
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
 
             except Exception as e:
                 logger.error(f"Error in MT5 connection stream: {str(e)}", exc_info=True)
+                self.error_count += 1
                 await asyncio.sleep(self.interval)
 
     async def _check_mt5_status(self):

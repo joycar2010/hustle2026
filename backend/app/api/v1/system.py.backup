@@ -771,23 +771,6 @@ async def rollback_version(
                 detail="Either hash or version must be provided"
             )
 
-        # Get commit message to extract version numbers
-        commit_msg_result = subprocess.run(
-            ["git", "log", "-1", "--format=%s", target],
-            capture_output=True,
-            text=True,
-            cwd=".."
-        )
-
-        if commit_msg_result.returncode != 0:
-            raise Exception(f"Failed to get commit message: {commit_msg_result.stderr}")
-
-        commit_message = commit_msg_result.stdout.strip()
-
-        # Extract version numbers from commit message (format: "Version X.Y.Z/A.B.C: remark")
-        version_pattern = r"Version (\d+\.\d+\.\d+)/(\d+\.\d+\.\d+)"
-        version_match = re.search(version_pattern, commit_message)
-
         # Reset to the specified commit
         reset_result = subprocess.run(
             ["git", "reset", "--hard", target],
@@ -799,23 +782,10 @@ async def rollback_version(
         if reset_result.returncode != 0:
             raise Exception(f"Git reset failed: {reset_result.stderr}")
 
-        # Restore version numbers if found in commit message
-        if version_match:
-            frontend_version = version_match.group(1)
-            backend_version = version_match.group(2)
-            version_service.set_versions_on_restore(frontend_version, backend_version)
-
-            return {
-                "message": f"Successfully rolled back to {target[:7]}",
-                "frontend_version": frontend_version,
-                "backend_version": backend_version,
-                "note": "Please restart the system for changes to take effect"
-            }
-        else:
-            return {
-                "message": f"Successfully rolled back to {target[:7]}",
-                "note": "Please restart the system for changes to take effect (version numbers not found in commit message)"
-            }
+        return {
+            "message": f"Successfully rolled back to {target[:7]}",
+            "note": "Please restart the system for changes to take effect"
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -825,66 +795,34 @@ async def rollback_version(
         )
 
 
-@router.delete("/github/backup/{version_hash}")
-async def delete_github_backup(
+@router.delete("/github/version/{version_hash}")
+async def delete_version(
     version_hash: str,
     user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, str]:
-    """Delete GitHub backup (tag) for a specific version"""
+    """Delete/revert a specific version"""
     try:
         import subprocess
 
-        # Get commit message to extract tag name
-        commit_msg_result = subprocess.run(
-            ["git", "log", "-1", "--format=%s", version_hash],
+        # Use git revert to create a new commit that undoes the changes
+        revert_result = subprocess.run(
+            ["git", "revert", "--no-edit", version_hash],
             capture_output=True,
             text=True,
             cwd=".."
         )
 
-        if commit_msg_result.returncode != 0:
-            raise Exception(f"Failed to get commit message: {commit_msg_result.stderr}")
-
-        commit_message = commit_msg_result.stdout.strip()
-
-        # Extract version numbers from commit message (format: "Version X.Y.Z/A.B.C: remark")
-        version_pattern = r"Version (\d+\.\d+\.\d+)/(\d+\.\d+\.\d+)"
-        version_match = re.search(version_pattern, commit_message)
-
-        if not version_match:
-            raise Exception("Version numbers not found in commit message")
-
-        frontend_version = version_match.group(1)
-        backend_version = version_match.group(2)
-        tag_name = f"backup-{frontend_version}-{backend_version}"
-
-        # Delete local tag
-        delete_local_result = subprocess.run(
-            ["git", "tag", "-d", tag_name],
-            capture_output=True,
-            text=True,
-            cwd=".."
-        )
-
-        # Delete remote tag (ignore errors if tag doesn't exist on remote)
-        delete_remote_result = subprocess.run(
-            ["git", "push", "origin", f":refs/tags/{tag_name}"],
-            capture_output=True,
-            text=True,
-            cwd=".."
-        )
-
-        if delete_local_result.returncode != 0 and delete_remote_result.returncode != 0:
-            raise Exception(f"Failed to delete tag: {delete_local_result.stderr}")
+        if revert_result.returncode != 0:
+            raise Exception(f"Git revert failed: {revert_result.stderr}")
 
         return {
-            "message": f"Successfully deleted backup tag {tag_name}",
-            "note": "Commit history is preserved for audit purposes"
+            "message": f"Successfully reverted version {version_hash[:7]}",
+            "note": "A new commit has been created to undo the changes"
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete backup: {str(e)}"
+            detail=f"Failed to delete version: {str(e)}"
         )
 
 
