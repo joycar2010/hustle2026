@@ -1,7 +1,6 @@
 <template>
   <div class="trading-dashboard">
-    <!-- Left Sidebar - Account Status (Hidden on mobile) -->
-    <aside class="sidebar-left">
+    <!-- Left Sidebar - Account Status (Hidden on mobile) --><aside class="sidebar-left">
       <div class="sidebar-section account-section">
         <AccountStatusPanel />
       </div>
@@ -27,19 +26,18 @@
         </div>
       </section>
 
-      <!-- Orders and Manual Trading Section -->
+      <!-- Orders and Spread Section -->
       <section class="section-orders-spread">
         <div class="order-monitor-wrapper">
           <OrderMonitor />
         </div>
 
-        <!-- PC端显示ManualTrading，移动端隐藏 -->
-        <div class="manual-trading-wrapper-pc">
-          <ManualTrading />
+        <div class="spread-table-wrapper">
+          <SpreadDataTable />
         </div>
       </section>
 
-      <!-- Manual Trading Section (仅移动端显示拆分后的组件) -->
+      <!-- Manual Trading Section (拆分后的两个组件) -->
       <section class="section-manual-trading">
         <div class="emergency-trading-wrapper">
           <EmergencyManualTrading @orderExecuted="handleOrderExecuted" />
@@ -68,7 +66,7 @@ import NavigationPanel from '@/components/trading/NavigationPanel.vue'
 import MarketCards from '@/components/trading/MarketCards.vue'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
 import OrderMonitor from '@/components/trading/OrderMonitor.vue'
-import ManualTrading from '@/components/trading/ManualTrading.vue'
+import SpreadDataTable from '@/components/trading/SpreadDataTable.vue'
 import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
 import RecentTradingRecords from '@/components/trading/RecentTradingRecords.vue'
 import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vue'
@@ -109,11 +107,11 @@ function handleOrderExecuted() {
 }
 
 .account-section {
-  flex: 6.5;
+  flex: 7;
 }
 
 .navigation-section {
-  flex: 3.5;
+  flex: 3;
 }
 
 .sidebar-right {
@@ -176,7 +174,7 @@ function handleOrderExecuted() {
   min-width: 0;
 }
 
-.manual-trading-wrapper-pc {
+.spread-table-wrapper {
   flex: 1;
   background-color: #1e2329;
   border-radius: 8px;
@@ -184,9 +182,9 @@ function handleOrderExecuted() {
   min-width: 0;
 }
 
-/* ========== 手动交易区域（PC端隐藏，移动端显示） ========== */
+/* ========== 手动交易区域（新增） ========== */
 .section-manual-trading {
-  display: none;
+  display: none; /* PC端默认隐藏，移动端显示 */
 }
 
 /* ========== 移动端H5竖屏适配 ========== */
@@ -204,8 +202,8 @@ function handleOrderExecuted() {
   /* 主内容区域 */
   .main-content {
     width: 100%;
-    padding: 0;
-    gap: 0;
+    padding: 12px;
+    gap: 16px;
     overflow-y: auto;
   }
 
@@ -215,52 +213,44 @@ function handleOrderExecuted() {
     flex-direction: column;
     padding: 0;
     border-bottom: none;
-    gap: 0;
+    gap: 16px;
   }
 
   .strategy-container {
     width: 100%;
-    height: auto;
-    min-height: auto;
-    border-radius: 0;
+    max-height: 300px;
+    min-height: 300px;
   }
 
   .market-cards-container {
     width: 100%;
-    height: auto;
-    border-radius: 0;
+    max-height: 300px;
   }
 
-  /* 订单和手动交易区域 - 垂直排列 */
+  /* 订单和点差区域 - 垂直排列 */
   .section-orders-spread {
     flex-direction: column;
     padding: 0;
-    gap: 0;
+    gap: 16px;
   }
 
-  .order-monitor-wrapper {
+  .order-monitor-wrapper,
+  .spread-table-wrapper {
     width: 100%;
     max-height: 350px;
-    border-radius: 0;
-  }
-
-  /* PC端的ManualTrading在移动端隐藏 */
-  .manual-trading-wrapper-pc {
-    display: none;
   }
 
   /* 手动交易区域 - 显示并垂直排列 */
   .section-manual-trading {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 16px;
   }
 
   .emergency-trading-wrapper,
   .recent-records-wrapper {
     width: 100%;
     max-height: 400px;
-    border-radius: 0;
   }
 }
 
@@ -271,7 +261,7 @@ function handleOrderExecuted() {
   }
 
   .sidebar-right {
-    display: none;
+    display: none; /* 平板隐藏右侧边栏 */
   }
 
   .market-cards-container {

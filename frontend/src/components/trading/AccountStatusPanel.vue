@@ -55,7 +55,7 @@
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">总持仓</span>
-            <span class="font-mono">{{ getDisplayValue(account, 'total_positions') }}</span>
+            <span class="font-mono">{{ getDisplayValue(account, 'total_positions', false, false, true) }}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">冻结资产</span>
@@ -78,39 +78,27 @@
             </span>
           </div>
           <div v-if="account.platform_id === 2" class="flex justify-between">
-            <span class="text-gray-400">做多掉期费</span>
-            <span class="font-mono" :class="getValueColor(account, 'long_swap_fee')">
-              {{ getDisplayValue(account, 'long_swap_fee', true) }}
-            </span>
-          </div>
-          <div v-if="account.platform_id === 2" class="flex justify-between">
-            <span class="text-gray-400">做空掉期费</span>
-            <span class="font-mono" :class="getValueColor(account, 'short_swap_fee')">
-              {{ getDisplayValue(account, 'short_swap_fee', true) }}
-            </span>
-          </div>
-          <div v-if="account.platform_id === 2" class="flex justify-between">
             <span class="text-gray-400">手续费(佣金)</span>
             <span class="font-mono" :class="getValueColor(account, 'commission_fee')">
               {{ getDisplayValue(account, 'commission_fee', true) }}
             </span>
           </div>
+          <div v-if="account.platform_id === 2" class="flex justify-between">
+            <span class="text-gray-400">MT5过夜费</span>
+            <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
+              {{ getDisplayValue(account, 'funding_fee', true) }}
+            </span>
+          </div>
           <div v-if="account.platform_id === 1" class="flex justify-between">
-            <span class="text-gray-400">做多资金费</span>
+            <span class="text-gray-400">手续费汇总(USDT)</span>
             <span class="font-mono" :class="getValueColor(account, 'long_funding_rate')">
               {{ getDisplayValue(account, 'long_funding_rate', true) }}
             </span>
           </div>
           <div v-if="account.platform_id === 1" class="flex justify-between">
-            <span class="text-gray-400">做空资金费</span>
+            <span class="text-gray-400">手续费汇总(BNB)</span>
             <span class="font-mono" :class="getValueColor(account, 'short_funding_rate')">
               {{ getDisplayValue(account, 'short_funding_rate', true) }}
-            </span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-gray-400">{{ account.platform_id === 1 ? '掉期费(Binance)' : '资金费(Bybit)' }}</span>
-            <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
-              {{ getDisplayValue(account, 'funding_fee', true) }}
             </span>
           </div>
         </div>
@@ -129,11 +117,12 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
+import { useNotificationStore } from '@/stores/notification'
 
 const marketStore = useMarketStore()
+const notificationStore = useNotificationStore()
 
 const activeAccounts = ref([])
-const systemAlerts = ref([])
 
 // Persist disconnected state across page refreshes
 const STORAGE_KEY = 'disconnectedAccounts'
@@ -208,8 +197,8 @@ function handleAccountBalanceUpdate(data) {
       }
     })
 
-    // Regenerate alerts with updated data
-    systemAlerts.value = generateSystemAlerts(data)
+    // Update system alerts via notification store
+    notificationStore.updateSystemAlerts(data)
   }
 }
 
@@ -254,54 +243,10 @@ async function fetchAccountData() {
     // Always update all accounts with fresh data
     activeAccounts.value = allAccounts
 
-    systemAlerts.value = generateSystemAlerts(data)
+    notificationStore.updateSystemAlerts(data)
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
-}
-
-function generateSystemAlerts(data) {
-  const alerts = []
-
-  if (data.summary) {
-    // Net value alert
-    alerts.push({
-      id: 1,
-      type: 'warning',
-      message: '账户净值提醒',
-      value: `当前净值: $${formatNumber(data.summary.net_assets || 0)}`
-    })
-
-    // Risk status
-    const riskRatio = data.summary.risk_ratio || 0
-    if (riskRatio > 60) {
-      alerts.push({
-        id: 2,
-        type: 'danger',
-        message: '风险率过高',
-        value: `当前风险率: ${riskRatio.toFixed(2)}%`
-      })
-    } else {
-      alerts.push({
-        id: 2,
-        type: 'success',
-        message: '风控状态',
-        value: '正常运行'
-      })
-    }
-
-    // Position count
-    if (data.summary.position_count > 0) {
-      alerts.push({
-        id: 3,
-        type: 'info',
-        message: '持仓提醒',
-        value: `当前持仓: ${data.summary.position_count} 个`
-      })
-    }
-  }
-
-  return alerts
 }
 
 function toggleConnection(accountId) {
@@ -402,7 +347,7 @@ function getBanInfo(account) {
   return null
 }
 
-function getDisplayValue(account, field, showSign = false, isPercent = false) {
+function getDisplayValue(account, field, showSign = false, isPercent = false, isLots = false) {
   // Check if account has rate limit ban
   const banInfo = getBanInfo(account)
   if (banInfo) {
@@ -425,6 +370,10 @@ function getDisplayValue(account, field, showSign = false, isPercent = false) {
   // Format the value
   if (isPercent) {
     return value.toFixed(2) + '%'
+  }
+
+  if (isLots) {
+    return formatNumber(value) + ' 手'
   }
 
   if (showSign) {

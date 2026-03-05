@@ -8,6 +8,7 @@ export const useNotificationStore = defineStore('notification', () => {
   const activePopup = ref(null)
   const audioContext = ref(null)
   const isAudioPlaying = ref(false)
+  const systemAlerts = ref([])
 
   // Alert switches with localStorage persistence
   const alertSoundEnabled = ref(localStorage.getItem('alertSoundEnabled') !== 'false')
@@ -336,6 +337,56 @@ export const useNotificationStore = defineStore('notification', () => {
     activePopup.value = null
   }
 
+  // Update system alerts from account data
+  function updateSystemAlerts(data) {
+    const newAlerts = []
+
+    if (data.summary) {
+      // Net value alert
+      newAlerts.push({
+        id: 1,
+        type: 'warning',
+        message: '账户净值提醒',
+        value: `当前净值: $${formatNumber(data.summary.net_assets || 0)}`
+      })
+
+      // Risk status
+      const riskRatio = data.summary.risk_ratio || 0
+      if (riskRatio > 60) {
+        newAlerts.push({
+          id: 2,
+          type: 'danger',
+          message: '风险率过高',
+          value: `当前风险率: ${riskRatio.toFixed(2)}%`
+        })
+      } else {
+        newAlerts.push({
+          id: 2,
+          type: 'success',
+          message: '风控状态',
+          value: '正常运行'
+        })
+      }
+
+      // Position count
+      if (data.summary.position_count > 0) {
+        newAlerts.push({
+          id: 3,
+          type: 'info',
+          message: '持仓提醒',
+          value: `当前持仓: ${data.summary.position_count} 个`
+        })
+      }
+    }
+
+    systemAlerts.value = newAlerts
+  }
+
+  // Helper function to format numbers
+  function formatNumber(num) {
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+
   return {
     alerts,
     alertSettings,
@@ -343,6 +394,7 @@ export const useNotificationStore = defineStore('notification', () => {
     isAudioPlaying,
     alertSoundEnabled,
     singleLegAlertEnabled,
+    systemAlerts,
     loadAlertSettings,
     checkMarketAlerts,
     checkAccountAlerts,
@@ -351,6 +403,7 @@ export const useNotificationStore = defineStore('notification', () => {
     dismissAlert,
     dismissPopup,
     toggleAlertSound,
-    toggleSingleLegAlert
+    toggleSingleLegAlert,
+    updateSystemAlerts
   }
 })

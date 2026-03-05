@@ -40,94 +40,23 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMarketStore } from '@/stores/market'
+import { useNotificationStore } from '@/stores/notification'
 import api from '@/services/api'
 
 const router = useRouter()
 const marketStore = useMarketStore()
+const notificationStore = useNotificationStore()
 const activeNav = ref('strategy')
-const systemAlerts = ref([])
 const redisStatus = ref({ healthy: false, last_error: null })
 
-onMounted(async () => {
-  await fetchSystemAlerts()
-  await fetchRedisStatus()
+// Combine notification store alerts with Redis status
+const systemAlerts = computed(() => {
+  const alerts = [...notificationStore.systemAlerts]
 
-  // Fetch Redis status every 30 seconds
-  setInterval(fetchRedisStatus, 30000)
-
-  // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
-  watch(() => marketStore.lastMessage, (message) => {
-    if (message && message.type === 'account_balance') {
-      systemAlerts.value = generateSystemAlerts(message.data)
-    }
-  })
-})
-
-async function fetchSystemAlerts() {
-  try {
-    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
-    const data = response.data
-    systemAlerts.value = generateSystemAlerts(data)
-  } catch (error) {
-    console.error('Failed to fetch system alerts:', error)
-  }
-}
-
-async function fetchRedisStatus() {
-  try {
-    const response = await api.get('/api/v1/system/redis/status')
-    redisStatus.value = response.data
-  } catch (error) {
-    console.error('Failed to fetch Redis status:', error)
-    redisStatus.value = { healthy: false, last_error: 'Failed to fetch status' }
-  }
-}
-
-function generateSystemAlerts(data) {
-  const alerts = []
-
-  if (data.summary) {
-    // Net value alert
-    alerts.push({
-      id: 1,
-      type: 'warning',
-      message: '账户净值提醒',
-      value: `当前净值: $${formatNumber(data.summary.net_assets || 0)}`
-    })
-
-    // Risk status
-    const riskRatio = data.summary.risk_ratio || 0
-    if (riskRatio > 60) {
-      alerts.push({
-        id: 2,
-        type: 'danger',
-        message: '风险率过高',
-        value: `当前风险率: ${riskRatio.toFixed(2)}%`
-      })
-    } else {
-      alerts.push({
-        id: 2,
-        type: 'success',
-        message: '风控状态',
-        value: '正常运行'
-      })
-    }
-
-    // Position count
-    if (data.summary.position_count > 0) {
-      alerts.push({
-        id: 3,
-        type: 'info',
-        message: '持仓提醒',
-        value: `当前持仓: ${data.summary.position_count} 个`
-      })
-    }
-  }
-
-  // Redis status
+  // Add Redis status alert
   if (redisStatus.value.healthy) {
     alerts.push({
       id: 4,
@@ -145,10 +74,41 @@ function generateSystemAlerts(data) {
   }
 
   return alerts
+})
+
+onMounted(async () => {
+  await fetchSystemAlerts()
+  await fetchRedisStatus()
+
+  // Fetch Redis status every 30 seconds
+  setInterval(fetchRedisStatus, 30000)
+
+  // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
+  watch(() => marketStore.lastMessage, (message) => {
+    if (message && message.type === 'account_balance') {
+      notificationStore.updateSystemAlerts(message.data)
+    }
+  })
+})
+
+async function fetchSystemAlerts() {
+  try {
+    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const data = response.data
+    notificationStore.updateSystemAlerts(data)
+  } catch (error) {
+    console.error('Failed to fetch system alerts:', error)
+  }
 }
 
-function formatNumber(num) {
-  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+async function fetchRedisStatus() {
+  try {
+    const response = await api.get('/api/v1/system/redis/status')
+    redisStatus.value = response.data
+  } catch (error) {
+    console.error('Failed to fetch Redis status:', error)
+    redisStatus.value = { healthy: false, last_error: 'Failed to fetch status' }
+  }
 }
 
 function getAlertColor(type) {

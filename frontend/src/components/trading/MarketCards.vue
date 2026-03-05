@@ -56,10 +56,14 @@
         <!-- Reverse Arbitrage -->
         <div class="bg-[#1e2329] rounded p-2">
           <div class="text-xs text-gray-400 mb-1">反向持仓 (Bybit MT5)</div>
-          <div class="flex justify-center text-xs">
+          <div class="flex justify-between items-center text-xs">
             <div class="flex items-center space-x-2">
-              <span class="text-gray-400">实际持仓:</span>
+              <span class="text-gray-400">实仓:</span>
               <span class="font-mono text-white text-lg">{{ reverseActualPosition.toFixed(2) }}</span>
+            </div>
+            <div class="flex items-center space-x-1">
+              <span class="text-gray-400">点差:</span>
+              <span class="font-mono text-[#0ecb81] text-sm">{{ formatSpread(reverseSpread) }}</span>
             </div>
           </div>
         </div>
@@ -67,10 +71,14 @@
         <!-- Forward Arbitrage -->
         <div class="bg-[#1e2329] rounded p-2">
           <div class="text-xs text-gray-400 mb-1">正向持仓 (Binance)</div>
-          <div class="flex justify-center text-xs">
+          <div class="flex justify-between items-center text-xs">
             <div class="flex items-center space-x-2">
-              <span class="text-gray-400">实际持仓:</span>
+              <span class="text-gray-400">实仓:</span>
               <span class="font-mono text-white text-lg">{{ forwardActualPosition.toFixed(2) }}</span>
+            </div>
+            <div class="flex items-center space-x-1">
+              <span class="text-gray-400">点差:</span>
+              <span class="font-mono text-[#0ecb81] text-sm">{{ formatSpread(forwardSpread) }}</span>
             </div>
           </div>
         </div>
@@ -206,6 +214,10 @@ const totalProfit = ref(0)
 const forwardActualPosition = ref(0)
 const reverseActualPosition = ref(0)
 
+// Position spread data - store position details for cost calculation
+const reversePositions = ref([]) // Bybit MT5 short positions
+const forwardPositions = ref([]) // Binance long positions
+
 // Fee data
 const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
@@ -214,6 +226,36 @@ const binanceShortFundingRate = ref(0)
 
 const bybitLagLevel = computed(() => Math.min(Math.floor(bybitLagCount.value / 10), 5))
 const binanceLagLevel = computed(() => Math.min(Math.floor(binanceLagCount.value / 10), 5))
+
+// Calculate hedge arbitrage cost price
+// 正向套利组合成本价 = Binance多持仓成本 - Bybit空持仓成本
+const hedgeCostPrice = computed(() => {
+  // 需要同时有Binance多头和Bybit空头才能计算套利成本
+  if (forwardPositions.value.length === 0 || reversePositions.value.length === 0) {
+    return 0
+  }
+
+  // 计算Binance多头平均成本价（每盎司）
+  const binanceLongCost = forwardPositions.value.reduce((sum, pos) => {
+    return sum + (pos.entry_price * pos.size)
+  }, 0)
+  const binanceLongSize = forwardPositions.value.reduce((sum, pos) => sum + pos.size, 0)
+  const binanceAvgCost = binanceLongSize > 0 ? binanceLongCost / binanceLongSize : 0
+
+  // 计算Bybit空头平均成本价（每盎司）
+  const bybitShortCost = reversePositions.value.reduce((sum, pos) => {
+    return sum + (pos.entry_price * pos.size)
+  }, 0)
+  const bybitShortSize = reversePositions.value.reduce((sum, pos) => sum + pos.size, 0)
+  const bybitAvgCost = bybitShortSize > 0 ? bybitShortCost / bybitShortSize : 0
+
+  // 正向套利组合成本价 = Binance多成本 - Bybit空成本
+  return binanceAvgCost - bybitAvgCost
+})
+
+// 反向持仓和正向持仓都显示同一个套利组合成本价
+const reverseSpread = computed(() => hedgeCostPrice.value)
+const forwardSpread = computed(() => hedgeCostPrice.value)
 
 watch(() => marketStore.marketData, (data) => {
   if (!data) return
@@ -297,6 +339,8 @@ function handleAccountBalanceUpdate(data) {
     // Reset position values
     forwardActualPosition.value = 0
     reverseActualPosition.value = 0
+    reversePositions.value = []
+    forwardPositions.value = []
 
     // Aggregate positions by platform
     data.positions.forEach(position => {
@@ -311,6 +355,8 @@ function handleAccountBalanceUpdate(data) {
         symbol: position.symbol,
         side: position.side,
         size: position.size,
+        entry_price: position.entry_price,
+        current_price: position.current_price,
         platform_id: account.platform_id,
         account_name: account.account_name
       })
@@ -321,13 +367,25 @@ function handleAccountBalanceUpdate(data) {
         // Bybit MT5: count all positions (both Buy and Sell)
         // Reverse arbitrage uses Bybit short positions
         if (position.side === 'Sell') {
-          reverseActualPosition.value += Math.abs(position.size || 0)
+          const posSize = Math.abs(position.size || 0)
+          reverseActualPosition.value += posSize
+          reversePositions.value.push({
+            size: posSize,
+            entry_price: position.entry_price || 0,
+            current_price: position.current_price || 0
+          })
           console.log('[MarketCards] Added to reverse position:', position.size, 'Total:', reverseActualPosition.value)
         }
       } else if (account.platform_id === 1) {
         // Binance: count Buy (long) positions for forward arbitrage
         if (position.side === 'Buy') {
-          forwardActualPosition.value += Math.abs(position.size || 0)
+          const posSize = Math.abs(position.size || 0)
+          forwardActualPosition.value += posSize
+          forwardPositions.value.push({
+            size: posSize,
+            entry_price: position.entry_price || 0,
+            current_price: position.current_price || 0
+          })
           console.log('[MarketCards] Added to forward position:', position.size, 'Total:', forwardActualPosition.value)
         }
       }
@@ -335,12 +393,17 @@ function handleAccountBalanceUpdate(data) {
 
     console.log('[MarketCards] Final positions:', {
       reverse: reverseActualPosition.value,
-      forward: forwardActualPosition.value
+      forward: forwardActualPosition.value,
+      reversePositions: reversePositions.value,
+      forwardPositions: forwardPositions.value,
+      hedgeCostPrice: hedgeCostPrice.value
     })
   } else {
     // No positions, reset to 0
     forwardActualPosition.value = 0
     reverseActualPosition.value = 0
+    reversePositions.value = []
+    forwardPositions.value = []
     console.log('[MarketCards] No positions in data')
   }
 }
@@ -373,6 +436,12 @@ function getPriceClass(current, previous) {
 
 function formatNumber(num) {
   return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatSpread(spread) {
+  if (!spread || isNaN(spread)) return '0.00'
+  const sign = spread >= 0 ? '+' : ''
+  return sign + spread.toFixed(2)
 }
 
 async function fetchAccountData() {
@@ -410,6 +479,8 @@ async function fetchAccountData() {
       // Reset position values
       forwardActualPosition.value = 0
       reverseActualPosition.value = 0
+      reversePositions.value = []
+      forwardPositions.value = []
 
       // Aggregate positions by platform
       data.positions.forEach(position => {
@@ -423,12 +494,24 @@ async function fetchAccountData() {
           // Bybit MT5: count all positions (both Buy and Sell)
           // Reverse arbitrage uses Bybit short positions
           if (position.side === 'Sell') {
-            reverseActualPosition.value += Math.abs(position.size || 0)
+            const posSize = Math.abs(position.size || 0)
+            reverseActualPosition.value += posSize
+            reversePositions.value.push({
+              size: posSize,
+              entry_price: position.entry_price || 0,
+              current_price: position.current_price || 0
+            })
           }
         } else if (account.platform_id === 1) {
           // Binance: count Buy (long) positions for forward arbitrage
           if (position.side === 'Buy') {
-            forwardActualPosition.value += Math.abs(position.size || 0)
+            const posSize = Math.abs(position.size || 0)
+            forwardActualPosition.value += posSize
+            forwardPositions.value.push({
+              size: posSize,
+              entry_price: position.entry_price || 0,
+              current_price: position.current_price || 0
+            })
           }
         }
       })
@@ -436,9 +519,27 @@ async function fetchAccountData() {
       // No positions, reset to 0
       forwardActualPosition.value = 0
       reverseActualPosition.value = 0
+      reversePositions.value = []
+      forwardPositions.value = []
     }
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
 }
 </script>
+
+<style scoped>
+/* 移动端H5竖屏适配 - 确保完全撑满宽度 */
+@media (orientation: portrait), (max-width: 750px) {
+  /* 移除所有内边距，让内容完全撑满 */
+  :deep(.grid) {
+    width: 100%;
+  }
+
+  /* 确保所有子元素也是100%宽度 */
+  :deep(.bg-\\[\\#1e2329\\]) {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+</style>
