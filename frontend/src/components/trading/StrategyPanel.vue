@@ -299,6 +299,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
+import { useNotificationStore } from '@/stores/notification'
 import api from '@/services/api'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 import { xauToLot } from '@/composables/useQuantityConverter'
@@ -334,6 +335,7 @@ function saveEnabledState(key, value) {
 }
 
 const marketStore = useMarketStore()
+const notificationStore = useNotificationStore()
 const currentSpread = ref(0)
 const closingSpread = ref(0)
 const binanceAssets = ref(10000)
@@ -509,12 +511,83 @@ watch(() => marketStore.marketData, (newData) => {
   }
 })
 
-// Watch for account balance updates via WebSocket
+// Watch for account balance updates and strategy status via WebSocket
 watch(() => marketStore.lastMessage, (message) => {
-  if (message && message.type === 'account_balance') {
+  if (!message) return
+
+  if (message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
+  } else if (message.type === 'strategy_trigger_progress') {
+    handleTriggerProgress(message.data)
+  } else if (message.type === 'strategy_position_change') {
+    handlePositionChange(message.data)
+  } else if (message.type === 'strategy_execution_started') {
+    handleExecutionStarted(message.data)
+  } else if (message.type === 'strategy_execution_completed') {
+    handleExecutionCompleted(message.data)
+  } else if (message.type === 'strategy_execution_error') {
+    handleExecutionError(message.data)
+  } else if (message.type === 'strategy_order_executed') {
+    handleOrderExecuted(message.data)
   }
 })
+
+// Handle strategy WebSocket events
+function handleTriggerProgress(data) {
+  // Only handle messages for this strategy
+  if (data.strategy_id !== configId.value) return
+
+  // Update trigger count based on action
+  if (data.action.includes('opening')) {
+    triggerCount.value.opening = data.current_count
+  } else if (data.action.includes('closing')) {
+    triggerCount.value.closing = data.current_count
+  }
+
+  console.log(`[WebSocket] Trigger progress: ${data.current_count}/${data.required_count} for ${data.action}`)
+}
+
+function handlePositionChange(data) {
+  // Only handle messages for this strategy
+  if (data.strategy_id !== configId.value) return
+
+  // Refresh position data
+  refreshPositions()
+
+  console.log(`[WebSocket] Position changed: ${data.change_type} ${data.quantity}`)
+}
+
+function handleExecutionStarted(data) {
+  if (data.strategy_id !== configId.value) return
+
+  executing.value = true
+  console.log(`[WebSocket] Execution started: ${data.action}`)
+}
+
+function handleExecutionCompleted(data) {
+  if (data.strategy_id !== configId.value) return
+
+  executing.value = false
+  notificationStore.showStrategyNotification(`策略执行完成: ${data.action}`, 'success')
+  console.log(`[WebSocket] Execution completed: ${data.action}`)
+}
+
+function handleExecutionError(data) {
+  if (data.strategy_id !== configId.value) return
+
+  executing.value = false
+  notificationStore.showStrategyNotification(`策略执行错误: ${data.error_message}`, 'error')
+  console.log(`[WebSocket] Execution error: ${data.error_message}`)
+}
+
+function handleOrderExecuted(data) {
+  if (data.strategy_id !== configId.value) return
+
+  // Refresh position data after order execution
+  refreshPositions()
+
+  console.log(`[WebSocket] Order executed: Binance ${data.binance_filled}, Bybit ${data.bybit_filled}`)
+}
 
 function handleAccountBalanceUpdate(data) {
   // Update available assets from WebSocket data
@@ -586,7 +659,7 @@ async function saveConfig() {
 
     const response = await api.post('/api/v1/strategies/configs/upsert', configData)
     configId.value = response.data.config_id
-    alert('配置保存成功！')
+    notificationStore.showStrategyNotification('配置保存成功！', 'success')
   } catch (error) {
     console.error('Failed to save config:', error)
     let errorMessage = '未知错误'
@@ -601,7 +674,7 @@ async function saveConfig() {
     } else if (error.message) {
       errorMessage = error.message
     }
-    alert(`配置保存失败: ${errorMessage}`)
+    notificationStore.showStrategyNotification(`配置保存失败: ${errorMessage}`, 'error')
   }
 }
 
@@ -824,7 +897,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
     const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
 
     if (!binanceAccount || !bybitMT5Account) {
-      alert('无法找到账户信息，请刷新页面重试')
+      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
       config.value.openingEnabled = false
       return
     }
@@ -860,7 +933,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
         if (binanceFilled === 0 && bybitFilled === 0) {
           const message = response.data.message || 'Binance未匹配到订单，取消策略执行，下次再试!'
           console.log(`Ladder ${ladderIndex + 1}: ${message}`)
-          alert(message)
+          notificationStore.showStrategyNotification(message, 'warning')
           config.value.openingEnabled = false
           saveEnabledState(STORAGE_KEY_OPENING, false)
           return
@@ -885,7 +958,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
             console.log('All ladders completed, stopping opening strategy')
             config.value.openingEnabled = false
             ladderProgress.value.opening.currentLadderIndex = 0
-            alert('所有阶梯开仓完成')
+            notificationStore.showStrategyNotification('所有阶梯开仓完成', 'success')
           }
         }
 
@@ -893,14 +966,14 @@ async function executeLadderOpening(ladderIndex, ladder) {
       } else {
         const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
         console.error(`Ladder ${ladderIndex + 1} execution failed:`, errorMsg)
-        alert(`阶梯 ${ladderIndex + 1} 执行失败: ${errorMsg}`)
+        notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行失败: ${errorMsg}`, 'error')
         config.value.openingEnabled = false
         saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
       }
     } catch (error) {
       console.error(`Ladder ${ladderIndex + 1} execution error:`, error)
       const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
-      alert(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`)
+      notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`, 'error')
       config.value.openingEnabled = false
       saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
     }
@@ -920,7 +993,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
     const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
 
     if (!binanceAccount || !bybitMT5Account) {
-      alert('无法找到账户信息，请刷新页面重试')
+      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
       config.value.closingEnabled = false
       return
     }
@@ -953,7 +1026,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
         if (binanceFilled === 0 && bybitFilled === 0) {
           const message = response.data.message || 'Binance未匹配到订单，取消策略执行，下次再试!'
           console.log(`Ladder ${ladderIndex + 1}: ${message}`)
-          alert(message)
+          notificationStore.showStrategyNotification(message, 'warning')
           config.value.closingEnabled = false
           saveEnabledState(STORAGE_KEY_CLOSING, false)
           return
@@ -978,7 +1051,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
             console.log('All ladders closing completed, stopping closing strategy')
             config.value.closingEnabled = false
             ladderProgress.value.closing.currentLadderIndex = 0
-            alert('所有阶梯平仓完成')
+            notificationStore.showStrategyNotification('所有阶梯平仓完成', 'success')
           }
         }
 
@@ -986,14 +1059,14 @@ async function executeLadderClosing(ladderIndex, ladder) {
       } else {
         const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
         console.error(`Ladder ${ladderIndex + 1} closing failed:`, errorMsg)
-        alert(`阶梯 ${ladderIndex + 1} 平仓失败: ${errorMsg}`)
+        notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓失败: ${errorMsg}`, 'error')
         config.value.closingEnabled = false
         saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
       }
     } catch (error) {
       console.error(`Ladder ${ladderIndex + 1} closing error:`, error)
       const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
-      alert(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`)
+      notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`, 'error')
       config.value.closingEnabled = false
       saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
     }
@@ -1013,7 +1086,7 @@ async function executeBatchOpening(ladder) {
     const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
 
     if (!binanceAccount || !bybitMT5Account) {
-      alert('无法找到账户信息，请刷新页面重试')
+      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
       config.value.openingEnabled = false
       return
     }
@@ -1076,14 +1149,14 @@ async function executeBatchOpening(ladder) {
             if (bybitResult.error) detailedError += `\nBybit: ${bybitResult.error}`
           }
 
-          alert(`批次 ${i + 1} 执行失败: ${detailedError}`)
+          notificationStore.showStrategyNotification(`批次 ${i + 1} 执行失败: ${detailedError}`, 'error')
           break
         }
       } catch (error) {
         console.error(`Batch ${i + 1} error:`, error)
         const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
         console.error('Full error:', error.response?.data)
-        alert(`批次 ${i + 1} 执行异常: ${errorMsg}`)
+        notificationStore.showStrategyNotification(`批次 ${i + 1} 执行异常: ${errorMsg}`, 'error')
         break
       }
     }
@@ -1110,7 +1183,7 @@ async function executeBatchClosing(ladder) {
     const bybitMT5Account = accounts.find(acc => acc.platform_id === 2 && acc.is_mt5_account)
 
     if (!binanceAccount || !bybitMT5Account) {
-      alert('无法找到账户信息，请刷新页面重试')
+      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
       config.value.closingEnabled = false
       return
     }
@@ -1172,14 +1245,14 @@ async function executeBatchClosing(ladder) {
             if (bybitResult.error) detailedError += `\nBybit: ${bybitResult.error}`
           }
 
-          alert(`批次 ${i + 1} 执行失败: ${detailedError}`)
+          notificationStore.showStrategyNotification(`批次 ${i + 1} 执行失败: ${detailedError}`, 'error')
           break
         }
       } catch (error) {
         console.error(`Batch ${i + 1} error:`, error)
         const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
         console.error('Full error:', error.response?.data)
-        alert(`批次 ${i + 1} 执行异常: ${errorMsg}`)
+        notificationStore.showStrategyNotification(`批次 ${i + 1} 执行异常: ${errorMsg}`, 'error')
         break
       }
     }

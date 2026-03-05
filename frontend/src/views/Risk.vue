@@ -233,36 +233,6 @@
           保存设置
         </button>
       </div>
-
-      <!-- Risk Alerts -->
-      <div class="card p-3">
-        <h2 class="text-sm font-bold mb-3">风险警报</h2>
-        <div class="space-y-2">
-          <div v-for="alert in alerts" :key="alert.id" class="bg-dark-200 rounded p-2">
-            <div class="flex justify-between items-start gap-2">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center space-x-1 mb-1">
-                  <span :class="['px-1.5 py-0.5 rounded text-xs', getAlertClass(alert.level)]">
-                    {{ alert.level }}
-                  </span>
-                  <span class="font-bold text-xs truncate">{{ alert.title }}</span>
-                </div>
-                <p class="text-xs text-gray-400 break-words">{{ alert.message }}</p>
-                <p class="text-xs text-gray-500 mt-1">{{ formatTime(alert.time) }}</p>
-              </div>
-              <button @click="dismissAlert(alert.id)" class="text-gray-400 hover:text-white flex-shrink-0">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <div v-if="!alerts.length" class="text-center text-gray-400 py-6 text-xs">
-            无活动警报
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -272,15 +242,16 @@ import { ref, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
+import { useNotificationStore } from '@/stores/notification'
 
 const marketStore = useMarketStore()
+const notificationStore = useNotificationStore()
 const emergencyStopActive = ref(false)
 const riskMetrics = ref({
   accountRisk: 45,
   mt5Status: '正常',
   activeAlerts: 0
 })
-const alerts = ref([])
 
 // Alert Settings
 const alertSettings = ref({
@@ -314,31 +285,24 @@ onMounted(async () => {
   await fetchRiskData()
   await fetchAlertSettings()
 
-  // Reduced polling frequency (30s instead of 5s)
-  setInterval(fetchRiskData, 30000)
+  // Update active alerts count from notification store
+  riskMetrics.value.activeAlerts = notificationStore.riskAlerts.length
+
+  // Note: Removed 30s polling - now using WebSocket risk_metrics messages
+  // Backend broadcasts risk_metrics every 30s via WebSocket
 })
 
-// Watch for risk alerts via WebSocket
+// Watch for risk alerts and metrics via WebSocket
 watch(() => marketStore.lastMessage, (message) => {
   if (message && message.type === 'risk_alert') {
-    handleRiskAlert(message.data)
+    // Delegate to notification store
+    notificationStore.handleRiskAlert(message.data)
+    // Update active alerts count
+    riskMetrics.value.activeAlerts = notificationStore.riskAlerts.length
   } else if (message && message.type === 'risk_metrics') {
     updateRiskMetrics(message.data)
   }
 })
-
-function handleRiskAlert(alertData) {
-  // Add new alert to the list
-  alerts.value = [
-    {
-      id: Date.now(),
-      level: alertData.level || 'warning',
-      message: alertData.message,
-      time: alertData.timestamp || new Date().toISOString()
-    },
-    ...alerts.value
-  ].slice(0, 10) // Keep only last 10 alerts
-}
 
 function updateRiskMetrics(data) {
   if (data.emergency_stop_active !== undefined) {
@@ -385,22 +349,5 @@ async function toggleEmergencyStop() {
   } catch (error) {
     console.error('Failed to toggle emergency stop:', error)
   }
-}
-
-async function dismissAlert(id) {
-  alerts.value = alerts.value.filter(a => a.id !== id)
-}
-
-function getAlertClass(level) {
-  const classes = {
-    critical: 'bg-red-500/20 text-red-400',
-    warning: 'bg-yellow-500/20 text-yellow-400',
-    info: 'bg-blue-500/20 text-blue-400'
-  }
-  return classes[level] || 'bg-gray-500/20 text-gray-400'
-}
-
-function formatTime(time) {
-  return dayjs(time).format('MM-DD HH:mm:ss')
 }
 </script>

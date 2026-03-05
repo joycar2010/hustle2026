@@ -9,6 +9,7 @@ export const useNotificationStore = defineStore('notification', () => {
   const audioContext = ref(null)
   const isAudioPlaying = ref(false)
   const systemAlerts = ref([])
+  const riskAlerts = ref([]) // Risk alerts from Risk.vue
 
   // Alert switches with localStorage persistence
   const alertSoundEnabled = ref(localStorage.getItem('alertSoundEnabled') !== 'false')
@@ -387,6 +388,63 @@ export const useNotificationStore = defineStore('notification', () => {
     return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
+  // Handle risk alert from WebSocket
+  function handleRiskAlert(alertData) {
+    const newAlert = {
+      id: Date.now(),
+      level: alertData.level || 'warning',
+      title: alertData.title || '风险警报',
+      message: alertData.message,
+      time: alertData.timestamp || new Date().toISOString()
+    }
+
+    // Add to risk alerts list (keep last 10)
+    riskAlerts.value = [newAlert, ...riskAlerts.value].slice(0, 10)
+
+    // Also trigger popup for critical alerts
+    if (alertData.level === 'critical' || alertData.level === 'danger') {
+      triggerPopup(newAlert)
+    }
+  }
+
+  // Dismiss risk alert
+  function dismissRiskAlert(id) {
+    riskAlerts.value = riskAlerts.value.filter(a => a.id !== id)
+  }
+
+  // Show strategy notification (success/error/info)
+  function showStrategyNotification(message, type = 'info') {
+    const levelMap = {
+      success: 'info',
+      error: 'critical',
+      warning: 'warning',
+      info: 'info'
+    }
+
+    const alert = {
+      id: Date.now() + '_strategy',
+      type: 'strategy_notification',
+      level: levelMap[type] || 'info',
+      title: type === 'error' ? '策略执行失败' : type === 'success' ? '策略执行成功' : '策略通知',
+      message: message,
+      timestamp: new Date().toISOString()
+    }
+
+    alerts.value.push(alert)
+
+    // Trigger popup for errors and important messages
+    if (type === 'error' || type === 'warning') {
+      triggerPopup(alert)
+    }
+
+    // Auto-dismiss after 5 seconds for success/info messages
+    if (type === 'success' || type === 'info') {
+      setTimeout(() => {
+        dismissAlert(alert.id)
+      }, 5000)
+    }
+  }
+
   return {
     alerts,
     alertSettings,
@@ -395,6 +453,7 @@ export const useNotificationStore = defineStore('notification', () => {
     alertSoundEnabled,
     singleLegAlertEnabled,
     systemAlerts,
+    riskAlerts,
     loadAlertSettings,
     checkMarketAlerts,
     checkAccountAlerts,
@@ -404,6 +463,9 @@ export const useNotificationStore = defineStore('notification', () => {
     dismissPopup,
     toggleAlertSound,
     toggleSingleLegAlert,
-    updateSystemAlerts
+    updateSystemAlerts,
+    handleRiskAlert,
+    dismissRiskAlert,
+    showStrategyNotification
   }
 })

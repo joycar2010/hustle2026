@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
@@ -51,6 +51,7 @@ const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const activeNav = ref('strategy')
 const redisStatus = ref({ healthy: false, last_error: null })
+let redisCheckInterval = null
 
 // Combine notification store alerts with Redis status
 const systemAlerts = computed(() => {
@@ -80,8 +81,8 @@ onMounted(async () => {
   await fetchSystemAlerts()
   await fetchRedisStatus()
 
-  // Fetch Redis status every 30 seconds
-  setInterval(fetchRedisStatus, 30000)
+  // Keep Redis status polling (30s) - no WebSocket alternative yet
+  redisCheckInterval = setInterval(fetchRedisStatus, 30000)
 
   // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
   watch(() => marketStore.lastMessage, (message) => {
@@ -89,6 +90,12 @@ onMounted(async () => {
       notificationStore.updateSystemAlerts(message.data)
     }
   })
+})
+
+onUnmounted(() => {
+  if (redisCheckInterval) {
+    clearInterval(redisCheckInterval)
+  }
 })
 
 async function fetchSystemAlerts() {

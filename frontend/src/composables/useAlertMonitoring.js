@@ -7,10 +7,10 @@ export function useAlertMonitoring() {
   const notificationStore = useNotificationStore()
   const marketStore = useMarketStore()
 
-  let mt5CheckInterval = null
   let unwatchMarket = null
   let unwatchAccount = null
   let unwatchSingleLeg = null
+  let unwatchMT5 = null
 
   // Monitor market data for spread alerts
   async function checkMarketData() {
@@ -92,8 +92,14 @@ export function useAlertMonitoring() {
       }
     })
 
-    // Keep MT5 status polling (30s) - no WebSocket alternative yet
-    mt5CheckInterval = setInterval(checkMT5Status, 30000)
+    // Watch for MT5 connection status WebSocket messages (backend broadcasts every 30s)
+    unwatchMT5 = watch(() => marketStore.lastMessage, (message) => {
+      if (message && message.type === 'mt5_connection_status') {
+        if (!message.data.healthy || message.data.connection_failures > 0) {
+          notificationStore.checkMT5LagAlert(message.data.connection_failures)
+        }
+      }
+    })
 
     // Initial checks
     checkMarketData()
@@ -103,10 +109,10 @@ export function useAlertMonitoring() {
 
   // Stop monitoring
   function stopMonitoring() {
-    if (mt5CheckInterval) clearInterval(mt5CheckInterval)
     if (unwatchMarket) unwatchMarket()
     if (unwatchAccount) unwatchAccount()
     if (unwatchSingleLeg) unwatchSingleLeg()
+    if (unwatchMT5) unwatchMT5()
   }
 
   // Auto-start on mount and cleanup on unmount

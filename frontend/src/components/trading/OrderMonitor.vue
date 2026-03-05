@@ -74,10 +74,11 @@ onMounted(() => {
     }
   })
 
-  // 添加定时刷新挂单（每0.5秒刷新一次Binance实时挂单）
+  // Reduced polling frequency as fallback (10s instead of 0.5s)
+  // WebSocket order_update should handle most updates in real-time
   refreshInterval = setInterval(() => {
     fetchPendingOrders()
-  }, 500)
+  }, 10000)
 })
 
 onUnmounted(() => {

@@ -12,11 +12,12 @@ from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
 from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management
 from app.tasks.market_data import market_streamer
-from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer
+from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer
 from app.tasks.redis_monitor import redis_monitor
 from app.services.position_monitor import position_monitor
 from app.services.realtime_market_service import market_data_service
 from app.services.binance_ws_client import binance_ws
+from app.services.strategy_status_pusher import status_pusher
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,20 @@ async def lifespan(app: FastAPI):
     await market_streamer.start()
     await account_balance_streamer.start()
     await risk_metrics_streamer.start()
+    await mt5_connection_streamer.start()  # Start MT5 connection monitor
     await position_monitor.start_monitoring()
     await market_data_service.start()
+    await status_pusher.start()  # Start strategy status pusher
     yield
     # Shutdown
     await binance_ws.stop()
     await market_streamer.stop()
     await account_balance_streamer.stop()
     await risk_metrics_streamer.stop()
+    await mt5_connection_streamer.stop()  # Stop MT5 connection monitor
     await position_monitor.stop_monitoring()
     await market_data_service.stop()
+    await status_pusher.stop()  # Stop strategy status pusher
     await redis_monitor.stop()  # Stop Redis monitor
     await redis_client.disconnect()
 

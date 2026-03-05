@@ -1,11 +1,13 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
+from datetime import datetime
 from app.websocket.manager import manager
 from app.core.database import get_db_context
 from app.models.account import Account
 from app.services.account_service import account_data_service
 from sqlalchemy import select
 import logging
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,86 @@ class RiskMetricsStreamer:
                 await asyncio.sleep(self.interval)
 
 
+class MT5ConnectionStreamer:
+    """Background task for streaming MT5 connection status"""
+
+    def __init__(self):
+        self.running = False
+        self.task = None
+        self.interval = 30  # Update interval in seconds (every 30s)
+
+    async def start(self):
+        """Start the MT5 connection streaming task"""
+        if self.running:
+            return
+
+        self.running = True
+        self.task = asyncio.create_task(self._stream_loop())
+        logger.info("MT5 connection streamer started (interval: 30s)")
+
+    async def stop(self):
+        """Stop the MT5 connection streaming task"""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("MT5 connection streamer stopped")
+
+    async def _stream_loop(self):
+        """Main streaming loop"""
+        while self.running:
+            try:
+                # Only broadcast if there are active connections
+                if manager.get_connection_count() == 0:
+                    await asyncio.sleep(self.interval)
+                    continue
+
+                # Check MT5 connection status
+                mt5_status = await self._check_mt5_status()
+
+                # Broadcast to all connected clients
+                await manager.broadcast({
+                    "type": "mt5_connection_status",
+                    "data": mt5_status
+                })
+
+                # Wait for next interval
+                await asyncio.sleep(self.interval)
+
+            except Exception as e:
+                logger.error(f"Error in MT5 connection stream: {str(e)}", exc_info=True)
+                await asyncio.sleep(self.interval)
+
+    async def _check_mt5_status(self):
+        """Check MT5 connection status"""
+        try:
+            # Try to call the MT5 status endpoint
+            async with aiohttp.ClientSession() as session:
+                async with session.get('http://localhost:8000/api/v1/market/connection/status', timeout=5) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        mt5_data = data.get('mt5', {})
+                        return {
+                            "healthy": mt5_data.get('healthy', False),
+                            "connection_failures": mt5_data.get('connection_failures', 0),
+                            "last_check": datetime.utcnow().isoformat(),
+                            "status": "connected" if mt5_data.get('healthy') else "disconnected"
+                        }
+        except Exception as e:
+            logger.error(f"Failed to check MT5 status: {e}")
+
+        return {
+            "healthy": False,
+            "connection_failures": 0,
+            "last_check": datetime.utcnow().isoformat(),
+            "status": "unknown"
+        }
+
+
 # Global streamer instances
 account_balance_streamer = AccountBalanceStreamer()
 risk_metrics_streamer = RiskMetricsStreamer()
+mt5_connection_streamer = MT5ConnectionStreamer()

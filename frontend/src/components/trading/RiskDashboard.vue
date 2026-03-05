@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 
@@ -82,8 +82,6 @@ const totalEquity = computed(() => riskData.value.binanceEquity + riskData.value
 
 riskData.value.totalEquity = totalEquity.value
 
-let updateInterval = null
-
 onMounted(async () => {
   // Ensure WebSocket connection
   if (!marketStore.connected) {
@@ -93,17 +91,11 @@ onMounted(async () => {
   // Initial fetch
   await fetchRiskData()
 
-  // Reduced polling frequency (30s instead of 5s) since risk data changes less frequently
-  updateInterval = setInterval(fetchRiskData, 30000)
+  // Note: Removed 30s polling - now using WebSocket risk_metrics messages
+  // Backend broadcasts risk_metrics every 30s via WebSocket
 })
 
-onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
-})
-
-// Watch for risk metrics updates via WebSocket (when backend implements it)
+// Watch for risk metrics updates via WebSocket
 watch(() => marketStore.lastMessage, (message) => {
   if (message && message.type === 'risk_metrics') {
     updateRiskData(message.data)
