@@ -36,6 +36,27 @@
         <button @click="showRecentDays(30)" class="btn-secondary" :disabled="loading">
           最近30天
         </button>
+
+        <!-- Export Dropdown -->
+        <div class="relative" v-if="hasData">
+          <button @click="showExportMenu = !showExportMenu" class="btn-secondary flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            导出数据
+          </button>
+          <div v-if="showExportMenu" class="absolute right-0 mt-2 w-48 bg-dark-100 border border-border-primary rounded shadow-lg z-10">
+            <button @click="exportData('csv')" class="w-full text-left px-4 py-2 hover:bg-dark-200 transition-colors">
+              导出为 CSV
+            </button>
+            <button @click="exportData('xlsx')" class="w-full text-left px-4 py-2 hover:bg-dark-200 transition-colors">
+              导出为 Excel (XLSX)
+            </button>
+            <button @click="exportData('pdf')" class="w-full text-left px-4 py-2 hover:bg-dark-200 transition-colors">
+              导出为 PDF
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -211,13 +232,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 // Query Controls
 const startTime = ref('')
 const endTime = ref('')
 const loading = ref(false)
+const showExportMenu = ref(false)
 
 // Initialize with today's date range (00:00:00 to 23:59:59)
 function initializeDateRange() {
@@ -395,9 +420,277 @@ function formatDateTime(timestamp) {
   })
 }
 
+// Export functions
+function exportData(format) {
+  showExportMenu.value = false
+
+  if (!hasData.value) {
+    alert('没有数据可导出')
+    return
+  }
+
+  const timestamp = new Date().toISOString().split('T')[0]
+  const filename = `trading_history_${timestamp}`
+
+  if (format === 'csv') {
+    exportToCSV(filename)
+  } else if (format === 'xlsx') {
+    exportToExcel(filename)
+  } else if (format === 'pdf') {
+    exportToPDF(filename)
+  }
+}
+
+function exportToCSV(filename) {
+  const binanceHeaders = ['交易对', '方向', '成交价', '成交量', '成交额', '类别', '时间', '手续费']
+  const binanceRows = accountTrades.value.map(trade => [
+    trade.symbol,
+    trade.side === 'buy' ? '买入' : '卖出',
+    trade.price != null ? Number(trade.price).toFixed(2) : '-',
+    trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-',
+    trade.amount != null ? Number(trade.amount).toFixed(2) : '-',
+    trade.maker ? '挂单' : '吃单',
+    formatDateTime(trade.timestamp),
+    trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
+  ])
+
+  const mt5Headers = ['交易对', '方向', '成交价', '成交量', '成交额', '过夜费', '时间', '手续费']
+  const mt5Rows = mt5Trades.value.map(trade => [
+    trade.symbol,
+    trade.side === 'buy' ? '买入' : '卖出',
+    trade.price != null ? Number(trade.price).toFixed(2) : '-',
+    trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-',
+    trade.amount != null ? Number(trade.amount).toFixed(2) : '-',
+    trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00',
+    formatDateTime(trade.timestamp),
+    trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
+  ])
+
+  const csvContent = [
+    ['交易历史数据报告'],
+    [`查询时间: ${startTime.value} 至 ${endTime.value}`],
+    [],
+    ['=== Binance账户统计 ==='],
+    ['成交量汇总', stats.value.totalVolume?.toFixed(2) || '0.00'],
+    ['成交额汇总', (stats.value.totalAmount?.toFixed(2) || '0.00') + ' USDT'],
+    ['成交额(吃单)', (stats.value.takerAmount?.toFixed(2) || '0.00') + ' USDT'],
+    ['成交额(挂单)', (stats.value.makerAmount?.toFixed(2) || '0.00') + ' USDT'],
+    ['手续费汇总(USDT)', (stats.value.totalFees?.toFixed(2) || '0.00') + ' USDT'],
+    ['手续费汇总(BNB)', (stats.value.bnbFees?.toFixed(4) || '0.0000') + ' BNB'],
+    ['已实现盈亏', (stats.value.realizedPnL?.toFixed(2) || '0.00') + ' USDT'],
+    [],
+    ['=== Bybit MT5统计 ==='],
+    ['成交量汇总', stats.value.mt5Volume?.toFixed(2) || '0.00'],
+    ['成交额汇总', (stats.value.mt5Amount?.toFixed(2) || '0.00') + ' USDT'],
+    ['MT5过夜费', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
+    ['MT5手续费', (stats.value.mt5Fee?.toFixed(2) || '0.00') + ' USDT'],
+    ['MT5已实现盈亏', (stats.value.mt5RealizedPnL?.toFixed(2) || '0.00') + ' USDT'],
+    [],
+    ['=== Binance账户成交历史 ==='],
+    binanceHeaders,
+    ...binanceRows,
+    [],
+    ['=== Bybit MT5成交历史 ==='],
+    mt5Headers,
+    ...mt5Rows
+  ].map(row => row.join(',')).join('\n')
+
+  const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `${filename}.csv`
+  link.click()
+}
+
+function exportToExcel(filename) {
+  const wb = XLSX.utils.book_new()
+
+  // Statistics sheet
+  const statsData = [
+    ['交易历史数据报告'],
+    [`查询时间: ${startTime.value} 至 ${endTime.value}`],
+    [],
+    ['Binance账户统计', ''],
+    ['成交量汇总', stats.value.totalVolume?.toFixed(2) || '0.00'],
+    ['成交额汇总', (stats.value.totalAmount?.toFixed(2) || '0.00') + ' USDT'],
+    ['成交额(吃单)', (stats.value.takerAmount?.toFixed(2) || '0.00') + ' USDT'],
+    ['成交额(挂单)', (stats.value.makerAmount?.toFixed(2) || '0.00') + ' USDT'],
+    ['手续费汇总(USDT)', (stats.value.totalFees?.toFixed(2) || '0.00') + ' USDT'],
+    ['手续费汇总(BNB)', (stats.value.bnbFees?.toFixed(4) || '0.0000') + ' BNB'],
+    ['已实现盈亏', (stats.value.realizedPnL?.toFixed(2) || '0.00') + ' USDT'],
+    [],
+    ['Bybit MT5统计', ''],
+    ['成交量汇总', stats.value.mt5Volume?.toFixed(2) || '0.00'],
+    ['成交额汇总', (stats.value.mt5Amount?.toFixed(2) || '0.00') + ' USDT'],
+    ['MT5过夜费', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
+    ['MT5手续费', (stats.value.mt5Fee?.toFixed(2) || '0.00') + ' USDT'],
+    ['MT5已实现盈亏', (stats.value.mt5RealizedPnL?.toFixed(2) || '0.00') + ' USDT']
+  ]
+  const statsSheet = XLSX.utils.aoa_to_sheet(statsData)
+  XLSX.utils.book_append_sheet(wb, statsSheet, '统计数据')
+
+  // Binance sheet
+  const binanceData = [
+    ['交易对', '方向', '成交价', '成交量', '成交额', '类别', '时间', '手续费'],
+    ...accountTrades.value.map(trade => [
+      trade.symbol,
+      trade.side === 'buy' ? '买入' : '卖出',
+      trade.price != null ? Number(trade.price).toFixed(2) : '-',
+      trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-',
+      trade.amount != null ? Number(trade.amount).toFixed(2) : '-',
+      trade.maker ? '挂单' : '吃单',
+      formatDateTime(trade.timestamp),
+      trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
+    ])
+  ]
+  const binanceSheet = XLSX.utils.aoa_to_sheet(binanceData)
+  XLSX.utils.book_append_sheet(wb, binanceSheet, 'Binance成交历史')
+
+  // MT5 sheet
+  const mt5Data = [
+    ['交易对', '方向', '成交价', '成交量', '成交额', '过夜费', '时间', '手续费'],
+    ...mt5Trades.value.map(trade => [
+      trade.symbol,
+      trade.side === 'buy' ? '买入' : '卖出',
+      trade.price != null ? Number(trade.price).toFixed(2) : '-',
+      trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-',
+      trade.amount != null ? Number(trade.amount).toFixed(2) : '-',
+      trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00',
+      formatDateTime(trade.timestamp),
+      trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
+    ])
+  ]
+  const mt5Sheet = XLSX.utils.aoa_to_sheet(mt5Data)
+  XLSX.utils.book_append_sheet(wb, mt5Sheet, 'MT5成交历史')
+
+  XLSX.writeFile(wb, `${filename}.xlsx`)
+}
+
+function exportToPDF(filename) {
+  try {
+    // Create PDF document
+    const doc = new jsPDF()
+
+    // Title
+    doc.setFontSize(16)
+    doc.text('Trading History Report', 14, 15)
+
+    // Date range
+    doc.setFontSize(10)
+    doc.text(`Query Time: ${startTime.value} to ${endTime.value}`, 14, 25)
+
+    // Binance Statistics
+    doc.setFontSize(12)
+    doc.text('Binance Account Statistics', 14, 35)
+
+    autoTable(doc, {
+      startY: 40,
+      head: [['Item', 'Value']],
+      body: [
+        ['Total Volume', stats.value.totalVolume?.toFixed(2) || '0.00'],
+        ['Total Amount', (stats.value.totalAmount?.toFixed(2) || '0.00') + ' USDT'],
+        ['Taker Amount', (stats.value.takerAmount?.toFixed(2) || '0.00') + ' USDT'],
+        ['Maker Amount', (stats.value.makerAmount?.toFixed(2) || '0.00') + ' USDT'],
+        ['Total Fees (USDT)', (stats.value.totalFees?.toFixed(2) || '0.00') + ' USDT'],
+        ['Total Fees (BNB)', (stats.value.bnbFees?.toFixed(4) || '0.0000') + ' BNB'],
+        ['Realized PnL', (stats.value.realizedPnL?.toFixed(2) || '0.00') + ' USDT']
+      ],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [41, 128, 185] }
+    })
+
+    // MT5 Statistics
+    let currentY = doc.previousAutoTable.finalY + 10
+    doc.text('Bybit MT5 Statistics', 14, currentY)
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [['Item', 'Value']],
+      body: [
+        ['Total Volume', stats.value.mt5Volume?.toFixed(2) || '0.00'],
+        ['Total Amount', (stats.value.mt5Amount?.toFixed(2) || '0.00') + ' USDT'],
+        ['Overnight Fee', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
+        ['MT5 Fee', (stats.value.mt5Fee?.toFixed(2) || '0.00') + ' USDT'],
+        ['MT5 Realized PnL', (stats.value.mt5RealizedPnL?.toFixed(2) || '0.00') + ' USDT']
+      ],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [231, 76, 60] }
+    })
+
+    // Binance trades table
+    currentY = doc.previousAutoTable.finalY + 10
+    doc.text('Binance Account Trade History', 14, currentY)
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [['Symbol', 'Side', 'Price', 'Qty', 'Amount', 'Type', 'Time', 'Fee']],
+      body: accountTrades.value.map(trade => [
+        trade.symbol,
+        trade.side === 'buy' ? 'Buy' : 'Sell',
+        trade.price != null ? Number(trade.price).toFixed(2) : '-',
+        trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-',
+        trade.amount != null ? Number(trade.amount).toFixed(2) : '-',
+        trade.maker ? 'Maker' : 'Taker',
+        formatDateTime(trade.timestamp),
+        trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
+      ]),
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [41, 128, 185] }
+    })
+
+    // MT5 trades table
+    currentY = doc.previousAutoTable.finalY + 10
+
+    // Check if we need a new page
+    if (currentY > 250) {
+      doc.addPage()
+      currentY = 15
+    }
+
+    doc.text('Bybit MT5 Trade History', 14, currentY)
+
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [['Symbol', 'Side', 'Price', 'Qty', 'Amount', 'Overnight', 'Time', 'Fee']],
+      body: mt5Trades.value.map(trade => [
+        trade.symbol,
+        trade.side === 'buy' ? 'Buy' : 'Sell',
+        trade.price != null ? Number(trade.price).toFixed(2) : '-',
+        trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-',
+        trade.amount != null ? Number(trade.amount).toFixed(2) : '-',
+        trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00',
+        formatDateTime(trade.timestamp),
+        trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
+      ]),
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [231, 76, 60] }
+    })
+
+    doc.save(`${filename}.pdf`)
+    console.log('PDF exported successfully')
+  } catch (error) {
+    console.error('PDF export error:', error)
+    console.error('Error stack:', error.stack)
+    alert('PDF导出失败: ' + error.message + '\n\n请尝试：\n1. 刷新页面 (Ctrl+Shift+R)\n2. 清除浏览器缓存\n3. 使用CSV或Excel导出')
+  }
+}
+
+// Close export menu when clicking outside
+function handleClickOutside(event) {
+  const exportMenu = event.target.closest('.relative')
+  if (!exportMenu && showExportMenu.value) {
+    showExportMenu.value = false
+  }
+}
+
 // Load today's data on mount
 onMounted(() => {
   initializeDateRange()
   queryData()
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>

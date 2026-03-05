@@ -58,7 +58,7 @@
               <td colspan="9" class="text-center py-8 text-gray-500">暂无数据</td>
             </tr>
             <tr v-for="order in orders" :key="order.id" class="border-b border-gray-800">
-              <td class="py-3">{{ formatDateTime(order.timestamp) }}</td>
+              <td class="py-3">{{ formatDateTimeBeijing(order.timestamp) }}</td>
               <td class="text-xs text-gray-400">{{ order.exchange }}</td>
               <td>{{ order.symbol }}</td>
               <td>
@@ -99,6 +99,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
+import { formatDateTimeBeijing } from '@/utils/timeUtils'
 
 const orders = ref([])
 const filterSource = ref('')
@@ -158,19 +159,6 @@ async function manualProcessOrder(orderId) {
     console.error('Failed to process order:', error)
     alert('操作失败: ' + (error.response?.data?.detail || error.message))
   }
-}
-
-function formatDateTime(timestamp) {
-  if (!timestamp) return '-'
-  const date = new Date(timestamp)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
 }
 
 function getStatusClass(status) {

@@ -13,8 +13,6 @@
                   class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
             <option value="recent">近2小时</option>
             <option value="day">按日</option>
-            <option value="week">按周</option>
-            <option value="month">按月</option>
             <option value="custom">自定义时间段</option>
           </select>
         </div>
@@ -23,18 +21,6 @@
         <div v-if="queryType === 'day'">
           <label class="block text-sm text-gray-400 mb-2">选择日期</label>
           <input type="date" v-model="selectedDate"
-                 class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
-        </div>
-
-        <div v-if="queryType === 'week'">
-          <label class="block text-sm text-gray-400 mb-2">选择周</label>
-          <input type="week" v-model="selectedWeek"
-                 class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
-        </div>
-
-        <div v-if="queryType === 'month'">
-          <label class="block text-sm text-gray-400 mb-2">选择月份</label>
-          <input type="month" v-model="selectedMonth"
                  class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary" />
         </div>
 
@@ -124,7 +110,7 @@
           </thead>
           <tbody>
             <tr v-for="record in paginatedRecords" :key="record.id" class="border-b border-gray-800">
-              <td class="py-3">{{ formatDateTime(record.timestamp) }}</td>
+              <td class="py-3">{{ formatDateTimeBeijing(record.timestamp) }}</td>
               <td :class="record.forward_spread >= 2.0 ? 'text-green-500' : record.forward_spread <= -2.0 ? 'text-red-500' : 'text-gray-400'">
                 {{ record.forward_spread.toFixed(2) }}
               </td>
@@ -178,6 +164,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Chart, registerables } from 'chart.js'
 import api from '@/services/api'
+import { formatDateTimeBeijing, formatTimeBeijing } from '@/utils/timeUtils'
 
 Chart.register(...registerables)
 
@@ -404,7 +391,7 @@ function getFirstDayOfWeek(year, week) {
 function updateCharts() {
   if (spreadRecords.value.length === 0) return
 
-  const labels = spreadRecords.value.map(r => formatTime(r.timestamp))
+  const labels = spreadRecords.value.map(r => formatTimeBeijing(r.timestamp))
   const forwardData = spreadRecords.value.map(r => r.forward_spread)
   const reverseData = spreadRecords.value.map(r => r.reverse_spread)
 
@@ -497,31 +484,11 @@ function updateCharts() {
   }
 }
 
-function formatDateTime(timestamp) {
-  const date = new Date(timestamp)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-}
-
-function formatTime(timestamp) {
-  const date = new Date(timestamp)
-  return date.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
 function exportData() {
   const csv = [
     ['时间', '正向开仓点差', '反向开仓点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价'],
     ...spreadRecords.value.map(r => [
-      formatDateTime(r.timestamp),
+      formatDateTimeBeijing(r.timestamp),
       r.forward_spread.toFixed(2),
       r.reverse_spread.toFixed(2),
       r.binance_bid.toFixed(2),
