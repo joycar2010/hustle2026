@@ -18,6 +18,7 @@ from app.services.position_monitor import position_monitor
 from app.services.realtime_market_service import market_data_service
 from app.services.binance_ws_client import binance_ws
 from app.services.strategy_status_pusher import status_pusher
+from app.services.mt5_bridge import mt5_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
     await account_balance_streamer.start()
     await risk_metrics_streamer.start()
     await mt5_connection_streamer.start()  # Start MT5 connection monitor
+    await mt5_bridge.start()  # Start MT5 real-time bridge
     await position_monitor.start_monitoring()
     await market_data_service.start()
     await status_pusher.start()  # Start strategy status pusher
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     await account_balance_streamer.stop()
     await risk_metrics_streamer.stop()
     await mt5_connection_streamer.stop()  # Stop MT5 connection monitor
+    await mt5_bridge.stop()  # Stop MT5 real-time bridge
     await position_monitor.stop_monitoring()
     await market_data_service.stop()
     await status_pusher.stop()  # Stop strategy status pusher

@@ -14,6 +14,7 @@ from app.core.security import get_current_user_id
 from app.core.config import settings
 from app.tasks.redis_monitor import redis_monitor
 from app.services.version_service import version_service
+from app.services.mt5_bridge import mt5_bridge
 
 router = APIRouter()
 
@@ -1237,6 +1238,26 @@ async def get_redis_status(
             "service": "Memurai",
             "healthy": False,
             "last_error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+@router.get("/mt5-bridge/status")
+async def get_mt5_bridge_status(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get MT5 Bridge service status"""
+    try:
+        stats = mt5_bridge.get_stats()
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
 

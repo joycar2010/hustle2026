@@ -12,13 +12,13 @@ from app.utils.quantity_converter import quantity_converter
 class OrderExecutorV2:
     """
     Optimized order executor with V2.0 specifications:
-    - Binance timeout: 0.4 seconds
+    - Binance timeout: 0.3 seconds
     - Bybit timeout: 0.1 seconds
     - Single retry for unfilled orders
     """
 
     def __init__(self):
-        self.binance_timeout = 0.4  # 400ms (从0.2秒增加到0.4秒)
+        self.binance_timeout = 0.3  # 300ms
         self.bybit_timeout = 0.1    # 100ms
         self.max_retries = 1        # Only 1 retry (循环一次)
         self.base_executor = base_executor
@@ -37,7 +37,7 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit SELL order (open short)
-        2. Monitor Binance order (0.4s timeout)
+        2. Monitor Binance order (0.3s timeout)
         3. Bybit market BUY order (open long) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
@@ -136,7 +136,7 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit BUY order (close short)
-        2. Monitor Binance order (0.4s timeout)
+        2. Monitor Binance order (0.3s timeout)
         3. Bybit market SELL order (close long) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
@@ -235,7 +235,7 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit BUY order (open long)
-        2. Monitor Binance order (0.4s timeout)
+        2. Monitor Binance order (0.3s timeout)
         3. Bybit market SELL order (open short) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
@@ -334,7 +334,7 @@ class OrderExecutorV2:
 
         Flow:
         1. Binance limit SELL order (close long)
-        2. Monitor Binance order (0.4s timeout)
+        2. Monitor Binance order (0.3s timeout)
         3. Bybit market BUY order (close short) with Binance filled quantity
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
