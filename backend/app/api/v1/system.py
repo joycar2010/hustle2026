@@ -1261,3 +1261,23 @@ async def get_mt5_bridge_status(
             "timestamp": datetime.utcnow().isoformat()
         }
 
+
+@router.get("/market-streamer/stats")
+async def get_market_streamer_stats(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get market data streamer statistics (dynamic frequency)"""
+    try:
+        from app.tasks.market_data import market_streamer
+        stats = market_streamer.get_stats()
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }

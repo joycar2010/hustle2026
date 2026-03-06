@@ -55,7 +55,6 @@ const orders = ref([])
 const pendingOrders = ref([])
 const filterSource = ref('')
 let unwatchOrders = null
-let refreshInterval = null
 
 onMounted(() => {
   // Connect to WebSocket if not already connected
@@ -74,19 +73,12 @@ onMounted(() => {
     }
   })
 
-  // Reduced polling frequency as fallback (10s instead of 0.5s)
-  // WebSocket order_update should handle most updates in real-time
-  refreshInterval = setInterval(() => {
-    fetchPendingOrders()
-  }, 10000)
+  // Removed polling - rely entirely on WebSocket order_update for real-time updates
 })
 
 onUnmounted(() => {
   if (unwatchOrders) {
     unwatchOrders()
-  }
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
   }
 })
 

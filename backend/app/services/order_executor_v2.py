@@ -535,7 +535,7 @@ class OrderExecutorV2:
         close_position: bool = True
     ) -> float:
         """
-        Execute Bybit market BUY order with retry logic.
+        Execute Bybit market BUY order with retry logic and volume verification.
 
         Args:
             close_position: If True, close existing SHORT position instead of opening new LONG
@@ -561,31 +561,50 @@ class OrderExecutorV2:
                 break
 
             order_id = result["order_id"]
+            ticket = int(order_id)
 
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # Check order status
-            status = await self.base_executor.check_bybit_order_status(
-                account, symbol, order_id
+            # Additional wait for MT5 to process deals
+            await asyncio.sleep(0.3)
+
+            # Check actual filled volume from MT5 deals
+            volume_check = await self._check_mt5_filled_volume(
+                account, ticket, remaining
             )
 
-            if status.get("success"):
-                filled_qty = status.get("filled_qty", 0)
-                total_filled += filled_qty
+            actual_filled = volume_check["actual_filled"]
+            is_partial = volume_check["is_partial_fill"]
 
-                if filled_qty >= remaining:
-                    # Fully filled
+            if actual_filled > 0:
+                total_filled += actual_filled
+
+                # Send alert if partial fill detected
+                if is_partial and actual_filled < remaining * 0.5:
+                    await self._send_partial_fill_alert(
+                        account.user_id,
+                        symbol,
+                        remaining,
+                        actual_filled,
+                        ticket
+                    )
+                    print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
+
+                if actual_filled >= remaining * 0.95:
+                    # Consider 95%+ as fully filled
                     break
 
-                # Partially filled, cancel and retry with remaining
-                await self.base_executor.cancel_bybit_order(account, symbol, order_id)
-                remaining -= filled_qty
+                # Partially filled, update remaining
+                remaining -= actual_filled
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
                     print(f"Warning: Bybit order not fully filled after {self.max_retries + 1} attempts. "
                           f"Filled: {total_filled}, Remaining: {remaining}")
+            else:
+                # No fill detected, break
+                break
 
         return total_filled
 
@@ -597,7 +616,7 @@ class OrderExecutorV2:
         close_position: bool = True
     ) -> float:
         """
-        Execute Bybit market SELL order with retry logic.
+        Execute Bybit market SELL order with retry logic and volume verification.
 
         Args:
             close_position: If True, close existing LONG position instead of opening new SHORT
@@ -623,33 +642,151 @@ class OrderExecutorV2:
                 break
 
             order_id = result["order_id"]
+            ticket = int(order_id)
 
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # Check order status
-            status = await self.base_executor.check_bybit_order_status(
-                account, symbol, order_id
+            # Additional wait for MT5 to process deals
+            await asyncio.sleep(0.3)
+
+            # Check actual filled volume from MT5 deals
+            volume_check = await self._check_mt5_filled_volume(
+                account, ticket, remaining
             )
 
-            if status.get("success"):
-                filled_qty = status.get("filled_qty", 0)
-                total_filled += filled_qty
+            actual_filled = volume_check["actual_filled"]
+            is_partial = volume_check["is_partial_fill"]
 
-                if filled_qty >= remaining:
-                    # Fully filled
+            if actual_filled > 0:
+                total_filled += actual_filled
+
+                # Send alert if partial fill detected
+                if is_partial and actual_filled < remaining * 0.5:
+                    await self._send_partial_fill_alert(
+                        account.user_id,
+                        symbol,
+                        remaining,
+                        actual_filled,
+                        ticket
+                    )
+                    print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
+
+                if actual_filled >= remaining * 0.95:
+                    # Consider 95%+ as fully filled
                     break
 
-                # Partially filled, cancel and retry with remaining
-                await self.base_executor.cancel_bybit_order(account, symbol, order_id)
-                remaining -= filled_qty
+                # Partially filled, update remaining
+                remaining -= actual_filled
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
                     print(f"Warning: Bybit order not fully filled after {self.max_retries + 1} attempts. "
                           f"Filled: {total_filled}, Remaining: {remaining}")
+            else:
+                # No fill detected, break
+                break
 
         return total_filled
+
+    async def _check_mt5_filled_volume(
+        self,
+        account: Account,
+        ticket: int,
+        expected_volume: float
+    ) -> Dict[str, Any]:
+        """
+        Check MT5 order actual filled volume and compare with expected
+
+        Args:
+            account: Bybit account with MT5 credentials
+            ticket: MT5 order ticket number
+            expected_volume: Expected fill volume
+
+        Returns:
+            Dict with actual_filled, expected, is_partial_fill, fill_ratio
+        """
+        from app.services.market_service import market_data_service
+
+        try:
+            mt5_client = market_data_service.mt5_client
+
+            # Get deals for this ticket
+            deals = mt5_client.get_deals_by_ticket(ticket)
+
+            if not deals:
+                return {
+                    "actual_filled": 0.0,
+                    "expected": expected_volume,
+                    "is_partial_fill": True,
+                    "fill_ratio": 0.0,
+                    "error": "No deals found for ticket"
+                }
+
+            # Sum up all deal volumes
+            actual_filled = sum(deal['volume'] for deal in deals)
+
+            # Calculate fill ratio
+            fill_ratio = actual_filled / expected_volume if expected_volume > 0 else 0.0
+            is_partial_fill = actual_filled < expected_volume * 0.95  # Less than 95% filled
+
+            return {
+                "actual_filled": actual_filled,
+                "expected": expected_volume,
+                "is_partial_fill": is_partial_fill,
+                "fill_ratio": fill_ratio,
+                "deals_count": len(deals)
+            }
+
+        except Exception as e:
+            return {
+                "actual_filled": 0.0,
+                "expected": expected_volume,
+                "is_partial_fill": True,
+                "fill_ratio": 0.0,
+                "error": str(e)
+            }
+
+    async def _send_partial_fill_alert(
+        self,
+        user_id: UUID,
+        symbol: str,
+        expected_qty: float,
+        actual_qty: float,
+        ticket: int
+    ):
+        """
+        Send alert for partial fill via WebSocket
+
+        Args:
+            user_id: User ID
+            symbol: Trading symbol
+            expected_qty: Expected quantity
+            actual_qty: Actual filled quantity
+            ticket: Order ticket
+        """
+        try:
+            from app.websocket.manager import manager
+
+            fill_ratio = (actual_qty / expected_qty * 100) if expected_qty > 0 else 0
+
+            message = {
+                "type": "mt5_partial_fill_alert",
+                "data": {
+                    "symbol": symbol,
+                    "expected_qty": expected_qty,
+                    "actual_qty": actual_qty,
+                    "unfilled_qty": expected_qty - actual_qty,
+                    "fill_ratio": round(fill_ratio, 2),
+                    "ticket": ticket,
+                    "timestamp": time.time()
+                }
+            }
+
+            await manager.send_personal_message(message, str(user_id))
+
+        except Exception as e:
+            print(f"Failed to send partial fill alert: {e}")
 
 
 # Global instance

@@ -218,7 +218,16 @@
             class="bg-[#1a1d21] rounded p-2"
           >
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs text-gray-400">阶梯 {{ index + 1 }}</span>
+              <div class="flex items-center space-x-2">
+                <span class="text-xs text-gray-400">阶梯 {{ index + 1 }}</span>
+                <!-- Phase 3: 失败计数显示 -->
+                <span
+                  v-if="(ladderFailureCounts.opening[index] || 0) > 0 || (ladderFailureCounts.closing[index] || 0) > 0"
+                  class="text-xs px-2 py-0.5 rounded bg-[#f6465d] bg-opacity-20 text-[#f6465d]"
+                >
+                  失败: 开{{ ladderFailureCounts.opening[index] || 0 }}/平{{ ladderFailureCounts.closing[index] || 0 }}
+                </span>
+              </div>
               <div class="flex items-center space-x-2">
                 <label :for="`ladder-enabled-${type}-${index}`" class="flex items-center space-x-1 cursor-pointer">
                   <input
@@ -291,6 +300,22 @@
         >
           保存策略
         </button>
+
+        <!-- Phase 3: Reset Failure Counts Buttons -->
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <button
+            @click="resetLadderFailures('opening')"
+            class="px-3 py-1.5 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
+          >
+            重置开仓失败计数
+          </button>
+          <button
+            @click="resetLadderFailures('closing')"
+            class="px-3 py-1.5 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
+          >
+            重置平仓失败计数
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -359,6 +384,37 @@ function saveLadderProgress() {
   }
 }
 
+// Phase 3: 阶梯失败计数管理
+function loadLadderFailureCounts() {
+  try {
+    const saved = localStorage.getItem(`ladder_failures_${configId.value}`)
+    if (saved) {
+      ladderFailureCounts.value = JSON.parse(saved)
+    }
+  } catch (error) {
+    console.error('Failed to load ladder failure counts:', error)
+  }
+}
+
+function saveLadderFailureCounts() {
+  try {
+    localStorage.setItem(
+      `ladder_failures_${configId.value}`,
+      JSON.stringify(ladderFailureCounts.value)
+    )
+  } catch (error) {
+    console.error('Failed to save ladder failure counts:', error)
+  }
+}
+
+function resetLadderFailures(type) {
+  if (confirm(`确定要重置所有${type === 'opening' ? '开仓' : '平仓'}阶梯的失败计数吗？`)) {
+    ladderFailureCounts.value[type] = {}
+    saveLadderFailureCounts()
+    notificationStore.showStrategyNotification('失败计数已重置', 'success')
+  }
+}
+
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const currentSpread = ref(0)
@@ -393,9 +449,19 @@ const validationErrors = ref([])
 // 阶梯执行进度跟踪
 const ladderProgress = ref(loadLadderProgress())
 
+// 阶梯失败计数跟踪（Phase 3）
+const MAX_LADDER_FAILURES = 5
+const ladderFailureCounts = ref({
+  opening: {},  // {0: 3, 1: 0, 2: 5}
+  closing: {}
+})
+
 onMounted(async () => {
   // Load config from database (including enabled states)
   await loadConfigFromDB()
+
+  // Load ladder failure counts after configId is set
+  loadLadderFailureCounts()
 
   // Ensure WebSocket connection
   if (!marketStore.connected) {
@@ -915,6 +981,30 @@ async function toggleClosing() {
 }
 
 async function executeLadderOpening(ladderIndex, ladder) {
+  // Phase 3: 检查阶梯失败次数，决定是否跳过
+  const failureCount = ladderFailureCounts.value.opening[ladderIndex] || 0
+
+  if (failureCount >= MAX_LADDER_FAILURES) {
+    console.log(`Skipping ladder ${ladderIndex + 1} due to ${failureCount} consecutive failures`)
+
+    // 跳过到下一个阶梯
+    ladderProgress.value.opening.currentLadderIndex++
+    ladderProgress.value.opening.completedQty = 0
+    saveLadderProgress()
+
+    // 重置失败计数
+    ladderFailureCounts.value.opening[ladderIndex] = 0
+    saveLadderFailureCounts()
+
+    // 通知用户
+    notificationStore.showStrategyNotification(
+      `阶梯 ${ladderIndex + 1} 连续失败${failureCount}次，已自动跳过`,
+      'warning'
+    )
+
+    return
+  }
+
   // 全局互斥锁：防止与其他策略冲突
   if (executingAnyStrategy.value) {
     console.log('Another strategy is executing, skipping opening')
@@ -957,6 +1047,10 @@ async function executeLadderOpening(ladderIndex, ladder) {
         console.log(`Ladder ${ladderIndex + 1} batch executed successfully`)
         console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
 
+        // Phase 3: 成功执行，重置失败计数
+        ladderFailureCounts.value.opening[ladderIndex] = 0
+        saveLadderFailureCounts()
+
         // 检查实际成交数量
         const binanceFilled = response.data.binance_filled_qty || 0
         const bybitFilled = response.data.bybit_filled_qty || 0
@@ -998,16 +1092,40 @@ async function executeLadderOpening(ladderIndex, ladder) {
 
         // Position data will be updated via WebSocket
       } else {
+        // Phase 3: 失败时增加失败计数
+        const currentFailures = ladderFailureCounts.value.opening[ladderIndex] || 0
+        ladderFailureCounts.value.opening[ladderIndex] = currentFailures + 1
+        saveLadderFailureCounts()
+
         const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
         console.error(`Ladder ${ladderIndex + 1} execution failed:`, errorMsg)
+        console.log(`Ladder ${ladderIndex + 1} failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
+
         notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行失败: ${errorMsg}`, 'error')
+
+        // 如果达到最大失败次数，提示下次将自动跳过
+        if (currentFailures + 1 >= MAX_LADDER_FAILURES) {
+          notificationStore.showStrategyNotification(
+            `阶梯 ${ladderIndex + 1} 已连续失败${currentFailures + 1}次，下次将自动跳过`,
+            'error'
+          )
+        }
+
         config.value.openingEnabled = false
         saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
       }
     } catch (error) {
+      // Phase 3: 异常也算失败
+      const currentFailures = ladderFailureCounts.value.opening[ladderIndex] || 0
+      ladderFailureCounts.value.opening[ladderIndex] = currentFailures + 1
+      saveLadderFailureCounts()
+
       console.error(`Ladder ${ladderIndex + 1} execution error:`, error)
+      console.log(`Ladder ${ladderIndex + 1} failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
+
       const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
       notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`, 'error')
+
       config.value.openingEnabled = false
       saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
     }
@@ -1017,6 +1135,30 @@ async function executeLadderOpening(ladderIndex, ladder) {
 }
 
 async function executeLadderClosing(ladderIndex, ladder) {
+  // Phase 3: 检查阶梯失败次数，决定是否跳过
+  const failureCount = ladderFailureCounts.value.closing[ladderIndex] || 0
+
+  if (failureCount >= MAX_LADDER_FAILURES) {
+    console.log(`Skipping ladder ${ladderIndex + 1} closing due to ${failureCount} consecutive failures`)
+
+    // 跳过到下一个阶梯
+    ladderProgress.value.closing.currentLadderIndex++
+    ladderProgress.value.closing.completedQty = 0
+    saveLadderProgress()
+
+    // 重置失败计数
+    ladderFailureCounts.value.closing[ladderIndex] = 0
+    saveLadderFailureCounts()
+
+    // 通知用户
+    notificationStore.showStrategyNotification(
+      `阶梯 ${ladderIndex + 1} 平仓连续失败${failureCount}次，已自动跳过`,
+      'warning'
+    )
+
+    return
+  }
+
   // 全局互斥锁：防止与其他策略冲突
   if (executingAnyStrategy.value) {
     console.log('Another strategy is executing, skipping closing')
@@ -1055,6 +1197,10 @@ async function executeLadderClosing(ladderIndex, ladder) {
       if (response.data.success) {
         console.log(`Ladder ${ladderIndex + 1} batch closed successfully`)
         console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
+
+        // Phase 3: 成功执行，重置失败计数
+        ladderFailureCounts.value.closing[ladderIndex] = 0
+        saveLadderFailureCounts()
 
         // 检查实际成交数量
         const binanceFilled = response.data.binance_filled_qty || 0
@@ -1097,16 +1243,40 @@ async function executeLadderClosing(ladderIndex, ladder) {
 
         // Position data will be updated via WebSocket
       } else {
+        // Phase 3: 失败时增加失败计数
+        const currentFailures = ladderFailureCounts.value.closing[ladderIndex] || 0
+        ladderFailureCounts.value.closing[ladderIndex] = currentFailures + 1
+        saveLadderFailureCounts()
+
         const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
         console.error(`Ladder ${ladderIndex + 1} closing failed:`, errorMsg)
+        console.log(`Ladder ${ladderIndex + 1} closing failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
+
         notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓失败: ${errorMsg}`, 'error')
+
+        // 如果达到最大失败次数，提示下次将自动跳过
+        if (currentFailures + 1 >= MAX_LADDER_FAILURES) {
+          notificationStore.showStrategyNotification(
+            `阶梯 ${ladderIndex + 1} 平仓已连续失败${currentFailures + 1}次，下次将自动跳过`,
+            'error'
+          )
+        }
+
         config.value.closingEnabled = false
         saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
       }
     } catch (error) {
+      // Phase 3: 异常也算失败
+      const currentFailures = ladderFailureCounts.value.closing[ladderIndex] || 0
+      ladderFailureCounts.value.closing[ladderIndex] = currentFailures + 1
+      saveLadderFailureCounts()
+
       console.error(`Ladder ${ladderIndex + 1} closing error:`, error)
+      console.log(`Ladder ${ladderIndex + 1} closing failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
+
       const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
       notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`, 'error')
+
       config.value.closingEnabled = false
       saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
     }

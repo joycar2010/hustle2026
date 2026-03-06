@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.services.feishu_service import get_feishu_service
 from app.models.notification_config import NotificationTemplate, NotificationLog
-from app.websocket.connection_manager import manager
+from app.websocket.manager import manager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 import uuid

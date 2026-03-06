@@ -203,8 +203,6 @@ const risk = ref({
   winRate: 0,
 })
 
-let refreshInterval = null
-
 onMounted(async () => {
   // Ensure WebSocket connection
   if (!marketStore.connected) {
@@ -213,14 +211,11 @@ onMounted(async () => {
 
   await fetchDashboardData()
 
-  // Reduced polling frequency (60s instead of 10s) since account data changes less frequently
-  refreshInterval = setInterval(fetchDashboardData, 60000)
+  // Removed polling - rely on WebSocket account_balance messages (backend broadcasts every 10s)
 })
 
 onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  // Cleanup handled by marketStore
 })
 
 // Watch for account balance updates via WebSocket (when backend implements it)

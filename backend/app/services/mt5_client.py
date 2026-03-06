@@ -621,6 +621,49 @@ class MT5Client:
             logger.error(f"Error getting default symbol info: {e}")
             return None
 
+    def get_deals_by_ticket(self, ticket: int) -> list:
+        """
+        Get deals for a specific order ticket (for volume verification)
+
+        Args:
+            ticket: Order ticket number
+
+        Returns:
+            List of deals associated with this ticket
+        """
+        if not self.connected:
+            if not self.connect():
+                return []
+
+        try:
+            # Get deals from last 5 minutes (should be enough for recent orders)
+            date_from = datetime.utcnow() - timedelta(minutes=5)
+            date_to = datetime.utcnow()
+
+            deals = mt5.history_deals_get(date_from, date_to)
+            if deals is None:
+                return []
+
+            # Filter deals by order ticket
+            result = []
+            for deal in deals:
+                if deal.order == ticket:
+                    result.append({
+                        'ticket': deal.ticket,
+                        'order': deal.order,
+                        'time': datetime.fromtimestamp(deal.time),
+                        'type': deal.type,
+                        'volume': deal.volume,
+                        'price': deal.price,
+                        'symbol': deal.symbol
+                    })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get deals by ticket {ticket}: {e}")
+            return []
+
     def get_deals_history(
         self,
         date_from: Optional[datetime] = None,

@@ -21,6 +21,7 @@ from app.services.realtime_market_service import market_data_service
 from app.services.binance_ws_client import binance_ws
 from app.services.strategy_status_pusher import status_pusher
 from app.services.mt5_bridge import mt5_bridge
+from app.services.order_recovery_service import order_recovery_service
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,14 @@ async def lifespan(app: FastAPI):
     await position_monitor.start_monitoring()
     await market_data_service.start()
     await status_pusher.start()  # Start strategy status pusher
+
+    # Recover pending orders from network interruptions
+    logger.info("Recovering pending orders...")
+    try:
+        recovery_result = await order_recovery_service.recover_all_pending_orders()
+        logger.info(f"Order recovery completed: {recovery_result}")
+    except Exception as e:
+        logger.error(f"Order recovery failed: {e}")
 
     # Start memory cleanup task
     cleanup_task = asyncio.create_task(periodic_memory_cleanup())
