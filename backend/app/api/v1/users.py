@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, text
 from uuid import UUID
 from typing import List
+import logging
 from app.core.database import get_db
 from app.core.security import get_current_user_id, get_password_hash
 from app.models.user import User
@@ -11,6 +12,7 @@ from app.models.position import Position
 from app.schemas.user import UserResponse, UserUpdate, UserCreate
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -49,22 +51,37 @@ async def update_current_user(
 
     # Update fields
     if user_update.email is not None:
-        # Check if email already exists
-        result = await db.execute(
-            select(User).where(User.email == user_update.email, User.user_id != UUID(user_id))
-        )
-        existing_email = result.scalar_one_or_none()
-
-        if existing_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="邮箱已被使用",
+        # Only check for duplicates if email is not empty
+        if user_update.email:
+            # Check if email already exists
+            result = await db.execute(
+                select(User).where(User.email == user_update.email, User.user_id != UUID(user_id))
             )
+            existing_email = result.scalar_one_or_none()
 
-        user.email = user_update.email
+            if existing_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="邮箱已被使用",
+                )
+
+        user.email = user_update.email if user_update.email else None
 
     if user_update.password is not None:
         user.password_hash = get_password_hash(user_update.password)
+
+    # Update Feishu fields - only update fields that were explicitly provided
+    # Use model_dump(exclude_unset=True) to get only the fields that were set in the request
+    update_data = user_update.model_dump(exclude_unset=True)
+
+    if 'feishu_open_id' in update_data:
+        user.feishu_open_id = user_update.feishu_open_id if user_update.feishu_open_id else None
+
+    if 'feishu_mobile' in update_data:
+        user.feishu_mobile = user_update.feishu_mobile if user_update.feishu_mobile else None
+
+    if 'feishu_union_id' in update_data:
+        user.feishu_union_id = user_update.feishu_union_id if user_update.feishu_union_id else None
 
     await db.commit()
     await db.refresh(user)
@@ -72,7 +89,7 @@ async def update_current_user(
     return user
 
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("/")
 async def get_all_users(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
@@ -96,11 +113,21 @@ async def get_all_users(
             "username": user.username,
             "email": user.email,
             "role": user.role,  # 保留旧的role字段以兼容
+            "feishu_open_id": user.feishu_open_id,
+            "feishu_mobile": user.feishu_mobile,
+            "feishu_union_id": user.feishu_union_id,
             "rbac_roles": [],
             "is_active": user.is_active,
             "create_time": user.create_time,
             "update_time": user.update_time
         }
+
+        # Debug logging
+        if user.username == 'admin':
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Admin user dict keys: {list(user_dict.keys())}")
+            logger.info(f"Admin feishu_open_id: {user_dict['feishu_open_id']}")
 
         # Get RBAC roles for this user
         for user_role in user.user_roles:
@@ -117,7 +144,7 @@ async def get_all_users(
 
         users_response.append(user_dict)
 
-    return users_response
+    return {"users": users_response}
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -137,28 +164,39 @@ async def create_user(
             detail="用户名已存在",
         )
 
-    # Check if email already exists
-    result = await db.execute(select(User).where(User.email == user_create.email))
-    existing_email = result.scalar_one_or_none()
+    # Check if email already exists (only if email is provided)
+    if user_create.email:
+        result = await db.execute(select(User).where(User.email == user_create.email))
+        existing_email = result.scalar_one_or_none()
 
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="邮箱已存在",
-        )
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="邮箱已存在",
+            )
 
     # Create new user
+    logger.info(f"Creating user with data: username={user_create.username}, email={user_create.email}, "
+                f"feishu_open_id={user_create.feishu_open_id}, feishu_mobile={user_create.feishu_mobile}, "
+                f"feishu_union_id={user_create.feishu_union_id}")
+
     new_user = User(
         username=user_create.username,
-        email=user_create.email,
+        email=user_create.email if user_create.email else None,
         password_hash=get_password_hash(user_create.password),
         role=user_create.role if hasattr(user_create, 'role') and user_create.role else '交易员',
         is_active=user_create.is_active if hasattr(user_create, 'is_active') else True,
+        feishu_open_id=user_create.feishu_open_id if user_create.feishu_open_id else None,
+        feishu_mobile=user_create.feishu_mobile if user_create.feishu_mobile else None,
+        feishu_union_id=user_create.feishu_union_id if user_create.feishu_union_id else None,
     )
 
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
+
+    logger.info(f"User created: user_id={new_user.user_id}, feishu_open_id={new_user.feishu_open_id}, "
+                f"feishu_mobile={new_user.feishu_mobile}, feishu_union_id={new_user.feishu_union_id}")
 
     return new_user
 
@@ -182,19 +220,21 @@ async def update_user(
 
     # Update fields
     if user_update.email is not None:
-        # Check if email already exists
-        result = await db.execute(
-            select(User).where(User.email == user_update.email, User.user_id != target_user_id)
-        )
-        existing_email = result.scalar_one_or_none()
-
-        if existing_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="邮箱已被使用",
+        # Only check for duplicates if email is not empty
+        if user_update.email:
+            # Check if email already exists
+            result = await db.execute(
+                select(User).where(User.email == user_update.email, User.user_id != target_user_id)
             )
+            existing_email = result.scalar_one_or_none()
 
-        user.email = user_update.email
+            if existing_email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="邮箱已被使用",
+                )
+
+        user.email = user_update.email if user_update.email else None
 
     if user_update.password is not None:
         user.password_hash = get_password_hash(user_update.password)
@@ -205,8 +245,27 @@ async def update_user(
     if hasattr(user_update, 'is_active') and user_update.is_active is not None:
         user.is_active = user_update.is_active
 
+    logger.info(f"Updating user {target_user_id}: feishu_open_id={user_update.feishu_open_id}, "
+                f"feishu_mobile={user_update.feishu_mobile}, feishu_union_id={user_update.feishu_union_id}")
+
+    # Update Feishu fields - only update fields that were explicitly provided
+    # Use model_dump(exclude_unset=True) to get only the fields that were set in the request
+    update_data = user_update.model_dump(exclude_unset=True)
+
+    if 'feishu_open_id' in update_data:
+        user.feishu_open_id = user_update.feishu_open_id if user_update.feishu_open_id else None
+
+    if 'feishu_mobile' in update_data:
+        user.feishu_mobile = user_update.feishu_mobile if user_update.feishu_mobile else None
+
+    if 'feishu_union_id' in update_data:
+        user.feishu_union_id = user_update.feishu_union_id if user_update.feishu_union_id else None
+
     await db.commit()
     await db.refresh(user)
+
+    logger.info(f"User updated: feishu_open_id={user.feishu_open_id}, "
+                f"feishu_mobile={user.feishu_mobile}, feishu_union_id={user.feishu_union_id}")
 
     return user
 

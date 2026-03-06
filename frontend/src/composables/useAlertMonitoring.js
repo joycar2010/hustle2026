@@ -11,6 +11,7 @@ export function useAlertMonitoring() {
   let unwatchAccount = null
   let unwatchSingleLeg = null
   let unwatchMT5 = null
+  let unwatchRiskAlert = null
 
   // Monitor market data for spread alerts
   async function checkMarketData() {
@@ -101,6 +102,14 @@ export function useAlertMonitoring() {
       }
     })
 
+    // Watch for risk_alert WebSocket messages from backend notification services
+    unwatchRiskAlert = watch(() => marketStore.lastMessage, (message) => {
+      if (message && message.type === 'risk_alert') {
+        // Handle risk alerts from backend (spread alerts, asset alerts, etc.)
+        notificationStore.handleRiskAlert(message.data)
+      }
+    })
+
     // Initial checks
     checkMarketData()
     checkAccountData()
@@ -113,6 +122,7 @@ export function useAlertMonitoring() {
     if (unwatchAccount) unwatchAccount()
     if (unwatchSingleLeg) unwatchSingleLeg()
     if (unwatchMT5) unwatchMT5()
+    if (unwatchRiskAlert) unwatchRiskAlert()
   }
 
   // Auto-start on mount and cleanup on unmount

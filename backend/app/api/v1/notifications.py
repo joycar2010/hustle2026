@@ -3,9 +3,14 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 import uuid
+
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # Python 3.8 fallback
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -20,6 +25,23 @@ import logging
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def get_beijing_time():
+    """
+    获取当前北京时间（UTC+8），返回不带时区的 naive datetime 对象
+    解决数据库 TIMESTAMP WITHOUT TIME ZONE 存储报错问题
+    """
+    beijing_tz = ZoneInfo("Asia/Shanghai")  # 使用标准时区标识
+    beijing_time = datetime.now(beijing_tz)  # 获取带时区的北京时间
+    # 移除时区信息，转为 naive datetime（数据库兼容）
+    return beijing_time.replace(tzinfo=None)
+
+
+class SafeFormatter(dict):
+    """A dict subclass that returns a placeholder for missing keys"""
+    def __missing__(self, key):
+        return f'{{{key}}}'
 
 
 # Pydantic models
@@ -37,6 +59,8 @@ class NotificationTemplateUpdate(BaseModel):
     enable_feishu: Optional[bool] = None
     priority: Optional[int] = None
     cooldown_seconds: Optional[int] = None
+    alert_sound: Optional[str] = None
+    repeat_count: Optional[int] = None
 
 
 class SendNotificationRequest(BaseModel):
@@ -56,7 +80,7 @@ async def get_notification_configs(
 ):
     """Get all notification service configurations"""
     # Check admin permission
-    if not current_user.is_admin:
+    if current_user.role not in ['系统管理员', '管理员', 'admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     result = await db.execute(select(NotificationConfig))
@@ -84,7 +108,7 @@ async def update_notification_config(
     db: AsyncSession = Depends(get_db),
 ):
     """Update notification service configuration"""
-    if not current_user.is_admin:
+    if current_user.role not in ['系统管理员', '管理员', 'admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     # Validate service type
@@ -136,7 +160,7 @@ async def test_notification_service(
     db: AsyncSession = Depends(get_db),
 ):
     """Test notification service"""
-    if not current_user.is_admin:
+    if current_user.role not in ['系统管理员', '管理员', 'admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     if service_type == "feishu":
@@ -145,11 +169,32 @@ async def test_notification_service(
             raise HTTPException(status_code=400, detail="飞书服务未初始化，请先配置并启用")
 
         try:
+            # Detect recipient type
+            # Phone numbers: start with + or digits only (with optional country code)
+            # Open ID: starts with "ou_"
+            # Email: contains @
+            if recipient.startswith("ou_"):
+                receive_id_type = "open_id"
+            elif "@" in recipient:
+                receive_id_type = "email"
+            elif recipient.startswith("+") or recipient.isdigit():
+                receive_id_type = "mobile"
+                # Ensure phone number has country code
+                if not recipient.startswith("+"):
+                    recipient = "+86" + recipient  # Default to China country code
+            else:
+                # Default to open_id for unknown formats
+                receive_id_type = "open_id"
+
+            logger.info(f"发送飞书测试消息: recipient={recipient}, type={receive_id_type}")
+
+            beijing_time = get_beijing_time()
             result = await feishu.send_card_message(
                 receive_id=recipient,
                 title="🧪 测试消息",
                 content="**这是一条测试消息**\n\n如果您收到此消息，说明飞书通知服务配置成功！\n\n测试时间：" +
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        beijing_time.strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
+                receive_id_type=receive_id_type,
                 color="blue"
             )
 
@@ -260,7 +305,7 @@ async def update_notification_template(
     db: AsyncSession = Depends(get_db),
 ):
     """Update notification template"""
-    if not current_user.is_admin:
+    if current_user.role not in ['系统管理员', '管理员', 'admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     result = await db.execute(
@@ -310,16 +355,20 @@ async def send_notification(
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
 
-    # Render template
+    # Render template with safe formatting (missing variables will be shown as {variable_name})
     try:
-        title = template.title_template.format(**request.variables)
-        content = template.content_template.format(**request.variables)
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=f"模板变量缺失: {str(e)}")
+        safe_vars = SafeFormatter(request.variables)
+        title = template.title_template.format_map(safe_vars)
+        content = template.content_template.format_map(safe_vars)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"模板渲染失败: {str(e)}")
 
     # Send notifications
     results = []
     feishu = get_feishu_service()
+
+    logger.info(f"Feishu service status: {'initialized' if feishu else 'not initialized'}")
+    logger.info(f"Template enable_feishu: {template.enable_feishu}")
 
     for user_id_str in request.user_ids:
         try:
@@ -337,8 +386,9 @@ async def send_notification(
 
             # Send Feishu notification
             if template.enable_feishu and feishu:
-                # For now, use email as feishu_user_id (should be configured separately)
-                feishu_user_id = user.email  # TODO: Add feishu_user_id to user settings
+                # Use feishu_open_id if available, fallback to feishu_mobile, then email
+                feishu_user_id = user.feishu_open_id or user.feishu_mobile or user.email
+                receive_id_type = "open_id" if user.feishu_open_id else ("mobile" if user.feishu_mobile else "email")
 
                 try:
                     # Determine color based on priority
@@ -349,7 +399,7 @@ async def send_notification(
                         receive_id=feishu_user_id,
                         title=title,
                         content=content,
-                        receive_id_type="email",  # Use email as receive_id_type
+                        receive_id_type=receive_id_type,
                         color=color
                     )
 
@@ -363,7 +413,7 @@ async def send_notification(
                         content=content,
                         status="sent" if result.get("success") else "failed",
                         error_message=result.get("error"),
-                        sent_at=datetime.utcnow() if result.get("success") else None
+                        sent_at=get_beijing_time() if result.get("success") else None
                     )
                     db.add(log)
 
@@ -420,7 +470,7 @@ async def get_notification_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """Get notification logs"""
-    if not current_user.is_admin:
+    if current_user.role not in ['系统管理员', '管理员', 'admin', 'super_admin']:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     query = select(NotificationLog)

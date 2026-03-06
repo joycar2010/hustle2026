@@ -392,19 +392,21 @@ export const useNotificationStore = defineStore('notification', () => {
   function handleRiskAlert(alertData) {
     const newAlert = {
       id: Date.now(),
+      type: alertData.alert_type || 'risk_alert',
       level: alertData.level || 'warning',
       title: alertData.title || '风险警报',
       message: alertData.message,
-      time: alertData.timestamp || new Date().toISOString()
+      timestamp: alertData.timestamp || new Date().toISOString()
     }
+
+    // Add to alerts list
+    alerts.value.push(newAlert)
 
     // Add to risk alerts list (keep last 10)
     riskAlerts.value = [newAlert, ...riskAlerts.value].slice(0, 10)
 
-    // Also trigger popup for critical alerts
-    if (alertData.level === 'critical' || alertData.level === 'danger') {
-      triggerPopup(newAlert)
-    }
+    // Trigger popup and sound for all risk alerts
+    triggerPopup(newAlert)
   }
 
   // Dismiss risk alert

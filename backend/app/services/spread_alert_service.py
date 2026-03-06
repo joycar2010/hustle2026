@@ -2,6 +2,7 @@
 import logging
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from app.services.feishu_service import get_feishu_service
 from app.models.notification_config import NotificationTemplate, NotificationLog
 from app.websocket.connection_manager import manager
@@ -10,6 +11,13 @@ from sqlalchemy import select, and_
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def get_beijing_time():
+    """Get current time in Beijing timezone (UTC+8) as naive datetime"""
+    beijing_tz = ZoneInfo("Asia/Shanghai")
+    beijing_time = datetime.now(beijing_tz)
+    return beijing_time.replace(tzinfo=None)
 
 
 class SpreadAlertService:
@@ -112,7 +120,7 @@ class SpreadAlertService:
             是否应该发送
         """
         key = f"{alert_type}_{user_id}"
-        now = datetime.now()
+        now = get_beijing_time()
 
         if key in self.last_alert_time:
             last_time = self.last_alert_time[key]
@@ -193,6 +201,37 @@ class SpreadAlertService:
                 color=color
             )
 
+            # 如果模板配置了声音提醒，发送音频消息
+            if result.get("success") and template.alert_sound:
+                try:
+                    import os
+                    # 构造音频文件路径（假设音频文件存储在 frontend/public/sounds/ 目录）
+                    audio_path = os.path.join("frontend", "public", "sounds", template.alert_sound)
+
+                    if os.path.exists(audio_path):
+                        # 上传音频文件
+                        upload_result = await feishu.upload_audio_file(audio_path)
+
+                        if upload_result.get("success"):
+                            file_key = upload_result.get("file_key")
+                            # 发送音频消息
+                            audio_result = await feishu.send_audio_message(
+                                receive_id=recipient,
+                                file_key=file_key,
+                                receive_id_type="email"
+                            )
+
+                            if audio_result.get("success"):
+                                logger.info(f"音频提醒发送成功: {template.alert_sound}")
+                            else:
+                                logger.warning(f"音频提醒发送失败: {audio_result.get('error')}")
+                        else:
+                            logger.warning(f"音频文件上传失败: {upload_result.get('error')}")
+                    else:
+                        logger.warning(f"音频文件不存在: {audio_path}")
+                except Exception as e:
+                    logger.error(f"发送音频提醒失败: {e}", exc_info=True)
+
             # 记录日志
             log = NotificationLog(
                 user_id=uuid.UUID(user_id),
@@ -203,7 +242,7 @@ class SpreadAlertService:
                 content=content,
                 status="sent" if result.get("success") else "failed",
                 error_message=result.get("error"),
-                sent_at=datetime.utcnow() if result.get("success") else None
+                sent_at=get_beijing_time() if result.get("success") else None
             )
             db.add(log)
             await db.commit()
@@ -259,7 +298,7 @@ class SpreadAlertService:
                     "level": level_map.get(template.priority, 'warning'),
                     "title": template.title_template.format(**variables),
                     "message": template.content_template.format(**variables),
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": get_beijing_time().isoformat(),
                     "template_key": template_key
                 }
             }

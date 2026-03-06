@@ -13,17 +13,25 @@ Risk Control Alert Service
 
 import asyncio
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import logging
 
 from app.models.notification_config import NotificationTemplate
-from app.services.feishu_service import FeishuService
+from app.services.feishu_service import get_feishu_service
 from app.models.notification_config import NotificationConfig
 from app.websocket.connection_manager import manager
 
 logger = logging.getLogger(__name__)
+
+
+def get_beijing_time():
+    """Get current time in Beijing timezone (UTC+8) as naive datetime"""
+    beijing_tz = ZoneInfo("Asia/Shanghai")
+    beijing_time = datetime.now(beijing_tz)
+    return beijing_time.replace(tzinfo=None)
 
 
 class RiskAlertService:
@@ -31,7 +39,6 @@ class RiskAlertService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.feishu_service = FeishuService()
         # 冷却时间缓存：{user_id}_{template_key} -> last_sent_time
         self.cooldown_cache: Dict[str, datetime] = {}
 
@@ -43,7 +50,7 @@ class RiskAlertService:
         last_sent = self.cooldown_cache.get(cache_key)
 
         if last_sent:
-            elapsed = (datetime.utcnow() - last_sent).total_seconds()
+            elapsed = (get_beijing_time() - last_sent).total_seconds()
             if elapsed < cooldown_seconds:
                 return False
 
@@ -95,18 +102,62 @@ class RiskAlertService:
             title = template.title_template.format(**variables)
             content = template.content_template.format(**variables)
 
+            # 获取飞书服务
+            feishu = get_feishu_service()
+            if not feishu:
+                logger.warning("飞书服务未初始化")
+                return False
+
+            # 根据优先级设置颜色
+            color_map = {1: "blue", 2: "blue", 3: "orange", 4: "red"}
+            color = color_map.get(template.priority, "orange")
+
             # 发送飞书卡片消息
-            success = await self.feishu_service.send_card_message(
-                user_id=config.receiver_id,
+            result = await feishu.send_card_message(
+                receive_id=config.receiver_id,
                 title=title,
                 content=content,
-                priority=template.priority,
+                receive_id_type="email",
+                color=color
             )
+
+            success = result.get("success", False)
+
+            # 如果卡片消息发送成功且模板配置了声音提醒，发送音频消息
+            if success and template.alert_sound:
+                try:
+                    import os
+                    # 构造音频文件路径
+                    audio_path = os.path.join("frontend", "public", "sounds", template.alert_sound)
+
+                    if os.path.exists(audio_path):
+                        # 上传音频文件
+                        upload_result = await feishu.upload_audio_file(audio_path)
+
+                        if upload_result.get("success"):
+                            file_key = upload_result.get("file_key")
+                            # 发送音频消息
+                            audio_result = await feishu.send_audio_message(
+                                receive_id=config.receiver_id,
+                                file_key=file_key,
+                                receive_id_type="email"
+                            )
+
+                            if audio_result.get("success"):
+                                logger.info(f"音频提醒发送成功: {template.alert_sound}")
+                            else:
+                                logger.warning(f"音频提醒发送失败: {audio_result.get('error')}")
+                        else:
+                            logger.warning(f"音频文件上传失败: {upload_result.get('error')}")
+                    else:
+                        logger.warning(f"音频文件不存在: {audio_path}")
+                except Exception as e:
+                    logger.error(f"发送音频提醒失败: {e}", exc_info=True)
 
             if success:
                 # 更新冷却时间
                 cache_key = f"{user_id}_{template_key}"
-                self.cooldown_cache[cache_key] = datetime.utcnow()
+                self.cooldown_cache[cache_key] = get_beijing_time()
                 logger.info(f"Alert sent: {template_key} to user {user_id}")
 
                 # 通过WebSocket推送到前端
@@ -164,7 +215,7 @@ class RiskAlertService:
                     "level": level_map.get(template.priority, 'warning'),
                     "title": template.title_template.format(**variables),
                     "message": template.content_template.format(**variables),
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": get_beijing_time().isoformat(),
                     "template_key": template_key
                 }
             }

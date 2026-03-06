@@ -45,6 +45,10 @@ class NotificationTemplate(Base):
     priority = Column(Integer, default=1)  # 1=low, 2=medium, 3=high, 4=urgent
     cooldown_seconds = Column(Integer, default=0)  # 冷却时间，防止频繁通知
 
+    # 声音提醒设置
+    alert_sound = Column(String(500), nullable=True)  # 提醒声音文件路径
+    repeat_count = Column(Integer, default=3)  # 声音重复次数
+
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

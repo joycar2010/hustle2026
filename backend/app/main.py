@@ -10,7 +10,7 @@ import logging
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer
 from app.tasks.redis_monitor import redis_monitor
@@ -136,12 +136,18 @@ app.include_router(security_components.router, prefix="/api/v1/security", tags=[
 app.include_router(ssl_certificates.router, prefix="/api/v1/ssl", tags=["SSL证书管理"])
 app.include_router(key_management.router, prefix="/api/v1/keys", tags=["密钥管理"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["通知服务"])
+app.include_router(sound_files.router, prefix="/api/v1", tags=["声音文件管理"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Mount sounds directory for audio files
+sounds_dir = Path("frontend/public/sounds")
+sounds_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/sounds", StaticFiles(directory=str(sounds_dir)), name="sounds")
 
 
 @app.get("/")

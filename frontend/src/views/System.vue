@@ -173,333 +173,7 @@
       </div>
 
       <div v-if="activeTab === 'alerts'" class="space-y-6">
-        <div class="card">
-          <h2 class="text-xl font-bold mb-4">提醒声音设置</h2>
-          <p class="text-text-secondary mb-6">为不同类型的提醒设置自定义MP3声音文件</p>
-
-          <div class="space-y-6">
-            <!-- Single-leg Alert Sound -->
-            <div class="bg-dark-200 rounded p-4">
-              <h3 class="font-bold mb-3">单腿提醒声音</h3>
-              <div class="flex items-center space-x-4 mb-3">
-                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'single_leg')" ref="singleLegFileInput" class="hidden" />
-                <button @click="$refs.singleLegFileInput.click()" class="btn-secondary">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  选择文件
-                </button>
-                <span v-if="alertSounds.singleLeg" class="text-sm text-text-secondary">{{ getFileName(alertSounds.singleLeg) }}</span>
-                <button v-if="alertSounds.singleLeg" @click="playSound(alertSounds.singleLeg)" class="btn-secondary">
-                  <!-- Stop icon when playing -->
-                  <svg v-if="playingSound === alertSounds.singleLeg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6v4H9z" />
-                  </svg>
-                  <!-- Play icon when not playing -->
-                  <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </div>
-              <div class="flex items-center space-x-3">
-                <label class="text-sm text-text-secondary">提醒次数:</label>
-                <input
-                  type="number"
-                  v-model.number="alertRepeatCounts.singleLeg"
-                  min="1"
-                  max="10"
-                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
-                />
-                <span class="text-xs text-text-tertiary">次</span>
-              </div>
-            </div>
-
-            <!-- Spread Alert Sound -->
-            <div class="bg-dark-200 rounded p-4">
-              <h3 class="font-bold mb-3">点差提醒声音</h3>
-              <div class="flex items-center space-x-4 mb-3">
-                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'spread')" ref="spreadFileInput" class="hidden" />
-                <button @click="$refs.spreadFileInput.click()" class="btn-secondary">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  选择文件
-                </button>
-                <span v-if="alertSounds.spread" class="text-sm text-text-secondary">{{ getFileName(alertSounds.spread) }}</span>
-                <button v-if="alertSounds.spread" @click="playSound(alertSounds.spread)" class="btn-secondary">
-                  <!-- Stop icon when playing -->
-                  <svg v-if="playingSound === alertSounds.spread" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6v4H9z" />
-                  </svg>
-                  <!-- Play icon when not playing -->
-                  <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </div>
-              <div class="flex items-center space-x-3">
-                <label class="text-sm text-text-secondary">提醒次数:</label>
-                <input
-                  type="number"
-                  v-model.number="alertRepeatCounts.spread"
-                  min="1"
-                  max="10"
-                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
-                />
-                <span class="text-xs text-text-tertiary">次</span>
-              </div>
-            </div>
-
-            <!-- Net Asset Alert Sound -->
-            <div class="bg-dark-200 rounded p-4">
-              <h3 class="font-bold mb-3">净资产提醒声音</h3>
-              <div class="flex items-center space-x-4 mb-3">
-                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'net_asset')" ref="netAssetFileInput" class="hidden" />
-                <button @click="$refs.netAssetFileInput.click()" class="btn-secondary">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  选择文件
-                </button>
-                <span v-if="alertSounds.netAsset" class="text-sm text-text-secondary">{{ getFileName(alertSounds.netAsset) }}</span>
-                <button v-if="alertSounds.netAsset" @click="playSound(alertSounds.netAsset)" class="btn-secondary">
-                  <!-- Stop icon when playing -->
-                  <svg v-if="playingSound === alertSounds.netAsset" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6v4H9z" />
-                  </svg>
-                  <!-- Play icon when not playing -->
-                  <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </div>
-              <div class="flex items-center space-x-3">
-                <label class="text-sm text-text-secondary">提醒次数:</label>
-                <input
-                  type="number"
-                  v-model.number="alertRepeatCounts.netAsset"
-                  min="1"
-                  max="10"
-                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
-                />
-                <span class="text-xs text-text-tertiary">次</span>
-              </div>
-            </div>
-
-            <!-- MT5 Alert Sound -->
-            <div class="bg-dark-200 rounded p-4">
-              <h3 class="font-bold mb-3">MT5状态提醒声音</h3>
-              <div class="flex items-center space-x-4 mb-3">
-                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'mt5')" ref="mt5FileInput" class="hidden" />
-                <button @click="$refs.mt5FileInput.click()" class="btn-secondary">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  选择文件
-                </button>
-                <span v-if="alertSounds.mt5" class="text-sm text-text-secondary">{{ getFileName(alertSounds.mt5) }}</span>
-                <button v-if="alertSounds.mt5" @click="playSound(alertSounds.mt5)" class="btn-secondary">
-                  <!-- Stop icon when playing -->
-                  <svg v-if="playingSound === alertSounds.mt5" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6v4H9z" />
-                  </svg>
-                  <!-- Play icon when not playing -->
-                  <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </div>
-              <div class="flex items-center space-x-3">
-                <label class="text-sm text-text-secondary">提醒次数:</label>
-                <input
-                  type="number"
-                  v-model.number="alertRepeatCounts.mt5"
-                  min="1"
-                  max="10"
-                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
-                />
-                <span class="text-xs text-text-tertiary">次</span>
-              </div>
-            </div>
-
-            <!-- Liquidation Alert Sound -->
-            <div class="bg-dark-200 rounded p-4">
-              <h3 class="font-bold mb-3">爆仓提醒声音</h3>
-              <div class="flex items-center space-x-4 mb-3">
-                <input type="file" accept=".mp3" @change="handleFileUpload($event, 'liquidation')" ref="liquidationFileInput" class="hidden" />
-                <button @click="$refs.liquidationFileInput.click()" class="btn-secondary">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  选择文件
-                </button>
-                <span v-if="alertSounds.liquidation" class="text-sm text-text-secondary">{{ getFileName(alertSounds.liquidation) }}</span>
-                <button v-if="alertSounds.liquidation" @click="playSound(alertSounds.liquidation)" class="btn-secondary">
-                  <!-- Stop icon when playing -->
-                  <svg v-if="playingSound === alertSounds.liquidation" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6v4H9z" />
-                  </svg>
-                  <!-- Play icon when not playing -->
-                  <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-              </div>
-              <div class="flex items-center space-x-3">
-                <label class="text-sm text-text-secondary">提醒次数:</label>
-                <input
-                  type="number"
-                  v-model.number="alertRepeatCounts.liquidation"
-                  min="1"
-                  max="10"
-                  class="w-20 px-3 py-1.5 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary text-sm"
-                />
-                <span class="text-xs text-text-tertiary">次</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-6">
-            <button @click="saveAlertSounds" class="btn-primary">
-              保存设置
-            </button>
-          </div>
-        </div>
-      </div>
-
-
-
-      <!-- RBAC权限管理 Tab -->
-      <div v-if="activeTab === 'rbac'" class="space-y-6">
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">角色权限管理</h2>
-            <div class="flex space-x-3">
-              <button @click="openAddRoleModal" class="btn-primary">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                添加角色
-              </button>
-              <button @click="loadRoles" class="btn-secondary">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                刷新
-              </button>
-            </div>
-          </div>
-
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b border-border-primary">
-                  <th class="text-left py-3 px-4">角色名称</th>
-                  <th class="text-left py-3 px-4">角色代码</th>
-                  <th class="text-left py-3 px-4">描述</th>
-                  <th class="text-left py-3 px-4">状态</th>
-                  <th class="text-left py-3 px-4">创建时间</th>
-                  <th class="text-left py-3 px-4">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="role in roles" :key="role.role_id" class="border-b border-border-secondary hover:bg-dark-50">
-                  <td class="py-3 px-4">{{ role.role_name }}</td>
-                  <td class="py-3 px-4 font-mono text-sm">{{ role.role_code }}</td>
-                  <td class="py-3 px-4 text-text-secondary text-sm">{{ role.description || '-' }}</td>
-                  <td class="py-3 px-4">
-                    <span :class="role.is_active ? 'text-success' : 'text-danger'">
-                      {{ role.is_active ? '启用' : '禁用' }}
-                    </span>
-                  </td>
-                  <td class="py-3 px-4 text-text-secondary text-sm">{{ formatDate(role.created_at) }}</td>
-                  <td class="py-3 px-4">
-                    <button @click="editRole(role)" class="text-primary hover:text-blue-400 mr-2">编辑</button>
-                    <button @click="managePermissions(role)" class="text-success hover:text-green-400 mr-2">权限</button>
-                    <button v-if="!role.is_system" @click="deleteRole(role.role_id)" class="text-danger hover:text-red-400">删除</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-if="roles.length === 0" class="text-center py-8 text-text-secondary">
-              暂无角色数据
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SSL证书管理 Tab -->
-      <div v-if="activeTab === 'ssl'" class="space-y-6">
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">SSL证书管理</h2>
-            <div class="flex space-x-3">
-              <button @click="openUploadCertModal" class="btn-primary">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                上传证书
-              </button>
-              <button @click="loadCertificates" class="btn-secondary">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                刷新
-              </button>
-            </div>
-          </div>
-
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b border-border-primary">
-                  <th class="text-left py-3 px-4">证书名称</th>
-                  <th class="text-left py-3 px-4">域名</th>
-                  <th class="text-left py-3 px-4">类型</th>
-                  <th class="text-left py-3 px-4">状态</th>
-                  <th class="text-left py-3 px-4">过期时间</th>
-                  <th class="text-left py-3 px-4">剩余天数</th>
-                  <th class="text-left py-3 px-4">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="cert in certificates" :key="cert.cert_id" class="border-b border-border-secondary hover:bg-dark-50">
-                  <td class="py-3 px-4">{{ cert.cert_name }}</td>
-                  <td class="py-3 px-4 font-mono text-sm">{{ cert.domain_name }}</td>
-                  <td class="py-3 px-4 text-sm">{{ getCertTypeLabel(cert.cert_type) }}</td>
-                  <td class="py-3 px-4">
-                    <span :class="getCertStatusClass(cert.status)">
-                      {{ getCertStatusLabel(cert.status) }}
-                    </span>
-                  </td>
-                  <td class="py-3 px-4 text-text-secondary text-sm">{{ formatDate(cert.expires_at) }}</td>
-                  <td class="py-3 px-4">
-                    <span :class="cert.days_before_expiry <= 30 ? 'text-danger' : 'text-success'">
-                      {{ cert.days_before_expiry }} 天
-                    </span>
-                  </td>
-                  <td class="py-3 px-4">
-                    <button @click="viewCertDetails(cert)" class="text-primary hover:text-blue-400 mr-2">详情</button>
-                    <button @click="deleteCertificate(cert.cert_id)" class="text-danger hover:text-red-400">删除</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-if="certificates.length === 0" class="text-center py-8 text-text-secondary">
-              暂无证书数据
-            </div>
-          </div>
-        </div>
+        <SoundFileManager />
       </div>
 
 
@@ -1416,10 +1090,11 @@
         <h3 class="text-xl font-bold mb-4">{{ isEditingUser ? '编辑用户' : '添加用户' }}</h3>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium mb-2">用户名</label>
+            <label class="block text-sm font-medium mb-2">用户名 <span class="text-danger">*</span></label>
             <input
               v-model="userForm.username"
               type="text"
+              required
               class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
               placeholder="请输入用户名"
               :disabled="isEditingUser"
@@ -1435,12 +1110,13 @@
             />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-2">密码{{ isEditingUser ? '（留空则不修改）' : '' }}</label>
+            <label class="block text-sm font-medium mb-2">密码{{ isEditingUser ? '（留空则不修改）' : '' }} <span v-if="!isEditingUser" class="text-danger">*</span></label>
             <input
               v-model="userForm.password"
               type="password"
+              :required="!isEditingUser"
               class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
-              :placeholder="isEditingUser ? '留空则不修改密码' : '请输入密码'"
+              :placeholder="isEditingUser ? '留空则不修改密码' : '请输入密码（至少8个字符）'"
             />
           </div>
           <div>
@@ -1462,6 +1138,52 @@
               class="mr-2"
             />
             <label for="user-active" class="text-sm">启用此用户</label>
+          </div>
+
+          <!-- Feishu Fields -->
+          <div class="border-t border-border-primary pt-4 mt-4">
+            <h4 class="text-sm font-medium mb-3 text-text-secondary">飞书通知配置</h4>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium mb-2">飞书 Open ID</label>
+                <input
+                  v-model="userForm.feishu_open_id"
+                  type="text"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                  placeholder="ou_xxxxxxxxxxxxxxxx"
+                />
+                <p class="text-xs text-text-secondary mt-1">用于接收飞书通知，优先级最高</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">飞书手机号</label>
+                <input
+                  v-model="userForm.feishu_mobile"
+                  type="text"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                  placeholder="+8613800138000"
+                />
+                <p class="text-xs text-text-secondary mt-1">需包含国家代码，如 +86</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">飞书 Union ID</label>
+                <input
+                  v-model="userForm.feishu_union_id"
+                  type="text"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                  placeholder="on_xxxxxxxxxxxxxxxx"
+                />
+                <p class="text-xs text-text-secondary mt-1">跨应用唯一标识（可选）</p>
+              </div>
+              <div class="flex items-center">
+                <input
+                  v-model="userForm.feishu_enabled"
+                  type="checkbox"
+                  id="feishu-enabled"
+                  class="mr-2"
+                />
+                <label for="feishu-enabled" class="text-sm">启用飞书通知</label>
+              </div>
+            </div>
           </div>
         </div>
         <div class="flex justify-end space-x-3 mt-6">
@@ -1566,7 +1288,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import TableDetailModal from '@/components/modals/TableDetailModal.vue'
@@ -1574,6 +1296,7 @@ import BackupSelectModal from '@/components/modals/BackupSelectModal.vue'
 import BackupActionModal from '@/components/modals/BackupActionModal.vue'
 import WebSocketMonitor from '@/components/system/WebSocketMonitor.vue'
 import NotificationServiceConfig from '@/components/system/NotificationServiceConfig.vue'
+import SoundFileManager from '@/components/system/SoundFileManager.vue'
 import { useMarketStore } from '@/stores/market'
 
 // 引入market store以获取WebSocket连接状态
@@ -1673,7 +1396,11 @@ const userForm = ref({
   email: '',
   password: '',
   role: '交易员',
-  is_active: true
+  is_active: true,
+  feishu_open_id: '',
+  feishu_mobile: '',
+  feishu_union_id: '',
+  feishu_enabled: false
 })
 const selectedUserRoles = ref([])
 
@@ -1985,7 +1712,17 @@ function getLogCategoryLabel(category) {
 async function loadUsers() {
   try {
     const response = await api.get('/api/v1/users/')
-    users.value = response.data
+    console.log('=== LOAD USERS DEBUG ===')
+    console.log('Users API response:', response.data)
+    users.value = response.data.users || response.data || []
+    console.log('Loaded users count:', users.value.length)
+
+    // Log admin user if exists
+    const adminUser = users.value.find(u => u.username === 'admin')
+    if (adminUser) {
+      console.log('Admin user data:', JSON.stringify(adminUser, null, 2))
+    }
+    console.log('=== END LOAD USERS DEBUG ===')
   } catch (error) {
     console.error('Failed to load users:', error)
     alert('加载用户失败: ' + (error.response?.data?.detail || error.message))
@@ -1998,20 +1735,40 @@ function openAddUserModal() {
     email: '',
     password: '',
     role: '交易员',
-    is_active: true
+    is_active: true,
+    feishu_open_id: '',
+    feishu_mobile: '',
+    feishu_union_id: '',
+    feishu_enabled: false
   }
   isEditingUser.value = false
   showUserModal.value = true
 }
 
 function editUser(user) {
+  console.log('=== EDIT USER DEBUG ===')
+  console.log('Full user object:', JSON.stringify(user, null, 2))
+  console.log('User feishu fields:', {
+    feishu_open_id: user.feishu_open_id,
+    feishu_mobile: user.feishu_mobile,
+    feishu_union_id: user.feishu_union_id
+  })
+
   userForm.value = {
     username: user.username,
-    email: user.email,
+    email: user.email || '',
     password: '',
     role: user.role,
-    is_active: user.is_active
+    is_active: user.is_active,
+    feishu_open_id: user.feishu_open_id || '',
+    feishu_mobile: user.feishu_mobile || '',
+    feishu_union_id: user.feishu_union_id || '',
+    feishu_enabled: !!(user.feishu_open_id || user.feishu_mobile)
   }
+
+  console.log('UserForm after setting:', JSON.stringify(userForm.value, null, 2))
+  console.log('=== END EDIT USER DEBUG ===')
+
   currentUser.value = user
   isEditingUser.value = true
   showUserModal.value = true
@@ -2019,29 +1776,50 @@ function editUser(user) {
 
 async function saveUser() {
   try {
-    if (!userForm.value.username || !userForm.value.email) {
-      alert('请填写用户名和邮箱')
+    if (!userForm.value.username) {
+      alert('请填写必填项：用户名')
       return
     }
 
     if (!isEditingUser.value && !userForm.value.password) {
-      alert('请填写密码')
+      alert('请填写必填项：密码（至少8个字符）')
       return
     }
 
     if (isEditingUser.value) {
       const updateData = {
-        email: userForm.value.email,
+        email: userForm.value.email || null,
         role: userForm.value.role,
-        is_active: userForm.value.is_active
+        is_active: userForm.value.is_active,
+        feishu_open_id: userForm.value.feishu_open_id || null,
+        feishu_mobile: userForm.value.feishu_mobile || null,
+        feishu_union_id: userForm.value.feishu_union_id || null
       }
       if (userForm.value.password) {
         updateData.password = userForm.value.password
       }
-      await api.put(`/api/v1/users/${currentUser.value.user_id}`, updateData)
-      alert('用户更新成功')
+      console.log('=== UPDATE USER DEBUG ===')
+      console.log('Updating user with data:', JSON.stringify(updateData, null, 2))
+      const response = await api.put(`/api/v1/users/${currentUser.value.user_id}`, updateData)
+      console.log('Update response:', JSON.stringify(response.data, null, 2))
+      console.log('=== END UPDATE USER DEBUG ===')
+      alert('用户信息更新成功')
     } else {
-      await api.post('/api/v1/users/', userForm.value)
+      const createData = {
+        username: userForm.value.username,
+        email: userForm.value.email || null,
+        password: userForm.value.password,
+        role: userForm.value.role,
+        is_active: userForm.value.is_active,
+        feishu_open_id: userForm.value.feishu_open_id || null,
+        feishu_mobile: userForm.value.feishu_mobile || null,
+        feishu_union_id: userForm.value.feishu_union_id || null
+      }
+      console.log('=== CREATE USER DEBUG ===')
+      console.log('Creating user with data:', JSON.stringify(createData, null, 2))
+      const response = await api.post('/api/v1/users/', createData)
+      console.log('Create response:', JSON.stringify(response.data, null, 2))
+      console.log('=== END CREATE USER DEBUG ===')
       alert('用户创建成功')
     }
 
@@ -2049,7 +1827,24 @@ async function saveUser() {
     await loadUsers()
   } catch (error) {
     console.error('Failed to save user:', error)
-    alert('保存用户失败: ' + (error.response?.data?.detail || error.message))
+    console.error('Error details:', error.response?.data)
+
+    // Better error message handling
+    let errorMsg = '保存用户失败'
+    if (error.response?.data?.detail) {
+      if (Array.isArray(error.response.data.detail)) {
+        // Validation errors array
+        errorMsg = error.response.data.detail.map(e => e.msg || e.message || JSON.stringify(e)).join(', ')
+      } else if (typeof error.response.data.detail === 'object') {
+        errorMsg = JSON.stringify(error.response.data.detail)
+      } else {
+        errorMsg = error.response.data.detail
+      }
+    } else if (error.message) {
+      errorMsg = error.message
+    }
+
+    alert(errorMsg)
   }
 }
 

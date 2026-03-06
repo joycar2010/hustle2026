@@ -634,11 +634,92 @@ async def place_manual_order(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Place a manual order on a single exchange with auto-price logic"""
-    raise HTTPException(
-        status_code=501,
-        detail="Manual trading has been disabled. Order execution logic has been removed."
-    )
+    """Place a manual order on a single exchange with auto-price logic
+
+    买入开多: 使用bid价
+    卖出开空: 使用ask价
+    """
+    try:
+        # Get user accounts
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            raise HTTPException(status_code=404, detail="No trading accounts found")
+
+        # Find the account for the specified exchange
+        target_account = None
+        for account in accounts:
+            if req.exchange == "binance" and account.platform_id == 1:
+                target_account = account
+                break
+            elif req.exchange == "bybit" and account.platform_id == 2:
+                target_account = account
+                break
+
+        if not target_account:
+            raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
+
+        # Get current market prices
+        spread_data = await market_data_service.get_current_spread(use_cache=False)
+
+        # Determine price based on side and exchange
+        if req.exchange == "binance":
+            # Binance: 买入开多用bid价，卖出开空用ask价
+            if req.side == "buy":
+                price = spread_data.binance_quote.bid_price
+            else:  # sell
+                price = spread_data.binance_quote.ask_price
+            symbol = "XAUUSDT"
+        else:  # bybit
+            # Bybit: 买入开多用bid价，卖出开空用ask价
+            if req.side == "buy":
+                price = spread_data.bybit_quote.bid_price
+            else:  # sell
+                price = spread_data.bybit_quote.ask_price
+            symbol = "XAUUSD.s"
+
+        # Import order executor
+        from app.services.order_executor import order_executor
+
+        # Place order
+        if req.exchange == "binance":
+            result = await order_executor.place_binance_order(
+                account=target_account,
+                symbol=symbol,
+                side="BUY" if req.side == "buy" else "SELL",
+                order_type="LIMIT",
+                quantity=req.quantity,
+                price=price,
+                position_side="LONG" if req.side == "buy" else "SHORT",
+                post_only=True,
+            )
+        else:  # bybit
+            result = await order_executor.place_bybit_order(
+                account=target_account,
+                symbol=symbol,
+                side="Buy" if req.side == "buy" else "Sell",
+                order_type="Limit",
+                quantity=str(req.quantity),
+                price=str(price),
+                close_position=False,
+            )
+
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
+
+        return {
+            "success": True,
+            "exchange": req.exchange,
+            "side": req.side,
+            "quantity": req.quantity,
+            "price": price,
+            "order_id": result.get("order_id"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manual order error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/manual/close-all")
@@ -646,11 +727,142 @@ async def close_all_positions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Close all open positions at market price on both exchanges"""
-    raise HTTPException(
-        status_code=501,
-        detail="Manual trading has been disabled. Order execution logic has been removed."
-    )
+    """Close all open positions at market price on both exchanges
+
+    多单: 使用ask价平仓
+    空单: 使用bid价平仓
+    """
+    try:
+        # Get user accounts
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            raise HTTPException(status_code=404, detail="No trading accounts found")
+
+        # Get current market prices
+        spread_data = await market_data_service.get_current_spread(use_cache=False)
+
+        # Import order executor
+        from app.services.order_executor import order_executor
+
+        results = []
+
+        # Close Binance positions
+        binance_account = None
+        for account in accounts:
+            if account.platform_id == 1:
+                binance_account = account
+                break
+
+        if binance_account:
+            try:
+                # Get Binance positions
+                from app.services.binance_client import BinanceFuturesClient
+                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+                try:
+                    positions = await client.get_position_risk("XAUUSDT")
+
+                    for pos in positions:
+                        position_amt = float(pos.get("positionAmt", 0))
+                        if position_amt == 0:
+                            continue
+
+                        # 多单用ask价平仓，空单用bid价平仓
+                        if position_amt > 0:  # LONG position
+                            price = spread_data.binance_quote.ask_price
+                            side = "SELL"
+                            position_side = "LONG"
+                        else:  # SHORT position
+                            price = spread_data.binance_quote.bid_price
+                            side = "BUY"
+                            position_side = "SHORT"
+                            position_amt = abs(position_amt)
+
+                        result = await order_executor.place_binance_order(
+                            account=binance_account,
+                            symbol="XAUUSDT",
+                            side=side,
+                            order_type="LIMIT",
+                            quantity=position_amt,
+                            price=price,
+                            position_side=position_side,
+                            post_only=True,
+                        )
+
+                        results.append({
+                            "exchange": "binance",
+                            "position_side": position_side,
+                            "quantity": position_amt,
+                            "price": price,
+                            "success": result.get("success"),
+                            "order_id": result.get("order_id"),
+                        })
+                finally:
+                    await client.close()
+            except Exception as e:
+                logger.error(f"Binance close positions error: {str(e)}", exc_info=True)
+                results.append({"exchange": "binance", "error": str(e)})
+
+        # Close Bybit positions
+        bybit_account = None
+        for account in accounts:
+            if account.platform_id == 2:
+                bybit_account = account
+                break
+
+        if bybit_account:
+            try:
+                # Get Bybit MT5 positions
+                import MetaTrader5 as mt5
+                loop = asyncio.get_event_loop()
+                positions = await loop.run_in_executor(None, mt5.positions_get, "XAUUSD.s")
+
+                if positions:
+                    for pos in positions:
+                        volume = pos.volume
+                        if volume == 0:
+                            continue
+
+                        # 多单用ask价平仓，空单用bid价平仓
+                        if pos.type == mt5.POSITION_TYPE_BUY:  # LONG position
+                            price = spread_data.bybit_quote.ask_price
+                            side = "Sell"
+                        else:  # SHORT position
+                            price = spread_data.bybit_quote.bid_price
+                            side = "Buy"
+
+                        result = await order_executor.place_bybit_order(
+                            account=bybit_account,
+                            symbol="XAUUSD.s",
+                            side=side,
+                            order_type="Limit",
+                            quantity=str(volume),
+                            price=str(price),
+                            close_position=True,
+                        )
+
+                        results.append({
+                            "exchange": "bybit",
+                            "position_type": "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT",
+                            "quantity": volume,
+                            "price": price,
+                            "success": result.get("success"),
+                            "order_id": result.get("order_id"),
+                        })
+            except Exception as e:
+                logger.error(f"Bybit close positions error: {str(e)}", exc_info=True)
+                results.append({"exchange": "bybit", "error": str(e)})
+
+        return {
+            "success": True,
+            "results": results,
+            "message": f"Closed {len(results)} positions"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Close all positions error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/sync-trades")
@@ -851,11 +1063,95 @@ async def cancel_all_orders(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cancel all pending orders on both exchanges and mark database orders as manually processed"""
-    raise HTTPException(
-        status_code=501,
-        detail="Manual trading has been disabled. Order execution logic has been removed."
-    )
+    """Cancel all pending orders on both exchanges"""
+    try:
+        # Get user accounts
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            raise HTTPException(status_code=404, detail="No trading accounts found")
+
+        # Import order executor
+        from app.services.order_executor import order_executor
+
+        results = []
+
+        # Cancel Binance orders
+        binance_account = None
+        for account in accounts:
+            if account.platform_id == 1:
+                binance_account = account
+                break
+
+        if binance_account:
+            try:
+                from app.services.binance_client import BinanceFuturesClient
+                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+                try:
+                    # Get all open orders
+                    open_orders = await client.get_open_orders("XAUUSDT")
+
+                    for order in open_orders:
+                        order_id = order.get("orderId")
+                        result = await order_executor.cancel_binance_order(
+                            binance_account,
+                            "XAUUSDT",
+                            order_id
+                        )
+
+                        results.append({
+                            "exchange": "binance",
+                            "order_id": order_id,
+                            "success": result.get("success") if isinstance(result, dict) else True,
+                        })
+                finally:
+                    await client.close()
+            except Exception as e:
+                logger.error(f"Binance cancel orders error: {str(e)}", exc_info=True)
+                results.append({"exchange": "binance", "error": str(e)})
+
+        # Cancel Bybit orders
+        bybit_account = None
+        for account in accounts:
+            if account.platform_id == 2:
+                bybit_account = account
+                break
+
+        if bybit_account:
+            try:
+                # Get Bybit MT5 open orders
+                import MetaTrader5 as mt5
+                loop = asyncio.get_event_loop()
+                orders = await loop.run_in_executor(None, mt5.orders_get, "XAUUSD.s")
+
+                if orders:
+                    for order in orders:
+                        order_id = str(order.ticket)
+                        result = await order_executor.cancel_bybit_order(
+                            bybit_account,
+                            "XAUUSD.s",
+                            order_id
+                        )
+
+                        results.append({
+                            "exchange": "bybit",
+                            "order_id": order_id,
+                            "success": result.get("success") if isinstance(result, dict) else True,
+                        })
+            except Exception as e:
+                logger.error(f"Bybit cancel orders error: {str(e)}", exc_info=True)
+                results.append({"exchange": "bybit", "error": str(e)})
+
+        return {
+            "success": True,
+            "results": results,
+            "message": f"Cancelled {len(results)} orders"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cancel all orders error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/orders/{order_id}/manual-process")
