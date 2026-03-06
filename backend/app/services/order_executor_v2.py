@@ -106,8 +106,9 @@ class OrderExecutorV2:
                 "message": "Bybit订单已取消，等待下次重试"
             }
 
-        # Check for single-leg scenario
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
+        # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
+        bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
 
         return {
             "success": True,
@@ -118,7 +119,8 @@ class OrderExecutorV2:
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
                 "bybit_filled": bybit_filled_qty,
-                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+                "bybit_filled_xau": bybit_filled_xau,
+                "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
         }
 
@@ -135,12 +137,44 @@ class OrderExecutorV2:
         Execute reverse closing (Binance long close, Bybit short close).
 
         Flow:
-        1. Binance limit BUY order (close short)
-        2. Monitor Binance order (0.3s timeout)
-        3. Bybit market SELL order (close long) with Binance filled quantity
-        4. Monitor Bybit order (0.1s timeout)
-        5. Chase Bybit if not fully filled (1 retry)
+        1. Check Bybit LONG position exists
+        2. Binance limit BUY order (close short)
+        3. Monitor Binance order (0.3s timeout)
+        4. Bybit market SELL order (close long) with Binance filled quantity
+        5. Monitor Bybit order (0.1s timeout)
+        6. Chase Bybit if not fully filled (1 retry)
         """
+        # Step 0: Pre-check Bybit LONG position before placing any orders
+        from app.services.market_service import market_data_service
+        mt5_client = market_data_service.mt5_client
+
+        # Check if LONG position exists
+        bybit_positions = mt5_client.get_positions("XAUUSD.s")
+        long_positions = [p for p in bybit_positions if p['type'] == 0]  # type=0 is LONG
+
+        if not long_positions:
+            return {
+                "success": False,
+                "error": "Bybit没有LONG持仓可以平仓",
+                "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "is_single_leg": False,
+                "message": "Bybit没有LONG持仓，无法执行反向平仓"
+            }
+
+        total_long_volume = sum(p['volume'] for p in long_positions)
+        required_volume = quantity_converter.xau_to_lot(quantity)
+
+        if total_long_volume < required_volume:
+            return {
+                "success": False,
+                "error": f"Bybit LONG持仓不足: 当前{total_long_volume} Lot, 需要{required_volume} Lot",
+                "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "is_single_leg": False,
+                "message": f"Bybit LONG持仓不足，无法执行反向平仓"
+            }
+
         # Step 1: Place Binance limit BUY order with POST_ONLY (force MAKER)
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
@@ -205,8 +239,9 @@ class OrderExecutorV2:
                 "message": "Bybit订单已取消，等待下次重试"
             }
 
-        # Check for single-leg scenario
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
+        # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
+        bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
 
         return {
             "success": True,
@@ -217,7 +252,8 @@ class OrderExecutorV2:
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
                 "bybit_filled": bybit_filled_qty,
-                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+                "bybit_filled_xau": bybit_filled_xau,
+                "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
         }
 
@@ -304,8 +340,9 @@ class OrderExecutorV2:
                 "message": "Bybit订单已取消，等待下次重试"
             }
 
-        # Check for single-leg scenario
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
+        # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
+        bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
 
         return {
             "success": True,
@@ -316,7 +353,8 @@ class OrderExecutorV2:
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
                 "bybit_filled": bybit_filled_qty,
-                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+                "bybit_filled_xau": bybit_filled_xau,
+                "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
         }
 
@@ -333,12 +371,44 @@ class OrderExecutorV2:
         Execute forward closing (Binance short close, Bybit long close).
 
         Flow:
-        1. Binance limit SELL order (close long)
-        2. Monitor Binance order (0.3s timeout)
-        3. Bybit market BUY order (close short) with Binance filled quantity
-        4. Monitor Bybit order (0.1s timeout)
-        5. Chase Bybit if not fully filled (1 retry)
+        1. Check Bybit SHORT position exists
+        2. Binance limit SELL order (close long)
+        3. Monitor Binance order (0.3s timeout)
+        4. Bybit market BUY order (close short) with Binance filled quantity
+        5. Monitor Bybit order (0.1s timeout)
+        6. Chase Bybit if not fully filled (1 retry)
         """
+        # Step 0: Pre-check Bybit SHORT position before placing any orders
+        from app.services.market_service import market_data_service
+        mt5_client = market_data_service.mt5_client
+
+        # Check if SHORT position exists
+        bybit_positions = mt5_client.get_positions("XAUUSD.s")
+        short_positions = [p for p in bybit_positions if p['type'] == 1]  # type=1 is SHORT
+
+        if not short_positions:
+            return {
+                "success": False,
+                "error": "Bybit没有SHORT持仓可以平仓",
+                "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "is_single_leg": False,
+                "message": "Bybit没有SHORT持仓，无法执行正向平仓"
+            }
+
+        total_short_volume = sum(p['volume'] for p in short_positions)
+        required_volume = quantity_converter.xau_to_lot(quantity)
+
+        if total_short_volume < required_volume:
+            return {
+                "success": False,
+                "error": f"Bybit SHORT持仓不足: 当前{total_short_volume} Lot, 需要{required_volume} Lot",
+                "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "is_single_leg": False,
+                "message": f"Bybit SHORT持仓不足，无法执行正向平仓"
+            }
+
         # Step 1: Place Binance limit SELL order with POST_ONLY (force MAKER)
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
@@ -403,8 +473,9 @@ class OrderExecutorV2:
                 "message": "Bybit订单已取消，等待下次重试"
             }
 
-        # Check for single-leg scenario
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_qty < binance_filled_qty * 0.95
+        # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
+        bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
 
         return {
             "success": True,
@@ -415,7 +486,8 @@ class OrderExecutorV2:
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
                 "bybit_filled": bybit_filled_qty,
-                "unfilled_qty": binance_filled_qty - bybit_filled_qty
+                "bybit_filled_xau": bybit_filled_xau,
+                "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
         }
 

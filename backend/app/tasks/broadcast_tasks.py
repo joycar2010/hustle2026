@@ -1,10 +1,15 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
 from datetime import datetime
+from uuid import UUID
 from app.websocket.manager import manager
 from app.core.database import get_db_context
 from app.models.account import Account
+from app.models.risk_settings import RiskSettings
 from app.services.account_service import account_data_service
+from app.services.risk_alert_service import RiskAlertService
+from app.services.spread_alert_service import SpreadAlertService
+from app.services.market_service import market_data_service
 from sqlalchemy import select
 import logging
 import aiohttp
@@ -164,6 +169,9 @@ class RiskMetricsStreamer:
                     self.broadcast_count += 1
                     self.last_broadcast_time = datetime.now().isoformat()
 
+                    # Check risk alerts for each user
+                    await self._check_risk_alerts(db, active_accounts, aggregated_data)
+
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
 
@@ -171,6 +179,138 @@ class RiskMetricsStreamer:
                 logger.error(f"Error in risk metrics stream: {str(e)}", exc_info=True)
                 self.error_count += 1
                 await asyncio.sleep(self.interval)
+
+    async def _check_risk_alerts(self, db, active_accounts, aggregated_data):
+        """Check risk alerts and send Feishu notifications"""
+        try:
+            # Group accounts by user
+            user_accounts = {}
+            for account in active_accounts:
+                user_id = str(account.user_id)
+                if user_id not in user_accounts:
+                    user_accounts[user_id] = []
+                user_accounts[user_id].append(account)
+
+            # Check alerts for each user
+            for user_id, accounts in user_accounts.items():
+                try:
+                    # Get user's risk settings
+                    result = await db.execute(
+                        select(RiskSettings).where(RiskSettings.user_id == UUID(user_id))
+                    )
+                    risk_settings = result.scalar_one_or_none()
+
+                    if not risk_settings:
+                        continue
+
+                    # Initialize risk alert service
+                    risk_alert_service = RiskAlertService(db)
+
+                    # Get account data for this user
+                    summary = aggregated_data.get("summary", {})
+
+                    # Check Binance net asset
+                    if risk_settings.binance_net_asset:
+                        binance_asset = summary.get("binance_net_asset", 0)
+                        if binance_asset < risk_settings.binance_net_asset:
+                            await risk_alert_service.check_binance_net_asset(
+                                user_id=user_id,
+                                current_asset=binance_asset,
+                                threshold=risk_settings.binance_net_asset,
+                                is_below=True
+                            )
+
+                    # Check Bybit net asset
+                    if risk_settings.bybit_mt5_net_asset:
+                        bybit_asset = summary.get("bybit_mt5_net_asset", 0)
+                        if bybit_asset < risk_settings.bybit_mt5_net_asset:
+                            await risk_alert_service.check_bybit_net_asset(
+                                user_id=user_id,
+                                current_asset=bybit_asset,
+                                threshold=risk_settings.bybit_mt5_net_asset,
+                                is_below=True
+                            )
+
+                    # Check total net asset
+                    if risk_settings.total_net_asset:
+                        total_asset = summary.get("total_net_asset", 0)
+                        if total_asset < risk_settings.total_net_asset:
+                            await risk_alert_service.check_total_net_asset(
+                                user_id=user_id,
+                                current_asset=total_asset,
+                                threshold=risk_settings.total_net_asset,
+                                is_below=True
+                            )
+
+                    # Check Binance liquidation price
+                    if risk_settings.binance_liquidation_price:
+                        binance_liq = summary.get("binance_liquidation_price")
+                        binance_price = summary.get("binance_current_price")
+                        if binance_liq and binance_price:
+                            distance = abs(binance_price - binance_liq)
+                            # Alert if distance is less than 10% of liquidation price
+                            if distance < binance_liq * 0.1:
+                                status = "⚠️ 接近安全线" if distance < binance_liq * 0.05 else "注意价格变化"
+                                await risk_alert_service.check_binance_liquidation(
+                                    user_id=user_id,
+                                    current_price=binance_price,
+                                    liquidation_price=binance_liq,
+                                    distance=distance,
+                                    status=status
+                                )
+
+                    # Check Bybit liquidation price
+                    if risk_settings.bybit_mt5_liquidation_price:
+                        bybit_liq = summary.get("bybit_liquidation_price")
+                        bybit_price = summary.get("bybit_current_price")
+                        if bybit_liq and bybit_price:
+                            distance = abs(bybit_price - bybit_liq)
+                            # Alert if distance is less than 10% of liquidation price
+                            if distance < bybit_liq * 0.1:
+                                status = "⚠️ 接近安全线" if distance < bybit_liq * 0.05 else "注意价格变化"
+                                await risk_alert_service.check_bybit_liquidation(
+                                    user_id=user_id,
+                                    current_price=bybit_price,
+                                    liquidation_price=bybit_liq,
+                                    distance=distance,
+                                    status=status
+                                )
+
+                    # Check spread alerts (forward/reverse open/close)
+                    try:
+                        # Get current market data
+                        market_data = await market_data_service.get_current_spread()
+
+                        # Prepare alert settings
+                        alert_settings = {
+                            'forwardOpenPrice': risk_settings.forward_open_price,
+                            'forwardClosePrice': risk_settings.forward_close_price,
+                            'reverseOpenPrice': risk_settings.reverse_open_price,
+                            'reverseClosePrice': risk_settings.reverse_close_price,
+                        }
+
+                        # Prepare market data dict
+                        market_dict = {
+                            'forward_spread': market_data.forward_spread if hasattr(market_data, 'forward_spread') else None,
+                            'reverse_spread': market_data.reverse_spread if hasattr(market_data, 'reverse_spread') else None,
+                        }
+
+                        # Check spread alerts
+                        spread_alert_service = SpreadAlertService()
+                        await spread_alert_service.check_and_send_spread_alerts(
+                            db=db,
+                            user_id=user_id,
+                            market_data=market_dict,
+                            alert_settings=alert_settings
+                        )
+                    except Exception as e:
+                        logger.error(f"Error checking spread alerts for user {user_id}: {e}")
+
+                except Exception as e:
+                    logger.error(f"Error checking risk alerts for user {user_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in _check_risk_alerts: {e}")
 
 
 class MT5ConnectionStreamer:
@@ -231,6 +371,10 @@ class MT5ConnectionStreamer:
                 self.broadcast_count += 1
                 self.last_broadcast_time = datetime.now().isoformat()
 
+                # Check MT5 lag alerts for all users
+                if mt5_status.get("connection_failures", 0) > 0:
+                    await self._check_mt5_alerts(mt5_status)
+
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
 
@@ -238,6 +382,34 @@ class MT5ConnectionStreamer:
                 logger.error(f"Error in MT5 connection stream: {str(e)}", exc_info=True)
                 self.error_count += 1
                 await asyncio.sleep(self.interval)
+
+    async def _check_mt5_alerts(self, mt5_status):
+        """Check MT5 lag alerts and send Feishu notifications"""
+        try:
+            async with get_db_context() as db:
+                # Get all users with risk settings
+                result = await db.execute(
+                    select(RiskSettings).where(RiskSettings.mt5_lag_count.isnot(None))
+                )
+                risk_settings_list = result.scalars().all()
+
+                for risk_settings in risk_settings_list:
+                    try:
+                        failure_count = mt5_status.get("connection_failures", 0)
+
+                        # Check if failure count exceeds threshold
+                        if failure_count >= risk_settings.mt5_lag_count:
+                            risk_alert_service = RiskAlertService(db)
+                            await risk_alert_service.check_mt5_lag(
+                                user_id=str(risk_settings.user_id),
+                                failure_count=failure_count,
+                                last_response_time=mt5_status.get("last_check", "未知")
+                            )
+                    except Exception as e:
+                        logger.error(f"Error checking MT5 alert for user {risk_settings.user_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in _check_mt5_alerts: {e}")
 
     async def _check_mt5_status(self):
         """Check MT5 connection status"""

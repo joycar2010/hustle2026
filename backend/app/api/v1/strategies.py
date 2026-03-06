@@ -17,6 +17,7 @@ from app.schemas.strategy import (
 from app.services.position_manager import position_manager
 from app.services.order_executor_v2 import OrderExecutorV2
 from app.services.market_service import market_data_service
+from app.services.risk_alert_service import RiskAlertService
 from app.websocket.manager import manager
 
 router = APIRouter()
@@ -39,8 +40,8 @@ class ClosePositionRequest(BaseModel):
     ladder_index: int = 0
 
 
-async def send_single_leg_alert(user_id: str, strategy_type: str, action: str, details: dict):
-    """Send single-leg trade alert via WebSocket"""
+async def send_single_leg_alert(user_id: str, strategy_type: str, action: str, details: dict, db: AsyncSession):
+    """Send single-leg trade alert via WebSocket and Feishu"""
     alert_message = {
         "type": "single_leg_alert",
         "data": {
@@ -55,7 +56,27 @@ async def send_single_leg_alert(user_id: str, strategy_type: str, action: str, d
             "message": f"{strategy_type} {action}: Binance成交 {details.get('binance_filled', 0)}, Bybit成交 {details.get('bybit_filled', 0)}, 未成交 {details.get('unfilled_qty', 0)}"
         }
     }
+    # Send WebSocket notification
     await manager.send_to_user(alert_message, user_id)
+
+    # Send Feishu notification
+    try:
+        risk_alert_service = RiskAlertService(db)
+        # Determine direction based on strategy type and action
+        direction = "多头" if "forward" in strategy_type.lower() else "空头"
+        exchange = "Binance"  # Single-leg usually happens on Binance side
+
+        await risk_alert_service.check_single_leg(
+            user_id=user_id,
+            exchange=exchange,
+            quantity=details.get("unfilled_qty", 0),
+            duration=0,  # Immediate alert
+            direction=direction
+        )
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to send Feishu single-leg alert: {e}")
 
 
 @router.get("/configs", response_model=List[StrategyConfigResponse])
@@ -460,7 +481,8 @@ async def execute_reverse_arbitrage(
                     user_id=user_id,
                     strategy_type="反向套利",
                     action="开仓",
-                    details=details
+                    details=details,
+                    db=db
                 )
 
         return result
@@ -542,7 +564,8 @@ async def execute_forward_arbitrage(
                     user_id=user_id,
                     strategy_type="正向套利",
                     action="开仓",
-                    details=details
+                    details=details,
+                    db=db
                 )
 
         return result
@@ -623,7 +646,8 @@ async def close_reverse_position(
                     user_id=user_id,
                     strategy_type="反向套利",
                     action="平仓",
-                    details=details
+                    details=details,
+                    db=db
                 )
 
         return result
@@ -704,7 +728,8 @@ async def close_forward_position(
                     user_id=user_id,
                     strategy_type="正向套利",
                     action="平仓",
-                    details=details
+                    details=details,
+                    db=db
                 )
 
         return result

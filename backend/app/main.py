@@ -7,6 +7,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
+import gc
+import asyncio
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
@@ -21,6 +23,17 @@ from app.services.strategy_status_pusher import status_pusher
 from app.services.mt5_bridge import mt5_bridge
 
 logger = logging.getLogger(__name__)
+
+# Configure garbage collection for better memory management
+gc.set_threshold(700, 10, 10)  # More aggressive garbage collection
+
+
+async def periodic_memory_cleanup():
+    """Periodic memory cleanup task"""
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        gc.collect()
+        logger.debug("Periodic garbage collection completed")
 
 
 @asynccontextmanager
@@ -38,8 +51,18 @@ async def lifespan(app: FastAPI):
     await position_monitor.start_monitoring()
     await market_data_service.start()
     await status_pusher.start()  # Start strategy status pusher
+
+    # Start memory cleanup task
+    cleanup_task = asyncio.create_task(periodic_memory_cleanup())
+
     yield
+
     # Shutdown
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     await binance_ws.stop()
     await market_streamer.stop()
     await account_balance_streamer.stop()

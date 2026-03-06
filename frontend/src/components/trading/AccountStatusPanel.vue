@@ -266,7 +266,12 @@ function toggleConnection(accountId) {
     marketStore.connect()
     setWsConnectedState(true)
   } else {
-    // Disconnecting
+    // Disconnecting - check if any strategies are enabled
+    if (hasActiveStrategies()) {
+      alert('请先停用所有策略按钮再断开连接')
+      return
+    }
+
     disconnectedAccounts.value.add(accountId)
     disconnectedAccounts.value = new Set(disconnectedAccounts.value)
     saveDisconnected(disconnectedAccounts.value)
@@ -275,6 +280,32 @@ function toggleConnection(accountId) {
       marketStore.disconnect()
       setWsConnectedState(false)
     }
+  }
+}
+
+// Check if any strategies are currently enabled
+function hasActiveStrategies() {
+  try {
+    // Check forward opening
+    const forwardOpeningEnabled = localStorage.getItem('strategy_forward_opening_enabled')
+    if (forwardOpeningEnabled === 'true') return true
+
+    // Check forward closing
+    const forwardClosingEnabled = localStorage.getItem('strategy_forward_closing_enabled')
+    if (forwardClosingEnabled === 'true') return true
+
+    // Check reverse opening
+    const reverseOpeningEnabled = localStorage.getItem('strategy_reverse_opening_enabled')
+    if (reverseOpeningEnabled === 'true') return true
+
+    // Check reverse closing
+    const reverseClosingEnabled = localStorage.getItem('strategy_reverse_closing_enabled')
+    if (reverseClosingEnabled === 'true') return true
+
+    return false
+  } catch (error) {
+    console.error('Error checking strategy status:', error)
+    return false
   }
 }
 

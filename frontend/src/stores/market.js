@@ -57,20 +57,8 @@ export const useMarketStore = defineStore('market', () => {
           // Import notification store dynamically to avoid circular dependency
           import('./notification').then(({ useNotificationStore }) => {
             const notificationStore = useNotificationStore()
-
-            // Construct alert object
-            const alert = {
-              id: Date.now() + '_' + msg.data.alert_type,
-              type: msg.data.alert_type,
-              level: msg.data.level,
-              title: msg.data.title,
-              message: msg.data.message,
-              timestamp: msg.data.timestamp
-            }
-
-            // Add to alerts list and trigger popup with sound
-            notificationStore.alerts.push(alert)
-            notificationStore.triggerPopup(alert)
+            // Use handleRiskAlert to properly handle the alert
+            notificationStore.handleRiskAlert(msg.data)
           })
         }
       } catch (e) {

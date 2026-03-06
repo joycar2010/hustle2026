@@ -94,6 +94,14 @@ class OrderExecutor:
             position_ticket = None
             if close_position:
                 loop = asyncio.get_event_loop()
+
+                # First, log all current positions for debugging
+                all_positions = await loop.run_in_executor(
+                    None,
+                    lambda: mt5_client.get_positions(symbol)
+                )
+                logger.info(f"Current positions for {symbol}: {all_positions}")
+
                 position_ticket = await loop.run_in_executor(
                     None,
                     lambda: mt5_client.find_position_to_close(symbol, side)
@@ -101,7 +109,16 @@ class OrderExecutor:
                 if position_ticket:
                     logger.info(f"Found position to close: ticket={position_ticket}")
                 else:
-                    logger.warning(f"No position found to close for {symbol} {side}, will open new position instead")
+                    # This should not happen if pre-check in order_executor_v2 works correctly
+                    logger.error(f"CRITICAL: No position found to close for {symbol} {side}. "
+                               f"Pre-check should have prevented this! "
+                               f"Current positions: {all_positions}")
+                    # Return error to prevent opening new position
+                    return {
+                        "success": False,
+                        "platform": "bybit",
+                        "error": f"No {['LONG', 'SHORT'][1 if side.lower() == 'buy' else 0]} position found to close for {symbol}",
+                    }
 
             # 添加详细日志
             logger.info(f"Bybit order params BEFORE MT5: symbol={symbol}, side={side}, type={order_type}, "

@@ -22,7 +22,7 @@ import logging
 from app.models.notification_config import NotificationTemplate
 from app.services.feishu_service import get_feishu_service
 from app.models.notification_config import NotificationConfig
-from app.websocket.connection_manager import manager
+from app.websocket.manager import manager
 
 logger = logging.getLogger(__name__)
 
@@ -85,17 +85,32 @@ class RiskAlertService:
                 )
                 return False
 
-            # 获取飞书配置
+            # 获取用户信息和飞书配置
+            from app.models.user import User
+            result = await self.db.execute(
+                select(User).where(User.user_id == user_id)
+            )
+            user = result.scalar_one_or_none()
+
+            if not user:
+                logger.debug(f"User not found: {user_id}")
+                return False
+
+            # 检查用户是否配置了飞书
+            if not user.email and not user.feishu_open_id:
+                logger.debug(f"User {user_id} has no feishu configuration")
+                return False
+
+            # 检查全局飞书服务是否启用
             result = await self.db.execute(
                 select(NotificationConfig).where(
-                    NotificationConfig.user_id == user_id,
-                    NotificationConfig.service_type == "feishu",
+                    NotificationConfig.service_type == "feishu"
                 )
             )
-            config = result.scalar_one_or_none()
+            global_config = result.scalar_one_or_none()
 
-            if not config or not config.enabled:
-                logger.debug(f"Feishu not enabled for user {user_id}")
+            if not global_config or not global_config.is_enabled:
+                logger.debug(f"Feishu service not enabled globally")
                 return False
 
             # 格式化消息
@@ -112,12 +127,16 @@ class RiskAlertService:
             color_map = {1: "blue", 2: "blue", 3: "orange", 4: "red"}
             color = color_map.get(template.priority, "orange")
 
+            # 确定接收者ID（优先使用飞书open_id）
+            receiver_id = user.feishu_open_id if user.feishu_open_id else user.email
+            receive_id_type = "open_id" if user.feishu_open_id else "email"
+
             # 发送飞书卡片消息
             result = await feishu.send_card_message(
-                receive_id=config.receiver_id,
+                receive_id=receiver_id,
                 title=title,
                 content=content,
-                receive_id_type="email",
+                receive_id_type=receive_id_type,
                 color=color
             )
 
@@ -138,9 +157,9 @@ class RiskAlertService:
                             file_key = upload_result.get("file_key")
                             # 发送音频消息
                             audio_result = await feishu.send_audio_message(
-                                receive_id=config.receiver_id,
+                                receive_id=receiver_id,
                                 file_key=file_key,
-                                receive_id_type="email"
+                                receive_id_type=receive_id_type
                             )
 
                             if audio_result.get("success"):
@@ -192,6 +211,7 @@ class RiskAlertService:
                 'mt5_lag_alert': 'mt5_lag',
                 'binance_net_asset_alert': 'binance_asset',
                 'bybit_net_asset_alert': 'bybit_asset',
+                'total_net_asset_alert': 'total_asset',
                 'binance_liquidation_alert': 'binance_liquidation',
                 'bybit_liquidation_alert': 'bybit_liquidation',
                 'single_leg_alert': 'single_leg_alert'
@@ -319,6 +339,37 @@ class RiskAlertService:
         return await self._send_alert(
             user_id=user_id,
             template_key="bybit_net_asset_alert",
+            variables={
+                "current_asset": f"{current_asset:.2f}",
+                "threshold": f"{threshold:.2f}",
+                "status": status,
+            },
+        )
+
+    async def check_total_net_asset(
+        self,
+        user_id: str,
+        current_asset: float,
+        threshold: float,
+        is_below: bool = True,
+    ) -> bool:
+        """
+        检查总净资产
+
+        Args:
+            user_id: 用户ID
+            current_asset: 当前总净资产
+            threshold: 预警阈值
+            is_below: True=低于阈值, False=高于阈值
+
+        Returns:
+            是否发送成功
+        """
+        status = "低于" if is_below else "高于"
+
+        return await self._send_alert(
+            user_id=user_id,
+            template_key="total_net_asset_alert",
             variables={
                 "current_asset": f"{current_asset:.2f}",
                 "threshold": f"{threshold:.2f}",

@@ -297,7 +297,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import api from '@/services/api'
@@ -315,6 +315,7 @@ const props = defineProps({
 // LocalStorage keys for persisting strategy enabled states
 const STORAGE_KEY_OPENING = `strategy_${props.type}_opening_enabled`
 const STORAGE_KEY_CLOSING = `strategy_${props.type}_closing_enabled`
+const STORAGE_KEY_LADDER_PROGRESS = `strategy_${props.type}_ladder_progress`
 
 // Helper functions for localStorage
 function loadEnabledState(key, defaultValue = false) {
@@ -334,6 +335,30 @@ function saveEnabledState(key, value) {
   }
 }
 
+// 阶梯进度持久化函数
+function loadLadderProgress() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_LADDER_PROGRESS)
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (error) {
+    console.error('Failed to load ladder progress:', error)
+  }
+  return {
+    opening: { currentLadderIndex: 0, completedQty: 0 },
+    closing: { currentLadderIndex: 0, completedQty: 0 }
+  }
+}
+
+function saveLadderProgress() {
+  try {
+    localStorage.setItem(STORAGE_KEY_LADDER_PROGRESS, JSON.stringify(ladderProgress.value))
+  } catch (error) {
+    console.error('Failed to save ladder progress:', error)
+  }
+}
+
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const currentSpread = ref(0)
@@ -342,6 +367,8 @@ const binanceAssets = ref(10000)
 const bybitAssets = ref(8500)
 const executingOpening = ref(false)
 const executingClosing = ref(false)
+// 全局执行锁：防止多个策略同时执行导致冲突
+const executingAnyStrategy = computed(() => executingOpening.value || executingClosing.value)
 const accountsData = ref(null)
 const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
@@ -364,16 +391,7 @@ const configId = ref(null)
 const validationErrors = ref([])
 
 // 阶梯执行进度跟踪
-const ladderProgress = ref({
-  opening: {
-    currentLadderIndex: 0,  // 当前执行的阶梯索引
-    completedQty: 0         // 当前阶梯已完成数量
-  },
-  closing: {
-    currentLadderIndex: 0,
-    completedQty: 0
-  }
-})
+const ladderProgress = ref(loadLadderProgress())
 
 onMounted(async () => {
   // Load config from database (including enabled states)
@@ -817,6 +835,11 @@ async function waitForOrderFill(orderIds, maxWaitTime = 10000) {
 
 function toggleOpening() {
   if (config.value.openingEnabled) {
+    // 禁用策略前检查是否正在执行
+    if (executingOpening.value) {
+      notificationStore.showStrategyNotification('策略执行中，请稍后再试', 'warning')
+      return
+    }
     config.value.openingEnabled = false
     triggerCount.value.opening = 0
     validationErrors.value = []
@@ -849,6 +872,11 @@ function toggleOpening() {
 
 async function toggleClosing() {
   if (config.value.closingEnabled) {
+    // 禁用策略前检查是否正在执行
+    if (executingClosing.value) {
+      notificationStore.showStrategyNotification('策略执行中，请稍后再试', 'warning')
+      return
+    }
     config.value.closingEnabled = false
     triggerCount.value.closing = 0
     validationErrors.value = []
@@ -887,7 +915,11 @@ async function toggleClosing() {
 }
 
 async function executeLadderOpening(ladderIndex, ladder) {
-  if (executingOpening.value) return
+  // 全局互斥锁：防止与其他策略冲突
+  if (executingAnyStrategy.value) {
+    console.log('Another strategy is executing, skipping opening')
+    return
+  }
 
   try {
     executingOpening.value = true
@@ -929,19 +961,19 @@ async function executeLadderOpening(ladderIndex, ladder) {
         const binanceFilled = response.data.binance_filled_qty || 0
         const bybitFilled = response.data.bybit_filled_qty || 0
 
-        // 如果两边都没有成交，停止策略
+        // 如果两边都没有成交，显示警告但保持策略启用（等待下次自动重试）
         if (binanceFilled === 0 && bybitFilled === 0) {
-          const message = response.data.message || 'Binance未匹配到订单，取消策略执行，下次再试!'
+          const message = response.data.message || 'Binance未匹配到订单，等待下次自动重试'
           console.log(`Ladder ${ladderIndex + 1}: ${message}`)
           notificationStore.showStrategyNotification(message, 'warning')
-          config.value.openingEnabled = false
-          saveEnabledState(STORAGE_KEY_OPENING, false)
+          // 不禁用策略，允许下次触发时自动重试
           return
         }
 
         // 如果有成交，更新阶梯进度（使用实际成交数量）
         const actualFilled = Math.min(binanceFilled, bybitFilled)
         ladderProgress.value.opening.completedQty += actualFilled
+        saveLadderProgress()  // 持久化进度
 
         // 检查当前阶梯是否完成
         if (ladderProgress.value.opening.completedQty >= ladder.qtyLimit) {
@@ -950,6 +982,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
           // 移动到下一个阶梯
           ladderProgress.value.opening.currentLadderIndex++
           ladderProgress.value.opening.completedQty = 0
+          saveLadderProgress()  // 持久化进度
 
           // 检查是否所有阶梯都完成
           const enabledLadders = config.value.ladders.filter(l => l.enabled)
@@ -958,6 +991,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
             console.log('All ladders completed, stopping opening strategy')
             config.value.openingEnabled = false
             ladderProgress.value.opening.currentLadderIndex = 0
+            saveLadderProgress()  // 持久化进度
             notificationStore.showStrategyNotification('所有阶梯开仓完成', 'success')
           }
         }
@@ -983,7 +1017,11 @@ async function executeLadderOpening(ladderIndex, ladder) {
 }
 
 async function executeLadderClosing(ladderIndex, ladder) {
-  if (executingClosing.value) return
+  // 全局互斥锁：防止与其他策略冲突
+  if (executingAnyStrategy.value) {
+    console.log('Another strategy is executing, skipping closing')
+    return
+  }
 
   try {
     executingClosing.value = true
@@ -1022,19 +1060,19 @@ async function executeLadderClosing(ladderIndex, ladder) {
         const binanceFilled = response.data.binance_filled_qty || 0
         const bybitFilled = response.data.bybit_filled_qty || 0
 
-        // 如果两边都没有成交，停止策略
+        // 如果两边都没有成交，显示警告但保持策略启用（等待下次自动重试）
         if (binanceFilled === 0 && bybitFilled === 0) {
-          const message = response.data.message || 'Binance未匹配到订单，取消策略执行，下次再试!'
+          const message = response.data.message || 'Binance未匹配到订单，等待下次自动重试'
           console.log(`Ladder ${ladderIndex + 1}: ${message}`)
           notificationStore.showStrategyNotification(message, 'warning')
-          config.value.closingEnabled = false
-          saveEnabledState(STORAGE_KEY_CLOSING, false)
+          // 不禁用策略，允许下次触发时自动重试
           return
         }
 
         // 如果有成交，更新阶梯进度（使用实际成交数量）
         const actualFilled = Math.min(binanceFilled, bybitFilled)
         ladderProgress.value.closing.completedQty += actualFilled
+        saveLadderProgress()  // 持久化进度
 
         // 检查当前阶梯是否完成
         if (ladderProgress.value.closing.completedQty >= ladder.qtyLimit) {
@@ -1043,6 +1081,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
           // 移动到下一个阶梯
           ladderProgress.value.closing.currentLadderIndex++
           ladderProgress.value.closing.completedQty = 0
+          saveLadderProgress()  // 持久化进度
 
           // 检查是否所有阶梯都完成
           const enabledLadders = config.value.ladders.filter(l => l.enabled)
@@ -1051,6 +1090,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
             console.log('All ladders closing completed, stopping closing strategy')
             config.value.closingEnabled = false
             ladderProgress.value.closing.currentLadderIndex = 0
+            saveLadderProgress()  // 持久化进度
             notificationStore.showStrategyNotification('所有阶梯平仓完成', 'success')
           }
         }
@@ -1282,32 +1322,67 @@ async function checkPositionForClosing() {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const totalRequiredQty = enabledLadders.reduce((sum, ladder) => sum + (ladder.qtyLimit || 0), 0)
 
-    // Find positions for the current strategy type
-    // For reverse: Bybit MT5 long position (platform_id=2, side='Buy')
-    // For forward: Binance long position (platform_id=1, side='Buy')
-    const platformId = props.type === 'reverse' ? 2 : 1
-    const side = 'Buy'  // Both forward and reverse closing need to close long positions
+    // Check positions for BOTH platforms (套利策略需要检查两个平台的持仓)
+    // Forward closing: Binance LONG + Bybit SHORT
+    // Reverse closing: Binance SHORT + Bybit LONG
 
-    const relevantPositions = positions.filter(p => {
-      const matches = p.platform_id === platformId &&
-        (p.symbol === 'XAUUSD' || p.symbol === 'XAUUSDT') &&
-        p.side === side &&
+    let binancePositions, bybitPositions
+
+    if (props.type === 'forward') {
+      // Forward closing: close Binance LONG and Bybit SHORT
+      binancePositions = positions.filter(p =>
+        p.platform_id === 1 &&
+        p.symbol === 'XAUUSDT' &&
+        p.side === 'Buy' &&  // LONG position
         p.size > 0
+      )
 
-      console.log(`Position check: platform=${p.platform_id}, symbol=${p.symbol}, side=${p.side}, size=${p.size}, matches=${matches}`)
-      return matches
-    })
+      bybitPositions = positions.filter(p =>
+        p.platform_id === 2 &&
+        p.symbol === 'XAUUSD' &&
+        p.side === 'Sell' &&  // SHORT position
+        p.size > 0
+      )
+    } else {
+      // Reverse closing: close Binance SHORT and Bybit LONG
+      binancePositions = positions.filter(p =>
+        p.platform_id === 1 &&
+        p.symbol === 'XAUUSDT' &&
+        p.side === 'Sell' &&  // SHORT position
+        p.size > 0
+      )
 
-    console.log('Relevant positions:', relevantPositions)
+      bybitPositions = positions.filter(p =>
+        p.platform_id === 2 &&
+        p.symbol === 'XAUUSD' &&
+        p.side === 'Buy' &&  // LONG position
+        p.size > 0
+      )
+    }
 
-    const currentPosition = relevantPositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0)
+    const binancePosition = binancePositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0)
+    const bybitPosition = bybitPositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0)
 
-    console.log(`Current position: ${currentPosition}, Required: ${totalRequiredQty}`)
+    // Convert Bybit position from Lot to XAU for comparison (1 Lot = 100 XAU)
+    const bybitPositionXAU = bybitPosition * 100
 
-    if (currentPosition < totalRequiredQty) {
+    console.log(`Position check for ${props.type} closing:`)
+    console.log(`  Binance: ${binancePosition.toFixed(2)} XAU`)
+    console.log(`  Bybit: ${bybitPosition.toFixed(2)} Lot (${bybitPositionXAU.toFixed(2)} XAU)`)
+    console.log(`  Required: ${totalRequiredQty.toFixed(2)} XAU`)
+
+    // Check if BOTH platforms have sufficient positions
+    if (binancePosition < totalRequiredQty) {
       return {
         valid: false,
-        message: `持仓不足:\n当前持仓: ${currentPosition.toFixed(2)}\n需要平仓: ${totalRequiredQty.toFixed(2)}\n差额: ${(totalRequiredQty - currentPosition).toFixed(2)}\n\n请调整阶梯配置或等待持仓增加`
+        message: `Binance持仓不足:\n当前持仓: ${binancePosition.toFixed(2)} XAU\n需要平仓: ${totalRequiredQty.toFixed(2)} XAU\n差额: ${(totalRequiredQty - binancePosition).toFixed(2)} XAU\n\n请调整阶梯配置或等待持仓增加`
+      }
+    }
+
+    if (bybitPositionXAU < totalRequiredQty) {
+      return {
+        valid: false,
+        message: `Bybit持仓不足:\n当前持仓: ${bybitPosition.toFixed(2)} Lot (${bybitPositionXAU.toFixed(2)} XAU)\n需要平仓: ${(totalRequiredQty / 100).toFixed(2)} Lot (${totalRequiredQty.toFixed(2)} XAU)\n差额: ${((totalRequiredQty - bybitPositionXAU) / 100).toFixed(2)} Lot\n\n请调整阶梯配置或等待持仓增加`
       }
     }
 
