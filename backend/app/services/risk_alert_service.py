@@ -64,6 +64,7 @@ class RiskAlertService:
     ) -> bool:
         """发送提醒通知"""
         try:
+            logger.info(f"[RISK_ALERT] Starting to send risk alert: user_id={user_id}, template_key={template_key}, variables={variables}")
             # 获取模板
             result = await self.db.execute(
                 select(NotificationTemplate).where(
@@ -84,6 +85,27 @@ class RiskAlertService:
                     f"Alert {template_key} for user {user_id} is in cooldown"
                 )
                 return False
+
+            # 检查用户登录状态（仅对特定提醒类型）
+            # 无条件触发的提醒类型（净资产、点差提醒）
+            always_send_templates = {
+                'binance_net_asset_alert',
+                'bybit_net_asset_alert',
+                'total_net_asset_alert',
+                'forward_open_spread_alert',
+                'forward_close_spread_alert',
+                'reverse_open_spread_alert',
+                'reverse_close_spread_alert'
+            }
+
+            # 需要用户在线才触发的提醒类型（爆仓价、MT5卡顿、单腿）
+            if template_key not in always_send_templates:
+                # 检查用户是否在线（通过WebSocket连接）
+                if user_id not in manager.active_connections:
+                    logger.debug(
+                        f"Alert {template_key} requires user online, but user {user_id} is not connected"
+                    )
+                    return False
 
             # 获取用户信息和飞书配置
             from app.models.user import User
@@ -113,14 +135,26 @@ class RiskAlertService:
                 logger.debug(f"Feishu service not enabled globally")
                 return False
 
+            # 使用传入的variables（已包含实时账户数据）
+            # 确保必要的字段存在
+            variables.setdefault('binance_balance', '0.00')
+            variables.setdefault('bybit_balance', '0.00')
+            variables.setdefault('total_assets', '0.00')
+
+            # Log variables for debugging (logger handles encoding properly)
+            logger.info(f"[RISK_ALERT] Variables for template {template_key}: {variables}")
+
             # 格式化消息
             title = template.title_template.format(**variables)
             content = template.content_template.format(**variables)
 
+            # Message formatted successfully
+            logger.info(f"[RISK_ALERT] Message formatted successfully for template {template_key}")
+
             # 获取飞书服务
             feishu = get_feishu_service()
             if not feishu:
-                logger.warning("飞书服务未初始化")
+                logger.warning("Feishu service not initialized")
                 return False
 
             # 根据优先级设置颜色
@@ -132,6 +166,7 @@ class RiskAlertService:
             receive_id_type = "open_id" if user.feishu_open_id else "email"
 
             # 发送飞书卡片消息
+            logger.info(f"[RISK_ALERT] Preparing to send Feishu card: receiver_id={receiver_id}, title={title}")
             result = await feishu.send_card_message(
                 receive_id=receiver_id,
                 title=title,
@@ -141,37 +176,7 @@ class RiskAlertService:
             )
 
             success = result.get("success", False)
-
-            # 如果卡片消息发送成功且模板配置了声音提醒，发送音频消息
-            if success and template.alert_sound:
-                try:
-                    import os
-                    # 构造音频文件路径
-                    audio_path = os.path.join("frontend", "public", "sounds", template.alert_sound)
-
-                    if os.path.exists(audio_path):
-                        # 上传音频文件
-                        upload_result = await feishu.upload_audio_file(audio_path)
-
-                        if upload_result.get("success"):
-                            file_key = upload_result.get("file_key")
-                            # 发送音频消息
-                            audio_result = await feishu.send_audio_message(
-                                receive_id=receiver_id,
-                                file_key=file_key,
-                                receive_id_type=receive_id_type
-                            )
-
-                            if audio_result.get("success"):
-                                logger.info(f"音频提醒发送成功: {template.alert_sound}")
-                            else:
-                                logger.warning(f"音频提醒发送失败: {audio_result.get('error')}")
-                        else:
-                            logger.warning(f"音频文件上传失败: {upload_result.get('error')}")
-                    else:
-                        logger.warning(f"音频文件不存在: {audio_path}")
-                except Exception as e:
-                    logger.error(f"发送音频提醒失败: {e}", exc_info=True)
+            logger.info(f"[RISK_ALERT] Feishu card send result: success={success}, result={result}")
 
             if success:
                 # 更新冷却时间
@@ -190,7 +195,7 @@ class RiskAlertService:
             return success
 
         except Exception as e:
-            logger.error(f"Error sending alert {template_key}: {e}")
+            logger.error(f"Error sending alert {template_key}: {e}", exc_info=True)
             return False
 
     async def _broadcast_alert_to_frontend(
@@ -236,12 +241,19 @@ class RiskAlertService:
                     "title": template.title_template.format(**variables),
                     "message": template.content_template.format(**variables),
                     "timestamp": get_beijing_time().isoformat(),
-                    "template_key": template_key
+                    "template_key": template_key,
+                    # 添加弹窗配置
+                    "popup_config": {
+                        "title": template.popup_title_template.format(**variables) if template.popup_title_template else template.title_template.format(**variables),
+                        "content": template.popup_content_template.format(**variables) if template.popup_content_template else template.content_template.format(**variables),
+                        "sound_file": template.alert_sound_file if template.alert_sound_file else '/sounds/hello-moto.mp3',
+                        "sound_repeat": template.alert_sound_repeat if template.alert_sound_repeat else 3
+                    }
                 }
             }
 
             # 广播到指定用户
-            await manager.send_personal_message(
+            await manager.send_to_user(
                 message=alert_message,
                 user_id=user_id
             )
@@ -595,3 +607,66 @@ class RiskAlertService:
                 )
 
         return results
+
+    # ========================================================================
+    # 爆仓价计算辅助函数
+    # ========================================================================
+
+    def _calculate_binance_liquidation_price(
+        self,
+        entry_price: float,
+        leverage: float,
+        position_side: str = "LONG"
+    ) -> float:
+        """
+        计算 Binance 爆仓价
+
+        Args:
+            entry_price: 开仓均价
+            leverage: 杠杆倍数
+            position_side: 持仓方向 (LONG/SHORT)
+
+        Returns:
+            爆仓价
+        """
+        if entry_price == 0 or leverage == 0:
+            return 0
+
+        if position_side == "LONG":
+            # 多仓强平价 = 开仓价 × (1 − 1/杠杆)
+            return entry_price * (1 - 1 / leverage)
+        else:
+            # 空仓强平价 = 开仓价 × (1 + 1/杠杆)
+            return entry_price * (1 + 1 / leverage)
+
+    def _calculate_bybit_mt5_liquidation_price(
+        self,
+        entry_price: float,
+        equity: float,
+        volume_oz: float,
+        position_side: str = "LONG"
+    ) -> float:
+        """
+        计算 Bybit MT5 爆仓价
+
+        Args:
+            entry_price: 开仓均价
+            equity: 账户净值
+            volume_oz: 持仓盎司数
+            position_side: 持仓方向 (LONG/SHORT)
+
+        Returns:
+            爆仓价
+        """
+        if entry_price == 0 or volume_oz == 0:
+            return 0
+
+        price_offset = equity / volume_oz
+
+        if position_side == "LONG":
+            # 多头强平价 = 开仓价 − (账户净值 ÷ 持仓盎司数)
+            liquidation_price = entry_price - price_offset
+            return liquidation_price if liquidation_price > 0 else 0
+        else:
+            # 空头强平价 = 开仓价 + (账户净值 ÷ 持仓盎司数)
+            return entry_price + price_offset

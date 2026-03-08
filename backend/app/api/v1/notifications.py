@@ -6,6 +6,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 import uuid
+import logging
 
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
@@ -21,10 +22,16 @@ from app.models.notification_config import (
     NotificationLog
 )
 from app.services.feishu_service import get_feishu_service, init_feishu_service
-import logging
+from app.services.audio_manager import get_audio_file_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.get("/test-version")
+async def test_version():
+    """测试端点 - 验证代码版本"""
+    return {"version": "2024-03-06-v2", "message": "新版本代码已加载"}
 
 
 def get_beijing_time():
@@ -59,8 +66,15 @@ class NotificationTemplateUpdate(BaseModel):
     enable_feishu: Optional[bool] = None
     priority: Optional[int] = None
     cooldown_seconds: Optional[int] = None
+    # 旧字段（保留兼容）
     alert_sound: Optional[str] = None
     repeat_count: Optional[int] = None
+    # 新字段
+    alert_sound_file: Optional[str] = None
+    alert_sound_repeat: Optional[int] = None
+    popup_title_template: Optional[str] = None
+    popup_content_template: Optional[str] = None
+    is_enabled: Optional[bool] = None
 
 
 class SendNotificationRequest(BaseModel):
@@ -219,6 +233,47 @@ async def test_notification_service(
         raise HTTPException(status_code=400, detail="不支持的服务类型")
 
 
+@router.get("/feishu/status")
+async def get_feishu_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get Feishu service status"""
+    if current_user.role not in ['系统管理员', '管理员', 'admin', 'super_admin']:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    feishu = get_feishu_service()
+    if not feishu:
+        return {
+            "connected": False,
+            "error": "飞书服务未初始化",
+            "token_expires_at": None
+        }
+
+    try:
+        # Try to get token to verify connection
+        token = await feishu.get_tenant_access_token()
+        if token:
+            return {
+                "connected": True,
+                "token_expires_at": feishu.token_expires_at.isoformat() if feishu.token_expires_at else None,
+                "error": None
+            }
+        else:
+            return {
+                "connected": False,
+                "error": "无法获取访问令牌",
+                "token_expires_at": None
+            }
+    except Exception as e:
+        logger.error(f"检查飞书服务状态失败: {e}")
+        return {
+            "connected": False,
+            "error": str(e),
+            "token_expires_at": None
+        }
+
+
 # ============================================================================
 # Template Management
 # ============================================================================
@@ -230,6 +285,7 @@ async def get_notification_templates(
     db: AsyncSession = Depends(get_db),
 ):
     """Get notification templates"""
+    logger.info("=== 获取通知模板列表 - 新版本代码 ===")
     query = select(NotificationTemplate).filter(
         NotificationTemplate.is_active == True
     )
@@ -240,7 +296,7 @@ async def get_notification_templates(
     result = await db.execute(query.order_by(NotificationTemplate.category, NotificationTemplate.priority.desc()))
     templates = result.scalars().all()
 
-    return {
+    response_data = {
         "success": True,
         "templates": [
             {
@@ -255,11 +311,30 @@ async def get_notification_templates(
                 "enable_feishu": t.enable_feishu,
                 "priority": t.priority,
                 "cooldown_seconds": t.cooldown_seconds,
+                # 旧字段（保留兼容）
+                "alert_sound": t.alert_sound,
+                "repeat_count": t.repeat_count,
+                # 新字段
+                "alert_sound_file": t.alert_sound_file,
+                "alert_sound_repeat": t.alert_sound_repeat,
+                "popup_title_template": t.popup_title_template,
+                "popup_content_template": t.popup_content_template,
+                "is_enabled": t.is_active,
                 "updated_at": t.updated_at.isoformat() if t.updated_at else None
             }
             for t in templates
         ]
     }
+
+    # 调试日志：打印第一个模板的关键字段
+    if response_data["templates"]:
+        first = response_data["templates"][0]
+        logger.info(f"API返回第一个模板: {first['template_name']}")
+        logger.info(f"  - alert_sound: {first.get('alert_sound')}")
+        logger.info(f"  - repeat_count: {first.get('repeat_count')}")
+        logger.info(f"  - is_enabled: {first.get('is_enabled')}")
+
+    return response_data
 
 
 @router.get("/templates/{template_id}")
@@ -292,7 +367,15 @@ async def get_notification_template(
             "enable_sms": template.enable_sms,
             "enable_feishu": template.enable_feishu,
             "priority": template.priority,
-            "cooldown_seconds": template.cooldown_seconds
+            "cooldown_seconds": template.cooldown_seconds,
+            # 旧字段（保留兼容）
+            "alert_sound": template.alert_sound,
+            "repeat_count": template.repeat_count,
+            # 新字段
+            "alert_sound_file": template.alert_sound_file,
+            "alert_sound_repeat": template.alert_sound_repeat,
+            "popup_title_template": template.popup_title_template,
+            "popup_content_template": template.popup_content_template
         }
     }
 
@@ -320,12 +403,20 @@ async def update_notification_template(
 
     # Update fields
     update_data = template_update.dict(exclude_unset=True)
+    logger.info(f"更新模板 {template.template_name}, 数据: {update_data}")
+
     for key, value in update_data.items():
-        if hasattr(template, key):
+        # Map is_enabled to is_active
+        if key == 'is_enabled':
+            logger.info(f"设置 is_active = {value}")
+            setattr(template, 'is_active', value)
+        elif hasattr(template, key):
             setattr(template, key, value)
 
     template.updated_at = datetime.utcnow()
     await db.commit()
+
+    logger.info(f"模板更新成功: {template.template_name}, is_active={template.is_active}")
 
     return {"success": True, "message": "模板已更新"}
 
@@ -395,13 +486,44 @@ async def send_notification(
                     color_map = {1: "blue", 2: "blue", 3: "orange", 4: "red"}
                     color = color_map.get(template.priority, "blue")
 
-                    result = await feishu.send_card_message(
-                        receive_id=feishu_user_id,
-                        title=title,
-                        content=content,
-                        receive_id_type=receive_id_type,
-                        color=color
-                    )
+                    # Check if template has alert sound
+                    if template.alert_sound and template.alert_sound.strip():
+                        # Get audio file_key
+                        audio_file_key = await get_audio_file_key(feishu, template.alert_sound)
+
+                        if audio_file_key:
+                            # Send card with audio
+                            logger.info(f"发送带音频的卡片消息: {template.alert_sound}")
+                            result = await feishu.send_card_with_audio(
+                                receive_id=feishu_user_id,
+                                title=title,
+                                content=content,
+                                audio_file_key=audio_file_key,
+                                audio_title=f"{template.template_name}提醒",
+                                receive_id_type=receive_id_type,
+                                color=color,
+                                loop=True,  # 循环播放
+                                auto_play=True  # 自动播放
+                            )
+                        else:
+                            # Fallback to normal card if audio upload failed
+                            logger.warning(f"音频文件上传失败，发送普通卡片: {template.alert_sound}")
+                            result = await feishu.send_card_message(
+                                receive_id=feishu_user_id,
+                                title=title,
+                                content=content,
+                                receive_id_type=receive_id_type,
+                                color=color
+                            )
+                    else:
+                        # Send normal card without audio
+                        result = await feishu.send_card_message(
+                            receive_id=feishu_user_id,
+                            title=title,
+                            content=content,
+                            receive_id_type=receive_id_type,
+                            color=color
+                        )
 
                     # Log notification
                     log = NotificationLog(

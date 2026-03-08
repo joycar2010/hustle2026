@@ -81,6 +81,26 @@ async def get_websocket_stats():
     from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer
     from datetime import datetime
 
+    def get_streamer_stats(streamer, name):
+        """安全地获取streamer统计信息"""
+        try:
+            return {
+                "running": getattr(streamer, 'running', False),
+                "interval_ms": getattr(streamer, 'interval', 1) * 1000,
+                "broadcast_count": getattr(streamer, 'broadcast_count', 0),
+                "last_broadcast": getattr(streamer, 'last_broadcast_time', None),
+                "error_count": getattr(streamer, 'error_count', 0)
+            }
+        except Exception as e:
+            return {
+                "running": False,
+                "interval_ms": 0,
+                "broadcast_count": 0,
+                "last_broadcast": None,
+                "error_count": 0,
+                "error": str(e)
+            }
+
     return {
         "connections": {
             "total": manager.get_connection_count(),
@@ -88,34 +108,10 @@ async def get_websocket_stats():
             "users": list(manager.active_connections.keys())
         },
         "streamers": {
-            "market_data": {
-                "running": market_streamer.running,
-                "interval_ms": market_streamer.interval * 1000,
-                "broadcast_count": market_streamer.broadcast_count,
-                "last_broadcast": market_streamer.last_broadcast_time,
-                "error_count": market_streamer.error_count
-            },
-            "account_balance": {
-                "running": account_balance_streamer.running,
-                "interval_ms": account_balance_streamer.interval * 1000,
-                "broadcast_count": account_balance_streamer.broadcast_count,
-                "last_broadcast": account_balance_streamer.last_broadcast_time,
-                "error_count": account_balance_streamer.error_count
-            },
-            "risk_metrics": {
-                "running": risk_metrics_streamer.running,
-                "interval_ms": risk_metrics_streamer.interval * 1000,
-                "broadcast_count": risk_metrics_streamer.broadcast_count,
-                "last_broadcast": risk_metrics_streamer.last_broadcast_time,
-                "error_count": risk_metrics_streamer.error_count
-            },
-            "mt5_connection": {
-                "running": mt5_connection_streamer.running,
-                "interval_ms": mt5_connection_streamer.interval * 1000,
-                "broadcast_count": mt5_connection_streamer.broadcast_count,
-                "last_broadcast": mt5_connection_streamer.last_broadcast_time,
-                "error_count": mt5_connection_streamer.error_count
-            }
+            "market_data": get_streamer_stats(market_streamer, "market_data"),
+            "account_balance": get_streamer_stats(account_balance_streamer, "account_balance"),
+            "risk_metrics": get_streamer_stats(risk_metrics_streamer, "risk_metrics"),
+            "mt5_connection": get_streamer_stats(mt5_connection_streamer, "mt5_connection")
         },
         "server_time": datetime.now().isoformat()
     }

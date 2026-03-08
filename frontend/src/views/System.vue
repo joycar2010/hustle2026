@@ -394,6 +394,10 @@
         </div>
       </div>
 
+      <!-- 角色权限管理 Tab -->
+      <div v-if="activeTab === 'rbac'" class="space-y-6">
+        <RolePermissionAssign />
+      </div>
 
       <!-- 系统日志管理 Tab -->
       <div v-if="activeTab === 'systemlogs'" class="space-y-6">
@@ -1297,6 +1301,7 @@ import BackupActionModal from '@/components/modals/BackupActionModal.vue'
 import WebSocketMonitor from '@/components/system/WebSocketMonitor.vue'
 import NotificationServiceConfig from '@/components/system/NotificationServiceConfig.vue'
 import SoundFileManager from '@/components/system/SoundFileManager.vue'
+import RolePermissionAssign from '@/components/RolePermissionAssign.vue'
 import { useMarketStore } from '@/stores/market'
 
 // 引入market store以获取WebSocket连接状态

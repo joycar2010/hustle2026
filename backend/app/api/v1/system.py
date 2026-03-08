@@ -1281,3 +1281,84 @@ async def get_market_streamer_stats(
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+
+# Market closure configuration
+class MarketClosureConfig(BaseModel):
+    enabled: bool = False
+    winter_open: str = "周一 07:00"
+    winter_close: str = "周六 06:00"
+    summer_open: str = "周一 06:00"
+    summer_close: str = "周六 05:00"
+
+
+@router.get("/market-closure-config")
+async def get_market_closure_config(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get market closure configuration"""
+    try:
+        # For now, store in a simple JSON file
+        config_file = Path("config/market_closure.json")
+        if config_file.exists():
+            import json
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        else:
+            config = MarketClosureConfig().dict()
+        
+        return {
+            "success": True,
+            "config": config
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "config": MarketClosureConfig().dict()
+        }
+
+
+@router.put("/market-closure-config")
+async def update_market_closure_config(
+    config: MarketClosureConfig,
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Update market closure configuration"""
+    try:
+        # Save to JSON file
+        config_file = Path("config/market_closure.json")
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        import json
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config.dict(), f, ensure_ascii=False, indent=2)
+        
+        return {
+            "success": True,
+            "message": "配置已保存"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存配置失败: {str(e)}")
+
+
+@router.get("/market-status")
+async def get_market_status(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get current market status based on trading hours"""
+    try:
+        from app.utils.trading_time import is_bybit_trading_hours
+        is_open, message = is_bybit_trading_hours()
+        
+        return {
+            "success": True,
+            "is_open": is_open,
+            "message": message
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "is_open": True,
+            "message": f"无法获取市场状态: {str(e)}"
+        }

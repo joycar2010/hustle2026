@@ -109,15 +109,15 @@ function handleOrderExecuted() {
 }
 
 .account-section {
-  flex: 6.5;
+  flex: 6.3;
 }
 
 .navigation-section {
-  flex: 3.5;
+  flex: 3.7;
 }
 
 .sidebar-right {
-  width: 320px;
+  width: 304px;
   background-color: #1e2329;
   border-left: 1px solid #2b3139;
   overflow-y: auto;
@@ -135,10 +135,10 @@ function handleOrderExecuted() {
 
 /* ========== 策略面板区域 ========== */
 .section-strategies {
-  height: 60%;
+  height: 63%;
   display: flex;
-  gap: 12px;
-  padding: 12px;
+  gap: 8px;
+  padding: 8px;
   border-bottom: 1px solid #2b3139;
   min-height: 0;
 }
@@ -163,8 +163,8 @@ function handleOrderExecuted() {
 .section-orders-spread {
   flex: 1;
   display: flex;
-  gap: 12px;
-  padding: 0 12px 12px 12px;
+  gap: 8px;
+  padding: 0 8px 8px 8px;
   min-height: 0;
 }
 
@@ -286,7 +286,7 @@ function handleOrderExecuted() {
   }
 
   .sidebar-right {
-    width: 360px;
+    width: 342px;
   }
 
   .market-cards-container {

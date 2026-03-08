@@ -130,10 +130,10 @@ async function fetchOrders() {
     // 如果查询挂单中的订单，使用实时API获取Binance挂单
     if (filterStatus.value === 'new,pending' && !filterSource.value) {
       const response = await api.get('/api/v1/trading/orders/realtime')
-      orders.value = response.data
+      orders.value = response.data.slice(0, 8)
     } else {
       // 其他情况使用数据库查询（历史数据、已成交、已取消等）
-      const params = { limit: 200 }
+      const params = { limit: 8 }
       if (filterSource.value) {
         params.source = filterSource.value
       }

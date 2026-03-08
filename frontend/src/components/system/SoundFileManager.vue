@@ -1,6 +1,6 @@
 <template>
   <div class="card">
-    <h2 class="text-xl font-bold mb-4">提醒声音设置</h2>
+    <h2 class="text-xl font-bold mb-4">提醒声音上传</h2>
     <p class="text-sm text-text-secondary mb-4">
       管理系统提醒声音文件，上传的声音文件将自动同步到飞书云文档
     </p>
@@ -18,6 +18,16 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
+          </button>
+          <button
+            @click="importExisting"
+            class="btn-secondary"
+            :disabled="importing"
+          >
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            {{ importing ? '导入中...' : '导入现有文件' }}
           </button>
           <button
             @click="syncToFeishu"
@@ -43,7 +53,7 @@
       <div v-else class="space-y-2">
         <div
           v-for="sound in sounds"
-          :key="sound.filename"
+          :key="sound.file_id"
           class="flex items-center justify-between p-3 bg-dark-200 rounded hover:bg-dark-100 transition-colors"
         >
           <div class="flex items-center gap-3 flex-1">
@@ -51,8 +61,28 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
             </svg>
             <div class="flex-1">
-              <div class="font-medium">{{ sound.filename }}</div>
-              <div class="text-xs text-text-secondary">{{ formatFileSize(sound.size) }}</div>
+              <div class="flex items-center gap-2">
+                <span class="font-medium">{{ sound.filename }}</span>
+                <span
+                  v-if="sound.is_synced"
+                  class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded"
+                  :title="`已同步 - file_key: ${sound.file_key}`"
+                >
+                  已同步
+                </span>
+                <span
+                  v-else
+                  class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded"
+                >
+                  未同步
+                </span>
+              </div>
+              <div class="text-xs text-text-secondary mt-1">
+                <span>{{ formatFileSize(sound.size) }}</span>
+                <span v-if="sound.file_key" class="ml-3">
+                  file_key: <span class="font-mono">{{ sound.file_key }}</span>
+                </span>
+              </div>
             </div>
           </div>
           <div class="flex gap-2">
@@ -117,6 +147,7 @@ const sounds = ref([])
 const loading = ref(false)
 const uploading = ref(false)
 const syncing = ref(false)
+const importing = ref(false)
 const fileInput = ref(null)
 const currentAudio = ref(null)
 
@@ -165,6 +196,26 @@ async function handleFileUpload(event) {
   }
 }
 
+async function importExisting() {
+  if (!confirm('确定要导入现有的音频文件到数据库吗？')) {
+    return
+  }
+
+  importing.value = true
+  try {
+    const response = await api.post('/api/v1/sounds/import-existing')
+    if (response.data.success) {
+      alert(`${response.data.message}`)
+      await loadSounds()
+    }
+  } catch (error) {
+    console.error('导入失败:', error)
+    alert(error.response?.data?.detail || '导入失败')
+  } finally {
+    importing.value = false
+  }
+}
+
 async function syncToFeishu() {
   if (!confirm('确定要将所有声音文件同步到飞书云文档吗？')) {
     return
@@ -183,6 +234,9 @@ async function syncToFeishu() {
         message += `\n失败: ${failedCount} 个文件`
       }
       alert(message)
+
+      // 重新加载列表以显示更新后的同步状态
+      await loadSounds()
     }
   } catch (error) {
     console.error('同步失败:', error)

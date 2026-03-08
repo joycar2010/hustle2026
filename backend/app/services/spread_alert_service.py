@@ -148,6 +148,23 @@ class SpreadAlertService:
             variables: 模板变量
         """
         try:
+            # 获取实时账户数据
+            from app.services.account_service import get_account_summary
+            try:
+                account_data = await get_account_summary(db, uuid.UUID(user_id))
+                # 添加实时账户信息到变量中
+                variables.update({
+                    'binance_balance': f"{account_data.get('binance_net_asset', 0):.2f}",
+                    'bybit_balance': f"{account_data.get('bybit_mt5_net_asset', 0):.2f}",
+                    'total_assets': f"{account_data.get('total_assets', 0):.2f}"
+                })
+            except Exception as e:
+                logger.warning(f"获取账户数据失败: {e}")
+                # 如果获取失败，使用默认值
+                variables.setdefault('binance_balance', '0.00')
+                variables.setdefault('bybit_balance', '0.00')
+                variables.setdefault('total_assets', '0.00')
+
             # 获取模板
             result = await db.execute(
                 select(NotificationTemplate).filter(
@@ -201,36 +218,7 @@ class SpreadAlertService:
                 color=color
             )
 
-            # 如果模板配置了声音提醒，发送音频消息
-            if result.get("success") and template.alert_sound:
-                try:
-                    import os
-                    # 构造音频文件路径（假设音频文件存储在 frontend/public/sounds/ 目录）
-                    audio_path = os.path.join("frontend", "public", "sounds", template.alert_sound)
-
-                    if os.path.exists(audio_path):
-                        # 上传音频文件
-                        upload_result = await feishu.upload_audio_file(audio_path)
-
-                        if upload_result.get("success"):
-                            file_key = upload_result.get("file_key")
-                            # 发送音频消息
-                            audio_result = await feishu.send_audio_message(
-                                receive_id=recipient,
-                                file_key=file_key,
-                                receive_id_type="email"
-                            )
-
-                            if audio_result.get("success"):
-                                logger.info(f"音频提醒发送成功: {template.alert_sound}")
-                            else:
-                                logger.warning(f"音频提醒发送失败: {audio_result.get('error')}")
-                        else:
-                            logger.warning(f"音频文件上传失败: {upload_result.get('error')}")
-                    else:
-                        logger.warning(f"音频文件不存在: {audio_path}")
-                except Exception as e:
-                    logger.error(f"发送音频提醒失败: {e}", exc_info=True)
+            # 音频提醒功能已禁用 - 只发送文字卡片消息
 
             # 记录日志
             log = NotificationLog(

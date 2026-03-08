@@ -22,6 +22,10 @@ from app.services.binance_ws_client import binance_ws
 from app.services.strategy_status_pusher import status_pusher
 from app.services.mt5_bridge import mt5_bridge
 from app.services.order_recovery_service import order_recovery_service
+from app.services.feishu_service import init_feishu_service
+from app.models.notification_config import NotificationConfig
+from sqlalchemy import select
+from app.core.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,36 @@ async def lifespan(app: FastAPI):
     # Startup
     await redis_client.connect()
     await redis_monitor.start()  # Start Redis monitor
+
+    # Initialize Feishu service from database config
+    logger.info("Initializing Feishu service from database...")
+    try:
+        async with AsyncSessionLocal() as db:
+            logger.info("Querying Feishu configuration...")
+            result = await db.execute(
+                select(NotificationConfig).filter(
+                    NotificationConfig.service_type == 'feishu',
+                    NotificationConfig.is_enabled == True
+                )
+            )
+            feishu_config = result.scalar_one_or_none()
+            logger.info(f"Query result: config_found={feishu_config is not None}")
+
+            if feishu_config and feishu_config.config_data:
+                app_id = feishu_config.config_data.get('app_id')
+                app_secret = feishu_config.config_data.get('app_secret')
+                logger.info(f"Config data: app_id={app_id}, has_secret={bool(app_secret)}")
+
+                if app_id and app_secret:
+                    init_feishu_service(app_id, app_secret)
+                    logger.info("Feishu service initialized successfully from database config")
+                else:
+                    logger.warning("Feishu config incomplete: missing app_id or app_secret")
+            else:
+                logger.info("Feishu service not enabled or not configured")
+    except Exception as e:
+        logger.error(f"Failed to initialize Feishu service: {e}", exc_info=True)
+
     binance_ws.start()
     await market_streamer.start()
     await account_balance_streamer.start()

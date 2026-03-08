@@ -15,6 +15,31 @@
         </label>
       </div>
 
+      <!-- 飞书服务状态 -->
+      <div v-if="feishuConfig.is_enabled" class="mb-4 p-3 rounded" :class="feishuStatus.connected ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full" :class="feishuStatus.connected ? 'bg-green-500' : 'bg-red-500'"></div>
+            <span class="text-sm font-medium">
+              {{ feishuStatus.connected ? '飞书服务已连接' : '飞书服务未连接' }}
+            </span>
+          </div>
+          <button
+            @click="checkFeishuStatus"
+            class="text-xs px-2 py-1 rounded hover:bg-dark-300 transition-colors"
+            :disabled="checkingStatus"
+          >
+            {{ checkingStatus ? '检查中...' : '刷新状态' }}
+          </button>
+        </div>
+        <div v-if="feishuStatus.connected && feishuStatus.token_expires_at" class="text-xs text-text-secondary mt-2">
+          Token有效期至: {{ formatDateTime(feishuStatus.token_expires_at) }}
+        </div>
+        <div v-if="!feishuStatus.connected && feishuStatus.error" class="text-xs text-red-400 mt-2">
+          错误: {{ feishuStatus.error }}
+        </div>
+      </div>
+
       <div class="space-y-4">
         <div>
           <label class="block text-sm font-medium mb-2">App ID</label>
@@ -110,7 +135,7 @@
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            {{ saving ? '保存中...' : '保存配置' }}
+            {{ saving ? '保存中...' : '保存并启用' }}
           </button>
           <button
             @click="testNotification('feishu')"
@@ -127,6 +152,102 @@
             {{ testing ? '发送中...' : '发送测试消息' }}
           </button>
         </div>
+      </div>
+    </div>
+
+
+    <!-- 周末休市设置 -->
+    <div class="card">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h2 class="text-xl font-bold">周末休市设置</h2>
+          <p class="text-sm text-text-secondary mt-1">基于Bybit MT5黄金交易时间，休市期间停止所有提醒</p>
+        </div>
+        <label class="flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            v-model="marketClosureConfig.enabled"
+            class="sr-only peer"
+          />
+          <div class="relative w-11 h-6 bg-dark-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+          <span class="ml-3 text-sm font-medium">{{ marketClosureConfig.enabled ? '已启用' : '已禁用' }}</span>
+        </label>
+      </div>
+
+      <div v-if="marketClosureConfig.enabled" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">冬令时（11月-3月）</label>
+            <div class="space-y-2">
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">开市时间（北京时间）</label>
+                <input
+                  v-model="marketClosureConfig.winter_open"
+                  type="text"
+                  placeholder="周一 07:00"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                />
+              </div>
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">休市时间（北京时间）</label>
+                <input
+                  v-model="marketClosureConfig.winter_close"
+                  type="text"
+                  placeholder="周六 06:00"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">夏令时（4月-10月）</label>
+            <div class="space-y-2">
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">开市时间（北京时间）</label>
+                <input
+                  v-model="marketClosureConfig.summer_open"
+                  type="text"
+                  placeholder="周一 06:00"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                />
+              </div>
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">休市时间（北京时间）</label>
+                <input
+                  v-model="marketClosureConfig.summer_close"
+                  type="text"
+                  placeholder="周六 05:00"
+                  class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-3 bg-dark-200 rounded">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="w-2 h-2 rounded-full" :class="marketStatus.is_open ? 'bg-green-500' : 'bg-red-500'"></div>
+            <span class="text-sm font-medium">
+              当前市场状态: {{ marketStatus.is_open ? '交易中' : '休市中' }}
+            </span>
+          </div>
+          <p class="text-xs text-text-secondary">{{ marketStatus.message }}</p>
+        </div>
+
+        <button
+          @click="saveMarketClosureConfig"
+          :disabled="savingMarketClosure"
+          class="btn-primary"
+        >
+          <svg v-if="!savingMarketClosure" class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+          <svg v-else class="animate-spin w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          {{ savingMarketClosure ? '保存中...' : '保存设置' }}
+        </button>
       </div>
     </div>
 
@@ -158,7 +279,8 @@
               <th class="text-left py-3 px-4">分类</th>
               <th class="text-left py-3 px-4">通知渠道</th>
               <th class="text-left py-3 px-4">优先级</th>
-              <th class="text-left py-3 px-4">标题模板</th>
+              <th class="text-left py-3 px-4">声音提醒</th>
+              <th class="text-left py-3 px-4">状态</th>
               <th class="text-left py-3 px-4">操作</th>
             </tr>
           </thead>
@@ -190,7 +312,27 @@
                   {{ getPriorityLabel(template.priority) }}
                 </span>
               </td>
-              <td class="py-3 px-4 text-sm text-text-secondary truncate max-w-xs">{{ template.title_template }}</td>
+              <td class="py-3 px-4 text-sm">
+                <div v-if="template.alert_sound && template.alert_sound !== ''" class="flex items-center gap-2">
+                  <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  </svg>
+                  <span class="text-text-secondary">{{ template.alert_sound }}</span>
+                  <span class="text-xs text-text-secondary">({{ template.repeat_count || 1 }}次)</span>
+                </div>
+                <span v-else class="text-text-secondary text-xs">未设置</span>
+              </td>
+              <td class="py-3 px-4">
+                <label class="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    :checked="template.is_enabled !== false"
+                    @change="toggleTemplateStatus(template)"
+                    class="sr-only peer"
+                  />
+                  <div class="relative w-9 h-5 bg-dark-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </td>
               <td class="py-3 px-4">
                 <div class="flex gap-2">
                   <button
@@ -205,12 +347,6 @@
                     :disabled="testingSending"
                   >
                     发送测试
-                  </button>
-                  <button
-                    @click="openSoundSettings(template)"
-                    class="text-warning hover:text-yellow-400 text-sm"
-                  >
-                    声音设置
                   </button>
                 </div>
               </td>
@@ -379,6 +515,56 @@
               </label>
             </div>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2">声音提醒设置</label>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">提醒声音</label>
+                <select
+                  v-model="editingTemplate.alert_sound_file"
+                  class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded focus:outline-none focus:border-primary"
+                >
+                  <option value="">不使用声音</option>
+                  <option v-for="sound in availableSounds" :key="sound.filename" :value="sound.filename">
+                    {{ sound.filename }}
+                  </option>
+                </select>
+              </div>
+              <div v-if="editingTemplate.alert_sound_file">
+                <label class="block text-xs text-text-secondary mb-1">重复次数</label>
+                <input
+                  v-model.number="editingTemplate.alert_sound_repeat"
+                  type="number"
+                  min="1"
+                  max="10"
+                  class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded focus:outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2">前端弹窗配置</label>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">弹窗标题模板</label>
+                <input
+                  v-model="editingTemplate.popup_title_template"
+                  type="text"
+                  class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded focus:outline-none focus:border-primary"
+                  placeholder="留空则使用标题模板"
+                />
+              </div>
+              <div>
+                <label class="block text-xs text-text-secondary mb-1">弹窗内容模板</label>
+                <textarea
+                  v-model="editingTemplate.popup_content_template"
+                  rows="3"
+                  class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded focus:outline-none focus:border-primary"
+                  placeholder="留空则使用内容模板"
+                ></textarea>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="mt-6 flex justify-end gap-3">
           <button @click="editDialogVisible = false" class="btn-secondary">
@@ -503,6 +689,28 @@ const feishuConfig = ref({
 })
 const testRecipient = ref('')
 
+// 飞书服务状态
+const feishuStatus = ref({
+  connected: false,
+  token_expires_at: null,
+  error: null
+})
+const checkingStatus = ref(false)
+
+// 周末休市配置
+const marketClosureConfig = ref({
+  enabled: false,
+  winter_open: '周一 07:00',
+  winter_close: '周六 06:00',
+  summer_open: '周一 06:00',
+  summer_close: '周六 05:00'
+})
+const savingMarketClosure = ref(false)
+const marketStatus = ref({
+  is_open: true,
+  message: '正在检查市场状态...'
+})
+
 // 模板管理
 const templateCategory = ref('')
 const categories = [
@@ -535,6 +743,8 @@ onMounted(async () => {
   await loadTemplates()
   await loadUsers()
   await loadAvailableSounds()
+  await loadMarketClosureConfig()
+  await checkMarketStatus()
 })
 
 async function loadUsers() {
@@ -587,10 +797,57 @@ async function loadConfigs() {
         app_id: feishu.config_data.app_id || 'cli_a9235819f078dcbd',
         app_secret: feishu.config_data.app_secret || ''
       }
+
+      // 如果飞书已启用，检查服务状态
+      if (feishu.is_enabled) {
+        await checkFeishuStatus()
+      }
     }
   } catch (error) {
     console.error('加载配置失败:', error)
     alert('加载配置失败')
+  }
+}
+
+// 检查飞书服务状态
+async function checkFeishuStatus() {
+  if (!feishuConfig.value.is_enabled) return
+
+  checkingStatus.value = true
+  try {
+    const response = await api.get('/api/v1/notifications/feishu/status')
+    feishuStatus.value = {
+      connected: response.data.connected || false,
+      token_expires_at: response.data.token_expires_at || null,
+      error: response.data.error || null
+    }
+  } catch (error) {
+    feishuStatus.value = {
+      connected: false,
+      token_expires_at: null,
+      error: error.response?.data?.detail || '无法获取服务状态'
+    }
+  } finally {
+    checkingStatus.value = false
+  }
+}
+
+// 格式化日期时间
+function formatDateTime(dateStr) {
+  if (!dateStr) return ''
+  try {
+    const date = new Date(dateStr)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  } catch (e) {
+    return dateStr
   }
 }
 
@@ -635,7 +892,35 @@ async function loadTemplates() {
   try {
     const params = templateCategory.value ? { category: templateCategory.value } : {}
     const response = await api.get('/api/v1/notifications/templates', { params })
-    templates.value = response.data.templates
+
+    console.log('=== API原始响应 ===')
+    console.log('response.data:', response.data)
+    console.log('response.data.templates类型:', typeof response.data.templates)
+    console.log('response.data.templates长度:', response.data.templates?.length)
+
+    if (response.data.templates && response.data.templates.length > 0) {
+      console.log('第一个模板原始数据:', JSON.stringify(response.data.templates[0], null, 2))
+    }
+
+    // 核心修复：对缺失字段做默认值兜底
+    templates.value = response.data.templates.map(template => ({
+      ...template,
+      alert_sound: template.alert_sound ?? '',  // 音频默认空字符串（旧字段）
+      repeat_count: template.repeat_count ?? 3, // 重复次数默认3（旧字段）
+      alert_sound_file: template.alert_sound_file ?? template.alert_sound ?? '',  // 新字段，回退到旧字段
+      alert_sound_repeat: template.alert_sound_repeat ?? template.repeat_count ?? 3, // 新字段，回退到旧字段
+      popup_title_template: template.popup_title_template ?? '',  // 弹窗标题模板
+      popup_content_template: template.popup_content_template ?? '',  // 弹窗内容模板
+      is_enabled: template.is_enabled ?? true,  // 启用状态默认true
+    }))
+
+    console.log('加载的模板数量:', templates.value.length)
+    if (templates.value.length > 0) {
+      console.log('第一个模板示例（处理后）:', templates.value[0])
+      console.log('  - alert_sound:', templates.value[0].alert_sound)
+      console.log('  - repeat_count:', templates.value[0].repeat_count)
+      console.log('  - is_enabled:', templates.value[0].is_enabled)
+    }
   } catch (error) {
     console.error('加载模板失败:', error)
     alert('加载模板失败')
@@ -644,22 +929,77 @@ async function loadTemplates() {
 
 // 编辑模板
 function editTemplate(template) {
-  editingTemplate.value = { ...template }
+  editingTemplate.value = {
+    ...template,
+    // 旧字段（保留兼容）
+    repeat_count: template.repeat_count || 3,
+    alert_sound: template.alert_sound || '',
+    // 新字段
+    alert_sound_file: template.alert_sound_file || template.alert_sound || '',
+    alert_sound_repeat: template.alert_sound_repeat || template.repeat_count || 3,
+    popup_title_template: template.popup_title_template || '',
+    popup_content_template: template.popup_content_template || ''
+  }
+  console.log('编辑模板:', editingTemplate.value)
+  console.log('  - alert_sound_file值:', editingTemplate.value.alert_sound_file)
+  console.log('  - popup_title_template值:', editingTemplate.value.popup_title_template)
   editDialogVisible.value = true
 }
 
 async function saveTemplate() {
   savingTemplate.value = true
   try {
-    await api.put(`/api/v1/notifications/templates/${editingTemplate.value.template_id}`, editingTemplate.value)
+    // 准备要保存的数据，将空字符串转换为null
+    const dataToSave = {
+      ...editingTemplate.value,
+      // 旧字段（保留兼容）
+      alert_sound: editingTemplate.value.alert_sound === '' ? null : editingTemplate.value.alert_sound,
+      // 新字段
+      alert_sound_file: editingTemplate.value.alert_sound_file === '' ? null : editingTemplate.value.alert_sound_file,
+      alert_sound_repeat: editingTemplate.value.alert_sound_repeat || 3,
+      popup_title_template: editingTemplate.value.popup_title_template === '' ? null : editingTemplate.value.popup_title_template,
+      popup_content_template: editingTemplate.value.popup_content_template === '' ? null : editingTemplate.value.popup_content_template
+    }
+
+    console.log('保存模板 - 完整数据:', JSON.stringify(dataToSave, null, 2))
+    console.log('alert_sound_file:', dataToSave.alert_sound_file)
+    console.log('popup_title_template:', dataToSave.popup_title_template)
+
+    const response = await api.put(`/api/v1/notifications/templates/${editingTemplate.value.template_id}`, dataToSave)
+    console.log('保存响应:', response.data)
+
     alert('模板保存成功')
     editDialogVisible.value = false
     await loadTemplates()
   } catch (error) {
     console.error('保存模板失败:', error)
+    console.error('错误详情:', error.response?.data)
     alert(error.response?.data?.detail || '保存模板失败')
   } finally {
     savingTemplate.value = false
+  }
+}
+
+// 切换模板启用状态
+async function toggleTemplateStatus(template) {
+  try {
+    // 确定新状态：如果当前是true或undefined，则切换为false；如果是false，则切换为true
+    const currentStatus = template.is_enabled !== false
+    const newStatus = !currentStatus
+
+    console.log('切换模板状态:', template.template_name, '从', currentStatus, '到', newStatus)
+
+    await api.put(`/api/v1/notifications/templates/${template.template_id}`, {
+      is_enabled: newStatus
+    })
+
+    // 重新加载模板列表以获取最新状态
+    await loadTemplates()
+
+    alert(`模板已${newStatus ? '启用' : '禁用'}`)
+  } catch (error) {
+    console.error('切换模板状态失败:', error)
+    alert(error.response?.data?.detail || '切换模板状态失败')
   }
 }
 
@@ -803,17 +1143,33 @@ async function sendTemplateTest(template) {
       rate: '0.05',
       percentage: '5.0',
       count: '10',
-      total: '10000.00'
+      total: '10000.00',
+      // Asset alert variables (for total_net_asset_alert template)
+      current_asset: '10500.00',
+      threshold: '10000.00',
+      status: '超过',
+      // Binance/Bybit asset variables
+      binance_net_asset: '5000.00',
+      bybit_mt5_net_asset: '5500.00',
+      total_net_asset: '10500.00'
     }
 
     // Send notification using the template
     const response = await api.post('/api/v1/notifications/send', {
       template_key: template.template_key,
       user_ids: [String(currentUser.user_id)],
-      variables: testVariables
+      variables: testVariables,
+      // Include sound settings from template
+      alert_sound: template.alert_sound,
+      repeat_count: template.repeat_count
     })
 
     console.log('Send response:', response.data)
+
+    // Play alert sound if configured
+    if (template.alert_sound && template.alert_sound !== '') {
+      playAlertSound(template.alert_sound, template.repeat_count || 1)
+    }
 
     if (response.data.success) {
       alert(`测试消息已发送到 ${currentUser.username}`)
@@ -834,6 +1190,36 @@ async function sendTemplateTest(template) {
   } finally {
     testingSending.value = false
   }
+}
+
+// Play alert sound function
+function playAlertSound(soundFile, repeatCount = 1) {
+  if (!soundFile || soundFile === '') {
+    console.log('No sound file specified')
+    return
+  }
+
+  console.log(`Playing sound: ${soundFile}, repeat: ${repeatCount} times`)
+
+  const audio = new Audio(`/sounds/${soundFile}`)
+  let playedCount = 0
+
+  const playNext = () => {
+    playedCount++
+    if (playedCount < repeatCount) {
+      audio.currentTime = 0
+      audio.play().catch(err => {
+        console.error('Failed to play sound:', err)
+      })
+    }
+  }
+
+  audio.addEventListener('ended', playNext)
+
+  audio.play().catch(err => {
+    console.error('Failed to play sound:', err)
+    alert(`无法播放声音文件: ${soundFile}。请确保文件存在于 /sounds/ 目录中。`)
+  })
 }
 
 async function loadLogs() {
@@ -890,7 +1276,45 @@ function getPriorityLabel(priority) {
   return labels[priority] || priority
 }
 
-function formatDateTime(dateStr) {
-  return formatDateTimeBeijing(dateStr)
+// 周末休市配置
+async function loadMarketClosureConfig() {
+  try {
+    const response = await api.get('/api/v1/system/market-closure-config')
+    if (response.data.config) {
+      marketClosureConfig.value = response.data.config
+    }
+  } catch (error) {
+    console.error('加载周末休市配置失败:', error)
+  }
+}
+
+async function saveMarketClosureConfig() {
+  savingMarketClosure.value = true
+  try {
+    await api.put('/api/v1/system/market-closure-config', marketClosureConfig.value)
+    alert('周末休市配置保存成功')
+    await checkMarketStatus()
+  } catch (error) {
+    console.error('保存周末休市配置失败:', error)
+    alert(error.response?.data?.detail || '保存周末休市配置失败')
+  } finally {
+    savingMarketClosure.value = false
+  }
+}
+
+async function checkMarketStatus() {
+  try {
+    const response = await api.get('/api/v1/system/market-status')
+    marketStatus.value = {
+      is_open: response.data.is_open || false,
+      message: response.data.message || '未知状态'
+    }
+  } catch (error) {
+    console.error('检查市场状态失败:', error)
+    marketStatus.value = {
+      is_open: true,
+      message: '无法获取市场状态'
+    }
+  }
 }
 </script>

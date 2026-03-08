@@ -70,8 +70,8 @@ function handleOrderUpdate(orderData) {
     if (index !== -1) {
       recentOrders.value[index] = { ...recentOrders.value[index], ...orderData }
     } else {
-      // New order, add to top and keep only 10
-      recentOrders.value = [orderData, ...recentOrders.value].slice(0, 10)
+      // New order, add to top and keep only 8
+      recentOrders.value = [orderData, ...recentOrders.value].slice(0, 8)
     }
   }
 }
@@ -79,7 +79,7 @@ function handleOrderUpdate(orderData) {
 async function fetchRecentOrders() {
   try {
     const response = await api.get('/api/v1/trading/orders', {
-      params: { limit: 10, source: 'manual' }
+      params: { limit: 8, source: 'manual' }
     })
     recentOrders.value = response.data
   } catch (e) {

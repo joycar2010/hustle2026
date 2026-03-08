@@ -46,8 +46,14 @@ class NotificationTemplate(Base):
     cooldown_seconds = Column(Integer, default=0)  # 冷却时间，防止频繁通知
 
     # 声音提醒设置
-    alert_sound = Column(String(500), nullable=True)  # 提醒声音文件路径
-    repeat_count = Column(Integer, default=3)  # 声音重复次数
+    alert_sound = Column(String(500), nullable=True)  # 提醒声音文件路径（旧字段，保留兼容）
+    repeat_count = Column(Integer, default=3)  # 声音重复次数（旧字段，保留兼容）
+
+    # 前端弹窗配置（新字段）
+    popup_title_template = Column(Text, nullable=True)  # 前端弹窗标题模板
+    popup_content_template = Column(Text, nullable=True)  # 前端弹窗内容模板
+    alert_sound_file = Column(String(500), nullable=True)  # 提醒音频文件路径
+    alert_sound_repeat = Column(Integer, default=3)  # 音频重复次数
 
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)

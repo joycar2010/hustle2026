@@ -14,6 +14,17 @@
               <span class="text-xs" :class="account.error ? 'text-[#f0b90b]' : 'text-gray-500'">
                 {{ account.error ? '连接失败' : (account.is_active ? '已激活' : '未连接') }}
               </span>
+              <!-- Liquidation Prices -->
+              <div v-if="!account.error && account.is_active" class="mt-2 space-y-1">
+                <div class="flex items-center space-x-2 text-xs">
+                  <span class="text-gray-400">多头强平价:</span>
+                  <span class="font-mono text-[#0ecb81]">{{ getLiquidationPrice(account, 'long') }}</span>
+                </div>
+                <div class="flex items-center space-x-2 text-xs">
+                  <span class="text-gray-400">空头强平价:</span>
+                  <span class="font-mono text-[#f6465d]">{{ getLiquidationPrice(account, 'short') }}</span>
+                </div>
+              </div>
             </div>
             <div class="flex space-x-1 self-center">
               <button
@@ -428,5 +439,67 @@ function getValueColor(account, field) {
   }
 
   return value >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'
+}
+
+function getLiquidationPrice(account, type) {
+  // Return placeholder if account has error or no balance data
+  if (account.error || !account.balance) {
+    return '暂无'
+  }
+
+  const balance = account.balance
+
+  // Bybit MT5 calculation
+  if (account.platform_id === 2 && account.is_mt5_account) {
+    // 多头强平价 = 开仓价 − (账户净值 ÷ 持仓盎司数)
+    // 空头强平价 = 开仓价 + (账户净值 ÷ 持仓盎司数)
+
+    // 使用 price_open 或 entry_price 作为开仓均价
+    const entryPrice = balance.price_open || balance.entry_price || 0
+    // 使用 equity 或 net_assets 作为账户净值
+    const equity = balance.equity || balance.net_assets || 0
+    // 使用 volume 或 total_positions 作为持仓手数，1手=100盎司
+    const volume = balance.volume || balance.total_positions || 0
+    const volumeOz = volume * 100  // 持仓盎司数
+
+    if (volumeOz === 0 || entryPrice === 0) {
+      return '暂无'
+    }
+
+    const priceOffset = equity / volumeOz
+
+    if (type === 'long') {
+      const liquidationPrice = entryPrice - priceOffset
+      return liquidationPrice > 0 ? formatNumber(liquidationPrice) : '暂无'
+    } else {
+      const liquidationPrice = entryPrice + priceOffset
+      return formatNumber(liquidationPrice)
+    }
+  }
+
+  // Binance calculation
+  if (account.platform_id === 1) {
+    // 多仓强平价 = 开仓价 × (1 − 1/杠杆)
+    // 空仓强平价 = 开仓价 × (1 + 1/杠杆)
+
+    // 使用 entryPrice 或 entry_price 作为开仓均价
+    const entryPrice = balance.entryPrice || balance.entry_price || 0
+    // 使用 leverage 作为杠杆倍数
+    const leverage = balance.leverage || 0
+
+    if (entryPrice === 0 || leverage === 0) {
+      return '暂无'
+    }
+
+    if (type === 'long') {
+      const liquidationPrice = entryPrice * (1 - 1 / leverage)
+      return formatNumber(liquidationPrice)
+    } else {
+      const liquidationPrice = entryPrice * (1 + 1 / leverage)
+      return formatNumber(liquidationPrice)
+    }
+  }
+
+  return '暂无'
 }
 </script>

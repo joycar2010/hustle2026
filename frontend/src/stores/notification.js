@@ -154,6 +154,120 @@ export const useNotificationStore = defineStore('notification', () => {
     }
   }
 
+  // Check liquidation price alerts
+  function checkLiquidationAlerts(accountData) {
+    if (!alertSettings.value || !accountData) return
+
+    const newAlerts = []
+
+    // Check Binance liquidation price
+    if (accountData.binance_account && accountData.binance_current_price) {
+      const account = accountData.binance_account
+      const currentPrice = accountData.binance_current_price
+      const balance = account.balance
+
+      if (balance && balance.entryPrice && balance.leverage) {
+        const entryPrice = balance.entryPrice
+        const leverage = balance.leverage
+
+        // Calculate liquidation prices
+        const longLiqPrice = entryPrice * (1 - 1 / leverage)
+        const shortLiqPrice = entryPrice * (1 + 1 / leverage)
+
+        // Get distance threshold (default 10%)
+        const distanceThreshold = alertSettings.value.binanceLiquidationDistance || 10
+
+        // Check long position
+        const longDistance = Math.abs(currentPrice - longLiqPrice)
+        const longDistancePercent = (longDistance / longLiqPrice) * 100
+        if (longDistancePercent <= distanceThreshold) {
+          newAlerts.push({
+            id: Date.now() + '_binance_liquidation_long',
+            type: 'binance_liquidation',
+            level: 'critical',
+            title: 'Binance多仓爆仓价预警',
+            message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${longLiqPrice.toFixed(2)}，距离: ${longDistancePercent.toFixed(2)}%`,
+            timestamp: new Date().toISOString()
+          })
+        }
+
+        // Check short position
+        const shortDistance = Math.abs(currentPrice - shortLiqPrice)
+        const shortDistancePercent = (shortDistance / shortLiqPrice) * 100
+        if (shortDistancePercent <= distanceThreshold) {
+          newAlerts.push({
+            id: Date.now() + '_binance_liquidation_short',
+            type: 'binance_liquidation',
+            level: 'critical',
+            title: 'Binance空仓爆仓价预警',
+            message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${shortLiqPrice.toFixed(2)}，距离: ${shortDistancePercent.toFixed(2)}%`,
+            timestamp: new Date().toISOString()
+          })
+        }
+      }
+    }
+
+    // Check Bybit MT5 liquidation price
+    if (accountData.bybit_account && accountData.bybit_current_price) {
+      const account = accountData.bybit_account
+      const currentPrice = accountData.bybit_current_price
+      const balance = account.balance
+
+      if (balance && balance.entry_price && balance.net_assets && balance.total_positions) {
+        const entryPrice = balance.entry_price
+        const equity = balance.net_assets
+        const volumeOz = balance.total_positions * 100
+
+        if (volumeOz > 0) {
+          const priceOffset = equity / volumeOz
+
+          // Calculate liquidation prices
+          const longLiqPrice = entryPrice - priceOffset
+          const shortLiqPrice = entryPrice + priceOffset
+
+          // Get distance threshold (default 10%)
+          const distanceThreshold = alertSettings.value.bybitMT5LiquidationDistance || 10
+
+          // Check long position
+          if (longLiqPrice > 0) {
+            const longDistance = Math.abs(currentPrice - longLiqPrice)
+            const longDistancePercent = (longDistance / longLiqPrice) * 100
+            if (longDistancePercent <= distanceThreshold) {
+              newAlerts.push({
+                id: Date.now() + '_bybit_liquidation_long',
+                type: 'bybit_liquidation',
+                level: 'critical',
+                title: 'Bybit多头爆仓价预警',
+                message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${longLiqPrice.toFixed(2)}，距离: ${longDistancePercent.toFixed(2)}%`,
+                timestamp: new Date().toISOString()
+              })
+            }
+          }
+
+          // Check short position
+          const shortDistance = Math.abs(currentPrice - shortLiqPrice)
+          const shortDistancePercent = (shortDistance / shortLiqPrice) * 100
+          if (shortDistancePercent <= distanceThreshold) {
+            newAlerts.push({
+              id: Date.now() + '_bybit_liquidation_short',
+              type: 'bybit_liquidation',
+              level: 'critical',
+              title: 'Bybit空头爆仓价预警',
+              message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${shortLiqPrice.toFixed(2)}，距离: ${shortDistancePercent.toFixed(2)}%`,
+              timestamp: new Date().toISOString()
+            })
+          }
+        }
+      }
+    }
+
+    // Add new alerts and trigger popup
+    if (newAlerts.length > 0) {
+      alerts.value.push(...newAlerts)
+      triggerPopup(newAlerts[0])
+    }
+  }
+
   // Check MT5 lag count
   function checkMT5LagAlert(lagCount) {
     if (!alertSettings.value || lagCount === undefined) return
@@ -207,36 +321,37 @@ export const useNotificationStore = defineStore('notification', () => {
     // Check if alert sound is enabled
     if (!alertSoundEnabled.value) return
     if (isAudioPlaying.value) return
-    if (!alertSettings.value) return
 
     isAudioPlaying.value = true
 
     try {
-      // Determine which sound file and repeat count to use based on alert type
+      // Determine which sound file and repeat count to use
       let soundFile = null
       let repeatCount = 3
 
-      // Map alert types to sound settings
-      if (alert.type.includes('single_leg')) {
-        // Single-leg trading alerts
-        soundFile = alertSettings.value.singleLegAlertSound
-        repeatCount = alertSettings.value.singleLegAlertRepeatCount || 3
-      } else if (alert.type.includes('forward') || alert.type.includes('reverse')) {
-        // Spread alerts (forward_open, forward_close, reverse_open, reverse_close)
-        soundFile = alertSettings.value.spreadAlertSound
-        repeatCount = alertSettings.value.spreadAlertRepeatCount || 3
-      } else if (alert.type.includes('asset')) {
-        // Net asset alerts (binance_asset, bybit_asset, total_asset)
-        soundFile = alertSettings.value.netAssetAlertSound
-        repeatCount = alertSettings.value.netAssetAlertRepeatCount || 3
-      } else if (alert.type.includes('mt5')) {
-        // MT5 lag alerts
-        soundFile = alertSettings.value.mt5AlertSound
-        repeatCount = alertSettings.value.mt5AlertRepeatCount || 3
-      } else if (alert.type.includes('liquidation')) {
-        // Liquidation alerts
-        soundFile = alertSettings.value.liquidationAlertSound
-        repeatCount = alertSettings.value.liquidationAlertRepeatCount || 3
+      // 优先使用弹窗配置中的声音设置（来自后端模板）
+      if (alert.popupConfig) {
+        soundFile = alert.popupConfig.sound_file
+        repeatCount = alert.popupConfig.sound_repeat || 3
+      } else if (alertSettings.value) {
+        // 回退到旧的本地配置方式
+        // Map alert types to sound settings
+        if (alert.type.includes('single_leg')) {
+          soundFile = alertSettings.value.singleLegAlertSound
+          repeatCount = alertSettings.value.singleLegAlertRepeatCount || 3
+        } else if (alert.type.includes('forward') || alert.type.includes('reverse')) {
+          soundFile = alertSettings.value.spreadAlertSound
+          repeatCount = alertSettings.value.spreadAlertRepeatCount || 3
+        } else if (alert.type.includes('asset')) {
+          soundFile = alertSettings.value.netAssetAlertSound
+          repeatCount = alertSettings.value.netAssetAlertRepeatCount || 3
+        } else if (alert.type.includes('mt5')) {
+          soundFile = alertSettings.value.mt5AlertSound
+          repeatCount = alertSettings.value.mt5AlertRepeatCount || 3
+        } else if (alert.type.includes('liquidation')) {
+          soundFile = alertSettings.value.liquidationAlertSound
+          repeatCount = alertSettings.value.liquidationAlertRepeatCount || 3
+        }
       }
 
       // If no custom sound file is set, use default
@@ -396,7 +511,9 @@ export const useNotificationStore = defineStore('notification', () => {
       level: alertData.level || 'warning',
       title: alertData.title || '风险警报',
       message: alertData.message,
-      timestamp: alertData.timestamp || new Date().toISOString()
+      timestamp: alertData.timestamp || new Date().toISOString(),
+      // 添加弹窗配置
+      popupConfig: alertData.popup_config || null
     }
 
     // Add to alerts list
@@ -459,6 +576,7 @@ export const useNotificationStore = defineStore('notification', () => {
     loadAlertSettings,
     checkMarketAlerts,
     checkAccountAlerts,
+    checkLiquidationAlerts,
     checkMT5LagAlert,
     checkSingleLegAlert,
     dismissAlert,

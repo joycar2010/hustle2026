@@ -73,6 +73,7 @@
               v-for="item in navItems"
               :key="item.path"
               :to="item.path"
+              @click="handleNavClick(item.path)"
               class="nav-link"
             >
               <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
@@ -306,6 +307,16 @@ function toggleAlertSound() {
 
 function toggleSingleLegAlert() {
   notificationStore.toggleSingleLegAlert(!notificationStore.singleLegAlertEnabled)
+}
+
+function handleNavClick(path) {
+  // 如果点击的是控制面板（首页），强制刷新页面
+  if (path === '/') {
+    // 使用router.go(0)强制刷新当前路由
+    setTimeout(() => {
+      router.go(0)
+    }, 100)
+  }
 }
 
 // Icon components

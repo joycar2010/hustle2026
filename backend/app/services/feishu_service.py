@@ -108,17 +108,17 @@ class FeishuService:
         title: str,
         content: str,
         receive_id_type: str = "open_id",
-        color: str = "blue"  # blue, green, orange, red
+        color: str = "blue"  # blue, green, orange, red, grey, turquoise
     ) -> Dict[str, Any]:
         """
-        发送卡片消息（更美观）
+        发送卡片消息（更美观，与系统UI一致的深色主题）
 
         Args:
             receive_id: 接收者ID
             title: 卡片标题
             content: 卡片内容
             receive_id_type: ID类型
-            color: 卡片颜色
+            color: 卡片颜色 (blue=信息, green=成功, orange=警告, red=危险, grey=系统, turquoise=特殊)
         """
         token = await self.get_tenant_access_token()
         url = f"{self.base_url}/im/v1/messages"
@@ -132,10 +132,11 @@ class FeishuService:
             "receive_id_type": receive_id_type
         }
 
-        # 构造卡片内容
+        # 构造卡片内容 - 使用与系统UI一致的深色主题风格
         card_content = {
             "config": {
-                "wide_screen_mode": True
+                "wide_screen_mode": True,
+                "enable_forward": True
             },
             "header": {
                 "title": {
@@ -160,7 +161,16 @@ class FeishuService:
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": f"发送时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')} (北京时间)"
+                            "content": f"📅 {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')} (北京时间)"
+                        }
+                    ]
+                },
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": "🔔 生鲜配送管理系统"
                         }
                     ]
                 }
@@ -231,6 +241,168 @@ class FeishuService:
                     return {"success": False, "error": data.get("msg")}
 
                 return {"success": True, "user": data.get("data", {}).get("user")}
+
+    async def upload_audio_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        上传音频文件到飞书，获取file_key
+
+        Args:
+            file_path: 本地音频文件路径
+
+        Returns:
+            {"success": True, "file_key": "xxx"} 或 {"success": False, "error": "xxx"}
+        """
+        token = await self.get_tenant_access_token()
+        url = f"{self.base_url}/im/v1/files"
+
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+
+        try:
+            import os
+
+            # 读取文件
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+
+            # 准备multipart/form-data
+            data = aiohttp.FormData()
+            data.add_field('file_type', 'opus')  # 飞书推荐使用opus格式
+            data.add_field('file_name', os.path.basename(file_path))
+            data.add_field('file', file_content, filename=os.path.basename(file_path))
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, data=data) as response:
+                    result = await response.json()
+
+                    if result.get("code") != 0:
+                        logger.error(f"上传音频文件失败: {result.get('msg')}")
+                        return {"success": False, "error": result.get("msg")}
+
+                    file_key = result.get("data", {}).get("file_key")
+                    logger.info(f"音频文件上传成功: {file_key}")
+                    return {"success": True, "file_key": file_key}
+
+        except Exception as e:
+            logger.error(f"上传音频文件异常: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def send_card_with_audio(
+        self,
+        receive_id: str,
+        title: str,
+        content: str,
+        audio_file_key: str,
+        audio_title: str = "提醒音频",
+        receive_id_type: str = "open_id",
+        color: str = "blue",
+        loop: bool = True,
+        auto_play: bool = True
+    ) -> Dict[str, Any]:
+        """
+        发送带音频的卡片消息
+
+        Args:
+            receive_id: 接收者ID
+            title: 卡片标题
+            content: 卡片内容
+            audio_file_key: 音频文件的file_key
+            audio_title: 音频标题
+            receive_id_type: ID类型
+            color: 卡片颜色
+            loop: 是否循环播放
+            auto_play: 是否自动播放
+        """
+        token = await self.get_tenant_access_token()
+        url = f"{self.base_url}/im/v1/messages"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        params = {
+            "receive_id_type": receive_id_type
+        }
+
+        # 构造带音频的卡片内容
+        card_content = {
+            "config": {
+                "wide_screen_mode": True,
+                "enable_forward": False  # 包含音频的卡片不支持转发
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": title
+                },
+                "template": color
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": content
+                    }
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "audio",
+                    "file_key": audio_file_key,
+                    "title": audio_title,
+                    "loop": loop,
+                    "auto_play": auto_play,
+                    "fallback": {
+                        "text": {
+                            "content": "🔊 音频播放需升级飞书客户端到 V7.49+"
+                        }
+                    }
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": f"📅 {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')} (北京时间)"
+                        }
+                    ]
+                },
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": "🔔 生鲜配送管理系统"
+                        }
+                    ]
+                }
+            ]
+        }
+
+        payload = {
+            "receive_id": receive_id,
+            "msg_type": "interactive",
+            "content": json.dumps(card_content)
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, params=params, json=payload) as response:
+                data = await response.json()
+
+                if data.get("code") != 0:
+                    logger.error(f"飞书带音频卡片消息发送失败: {data.get('msg')}")
+                    return {"success": False, "error": data.get("msg")}
+
+                logger.info(f"飞书带音频卡片消息发送成功: {receive_id}")
+                return {"success": True, "message_id": data.get("data", {}).get("message_id")}
+
 
     async def get_user_by_mobile(self, mobile: str) -> Dict[str, Any]:
         """通过手机号获取用户信息"""

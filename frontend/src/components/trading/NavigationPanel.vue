@@ -1,34 +1,34 @@
 <template>
-  <div class="p-4 space-y-2 border-t border-[#2b3139]">
-    <h3 class="text-sm font-bold mb-3 text-gray-400">系统状态</h3>
+  <div class="p-2 space-y-1.5 border-t border-[#2b3139]">
+    <h3 class="text-xs font-bold mb-2 text-gray-400">系统状态</h3>
 
     <button
       v-for="item in navItems"
       :key="item.id"
       @click="handleNavClick(item.id)"
       :class="[
-        'w-full px-3 rounded text-left transition-all flex items-center justify-between',
-        'h-[40px]',
+        'w-full px-2 rounded text-left transition-all flex items-center justify-between',
+        'h-[32px]',
         activeNav === item.id
           ? 'bg-[#f0b90b]/20 text-[#f0b90b] border border-[#f0b90b]'
           : 'bg-[#252930] hover:bg-[#2b3139] text-gray-300'
       ]"
     >
-      <div class="flex items-center space-x-2 flex-1 min-w-0">
-        <component :is="iconComponents[item.icon]" class="w-5 h-5 flex-shrink-0" />
-        <span class="text-sm font-medium truncate">{{ item.label }}</span>
+      <div class="flex items-center space-x-1.5 flex-1 min-w-0">
+        <component :is="iconComponents[item.icon]" class="w-4 h-4 flex-shrink-0" />
+        <span class="text-xs font-medium truncate">{{ item.label }}</span>
       </div>
-      <div v-if="item.badge" :class="['text-xs px-2 py-0.5 rounded flex-shrink-0 ml-2', item.badgeClass]">
+      <div v-if="item.badge" :class="['text-xs px-1.5 py-0.5 rounded flex-shrink-0 ml-1.5', item.badgeClass]">
         {{ item.badge }}
       </div>
     </button>
 
     <!-- System Alerts -->
-    <div class="mt-4 bg-[#252930] rounded-lg border border-[#2b3139] p-3">
-      <div class="text-sm font-semibold mb-3 text-[#f0b90b]">系统提醒</div>
-      <div class="space-y-2">
-        <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-2 text-xs">
-          <div class="w-1.5 h-1.5 rounded-full mt-1 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
+    <div class="mt-2 bg-[#252930] rounded-lg border border-[#2b3139] p-2">
+      <div class="text-xs font-semibold mb-2 text-[#f0b90b]">系统提醒</div>
+      <div class="space-y-1.5">
+        <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-1.5 text-xs">
+          <div class="w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
           <div class="flex-1">
             <div class="text-gray-300">{{ alert.message }}</div>
             <div v-if="alert.value" class="text-gray-500 mt-0.5">{{ alert.value }}</div>
@@ -178,6 +178,14 @@ const navItems = [
     badgeClass: 'bg-[#0ecb81] text-white',
   },
   {
+    id: 'monitor',
+    label: '策略监控',
+    icon: 'DashboardIcon',
+    externalUrl: '/feishu-widget/index.html',
+    badge: '实时',
+    badgeClass: 'bg-[#2196F3] text-white',
+  },
+  {
     id: 'risk',
     label: '风控提醒',
     icon: 'RiskIcon',
@@ -190,7 +198,10 @@ const navItems = [
 function handleNavClick(id) {
   activeNav.value = id
   const item = navItems.find(i => i.id === id)
-  if (item?.route) {
+  if (item?.externalUrl) {
+    // Open external URL in new tab
+    window.open(item.externalUrl, '_blank')
+  } else if (item?.route) {
     router.push(item.route)
   }
 }

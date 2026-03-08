@@ -134,13 +134,10 @@ class RiskMetricsStreamer:
 
     async def _stream_loop(self):
         """Main streaming loop"""
+        logger.info("[BROADCAST] RiskMetricsStreamer _stream_loop started")
         while self.running:
             try:
-                # Only broadcast if there are active connections
-                if manager.get_connection_count() == 0:
-                    await asyncio.sleep(self.interval)
-                    continue
-
+                logger.info("[BROADCAST] RiskMetricsStreamer loop iteration starting")
                 # Fetch all active accounts from database
                 async with get_db_context() as db:
                     result = await db.execute(
@@ -164,12 +161,15 @@ class RiskMetricsStreamer:
                         "timestamp": aggregated_data.get("timestamp"),
                     }
 
-                    # Broadcast to all connected clients
-                    await manager.broadcast_risk_metrics(risk_data)
-                    self.broadcast_count += 1
-                    self.last_broadcast_time = datetime.now().isoformat()
+                    # Broadcast to all connected clients (only if there are connections)
+                    connection_count = manager.get_connection_count()
+                    if connection_count > 0:
+                        await manager.broadcast_risk_metrics(risk_data)
+                        self.broadcast_count += 1
+                        self.last_broadcast_time = datetime.now().isoformat()
 
-                    # Check risk alerts for each user
+                    # Always check risk alerts (independent of WebSocket connections)
+                    logger.info(f"[BROADCAST] Calling _check_risk_alerts, active_accounts={len(active_accounts)}")
                     await self._check_risk_alerts(db, active_accounts, aggregated_data)
 
                 # Wait for next interval
@@ -182,6 +182,7 @@ class RiskMetricsStreamer:
 
     async def _check_risk_alerts(self, db, active_accounts, aggregated_data):
         """Check risk alerts and send Feishu notifications"""
+        logger.info(f"[BROADCAST] _check_risk_alerts called, active_accounts数量={len(active_accounts)}")
         try:
             # Group accounts by user
             user_accounts = {}
@@ -211,30 +212,47 @@ class RiskMetricsStreamer:
 
                     # Check Binance net asset
                     if risk_settings.binance_net_asset:
-                        binance_asset = summary.get("binance_net_asset", 0)
-                        if binance_asset < risk_settings.binance_net_asset:
-                            await risk_alert_service.check_binance_net_asset(
-                                user_id=user_id,
-                                current_asset=binance_asset,
-                                threshold=risk_settings.binance_net_asset,
-                                is_below=True
-                            )
+                        # Find Binance account in the aggregated data
+                        binance_account = next(
+                            (acc for acc in aggregated_data.get("accounts", [])
+                             if acc.get("platform_id") == "binance"),
+                            None
+                        )
+                        if binance_account:
+                            binance_asset = binance_account["balance"]["net_assets"]
+                            if binance_asset < risk_settings.binance_net_asset:
+                                await risk_alert_service.check_binance_net_asset(
+                                    user_id=user_id,
+                                    current_asset=binance_asset,
+                                    threshold=risk_settings.binance_net_asset,
+                                    is_below=True
+                                )
 
                     # Check Bybit net asset
                     if risk_settings.bybit_mt5_net_asset:
-                        bybit_asset = summary.get("bybit_mt5_net_asset", 0)
-                        if bybit_asset < risk_settings.bybit_mt5_net_asset:
-                            await risk_alert_service.check_bybit_net_asset(
-                                user_id=user_id,
-                                current_asset=bybit_asset,
-                                threshold=risk_settings.bybit_mt5_net_asset,
-                                is_below=True
-                            )
+                        # Find Bybit/MT5 account in the aggregated data
+                        bybit_account = next(
+                            (acc for acc in aggregated_data.get("accounts", [])
+                             if acc.get("platform_id") in ["bybit", "mt5"]),
+                            None
+                        )
+                        if bybit_account:
+                            bybit_asset = bybit_account["balance"]["net_assets"]
+                            if bybit_asset < risk_settings.bybit_mt5_net_asset:
+                                await risk_alert_service.check_bybit_net_asset(
+                                    user_id=user_id,
+                                    current_asset=bybit_asset,
+                                    threshold=risk_settings.bybit_mt5_net_asset,
+                                    is_below=True
+                                )
 
                     # Check total net asset
                     if risk_settings.total_net_asset:
-                        total_asset = summary.get("total_net_asset", 0)
+                        # Use net_assets from summary (this is the correct key)
+                        total_asset = summary.get("net_assets", 0)
+                        logger.info(f"[BROADCAST] Checking total net_assets: user_id={user_id}, total={total_asset}, threshold={risk_settings.total_net_asset}")
                         if total_asset < risk_settings.total_net_asset:
+                            logger.info(f"[BROADCAST] Total asset below threshold, triggering alert")
                             await risk_alert_service.check_total_net_asset(
                                 user_id=user_id,
                                 current_asset=total_asset,

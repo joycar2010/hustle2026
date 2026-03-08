@@ -1,25 +1,33 @@
 <template>
-  <div class="h-full flex flex-col md:flex-row p-2 md:p-3 gap-2 md:gap-3 min-h-0">
+  <div class="h-full flex flex-col md:flex-row p-1.5 md:p-2 gap-1.5 md:gap-2 min-h-0">
     <!-- Left Side - Recent Trades -->
-    <div class="w-full md:w-[45%] flex flex-col border-b md:border-b-0 md:border-r border-[#2b3139] pb-2 md:pb-0 md:pr-3">
-      <div class="text-xs text-gray-400 mb-2">最近交易记录</div>
-      <div class="flex-1 overflow-y-auto space-y-1">
-        <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-2">
+    <div class="w-full md:w-[45%] flex flex-col border-b md:border-b-0 md:border-r border-[#2b3139] pb-1.5 md:pb-0 md:pr-2">
+      <div class="flex items-center justify-between mb-1.5">
+        <div class="text-xs text-gray-400">最近交易记录</div>
+        <button
+          @click="viewMore"
+          class="text-xs text-[#f0b90b] hover:text-[#f0b90b]/80 transition-colors"
+        >
+          查看更多 →
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto space-y-0.5">
+        <div v-if="recentOrders.length === 0" class="text-xs text-gray-500 text-center py-1.5">
           暂无记录
         </div>
         <div
           v-for="order in recentOrders"
           :key="order.id"
-          class="flex items-center justify-between text-xs bg-[#252930] rounded px-2 py-1.5"
+          class="flex items-center justify-between text-xs bg-[#252930] rounded px-1.5 py-1"
         >
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5">
             <span class="text-gray-500">{{ formatTime(order.timestamp) }}</span>
             <span class="text-gray-400">{{ order.exchange }}</span>
             <span :class="order.side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
               {{ order.side === 'buy' ? '买' : '卖' }}
             </span>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5">
             <span class="font-mono">{{ order.quantity }}</span>
             <span :class="getStatusClass(order.status)" class="text-xs">
               {{ getStatusText(order.status) }}
@@ -27,24 +35,18 @@
           </div>
         </div>
       </div>
-      <button
-        @click="viewMore"
-        class="w-full mt-2 text-xs text-[#f0b90b] hover:text-[#f0b90b]/80 transition-colors"
-      >
-        查看更多 →
-      </button>
     </div>
 
     <!-- Right Side - Trading Controls -->
     <div class="flex-1 flex flex-col min-h-0">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold">紧急手动交易</h3>
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-xs font-bold">紧急手动交易</h3>
         <div class="flex items-center space-x-1">
-          <div class="w-2 h-2 rounded-full bg-[#f6465d] animate-pulse"></div>
+          <div class="w-1.5 h-1.5 rounded-full bg-[#f6465d] animate-pulse"></div>
           <span class="text-xs text-[#f6465d] font-bold">紧急模式</span>
         </div>
       </div>
-      <div class="flex-1 overflow-y-auto space-y-3 min-h-0">
+      <div class="flex-1 overflow-y-auto space-y-2 min-h-0">
         <!-- Exchange Selection -->
         <div>
           <label class="text-xs text-gray-400 mb-1 block">交易平台</label>

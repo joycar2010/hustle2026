@@ -14,7 +14,8 @@
       "Bash(tasklist:*)",
       "Bash(cmd //c:*)",
       "Bash(pm2 list)",
-      "Bash(ls -la *.sh)"
+      "Bash(ls -la *.sh)",
+      "Bash(powershell -Command \"Get-Process | Where-Object {$_Id -eq 33436 -or $_Id -eq 15452} | Select-Object Id,ProcessName,Path\")"
     ]
   }
 }
