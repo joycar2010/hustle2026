@@ -1,9 +1,9 @@
 <template>
-  <div class="h-full flex flex-col md:flex-row gap-2 md:gap-3 p-2 md:p-3 min-h-0">
+  <div class="h-full flex flex-col md:flex-row gap-2 md:gap-3 p-2 md:p-3 min-h-0 max-lg:h-auto">
     <!-- Left: Strategy Pending Orders - Increased width by 40% -->
     <div class="w-full md:w-[47%] flex flex-col min-h-0 flex-shrink-0 mb-2 md:mb-0">
       <h3 class="text-xs md:text-sm font-bold mb-2 md:mb-3">策略挂单</h3>
-      <div class="flex-1 overflow-y-auto">
+      <div class="flex-1 overflow-y-auto md:overflow-y-auto max-md:overflow-visible max-md:h-auto">
         <table class="w-full text-xs">
           <thead class="sticky top-0 bg-[#1e2329]">
             <tr class="text-left text-gray-400 border-b border-[#2b3139]">
@@ -36,8 +36,8 @@
       </div>
     </div>
 
-    <!-- Right: Spread Data Table -->
-    <div class="flex-1 flex flex-col min-h-0">
+    <!-- Right: Spread Data Table (Hidden on small screens < 768px) -->
+    <div class="hidden md:flex flex-1 flex-col min-h-0">
       <SpreadDataTable />
     </div>
   </div>

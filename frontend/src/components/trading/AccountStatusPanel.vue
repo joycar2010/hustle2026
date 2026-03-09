@@ -1,26 +1,26 @@
 <template>
   <div class="flex flex-col h-full">
-    <div class="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
+    <div class="flex-1 overflow-y-auto p-2 md:p-3 space-y-1.5 md:space-y-2">
       <!-- Dynamic Account Cards -->
       <div v-for="account in activeAccounts" :key="account.account_id" class="bg-[#252930] rounded-lg border border-[#2b3139]">
-        <div class="p-2 md:p-3 border-b border-[#2b3139]">
+        <div class="p-1.5 md:p-2 border-b border-[#2b3139]">
           <div class="flex items-center justify-between">
-            <div class="flex flex-col items-start space-y-2 md:space-y-3">
-              <div class="flex items-center space-x-2">
-                <div class="w-2 h-2 rounded-full" :class="account.error ? 'bg-[#f0b90b]' : (account.is_active ? 'bg-[#0ecb81]' : 'bg-[#f6465d]')"></div>
-                <span class="text-base font-bold text-[#D4B106]">{{ account.account_name }}</span>
+            <div class="flex flex-col items-start space-y-1 md:space-y-1.5">
+              <div class="flex items-center space-x-1.5">
+                <div class="w-1.5 h-1.5 rounded-full" :class="account.error ? 'bg-[#f0b90b]' : (account.is_active ? 'bg-[#0ecb81]' : 'bg-[#f6465d]')"></div>
+                <span class="text-sm font-bold text-[#D4B106]">{{ account.account_name }}</span>
               </div>
-              <span class="font-semibold text-sm">{{ getPlatformName(account.platform_id, account.is_mt5_account) }}</span>
-              <span class="text-xs" :class="account.error ? 'text-[#f0b90b]' : 'text-gray-500'">
+              <span class="font-semibold text-xs">{{ getPlatformName(account.platform_id, account.is_mt5_account) }}</span>
+              <span class="text-[10px]" :class="account.error ? 'text-[#f0b90b]' : 'text-gray-500'">
                 {{ account.error ? '连接失败' : (account.is_active ? '已激活' : '未连接') }}
               </span>
               <!-- Liquidation Prices -->
-              <div v-if="!account.error && account.is_active" class="mt-2 space-y-1">
-                <div class="flex items-center space-x-2 text-xs">
+              <div v-if="!account.error && account.is_active" class="mt-1 space-y-0.5">
+                <div class="flex items-center space-x-1.5 text-[10px]">
                   <span class="text-gray-400">多头强平价:</span>
                   <span class="font-mono text-[#0ecb81]">{{ getLiquidationPrice(account, 'long') }}</span>
                 </div>
-                <div class="flex items-center space-x-2 text-xs">
+                <div class="flex items-center space-x-1.5 text-[10px]">
                   <span class="text-gray-400">空头强平价:</span>
                   <span class="font-mono text-[#f6465d]">{{ getLiquidationPrice(account, 'short') }}</span>
                 </div>
@@ -29,14 +29,14 @@
             <div class="flex space-x-1 self-center">
               <button
                 @click="toggleConnection(account.account_id)"
-                class="px-2 py-1 text-xs rounded transition-colors"
+                class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
                 :class="disconnectedAccounts.has(account.account_id) ? 'bg-[#0ecb81] hover:bg-[#0db774]' : 'bg-[#f6465d] hover:bg-[#e03d52]'"
               >
                 {{ disconnectedAccounts.has(account.account_id) ? '连接' : '断开' }}
               </button>
               <button
                 @click="toggleDisable(account.account_id)"
-                class="px-2 py-1 text-xs rounded transition-colors"
+                class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
                 :class="disconnectedAccounts.has(account.account_id) ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gray-500 opacity-50 cursor-not-allowed'"
                 :disabled="!disconnectedAccounts.has(account.account_id)"
                 :title="!disconnectedAccounts.has(account.account_id) ? '请先断开连接再禁用' : ''"
@@ -46,12 +46,19 @@
             </div>
           </div>
           <!-- Error Message -->
-          <div v-if="account.error" class="mt-2 text-xs text-[#f0b90b] bg-[#f0b90b]/10 rounded px-2 py-1">
-            错误: {{ account.error }}
+          <div v-if="account.error" class="mt-1 text-[10px] rounded px-1.5 py-0.5" :class="account.error.startsWith('RATE_LIMIT') ? 'text-orange-400 bg-orange-400/10' : 'text-[#f0b90b] bg-[#f0b90b]/10'">
+            <div v-if="account.error.startsWith('RATE_LIMIT')">
+              <div class="font-semibold">⚠️ Binance API限流</div>
+              <div class="mt-0.5">{{ getBanInfo(account) || '请稍后重试' }}</div>
+              <div class="mt-0.5 text-[9px] opacity-75">系统已自动降低请求频率，请耐心等待</div>
+            </div>
+            <div v-else>
+              错误: {{ account.error }}
+            </div>
           </div>
         </div>
 
-        <div class="p-2 md:p-3 space-y-1 md:space-y-[6px] text-xs">
+        <div class="p-1.5 md:p-2 space-y-0.5 md:space-y-1 text-[10px]">
           <div class="flex justify-between">
             <span class="text-gray-400">账户总资产</span>
             <span class="font-mono">{{ getDisplayValue(account, 'total_assets') }}</span>
@@ -393,13 +400,13 @@ function getBanInfo(account) {
       const minutesLeft = Math.ceil((banUntilDate - now) / 1000 / 60)
 
       if (minutesLeft > 0) {
+        // Format as Beijing time (24-hour format)
         const hours = banUntilDate.getHours()
         const minutes = banUntilDate.getMinutes()
-        const ampm = hours >= 12 ? 'PM' : 'AM'
-        const displayHours = hours % 12 || 12
-        const displayMinutes = minutes.toString().padStart(2, '0')
+        const seconds = banUntilDate.getSeconds()
+        const displayTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 
-        return `限制至${displayHours}:${displayMinutes} ${ampm} (${minutesLeft}分钟)`
+        return `API限流至 ${displayTime} (约${minutesLeft}分钟)`
       }
     }
   }

@@ -1351,7 +1351,7 @@ async def get_market_status(
     try:
         from app.utils.trading_time import is_bybit_trading_hours
         is_open, message = is_bybit_trading_hours()
-        
+
         return {
             "success": True,
             "is_open": is_open,
@@ -1362,4 +1362,29 @@ async def get_market_status(
             "success": False,
             "is_open": True,
             "message": f"无法获取市场状态: {str(e)}"
+        }
+
+
+@router.get("/websocket-status")
+async def get_websocket_status(
+    user_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    """Get Binance WebSocket connection status"""
+    try:
+        from app.services.binance_ws_client import binance_ws
+
+        return {
+            "success": True,
+            "connected": binance_ws.connected,
+            "bid": binance_ws.bid,
+            "ask": binance_ws.ask,
+            "mid": binance_ws.mid,
+            "timestamp": binance_ws.timestamp,
+            "message": "WebSocket connected" if binance_ws.connected else "WebSocket disconnected"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "connected": False,
+            "message": f"无法获取WebSocket状态: {str(e)}"
         }

@@ -109,8 +109,9 @@ class RiskAlertService:
 
             # 获取用户信息和飞书配置
             from app.models.user import User
+            import uuid as uuid_lib
             result = await self.db.execute(
-                select(User).where(User.user_id == user_id)
+                select(User).where(User.user_id == uuid_lib.UUID(user_id))
             )
             user = result.scalar_one_or_none()
 

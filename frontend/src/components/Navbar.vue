@@ -1,11 +1,11 @@
 <template>
-  <nav class="bg-dark-100 border-b border-border-primary sticky top-0 z-50">
+  <nav v-show="!navbarHidden" class="bg-dark-100 border-b border-border-primary sticky top-0 z-50">
     <div class="container mx-auto px-4">
       <div class="flex items-center justify-between h-16">
         <!-- Logo -->
         <div class="flex items-center space-x-6">
           <!-- Alert Switches -->
-          <div class="hidden xl:flex items-center space-x-2 mr-8">
+          <div class="hidden xl:flex items-center space-x-2 mr-8" :class="{ 'xl:hidden': navbarCollapsed }">
             <!-- Connection Status -->
             <div class="flex items-center space-x-2 px-3 py-1.5 bg-dark-200 rounded-lg">
               <div :class="['w-2 h-2 rounded-full', isConnected ? 'bg-success animate-pulse' : 'bg-danger']"></div>
@@ -61,14 +61,14 @@
             <div class="w-10 h-10 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center shadow-lg">
               <span class="text-dark-300 font-bold text-xl">H</span>
             </div>
-            <div class="hidden md:block">
+            <div class="hidden md:block" :class="{ 'md:hidden': navbarCollapsed }">
               <div class="text-lg font-bold">Hustle XAU</div>
               <div class="text-xs text-text-tertiary">Arbitrage System</div>
             </div>
           </router-link>
 
           <!-- Desktop Navigation -->
-          <div class="hidden lg:flex space-x-1">
+          <div class="hidden lg:flex space-x-1" :class="{ 'lg:hidden': navbarCollapsed }">
             <router-link
               v-for="item in navItems"
               :key="item.path"
@@ -147,6 +147,17 @@
             </transition>
           </div>
 
+          <!-- Hide Entire Navbar Button -->
+          <button
+            @click="toggleNavbarVisibility"
+            class="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-dark-50 transition-colors"
+            title="隐藏顶部导航栏"
+          >
+            <svg class="w-5 h-5 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+
           <!-- Mobile Menu Button -->
           <button
             @click="mobileMenuOpen = !mobileMenuOpen"
@@ -197,6 +208,18 @@
     </div>
   </nav>
 
+  <!-- Floating Show Navbar Button (when navbar is hidden) -->
+  <button
+    v-show="navbarHidden"
+    @click="toggleNavbarVisibility"
+    class="fixed bottom-4 right-4 z-50 p-3 bg-primary hover:bg-primary-hover rounded-lg shadow-lg transition-colors"
+    title="显示顶部导航栏"
+  >
+    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  </button>
+
   <!-- Modals -->
   <EditProfileModal :isOpen="editProfileModalOpen" @close="editProfileModalOpen = false" @updated="handleProfileUpdated" />
   <ChangePasswordModal :isOpen="changePasswordModalOpen" @close="changePasswordModalOpen = false" @updated="handlePasswordChanged" />
@@ -220,6 +243,16 @@ const userMenuRef = ref(null)
 const isConnected = ref(true)
 const editProfileModalOpen = ref(false)
 const changePasswordModalOpen = ref(false)
+const navbarCollapsed = ref(localStorage.getItem('navbarCollapsed') === 'true')
+
+// 检查是否是首次加载且屏幕分辨率较小
+const isFirstLoad = localStorage.getItem('navbarHidden') === null
+const isSmallScreen = window.innerWidth <= 1366 && window.innerHeight <= 768
+const navbarHidden = ref(
+  isFirstLoad && isSmallScreen
+    ? true
+    : localStorage.getItem('navbarHidden') === 'true'
+)
 
 const user = computed(() => authStore.user)
 const userInitial = computed(() => user.value?.username?.charAt(0).toUpperCase() || 'U')
@@ -264,10 +297,20 @@ const navItems = [
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  // 检查导航栏隐藏状态并设置滚动条
+  if (navbarHidden.value) {
+    document.body.style.overflow = 'hidden'
+    // 如果是首次加载且自动隐藏，保存状态
+    if (isFirstLoad && isSmallScreen) {
+      localStorage.setItem('navbarHidden', 'true')
+    }
+  }
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  // 清理滚动条样式
+  document.body.style.overflow = ''
 })
 
 function handleClickOutside(event) {
@@ -307,6 +350,22 @@ function toggleAlertSound() {
 
 function toggleSingleLegAlert() {
   notificationStore.toggleSingleLegAlert(!notificationStore.singleLegAlertEnabled)
+}
+
+function toggleNavbar() {
+  navbarCollapsed.value = !navbarCollapsed.value
+  localStorage.setItem('navbarCollapsed', navbarCollapsed.value.toString())
+}
+
+function toggleNavbarVisibility() {
+  navbarHidden.value = !navbarHidden.value
+  localStorage.setItem('navbarHidden', navbarHidden.value.toString())
+  // 同时控制页面滚动条
+  if (navbarHidden.value) {
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.body.style.overflow = ''
+  }
 }
 
 function handleNavClick(path) {

@@ -1,11 +1,14 @@
 <template>
-  <div class="trading-dashboard">
-    <!-- Left Sidebar - Account Status (Hidden on mobile) -->
-    <aside v-if="showLeftPanel" class="sidebar-left">
-      <div class="sidebar-section account-section">
+  <div class="flex bg-[#1a1d21] text-white lg:h-screen lg:overflow-hidden max-lg:min-h-screen max-lg:overflow-visible">
+    <!-- Left Sidebar - Account Status (Hidden on mobile/tablet) -->
+    <aside
+      v-if="showLeftPanel"
+      class="hidden lg:flex lg:w-[280px] xl:w-[320px] bg-[#1e2329] border-r border-[#2b3139] flex-col overflow-hidden flex-shrink-0"
+    >
+      <div class="flex-[6.3] overflow-y-auto">
         <AccountStatusPanel />
       </div>
-      <div class="sidebar-section navigation-section">
+      <div class="flex-[3.7] overflow-y-auto">
         <NavigationPanel @toggle-panel="toggleLeftPanel" />
       </div>
     </aside>
@@ -14,7 +17,7 @@
     <button
       v-if="!showLeftPanel"
       @click="toggleLeftPanel"
-      class="left-panel-toggle"
+      class="hidden lg:block fixed left-0 top-1/2 -translate-y-1/2 bg-[#1e2329] border border-l-0 border-[#2b3139] rounded-r-lg p-3 px-1.5 text-white cursor-pointer transition-all duration-300 z-[100] shadow-[2px_0_8px_rgba(0,0,0,0.3)] hover:bg-[#2b3139] hover:pr-2"
       title="显示左侧面板"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -23,48 +26,55 @@
     </button>
 
     <!-- Main Content Area -->
-    <main class="main-content">
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden lg:overflow-hidden max-lg:overflow-visible max-lg:h-auto">
       <!-- Strategy Panels Section -->
-      <section class="section-strategies">
-        <div class="strategy-container reverse-strategy">
+      <section class="flex flex-col lg:flex-row gap-2 p-2 border-b border-[#2b3139] lg:h-[63%] max-lg:h-auto min-h-0">
+        <!-- Reverse Strategy -->
+        <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
           <StrategyPanel type="reverse" />
         </div>
 
-        <div class="market-cards-container">
+        <!-- Market Cards -->
+        <div class="w-full lg:w-[380px] xl:w-[420px] bg-[#1e2329] rounded-lg flex-shrink-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
           <MarketCards />
         </div>
 
-        <div class="strategy-container forward-strategy">
+        <!-- Forward Strategy -->
+        <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
           <StrategyPanel type="forward" />
         </div>
       </section>
 
       <!-- Orders and Manual Trading Section -->
-      <section class="section-orders-spread">
-        <div class="order-monitor-wrapper">
+      <section class="flex-1 flex flex-col lg:flex-row gap-2 p-2 pt-0 min-h-0 max-lg:h-auto">
+        <!-- Order Monitor -->
+        <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
           <OrderMonitor />
         </div>
 
-        <!-- PC端显示ManualTrading，移动端隐藏 -->
-        <div class="manual-trading-wrapper-pc">
+        <!-- Manual Trading (PC only) -->
+        <div class="hidden lg:block flex-1 bg-[#1e2329] rounded-lg overflow-hidden min-w-0">
           <ManualTrading />
         </div>
       </section>
 
-      <!-- Manual Trading Section (仅移动端显示拆分后的组件) -->
-      <section class="section-manual-trading">
-        <div class="emergency-trading-wrapper">
+      <!-- Manual Trading Section (Mobile/Tablet only) -->
+      <section class="flex lg:hidden flex-col gap-2 p-2 pt-0">
+        <div class="bg-[#1e2329] rounded-lg overflow-visible">
           <EmergencyManualTrading @orderExecuted="handleOrderExecuted" />
         </div>
 
-        <div class="recent-records-wrapper">
+        <div class="bg-[#1e2329] rounded-lg overflow-visible">
           <RecentTradingRecords ref="recentRecordsRef" />
         </div>
       </section>
     </main>
 
     <!-- Right Sidebar - Risk Management (Hidden on mobile/tablet) -->
-    <aside v-if="showRiskPanel" class="sidebar-right">
+    <aside
+      v-if="showRiskPanel"
+      class="hidden xl:block w-[304px] 2xl:w-[342px] bg-[#1e2329] border-l border-[#2b3139] overflow-y-auto flex-shrink-0"
+    >
       <Risk @toggle-panel="toggleRiskPanel" />
     </aside>
 
@@ -72,7 +82,7 @@
     <button
       v-if="!showRiskPanel"
       @click="toggleRiskPanel"
-      class="risk-panel-toggle"
+      class="hidden xl:block fixed right-0 top-1/2 -translate-y-1/2 bg-[#1e2329] border border-r-0 border-[#2b3139] rounded-l-lg p-3 px-1.5 text-white cursor-pointer transition-all duration-300 z-[100] shadow-[-2px_0_8px_rgba(0,0,0,0.3)] hover:bg-[#2b3139] hover:pl-2"
       title="显示风险控制面板"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -80,7 +90,7 @@
       </svg>
     </button>
 
-    <!-- Floating Action Buttons (仅移动端显示) -->
+    <!-- Floating Action Buttons (Mobile only) -->
     <FloatingActionButtons />
   </div>
 </template>
@@ -93,6 +103,7 @@ import MarketCards from '@/components/trading/MarketCards.vue'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
 import OrderMonitor from '@/components/trading/OrderMonitor.vue'
 import ManualTrading from '@/components/trading/ManualTrading.vue'
+import SpreadDataTable from '@/components/trading/SpreadDataTable.vue'
 import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
 import RecentTradingRecords from '@/components/trading/RecentTradingRecords.vue'
 import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vue'

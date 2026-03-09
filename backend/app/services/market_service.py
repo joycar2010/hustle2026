@@ -52,19 +52,9 @@ class MarketDataService:
                 ask_qty=0,
                 timestamp=binance_ws.timestamp or int(time.time() * 1000),
             )
-        # Fallback: WebSocket not yet connected, use REST once
-        try:
-            data = await self.binance_client.get_book_ticker(symbol)
-            return MarketQuote(
-                symbol=symbol,
-                bid_price=float(data["bidPrice"]),
-                bid_qty=float(data["bidQty"]),
-                ask_price=float(data["askPrice"]),
-                ask_qty=float(data["askQty"]),
-                timestamp=int(time.time() * 1000),
-            )
-        except Exception as e:
-            raise Exception(f"Failed to fetch Binance quote: {str(e)}")
+        # Fallback: WebSocket not yet connected, use cached data or fail gracefully
+        logger.warning(f"Binance WebSocket not connected (connected={binance_ws.connected}, bid={binance_ws.bid}, ask={binance_ws.ask})")
+        raise Exception(f"Binance WebSocket not available, please wait for connection")
 
     async def get_bybit_quote(
         self,

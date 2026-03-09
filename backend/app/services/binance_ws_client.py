@@ -63,12 +63,14 @@ class BinanceWebSocketClient:
     async def _run(self):
         """Reconnect loop — keeps reconnecting on any error."""
         url = f"{BINANCE_WS_URL}/{self.symbol}@bookTicker"
+        reconnect_count = 0
         while True:
             try:
-                logger.info(f"Connecting to Binance WS: {url}")
+                logger.info(f"Connecting to Binance WS: {url} (attempt #{reconnect_count + 1})")
                 async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                     self._connected = True
-                    logger.info("Binance WS connected")
+                    reconnect_count = 0  # Reset counter on successful connection
+                    logger.info("Binance WS connected successfully")
                     async for raw in ws:
                         data = json.loads(raw)
                         # bookTicker payload: {"b": bid, "a": ask, ...}
@@ -79,11 +81,13 @@ class BinanceWebSocketClient:
                             self._ask = float(a)
                             self._timestamp = int(time.time() * 1000)
             except asyncio.CancelledError:
+                logger.info("Binance WS task cancelled")
                 break
             except (ConnectionClosed, OSError, Exception) as e:
                 self._connected = False
-                logger.warning(f"Binance WS disconnected: {e}, reconnecting in 2s")
-                await asyncio.sleep(2)
+                reconnect_count += 1
+                logger.warning(f"Binance WS disconnected (attempt #{reconnect_count}): {e}, reconnecting in 5s")
+                await asyncio.sleep(5)  # Increased from 2s to 5s to avoid aggressive reconnection
 
 
 # Global instance

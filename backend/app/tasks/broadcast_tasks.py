@@ -54,7 +54,7 @@ class AccountBalanceStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        self.interval = 20  # Update interval: 20 seconds for spread alert checking
+        self.interval = 30  # Update interval: 30 seconds (increased to reduce API calls)
         self.broadcast_count = 0
         self.last_broadcast_time = None
         self.error_count = 0

@@ -20,7 +20,7 @@ class AccountDataService:
 
     def __init__(self):
         self._cache = {}
-        self._cache_ttl = 30  # Cache for 30 seconds
+        self._cache_ttl = 60  # Cache for 60 seconds (increased to reduce API calls)
 
     def _get_cache_key(self, account_id: str, data_type: str) -> str:
         """Generate cache key"""
@@ -294,9 +294,10 @@ class AccountDataService:
                 ban_until_ms = None
                 if ban_until_match:
                     ban_until_ms = int(ban_until_match.group(1))
+                    logger.info(f"IP banned until timestamp: {ban_until_ms} ({ban_until_ms/1000})")
 
                 # Raise a custom exception with ban info
-                raise Exception(f"RATE_LIMIT_BAN:{ban_until_ms if ban_until_ms else 0}")
+                raise Exception(f"RATE_LIMIT:{ban_until_ms if ban_until_ms else 0}")
 
             logger.error(f"Error fetching Binance balance: {error_msg}", exc_info=True)
             raise
@@ -342,7 +343,7 @@ class AccountDataService:
                     ban_until_ms = int(ban_until_match.group(1))
 
                 # Raise a custom exception with ban info
-                raise Exception(f"RATE_LIMIT_BAN:{ban_until_ms if ban_until_ms else 0}")
+                raise Exception(f"RATE_LIMIT:{ban_until_ms if ban_until_ms else 0}")
 
             raise
         finally:

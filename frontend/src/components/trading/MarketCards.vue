@@ -1,19 +1,19 @@
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Total Profit and Fees Header -->
-    <div class="p-2 md:p-3 bg-[#252930] border-b border-[#2b3139]">
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3 mb-2 md:mb-3">
+    <div class="p-2 lg:p-2 md:p-3 bg-[#252930] border-b border-[#2b3139]">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-1.5 md:gap-3 mb-2 lg:mb-1.5 md:mb-3">
         <!-- Left: Bybit Fees -->
-        <div class="bg-[#1e2329] rounded p-2 sm:order-1 order-2">
-          <div class="text-xs text-gray-400 mb-1 text-center">Bybit 掉期费</div>
-          <div class="flex flex-col space-y-1">
-            <div class="flex justify-between text-xs">
+        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 sm:order-1 order-2">
+          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5 text-center">Bybit 掉期费</div>
+          <div class="flex flex-col space-y-1 lg:space-y-0.5">
+            <div class="flex justify-between text-xs lg:text-[10px]">
               <span class="text-gray-400">做多:</span>
               <span class="font-mono" :class="bybitLongSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ bybitLongSwapFee >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitLongSwapFee)) }}
               </span>
             </div>
-            <div class="flex justify-between text-xs">
+            <div class="flex justify-between text-xs lg:text-[10px]">
               <span class="text-gray-400">做空:</span>
               <span class="font-mono" :class="bybitShortSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ bybitShortSwapFee >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitShortSwapFee)) }}
@@ -23,25 +23,25 @@
         </div>
 
         <!-- Center: Total Profit -->
-        <div class="bg-[#1e2329] rounded p-2 flex flex-col items-center justify-center sm:order-2 order-first">
-          <div class="text-xs text-gray-400 mb-1">总盈利</div>
-          <div class="text-lg md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 flex flex-col items-center justify-center sm:order-2 order-first">
+          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5">总盈利</div>
+          <div class="text-lg lg:text-base md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
             {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
           </div>
-          <div class="text-xs text-gray-400">USDT</div>
+          <div class="text-xs lg:text-[10px] text-gray-400">USDT</div>
         </div>
 
         <!-- Right: Binance Fees -->
-        <div class="bg-[#1e2329] rounded p-2 sm:order-3 order-3">
-          <div class="text-xs text-gray-400 mb-1 text-center">Binance 资金费</div>
-          <div class="flex flex-col space-y-1">
-            <div class="flex justify-between text-xs">
+        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 sm:order-3 order-3">
+          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5 text-center">Binance 资金费</div>
+          <div class="flex flex-col space-y-1 lg:space-y-0.5">
+            <div class="flex justify-between text-xs lg:text-[10px]">
               <span class="text-gray-400">做多:</span>
               <span class="font-mono" :class="binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ binanceLongFundingRate >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceLongFundingRate)) }}
               </span>
             </div>
-            <div class="flex justify-between text-xs">
+            <div class="flex justify-between text-xs lg:text-[10px]">
               <span class="text-gray-400">做空:</span>
               <span class="font-mono" :class="binanceShortFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ binanceShortFundingRate >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceShortFundingRate)) }}
@@ -52,18 +52,18 @@
       </div>
 
       <!-- Arbitrage Strategy Position Data -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-1.5">
         <!-- Reverse Arbitrage -->
-        <div class="bg-[#1e2329] rounded p-2">
-          <div class="text-xs text-gray-400 mb-1">反向持仓 (Bybit MT5)</div>
-          <div class="flex justify-between items-center text-xs">
-            <div class="flex items-center space-x-2">
+        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5">
+          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5">反向持仓 (Bybit MT5)</div>
+          <div class="flex justify-between items-center text-xs lg:text-[10px]">
+            <div class="flex items-center space-x-2 lg:space-x-1">
               <span class="text-gray-400">实仓:</span>
-              <span class="font-mono text-white text-lg">{{ reverseActualPosition.toFixed(2) }}</span>
+              <span class="font-mono text-white text-lg lg:text-sm">{{ reverseActualPosition.toFixed(2) }}</span>
             </div>
             <div class="flex items-center space-x-1">
               <span class="text-gray-400">点差:</span>
-              <span class="font-mono text-sm" :class="reverseSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+              <span class="font-mono text-sm lg:text-xs" :class="reverseSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ formatSpread(reverseSpread) }}
               </span>
             </div>
@@ -71,16 +71,16 @@
         </div>
 
         <!-- Forward Arbitrage -->
-        <div class="bg-[#1e2329] rounded p-2">
-          <div class="text-xs text-gray-400 mb-1">正向持仓 (Binance)</div>
-          <div class="flex justify-between items-center text-xs">
-            <div class="flex items-center space-x-2">
+        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5">
+          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5">正向持仓 (Binance)</div>
+          <div class="flex justify-between items-center text-xs lg:text-[10px]">
+            <div class="flex items-center space-x-2 lg:space-x-1">
               <span class="text-gray-400">实仓:</span>
-              <span class="font-mono text-white text-lg">{{ forwardActualPosition.toFixed(2) }}</span>
+              <span class="font-mono text-white text-lg lg:text-sm">{{ forwardActualPosition.toFixed(2) }}</span>
             </div>
             <div class="flex items-center space-x-1">
               <span class="text-gray-400">点差:</span>
-              <span class="font-mono text-sm" :class="forwardSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+              <span class="font-mono text-sm lg:text-xs" :class="forwardSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
                 {{ formatSpread(forwardSpread) }}
               </span>
             </div>
@@ -89,104 +89,104 @@
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-2 md:p-3">
-      <div class="grid grid-cols-1 gap-2 md:gap-3 h-full">
+    <div class="flex-1 overflow-y-auto p-2 lg:p-1.5 md:p-3">
+      <div class="grid grid-cols-1 gap-2 lg:gap-1.5 md:gap-3 h-full">
       <!-- Bybit MT5 Card -->
-      <div class="bg-[#252930] rounded p-3 flex flex-col border border-[#2b3139]">
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center space-x-2">
-            <div class="w-7 h-7 bg-[#ff9800] rounded flex items-center justify-center">
-              <span class="text-white font-bold text-lg">B</span>
+      <div class="bg-[#252930] rounded p-2 lg:p-2 md:p-3 flex flex-col border border-[#2b3139]">
+        <div class="flex items-center justify-between mb-1.5 lg:mb-1 md:mb-2">
+          <div class="flex items-center space-x-2 lg:space-x-1.5">
+            <div class="w-6 h-6 lg:w-5 lg:h-5 md:w-7 md:h-7 bg-[#ff9800] rounded flex items-center justify-center">
+              <span class="text-white font-bold text-base lg:text-sm md:text-lg">B</span>
             </div>
             <div>
-              <div class="font-medium text-lg">Bybit MT5 <span class="text-sm text-gray-400">XAUUSD.s</span></div>
+              <div class="font-medium text-base lg:text-sm md:text-lg">Bybit MT5 <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">XAUUSD.s</span></div>
             </div>
           </div>
-          <div :class="['w-3 h-3 rounded-full', bybitConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
+          <div :class="['w-2.5 h-2.5 lg:w-2 lg:h-2 md:w-3 md:h-3 rounded-full', bybitConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
         </div>
 
         <!-- Real-time Price (Compact) -->
-        <div class="mb-2 text-center py-1.5 bg-[#1e2329] rounded">
-          <div class="text-sm text-gray-400 mb-0.5">实时价格</div>
-          <div :class="['text-2xl font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
+        <div class="mb-1.5 lg:mb-1 md:mb-2 text-center py-1 lg:py-0.5 md:py-1.5 bg-[#1e2329] rounded">
+          <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
+          <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
             {{ formatPrice(bybit.mid) }}
           </div>
         </div>
 
         <!-- ASK and BID in one row -->
-        <div class="grid grid-cols-2 gap-2 mb-2">
-          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
-            <div class="text-sm text-gray-400 mb-0.5">ASK</div>
-            <div :class="['text-lg font-mono font-bold', getPriceClass(bybit.ask, bybit.prevAsk)]">
+        <div class="grid grid-cols-2 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
+          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
+            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">ASK</div>
+            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.ask, bybit.prevAsk)]">
               {{ formatPrice(bybit.ask) }}
             </div>
           </div>
-          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
-            <div class="text-sm text-gray-400 mb-0.5">BID</div>
-            <div :class="['text-lg font-mono font-bold', getPriceClass(bybit.bid, bybit.prevBid)]">
+          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
+            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">BID</div>
+            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.bid, bybit.prevBid)]">
               {{ formatPrice(bybit.bid) }}
             </div>
           </div>
         </div>
 
         <!-- Lag Heartbeat -->
-        <div class="pt-1.5 border-t border-[#2b3139] flex justify-between items-center">
-          <span class="text-sm text-gray-400">卡顿</span>
-          <div class="flex items-center space-x-1.5">
+        <div class="pt-1 lg:pt-0.5 md:pt-1.5 border-t border-[#2b3139] flex justify-between items-center">
+          <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">卡顿</span>
+          <div class="flex items-center space-x-1.5 lg:space-x-1">
             <div class="flex space-x-0.5">
-              <div v-for="i in 5" :key="i" :class="['w-1 h-3 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
+              <div v-for="i in 5" :key="i" :class="['w-1 lg:w-0.5 h-2.5 lg:h-2 md:h-3 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
-            <span class="text-sm font-mono">{{ bybitLagCount }}</span>
+            <span class="text-xs lg:text-[10px] md:text-sm font-mono">{{ bybitLagCount }}</span>
           </div>
         </div>
       </div>
 
       <!-- Binance Card -->
-      <div class="bg-[#252930] rounded p-3 flex flex-col border border-[#2b3139]">
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center space-x-2">
-            <div class="w-7 h-7 bg-[#f0b90b] rounded flex items-center justify-center">
-              <span class="text-[#1a1d21] font-bold text-lg">B</span>
+      <div class="bg-[#252930] rounded p-2 lg:p-2 md:p-3 flex flex-col border border-[#2b3139]">
+        <div class="flex items-center justify-between mb-1.5 lg:mb-1 md:mb-2">
+          <div class="flex items-center space-x-2 lg:space-x-1.5">
+            <div class="w-6 h-6 lg:w-5 lg:h-5 md:w-7 md:h-7 bg-[#f0b90b] rounded flex items-center justify-center">
+              <span class="text-[#1a1d21] font-bold text-base lg:text-sm md:text-lg">B</span>
             </div>
             <div>
-              <div class="font-medium text-lg">Binance <span class="text-sm text-gray-400">XAUUSDT</span></div>
+              <div class="font-medium text-base lg:text-sm md:text-lg">Binance <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">XAUUSDT</span></div>
             </div>
           </div>
-          <div :class="['w-3 h-3 rounded-full', binanceConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
+          <div :class="['w-2.5 h-2.5 lg:w-2 lg:h-2 md:w-3 md:h-3 rounded-full', binanceConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
         </div>
 
         <!-- Real-time Price (Compact) -->
-        <div class="mb-2 text-center py-1.5 bg-[#1e2329] rounded">
-          <div class="text-sm text-gray-400 mb-0.5">实时价格</div>
-          <div :class="['text-2xl font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
+        <div class="mb-1.5 lg:mb-1 md:mb-2 text-center py-1 lg:py-0.5 md:py-1.5 bg-[#1e2329] rounded">
+          <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
+          <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
             {{ formatPrice(binance.mid) }}
           </div>
         </div>
 
         <!-- ASK and BID in one row -->
-        <div class="grid grid-cols-2 gap-2 mb-2">
-          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
-            <div class="text-sm text-gray-400 mb-0.5">ASK</div>
-            <div :class="['text-lg font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
+        <div class="grid grid-cols-2 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
+          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
+            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">ASK</div>
+            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
               {{ formatPrice(binance.ask) }}
             </div>
           </div>
-          <div class="bg-[#1e2329] rounded px-2 py-1.5 border border-[#2b3139]">
-            <div class="text-sm text-gray-400 mb-0.5">BID</div>
-            <div :class="['text-lg font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
+          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
+            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">BID</div>
+            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
               {{ formatPrice(binance.bid) }}
             </div>
           </div>
         </div>
 
         <!-- Lag Heartbeat -->
-        <div class="pt-1.5 border-t border-[#2b3139] flex justify-between items-center">
-          <span class="text-sm text-gray-400">卡顿</span>
-          <div class="flex items-center space-x-1.5">
+        <div class="pt-1 lg:pt-0.5 md:pt-1.5 border-t border-[#2b3139] flex justify-between items-center">
+          <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">卡顿</span>
+          <div class="flex items-center space-x-1.5 lg:space-x-1">
             <div class="flex space-x-0.5">
-              <div v-for="i in 5" :key="i" :class="['w-1 h-3 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
+              <div v-for="i in 5" :key="i" :class="['w-1 lg:w-0.5 h-2.5 lg:h-2 md:h-3 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
-            <span class="text-sm font-mono">{{ binanceLagCount }}</span>
+            <span class="text-xs lg:text-[10px] md:text-sm font-mono">{{ binanceLagCount }}</span>
           </div>
         </div>
       </div>

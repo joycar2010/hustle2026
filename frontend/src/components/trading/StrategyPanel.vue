@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Header -->
     <div class="p-2 md:p-3 border-b border-[#2b3139] flex-shrink-0">
       <h3 :class="['text-base md:text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
@@ -7,7 +7,7 @@
       </h3>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-2 md:p-3 space-y-2 min-h-0">
+    <div class="flex-1 p-2 md:p-3 space-y-2 lg:overflow-y-auto lg:min-h-0 max-lg:overflow-visible max-lg:h-auto">
       <!-- Validation Errors Display -->
       <div v-if="validationErrors.length > 0" class="bg-[#f6465d] bg-opacity-10 border border-[#f6465d] rounded p-3">
         <div class="flex items-start space-x-2">
@@ -26,7 +26,7 @@
 
       <!-- Top Info Bar -->
       <div class="bg-[#252930] rounded p-2 md:p-3">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-3">
           <!-- Binance Available Assets -->
           <div>
             <div class="text-xs text-gray-400 mb-1">Binance可用资产</div>
@@ -44,7 +44,7 @@
           </div>
 
           <!-- Spread Display -->
-          <div class="text-center">
+          <div class="text-center lg:col-span-2">
             <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">
               {{ type === 'reverse' ? '做多Bybit点差' : '做多Binance点差' }}
             </div>

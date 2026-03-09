@@ -206,8 +206,9 @@ class SpreadAlertService:
 
             # 获取用户信息（这里简化处理，实际应该从user_notification_settings获取）
             from app.models.user import User
+            import uuid as uuid_lib
             user_result = await db.execute(
-                select(User).filter(User.user_id == uuid.UUID(user_id))
+                select(User).filter(User.user_id == uuid_lib.UUID(user_id))
             )
             user = user_result.scalar_one_or_none()
 
@@ -241,7 +242,7 @@ class SpreadAlertService:
 
             # 记录日志
             log = NotificationLog(
-                user_id=uuid.UUID(user_id),
+                user_id=uuid_lib.UUID(user_id),
                 template_key=template_key,
                 service_type="feishu",
                 recipient=recipient,
