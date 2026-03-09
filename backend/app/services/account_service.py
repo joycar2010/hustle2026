@@ -180,12 +180,27 @@ class AccountDataService:
                 logger.warning(f"Failed to fetch margin account data: {margin_account_data}")
 
             # Calculate total positions from position risk (sum of position quantities)
+            # Also get entry price and leverage
             total_positions = 0.0
+            avg_entry_price = 0.0
+            total_volume_weighted = 0.0
+            leverage = 0
+
             if not isinstance(position_risk_data, Exception):
                 for pos in position_risk_data:
                     position_amt = float(pos.get("positionAmt", 0))
                     if position_amt != 0:
-                        total_positions += abs(position_amt)
+                        entry_price = float(pos.get("entryPrice", 0))
+                        abs_amt = abs(position_amt)
+                        total_positions += abs_amt
+                        total_volume_weighted += abs_amt * entry_price
+                        # Get leverage from first position
+                        if leverage == 0:
+                            leverage = int(pos.get("leverage", 0))
+
+                # Calculate weighted average entry price
+                if total_positions > 0:
+                    avg_entry_price = total_volume_weighted / total_positions
             else:
                 logger.warning(f"Failed to fetch position risk data: {position_risk_data}")
 
@@ -263,6 +278,9 @@ class AccountDataService:
                 long_funding_rate=long_funding_rate,
                 short_funding_rate=short_funding_rate,
                 commission_fee=commission_fee,
+                # Position data for liquidation price calculation
+                entry_price=avg_entry_price,  # 开仓均价
+                leverage=leverage,  # 杠杆倍数
             )
         except Exception as e:
             error_msg = str(e)
@@ -398,15 +416,77 @@ class AccountDataService:
             unrealized_pnl = equity - balance  # 未实现盈亏 = 净值 - 余额
 
             # Calculate margin level (risk ratio)
+            # 风险率(%) = (账户权益 / 已用保证金) × 100
             margin_level = 0.0
-            if margin_used > 0:
+            if margin_used > 0.01:  # 已用保证金必须大于0.01才计算，避免异常值
                 margin_level = (equity / margin_used) * 100
+                # 限制最大值为10000%，避免显示异常
+                if margin_level > 10000:
+                    margin_level = 0.0
+            else:
+                # 无持仓或保证金极小时，风险率设为0
+                margin_level = 0.0
 
-            # Calculate total positions (sum of volumes)
+            # Calculate total positions (sum of volumes) and get entry price and liquidation prices
+            from app.core.bybit_mt5_config import get_symbol_config
+
             total_positions = 0.0
+            avg_entry_price = 0.0
+            total_volume_weighted = 0.0
+            long_liquidation_price = 0.0
+            short_liquidation_price = 0.0
+
+            # Get account leverage for liquidation price calculation
+            account_leverage = int(mt5_info.get("leverage", 1))
+
             for pos in mt5_positions:
                 volume = float(pos.get("volume", 0))
+                price_open = float(pos.get("price_open", 0))
+                pos_type = pos.get("type", 0)  # 0=Buy(Long), 1=Sell(Short)
+                symbol = pos.get("symbol", "")
+
                 total_positions += abs(volume)
+                total_volume_weighted += abs(volume) * price_open
+
+                # Try to get native liquidation price from MT5 API
+                price_liquidation = float(pos.get("price_liquidation", 0))
+
+                # If native liquidation price exists, use it
+                if price_liquidation > 0:
+                    if pos_type == 0:  # Long position
+                        long_liquidation_price = price_liquidation
+                    elif pos_type == 1:  # Short position
+                        short_liquidation_price = price_liquidation
+                else:
+                    # Fallback: Calculate liquidation price using Bybit simplified formula
+                    # This formula assumes isolated margin mode
+                    symbol_config = get_symbol_config(symbol)
+                    margin_rate_maintenance = symbol_config["margin_rate_maintenance"]
+                    digits = symbol_config["digits"]
+
+                    if account_leverage > 0 and price_open > 0:
+                        if pos_type == 0:  # Long position
+                            # 多头强平价 = 开仓价 × (1 - 1/杠杆 + 维持保证金率)
+                            calculated_liq_price = price_open * (1 - 1/account_leverage + margin_rate_maintenance)
+                            if calculated_liq_price > 0:
+                                long_liquidation_price = round(calculated_liq_price, digits)
+                                logger.info(f"Calculated LONG liquidation price for {symbol}: "
+                                           f"open={price_open:.{digits}f}, leverage={account_leverage}, "
+                                           f"maintenance_rate={margin_rate_maintenance}, "
+                                           f"liquidation={long_liquidation_price:.{digits}f}")
+                        else:  # Short position
+                            # 空头强平价 = 开仓价 × (1 + 1/杠杆 - 维持保证金率)
+                            calculated_liq_price = price_open * (1 + 1/account_leverage - margin_rate_maintenance)
+                            if calculated_liq_price > 0:
+                                short_liquidation_price = round(calculated_liq_price, digits)
+                                logger.info(f"Calculated SHORT liquidation price for {symbol}: "
+                                           f"open={price_open:.{digits}f}, leverage={account_leverage}, "
+                                           f"maintenance_rate={margin_rate_maintenance}, "
+                                           f"liquidation={short_liquidation_price:.{digits}f}")
+
+            # Calculate weighted average entry price
+            if total_positions > 0:
+                avg_entry_price = total_volume_weighted / total_positions
 
             # Calculate fees from deals history
             commission_fee = 0.0
@@ -437,7 +517,8 @@ class AccountDataService:
 
             logger.info(f"MT5 balance: balance={balance}, equity={equity}, free_margin={free_margin}, "
                        f"margin_used={margin_used}, positions={total_positions}, "
-                       f"commission={commission_fee}, long_swap={long_swap_fee}, short_swap={short_swap_fee}")
+                       f"commission={commission_fee}, long_swap={long_swap_fee}, short_swap={short_swap_fee}, "
+                       f"long_liquidation={long_liquidation_price}, short_liquidation={short_liquidation_price}")
 
             return AccountBalance(
                 total_assets=balance,  # 账户总资产
@@ -453,6 +534,14 @@ class AccountDataService:
                 long_swap_fee=long_swap_fee,  # 做多掉期费
                 short_swap_fee=short_swap_fee,  # 做空掉期费
                 commission_fee=commission_fee,  # 手续费
+                # Position data for liquidation price calculation
+                entry_price=avg_entry_price,  # 开仓均价
+                leverage=int(mt5_info.get("leverage", 0)),  # 杠杆倍数
+                volume=total_positions,  # 持仓手数
+                equity=equity,  # 账户权益
+                # MT5 native liquidation prices from Bybit
+                long_liquidation_price=long_liquidation_price,  # 多头强平价
+                short_liquidation_price=short_liquidation_price,  # 空头强平价
             )
         except Exception as e:
             logger.error(f"Failed to fetch MT5 balance: {str(e)}")

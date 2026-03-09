@@ -82,6 +82,16 @@ class AccountBalance(BaseModel):
     long_funding_rate: Optional[float] = None  # Binance做多资金费
     short_funding_rate: Optional[float] = None  # Binance做空资金费
 
+    # Position data for liquidation price calculation
+    entry_price: Optional[float] = None  # 开仓均价
+    leverage: Optional[int] = None  # 杠杆倍数
+    volume: Optional[float] = None  # MT5持仓手数
+    equity: Optional[float] = None  # MT5账户权益
+
+    # MT5 native liquidation prices (from Bybit MT5 API)
+    long_liquidation_price: Optional[float] = None  # 多头强平价
+    short_liquidation_price: Optional[float] = None  # 空头强平价
+
 
 class AccountPosition(BaseModel):
     """Schema for account position data"""

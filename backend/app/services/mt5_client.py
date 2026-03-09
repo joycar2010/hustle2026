@@ -499,7 +499,9 @@ class MT5Client:
                     'price_current': pos.price_current,
                     'profit': pos.profit,
                     'sl': pos.sl,
-                    'tp': pos.tp
+                    'tp': pos.tp,
+                    'margin': getattr(pos, 'margin', 0.0),  # Position margin (for liquidation calculation)
+                    'price_liquidation': getattr(pos, 'price_liquidation', 0.0)  # Bybit MT5 liquidation price
                 }
                 for pos in positions
             ]

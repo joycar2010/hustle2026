@@ -84,7 +84,7 @@
           </div>
           <div class="flex justify-between">
             <span class="text-gray-400">风险率</span>
-            <span class="font-mono" :class="getRiskColor(account.balance?.risk_ratio || 0)">
+            <span class="font-mono" :class="getRiskColor(account)">
               {{ getDisplayValue(account, 'risk_ratio', false, true) }}
             </span>
           </div>
@@ -347,7 +347,25 @@ function formatNumber(num) {
   return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function getRiskColor(ratio) {
+function getRiskColor(account) {
+  // Check if account has error
+  if (account.error || !account.balance) {
+    return 'text-gray-400'
+  }
+
+  const ratio = account.balance.risk_ratio || 0
+
+  // For Bybit MT5: risk_ratio is margin_level (equity/margin × 100)
+  // Lower is more dangerous (opposite of other platforms)
+  if (account.platform_id === 2 && account.is_mt5_account) {
+    if (ratio === 0) return 'text-gray-400'  // No position
+    if (ratio < 50) return 'text-[#f6465d]'   // Critical: will be liquidated
+    if (ratio < 100) return 'text-[#f0b90b]'  // Warning: margin call
+    if (ratio < 150) return 'text-[#f0b90b]'  // Caution
+    return 'text-[#0ecb81]'                   // Safe
+  }
+
+  // For other platforms (higher ratio = more risk)
   if (ratio < 30) return 'text-[#0ecb81]'
   if (ratio < 60) return 'text-[#f0b90b]'
   return 'text-[#f6465d]'
@@ -451,30 +469,37 @@ function getLiquidationPrice(account, type) {
 
   // Bybit MT5 calculation
   if (account.platform_id === 2 && account.is_mt5_account) {
-    // 多头强平价 = 开仓价 − (账户净值 ÷ 持仓盎司数)
-    // 空头强平价 = 开仓价 + (账户净值 ÷ 持仓盎司数)
+    // Check which position type exists based on liquidation prices from backend
+    const hasLongPosition = balance.long_liquidation_price && balance.long_liquidation_price > 0
+    const hasShortPosition = balance.short_liquidation_price && balance.short_liquidation_price > 0
 
-    // 使用 price_open 或 entry_price 作为开仓均价
-    const entryPrice = balance.price_open || balance.entry_price || 0
-    // 使用 equity 或 net_assets 作为账户净值
-    const equity = balance.equity || balance.net_assets || 0
-    // 使用 volume 或 total_positions 作为持仓手数，1手=100盎司
-    const volume = balance.volume || balance.total_positions || 0
-    const volumeOz = volume * 100  // 持仓盎司数
-
-    if (volumeOz === 0 || entryPrice === 0) {
-      return '暂无'
+    // If we have a long position, only show long liquidation price
+    if (hasLongPosition && !hasShortPosition) {
+      if (type === 'long') {
+        return formatNumber(balance.long_liquidation_price)
+      } else {
+        return '暂无'
+      }
     }
 
-    const priceOffset = equity / volumeOz
-
-    if (type === 'long') {
-      const liquidationPrice = entryPrice - priceOffset
-      return liquidationPrice > 0 ? formatNumber(liquidationPrice) : '暂无'
-    } else {
-      const liquidationPrice = entryPrice + priceOffset
-      return formatNumber(liquidationPrice)
+    // If we have a short position, only show short liquidation price
+    if (hasShortPosition && !hasLongPosition) {
+      if (type === 'long') {
+        return '暂无'
+      } else {
+        return formatNumber(balance.short_liquidation_price)
+      }
     }
+
+    // If we have both (shouldn't happen in normal cases) or neither, show what we have
+    if (type === 'long' && hasLongPosition) {
+      return formatNumber(balance.long_liquidation_price)
+    }
+    if (type === 'short' && hasShortPosition) {
+      return formatNumber(balance.short_liquidation_price)
+    }
+
+    return '暂无'
   }
 
   // Binance calculation

@@ -36,7 +36,6 @@
 
     <!-- System Alerts -->
     <div class="mt-2 bg-[#252930] rounded-lg border border-[#2b3139] p-2">
-      <div class="text-xs font-semibold mb-2 text-[#f0b90b]">系统提醒</div>
       <div class="space-y-1.5">
         <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-1.5 text-xs">
           <div class="w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
@@ -64,35 +63,41 @@ const activeNav = ref('strategy')
 const redisStatus = ref({ healthy: false, last_error: null })
 let redisCheckInterval = null
 
-// Combine notification store alerts with Redis status
+// Service status alerts only (WebSocket, Feishu, and Redis)
 const systemAlerts = computed(() => {
-  const alerts = [...notificationStore.systemAlerts]
+  const alerts = []
 
-  // Add Redis status alert
-  if (redisStatus.value.healthy) {
-    alerts.push({
-      id: 4,
-      type: 'success',
-      message: 'Redis服务',
-      value: '运行正常'
-    })
-  } else {
-    alerts.push({
-      id: 4,
-      type: 'danger',
-      message: 'Redis服务异常',
-      value: redisStatus.value.last_error || '连接失败'
-    })
-  }
+  // WebSocket status
+  alerts.push({
+    id: 1,
+    type: marketStore.connected ? 'success' : 'danger',
+    message: 'WebSocket推送',
+    value: marketStore.connected ? '已连接' : '未连接'
+  })
+
+  // Feishu service status
+  alerts.push({
+    id: 2,
+    type: notificationStore.feishuServiceStatus ? 'success' : 'danger',
+    message: '飞书消息服务',
+    value: notificationStore.feishuServiceStatus ? '运行正常' : '服务异常'
+  })
+
+  // Redis status
+  alerts.push({
+    id: 3,
+    type: redisStatus.value.healthy ? 'success' : 'danger',
+    message: 'Redis服务',
+    value: redisStatus.value.healthy ? '运行正常' : (redisStatus.value.last_error || '连接失败')
+  })
 
   return alerts
 })
 
 onMounted(async () => {
-  await fetchSystemAlerts()
   await fetchRedisStatus()
 
-  // Keep Redis status polling (30s) - no WebSocket alternative yet
+  // Keep Redis status polling (30s)
   redisCheckInterval = setInterval(fetchRedisStatus, 30000)
 
   // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
@@ -108,16 +113,6 @@ onUnmounted(() => {
     clearInterval(redisCheckInterval)
   }
 })
-
-async function fetchSystemAlerts() {
-  try {
-    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
-    const data = response.data
-    notificationStore.updateSystemAlerts(data)
-  } catch (error) {
-    console.error('Failed to fetch system alerts:', error)
-  }
-}
 
 async function fetchRedisStatus() {
   try {

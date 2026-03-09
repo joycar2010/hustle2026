@@ -10,6 +10,7 @@ export const useNotificationStore = defineStore('notification', () => {
   const isAudioPlaying = ref(false)
   const systemAlerts = ref([])
   const riskAlerts = ref([]) // Risk alerts from Risk.vue
+  const feishuServiceStatus = ref(true) // Feishu service status (default: true)
 
   // Alert switches with localStorage persistence
   const alertSoundEnabled = ref(localStorage.getItem('alertSoundEnabled') !== 'false')
@@ -573,6 +574,7 @@ export const useNotificationStore = defineStore('notification', () => {
     singleLegAlertEnabled,
     systemAlerts,
     riskAlerts,
+    feishuServiceStatus,
     loadAlertSettings,
     checkMarketAlerts,
     checkAccountAlerts,
