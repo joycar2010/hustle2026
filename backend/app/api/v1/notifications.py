@@ -66,6 +66,7 @@ class NotificationTemplateUpdate(BaseModel):
     enable_feishu: Optional[bool] = None
     priority: Optional[int] = None
     cooldown_seconds: Optional[int] = None
+    auto_check_enabled: Optional[bool] = None
     # 旧字段（保留兼容）
     alert_sound: Optional[str] = None
     repeat_count: Optional[int] = None

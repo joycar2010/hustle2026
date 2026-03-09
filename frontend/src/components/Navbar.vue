@@ -312,10 +312,13 @@ function toggleSingleLegAlert() {
 function handleNavClick(path) {
   // 如果点击的是控制面板（首页），强制刷新页面
   if (path === '/') {
-    // 使用router.go(0)强制刷新当前路由
-    setTimeout(() => {
+    // 如果当前已经在首页，强制刷新
+    if (router.currentRoute.value.path === '/') {
       router.go(0)
-    }, 100)
+    } else {
+      // 如果不在首页，正常跳转
+      router.push(path)
+    }
   }
 }
 

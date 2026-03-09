@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from app.core.config import settings
 from app.services.feishu_service import get_feishu_service
 from app.models.notification_config import NotificationTemplate, NotificationLog
 from app.websocket.manager import manager
@@ -51,60 +52,56 @@ class SpreadAlertService:
         # 1. 检查正向开仓点差值
         if market_data.get('forward_spread') and alert_settings.get('forwardOpenPrice'):
             if abs(market_data['forward_spread']) >= alert_settings['forwardOpenPrice']:
-                if self._should_send_alert('forward_open', user_id):
-                    alerts_to_send.append({
-                        'template_key': 'forward_open_spread_alert',
-                        'variables': {
-                            'spread': f"{market_data['forward_spread']:.2f}",
-                            'threshold': f"{alert_settings['forwardOpenPrice']:.2f}",
-                            'market_status': '优惠价格出现',
-                            'estimated_profit': f"{abs(market_data['forward_spread']) * 10:.2f}"  # 假设10件
-                        }
-                    })
+                alerts_to_send.append({
+                    'template_key': 'forward_open_spread_alert',
+                    'variables': {
+                        'spread': f"{market_data['forward_spread']:.2f}",
+                        'threshold': f"{alert_settings['forwardOpenPrice']:.2f}",
+                        'market_status': '优惠价格出现',
+                        'estimated_profit': f"{abs(market_data['forward_spread']) * 10:.2f}"  # 假设10件
+                    }
+                })
 
         # 2. 检查正向平仓点差值
         if market_data.get('forward_spread') and alert_settings.get('forwardClosePrice'):
             if abs(market_data['forward_spread']) <= alert_settings['forwardClosePrice']:
-                if self._should_send_alert('forward_close', user_id):
-                    alerts_to_send.append({
-                        'template_key': 'forward_close_spread_alert',
-                        'variables': {
-                            'spread': f"{market_data['forward_spread']:.2f}",
-                            'threshold': f"{alert_settings['forwardClosePrice']:.2f}",
-                            'market_status': '价格回归正常',
-                            'current_profit': f"{abs(market_data['forward_spread']) * 10:.2f}"
-                        }
-                    })
+                alerts_to_send.append({
+                    'template_key': 'forward_close_spread_alert',
+                    'variables': {
+                        'spread': f"{market_data['forward_spread']:.2f}",
+                        'threshold': f"{alert_settings['forwardClosePrice']:.2f}",
+                        'market_status': '价格回归正常',
+                        'current_profit': f"{abs(market_data['forward_spread']) * 10:.2f}"
+                    }
+                })
 
         # 3. 检查反向开仓点差值
         if market_data.get('reverse_spread') and alert_settings.get('reverseOpenPrice'):
             if abs(market_data['reverse_spread']) >= alert_settings['reverseOpenPrice']:
-                if self._should_send_alert('reverse_open', user_id):
-                    alerts_to_send.append({
-                        'template_key': 'reverse_open_spread_alert',
-                        'variables': {
-                            'spread': f"{market_data['reverse_spread']:.2f}",
-                            'threshold': f"{alert_settings['reverseOpenPrice']:.2f}",
-                            'market_status': '反向优惠出现',
-                            'estimated_profit': f"{abs(market_data['reverse_spread']) * 10:.2f}"
-                        }
-                    })
+                alerts_to_send.append({
+                    'template_key': 'reverse_open_spread_alert',
+                    'variables': {
+                        'spread': f"{market_data['reverse_spread']:.2f}",
+                        'threshold': f"{alert_settings['reverseOpenPrice']:.2f}",
+                        'market_status': '反向优惠出现',
+                        'estimated_profit': f"{abs(market_data['reverse_spread']) * 10:.2f}"
+                    }
+                })
 
         # 4. 检查反向平仓点差值
         if market_data.get('reverse_spread') and alert_settings.get('reverseClosePrice'):
             if abs(market_data['reverse_spread']) <= alert_settings['reverseClosePrice']:
-                if self._should_send_alert('reverse_close', user_id):
-                    alerts_to_send.append({
-                        'template_key': 'reverse_close_spread_alert',
-                        'variables': {
-                            'spread': f"{market_data['reverse_spread']:.2f}",
-                            'threshold': f"{alert_settings['reverseClosePrice']:.2f}",
-                            'market_status': '反向价格回归',
-                            'current_profit': f"{abs(market_data['reverse_spread']) * 10:.2f}"
-                        }
-                    })
+                alerts_to_send.append({
+                    'template_key': 'reverse_close_spread_alert',
+                    'variables': {
+                        'spread': f"{market_data['reverse_spread']:.2f}",
+                        'threshold': f"{alert_settings['reverseClosePrice']:.2f}",
+                        'market_status': '反向价格回归',
+                        'current_profit': f"{abs(market_data['reverse_spread']) * 10:.2f}"
+                    }
+                })
 
-        # 发送所有提醒
+        # 发送所有提醒（冷却时间检查在_send_alert中进行）
         for alert in alerts_to_send:
             await self._send_alert(db, user_id, alert['template_key'], alert['variables'])
 
@@ -124,8 +121,8 @@ class SpreadAlertService:
 
         if key in self.last_alert_time:
             last_time = self.last_alert_time[key]
-            # 冷却时间60秒
-            if (now - last_time).total_seconds() < 60:
+            # 冷却时间5秒
+            if (now - last_time).total_seconds() < settings.SPREAD_ALERT_COOLDOWN:
                 return False
 
         self.last_alert_time[key] = now
@@ -148,22 +145,22 @@ class SpreadAlertService:
             variables: 模板变量
         """
         try:
-            # 获取实时账户数据
-            from app.services.account_service import get_account_summary
-            try:
-                account_data = await get_account_summary(db, uuid.UUID(user_id))
-                # 添加实时账户信息到变量中
-                variables.update({
-                    'binance_balance': f"{account_data.get('binance_net_asset', 0):.2f}",
-                    'bybit_balance': f"{account_data.get('bybit_mt5_net_asset', 0):.2f}",
-                    'total_assets': f"{account_data.get('total_assets', 0):.2f}"
-                })
-            except Exception as e:
-                logger.warning(f"获取账户数据失败: {e}")
-                # 如果获取失败，使用默认值
-                variables.setdefault('binance_balance', '0.00')
-                variables.setdefault('bybit_balance', '0.00')
-                variables.setdefault('total_assets', '0.00')
+            # 获取实时账户数据（暂时禁用，函数不存在）
+            # from app.services.account_service import get_account_summary
+            # try:
+            #     account_data = await get_account_summary(db, uuid.UUID(user_id))
+            #     # 添加实时账户信息到变量中
+            #     variables.update({
+            #         'binance_balance': f"{account_data.get('binance_net_asset', 0):.2f}",
+            #         'bybit_balance': f"{account_data.get('bybit_mt5_net_asset', 0):.2f}",
+            #         'total_assets': f"{account_data.get('total_assets', 0):.2f}"
+            #     })
+            # except Exception as e:
+            #     logger.warning(f"获取账户数据失败: {e}")
+            # 使用默认值
+            variables.setdefault('binance_balance', '0.00')
+            variables.setdefault('bybit_balance', '0.00')
+            variables.setdefault('total_assets', '0.00')
 
             # 获取模板
             result = await db.execute(
@@ -171,15 +168,31 @@ class SpreadAlertService:
                     and_(
                         NotificationTemplate.template_key == template_key,
                         NotificationTemplate.is_active == True,
-                        NotificationTemplate.enable_feishu == True
+                        NotificationTemplate.enable_feishu == True,
+                        NotificationTemplate.auto_check_enabled == True  # 检查是否启用自动检查
                     )
                 )
             )
             template = result.scalar_one_or_none()
 
             if not template:
-                logger.warning(f"模板不存在或未启用: {template_key}")
+                logger.warning(f"模板不存在、未启用或未开启自动检查: {template_key}")
                 return
+
+            # 检查冷却时间（使用模板的配置）
+            cooldown = template.cooldown_seconds or 0
+            if cooldown > 0:
+                key = f"{template_key}_{user_id}"
+                now = get_beijing_time()
+
+                if key in self.last_alert_time:
+                    last_time = self.last_alert_time[key]
+                    elapsed = (now - last_time).total_seconds()
+                    if elapsed < cooldown:
+                        logger.info(f"模板 {template_key} 在冷却中，剩余 {cooldown - elapsed:.0f} 秒")
+                        return
+
+                self.last_alert_time[key] = now
 
             # 渲染模板
             title = template.title_template.format(**variables)
@@ -202,8 +215,14 @@ class SpreadAlertService:
                 logger.warning(f"用户不存在: {user_id}")
                 return
 
-            # 使用邮箱作为接收者ID
-            recipient = user.email
+            # 使用飞书open_id作为接收者ID，如果没有则使用邮箱
+            if user.feishu_open_id:
+                recipient = user.feishu_open_id
+                receive_id_type = "open_id"
+            else:
+                recipient = user.email
+                receive_id_type = "email"
+                logger.warning(f"用户 {user_id} 没有配置飞书open_id，使用邮箱: {recipient}")
 
             # 根据优先级设置颜色
             color_map = {1: "blue", 2: "blue", 3: "orange", 4: "red"}
@@ -214,7 +233,7 @@ class SpreadAlertService:
                 receive_id=recipient,
                 title=title,
                 content=content,
-                receive_id_type="email",
+                receive_id_type=receive_id_type,
                 color=color
             )
 
@@ -239,12 +258,14 @@ class SpreadAlertService:
                 logger.info(f"点差值提醒发送成功: {template_key} -> {user_id}")
 
                 # 通过WebSocket推送到前端
+                logger.info(f"准备通过WebSocket推送到前端: user_id={user_id}, template_key={template_key}")
                 await self._broadcast_alert_to_frontend(
                     user_id=user_id,
                     template_key=template_key,
                     template=template,
                     variables=variables
                 )
+                logger.info(f"WebSocket推送完成: {template_key}")
             else:
                 logger.error(f"点差值提醒发送失败: {template_key} -> {user_id}, 错误: {result.get('error')}")
 
@@ -292,7 +313,7 @@ class SpreadAlertService:
             }
 
             # 广播到指定用户
-            await manager.send_personal_message(
+            await manager.send_to_user(
                 message=alert_message,
                 user_id=user_id
             )

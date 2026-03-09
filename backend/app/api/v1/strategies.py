@@ -446,11 +446,11 @@ async def execute_reverse_arbitrage(
             raise HTTPException(status_code=400, detail="Position limit exceeded for this ladder")
 
         # 3. Get current market prices (use ask for sell, bid for buy)
-        # For reverse opening: Binance SELL (use ask price for MAKER), Bybit BUY (market)
+        # For reverse opening: Binance SELL (use ask+0.01 for MAKER), Bybit BUY (market)
         from app.services.market_service import market_data_service
         market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.ask_price  # MAKER: use ask price for sell order
+        binance_price = market_data.binance_quote.ask_price + 0.01  # MAKER: use ask+0.01 for sell order to ensure MAKER
         bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
 
         # 4. Execute order using OrderExecutorV2
@@ -529,11 +529,11 @@ async def execute_forward_arbitrage(
             raise HTTPException(status_code=400, detail="Position limit exceeded for this ladder")
 
         # 3. Get current market prices
-        # For forward opening: Binance BUY (use bid price for MAKER), Bybit SELL (market)
+        # For forward opening: Binance BUY (use bid-0.01 for MAKER), Bybit SELL (market)
         from app.services.market_service import market_data_service
         market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.bid_price  # MAKER: use bid price for buy order
+        binance_price = market_data.binance_quote.bid_price - 0.01  # MAKER: use bid-0.01 for buy order to ensure MAKER
         bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
 
         # 4. Execute order using OrderExecutorV2
@@ -611,11 +611,11 @@ async def close_reverse_position(
             raise HTTPException(status_code=400, detail="Insufficient position to close")
 
         # 3. Get current market prices
-        # For reverse closing: Binance BUY (use bid price for MAKER), Bybit SELL (market)
+        # For reverse closing: Binance BUY (use bid-0.01 for MAKER), Bybit SELL (market)
         from app.services.market_service import market_data_service
         market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.bid_price  # MAKER: use bid price for buy order
+        binance_price = market_data.binance_quote.bid_price - 0.01  # MAKER: use bid-0.01 for buy order to ensure MAKER
         bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
 
         # 4. Execute order using OrderExecutorV2
@@ -693,11 +693,11 @@ async def close_forward_position(
             raise HTTPException(status_code=400, detail="Insufficient position to close")
 
         # 3. Get current market prices
-        # For forward closing: Binance SELL (use ask price for MAKER), Bybit BUY (market)
+        # For forward closing: Binance SELL (use ask+0.01 for MAKER), Bybit BUY (market)
         from app.services.market_service import market_data_service
         market_data = await market_data_service.get_current_spread()
 
-        binance_price = market_data.binance_quote.ask_price  # MAKER: use ask price for sell order
+        binance_price = market_data.binance_quote.ask_price + 0.01  # MAKER: use ask+0.01 for sell order to ensure MAKER
         bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
 
         # 4. Execute order using OrderExecutorV2

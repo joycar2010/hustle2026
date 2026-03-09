@@ -487,6 +487,35 @@
             </select>
           </div>
           <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2">自动检查</label>
+            <label class="flex items-center">
+              <input
+                v-model="editingTemplate.auto_check_enabled"
+                type="checkbox"
+                class="mr-2"
+              />
+              <span>启用自动检查触发</span>
+            </label>
+            <p class="text-xs text-text-secondary mt-1">关闭后，此模板将不会自动触发通知</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2">冷却时间</label>
+            <div class="flex items-center space-x-2">
+              <input
+                v-model.number="editingTemplate.cooldown_seconds"
+                type="number"
+                min="0"
+                max="3600"
+                step="60"
+                class="w-32 px-3 py-2 bg-dark-200 border border-border-primary rounded focus:outline-none focus:border-primary"
+                placeholder="0"
+              />
+              <span class="text-sm text-text-secondary">秒</span>
+              <span class="text-xs text-text-secondary">({{ Math.floor((editingTemplate.cooldown_seconds || 0) / 60) }} 分钟)</span>
+            </div>
+            <p class="text-xs text-text-secondary mt-1">同一模板在冷却时间内不会重复发送通知</p>
+          </div>
+          <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">通知渠道</label>
             <div class="space-y-2">
               <label class="flex items-center">
@@ -938,7 +967,10 @@ function editTemplate(template) {
     alert_sound_file: template.alert_sound_file || template.alert_sound || '',
     alert_sound_repeat: template.alert_sound_repeat || template.repeat_count || 3,
     popup_title_template: template.popup_title_template || '',
-    popup_content_template: template.popup_content_template || ''
+    popup_content_template: template.popup_content_template || '',
+    // 自动检查和冷却时间
+    auto_check_enabled: template.auto_check_enabled !== undefined ? template.auto_check_enabled : true,
+    cooldown_seconds: template.cooldown_seconds || 0
   }
   console.log('编辑模板:', editingTemplate.value)
   console.log('  - alert_sound_file值:', editingTemplate.value.alert_sound_file)

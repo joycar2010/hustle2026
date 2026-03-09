@@ -679,10 +679,9 @@ function handleAccountBalanceUpdate(data) {
     const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1) || []
     const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2) || []
 
-    binanceAssets.value = binanceAccounts.reduce((sum, acc) =>
-      sum + (acc.balance?.available_balance || 0), 0)
-    bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
-      sum + (acc.balance?.available_balance || 0), 0)
+    // Use first account's available balance instead of summing all accounts
+    binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
+    bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
   }
 }
 
@@ -696,10 +695,9 @@ async function fetchAccountData() {
     const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
     const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
 
-    binanceAssets.value = binanceAccounts.reduce((sum, acc) =>
-      sum + (acc.balance?.available_balance || 0), 0)
-    bybitAssets.value = bybitAccounts.reduce((sum, acc) =>
-      sum + (acc.balance?.available_balance || 0), 0)
+    // Use first account's available balance instead of summing all accounts
+    binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
+    bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }

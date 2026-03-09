@@ -44,6 +44,7 @@ class NotificationTemplate(Base):
     # 优先级和频率控制
     priority = Column(Integer, default=1)  # 1=low, 2=medium, 3=high, 4=urgent
     cooldown_seconds = Column(Integer, default=0)  # 冷却时间，防止频繁通知
+    auto_check_enabled = Column(Boolean, default=True, nullable=False)  # 是否启用自动检查触发
 
     # 声音提醒设置
     alert_sound = Column(String(500), nullable=True)  # 提醒声音文件路径（旧字段，保留兼容）

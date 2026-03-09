@@ -2,6 +2,44 @@
   <div class="container mx-auto px-4 py-6">
     <h1 class="text-3xl font-bold mb-6">点差记录分析</h1>
 
+    <!-- Weekend Market Closed Notice -->
+    <div v-if="isWeekend && queryType === 'recent'" class="card mb-6 bg-yellow-900/20 border-yellow-600">
+      <div class="flex items-start gap-3">
+        <svg class="w-6 h-6 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <div>
+          <h3 class="text-lg font-semibold text-yellow-500 mb-2">MT5市场休市提醒</h3>
+          <p class="text-sm text-gray-300 mb-2">
+            当前为周末时间，MT5市场休市（周六、周日不交易）。由于点差数据需要同时获取Binance和Bybit MT5的价格，因此周末期间无法生成新的点差记录。
+          </p>
+          <p class="text-sm text-gray-400">
+            💡 您可以查询历史数据（选择"按日"或"自定义时间段"）来查看工作日的点差记录。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- No Data Notice -->
+    <div v-if="!loading && spreadRecords.length === 0 && !isWeekend" class="card mb-6 bg-red-900/20 border-red-600">
+      <div class="flex items-start gap-3">
+        <svg class="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+          <h3 class="text-lg font-semibold text-red-500 mb-2">无数据</h3>
+          <p class="text-sm text-gray-300">
+            所选时间段内没有点差记录。这可能是因为：
+          </p>
+          <ul class="text-sm text-gray-400 mt-2 ml-4 list-disc">
+            <li>市场数据服务未运行</li>
+            <li>所选时间段在MT5休市期间（周末）</li>
+            <li>账户未启用或API配置有误</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
     <!-- Query Controls -->
     <div class="card mb-6">
       <h2 class="text-xl font-semibold mb-4">查询条件</h2>
@@ -187,6 +225,13 @@ const forwardChartRef = ref(null)
 const reverseChartRef = ref(null)
 let forwardChart = null
 let reverseChart = null
+
+// Check if current time is weekend (Saturday or Sunday)
+const isWeekend = computed(() => {
+  const now = new Date()
+  const day = now.getDay() // 0=Sunday, 6=Saturday
+  return day === 0 || day === 6
+})
 
 // Computed Statistics
 const averageSpread = computed(() => {

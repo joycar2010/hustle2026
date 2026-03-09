@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     MARKET_DATA_UPDATE_INTERVAL: int = 1  # seconds (real-time market data refresh)
     SPREAD_RECORD_INTERVAL: int = 1  # seconds
     ACCOUNT_SYNC_INTERVAL: int = 5  # seconds
+    SPREAD_ALERT_COOLDOWN: int = 300  # seconds (cooldown time for spread alerts - 5 minutes)
 
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 100

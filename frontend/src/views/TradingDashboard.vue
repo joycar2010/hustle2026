@@ -1,14 +1,26 @@
 <template>
   <div class="trading-dashboard">
     <!-- Left Sidebar - Account Status (Hidden on mobile) -->
-    <aside class="sidebar-left">
+    <aside v-if="showLeftPanel" class="sidebar-left">
       <div class="sidebar-section account-section">
         <AccountStatusPanel />
       </div>
       <div class="sidebar-section navigation-section">
-        <NavigationPanel />
+        <NavigationPanel @toggle-panel="toggleLeftPanel" />
       </div>
     </aside>
+
+    <!-- Toggle Button for Left Panel (when panel is hidden) -->
+    <button
+      v-if="!showLeftPanel"
+      @click="toggleLeftPanel"
+      class="left-panel-toggle"
+      title="显示左侧面板"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+      </svg>
+    </button>
 
     <!-- Main Content Area -->
     <main class="main-content">
@@ -52,9 +64,21 @@
     </main>
 
     <!-- Right Sidebar - Risk Management (Hidden on mobile/tablet) -->
-    <aside class="sidebar-right">
-      <Risk />
+    <aside v-if="showRiskPanel" class="sidebar-right">
+      <Risk @toggle-panel="toggleRiskPanel" />
     </aside>
+
+    <!-- Toggle Button (when panel is hidden) -->
+    <button
+      v-if="!showRiskPanel"
+      @click="toggleRiskPanel"
+      class="risk-panel-toggle"
+      title="显示风险控制面板"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+      </svg>
+    </button>
 
     <!-- Floating Action Buttons (仅移动端显示) -->
     <FloatingActionButtons />
@@ -75,12 +99,24 @@ import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vu
 import Risk from '@/views/Risk.vue'
 
 const recentRecordsRef = ref(null)
+const showRiskPanel = ref(true)
+const showLeftPanel = ref(true)
 
 // 当紧急交易执行后，刷新最近交易记录
 function handleOrderExecuted() {
   if (recentRecordsRef.value) {
     recentRecordsRef.value.fetchRecentOrders()
   }
+}
+
+// 切换风险控制面板显示/隐藏
+function toggleRiskPanel() {
+  showRiskPanel.value = !showRiskPanel.value
+}
+
+// 切换左侧面板显示/隐藏
+function toggleLeftPanel() {
+  showLeftPanel.value = !showLeftPanel.value
 }
 </script>
 
@@ -189,6 +225,60 @@ function handleOrderExecuted() {
   display: none;
 }
 
+/* ========== 风险控制面板切换按钮 ========== */
+.risk-panel-toggle {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: #1e2329;
+  border: 1px solid #2b3139;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  padding: 12px 6px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
+}
+
+.risk-panel-toggle:hover {
+  background-color: #2b3139;
+  padding-left: 8px;
+}
+
+.risk-panel-toggle svg {
+  display: block;
+}
+
+/* ========== 左侧面板切换按钮 ========== */
+.left-panel-toggle {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: #1e2329;
+  border: 1px solid #2b3139;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 6px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+}
+
+.left-panel-toggle:hover {
+  background-color: #2b3139;
+  padding-right: 8px;
+}
+
+.left-panel-toggle svg {
+  display: block;
+}
+
 /* ========== 移动端H5竖屏适配 ========== */
 @media (orientation: portrait), (max-width: 750px) {
   .trading-dashboard {
@@ -198,6 +288,12 @@ function handleOrderExecuted() {
   /* 隐藏侧边栏 */
   .sidebar-left,
   .sidebar-right {
+    display: none;
+  }
+
+  /* 隐藏面板切换按钮 */
+  .risk-panel-toggle,
+  .left-panel-toggle {
     display: none;
   }
 

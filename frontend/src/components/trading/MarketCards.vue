@@ -63,7 +63,9 @@
             </div>
             <div class="flex items-center space-x-1">
               <span class="text-gray-400">点差:</span>
-              <span class="font-mono text-[#0ecb81] text-sm">{{ formatSpread(reverseSpread) }}</span>
+              <span class="font-mono text-sm" :class="reverseSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                {{ formatSpread(reverseSpread) }}
+              </span>
             </div>
           </div>
         </div>
@@ -78,7 +80,9 @@
             </div>
             <div class="flex items-center space-x-1">
               <span class="text-gray-400">点差:</span>
-              <span class="font-mono text-[#0ecb81] text-sm">{{ formatSpread(forwardSpread) }}</span>
+              <span class="font-mono text-sm" :class="forwardSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                {{ formatSpread(forwardSpread) }}
+              </span>
             </div>
           </div>
         </div>
@@ -215,8 +219,10 @@ const forwardActualPosition = ref(0)
 const reverseActualPosition = ref(0)
 
 // Position spread data - store position details for cost calculation
-const reversePositions = ref([]) // Bybit MT5 short positions
-const forwardPositions = ref([]) // Binance long positions
+const binanceShortPositions = ref([]) // Binance SHORT positions
+const binanceLongPositions = ref([]) // Binance LONG positions
+const bybitShortPositions = ref([]) // Bybit SHORT positions
+const bybitLongPositions = ref([]) // Bybit LONG positions
 
 // Fee data
 const bybitLongSwapFee = ref(0)
@@ -227,35 +233,53 @@ const binanceShortFundingRate = ref(0)
 const bybitLagLevel = computed(() => Math.min(Math.floor(bybitLagCount.value / 10), 5))
 const binanceLagLevel = computed(() => Math.min(Math.floor(binanceLagCount.value / 10), 5))
 
-// Calculate hedge arbitrage cost price
-// 正向套利组合成本价 = Binance多持仓成本 - Bybit空持仓成本
-const hedgeCostPrice = computed(() => {
-  // 需要同时有Binance多头和Bybit空头才能计算套利成本
-  if (forwardPositions.value.length === 0 || reversePositions.value.length === 0) {
+// Calculate reverse spread: Binance SHORT cost - Bybit LONG cost
+const reverseSpread = computed(() => {
+  if (binanceShortPositions.value.length === 0 || bybitLongPositions.value.length === 0) {
     return 0
   }
 
-  // 计算Binance多头平均成本价（每盎司）
-  const binanceLongCost = forwardPositions.value.reduce((sum, pos) => {
+  // Calculate Binance SHORT average cost price
+  const binanceShortCost = binanceShortPositions.value.reduce((sum, pos) => {
     return sum + (pos.entry_price * pos.size)
   }, 0)
-  const binanceLongSize = forwardPositions.value.reduce((sum, pos) => sum + pos.size, 0)
-  const binanceAvgCost = binanceLongSize > 0 ? binanceLongCost / binanceLongSize : 0
+  const binanceShortSize = binanceShortPositions.value.reduce((sum, pos) => sum + pos.size, 0)
+  const binanceShortAvg = binanceShortSize > 0 ? binanceShortCost / binanceShortSize : 0
 
-  // 计算Bybit空头平均成本价（每盎司）
-  const bybitShortCost = reversePositions.value.reduce((sum, pos) => {
+  // Calculate Bybit LONG average cost price
+  const bybitLongCost = bybitLongPositions.value.reduce((sum, pos) => {
     return sum + (pos.entry_price * pos.size)
   }, 0)
-  const bybitShortSize = reversePositions.value.reduce((sum, pos) => sum + pos.size, 0)
-  const bybitAvgCost = bybitShortSize > 0 ? bybitShortCost / bybitShortSize : 0
+  const bybitLongSize = bybitLongPositions.value.reduce((sum, pos) => sum + pos.size, 0)
+  const bybitLongAvg = bybitLongSize > 0 ? bybitLongCost / bybitLongSize : 0
 
-  // 正向套利组合成本价 = Binance多成本 - Bybit空成本
-  return binanceAvgCost - bybitAvgCost
+  // Reverse spread = Binance SHORT cost - Bybit LONG cost
+  return binanceShortAvg - bybitLongAvg
 })
 
-// 反向持仓和正向持仓都显示同一个套利组合成本价
-const reverseSpread = computed(() => hedgeCostPrice.value)
-const forwardSpread = computed(() => hedgeCostPrice.value)
+// Calculate forward spread: Bybit SHORT cost - Binance LONG cost
+const forwardSpread = computed(() => {
+  if (bybitShortPositions.value.length === 0 || binanceLongPositions.value.length === 0) {
+    return 0
+  }
+
+  // Calculate Bybit SHORT average cost price
+  const bybitShortCost = bybitShortPositions.value.reduce((sum, pos) => {
+    return sum + (pos.entry_price * pos.size)
+  }, 0)
+  const bybitShortSize = bybitShortPositions.value.reduce((sum, pos) => sum + pos.size, 0)
+  const bybitShortAvg = bybitShortSize > 0 ? bybitShortCost / bybitShortSize : 0
+
+  // Calculate Binance LONG average cost price
+  const binanceLongCost = binanceLongPositions.value.reduce((sum, pos) => {
+    return sum + (pos.entry_price * pos.size)
+  }, 0)
+  const binanceLongSize = binanceLongPositions.value.reduce((sum, pos) => sum + pos.size, 0)
+  const binanceLongAvg = binanceLongSize > 0 ? binanceLongCost / binanceLongSize : 0
+
+  // Forward spread = Bybit SHORT cost - Binance LONG cost
+  return bybitShortAvg - binanceLongAvg
+})
 
 watch(() => marketStore.marketData, (data) => {
   if (!data) return
@@ -320,6 +344,22 @@ function handleAccountBalanceUpdate(data) {
     binanceLongFundingRate.value = 0
     binanceShortFundingRate.value = 0
 
+    // Reset position values
+    forwardActualPosition.value = 0
+    reverseActualPosition.value = 0
+
+    // Get first account's positions and aggregate fees from all accounts
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
+    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+
+    // Use first account's total_positions instead of aggregating
+    if (bybitAccounts.length > 0) {
+      reverseActualPosition.value = bybitAccounts[0].balance?.total_positions || 0
+    }
+    if (binanceAccounts.length > 0) {
+      forwardActualPosition.value = binanceAccounts[0].balance?.total_positions || 0
+    }
+
     // Aggregate fees from all accounts
     data.accounts.forEach(account => {
       if (account.platform_id === 2) {
@@ -334,15 +374,15 @@ function handleAccountBalanceUpdate(data) {
     })
   }
 
-  // Extract actual positions from positions array
+  // Extract actual positions from positions array for spread calculation
   if (data.positions && data.positions.length > 0) {
-    // Reset position values
-    forwardActualPosition.value = 0
-    reverseActualPosition.value = 0
-    reversePositions.value = []
-    forwardPositions.value = []
+    // Reset position arrays
+    binanceShortPositions.value = []
+    binanceLongPositions.value = []
+    bybitShortPositions.value = []
+    bybitLongPositions.value = []
 
-    // Aggregate positions by platform
+    // Aggregate positions by platform and side
     data.positions.forEach(position => {
       // Find the account for this position to get platform_id
       const account = data.accounts?.find(acc => acc.account_id === position.account_id)
@@ -361,32 +401,34 @@ function handleAccountBalanceUpdate(data) {
         account_name: account.account_name
       })
 
-      // For Bybit MT5: Sell (short) positions = reverse arbitrage
-      // For Binance: Buy (long) positions = forward arbitrage
+      const posSize = Math.abs(position.size || 0)
+      const posData = {
+        size: posSize,
+        entry_price: position.entry_price || 0,
+        current_price: position.current_price || 0
+      }
+
       if (account.platform_id === 2) {
-        // Bybit MT5: count all positions (both Buy and Sell)
-        // Reverse arbitrage uses Bybit short positions
-        if (position.side === 'Sell') {
-          const posSize = Math.abs(position.size || 0)
-          reverseActualPosition.value += posSize
-          reversePositions.value.push({
-            size: posSize,
-            entry_price: position.entry_price || 0,
-            current_price: position.current_price || 0
-          })
-          console.log('[MarketCards] Added to reverse position:', position.size, 'Total:', reverseActualPosition.value)
+        // Bybit MT5 positions
+        if (position.side === 'Buy') {
+          // Bybit LONG positions
+          bybitLongPositions.value.push(posData)
+          console.log('[MarketCards] Added to Bybit LONG:', position.size)
+        } else if (position.side === 'Sell') {
+          // Bybit SHORT positions
+          bybitShortPositions.value.push(posData)
+          console.log('[MarketCards] Added to Bybit SHORT:', position.size)
         }
       } else if (account.platform_id === 1) {
-        // Binance: count Buy (long) positions for forward arbitrage
+        // Binance positions
         if (position.side === 'Buy') {
-          const posSize = Math.abs(position.size || 0)
-          forwardActualPosition.value += posSize
-          forwardPositions.value.push({
-            size: posSize,
-            entry_price: position.entry_price || 0,
-            current_price: position.current_price || 0
-          })
-          console.log('[MarketCards] Added to forward position:', position.size, 'Total:', forwardActualPosition.value)
+          // Binance LONG positions
+          binanceLongPositions.value.push(posData)
+          console.log('[MarketCards] Added to Binance LONG:', position.size)
+        } else if (position.side === 'Sell') {
+          // Binance SHORT positions
+          binanceShortPositions.value.push(posData)
+          console.log('[MarketCards] Added to Binance SHORT:', position.size)
         }
       }
     })
@@ -394,16 +436,19 @@ function handleAccountBalanceUpdate(data) {
     console.log('[MarketCards] Final positions:', {
       reverse: reverseActualPosition.value,
       forward: forwardActualPosition.value,
-      reversePositions: reversePositions.value,
-      forwardPositions: forwardPositions.value,
-      hedgeCostPrice: hedgeCostPrice.value
+      binanceShort: binanceShortPositions.value,
+      binanceLong: binanceLongPositions.value,
+      bybitShort: bybitShortPositions.value,
+      bybitLong: bybitLongPositions.value,
+      reverseSpread: reverseSpread.value,
+      forwardSpread: forwardSpread.value
     })
   } else {
-    // No positions, reset to 0
-    forwardActualPosition.value = 0
-    reverseActualPosition.value = 0
-    reversePositions.value = []
-    forwardPositions.value = []
+    // No positions, reset position arrays only
+    binanceShortPositions.value = []
+    binanceLongPositions.value = []
+    bybitShortPositions.value = []
+    bybitLongPositions.value = []
     console.log('[MarketCards] No positions in data')
   }
 }
@@ -452,13 +497,29 @@ async function fetchAccountData() {
       totalProfit.value = data.summary.daily_pnl || 0
     }
 
-    // Extract fee data from accounts
+    // Extract fee data and positions from accounts
     if (data.accounts && data.accounts.length > 0) {
       // Reset fee values
       bybitLongSwapFee.value = 0
       bybitShortSwapFee.value = 0
       binanceLongFundingRate.value = 0
       binanceShortFundingRate.value = 0
+
+      // Reset position values
+      forwardActualPosition.value = 0
+      reverseActualPosition.value = 0
+
+      // Get first account's positions and aggregate fees from all accounts
+      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
+      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+
+      // Use first account's total_positions instead of aggregating
+      if (bybitAccounts.length > 0) {
+        reverseActualPosition.value = bybitAccounts[0].balance?.total_positions || 0
+      }
+      if (binanceAccounts.length > 0) {
+        forwardActualPosition.value = binanceAccounts[0].balance?.total_positions || 0
+      }
 
       // Aggregate fees from all accounts
       data.accounts.forEach(account => {
@@ -474,53 +535,49 @@ async function fetchAccountData() {
       })
     }
 
-    // Extract actual positions from positions array
+    // Extract actual positions from positions array for spread calculation
     if (data.positions && data.positions.length > 0) {
-      // Reset position values
-      forwardActualPosition.value = 0
-      reverseActualPosition.value = 0
-      reversePositions.value = []
-      forwardPositions.value = []
+      // Reset position arrays
+      binanceShortPositions.value = []
+      binanceLongPositions.value = []
+      bybitShortPositions.value = []
+      bybitLongPositions.value = []
 
-      // Aggregate positions by platform
+      // Aggregate positions by platform and side
       data.positions.forEach(position => {
         // Find the account for this position to get platform_id
         const account = data.accounts?.find(acc => acc.account_id === position.account_id)
         if (!account) return
 
-        // For Bybit MT5: Sell (short) positions = reverse arbitrage
-        // For Binance: Buy (long) positions = forward arbitrage
+        const posSize = Math.abs(position.size || 0)
+        const posData = {
+          size: posSize,
+          entry_price: position.entry_price || 0,
+          current_price: position.current_price || 0
+        }
+
         if (account.platform_id === 2) {
-          // Bybit MT5: count all positions (both Buy and Sell)
-          // Reverse arbitrage uses Bybit short positions
-          if (position.side === 'Sell') {
-            const posSize = Math.abs(position.size || 0)
-            reverseActualPosition.value += posSize
-            reversePositions.value.push({
-              size: posSize,
-              entry_price: position.entry_price || 0,
-              current_price: position.current_price || 0
-            })
+          // Bybit MT5 positions
+          if (position.side === 'Buy') {
+            bybitLongPositions.value.push(posData)
+          } else if (position.side === 'Sell') {
+            bybitShortPositions.value.push(posData)
           }
         } else if (account.platform_id === 1) {
-          // Binance: count Buy (long) positions for forward arbitrage
+          // Binance positions
           if (position.side === 'Buy') {
-            const posSize = Math.abs(position.size || 0)
-            forwardActualPosition.value += posSize
-            forwardPositions.value.push({
-              size: posSize,
-              entry_price: position.entry_price || 0,
-              current_price: position.current_price || 0
-            })
+            binanceLongPositions.value.push(posData)
+          } else if (position.side === 'Sell') {
+            binanceShortPositions.value.push(posData)
           }
         }
       })
     } else {
-      // No positions, reset to 0
-      forwardActualPosition.value = 0
-      reverseActualPosition.value = 0
-      reversePositions.value = []
-      forwardPositions.value = []
+      // No positions, reset position arrays only
+      binanceShortPositions.value = []
+      binanceLongPositions.value = []
+      bybitShortPositions.value = []
+      bybitLongPositions.value = []
     }
   } catch (error) {
     console.error('Failed to fetch account data:', error)

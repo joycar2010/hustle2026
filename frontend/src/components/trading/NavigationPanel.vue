@@ -1,6 +1,17 @@
 <template>
   <div class="p-2 space-y-1.5 border-t border-[#2b3139]">
-    <h3 class="text-xs font-bold mb-2 text-gray-400">系统状态</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-xs font-bold text-gray-400">系统状态</h3>
+      <button
+        @click="$emit('toggle-panel')"
+        class="p-1 hover:bg-[#2b3139] rounded transition-colors"
+        title="隐藏面板"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+        </svg>
+      </button>
+    </div>
 
     <button
       v-for="item in navItems"

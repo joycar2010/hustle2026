@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 from app.websocket.manager import manager
 from app.core.database import get_db_context
+from app.core.config import settings
 from app.models.account import Account
 from app.models.risk_settings import RiskSettings
 from app.services.account_service import account_data_service
@@ -23,7 +24,7 @@ class AccountBalanceStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        self.interval = 10  # Update interval in seconds (every 10s)
+        self.interval = settings.MARKET_DATA_UPDATE_INTERVAL  # Update interval in seconds (1s)
         self.broadcast_count = 0
         self.last_broadcast_time = None
         self.error_count = 0
@@ -42,7 +43,7 @@ class AccountBalanceStreamer:
 
         self.running = True
         self.task = asyncio.create_task(self._stream_loop())
-        logger.info("Account balance streamer started (interval: 10s)")
+        logger.info(f"Account balance streamer started (interval: {self.interval}s)")
 
     async def stop(self):
         """Stop the account balance streaming task"""
@@ -309,8 +310,8 @@ class RiskMetricsStreamer:
 
                         # Prepare market data dict
                         market_dict = {
-                            'forward_spread': market_data.forward_spread if hasattr(market_data, 'forward_spread') else None,
-                            'reverse_spread': market_data.reverse_spread if hasattr(market_data, 'reverse_spread') else None,
+                            'forward_spread': market_data.forward_entry_spread if hasattr(market_data, 'forward_entry_spread') else None,
+                            'reverse_spread': market_data.reverse_entry_spread if hasattr(market_data, 'reverse_entry_spread') else None,
                         }
 
                         # Check spread alerts
