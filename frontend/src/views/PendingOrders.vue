@@ -98,27 +98,28 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 import { formatDateTimeBeijing } from '@/utils/timeUtils'
 
+const marketStore = useMarketStore()
 const orders = ref([])
 const filterSource = ref('')
 const filterStatus = ref('new,pending')
-let refreshInterval = null
 
 onMounted(() => {
+  // 初始加载
   fetchOrders()
 
-  // 添加定时刷新（每0.5秒刷新一次）
-  refreshInterval = setInterval(() => {
-    fetchOrders()
-  }, 500)
-})
-
-onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  // 监听 WebSocket 推送的挂单更新
+  watch(() => marketStore.lastMessage, (message) => {
+    if (message && message.type === 'pending_orders') {
+      // 如果当前筛选条件是挂单中，直接使用推送的数据
+      if (filterStatus.value === 'new,pending' && !filterSource.value) {
+        orders.value = message.data.slice(0, 8)
+      }
+    }
+  })
 })
 
 watch([filterSource, filterStatus], () => {

@@ -14,7 +14,7 @@ from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
 from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files
 from app.tasks.market_data import market_streamer
-from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer
+from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer
 from app.tasks.redis_monitor import redis_monitor
 from app.services.position_monitor import position_monitor
 from app.services.realtime_market_service import market_data_service
@@ -116,6 +116,8 @@ async def init_mt5_and_monitoring():
         await account_balance_streamer.start()
         await risk_metrics_streamer.start()
         await mt5_connection_streamer.start()
+        await pending_orders_streamer.start()
+        await redis_status_streamer.start()
         await mt5_bridge.start()
         await position_monitor.start_monitoring()
         app_state["mt5_services_ready"] = True
@@ -193,6 +195,8 @@ async def lifespan(app: FastAPI):
         await account_balance_streamer.stop()
         await risk_metrics_streamer.stop()
         await mt5_connection_streamer.stop()
+        await pending_orders_streamer.stop()
+        await redis_status_streamer.stop()
         await mt5_bridge.stop()
         await position_monitor.stop_monitoring()
         await market_data_service.stop()

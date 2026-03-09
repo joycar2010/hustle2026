@@ -97,21 +97,20 @@ const systemAlerts = computed(() => {
 onMounted(async () => {
   await fetchRedisStatus()
 
-  // Keep Redis status polling (30s)
-  redisCheckInterval = setInterval(fetchRedisStatus, 30000)
-
   // Watch for account_balance WebSocket messages (backend broadcasts every 10s)
   watch(() => marketStore.lastMessage, (message) => {
     if (message && message.type === 'account_balance') {
       notificationStore.updateSystemAlerts(message.data)
     }
+    // 监听 Redis 状态推送
+    if (message && message.type === 'redis_status') {
+      redisStatus.value = message.data
+    }
   })
 })
 
 onUnmounted(() => {
-  if (redisCheckInterval) {
-    clearInterval(redisCheckInterval)
-  }
+  // Redis状态已改为WebSocket推送，不需要清理定时器
 })
 
 async function fetchRedisStatus() {

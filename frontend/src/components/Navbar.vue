@@ -133,6 +133,15 @@
                   </svg>
                   <span>修改密码</span>
                 </button>
+                <button
+                  @click="handlePageManagement"
+                  class="w-full text-left px-4 py-2 text-sm hover:bg-dark-50 transition-colors flex items-center space-x-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
+                  <span>页面管理</span>
+                </button>
                 <div class="border-t border-border-secondary my-1"></div>
                 <button
                   @click="handleLogout"
@@ -223,6 +232,39 @@
   <!-- Modals -->
   <EditProfileModal :isOpen="editProfileModalOpen" @close="editProfileModalOpen = false" @updated="handleProfileUpdated" />
   <ChangePasswordModal :isOpen="changePasswordModalOpen" @close="changePasswordModalOpen = false" @updated="handlePasswordChanged" />
+
+  <!-- Page Management Modal -->
+  <div v-if="pageManagementModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" @click.self="pageManagementModalOpen = false">
+    <div class="bg-dark-100 rounded-lg shadow-xl border border-border-primary p-6 w-full max-w-md">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">页面管理</h3>
+        <button @click="pageManagementModalOpen = false" class="text-text-tertiary hover:text-text-primary">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="space-y-2">
+        <div v-for="item in allNavItems" :key="item.path" class="flex items-center justify-between p-3 bg-dark-200 rounded-lg">
+          <span class="text-sm">{{ item.label }}</span>
+          <button
+            @click="togglePageVisibility(item.path)"
+            :class="[
+              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+              pageVisibility[item.path] ? 'bg-primary' : 'bg-gray-600'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
+                pageVisibility[item.path] ? 'translate-x-5' : 'translate-x-1'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -243,6 +285,7 @@ const userMenuRef = ref(null)
 const isConnected = ref(true)
 const editProfileModalOpen = ref(false)
 const changePasswordModalOpen = ref(false)
+const pageManagementModalOpen = ref(false)
 const navbarCollapsed = ref(localStorage.getItem('navbarCollapsed') === 'true')
 
 // 检查是否是首次加载且屏幕分辨率较小
@@ -257,7 +300,35 @@ const navbarHidden = ref(
 const user = computed(() => authStore.user)
 const userInitial = computed(() => user.value?.username?.charAt(0).toUpperCase() || 'U')
 
-const navItems = [
+// 初始化页面可见性状态
+const initPageVisibility = () => {
+  const saved = localStorage.getItem('pageVisibility')
+  if (saved) {
+    return JSON.parse(saved)
+  }
+
+  // 首次加载：在1366×768分辨率下，Risk页面默认隐藏
+  const isSmallScreen = window.innerWidth <= 1366 && window.innerHeight <= 768
+  const defaultVisibility = {
+    '/': true,
+    '/trading': true,
+    '/pending-orders': true,
+    '/strategies': true,
+    '/positions': true,
+    '/accounts': true,
+    '/risk': !isSmallScreen, // 小屏幕下默认隐藏
+    '/system': true,
+  }
+
+  // 保存默认状态
+  localStorage.setItem('pageVisibility', JSON.stringify(defaultVisibility))
+  return defaultVisibility
+}
+
+const pageVisibility = ref(initPageVisibility())
+
+// 所有可用的导航项
+const allNavItems = [
   {
     path: '/',
     label: '控制面板',
@@ -289,11 +360,21 @@ const navItems = [
     icon: 'AccountsIcon',
   },
   {
+    path: '/risk',
+    label: '风险管理',
+    icon: 'RiskIcon',
+  },
+  {
     path: '/system',
     label: '系统管理',
     icon: 'SystemIcon',
   },
 ]
+
+// 过滤出可见的导航项
+const navItems = computed(() => {
+  return allNavItems.filter(item => pageVisibility.value[item.path] !== false)
+})
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
@@ -332,6 +413,16 @@ function handleEditProfile() {
 function handleChangePassword() {
   userMenuOpen.value = false
   changePasswordModalOpen.value = true
+}
+
+function handlePageManagement() {
+  userMenuOpen.value = false
+  pageManagementModalOpen.value = true
+}
+
+function togglePageVisibility(path) {
+  pageVisibility.value[path] = !pageVisibility.value[path]
+  localStorage.setItem('pageVisibility', JSON.stringify(pageVisibility.value))
 }
 
 function handleProfileUpdated() {

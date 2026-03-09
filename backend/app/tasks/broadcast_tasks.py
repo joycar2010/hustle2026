@@ -607,7 +607,143 @@ class MT5ConnectionStreamer:
         }
 
 
+
+
+class PendingOrdersStreamer:
+    """Background task for streaming pending orders updates"""
+
+    def __init__(self):
+        self.running = False
+        self.task = None
+        self.interval = 2  # Update interval: 2 seconds
+        self.broadcast_count = 0
+        self.last_broadcast_time = None
+        self.error_count = 0
+
+    async def start(self):
+        """Start the pending orders streaming task"""
+        if self.running:
+            return
+
+        self.running = True
+        self.task = asyncio.create_task(self._stream_loop())
+        logger.info(f"Pending orders streamer started (interval: {self.interval}s)")
+
+    async def stop(self):
+        """Stop the pending orders streaming task"""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Pending orders streamer stopped")
+
+    async def _stream_loop(self):
+        """Main streaming loop"""
+        while self.running:
+            try:
+                # Only broadcast if there are active connections
+                if manager.get_connection_count() == 0:
+                    await asyncio.sleep(self.interval)
+                    continue
+
+                # Fetch pending orders from API
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get('http://localhost:8000/api/v1/trading/orders/realtime', timeout=5) as response:
+                            if response.status == 200:
+                                orders_data = await response.json()
+
+                                # Broadcast to all connected clients
+                                await manager.broadcast({
+                                    "type": "pending_orders",
+                                    "data": orders_data
+                                })
+                                self.broadcast_count += 1
+                                self.last_broadcast_time = datetime.now().isoformat()
+                except Exception as e:
+                    logger.error(f"Failed to fetch pending orders: {e}")
+
+                # Wait for next interval
+                await asyncio.sleep(self.interval)
+
+            except Exception as e:
+                logger.error(f"Error in pending orders stream: {str(e)}", exc_info=True)
+                self.error_count += 1
+                await asyncio.sleep(self.interval * 2)
+
+
+class RedisStatusStreamer:
+    """Background task for streaming Redis status updates"""
+
+    def __init__(self):
+        self.running = False
+        self.task = None
+        self.interval = 30  # Update interval: 30 seconds
+        self.broadcast_count = 0
+        self.last_broadcast_time = None
+        self.error_count = 0
+
+    async def start(self):
+        """Start the Redis status streaming task"""
+        if self.running:
+            return
+
+        self.running = True
+        self.task = asyncio.create_task(self._stream_loop())
+        logger.info(f"Redis status streamer started (interval: {self.interval}s)")
+
+    async def stop(self):
+        """Stop the Redis status streaming task"""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Redis status streamer stopped")
+
+    async def _stream_loop(self):
+        """Main streaming loop"""
+        while self.running:
+            try:
+                # Only broadcast if there are active connections
+                if manager.get_connection_count() == 0:
+                    await asyncio.sleep(self.interval)
+                    continue
+
+                # Fetch Redis status from API
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get('http://localhost:8000/api/v1/system/redis/status', timeout=5) as response:
+                            if response.status == 200:
+                                redis_data = await response.json()
+
+                                # Broadcast to all connected clients
+                                await manager.broadcast({
+                                    "type": "redis_status",
+                                    "data": redis_data
+                                })
+                                self.broadcast_count += 1
+                                self.last_broadcast_time = datetime.now().isoformat()
+                except Exception as e:
+                    logger.error(f"Failed to fetch Redis status: {e}")
+
+                # Wait for next interval
+                await asyncio.sleep(self.interval)
+
+            except Exception as e:
+                logger.error(f"Error in Redis status stream: {str(e)}", exc_info=True)
+                self.error_count += 1
+                await asyncio.sleep(self.interval * 2)
+
+
 # Global streamer instances
 account_balance_streamer = AccountBalanceStreamer()
 risk_metrics_streamer = RiskMetricsStreamer()
 mt5_connection_streamer = MT5ConnectionStreamer()
+pending_orders_streamer = PendingOrdersStreamer()
+redis_status_streamer = RedisStatusStreamer()

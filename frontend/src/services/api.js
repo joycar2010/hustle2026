@@ -1,4 +1,5 @@
 import axios from 'axios'
+import router from '@/router'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
@@ -27,7 +28,8 @@ api.interceptors.response.use(
       // Only redirect if not already on login page to prevent redirect loop
       if (window.location.pathname !== '/login') {
         localStorage.removeItem('token')
-        window.location.href = '/login'
+        // Use Vue Router instead of window.location to avoid full page reload
+        router.push('/login')
       }
     }
     return Promise.reject(error)
