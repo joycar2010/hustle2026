@@ -34,16 +34,13 @@ class MarketDataStreamer:
         """Get count of currently enabled strategies"""
         try:
             from app.core.database import get_db_context
-            from app.models.strategy_config import StrategyConfig
-            from sqlalchemy import select, or_
+            from app.models.strategy import StrategyConfig
+            from sqlalchemy import select
 
             async with get_db_context() as db:
                 result = await db.execute(
                     select(StrategyConfig).where(
-                        or_(
-                            StrategyConfig.opening_enabled == True,
-                            StrategyConfig.closing_enabled == True
-                        )
+                        StrategyConfig.is_enabled == True
                     )
                 )
                 configs = result.scalars().all()

@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 # Configure garbage collection for better memory management
 gc.set_threshold(700, 10, 10)  # More aggressive garbage collection
 
+# Global initialization state
+app_state = {
+    "redis_connected": False,
+    "feishu_initialized": False,
+    "market_services_ready": False,
+    "mt5_services_ready": False,
+    "order_recovery_done": False,
+    "init_complete": False,
+    "init_progress": 0,
+    "init_errors": []
+}
+
 
 async def periodic_memory_cleanup():
     """Periodic memory cleanup task"""
@@ -41,62 +53,129 @@ async def periodic_memory_cleanup():
         logger.debug("Periodic garbage collection completed")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan events"""
-    # Startup
-    await redis_client.connect()
-    await redis_monitor.start()  # Start Redis monitor
-
-    # Initialize Feishu service from database config
-    logger.info("Initializing Feishu service from database...")
+async def init_redis_and_feishu():
+    """Initialize Redis and Feishu service (fast, keep synchronous)"""
     try:
-        async with AsyncSessionLocal() as db:
-            logger.info("Querying Feishu configuration...")
-            result = await db.execute(
-                select(NotificationConfig).filter(
-                    NotificationConfig.service_type == 'feishu',
-                    NotificationConfig.is_enabled == True
+        await redis_client.connect()
+        await redis_monitor.start()
+        app_state["redis_connected"] = True
+        logger.info("Redis connected successfully")
+
+        # Initialize Feishu service from database config
+        logger.info("Initializing Feishu service from database...")
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(NotificationConfig).filter(
+                        NotificationConfig.service_type == 'feishu',
+                        NotificationConfig.is_enabled == True
+                    )
                 )
-            )
-            feishu_config = result.scalar_one_or_none()
-            logger.info(f"Query result: config_found={feishu_config is not None}")
+                feishu_config = result.scalar_one_or_none()
 
-            if feishu_config and feishu_config.config_data:
-                app_id = feishu_config.config_data.get('app_id')
-                app_secret = feishu_config.config_data.get('app_secret')
-                logger.info(f"Config data: app_id={app_id}, has_secret={bool(app_secret)}")
+                if feishu_config and feishu_config.config_data:
+                    app_id = feishu_config.config_data.get('app_id')
+                    app_secret = feishu_config.config_data.get('app_secret')
 
-                if app_id and app_secret:
-                    init_feishu_service(app_id, app_secret)
-                    logger.info("Feishu service initialized successfully from database config")
+                    if app_id and app_secret:
+                        init_feishu_service(app_id, app_secret)
+                        logger.info("Feishu service initialized successfully")
+                        app_state["feishu_initialized"] = True
                 else:
-                    logger.warning("Feishu config incomplete: missing app_id or app_secret")
-            else:
-                logger.info("Feishu service not enabled or not configured")
+                    logger.info("Feishu service not enabled or not configured")
+                    app_state["feishu_initialized"] = True
+        except Exception as e:
+            logger.error(f"Failed to initialize Feishu service: {e}")
+            app_state["init_errors"].append(f"Feishu init failed: {str(e)}")
+            app_state["feishu_initialized"] = True  # Mark as done even if failed
     except Exception as e:
-        logger.error(f"Failed to initialize Feishu service: {e}", exc_info=True)
+        logger.error(f"Redis/Feishu initialization failed: {e}")
+        app_state["init_errors"].append(f"Redis init failed: {str(e)}")
 
-    binance_ws.start()
-    await market_streamer.start()
-    await account_balance_streamer.start()
-    await risk_metrics_streamer.start()
-    await mt5_connection_streamer.start()  # Start MT5 connection monitor
-    await mt5_bridge.start()  # Start MT5 real-time bridge
-    await position_monitor.start_monitoring()
-    await market_data_service.start()
-    await status_pusher.start()  # Start strategy status pusher
 
-    # Recover pending orders from network interruptions
-    logger.info("Recovering pending orders...")
+async def init_market_services():
+    """Initialize market data services (async, non-blocking)"""
     try:
+        logger.info("Starting market services initialization...")
+        binance_ws.start()
+        await market_streamer.start()
+        await market_data_service.start()
+        await status_pusher.start()
+        app_state["market_services_ready"] = True
+        logger.info("Market services initialized successfully")
+    except Exception as e:
+        logger.error(f"Market services initialization failed: {e}")
+        app_state["init_errors"].append(f"Market services failed: {str(e)}")
+        app_state["market_services_ready"] = True  # Mark as done to not block
+
+
+async def init_mt5_and_monitoring():
+    """Initialize MT5 and monitoring services (async, non-blocking)"""
+    try:
+        logger.info("Starting MT5 and monitoring services...")
+        await account_balance_streamer.start()
+        await risk_metrics_streamer.start()
+        await mt5_connection_streamer.start()
+        await mt5_bridge.start()
+        await position_monitor.start_monitoring()
+        app_state["mt5_services_ready"] = True
+        logger.info("MT5 and monitoring services initialized successfully")
+    except Exception as e:
+        logger.error(f"MT5 services initialization failed: {e}")
+        app_state["init_errors"].append(f"MT5 services failed: {str(e)}")
+        app_state["mt5_services_ready"] = True  # Mark as done to not block
+
+
+async def recover_pending_orders():
+    """Recover pending orders (async, non-blocking)"""
+    try:
+        logger.info("Recovering pending orders...")
         recovery_result = await order_recovery_service.recover_all_pending_orders()
         logger.info(f"Order recovery completed: {recovery_result}")
+        app_state["order_recovery_done"] = True
     except Exception as e:
         logger.error(f"Order recovery failed: {e}")
+        app_state["init_errors"].append(f"Order recovery failed: {str(e)}")
+        app_state["order_recovery_done"] = True
+
+
+async def init_all_background_services():
+    """Initialize all background services in parallel (non-blocking)"""
+    try:
+        # First initialize Redis and Feishu (fast)
+        await init_redis_and_feishu()
+        app_state["init_progress"] = 20
+
+        # Then initialize other services in parallel
+        await asyncio.gather(
+            init_market_services(),
+            init_mt5_and_monitoring(),
+            recover_pending_orders(),
+            return_exceptions=True
+        )
+
+        app_state["init_progress"] = 100
+        app_state["init_complete"] = True
+        logger.info("All background services initialized successfully")
+
+        if app_state["init_errors"]:
+            logger.warning(f"Initialization completed with errors: {app_state['init_errors']}")
+    except Exception as e:
+        logger.error(f"Background services initialization failed: {e}")
+        app_state["init_errors"].append(f"Overall init failed: {str(e)}")
+        app_state["init_complete"] = True  # Mark as complete to not block forever
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events - fast startup with async background init"""
+    # Start background initialization task (non-blocking)
+    init_task = asyncio.create_task(init_all_background_services())
 
     # Start memory cleanup task
     cleanup_task = asyncio.create_task(periodic_memory_cleanup())
+
+    logger.info("FastAPI application started - background services initializing...")
 
     yield
 
@@ -106,17 +185,22 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
-    await binance_ws.stop()
-    await market_streamer.stop()
-    await account_balance_streamer.stop()
-    await risk_metrics_streamer.stop()
-    await mt5_connection_streamer.stop()  # Stop MT5 connection monitor
-    await mt5_bridge.stop()  # Stop MT5 real-time bridge
-    await position_monitor.stop_monitoring()
-    await market_data_service.stop()
-    await status_pusher.stop()  # Stop strategy status pusher
-    await redis_monitor.stop()  # Stop Redis monitor
-    await redis_client.disconnect()
+
+    # Stop all services
+    try:
+        await binance_ws.stop()
+        await market_streamer.stop()
+        await account_balance_streamer.stop()
+        await risk_metrics_streamer.stop()
+        await mt5_connection_streamer.stop()
+        await mt5_bridge.stop()
+        await position_monitor.stop_monitoring()
+        await market_data_service.stop()
+        await status_pusher.stop()
+        await redis_monitor.stop()
+        await redis_client.disconnect()
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 
 # Create FastAPI app
@@ -230,6 +314,22 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.get("/api/init-status")
+async def get_init_status():
+    """Get backend initialization status - for frontend polling"""
+    return {
+        "redis_connected": app_state["redis_connected"],
+        "feishu_initialized": app_state["feishu_initialized"],
+        "market_services_ready": app_state["market_services_ready"],
+        "mt5_services_ready": app_state["mt5_services_ready"],
+        "order_recovery_done": app_state["order_recovery_done"],
+        "init_complete": app_state["init_complete"],
+        "init_progress": app_state["init_progress"],
+        "init_errors": app_state["init_errors"],
+        "status": "ready" if app_state["init_complete"] else "initializing"
+    }
 
 
 if __name__ == "__main__":

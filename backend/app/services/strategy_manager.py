@@ -179,8 +179,8 @@ class StrategyManager:
                 symbol=strategy.symbol,
                 direction=strategy.direction,
                 quantity=position_size,
-                binance_account_id=binance_account.id,
-                bybit_account_id=bybit_account.id,
+                binance_account_id=binance_account.account_id,
+                bybit_account_id=bybit_account.account_id,
                 db=db
             )
 
@@ -205,8 +205,8 @@ class StrategyManager:
         from app.services.account_service import AccountDataService
         account_service = AccountDataService()
 
-        binance_balance = await account_service.get_account_balance(binance_account.id, db)
-        bybit_balance = await account_service.get_account_balance(bybit_account.id, db)
+        binance_balance = await account_service.get_account_balance(binance_account.account_id, db)
+        bybit_balance = await account_service.get_account_balance(bybit_account.account_id, db)
 
         if not binance_balance or not bybit_balance:
             return 0

@@ -9,6 +9,11 @@ engine = create_async_engine(
     settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
     echo=settings.ENVIRONMENT == "development",
     future=True,
+    pool_size=20,  # Increased from 10 to handle streaming tasks + HTTP requests
+    max_overflow=30,  # Increased from 20 for peak load
+    pool_timeout=10,  # Reduced from 30 for faster failure detection
+    pool_recycle=3600,
+    pool_pre_ping=True,
 )
 
 # Create async session factory

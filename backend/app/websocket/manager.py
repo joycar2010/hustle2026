@@ -60,7 +60,9 @@ class ConnectionManager:
         """Broadcast a message to all connected clients"""
         disconnected = set()
 
-        for connection in self.all_connections:
+        # Create a copy to avoid "Set changed size during iteration" error
+        connections_copy = list(self.all_connections)
+        for connection in connections_copy:
             try:
                 await connection.send_json(message)
             except Exception:

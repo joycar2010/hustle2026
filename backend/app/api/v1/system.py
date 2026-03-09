@@ -708,16 +708,17 @@ async def push_to_github(
                 if add_result.returncode != 0:
                     raise Exception(f"Git add failed: {add_result.stderr}")
 
-            # Commit changes
+            # Commit changes (skip pre-commit hooks for automated backups)
             commit_result = subprocess.run(
-                ["git", "commit", "-m", commit_message],
+                ["git", "commit", "--no-verify", "-m", commit_message],
                 capture_output=True,
                 text=True,
                 cwd=".."
             )
 
             if commit_result.returncode != 0:
-                raise Exception(f"Git commit failed: {commit_result.stderr}")
+                error_msg = commit_result.stderr or commit_result.stdout or "Unknown error"
+                raise Exception(f"Git commit failed: {error_msg}")
 
         # Push to remote with current branch
         # Use force push for backup branches to overwrite remote if needed

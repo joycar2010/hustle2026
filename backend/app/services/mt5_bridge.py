@@ -70,7 +70,7 @@ class MT5Bridge:
                     result = await db.execute(
                         select(Account).where(
                             Account.is_active == True,
-                            Account.exchange == "bybit_mt5"
+                            Account.is_mt5_account == True
                         )
                     )
                     mt5_accounts = result.scalars().all()
@@ -115,17 +115,22 @@ class MT5Bridge:
             from app.services.mt5_client import MT5Client
 
             # 获取或创建MT5客户端
-            account_id = str(account.id)
+            account_id = str(account.account_id)
             if account_id not in self.mt5_clients:
-                # 解密API密钥
-                from app.core.security import decrypt_api_key
-                decrypted_password = decrypt_api_key(account.api_secret)
+                # 获取MT5密码（使用mt5_primary_pwd字段，如果为空则使用api_secret）
+                mt5_password = account.mt5_primary_pwd or account.api_secret
+
+                # 获取MT5账户ID（使用mt5_id字段，如果为空则使用api_key）
+                mt5_login = account.mt5_id or account.api_key
+
+                # 获取MT5服务器
+                mt5_server = account.mt5_server or account.server or "Bybit-Live-2"
 
                 # 创建MT5客户端
                 mt5_client = MT5Client(
-                    login=int(account.api_key),
-                    password=decrypted_password,
-                    server=account.server or "Bybit-Live"
+                    login=int(mt5_login),
+                    password=mt5_password,
+                    server=mt5_server
                 )
 
                 # 连接MT5
@@ -155,7 +160,7 @@ class MT5Bridge:
             for pos in positions:
                 formatted_positions.append({
                     "account_id": account_id,
-                    "account_name": account.name,
+                    "account_name": account.account_name,
                     "ticket": pos.get("ticket"),
                     "symbol": pos.get("symbol"),
                     "volume": pos.get("volume"),
@@ -171,7 +176,7 @@ class MT5Bridge:
             return formatted_positions
 
         except Exception as e:
-            logger.error(f"Error fetching MT5 positions for account {account.id}: {e}")
+            logger.error(f"Error fetching MT5 positions for account {account.account_id}: {e}")
             return []
 
     def _has_positions_changed(self, current_positions: List[Dict[str, Any]]) -> bool:
