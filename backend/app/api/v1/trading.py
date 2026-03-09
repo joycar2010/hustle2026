@@ -1221,17 +1221,21 @@ async def get_realtime_trading_history(
         accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
         if not accounts:
             return {"binanceTrades": [], "mt5Trades": [], "timeZone": "Asia/Shanghai (UTC+8)"}
-        
-        # 实时获取 Binance 订单
+
+        # 实时获取 Binance 订单和已实现盈亏
         binance_trades = []
+        binance_realized_pnl = 0.0
         for account in accounts:
             if account.platform_id == 1:
                 try:
                     trades = await _get_binance_trades_realtime(account, start_utc_ms, end_utc_ms)
                     binance_trades.extend(trades)
+                    # 获取Binance已实现盈亏
+                    pnl = await _get_binance_realized_pnl(account, start_utc_ms, end_utc_ms)
+                    binance_realized_pnl += pnl
                 except Exception as e:
                     logger.error(f"Binance trades error: {str(e)}")
-        
+
         # 实时获取 MT5 订单
         mt5_trades = []
         for account in accounts:
@@ -1247,7 +1251,7 @@ async def get_realtime_trading_history(
         formatted_mt5 = _format_mt5_trades(mt5_trades)
 
         # 计算统计数据
-        stats = _calculate_stats(formatted_binance, formatted_mt5)
+        stats = _calculate_stats(formatted_binance, formatted_mt5, binance_realized_pnl)
 
         # 返回数据（字段名与前端期望一致）
         return {
@@ -1273,17 +1277,48 @@ async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms):
         await client.close()
 
 
+async def _get_binance_realized_pnl(account, start_time_ms, end_time_ms):
+    """获取Binance已实现盈亏（使用income API获取准确的平仓盈亏）"""
+    from app.services.binance_client import BinanceFuturesClient
+    client = BinanceFuturesClient(account.api_key, account.api_secret)
+    try:
+        # 使用income API获取平仓盈亏（incomeType=REALIZED_PNL）
+        income_data = await client.get_income(
+            symbol="XAUUSDT",
+            income_type="REALIZED_PNL",
+            start_time=start_time_ms,
+            end_time=end_time_ms,
+            limit=1000
+        )
+        # 累加所有平仓盈亏
+        total_pnl = sum(float(item.get("income", 0)) for item in income_data)
+        logger.info(f"Binance realized PnL: {total_pnl:.2f} USDT ({len(income_data)} records)")
+        return total_pnl
+    except Exception as e:
+        logger.error(f"Failed to get Binance realized PnL: {str(e)}")
+        return 0.0
+    finally:
+        await client.close()
+
+
 async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms):
     from app.services.market_service import market_data_service
     mt5_client = market_data_service.mt5_client
     if not mt5_client or not mt5_client.connected:
         if not mt5_client or not mt5_client.connect():
+            logger.warning("MT5 client not connected")
             return []
     start_dt = datetime.fromtimestamp(start_time_ms / 1000, tz=timezone.utc)
     end_dt = datetime.fromtimestamp(end_time_ms / 1000, tz=timezone.utc)
+    logger.info(f"Fetching MT5 deals from {start_dt} to {end_dt}")
     loop = asyncio.get_event_loop()
     history_deals = await loop.run_in_executor(None, lambda: mt5.history_deals_get(start_dt, end_dt))
-    return [d for d in history_deals if d.symbol == "XAUUSD.s"] if history_deals else []
+    if not history_deals:
+        logger.warning("No MT5 deals found")
+        return []
+    filtered_deals = [d for d in history_deals if d.symbol == "XAUUSD.s"]
+    logger.info(f"Found {len(filtered_deals)} MT5 deals for XAUUSD.s (total deals: {len(history_deals)})")
+    return filtered_deals
 
 
 def _format_binance_trades(trades):
@@ -1331,6 +1366,7 @@ def _format_mt5_trades(deals):
     """格式化MT5交易数据"""
     from app.utils.time_utils import mt5_time_to_beijing
     formatted = []
+    total_profit = 0.0
     for deal in deals:
         # MT5时间戳转北京时间
         beijing_time = mt5_time_to_beijing(deal.time)
@@ -1356,6 +1392,10 @@ def _format_mt5_trades(deals):
             # 如果没有commission字段，显示0.00
             fee = 0.00
 
+        # 获取盈亏（profit字段）
+        profit = float(deal.profit) if hasattr(deal, 'profit') else 0.00
+        total_profit += profit
+
         # 过夜费（暂时设为0，后续可以从其他地方获取）
         overnight_fee = 0.00
 
@@ -1370,14 +1410,16 @@ def _format_mt5_trades(deals):
             "amount": round(amount, 2),  # 成交额
             "overnight_fee": round(overnight_fee, 2),  # 过夜费
             "fee": round(fee, 2),  # 保留2位小数
+            "profit": round(profit, 2),  # 已实现盈亏
             "id": str(deal.ticket),
         })
 
+    logger.info(f"Formatted {len(formatted)} MT5 trades, total profit: {total_profit:.2f}")
     # 降序排序（最新的在最上面）
     return sorted(formatted, key=lambda x: x["timestamp"], reverse=True)
 
 
-def _calculate_stats(binance_trades, mt5_trades):
+def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0):
     """计算交易统计数据"""
     stats = {
         "totalVolume": 0,
@@ -1386,7 +1428,7 @@ def _calculate_stats(binance_trades, mt5_trades):
         "makerAmount": 0,  # 挂单成交额
         "totalFees": 0,
         "bnbFees": 0,  # BNB手续费
-        "realizedPnL": 0,
+        "realizedPnL": binance_realized_pnl,  # 使用从income API获取的已实现盈亏
         "mt5Volume": 0,  # MT5成交量
         "mt5Amount": 0,  # MT5成交额
         "mt5OvernightFee": 0,
@@ -1418,12 +1460,16 @@ def _calculate_stats(binance_trades, mt5_trades):
         amount = trade.get("amount", 0)
         fee = trade.get("fee", 0)
         overnight_fee = trade.get("overnight_fee", 0)
+        profit = trade.get("profit", 0)  # 获取profit字段
 
         stats["mt5Volume"] += qty
         stats["mt5Amount"] += amount
         stats["mt5Fee"] += fee
         stats["mt5OvernightFee"] += overnight_fee
+        stats["mt5RealizedPnL"] += profit  # 累加已实现盈亏
         stats["totalFees"] += fee
 
+    logger.info(f"Stats calculated: Binance trades={len(binance_trades)}, MT5 trades={len(mt5_trades)}, "
+                f"Binance realizedPnL={stats['realizedPnL']:.2f}, MT5 realizedPnL={stats['mt5RealizedPnL']:.2f}")
     return stats
 

@@ -1,6 +1,14 @@
 <template>
   <div class="container mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6">交易历史数据</h1>
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-3xl font-bold">交易历史数据</h1>
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-gray-400">套利组合总盈亏:</span>
+        <span class="text-2xl font-bold" :class="totalArbitragePnL >= 0 ? 'text-green-500' : 'text-red-500'">
+          {{ totalArbitragePnL >= 0 ? '+' : '' }}{{ totalArbitragePnL.toFixed(2) }} USDT
+        </span>
+      </div>
+    </div>
 
     <!-- Query Controls -->
     <div class="card mb-6">
@@ -281,6 +289,11 @@ const mt5Trades = ref([])
 // Computed Net Profit
 const netProfit = computed(() => {
   return stats.value.totalReturnProfit - stats.value.totalFees - stats.value.overnightFees
+})
+
+// Computed Total Arbitrage PnL (MT5 + Binance)
+const totalArbitragePnL = computed(() => {
+  return (stats.value.mt5RealizedPnL || 0) + (stats.value.realizedPnL || 0)
 })
 
 // Check if there's any data

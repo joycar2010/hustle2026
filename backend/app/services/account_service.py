@@ -415,6 +415,7 @@ class AccountDataService:
             margin_used = float(mt5_info.get("margin", 0))  # 冻结资产（已用保证金）
             margin_balance = equity  # 保证金余额 = 净值
             unrealized_pnl = equity - balance  # 未实现盈亏 = 净值 - 余额
+            account_profit = float(mt5_info.get("profit", 0))  # 累计已实现盈亏（从MT5 API获取）
 
             # Calculate margin level (risk ratio)
             # 风险率(%) = (账户权益 / 已用保证金) × 100
@@ -493,7 +494,6 @@ class AccountDataService:
             commission_fee = 0.0
             long_swap_fee = 0.0
             short_swap_fee = 0.0
-            daily_pnl = 0.0
 
             for deal in mt5_deals:
                 # Commission fees (always negative in MT5)
@@ -509,12 +509,10 @@ class AccountDataService:
                 elif deal_type == 1:  # Sell (Short)
                     short_swap_fee += swap
 
-                # Daily P&L (realized profit from closed positions)
-                profit = float(deal.get("profit", 0))
-                daily_pnl += profit
-
-            # Add unrealized PnL to daily PnL
-            daily_pnl += unrealized_pnl
+            # Daily P&L = account total profit (from MT5 API)
+            # account.profit represents cumulative realized P&L from all closed positions
+            # This matches the "账户总盈亏" from user's documentation
+            daily_pnl = account_profit
 
             logger.info(f"MT5 balance: balance={balance}, equity={equity}, free_margin={free_margin}, "
                        f"margin_used={margin_used}, positions={total_positions}, "

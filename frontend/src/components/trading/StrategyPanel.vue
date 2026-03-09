@@ -1485,6 +1485,7 @@ async function checkPositionForClosing() {
     const positions = accountsData.value?.positions || []
 
     console.log('All positions:', positions)
+    console.log('Strategy type:', props.type)
 
     // Calculate total required quantity from enabled ladders
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
@@ -1507,7 +1508,7 @@ async function checkPositionForClosing() {
 
       bybitPositions = positions.filter(p =>
         p.platform_id === 2 &&
-        p.symbol === 'XAUUSD' &&
+        (p.symbol === 'XAUUSD' || p.symbol?.startsWith('XAUUSD')) &&  // Match XAUUSD, XAUUSD.s, etc.
         p.side === 'Sell' &&  // SHORT position
         p.size > 0
       )
@@ -1522,11 +1523,14 @@ async function checkPositionForClosing() {
 
       bybitPositions = positions.filter(p =>
         p.platform_id === 2 &&
-        p.symbol === 'XAUUSD' &&
+        (p.symbol === 'XAUUSD' || p.symbol?.startsWith('XAUUSD')) &&  // Match XAUUSD, XAUUSD.s, etc.
         p.side === 'Buy' &&  // LONG position
         p.size > 0
       )
     }
+
+    console.log('Filtered Binance positions:', binancePositions)
+    console.log('Filtered Bybit positions:', bybitPositions)
 
     const binancePosition = binancePositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0)
     const bybitPosition = bybitPositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0)
