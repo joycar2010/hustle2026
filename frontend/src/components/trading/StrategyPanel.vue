@@ -389,6 +389,7 @@
           <div
             v-for="(ladder, index) in config.ladders"
             :key="index"
+            v-memo="[ladder.enabled, ladder.openPrice, ladder.threshold, ladder.qtyLimit, ladderFailureCounts.opening[index], ladderFailureCounts.closing[index]]"
             class="bg-[#1a1d21] rounded p-1.5"
           >
             <div class="flex items-center justify-between mb-1.5">
@@ -608,6 +609,11 @@ const accountsData = ref(null)
 const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
 
+// 移动端性能优化：检测是否为移动设备
+const isMobile = ref(window.innerWidth < 768)
+let lastUpdateTime = 0
+const UPDATE_THROTTLE = isMobile.value ? 100 : 50 // 移动端降低更新频率
+
 // Continuous execution state - separate for opening and closing
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
@@ -714,6 +720,13 @@ onUnmounted(() => {
 // Watch for market data updates via WebSocket
 watch(() => marketStore.marketData, (newData) => {
   if (!newData) return
+
+  // 移动端性能优化：节流更新
+  const now = Date.now()
+  if (now - lastUpdateTime < UPDATE_THROTTLE) {
+    return
+  }
+  lastUpdateTime = now
 
   // 使用统一的点差计算器
   const spreads = calculateAllSpreads(newData)
@@ -1970,3 +1983,93 @@ onUnmounted(() => {
   stopStatusPolling('closing')
 })
 </script>
+
+<style scoped>
+/* 移动端性能优化 */
+@media (max-width: 767px) {
+  /* 使用 GPU 加速，减少重绘 */
+  .h-full {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+
+  /* 优化滚动性能 */
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
+  }
+
+  /* 减少动画复杂度 */
+  .transition-all {
+    transition: opacity 0.2s ease;
+  }
+
+  /* 禁用不必要的 hover 效果 */
+  button:hover {
+    transform: none;
+  }
+}
+
+/* 高分辨率显示优化 (2736×1824) */
+@media (min-width: 1920px) and (min-height: 1400px) {
+  /* 减少整体间距 */
+  .space-y-2 > * + * {
+    margin-top: 0.375rem !important;
+  }
+
+  .space-y-1\.5 > * + * {
+    margin-top: 0.25rem !important;
+  }
+
+  /* 压缩内边距 */
+  .p-2 {
+    padding: 0.375rem !important;
+  }
+
+  .p-1\.5 {
+    padding: 0.25rem !important;
+  }
+
+  /* 减少按钮高度 */
+  .py-1\.5 {
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.25rem !important;
+  }
+
+  /* 优化输入框高度 */
+  input[type="number"] {
+    padding-top: 0.125rem !important;
+    padding-bottom: 0.125rem !important;
+  }
+
+  /* 减少标签间距 */
+  .mb-1 {
+    margin-bottom: 0.25rem !important;
+  }
+
+  .mb-0\.5 {
+    margin-bottom: 0.125rem !important;
+  }
+
+  .mt-1 {
+    margin-top: 0.25rem !important;
+  }
+
+  .mt-1\.5 {
+    margin-top: 0.25rem !important;
+  }
+
+  .mt-2 {
+    margin-top: 0.375rem !important;
+  }
+
+  /* 减少间隙 */
+  .gap-2 {
+    gap: 0.375rem !important;
+  }
+
+  .gap-1\.5 {
+    gap: 0.25rem !important;
+  }
+}
+</style>
