@@ -1,99 +1,21 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto">
-    <!-- Total Profit and Fees Header -->
+    <!-- Total Profit Header -->
     <div class="p-2 lg:p-2 md:p-3 bg-[#252930] border-b border-[#2b3139]">
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:gap-1.5 md:gap-3 mb-2 lg:mb-1.5 md:mb-3">
-        <!-- Left: Bybit Fees -->
-        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 sm:order-1 order-2">
-          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5 text-center">Bybit 掉期费</div>
-          <div class="flex flex-col space-y-1 lg:space-y-0.5">
-            <div class="flex justify-between text-xs lg:text-[10px]">
-              <span class="text-gray-400">做多:</span>
-              <span class="font-mono" :class="bybitLongSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ bybitLongSwapFee >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitLongSwapFee)) }}
-              </span>
-            </div>
-            <div class="flex justify-between text-xs lg:text-[10px]">
-              <span class="text-gray-400">做空:</span>
-              <span class="font-mono" :class="bybitShortSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ bybitShortSwapFee >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitShortSwapFee)) }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Center: Total Profit -->
-        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 flex flex-col items-center justify-center sm:order-2 order-first">
-          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5">总盈利</div>
-          <div class="text-lg lg:text-base md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-            {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
-          </div>
-          <div class="text-xs lg:text-[10px] text-gray-400">USDT</div>
-        </div>
-
-        <!-- Right: Binance Fees -->
-        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 sm:order-3 order-3">
-          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5 text-center">Binance 资金费</div>
-          <div class="flex flex-col space-y-1 lg:space-y-0.5">
-            <div class="flex justify-between text-xs lg:text-[10px]">
-              <span class="text-gray-400">做多:</span>
-              <span class="font-mono" :class="binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ binanceLongFundingRate >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceLongFundingRate)) }}
-              </span>
-            </div>
-            <div class="flex justify-between text-xs lg:text-[10px]">
-              <span class="text-gray-400">做空:</span>
-              <span class="font-mono" :class="binanceShortFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ binanceShortFundingRate >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceShortFundingRate)) }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Arbitrage Strategy Position Data -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:gap-1.5">
-        <!-- Reverse Arbitrage -->
-        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5">
-          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5">反向持仓 (Bybit MT5)</div>
-          <div class="flex justify-between items-center text-xs lg:text-[10px]">
-            <div class="flex items-center space-x-2 lg:space-x-1">
-              <span class="text-gray-400">实仓:</span>
-              <span class="font-mono text-white text-lg lg:text-sm">{{ reverseActualPosition.toFixed(2) }}</span>
-            </div>
-            <div class="flex items-center space-x-1">
-              <span class="text-gray-400">点差:</span>
-              <span class="font-mono text-sm lg:text-xs" :class="reverseSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ formatSpread(reverseSpread) }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Forward Arbitrage -->
-        <div class="bg-[#1e2329] rounded p-2 lg:p-1.5">
-          <div class="text-xs lg:text-[10px] text-gray-400 mb-1 lg:mb-0.5">正向持仓 (Binance)</div>
-          <div class="flex justify-between items-center text-xs lg:text-[10px]">
-            <div class="flex items-center space-x-2 lg:space-x-1">
-              <span class="text-gray-400">实仓:</span>
-              <span class="font-mono text-white text-lg lg:text-sm">{{ forwardActualPosition.toFixed(2) }}</span>
-            </div>
-            <div class="flex items-center space-x-1">
-              <span class="text-gray-400">点差:</span>
-              <span class="font-mono text-sm lg:text-xs" :class="forwardSpread >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-                {{ formatSpread(forwardSpread) }}
-              </span>
-            </div>
-          </div>
-        </div>
+      <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 flex items-center justify-center gap-2">
+        <span class="text-xs lg:text-[10px] text-gray-400">总盈利</span>
+        <span class="text-lg lg:text-base md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+          {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
+        </span>
+        <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
       </div>
     </div>
 
     <div class="flex-1 overflow-y-auto p-2 lg:p-1.5 md:p-3">
-      <div class="grid grid-cols-1 gap-2 lg:gap-1.5 md:gap-3 h-full">
+      <div class="grid grid-cols-1 gap-2 lg:gap-1.5 md:gap-3">
       <!-- Bybit MT5 Card -->
       <div class="bg-[#252930] rounded p-2 lg:p-2 md:p-3 flex flex-col border border-[#2b3139]">
-        <div class="flex items-center justify-between mb-1.5 lg:mb-1 md:mb-2">
+        <div class="flex items-center justify-center mb-1.5 lg:mb-1 md:mb-2">
           <div class="flex items-center space-x-2 lg:space-x-1.5">
             <div class="w-6 h-6 lg:w-5 lg:h-5 md:w-7 md:h-7 bg-[#ff9800] rounded flex items-center justify-center">
               <span class="text-white font-bold text-base lg:text-sm md:text-lg">B</span>
@@ -102,19 +24,16 @@
               <div class="font-medium text-base lg:text-sm md:text-lg">Bybit MT5 <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">XAUUSD.s</span></div>
             </div>
           </div>
-          <div :class="['w-2.5 h-2.5 lg:w-2 lg:h-2 md:w-3 md:h-3 rounded-full', bybitConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
         </div>
 
-        <!-- Real-time Price (Compact) -->
-        <div class="mb-1.5 lg:mb-1 md:mb-2 text-center py-1 lg:py-0.5 md:py-1.5 bg-[#1e2329] rounded">
-          <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
-          <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
-            {{ formatPrice(bybit.mid) }}
+        <!-- Real-time Price, ASK and BID in one row -->
+        <div class="grid grid-cols-3 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
+          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
+            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
+            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
+              {{ formatPrice(bybit.mid) }}
+            </div>
           </div>
-        </div>
-
-        <!-- ASK and BID in one row -->
-        <div class="grid grid-cols-2 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
           <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
             <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">ASK</div>
             <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.ask, bybit.prevAsk)]">
@@ -143,7 +62,7 @@
 
       <!-- Binance Card -->
       <div class="bg-[#252930] rounded p-2 lg:p-2 md:p-3 flex flex-col border border-[#2b3139]">
-        <div class="flex items-center justify-between mb-1.5 lg:mb-1 md:mb-2">
+        <div class="flex items-center justify-center mb-1.5 lg:mb-1 md:mb-2">
           <div class="flex items-center space-x-2 lg:space-x-1.5">
             <div class="w-6 h-6 lg:w-5 lg:h-5 md:w-7 md:h-7 bg-[#f0b90b] rounded flex items-center justify-center">
               <span class="text-[#1a1d21] font-bold text-base lg:text-sm md:text-lg">B</span>
@@ -152,19 +71,16 @@
               <div class="font-medium text-base lg:text-sm md:text-lg">Binance <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">XAUUSDT</span></div>
             </div>
           </div>
-          <div :class="['w-2.5 h-2.5 lg:w-2 lg:h-2 md:w-3 md:h-3 rounded-full', binanceConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
         </div>
 
-        <!-- Real-time Price (Compact) -->
-        <div class="mb-1.5 lg:mb-1 md:mb-2 text-center py-1 lg:py-0.5 md:py-1.5 bg-[#1e2329] rounded">
-          <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
-          <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
-            {{ formatPrice(binance.mid) }}
+        <!-- Real-time Price, ASK and BID in one row -->
+        <div class="grid grid-cols-3 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
+          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
+            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
+            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
+              {{ formatPrice(binance.mid) }}
+            </div>
           </div>
-        </div>
-
-        <!-- ASK and BID in one row -->
-        <div class="grid grid-cols-2 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
           <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
             <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">ASK</div>
             <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
@@ -190,6 +106,12 @@
           </div>
         </div>
       </div>
+
+      <!-- Spread Data Table -->
+      <SpreadDataTable />
+
+      <!-- Pending Orders -->
+      <PendingOrders />
       </div>
     </div>
   </div>
@@ -199,6 +121,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
+import SpreadDataTable from './SpreadDataTable.vue'
+import PendingOrders from '@/views/PendingOrders.vue'
 
 const marketStore = useMarketStore()
 
@@ -295,7 +219,7 @@ watch(() => marketStore.marketData, (data) => {
   bybit.value.prevMid = bybit.value.mid
   binance.value.prevBid = binance.value.bid
   binance.value.prevAsk = binance.value.ask
-  binance.value.prevMid = binance.value.mid
+  binance.value.prevMid = binance.value.prevMid
 
   bybit.value.bid = data.bybit_bid || 0
   bybit.value.ask = data.bybit_ask || 0
@@ -324,13 +248,6 @@ watch(() => marketStore.lastMessage, (message) => {
 })
 
 function handleAccountBalanceUpdate(data) {
-  // Debug: log received data
-  console.log('[MarketCards] Received account_balance data:', {
-    accounts: data.accounts?.length || 0,
-    positions: data.positions?.length || 0,
-    positionsDetail: data.positions
-  })
-
   // Update total profit
   if (data.summary) {
     totalProfit.value = data.summary.daily_pnl || 0
@@ -386,20 +303,7 @@ function handleAccountBalanceUpdate(data) {
     data.positions.forEach(position => {
       // Find the account for this position to get platform_id
       const account = data.accounts?.find(acc => acc.account_id === position.account_id)
-      if (!account) {
-        console.warn('[MarketCards] Position without matching account:', position)
-        return
-      }
-
-      console.log('[MarketCards] Processing position:', {
-        symbol: position.symbol,
-        side: position.side,
-        size: position.size,
-        entry_price: position.entry_price,
-        current_price: position.current_price,
-        platform_id: account.platform_id,
-        account_name: account.account_name
-      })
+      if (!account) return
 
       const posSize = Math.abs(position.size || 0)
       const posData = {
@@ -411,37 +315,18 @@ function handleAccountBalanceUpdate(data) {
       if (account.platform_id === 2) {
         // Bybit MT5 positions
         if (position.side === 'Buy') {
-          // Bybit LONG positions
           bybitLongPositions.value.push(posData)
-          console.log('[MarketCards] Added to Bybit LONG:', position.size)
         } else if (position.side === 'Sell') {
-          // Bybit SHORT positions
           bybitShortPositions.value.push(posData)
-          console.log('[MarketCards] Added to Bybit SHORT:', position.size)
         }
       } else if (account.platform_id === 1) {
         // Binance positions
         if (position.side === 'Buy') {
-          // Binance LONG positions
           binanceLongPositions.value.push(posData)
-          console.log('[MarketCards] Added to Binance LONG:', position.size)
         } else if (position.side === 'Sell') {
-          // Binance SHORT positions
           binanceShortPositions.value.push(posData)
-          console.log('[MarketCards] Added to Binance SHORT:', position.size)
         }
       }
-    })
-
-    console.log('[MarketCards] Final positions:', {
-      reverse: reverseActualPosition.value,
-      forward: forwardActualPosition.value,
-      binanceShort: binanceShortPositions.value,
-      binanceLong: binanceLongPositions.value,
-      bybitShort: bybitShortPositions.value,
-      bybitLong: bybitLongPositions.value,
-      reverseSpread: reverseSpread.value,
-      forwardSpread: forwardSpread.value
     })
   } else {
     // No positions, reset position arrays only
@@ -449,7 +334,6 @@ function handleAccountBalanceUpdate(data) {
     binanceLongPositions.value = []
     bybitShortPositions.value = []
     bybitLongPositions.value = []
-    console.log('[MarketCards] No positions in data')
   }
 }
 
@@ -583,6 +467,18 @@ async function fetchAccountData() {
     console.error('Failed to fetch account data:', error)
   }
 }
+
+// Export data for StrategyPanel to use
+defineExpose({
+  reverseActualPosition,
+  forwardActualPosition,
+  reverseSpread,
+  forwardSpread,
+  bybitLongSwapFee,
+  bybitShortSwapFee,
+  binanceLongFundingRate,
+  binanceShortFundingRate
+})
 </script>
 
 <style scoped>
@@ -594,7 +490,7 @@ async function fetchAccountData() {
   }
 
   /* 确保所有子元素也是100%宽度 */
-  :deep(.bg-\\[\\#1e2329\\]) {
+  :deep(.bg-\[\#1e2329\]) {
     width: 100%;
     box-sizing: border-box;
   }

@@ -28,44 +28,20 @@
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col min-w-0 overflow-hidden lg:overflow-hidden max-lg:overflow-visible max-lg:h-auto">
       <!-- Strategy Panels Section -->
-      <section class="flex flex-col lg:flex-row gap-2 p-2 border-b border-[#2b3139] lg:h-[63%] max-lg:h-auto min-h-0">
+      <section class="flex-1 flex flex-col lg:flex-row gap-2 p-2 min-h-0 max-lg:h-auto">
         <!-- Reverse Strategy -->
         <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <StrategyPanel type="reverse" />
+          <StrategyPanel type="reverse" :market-cards-ref="marketCardsRef" />
         </div>
 
         <!-- Market Cards -->
         <div class="w-full lg:w-[380px] xl:w-[420px] bg-[#1e2329] rounded-lg flex-shrink-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <MarketCards />
+          <MarketCards ref="marketCardsRef" />
         </div>
 
         <!-- Forward Strategy -->
         <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <StrategyPanel type="forward" />
-        </div>
-      </section>
-
-      <!-- Orders and Manual Trading Section -->
-      <section class="flex-1 flex flex-col lg:flex-row gap-2 p-2 pt-0 min-h-0 max-lg:h-auto">
-        <!-- Order Monitor -->
-        <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <OrderMonitor />
-        </div>
-
-        <!-- Manual Trading (PC only) -->
-        <div class="hidden lg:block flex-1 bg-[#1e2329] rounded-lg overflow-hidden min-w-0">
-          <ManualTrading />
-        </div>
-      </section>
-
-      <!-- Manual Trading Section (Mobile/Tablet only) -->
-      <section class="flex lg:hidden flex-col gap-2 p-2 pt-0">
-        <div class="bg-[#1e2329] rounded-lg overflow-visible">
-          <EmergencyManualTrading @orderExecuted="handleOrderExecuted" />
-        </div>
-
-        <div class="bg-[#1e2329] rounded-lg overflow-visible">
-          <RecentTradingRecords ref="recentRecordsRef" />
+          <StrategyPanel type="forward" :market-cards-ref="marketCardsRef" />
         </div>
       </section>
     </main>
@@ -101,24 +77,12 @@ import AccountStatusPanel from '@/components/trading/AccountStatusPanel.vue'
 import NavigationPanel from '@/components/trading/NavigationPanel.vue'
 import MarketCards from '@/components/trading/MarketCards.vue'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
-import OrderMonitor from '@/components/trading/OrderMonitor.vue'
-import ManualTrading from '@/components/trading/ManualTrading.vue'
-import SpreadDataTable from '@/components/trading/SpreadDataTable.vue'
-import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
-import RecentTradingRecords from '@/components/trading/RecentTradingRecords.vue'
 import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vue'
 import Risk from '@/views/Risk.vue'
 
-const recentRecordsRef = ref(null)
 const showRiskPanel = ref(true)
 const showLeftPanel = ref(true)
-
-// 当紧急交易执行后，刷新最近交易记录
-function handleOrderExecuted() {
-  if (recentRecordsRef.value) {
-    recentRecordsRef.value.fetchRecentOrders()
-  }
-}
+const marketCardsRef = ref(null)
 
 // 切换风险控制面板显示/隐藏
 function toggleRiskPanel() {

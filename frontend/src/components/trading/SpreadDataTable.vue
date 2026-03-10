@@ -63,8 +63,8 @@ watch(() => marketStore.marketData, (newData) => {
       isNew: true
     }
 
-    // 添加到历史记录（保持最新8条）
-    spreadHistory.value = [spreadItem, ...spreadHistory.value].slice(0, 8)
+    // 添加到历史记录（保持最新5条）
+    spreadHistory.value = [spreadItem, ...spreadHistory.value].slice(0, 5)
 
     // 移除新标记
     setTimeout(() => {

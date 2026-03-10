@@ -2,9 +2,19 @@
   <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Header -->
     <div class="p-2 md:p-3 border-b border-[#2b3139] flex-shrink-0">
-      <h3 :class="['text-base md:text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
-        {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
-      </h3>
+      <div class="flex items-center justify-between">
+        <h3 :class="['text-base md:text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
+          {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
+        </h3>
+        <div v-if="marketCardsRef" :class="['text-sm font-bold', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
+          <span v-if="type === 'reverse'">
+            实仓: {{ marketCardsRef.reverseActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
+          </span>
+          <span v-else>
+            实仓: {{ marketCardsRef.forwardActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.forwardSpread?.toFixed(2) || '0.00' }}
+          </span>
+        </div>
+      </div>
     </div>
 
     <div class="flex-1 p-2 md:p-3 space-y-2 lg:overflow-y-auto lg:min-h-0 max-lg:overflow-visible max-lg:h-auto">
@@ -25,10 +35,11 @@
       </div>
 
       <!-- Top Info Bar -->
-      <div class="bg-[#252930] rounded p-2 md:p-3">
-        <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-2 gap-2 md:gap-3">
+      <div class="bg-[#252930] rounded p-2 md:p-3 space-y-3">
+        <!-- Row 1: Assets (centered) -->
+        <div class="flex items-center justify-center gap-6">
           <!-- Binance Available Assets -->
-          <div>
+          <div class="text-center">
             <div class="text-xs text-gray-400 mb-1">Binance可用资产</div>
             <div class="text-base font-mono font-bold">
               {{ formatNumber(binanceAssets) }} USDT
@@ -36,22 +47,55 @@
           </div>
 
           <!-- Bybit MT5 Available Assets -->
-          <div>
+          <div class="text-center">
             <div class="text-xs text-gray-400 mb-1">Bybit MT5可用资产</div>
             <div class="text-base font-mono font-bold">
               {{ formatNumber(bybitAssets) }} USDT
             </div>
           </div>
+        </div>
 
-          <!-- Spread Display -->
-          <div class="text-center lg:col-span-2">
-            <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">
-              {{ type === 'reverse' ? '做多Bybit点差' : '做多Binance点差' }}
+        <!-- Row 2: Spread and Fees (centered) -->
+        <div class="flex items-center justify-center gap-6">
+          <!-- For Reverse Strategy: Bybit Fee + Spread -->
+          <template v-if="type === 'reverse'">
+            <!-- Bybit Swap Fee -->
+            <div v-if="marketCardsRef" class="text-center">
+              <div class="text-xs text-gray-400 mb-1">Bybit 掉期费</div>
+              <div class="flex gap-2 justify-center">
+                <span class="text-[#0ecb81] text-sm font-mono">多: {{ marketCardsRef.bybitLongSwapFee?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#f6465d] text-sm font-mono">空: {{ marketCardsRef.bybitShortSwapFee?.toFixed(4) || '0.0000' }}%</span>
+              </div>
             </div>
-            <div :class="['text-xl font-mono font-bold whitespace-nowrap', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
-              {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
+
+            <!-- Spread -->
+            <div class="text-center">
+              <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">做多Bybit点差</div>
+              <div class="text-xl font-mono font-bold whitespace-nowrap text-[#0ecb81]">
+                {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
+              </div>
             </div>
-          </div>
+          </template>
+
+          <!-- For Forward Strategy: Spread + Binance Fee -->
+          <template v-else>
+            <!-- Spread -->
+            <div class="text-center">
+              <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">做多Binance点差</div>
+              <div class="text-xl font-mono font-bold whitespace-nowrap text-[#f6465d]">
+                {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
+              </div>
+            </div>
+
+            <!-- Binance Funding Rate -->
+            <div v-if="marketCardsRef" class="text-center">
+              <div class="text-xs text-gray-400 mb-1">Binance 资金费</div>
+              <div class="flex gap-2 justify-center">
+                <span class="text-[#0ecb81] text-sm font-mono">多: {{ marketCardsRef.binanceLongFundingRate?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#f6465d] text-sm font-mono">空: {{ marketCardsRef.binanceShortFundingRate?.toFixed(4) || '0.0000' }}%</span>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
 
@@ -334,6 +378,10 @@ const props = defineProps({
     type: String,
     required: true,
     validator: (value) => ['forward', 'reverse'].includes(value)
+  },
+  marketCardsRef: {
+    type: Object,
+    default: null
   }
 })
 
@@ -423,6 +471,7 @@ const binanceAssets = ref(10000)
 const bybitAssets = ref(8500)
 const executingOpening = ref(false)
 const executingClosing = ref(false)
+const executing = ref(false)
 // 全局执行锁：防止多个策略同时执行导致冲突
 const executingAnyStrategy = computed(() => executingOpening.value || executingClosing.value)
 const accountsData = ref(null)

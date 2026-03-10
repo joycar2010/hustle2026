@@ -1,15 +1,15 @@
 <template>
-  <div class="container mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6">挂单查询</h1>
+  <div class="px-2 py-2">
+    <h1 class="text-sm font-bold mb-2">挂单查询</h1>
 
     <!-- Filters -->
-    <div class="card mb-6">
-      <div class="flex flex-wrap items-center gap-4">
-        <div class="flex items-center gap-2">
-          <label class="text-sm text-gray-400">来源:</label>
+    <div class="card mb-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-1">
+          <label class="text-xs text-gray-400">来源:</label>
           <select
             v-model="filterSource"
-            class="px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+            class="px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
           >
             <option value="">全部</option>
             <option value="strategy">策略交易</option>
@@ -17,11 +17,11 @@
           </select>
         </div>
 
-        <div class="flex items-center gap-2">
-          <label class="text-sm text-gray-400">状态:</label>
+        <div class="flex items-center gap-1">
+          <label class="text-xs text-gray-400">状态:</label>
           <select
             v-model="filterStatus"
-            class="px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+            class="px-2 py-1 text-xs bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
           >
             <option value="new,pending">挂单中</option>
             <option value="">全部状态</option>
@@ -30,7 +30,7 @@
           </select>
         </div>
 
-        <button @click="fetchOrders" class="btn-primary">
+        <button @click="fetchOrders" class="btn-primary text-xs px-2 py-1">
           刷新
         </button>
       </div>
@@ -39,42 +39,42 @@
     <!-- Orders Table -->
     <div class="card">
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-xs">
           <thead>
             <tr class="text-left text-gray-400 border-b border-gray-700">
-              <th class="pb-3">时间</th>
-              <th class="pb-3">平台</th>
-              <th class="pb-3">交易对</th>
-              <th class="pb-3">方向</th>
-              <th class="pb-3">数量</th>
-              <th class="pb-3">价格</th>
-              <th class="pb-3">状态</th>
-              <th class="pb-3">来源</th>
-              <th class="pb-3">操作</th>
+              <th class="pb-1.5 pr-2">时间</th>
+              <th class="pb-1.5 pr-2">平台</th>
+              <th class="pb-1.5 pr-2">交易对</th>
+              <th class="pb-1.5 pr-2">方向</th>
+              <th class="pb-1.5 pr-2">数量</th>
+              <th class="pb-1.5 pr-2">价格</th>
+              <th class="pb-1.5 pr-2">状态</th>
+              <th class="pb-1.5 pr-2">来源</th>
+              <th class="pb-1.5">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="orders.length === 0">
-              <td colspan="9" class="text-center py-8 text-gray-500">暂无数据</td>
+              <td colspan="9" class="text-center py-4 text-gray-500 text-xs">暂无数据</td>
             </tr>
             <tr v-for="order in orders" :key="order.id" class="border-b border-gray-800">
-              <td class="py-3">{{ formatDateTimeBeijing(order.timestamp) }}</td>
-              <td class="text-xs text-gray-400">{{ order.exchange }}</td>
-              <td>{{ order.symbol }}</td>
-              <td>
+              <td class="py-1.5 pr-2">{{ formatDateTimeBeijing(order.timestamp) }}</td>
+              <td class="text-xs text-gray-400 pr-2">{{ order.exchange }}</td>
+              <td class="pr-2">{{ order.symbol }}</td>
+              <td class="pr-2">
                 <span :class="order.side === 'buy' ? 'text-green-500' : 'text-red-500'">
                   {{ order.side === 'buy' ? '买入' : '卖出' }}
                 </span>
               </td>
-              <td>{{ order.quantity }}</td>
-              <td>{{ order.price != null ? Number(order.price).toFixed(2) : '-' }}</td>
-              <td>
+              <td class="pr-2">{{ order.quantity }}</td>
+              <td class="pr-2">{{ order.price != null ? Number(order.price).toFixed(2) : '-' }}</td>
+              <td class="pr-2">
                 <span :class="getStatusClass(order.status)">
                   {{ getStatusText(order.status) }}
                 </span>
               </td>
-              <td>
-                <span class="text-xs px-2 py-1 rounded" :class="getSourceClass(order.source)">
+              <td class="pr-2">
+                <span class="text-xs px-1.5 py-0.5 rounded" :class="getSourceClass(order.source)">
                   {{ getSourceText(order.source) }}
                 </span>
               </td>
@@ -82,7 +82,7 @@
                 <button
                   v-if="order.status === 'new' || order.status === 'pending'"
                   @click="manualProcessOrder(order.id)"
-                  class="text-xs px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
+                  class="text-xs px-2 py-0.5 bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors"
                 >
                   人工补单
                 </button>
