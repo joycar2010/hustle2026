@@ -20,7 +20,14 @@ export const useMarketStore = defineStore('market', () => {
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return
 
     token = getToken()
-    const url = token ? `${WS_URL}?token=${token}` : WS_URL
+
+    // If no token, don't try to connect
+    if (!token) {
+      console.log('No token available, skipping WebSocket connection')
+      return
+    }
+
+    const url = `${WS_URL}?token=${token}`
 
     ws = new WebSocket(url)
 
@@ -66,10 +73,26 @@ export const useMarketStore = defineStore('market', () => {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       connected.value = false
       ws = null
-      // Reconnect after 10 seconds to prevent rate limiting
+
+      // If closed due to authentication failure (code 1008), don't reconnect
+      // User needs to login again
+      if (event.code === 1008) {
+        console.log('WebSocket authentication failed, redirecting to login')
+        // Clear token and redirect to login
+        localStorage.removeItem('token')
+        // Use router to navigate without page reload
+        import('@/router').then(({ default: router }) => {
+          if (window.location.pathname !== '/login') {
+            router.push('/login')
+          }
+        })
+        return
+      }
+
+      // For other close reasons, reconnect after 10 seconds
       reconnectTimer = setTimeout(connect, 10000)
     }
 

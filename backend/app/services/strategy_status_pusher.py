@@ -337,6 +337,33 @@ class StrategyExecutionStatusPusher:
         }
         await self._push_queue.put(message)
 
+    async def push_custom_event(
+        self,
+        strategy_id: int,
+        event_type: str,
+        data: Dict,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push custom event.
+
+        Args:
+            strategy_id: Strategy ID
+            event_type: Custom event type
+            data: Event data
+            user_id: Optional user ID
+        """
+        message = {
+            'type': f'strategy_{event_type}',
+            'data': {
+                'strategy_id': strategy_id,
+                **data,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
 
 # Global status pusher instance
 status_pusher = StrategyExecutionStatusPusher()

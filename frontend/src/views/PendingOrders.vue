@@ -1,6 +1,6 @@
 <template>
   <div class="px-2 py-2">
-    <h1 class="text-sm font-bold mb-2">挂单查询</h1>
+    <h1 class="text-sm font-bold mb-2 text-center">挂单查询</h1>
 
     <!-- Filters -->
     <div class="card mb-2">

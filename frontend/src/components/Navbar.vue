@@ -460,16 +460,9 @@ function toggleNavbarVisibility() {
 }
 
 function handleNavClick(path) {
-  // 如果点击的是控制面板（首页），强制刷新页面
-  if (path === '/') {
-    // 如果当前已经在首页，强制刷新
-    if (router.currentRoute.value.path === '/') {
-      router.go(0)
-    } else {
-      // 如果不在首页，正常跳转
-      router.push(path)
-    }
-  }
+  // 直接使用路由跳转，不强制刷新页面
+  // Vue Router 会自动处理相同路由的情况
+  router.push(path)
 }
 
 // Icon components

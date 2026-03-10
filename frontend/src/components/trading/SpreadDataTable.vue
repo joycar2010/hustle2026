@@ -1,7 +1,7 @@
 <template>
   <div class="h-full flex flex-col">
     <div class="p-1 border-b border-[#2b3139]">
-      <h3 class="text-xs font-bold">点差数据流</h3>
+      <h3 class="text-xs font-bold text-center">点差数据流</h3>
     </div>
     <div class="flex-1 overflow-y-auto md:overflow-y-auto text-xs overflow-x-auto max-md:overflow-y-visible max-md:h-auto">
       <table class="w-full min-w-[300px]">

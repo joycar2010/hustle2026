@@ -1,77 +1,75 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Header -->
-    <div class="p-2 md:p-3 border-b border-[#2b3139] flex-shrink-0">
-      <div class="flex items-center justify-between">
-        <h3 :class="['text-base md:text-lg font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
-          {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
-        </h3>
-        <div v-if="marketCardsRef" :class="['text-sm font-bold', type === 'reverse' ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
-          <span v-if="type === 'reverse'">
-            实仓: {{ marketCardsRef.reverseActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
-          </span>
-          <span v-else>
-            实仓: {{ marketCardsRef.forwardActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.forwardSpread?.toFixed(2) || '0.00' }}
-          </span>
-        </div>
+    <div class="p-1.5 border-b border-[#2b3139] flex-shrink-0">
+      <h3 :class="['text-sm font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
+        {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
+      </h3>
+      <div v-if="marketCardsRef" class="text-2xl font-bold text-center mt-1 text-[#3b82f6]">
+        <span v-if="type === 'reverse'">
+          实仓: {{ marketCardsRef.reverseActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
+        </span>
+        <span v-else>
+          实仓: {{ marketCardsRef.forwardActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.forwardSpread?.toFixed(2) || '0.00' }}
+        </span>
       </div>
     </div>
 
-    <div class="flex-1 p-2 md:p-3 space-y-2 lg:overflow-y-auto lg:min-h-0 max-lg:overflow-visible max-lg:h-auto">
+    <div class="flex-1 p-1.5 space-y-1.5 lg:overflow-y-auto lg:min-h-0 max-lg:overflow-visible max-lg:h-auto">
       <!-- Validation Errors Display -->
-      <div v-if="validationErrors.length > 0" class="bg-[#f6465d] bg-opacity-10 border border-[#f6465d] rounded p-3">
+      <div v-if="validationErrors.length > 0" class="bg-[#f6465d] bg-opacity-10 border border-[#f6465d] rounded p-2">
         <div class="flex items-start space-x-2">
-          <span class="text-[#f6465d] text-lg">⚠</span>
+          <span class="text-[#f6465d] text-base">⚠</span>
           <div class="flex-1">
-            <div class="text-sm font-bold text-[#f6465d] mb-1">配置验证失败</div>
-            <ul class="text-xs text-[#f6465d] space-y-1">
+            <div class="text-xs font-bold text-[#f6465d] mb-0.5">配置验证失败</div>
+            <ul class="text-xs text-[#f6465d] space-y-0.5">
               <li v-for="(error, index) in validationErrors" :key="index">• {{ error }}</li>
             </ul>
           </div>
           <button @click="validationErrors = []" class="text-[#f6465d] hover:text-white transition-colors">
-            <span class="text-lg">×</span>
+            <span class="text-base">×</span>
           </button>
         </div>
       </div>
 
       <!-- Top Info Bar -->
-      <div class="bg-[#252930] rounded p-2 md:p-3 space-y-3">
+      <div class="bg-[#252930] rounded p-2 space-y-2">
         <!-- Row 1: Assets (centered) -->
-        <div class="flex items-center justify-center gap-6">
+        <div class="flex items-center justify-center gap-4">
           <!-- Binance Available Assets -->
           <div class="text-center">
-            <div class="text-xs text-gray-400 mb-1">Binance可用资产</div>
-            <div class="text-base font-mono font-bold">
+            <div class="text-xs text-gray-400 mb-0.5">Binance可用资产</div>
+            <div class="text-sm font-mono font-bold">
               {{ formatNumber(binanceAssets) }} USDT
             </div>
           </div>
 
           <!-- Bybit MT5 Available Assets -->
           <div class="text-center">
-            <div class="text-xs text-gray-400 mb-1">Bybit MT5可用资产</div>
-            <div class="text-base font-mono font-bold">
+            <div class="text-xs text-gray-400 mb-0.5">Bybit MT5可用资产</div>
+            <div class="text-sm font-mono font-bold">
               {{ formatNumber(bybitAssets) }} USDT
             </div>
           </div>
         </div>
 
         <!-- Row 2: Spread and Fees (centered) -->
-        <div class="flex items-center justify-center gap-6">
+        <div class="flex items-center justify-center gap-4">
           <!-- For Reverse Strategy: Bybit Fee + Spread -->
           <template v-if="type === 'reverse'">
             <!-- Bybit Swap Fee -->
             <div v-if="marketCardsRef" class="text-center">
-              <div class="text-xs text-gray-400 mb-1">Bybit 掉期费</div>
+              <div class="text-xs text-gray-400 mb-0.5">Bybit 掉期费</div>
               <div class="flex gap-2 justify-center">
-                <span class="text-[#0ecb81] text-sm font-mono">多: {{ marketCardsRef.bybitLongSwapFee?.toFixed(4) || '0.0000' }}%</span>
-                <span class="text-[#f6465d] text-sm font-mono">空: {{ marketCardsRef.bybitShortSwapFee?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.bybitLongSwapFee?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.bybitShortSwapFee?.toFixed(4) || '0.0000' }}%</span>
               </div>
             </div>
 
             <!-- Spread -->
             <div class="text-center">
-              <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">做多Bybit点差</div>
-              <div class="text-xl font-mono font-bold whitespace-nowrap text-[#0ecb81]">
+              <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多Bybit点差</div>
+              <div class="text-lg font-mono font-bold whitespace-nowrap text-[#0ecb81]">
                 {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
@@ -81,18 +79,18 @@
           <template v-else>
             <!-- Spread -->
             <div class="text-center">
-              <div class="text-xs text-gray-400 mb-1 whitespace-nowrap">做多Binance点差</div>
-              <div class="text-xl font-mono font-bold whitespace-nowrap text-[#f6465d]">
+              <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多Binance点差</div>
+              <div class="text-lg font-mono font-bold whitespace-nowrap text-[#f6465d]">
                 {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
 
             <!-- Binance Funding Rate -->
             <div v-if="marketCardsRef" class="text-center">
-              <div class="text-xs text-gray-400 mb-1">Binance 资金费</div>
+              <div class="text-xs text-gray-400 mb-0.5">Binance 资金费</div>
               <div class="flex gap-2 justify-center">
-                <span class="text-[#0ecb81] text-sm font-mono">多: {{ marketCardsRef.binanceLongFundingRate?.toFixed(4) || '0.0000' }}%</span>
-                <span class="text-[#f6465d] text-sm font-mono">空: {{ marketCardsRef.binanceShortFundingRate?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.binanceLongFundingRate?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.binanceShortFundingRate?.toFixed(4) || '0.0000' }}%</span>
               </div>
             </div>
           </template>
@@ -100,14 +98,14 @@
       </div>
 
       <!-- Configuration Area -->
-      <div class="bg-[#252930] rounded p-3 space-y-3">
-        <div class="text-xs font-bold mb-2">策略配置</div>
+      <div class="bg-[#252930] rounded p-2 space-y-2">
+        <div class="text-xs font-bold mb-1">策略配置</div>
 
         <!-- M Coin Settings -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-2">
           <div>
             <label :for="`openingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
-              {{ type === 'forward' ? '正向开仓单次下单手数' : '反向开仓单次下单手数' }} (XAU)
+              {{ type === 'forward' ? '正开单手数' : '反开单手数' }} (XAU)
               <span class="text-[#0ecb81] ml-1">≈ {{ xauToLot(config.openingMCoin).toFixed(2) }} Lot</span>
             </label>
             <input
@@ -115,13 +113,13 @@
               v-model.number="config.openingMCoin"
               type="number"
               step="1"
-              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
           </div>
 
           <div>
             <label :for="`closingMCoin-${type}`" class="text-xs text-gray-400 mb-1 block">
-              {{ type === 'forward' ? '正向平仓单次下单手数' : '反向平仓单次下单手数' }} (XAU)
+              {{ type === 'forward' ? '正平单手数' : '反平单手数' }} (XAU)
               <span class="text-[#0ecb81] ml-1">≈ {{ xauToLot(config.closingMCoin).toFixed(2) }} Lot</span>
             </label>
             <input
@@ -129,20 +127,20 @@
               v-model.number="config.closingMCoin"
               type="number"
               step="1"
-              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
           </div>
         </div>
 
         <!-- Opening/Closing Position Toggles -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="text-xs text-gray-400 mb-1 block">开仓控制</label>
+            <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpening"
               :disabled="executing"
               :class="[
-                'w-full px-3 py-2 rounded text-xs font-bold transition-all',
+                'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
                 executing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
                 config.openingEnabled
                   ? 'bg-[#F1C40F] text-white'
@@ -152,14 +150,14 @@
               {{ executing ? '执行中...' : (config.openingEnabled ? '停用开仓' : (type === 'forward' ? '启用正向开仓' : '启用反向开仓')) }}
             </button>
             <!-- Trigger Progress for Opening -->
-            <div v-if="config.openingEnabled" class="mt-2 text-xs">
-              <div class="flex justify-between text-gray-400 mb-1">
+            <div v-if="config.openingEnabled" class="mt-1.5 text-xs">
+              <div class="flex justify-between text-gray-400 mb-0.5">
                 <span>触发进度</span>
                 <span>{{ triggerCount.opening }} / {{ config.openingSyncQty }}</span>
               </div>
-              <div class="w-full bg-[#1a1d21] rounded-full h-2">
+              <div class="w-full bg-[#1a1d21] rounded-full h-1.5">
                 <div
-                  class="bg-[#0ecb81] h-2 rounded-full transition-all duration-300"
+                  class="bg-[#0ecb81] h-1.5 rounded-full transition-all duration-300"
                   :style="{ width: `${Math.min(100, (triggerCount.opening / config.openingSyncQty) * 100)}%` }"
                 ></div>
               </div>
@@ -167,29 +165,29 @@
           </div>
 
           <div>
-            <label class="text-xs text-gray-400 mb-1 block">平仓控制</label>
+            <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosing"
               :disabled="executing"
               :class="[
-                'w-full px-3 py-2 rounded text-xs font-bold transition-all',
+                'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
                 executing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
                 config.closingEnabled
                   ? 'bg-[#F1C40F] text-white'
-                  : 'bg-[#00C98B] text-white'
+                  : 'bg-[#f6465d] text-white'
               ]"
             >
               {{ executing ? '执行中...' : (config.closingEnabled ? '停用平仓' : (type === 'forward' ? '启用正向平仓' : '启用反向平仓')) }}
             </button>
             <!-- Trigger Progress for Closing -->
-            <div v-if="config.closingEnabled" class="mt-2 text-xs">
-              <div class="flex justify-between text-gray-400 mb-1">
+            <div v-if="config.closingEnabled" class="mt-1.5 text-xs">
+              <div class="flex justify-between text-gray-400 mb-0.5">
                 <span>触发进度</span>
                 <span>{{ triggerCount.closing }} / {{ config.closingSyncQty }}</span>
               </div>
-              <div class="w-full bg-[#1a1d21] rounded-full h-2">
+              <div class="w-full bg-[#1a1d21] rounded-full h-1.5">
                 <div
-                  class="bg-[#f6465d] h-2 rounded-full transition-all duration-300"
+                  class="bg-[#f6465d] h-1.5 rounded-full transition-all duration-300"
                   :style="{ width: `${Math.min(100, (triggerCount.closing / config.closingSyncQty) * 100)}%` }"
                 ></div>
               </div>
@@ -197,11 +195,124 @@
           </div>
         </div>
 
+        <!-- Continuous Execution Controls -->
+        <div class="border-t border-[#2b3139] pt-2 mt-2">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs text-gray-400">连续执行模式</label>
+            <div class="flex gap-2">
+              <span v-if="continuousExecutionEnabled.opening" class="text-xs text-[#0ecb81] font-bold">开仓运行中</span>
+              <span v-if="continuousExecutionEnabled.closing" class="text-xs text-[#f6465d] font-bold">平仓运行中</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              @click="startContinuousExecution('opening')"
+              :disabled="continuousExecutionEnabled.opening || executing"
+              :class="[
+                'px-2 py-1.5 rounded text-xs font-bold transition-all',
+                continuousExecutionEnabled.opening || executing
+                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                  : 'bg-[#0ecb81] text-white hover:bg-[#0db872]'
+              ]"
+            >
+              {{ continuousExecutionEnabled.opening ? '开仓执行中' : '连续开仓' }}
+            </button>
+
+            <button
+              @click="startContinuousExecution('closing')"
+              :disabled="continuousExecutionEnabled.closing || executing"
+              :class="[
+                'px-2 py-1.5 rounded text-xs font-bold transition-all',
+                continuousExecutionEnabled.closing || executing
+                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                  : 'bg-[#f6465d] text-white hover:bg-[#e5394d]'
+              ]"
+            >
+              {{ continuousExecutionEnabled.closing ? '平仓执行中' : '连续平仓' }}
+            </button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 mt-1.5">
+            <button
+              v-if="continuousExecutionEnabled.opening"
+              @click="stopContinuousExecution('opening')"
+              class="px-2 py-1 rounded text-xs font-bold bg-[#F1C40F] text-white hover:bg-[#e1b40f] transition-all"
+            >
+              停止开仓
+            </button>
+            <button
+              v-if="continuousExecutionEnabled.closing"
+              @click="stopContinuousExecution('closing')"
+              class="px-2 py-1 rounded text-xs font-bold bg-[#F1C40F] text-white hover:bg-[#e1b40f] transition-all"
+            >
+              停止平仓
+            </button>
+          </div>
+
+          <!-- Execution Status Display -->
+          <div v-if="continuousExecutionStatus.opening || continuousExecutionStatus.closing" class="mt-2 space-y-1.5">
+            <div v-if="continuousExecutionStatus.opening" class="p-1.5 bg-[#1a1d21] rounded text-xs">
+              <div class="text-[#0ecb81] font-bold mb-0.5">开仓状态</div>
+              <div class="flex justify-between mb-0.5">
+                <span class="text-gray-400">状态:</span>
+                <span :class="[
+                  'font-bold',
+                  continuousExecutionStatus.opening.status === 'running' ? 'text-[#0ecb81]' :
+                  continuousExecutionStatus.opening.status === 'completed' ? 'text-[#00C98B]' :
+                  continuousExecutionStatus.opening.status === 'failed' ? 'text-[#f6465d]' :
+                  'text-gray-400'
+                ]">
+                  {{ continuousExecutionStatus.opening.status === 'running' ? '运行中' :
+                     continuousExecutionStatus.opening.status === 'completed' ? '已完成' :
+                     continuousExecutionStatus.opening.status === 'failed' ? '失败' :
+                     continuousExecutionStatus.opening.status }}
+                </span>
+              </div>
+              <div v-if="continuousExecutionStatus.opening.current_ladder !== undefined" class="flex justify-between mb-0.5">
+                <span class="text-gray-400">当前阶梯:</span>
+                <span class="text-white">{{ continuousExecutionStatus.opening.current_ladder + 1 }}</span>
+              </div>
+              <div v-if="continuousExecutionStatus.opening.trades_executed !== undefined" class="flex justify-between">
+                <span class="text-gray-400">已执行交易:</span>
+                <span class="text-white">{{ continuousExecutionStatus.opening.trades_executed }}</span>
+              </div>
+            </div>
+
+            <div v-if="continuousExecutionStatus.closing" class="p-1.5 bg-[#1a1d21] rounded text-xs">
+              <div class="text-[#f6465d] font-bold mb-0.5">平仓状态</div>
+              <div class="flex justify-between mb-0.5">
+                <span class="text-gray-400">状态:</span>
+                <span :class="[
+                  'font-bold',
+                  continuousExecutionStatus.closing.status === 'running' ? 'text-[#0ecb81]' :
+                  continuousExecutionStatus.closing.status === 'completed' ? 'text-[#00C98B]' :
+                  continuousExecutionStatus.closing.status === 'failed' ? 'text-[#f6465d]' :
+                  'text-gray-400'
+                ]">
+                  {{ continuousExecutionStatus.closing.status === 'running' ? '运行中' :
+                     continuousExecutionStatus.closing.status === 'completed' ? '已完成' :
+                     continuousExecutionStatus.closing.status === 'failed' ? '失败' :
+                     continuousExecutionStatus.closing.status }}
+                </span>
+              </div>
+              <div v-if="continuousExecutionStatus.closing.current_ladder !== undefined" class="flex justify-between mb-0.5">
+                <span class="text-gray-400">当前阶梯:</span>
+                <span class="text-white">{{ continuousExecutionStatus.closing.current_ladder + 1 }}</span>
+              </div>
+              <div v-if="continuousExecutionStatus.closing.trades_executed !== undefined" class="flex justify-between">
+                <span class="text-gray-400">已执行交易:</span>
+                <span class="text-white">{{ continuousExecutionStatus.closing.trades_executed }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Data Sync Quantities -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-3 gap-2">
           <div>
             <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
-              {{ type === 'forward' ? '正向开仓触发次数' : '反向开仓触发次数' }}
+              {{ type === 'forward' ? '正开次数' : '反开次数' }}
             </label>
             <input
               :id="`openingSyncQty-${type}`"
@@ -209,13 +320,13 @@
               type="number"
               step="1"
               min="1"
-              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
           </div>
 
           <div>
             <label :for="`closingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
-              {{ type === 'forward' ? '正向平仓触发次数' : '反向平仓触发次数' }}
+              {{ type === 'forward' ? '正平次数' : '反平次数' }}
             </label>
             <input
               :id="`closingSyncQty-${type}`"
@@ -223,29 +334,48 @@
               type="number"
               step="1"
               min="1"
-              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1.5 text-sm focus:border-[#f0b90b] focus:outline-none"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
+          </div>
+
+          <div>
+            <label :for="`triggerCheckInterval-${type}`" class="text-xs text-gray-400 mb-1 block">
+              触发频率
+              <span class="text-[#0ecb81] ml-1">{{ config.triggerCheckInterval }}ms</span>
+            </label>
+            <input
+              :id="`triggerCheckInterval-${type}`"
+              v-model.number="config.triggerCheckInterval"
+              type="number"
+              step="10"
+              min="10"
+              max="1000"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
+            />
+            <div class="text-xs text-gray-500 mt-0.5">
+              建议值: 50ms
+            </div>
           </div>
         </div>
 
         <!-- Save Button -->
         <button
           @click="saveConfig"
-          class="w-full px-4 py-2 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors"
+          class="w-full px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
         >
           保存配置
         </button>
       </div>
 
       <!-- Ladder Configuration -->
-      <div class="bg-[#252930] rounded p-3">
-        <div class="flex items-center justify-between mb-3">
+      <div class="bg-[#252930] rounded p-2">
+        <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-bold">阶梯配置（最多5级）</span>
           <button
             @click="addLadder"
             :disabled="config.ladders.length >= 5"
             :class="[
-              'px-3 py-1 rounded text-xs font-bold transition-colors',
+              'px-2 py-1 rounded text-xs font-bold transition-colors',
               config.ladders.length >= 5
                 ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                 : 'bg-[#f0b90b] text-[#1a1d21] hover:bg-[#e0a800]'
@@ -255,46 +385,46 @@
           </button>
         </div>
 
-        <div class="space-y-2">
+        <div class="space-y-1.5">
           <div
             v-for="(ladder, index) in config.ladders"
             :key="index"
-            class="bg-[#1a1d21] rounded p-2"
+            class="bg-[#1a1d21] rounded p-1.5"
           >
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center space-x-2">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center space-x-1.5">
                 <span class="text-xs text-gray-400">阶梯 {{ index + 1 }}</span>
                 <!-- Phase 3: 失败计数显示 -->
                 <span
                   v-if="(ladderFailureCounts.opening[index] || 0) > 0 || (ladderFailureCounts.closing[index] || 0) > 0"
-                  class="text-xs px-2 py-0.5 rounded bg-[#f6465d] bg-opacity-20 text-[#f6465d]"
+                  class="text-xs px-1.5 py-0.5 rounded bg-[#f6465d] bg-opacity-20 text-[#f6465d]"
                 >
                   失败: 开{{ ladderFailureCounts.opening[index] || 0 }}/平{{ ladderFailureCounts.closing[index] || 0 }}
                 </span>
               </div>
-              <div class="flex items-center space-x-2">
+              <div class="flex items-center space-x-1.5">
                 <label :for="`ladder-enabled-${type}-${index}`" class="flex items-center space-x-1 cursor-pointer">
                   <input
                     :id="`ladder-enabled-${type}-${index}`"
                     v-model="ladder.enabled"
                     type="checkbox"
-                    class="w-4 h-4 rounded border-[#2b3139] bg-[#252930] text-[#0ecb81] focus:ring-[#0ecb81]"
+                    class="w-3.5 h-3.5 rounded border-[#2b3139] bg-[#252930] text-[#0ecb81] focus:ring-[#0ecb81]"
                   />
                   <span class="text-xs">启用</span>
                 </label>
                 <button
                   @click="removeLadder(index)"
-                  class="px-2 py-1 bg-[#f6465d] text-white rounded text-xs hover:bg-[#e03d52] transition-colors"
+                  class="px-1.5 py-0.5 bg-[#f6465d] text-white rounded text-xs hover:bg-[#e03d52] transition-colors"
                 >
                   删除
                 </button>
               </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-3 gap-1.5">
               <div>
-                <label :for="`openPrice-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
-                  {{ type === 'forward' ? '正向开仓点差值' : '反向开仓点差值' }}
+                <label :for="`openPrice-${type}-${index}`" class="text-xs text-gray-400 mb-0.5 block">
+                  {{ type === 'forward' ? '正开差值' : '反开差值' }}
                 </label>
                 <input
                   :id="`openPrice-${type}-${index}`"
@@ -302,13 +432,13 @@
                   type="number"
                   step="0.01"
                   :placeholder="(0).toFixed(2)"
-                  class="w-full bg-transparent border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
+                  class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label :for="`threshold-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
-                  {{ type === 'forward' ? '正向平仓点差值' : '反向平仓点差值' }}
+                <label :for="`threshold-${type}-${index}`" class="text-xs text-gray-400 mb-0.5 block">
+                  {{ type === 'forward' ? '正平差值' : '反平差值' }}
                 </label>
                 <input
                   :id="`threshold-${type}-${index}`"
@@ -316,13 +446,13 @@
                   type="number"
                   step="0.01"
                   :placeholder="(0).toFixed(2)"
-                  class="w-full bg-transparent border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
+                  class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
 
               <div>
-                <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-1 block">
-                  {{ type === 'forward' ? '正向下单总手数' : '反向下单总手数' }} (XAU)
+                <label :for="`qtyLimit-${type}-${index}`" class="text-xs text-gray-400 mb-0.5 block">
+                  {{ type === 'forward' ? '正下总手数' : '反下总手数' }} (XAU)
                   <span class="text-[#0ecb81] ml-1">≈ {{ xauToLot(ladder.qtyLimit).toFixed(2) }} Lot</span>
                 </label>
                 <input
@@ -330,7 +460,7 @@
                   v-model.number="ladder.qtyLimit"
                   type="number"
                   step="1"
-                  class="w-full bg-transparent border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
+                  class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
             </div>
@@ -340,22 +470,22 @@
         <!-- Save Strategy Button -->
         <button
           @click="saveStrategy"
-          class="w-full mt-3 px-4 py-2 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors"
+          class="w-full mt-2 px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
         >
           保存策略
         </button>
 
         <!-- Phase 3: Reset Failure Counts Buttons -->
-        <div class="grid grid-cols-2 gap-2 mt-2">
+        <div class="grid grid-cols-2 gap-1.5 mt-1.5">
           <button
             @click="resetLadderFailures('opening')"
-            class="px-3 py-1.5 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
+            class="px-2 py-1 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
           >
             重置开仓失败计数
           </button>
           <button
             @click="resetLadderFailures('closing')"
-            class="px-3 py-1.5 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
+            class="px-2 py-1 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
           >
             重置平仓失败计数
           </button>
@@ -478,6 +608,12 @@ const accountsData = ref(null)
 const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
 
+// Continuous execution state - separate for opening and closing
+const continuousExecutionEnabled = ref({ opening: false, closing: false })
+const continuousExecutionTaskId = ref({ opening: null, closing: null })
+const continuousExecutionStatus = ref({ opening: null, closing: null })
+const statusPollingInterval = ref({ opening: null, closing: null })
+
 const config = ref({
   openingMCoin: 5,
   closingMCoin: 5,
@@ -485,6 +621,7 @@ const config = ref({
   closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING, false),
   openingSyncQty: 3,
   closingSyncQty: 3,
+  triggerCheckInterval: 50, // 触发器检测频率（毫秒）
   ladders: [
     { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3 },
     { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3 },
@@ -1634,7 +1771,7 @@ function validateLadderConfig(action) {
     if (action === 'opening') {
       // Check opening spread value
       if (ladder.openPrice === undefined || ladder.openPrice === null) {
-        errors.push(`阶梯${ladderNum}: 开仓点差值未配置`)
+        errors.push(`阶梯${ladderNum}: 开差值未配置`)
       }
 
       // Check opening trigger count (config level)
@@ -1644,17 +1781,17 @@ function validateLadderConfig(action) {
 
       // Check opening m_coin
       if (!config.value.openingMCoin || config.value.openingMCoin <= 0) {
-        errors.push(`开仓单次下单手数必须大于0`)
+        errors.push(`开单手数必须大于0`)
       }
 
       // Check m_coin doesn't exceed total quantity
       if (config.value.openingMCoin > ladder.qtyLimit) {
-        errors.push(`阶梯${ladderNum}: 开仓单次下单手数(${config.value.openingMCoin})不能超过总手数(${ladder.qtyLimit})`)
+        errors.push(`阶梯${ladderNum}: 开单手数(${config.value.openingMCoin})不能超过总手数(${ladder.qtyLimit})`)
       }
     } else if (action === 'closing') {
       // Check closing spread value
       if (ladder.threshold === undefined || ladder.threshold === null) {
-        errors.push(`阶梯${ladderNum}: 平仓点差值未配置`)
+        errors.push(`阶梯${ladderNum}: 平差值未配置`)
       }
 
       // Check closing trigger count (config level)
@@ -1664,12 +1801,12 @@ function validateLadderConfig(action) {
 
       // Check closing m_coin
       if (!config.value.closingMCoin || config.value.closingMCoin <= 0) {
-        errors.push(`平仓单次下单手数必须大于0`)
+        errors.push(`平单手数必须大于0`)
       }
 
       // Check m_coin doesn't exceed total quantity
       if (config.value.closingMCoin > ladder.qtyLimit) {
-        errors.push(`阶梯${ladderNum}: 平仓单次下单手数(${config.value.closingMCoin})不能超过总手数(${ladder.qtyLimit})`)
+        errors.push(`阶梯${ladderNum}: 平单手数(${config.value.closingMCoin})不能超过总手数(${ladder.qtyLimit})`)
       }
     }
 
@@ -1688,4 +1825,148 @@ function validateLadderConfig(action) {
 function formatNumber(num) {
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
+
+// Continuous execution methods
+async function startContinuousExecution(action) {
+  try {
+    // Validate configuration
+    const validation = validateLadderConfig(action)
+    if (!validation.valid) {
+      validationErrors.value = validation.errors
+      return
+    }
+
+    // Validate accounts
+    const accountValidation = validateAccountsForExecution()
+    if (!accountValidation.valid) {
+      notificationStore.showStrategyNotification(accountValidation.message, 'error')
+      return
+    }
+
+    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === 1)
+    const bybitMT5Account = accountsData.value.accounts.find(a => a.platform_id === 2)
+
+    // Prepare ladder configurations
+    const ladders = config.value.ladders
+      .filter(l => l.enabled)
+      .map(ladder => ({
+        enabled: true,
+        opening_spread: ladder.openPrice || 0,
+        closing_spread: ladder.threshold || 0,
+        total_qty: ladder.qtyLimit || 0,
+        opening_trigger_count: config.value.openingSyncQty || 1,
+        closing_trigger_count: config.value.closingSyncQty || 1
+      }))
+
+    const requestData = {
+      binance_account_id: binanceAccount.account_id,
+      bybit_account_id: bybitMT5Account.account_id,
+      opening_m_coin: config.value.openingMCoin || 5,
+      closing_m_coin: config.value.closingMCoin || 5,
+      ladders: ladders,
+      trigger_check_interval: (config.value.triggerCheckInterval || 50) / 1000 // Convert ms to seconds
+    }
+
+    // Determine endpoint based on action and strategy type
+    let endpoint = ''
+    if (action === 'opening') {
+      endpoint = `/api/v1/strategies/execute/${props.type}/continuous`
+    } else {
+      endpoint = `/api/v1/strategies/close/${props.type}/continuous`
+    }
+
+    console.log('Sending continuous execution request:', { endpoint, requestData })
+    const response = await api.post(endpoint, requestData)
+    console.log('Continuous execution response:', response.data)
+
+    if (response.data.task_id) {
+      continuousExecutionTaskId.value[action] = response.data.task_id
+      continuousExecutionEnabled.value[action] = true
+
+      console.log('Task ID received:', response.data.task_id)
+
+      // Start polling for status
+      startStatusPolling(action)
+
+      notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已启动`, 'success')
+    } else {
+      console.error('No task_id in response:', response.data)
+      notificationStore.showStrategyNotification('启动失败：未收到任务ID', 'error')
+    }
+  } catch (error) {
+    console.error('Failed to start continuous execution:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '未知错误'
+    notificationStore.showStrategyNotification(`启动连续执行失败: ${errorMsg}`, 'error')
+  }
+}
+
+async function stopContinuousExecution(action) {
+  try {
+    if (!continuousExecutionTaskId.value[action]) {
+      return
+    }
+
+    await api.post(`/api/v1/strategies/execution/${continuousExecutionTaskId.value[action]}/stop`)
+
+    continuousExecutionEnabled.value[action] = false
+    continuousExecutionStatus.value[action] = null  // Clear status to hide the status display
+    stopStatusPolling(action)
+
+    notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已停止`, 'info')
+  } catch (error) {
+    console.error('Failed to stop continuous execution:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '未知错误'
+    notificationStore.showStrategyNotification(`停止连续执行失败: ${errorMsg}`, 'error')
+  }
+}
+
+function startStatusPolling(action) {
+  if (statusPollingInterval.value[action]) {
+    clearInterval(statusPollingInterval.value[action])
+  }
+
+  statusPollingInterval.value[action] = setInterval(async () => {
+    await fetchExecutionStatus(action)
+  }, 1000) // Poll every second
+}
+
+function stopStatusPolling(action) {
+  if (statusPollingInterval.value[action]) {
+    clearInterval(statusPollingInterval.value[action])
+    statusPollingInterval.value[action] = null
+  }
+}
+
+async function fetchExecutionStatus(action) {
+  try {
+    if (!continuousExecutionTaskId.value[action]) {
+      return
+    }
+
+    const response = await api.get(`/api/v1/strategies/execution/${continuousExecutionTaskId.value[action]}/status`)
+    // 后端返回格式: { success: true, task: {...} }
+    const taskStatus = response.data.task || response.data
+    continuousExecutionStatus.value[action] = taskStatus
+
+    // If task completed or failed, stop polling
+    if (taskStatus.status === 'completed' || taskStatus.status === 'failed' || taskStatus.status === 'cancelled') {
+      continuousExecutionEnabled.value[action] = false
+      stopStatusPolling(action)
+
+      if (taskStatus.status === 'completed') {
+        notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
+      } else if (taskStatus.status === 'failed') {
+        notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}失败`, 'error')
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch execution status:', error)
+  }
+}
+
+// Cleanup on component unmount
+onUnmounted(() => {
+  stopStatusPolling('opening')
+  stopStatusPolling('closing')
+})
 </script>

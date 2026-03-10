@@ -106,6 +106,24 @@ class TriggerCountManager:
             "last_trigger_time": self.last_trigger_time
         }
 
+    def get_count(self) -> int:
+        """
+        Get current trigger count.
+
+        Returns:
+            Current trigger count
+        """
+        return self.count
+
+    def set_count(self, count: int):
+        """
+        Set trigger count (primarily for testing).
+
+        Args:
+            count: Trigger count to set
+        """
+        self.count = max(0, count)  # Ensure non-negative
+
 
 class TriggerManagerRegistry:
     """

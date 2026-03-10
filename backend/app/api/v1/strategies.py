@@ -904,3 +904,284 @@ async def sync_positions_from_exchange(
 
     return sync_result
 
+
+
+# ============================================================================
+# Continuous Execution Endpoints
+# ============================================================================
+
+class LadderConfigSchema(BaseModel):
+    """Ladder configuration schema"""
+    enabled: bool
+    opening_spread: float
+    closing_spread: float
+    total_qty: float
+    opening_trigger_count: int
+    closing_trigger_count: int
+
+
+class ContinuousExecuteRequest(BaseModel):
+    """Request schema for continuous execution"""
+    binance_account_id: UUID
+    bybit_account_id: UUID
+    opening_m_coin: float
+    closing_m_coin: float
+    trigger_check_interval: float = Field(default=0.05, ge=0.01, le=1.0)  # 10ms to 1000ms
+    ladders: List[LadderConfigSchema]
+    trigger_check_interval: float = 0.05
+
+
+@router.post("/execute/{strategy_type}/continuous")
+async def execute_continuous_opening(
+    strategy_type: str,
+    request: ContinuousExecuteRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute arbitrage strategy opening with continuous execution
+
+    Args:
+        strategy_type: 'forward' or 'reverse'
+    """
+    # Write to a debug file to confirm API is called
+    import datetime
+    with open("api_debug.log", "a") as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"[{datetime.datetime.now()}] API CALLED: /execute/{strategy_type}/continuous\n")
+        f.write(f"User ID: {user_id}\n")
+        f.write(f"Request: {request.dict()}\n")
+        f.write(f"{'='*80}\n")
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.error("=" * 80)
+    logger.error(f"API ENDPOINT CALLED: /execute/{strategy_type}/continuous")
+    logger.error(f"User ID: {user_id}")
+    logger.error(f"Request data: {request.dict()}")
+    logger.error("=" * 80)
+
+    from app.services.continuous_executor import ContinuousStrategyExecutor, LadderConfig
+    from app.services.execution_task_manager import execution_task_manager
+
+    # Validate strategy type
+    if strategy_type not in ['forward', 'reverse']:
+        raise HTTPException(status_code=400, detail="Invalid strategy type. Must be 'forward' or 'reverse'")
+
+    try:
+        # 1. Get accounts
+        binance_result = await db.execute(
+            select(Account).where(Account.account_id == request.binance_account_id)
+        )
+        binance_account = binance_result.scalar_one_or_none()
+
+        bybit_result = await db.execute(
+            select(Account).where(Account.account_id == request.bybit_account_id)
+        )
+        bybit_account = bybit_result.scalar_one_or_none()
+
+        if not binance_account or not bybit_account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # 2. Convert ladder schemas to LadderConfig objects
+        ladders = [
+            LadderConfig(
+                enabled=ladder.enabled,
+                opening_spread=ladder.opening_spread,
+                closing_spread=ladder.closing_spread,
+                total_qty=ladder.total_qty,
+                opening_trigger_count=ladder.opening_trigger_count,
+                closing_trigger_count=ladder.closing_trigger_count
+            )
+            for ladder in request.ladders
+        ]
+
+        # 3. Create continuous executor
+        strategy_id = f"{user_id}_{strategy_type}_opening_continuous"
+        executor = ContinuousStrategyExecutor(
+            strategy_id=strategy_id,
+            order_executor=order_executor_v2,
+            trigger_check_interval=request.trigger_check_interval
+        )
+
+        # 4. Start continuous execution in background based on strategy type
+        if strategy_type == 'reverse':
+            coro = executor.execute_reverse_opening_continuous(
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                opening_m_coin=request.opening_m_coin,
+                user_id=user_id
+            )
+        else:  # forward
+            coro = executor.execute_forward_opening_continuous(
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                opening_m_coin=request.opening_m_coin,
+                user_id=user_id
+            )
+
+        task_id = execution_task_manager.start_task(executor, coro)
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "message": "Continuous execution started",
+            "strategy_id": strategy_id
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start continuous execution: {str(e)}"
+        )
+
+
+@router.post("/close/{strategy_type}/continuous")
+async def execute_continuous_closing(
+    strategy_type: str,
+    request: ContinuousExecuteRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute arbitrage strategy closing with continuous execution
+
+    Args:
+        strategy_type: 'forward' or 'reverse'
+    """
+    from app.services.continuous_executor import ContinuousStrategyExecutor, LadderConfig
+    from app.services.execution_task_manager import execution_task_manager
+
+    # Validate strategy type
+    if strategy_type not in ['forward', 'reverse']:
+        raise HTTPException(status_code=400, detail="Invalid strategy type. Must be 'forward' or 'reverse'")
+
+    try:
+        # 1. Get accounts
+        binance_result = await db.execute(
+            select(Account).where(Account.account_id == request.binance_account_id)
+        )
+        binance_account = binance_result.scalar_one_or_none()
+
+        bybit_result = await db.execute(
+            select(Account).where(Account.account_id == request.bybit_account_id)
+        )
+        bybit_account = bybit_result.scalar_one_or_none()
+
+        if not binance_account or not bybit_account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # 2. Convert ladder schemas to LadderConfig objects
+        ladders = [
+            LadderConfig(
+                enabled=ladder.enabled,
+                opening_spread=ladder.opening_spread,
+                closing_spread=ladder.closing_spread,
+                total_qty=ladder.total_qty,
+                opening_trigger_count=ladder.opening_trigger_count,
+                closing_trigger_count=ladder.closing_trigger_count
+            )
+            for ladder in request.ladders
+        ]
+
+        # 3. Create continuous executor
+        strategy_id = f"{user_id}_{strategy_type}_closing_continuous"
+        executor = ContinuousStrategyExecutor(
+            strategy_id=strategy_id,
+            order_executor=order_executor_v2,
+            trigger_check_interval=request.trigger_check_interval
+        )
+
+        # 4. Start continuous execution in background based on strategy type
+        if strategy_type == 'reverse':
+            coro = executor.execute_reverse_closing_continuous(
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                closing_m_coin=request.closing_m_coin,
+                user_id=user_id
+            )
+        else:  # forward
+            coro = executor.execute_forward_closing_continuous(
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                closing_m_coin=request.closing_m_coin,
+                user_id=user_id
+            )
+
+        task_id = execution_task_manager.start_task(executor, coro)
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "message": "Continuous execution started",
+            "strategy_id": strategy_id
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start continuous execution: {str(e)}"
+        )
+
+
+@router.get("/execution/{task_id}/status")
+async def get_execution_status(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Get status of continuous execution task"""
+    from app.services.execution_task_manager import execution_task_manager
+
+    task_status = execution_task_manager.get_status(task_id)
+
+    if not task_status:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+
+    return {
+        "success": True,
+        "task": task_status
+    }
+
+
+@router.post("/execution/{task_id}/stop")
+async def stop_execution(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Stop continuous execution task"""
+    from app.services.execution_task_manager import execution_task_manager
+
+    stopped = await execution_task_manager.stop_task(task_id)
+
+    if not stopped:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+
+    return {
+        "success": True,
+        "message": "Execution stopped",
+        "task_id": task_id
+    }
+
+
+@router.get("/execution/tasks")
+async def get_all_execution_tasks(
+    user_id: str = Depends(get_current_user_id),
+):
+    """Get all execution tasks"""
+    from app.services.execution_task_manager import execution_task_manager
+
+    tasks = execution_task_manager.get_all_tasks()
+
+    return {
+        "success": True,
+        "tasks": tasks
+    }

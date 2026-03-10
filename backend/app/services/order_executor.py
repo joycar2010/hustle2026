@@ -28,9 +28,15 @@ class OrderExecutor:
         post_only: bool = False,
     ) -> Dict[str, Any]:
         """Place order on Binance"""
+        import logging
+        logger = logging.getLogger(__name__)
+
         client = BinanceFuturesClient(account.api_key, account.api_secret)
 
         try:
+            # Log order parameters
+            logger.info(f"Binance下单请求 - symbol: {symbol}, side: {side}, type: {order_type}, qty: {quantity}, price: {price}, position_side: {position_side}, post_only: {post_only}")
+
             result = await client.place_order(
                 symbol=symbol,
                 side=side,
@@ -40,6 +46,9 @@ class OrderExecutor:
                 position_side=position_side,
                 post_only=post_only,
             )
+
+            logger.info(f"Binance下单成功 - order_id: {result.get('orderId')}, status: {result.get('status')}")
+
             return {
                 "success": True,
                 "platform": "binance",
@@ -49,6 +58,7 @@ class OrderExecutor:
                 "data": result,
             }
         except Exception as e:
+            logger.error(f"Binance下单失败 - symbol: {symbol}, side: {side}, qty: {quantity}, price: {price}, error: {str(e)}")
             return {
                 "success": False,
                 "platform": "binance",

@@ -606,6 +606,7 @@ async def get_realtime_pending_orders(
                                 "price": float(order.get("price", 0)),
                                 "status": order.get("status", "").lower(),
                                 "symbol": order.get("symbol", ""),
+                                "source": "strategy"  # Default to strategy
                             })
                     finally:
                         await client.close()

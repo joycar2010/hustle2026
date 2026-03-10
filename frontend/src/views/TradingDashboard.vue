@@ -80,18 +80,39 @@ import StrategyPanel from '@/components/trading/StrategyPanel.vue'
 import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vue'
 import Risk from '@/views/Risk.vue'
 
-const showRiskPanel = ref(true)
-const showLeftPanel = ref(true)
+// 从 localStorage 加载面板状态
+function loadPanelState(key, defaultValue = true) {
+  try {
+    const saved = localStorage.getItem(key)
+    return saved !== null ? saved === 'true' : defaultValue
+  } catch {
+    return defaultValue
+  }
+}
+
+// 保存面板状态到 localStorage
+function savePanelState(key, value) {
+  try {
+    localStorage.setItem(key, value.toString())
+  } catch (error) {
+    console.error('Failed to save panel state:', error)
+  }
+}
+
+const showRiskPanel = ref(loadPanelState('showRiskPanel', true))
+const showLeftPanel = ref(loadPanelState('showLeftPanel', true))
 const marketCardsRef = ref(null)
 
 // 切换风险控制面板显示/隐藏
 function toggleRiskPanel() {
   showRiskPanel.value = !showRiskPanel.value
+  savePanelState('showRiskPanel', showRiskPanel.value)
 }
 
 // 切换左侧面板显示/隐藏
 function toggleLeftPanel() {
   showLeftPanel.value = !showLeftPanel.value
+  savePanelState('showLeftPanel', showLeftPanel.value)
 }
 </script>
 

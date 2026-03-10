@@ -12,13 +12,13 @@ from app.utils.quantity_converter import quantity_converter
 class OrderExecutorV2:
     """
     Optimized order executor with V2.0 specifications:
-    - Binance timeout: 0.3 seconds
+    - Binance timeout: 0.6 seconds (increased for better fill rate)
     - Bybit timeout: 0.1 seconds
     - Single retry for unfilled orders
     """
 
     def __init__(self):
-        self.binance_timeout = 0.3  # 300ms
+        self.binance_timeout = 0.6  # 600ms (increased from 300ms)
         self.bybit_timeout = 0.1    # 100ms
         self.max_retries = 1        # Only 1 retry (循环一次)
         self.base_executor = base_executor

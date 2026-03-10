@@ -649,20 +649,63 @@ class PendingOrdersStreamer:
                     await asyncio.sleep(self.interval)
                     continue
 
-                # Fetch pending orders from API
+                # Fetch pending orders directly from Binance API
                 try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get('http://localhost:8000/api/v1/trading/orders/realtime', timeout=5) as response:
-                            if response.status == 200:
-                                orders_data = await response.json()
+                    from app.models.account import Account
+                    from app.core.database import AsyncSessionLocal
+                    from app.services.binance_client import BinanceFuturesClient
+                    from app.utils.time_utils import utc_ms_to_beijing
+                    from sqlalchemy import select
 
-                                # Broadcast to all connected clients
-                                await manager.broadcast({
-                                    "type": "pending_orders",
-                                    "data": orders_data
-                                })
-                                self.broadcast_count += 1
-                                self.last_broadcast_time = datetime.now().isoformat()
+                    pending_orders = []
+
+                    # Get all Binance accounts from database
+                    async with AsyncSessionLocal() as db:
+                        result = await db.execute(
+                            select(Account).where(Account.platform_id == 1)  # Binance
+                        )
+                        accounts = result.scalars().all()
+
+                        # Fetch open orders for each account
+                        for account in accounts:
+                            try:
+                                client = BinanceFuturesClient(account.api_key, account.api_secret)
+                                try:
+                                    # Get all open orders for XAUUSDT
+                                    open_orders = await client.get_open_orders(symbol="XAUUSDT")
+
+                                    for order in open_orders:
+                                        # Convert time to Beijing time
+                                        order_time = order.get("time", 0)
+                                        beijing_time = utc_ms_to_beijing(order_time)
+
+                                        pending_orders.append({
+                                            "id": str(order.get("orderId")),
+                                            "timestamp": beijing_time,
+                                            "exchange": "Binance",
+                                            "side": order.get("side", "").lower(),
+                                            "quantity": float(order.get("origQty", 0)),
+                                            "price": float(order.get("price", 0)),
+                                            "status": order.get("status", "").lower(),
+                                            "symbol": order.get("symbol", ""),
+                                            "source": "strategy"  # Default to strategy
+                                        })
+                                finally:
+                                    await client.close()
+                            except Exception as e:
+                                logger.error(f"Failed to fetch orders for account {account.account_id}: {e}")
+
+                    # Sort by timestamp descending
+                    pending_orders.sort(key=lambda x: x["timestamp"], reverse=True)
+
+                    # Broadcast to all connected clients
+                    await manager.broadcast({
+                        "type": "pending_orders",
+                        "data": pending_orders[:8]  # Limit to 8 most recent orders
+                    })
+                    self.broadcast_count += 1
+                    self.last_broadcast_time = datetime.now().isoformat()
+
                 except Exception as e:
                     logger.error(f"Failed to fetch pending orders: {e}")
 
