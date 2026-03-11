@@ -312,9 +312,12 @@ class ContinuousStrategyExecutor:
                 logger.error(f"Execution failed: {exec_result}")
                 return {'success': False, 'error': exec_result.get('error')}
 
-            # Step 9: Handle Binance not filled
-            if exec_result.get('binance_filled_qty', 0) == 0:
-                logger.info("Binance not filled, resetting triggers")
+            # Step 9: Handle three scenarios
+            binance_filled = exec_result.get('binance_filled_qty', 0)
+
+            # Scenario 1: Binance not filled
+            if binance_filled == 0:
+                logger.info("Scenario 1: Binance not filled, resetting triggers")
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
                 continue
@@ -344,7 +347,17 @@ class ContinuousStrategyExecutor:
             await self._push_position_change(ladder_idx, filled_qty, position_info)
             await self._push_order_executed(ladder_idx, exec_result, current_spread)
 
-            # Step 12: DO NOT reset triggers - continue with accumulated count
+            # Step 12: Handle Scenario 2 vs Scenario 3
+            # Check if fully filled (use 95% threshold to account for rounding)
+            if binance_filled >= order_qty * 0.95:
+                # Scenario 2: Fully filled - DO NOT reset triggers
+                logger.info(f"Scenario 2: Fully filled ({binance_filled}/{order_qty}), keeping trigger count")
+            else:
+                # Scenario 3: Partially filled - Reset triggers
+                logger.info(f"Scenario 3: Partially filled ({binance_filled}/{order_qty}), resetting triggers")
+                self.trigger_mgr.reset()
+                await self._push_trigger_reset(ladder_idx, strategy_type)
+
             # Small delay to prevent API spam
             await asyncio.sleep(0.01)
 

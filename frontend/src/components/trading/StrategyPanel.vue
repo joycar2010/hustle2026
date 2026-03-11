@@ -138,28 +138,28 @@
           <div>
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
-              @click="toggleOpening"
-              :disabled="executing"
+              @click="toggleOpeningExecution"
+              :disabled="executing && !continuousExecutionEnabled.opening"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                executing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
-                config.openingEnabled
-                  ? 'bg-[#F1C40F] text-white'
-                  : 'bg-[#00C98B] text-white'
+                executing && !continuousExecutionEnabled.opening ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
+                continuousExecutionEnabled.opening
+                  ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
+                  : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
             >
-              {{ executing ? '执行中...' : (config.openingEnabled ? '停用开仓' : (type === 'forward' ? '启用正向开仓' : '启用反向开仓')) }}
+              {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
             </button>
             <!-- Trigger Progress for Opening -->
-            <div v-if="config.openingEnabled" class="mt-1.5 text-xs">
+            <div v-if="continuousExecutionEnabled.opening" class="mt-1.5 text-xs">
               <div class="flex justify-between text-gray-400 mb-0.5">
                 <span>触发进度</span>
-                <span>{{ triggerCount.opening }} / {{ config.openingSyncQty }}</span>
+                <span>{{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}</span>
               </div>
               <div class="w-full bg-[#1a1d21] rounded-full h-1.5">
                 <div
                   class="bg-[#0ecb81] h-1.5 rounded-full transition-all duration-300"
-                  :style="{ width: `${Math.min(100, (triggerCount.opening / config.openingSyncQty) * 100)}%` }"
+                  :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.opening.current / continuousExecutionTriggerProgress.opening.required) * 100)}%` }"
                 ></div>
               </div>
             </div>
@@ -168,90 +168,35 @@
           <div>
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
-              @click="toggleClosing"
-              :disabled="executing"
+              @click="toggleClosingExecution"
+              :disabled="executing && !continuousExecutionEnabled.closing"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                executing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
-                config.closingEnabled
-                  ? 'bg-[#F1C40F] text-white'
-                  : 'bg-[#f6465d] text-white'
+                executing && !continuousExecutionEnabled.closing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
+                continuousExecutionEnabled.closing
+                  ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
+                  : 'bg-[#f6465d] text-white hover:bg-[#e5394d]'
               ]"
             >
-              {{ executing ? '执行中...' : (config.closingEnabled ? '停用平仓' : (type === 'forward' ? '启用正向平仓' : '启用反向平仓')) }}
+              {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
             </button>
             <!-- Trigger Progress for Closing -->
-            <div v-if="config.closingEnabled" class="mt-1.5 text-xs">
+            <div v-if="continuousExecutionEnabled.closing" class="mt-1.5 text-xs">
               <div class="flex justify-between text-gray-400 mb-0.5">
                 <span>触发进度</span>
-                <span>{{ triggerCount.closing }} / {{ config.closingSyncQty }}</span>
+                <span>{{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}</span>
               </div>
               <div class="w-full bg-[#1a1d21] rounded-full h-1.5">
                 <div
                   class="bg-[#f6465d] h-1.5 rounded-full transition-all duration-300"
-                  :style="{ width: `${Math.min(100, (triggerCount.closing / config.closingSyncQty) * 100)}%` }"
+                  :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.closing.current / continuousExecutionTriggerProgress.closing.required) * 100)}%` }"
                 ></div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Continuous Execution Controls -->
-        <div class="border-t border-[#2b3139] pt-2 mt-2">
-          <div class="flex items-center justify-between mb-1.5">
-            <label class="text-xs text-gray-400">连续执行模式</label>
-            <div class="flex gap-2">
-              <span v-if="continuousExecutionEnabled.opening" class="text-xs text-[#0ecb81] font-bold">开仓运行中</span>
-              <span v-if="continuousExecutionEnabled.closing" class="text-xs text-[#f6465d] font-bold">平仓运行中</span>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2">
-            <button
-              @click="startContinuousExecution('opening')"
-              :disabled="continuousExecutionEnabled.opening || executing"
-              :class="[
-                'px-2 py-1.5 rounded text-xs font-bold transition-all',
-                continuousExecutionEnabled.opening || executing
-                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                  : 'bg-[#0ecb81] text-white hover:bg-[#0db872]'
-              ]"
-            >
-              {{ continuousExecutionEnabled.opening ? '开仓执行中' : '连续开仓' }}
-            </button>
-
-            <button
-              @click="startContinuousExecution('closing')"
-              :disabled="continuousExecutionEnabled.closing || executing"
-              :class="[
-                'px-2 py-1.5 rounded text-xs font-bold transition-all',
-                continuousExecutionEnabled.closing || executing
-                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                  : 'bg-[#f6465d] text-white hover:bg-[#e5394d]'
-              ]"
-            >
-              {{ continuousExecutionEnabled.closing ? '平仓执行中' : '连续平仓' }}
-            </button>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2 mt-1.5">
-            <button
-              v-if="continuousExecutionEnabled.opening"
-              @click="stopContinuousExecution('opening')"
-              class="px-2 py-1 rounded text-xs font-bold bg-[#F1C40F] text-white hover:bg-[#e1b40f] transition-all"
-            >
-              停止开仓
-            </button>
-            <button
-              v-if="continuousExecutionEnabled.closing"
-              @click="stopContinuousExecution('closing')"
-              class="px-2 py-1 rounded text-xs font-bold bg-[#F1C40F] text-white hover:bg-[#e1b40f] transition-all"
-            >
-              停止平仓
-            </button>
-          </div>
-
-          <!-- Execution Status Display -->
+        <!-- Execution Status Display -->
           <div v-if="continuousExecutionStatus.opening || continuousExecutionStatus.closing" class="mt-2 space-y-1.5">
             <div v-if="continuousExecutionStatus.opening" class="p-1.5 bg-[#1a1d21] rounded text-xs">
               <div class="text-[#0ecb81] font-bold mb-0.5">开仓状态</div>
@@ -333,7 +278,6 @@
               </div>
             </div>
           </div>
-        </div>
 
         <!-- Data Sync Quantities -->
         <div class="grid grid-cols-3 gap-2">
@@ -1213,18 +1157,12 @@ async function waitForOrderFill(orderIds, maxWaitTime = 10000) {
   console.warn('Order monitoring timeout - proceeding anyway')
 }
 
-function toggleOpening() {
-  if (config.value.openingEnabled) {
-    // 禁用策略前检查是否正在执行
-    if (executingOpening.value) {
-      notificationStore.showStrategyNotification('策略执行中，请稍后再试', 'warning')
-      return
-    }
-    config.value.openingEnabled = false
-    triggerCount.value.opening = 0
-    validationErrors.value = []
-    saveEnabledState(STORAGE_KEY_OPENING, false)
+async function toggleOpeningExecution() {
+  if (continuousExecutionEnabled.value.opening) {
+    // Stop execution
+    await stopContinuousExecution('opening')
   } else {
+    // Start execution
     // Clear previous errors
     validationErrors.value = []
 
@@ -1242,26 +1180,17 @@ function toggleOpening() {
       return
     }
 
-    config.value.openingEnabled = true
-    orderPlaced.value.opening = false
-    triggerCount.value.opening = 0
-    saveEnabledState(STORAGE_KEY_OPENING, true)
-    // closingEnabled is NOT touched — independent control
+    // Start continuous execution
+    await startContinuousExecution('opening')
   }
 }
 
-async function toggleClosing() {
-  if (config.value.closingEnabled) {
-    // 禁用策略前检查是否正在执行
-    if (executingClosing.value) {
-      notificationStore.showStrategyNotification('策略执行中，请稍后再试', 'warning')
-      return
-    }
-    config.value.closingEnabled = false
-    triggerCount.value.closing = 0
-    validationErrors.value = []
-    saveEnabledState(STORAGE_KEY_CLOSING, false)
+async function toggleClosingExecution() {
+  if (continuousExecutionEnabled.value.closing) {
+    // Stop execution
+    await stopContinuousExecution('closing')
   } else {
+    // Start execution
     // Clear previous errors
     validationErrors.value = []
 
@@ -1286,11 +1215,8 @@ async function toggleClosing() {
       return
     }
 
-    config.value.closingEnabled = true
-    orderPlaced.value.closing = false
-    triggerCount.value.closing = 0
-    saveEnabledState(STORAGE_KEY_CLOSING, true)
-    // openingEnabled is NOT touched — independent control
+    // Start continuous execution
+    await startContinuousExecution('closing')
   }
 }
 

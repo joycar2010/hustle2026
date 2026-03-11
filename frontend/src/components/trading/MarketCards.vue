@@ -192,7 +192,7 @@
     </div>
 
     <!-- Fixed Navigation Panel at Bottom -->
-    <div class="flex-shrink-0" style="margin-top: 10%;">
+    <div class="flex-shrink-0">
       <NavigationPanel />
     </div>
   </div>

@@ -33,15 +33,15 @@
       <!-- Strategy Panels Section -->
       <section class="section-strategies">
         <div class="strategy-container reverse-strategy">
-          <StrategyPanel type="reverse" />
+          <StrategyPanel type="reverse" :marketCardsRef="marketCardsRef" />
         </div>
 
         <div class="market-cards-container">
-          <MarketCards />
+          <MarketCards ref="marketCardsRef" />
         </div>
 
         <div class="strategy-container forward-strategy">
-          <StrategyPanel type="forward" />
+          <StrategyPanel type="forward" :marketCardsRef="marketCardsRef" />
         </div>
       </section>
 
@@ -99,6 +99,7 @@ import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vu
 import Risk from '@/views/Risk.vue'
 
 const recentRecordsRef = ref(null)
+const marketCardsRef = ref(null)
 
 // 从localStorage加载侧边栏状态
 const showLeftSidebar = ref(true)
