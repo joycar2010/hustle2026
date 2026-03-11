@@ -520,4 +520,44 @@ const SystemIcon = {
 .router-link-active.mobile-nav-link {
   @apply text-primary bg-primary/10 font-medium;
 }
+
+/* PC端优化 - 缩小提醒音和单腿提醒按钮 */
+@media (min-width: 1024px) {
+  /* 缩小开关容器 */
+  .xl\:flex > div.bg-dark-200 {
+    padding: 0.25rem 0.5rem !important;
+  }
+
+  /* 缩小图标 */
+  .xl\:flex > div.bg-dark-200 svg {
+    width: 0.75rem !important;
+    height: 0.75rem !important;
+  }
+
+  /* 缩小文字 */
+  .xl\:flex > div.bg-dark-200 span.text-sm {
+    font-size: 0.7rem !important;
+  }
+
+  /* 缩小开关按钮 */
+  .xl\:flex > div.bg-dark-200 button {
+    height: 0.875rem !important;
+    width: 1.5rem !important;
+  }
+
+  /* 缩小开关按钮内的圆点 */
+  .xl\:flex > div.bg-dark-200 button span {
+    height: 0.625rem !important;
+    width: 0.625rem !important;
+  }
+
+  /* 调整开关按钮圆点的位置 */
+  .xl\:flex > div.bg-dark-200 button span.translate-x-5 {
+    transform: translateX(0.625rem) !important;
+  }
+
+  .xl\:flex > div.bg-dark-200 button span.translate-x-1 {
+    transform: translateX(0.125rem) !important;
+  }
+}
 </style>

@@ -89,14 +89,16 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
-import AccountStatusPanel from '@/components/trading/AccountStatusPanel.vue'
+import { ref, watch, onMounted, defineAsyncComponent } from 'vue'
 import MarketCards from '@/components/trading/MarketCards.vue'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
-import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
-import RecentTradingRecords from '@/components/trading/RecentTradingRecords.vue'
-import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vue'
-import Risk from '@/views/Risk.vue'
+
+// 懒加载非关键组件，提升初始加载速度
+const AccountStatusPanel = defineAsyncComponent(() => import('@/components/trading/AccountStatusPanel.vue'))
+const EmergencyManualTrading = defineAsyncComponent(() => import('@/components/trading/EmergencyManualTrading.vue'))
+const RecentTradingRecords = defineAsyncComponent(() => import('@/components/trading/RecentTradingRecords.vue'))
+const FloatingActionButtons = defineAsyncComponent(() => import('@/components/trading/FloatingActionButtons.vue'))
+const Risk = defineAsyncComponent(() => import('@/views/Risk.vue'))
 
 const recentRecordsRef = ref(null)
 const marketCardsRef = ref(null)
@@ -141,6 +143,8 @@ function handleOrderExecuted() {
   background-color: #1a1d21;
   color: #ffffff;
   overflow: hidden;
+  /* 优化移动端触摸滚动 */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ========== 侧边栏样式 ========== */
@@ -288,24 +292,32 @@ function handleOrderExecuted() {
   display: none; /* PC端默认隐藏，移动端显示 */
 }
 
-/* ========== 移动端H5竖屏适配 ========== */
-@media (orientation: portrait), (max-width: 750px) {
+/* ========== 移动端H5竖屏适配 (包括2K屏幕如小米15 Pro) ========== */
+@media (orientation: portrait) and (max-width: 1500px), (max-width: 750px) {
   .trading-dashboard {
     flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    width: 100%;
   }
 
   /* 隐藏侧边栏 */
   .sidebar-left,
-  .sidebar-right {
+  .sidebar-right,
+  .show-sidebar-btn {
     display: none;
   }
 
   /* 主内容区域 */
   .main-content {
     width: 100%;
-    padding: 12px;
-    gap: 16px;
-    overflow-y: auto;
+    height: auto;
+    padding: 8px;
+    gap: 12px;
+    overflow: visible;
+    flex: none;
   }
 
   /* 策略面板区域 - 垂直排列 */
@@ -314,31 +326,32 @@ function handleOrderExecuted() {
     flex-direction: column;
     padding: 0;
     border-bottom: none;
-    gap: 16px;
+    gap: 12px;
+    flex: none;
+    width: 100%;
   }
 
   .strategy-container {
-    width: 100%;
-    max-height: 300px;
-    min-height: 300px;
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: auto;
+    min-height: 280px;
+    max-height: none;
+    flex: none;
   }
 
   .market-cards-container {
-    width: 100%;
-    max-height: 300px;
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: auto;
+    min-height: 280px;
+    max-height: none;
+    flex: none;
   }
 
-  /* 手动交易区域 - 显示并垂直排列 */
+  /* 手动交易区域 - 移动端隐藏 */
   .section-manual-trading {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .emergency-trading-wrapper,
-  .recent-records-wrapper {
-    width: 100%;
-    max-height: 400px;
+    display: none;
   }
 }
 

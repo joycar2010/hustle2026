@@ -2028,12 +2028,44 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 移动端性能优化 */
-@media (max-width: 767px) {
+/* ========== PC端优化 - 适合触摸屏操作 ========== */
+@media (min-width: 1024px) {
+  /* 优化按钮尺寸 - 适合PC触摸屏 */
+  button {
+    min-height: 42px !important; /* 确保按钮足够高 */
+    padding: 0.6rem 1rem !important; /* 增加padding */
+    font-size: 0.95rem !important; /* 增大字体 */
+  }
+
+  /* 输入框也要足够大 */
+  input[type="number"] {
+    min-height: 40px !important;
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.95rem !important;
+  }
+
+  /* 标签字体 */
+  label {
+    font-size: 0.875rem !important;
+  }
+
+  /* 优化文字大小 */
+  .text-xs {
+    font-size: 0.875rem !important;
+  }
+
+  .text-sm {
+    font-size: 0.95rem !important;
+  }
+}
+
+/* 移动端性能优化 (包括2K屏幕) */
+@media (orientation: portrait) and (max-width: 1500px), (max-width: 767px) {
   /* 使用 GPU 加速，减少重绘 */
   .h-full {
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
+    will-change: transform;
   }
 
   /* 优化滚动性能 */
@@ -2042,16 +2074,93 @@ onUnmounted(() => {
     overflow-scrolling: touch;
   }
 
-  /* 减少动画复杂度 */
-  .transition-all {
-    transition: opacity 0.2s ease;
+  /* 完全禁用动画和过渡 */
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 
-  /* 禁用不必要的 hover 效果 */
-  button:hover {
-    transform: none;
+  /* 优化按钮和输入框尺寸 - 统一所有移动设备（参考iPhone显示效果）*/
+  button {
+    padding: 0.85rem 1.1rem !important;
+    min-height: 54px !important;
+    min-width: unset !important;
+    font-size: 1.125rem !important;
+    max-width: 100%;
+  }
+
+  input[type="number"] {
+    padding: 0.75rem 0.85rem !important;
+    font-size: 1.125rem !important;
+    min-height: 50px !important;
+  }
+
+  /* 优化间距 */
+  .space-y-2 > * + * {
+    margin-top: 0.5rem !important;
+  }
+
+  .gap-2 {
+    gap: 0.5rem !important;
+  }
+
+  .p-2 {
+    padding: 0.65rem !important;
+  }
+
+  .p-1\.5 {
+    padding: 0.5rem !important;
+  }
+
+  /* 优化网格布局 */
+  .grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid-cols-2 > * {
+    max-width: 100%;
+  }
+
+  .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .grid-cols-3 > * {
+    max-width: 100%;
+  }
+
+  /* 统一字体大小（参考iPhone显示效果）*/
+  .text-xs {
+    font-size: 1rem !important;
+    line-height: 1.5 !important;
+  }
+
+  .text-sm {
+    font-size: 1.125rem !important;
+    line-height: 1.5 !important;
+  }
+
+  .text-lg {
+    font-size: 1.5rem !important;
+  }
+
+  .text-2xl {
+    font-size: 2rem !important;
+  }
+
+  /* 优化标签和输入框布局（参考iPhone显示效果）*/
+  label {
+    font-size: 1rem !important;
+    margin-bottom: 0.3rem !important;
+  }
+
+  /* 优化标题（参考iPhone显示效果）*/
+  h3 {
+    font-size: 1.5rem !important;
   }
 }
+
+/* ========== 移除单独的2K屏幕媒体查询 ========== */
 
 /* 高分辨率显示优化 (2736×1824) */
 @media (min-width: 1920px) and (min-height: 1400px) {
@@ -2113,6 +2222,105 @@ onUnmounted(() => {
 
   .gap-1\.5 {
     gap: 0.25rem !important;
+  }
+}
+
+/* ========== 小米15 Pro专属优化 (1400px-1500px宽度，按钮高度翻倍，所有文字翻倍) ========== */
+@media (orientation: portrait) and (min-width: 1400px) and (max-width: 1500px) {
+  /* 按钮高度翻倍 - 仅针对小米15 Pro */
+  button {
+    padding: 1.5rem 1.5rem !important;
+    min-height: 108px !important;
+    min-width: unset !important;
+    font-size: 2.25rem !important;
+    font-weight: 600 !important;
+    max-width: 100%;
+  }
+
+  /* 输入框也相应增大 */
+  input[type="number"] {
+    padding: 1rem 1.1rem !important;
+    font-size: 2.5rem !important;
+    min-height: 80px !important;
+  }
+
+  /* 字体大小翻倍 - 与main.css保持一致 */
+  .text-xs {
+    font-size: 2rem !important;
+    line-height: 1.5 !important;
+  }
+
+  .text-sm {
+    font-size: 2.25rem !important;
+    line-height: 1.5 !important;
+  }
+
+  .text-base {
+    font-size: 2.5rem !important;
+  }
+
+  .text-lg {
+    font-size: 3rem !important;
+  }
+
+  .text-2xl {
+    font-size: 4rem !important;
+  }
+
+  /* 标签字体翻倍 */
+  label {
+    font-size: 2rem !important;
+    margin-bottom: 0.8rem !important;
+  }
+
+  /* 标题翻倍 */
+  h3 {
+    font-size: 3rem !important;
+  }
+
+  /* 间距翻倍 */
+  .space-y-2 > * + * {
+    margin-top: 1rem !important;
+  }
+
+  .space-y-1\.5 > * + * {
+    margin-top: 0.75rem !important;
+  }
+
+  .gap-2 {
+    gap: 1rem !important;
+  }
+
+  .gap-1\.5 {
+    gap: 0.75rem !important;
+  }
+
+  .p-2 {
+    padding: 1rem !important;
+  }
+
+  .p-1\.5 {
+    padding: 0.75rem !important;
+  }
+
+  .mb-1 {
+    margin-bottom: 0.5rem !important;
+  }
+
+  .mb-0\.5 {
+    margin-bottom: 0.25rem !important;
+  }
+
+  .mt-1 {
+    margin-top: 0.5rem !important;
+  }
+
+  .mt-1\.5 {
+    margin-top: 0.75rem !important;
+  }
+
+  .mt-2 {
+    margin-top: 1rem !important;
   }
 }
 </style>

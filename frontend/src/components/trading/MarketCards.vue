@@ -1,8 +1,8 @@
 <template>
-  <div class="h-full flex flex-col max-lg:h-auto overflow-hidden">
+  <div class="h-full flex flex-col max-lg:h-auto overflow-hidden w-full">
     <!-- Total Profit Header -->
-    <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0">
-      <div class="bg-[#1e2329] rounded p-1.5 lg:p-1 flex items-center justify-center gap-2">
+    <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
+      <div class="bg-[#1e2329] rounded p-1.5 lg:p-1 flex items-center justify-center gap-2 w-full">
         <span class="text-xs lg:text-[10px] text-gray-400">总盈利</span>
         <span class="text-base lg:text-sm md:text-lg font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
           {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
@@ -722,8 +722,8 @@ defineExpose({
   transition: background-color 0.3s ease-in-out;
 }
 
-/* 移动端H5竖屏适配 - 确保完全撑满宽度 */
-@media (orientation: portrait), (max-width: 750px) {
+/* 移动端H5竖屏适配 - 确保完全撑满宽度 (包括2K屏幕) */
+@media (orientation: portrait) and (max-width: 1500px), (max-width: 750px) {
   /* 移除所有内边距，让内容完全撑满 */
   :deep(.grid) {
     width: 100%;
@@ -734,5 +734,83 @@ defineExpose({
     width: 100%;
     box-sizing: border-box;
   }
+
+  /* 确保容器占满宽度 */
+  .h-full {
+    width: 100% !important;
+    max-width: 100vw;
+  }
+
+  /* 优化内边距 */
+  .p-1\.5,
+  .p-2 {
+    padding: 0.375rem !important;
+  }
+
+  /* 统一字体大小 - 适用于所有移动设备（参考iPhone显示效果）*/
+  .text-xs {
+    font-size: 1rem !important;
+  }
+
+  .text-sm {
+    font-size: 1.125rem !important;
+  }
+
+  .text-base {
+    font-size: 1.25rem !important;
+  }
+
+  .text-lg {
+    font-size: 1.5rem !important;
+  }
+
+  /* 统一内边距 */
+  .p-1\.5,
+  .p-2 {
+    padding: 0.65rem !important;
+  }
+
+  .p-1 {
+    padding: 0.45rem !important;
+  }
+
+  /* 统一间距 */
+  .gap-1,
+  .gap-1\.5,
+  .gap-2 {
+    gap: 0.45rem !important;
+  }
+
+  .space-x-1,
+  .space-x-1\.5 {
+    margin-left: 0.45rem !important;
+  }
+
+  .mb-1,
+  .mb-1\.5 {
+    margin-bottom: 0.45rem !important;
+  }
+
+  /* 统一图标大小 */
+  .w-5,
+  .h-5 {
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+  }
+
+  .w-4,
+  .h-4 {
+    width: 1.25rem !important;
+    height: 1.25rem !important;
+  }
+
+  /* 完全禁用动画 */
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
+
+/* ========== 移除单独的2K屏幕媒体查询 ========== */
+
 </style>

@@ -1,10 +1,10 @@
 <template>
-  <div class="h-full flex flex-col">
-    <div class="p-1 border-b border-[#2b3139]">
+  <div class="h-full flex flex-col w-full">
+    <div class="p-1 border-b border-[#2b3139] w-full">
       <h3 class="text-sm font-bold text-center text-[#f0b90b]">点差数据流</h3>
     </div>
-    <div class="flex-1 overflow-y-auto md:overflow-y-auto text-xs overflow-x-auto max-md:overflow-y-visible max-md:h-auto">
-      <table class="w-full min-w-[300px]">
+    <div class="flex-1 overflow-y-auto md:overflow-y-auto text-xs overflow-x-hidden max-md:overflow-y-visible max-md:h-auto w-full">
+      <table class="w-full">
         <thead class="sticky top-0 bg-[#1e2329]">
           <tr class="text-left border-b border-[#2b3139]">
             <th class="p-0.5 md:p-1 w-20 md:w-24 text-sm text-[#f0b90b]">时间</th>
@@ -136,4 +136,34 @@ tr {
 .bg-green-500\/10, .bg-red-500\/10 {
   transition: background-color 0.5s ease-in-out;
 }
+
+/* 移动端优化 - 禁用动画 (统一所有移动设备) */
+@media (orientation: portrait) and (max-width: 1500px), (max-width: 767px) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* 统一表格字体 - 适用于所有移动设备（参考iPhone显示效果）*/
+  table {
+    font-size: 1.05rem !important;
+  }
+
+  th {
+    font-size: 1.125rem !important;
+    padding: 0.5rem 0.55rem !important;
+  }
+
+  td {
+    font-size: 1rem !important;
+    padding: 0.5rem 0.55rem !important;
+  }
+
+  /* 统一标题 */
+  h3 {
+    font-size: 1.25rem !important;
+  }
+}
+
+/* ========== 移除单独的2K屏幕媒体查询 ========== */
 </style>
