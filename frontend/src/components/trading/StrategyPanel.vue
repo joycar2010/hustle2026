@@ -60,10 +60,10 @@
           <template v-if="type === 'reverse'">
             <!-- Bybit Swap Fee -->
             <div v-if="marketCardsRef" class="text-center">
-              <div class="text-xs text-gray-400 mb-0.5">Bybit 掉期费</div>
+              <div class="text-xs text-gray-400 mb-0.5">Bybit 过夜费</div>
               <div class="flex gap-2 justify-center">
-                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.bybitLongSwapFee?.toFixed(4) || '0.0000' }}%</span>
-                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.bybitShortSwapFee?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.bybitLongSwapFee?.toFixed(2) || '0.00' }}</span>
+                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.bybitShortSwapFee?.toFixed(2) || '0.00' }}</span>
               </div>
             </div>
 
@@ -90,8 +90,8 @@
             <div v-if="marketCardsRef" class="text-center">
               <div class="text-xs text-gray-400 mb-0.5">Binance 资金费</div>
               <div class="flex gap-2 justify-center">
-                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.binanceLongFundingRate?.toFixed(4) || '0.0000' }}%</span>
-                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.binanceShortFundingRate?.toFixed(4) || '0.0000' }}%</span>
+                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.binanceLongFundingRate?.toFixed(2) || '0.00' }}</span>
+                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.binanceShortFundingRate?.toFixed(2) || '0.00' }}</span>
               </div>
             </div>
           </template>
@@ -823,32 +823,57 @@ watch(() => marketStore.marketData, (newData) => {
 })
 
 // Watch for account balance updates and strategy status via WebSocket
+// Optimized: Use shallow watch and early return for irrelevant messages
 watch(() => marketStore.lastMessage, (message) => {
-  if (!message) return
+  if (!message || !message.type) return
 
-  // Debug: log all messages
-  if (message.type && message.type.startsWith('strategy_')) {
+  // Early return if not a relevant message type
+  const relevantTypes = [
+    'account_balance',
+    'strategy_trigger_progress',
+    'strategy_trigger_reset',
+    'strategy_position_change',
+    'strategy_execution_started',
+    'strategy_execution_completed',
+    'strategy_execution_error',
+    'strategy_order_executed'
+  ]
+
+  if (!relevantTypes.includes(message.type)) return
+
+  // Debug: log strategy messages
+  if (message.type.startsWith('strategy_')) {
     console.log('[WebSocket] Received strategy message:', message.type, message.data)
   }
 
-  if (message.type === 'account_balance') {
-    handleAccountBalanceUpdate(message.data)
-  } else if (message.type === 'strategy_trigger_progress') {
-    handleTriggerProgress(message.data)
-  } else if (message.type === 'strategy_trigger_reset') {
-    handleTriggerReset(message.data)
-  } else if (message.type === 'strategy_position_change') {
-    handlePositionChange(message.data)
-  } else if (message.type === 'strategy_execution_started') {
-    handleExecutionStarted(message.data)
-  } else if (message.type === 'strategy_execution_completed') {
-    handleExecutionCompleted(message.data)
-  } else if (message.type === 'strategy_execution_error') {
-    handleExecutionError(message.data)
-  } else if (message.type === 'strategy_order_executed') {
-    handleOrderExecuted(message.data)
+  // Handle different message types
+  switch (message.type) {
+    case 'account_balance':
+      handleAccountBalanceUpdate(message.data)
+      break
+    case 'strategy_trigger_progress':
+      handleTriggerProgress(message.data)
+      break
+    case 'strategy_trigger_reset':
+      handleTriggerReset(message.data)
+      break
+    case 'strategy_position_change':
+      handlePositionChange(message.data)
+      break
+    case 'strategy_execution_started':
+      handleExecutionStarted(message.data)
+      break
+    case 'strategy_execution_completed':
+      handleExecutionCompleted(message.data)
+      break
+    case 'strategy_execution_error':
+      handleExecutionError(message.data)
+      break
+    case 'strategy_order_executed':
+      handleOrderExecuted(message.data)
+      break
   }
-})
+}, { deep: false }) // Shallow watch for better performance
 
 // Handle strategy WebSocket events
 function handleTriggerProgress(data) {

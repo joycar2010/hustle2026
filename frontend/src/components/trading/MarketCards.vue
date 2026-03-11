@@ -1,118 +1,199 @@
 <template>
-  <div class="h-full flex flex-col max-lg:h-auto">
+  <div class="h-full flex flex-col max-lg:h-auto overflow-hidden">
     <!-- Total Profit Header -->
-    <div class="p-2 lg:p-2 md:p-3 bg-[#252930] border-b border-[#2b3139]">
-      <div class="bg-[#1e2329] rounded p-2 lg:p-1.5 flex items-center justify-center gap-2">
+    <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0">
+      <div class="bg-[#1e2329] rounded p-1.5 lg:p-1 flex items-center justify-center gap-2">
         <span class="text-xs lg:text-[10px] text-gray-400">总盈利</span>
-        <span class="text-lg lg:text-base md:text-xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+        <span class="text-base lg:text-sm md:text-lg font-bold font-mono" :class="totalProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
           {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
         </span>
         <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-2 lg:p-1.5 md:p-3">
-      <div class="grid grid-cols-1 gap-2 lg:gap-1.5 md:gap-3">
+    <!-- Content Area -->
+    <div class="flex-1 overflow-y-auto overflow-x-hidden p-1.5 lg:p-1 md:p-2 scrollbar-hide">
+      <div class="grid grid-cols-1 gap-1.5 lg:gap-1 md:gap-2">
       <!-- Bybit MT5 Card -->
-      <div class="bg-[#252930] rounded p-2 lg:p-2 md:p-3 flex flex-col border border-[#2b3139]">
-        <div class="flex items-center justify-center mb-1.5 lg:mb-1 md:mb-2">
-          <div class="flex items-center space-x-2 lg:space-x-1.5">
-            <div class="w-6 h-6 lg:w-5 lg:h-5 md:w-7 md:h-7 bg-[#ff9800] rounded flex items-center justify-center">
-              <span class="text-white font-bold text-base lg:text-sm md:text-lg">B</span>
+      <div class="bg-[#252930] rounded p-1.5 lg:p-1.5 md:p-2 flex flex-col border border-[#2b3139]">
+        <div class="flex items-center justify-center mb-1 lg:mb-0.5 md:mb-1.5">
+          <div class="flex items-center space-x-1.5 lg:space-x-1">
+            <div class="w-5 h-5 lg:w-4 lg:h-4 md:w-6 md:h-6 bg-[#ff9800] rounded flex items-center justify-center">
+              <span class="text-white font-bold text-sm lg:text-xs md:text-base">B</span>
             </div>
             <div>
-              <div class="font-medium text-base lg:text-sm md:text-lg">Bybit MT5 <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">XAUUSD.s</span></div>
+              <div class="font-medium text-sm lg:text-xs md:text-base">Bybit MT5 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">XAUUSD.s</span></div>
             </div>
           </div>
         </div>
 
-        <!-- Real-time Price, ASK and BID in one row -->
-        <div class="grid grid-cols-3 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
-          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
-            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
-            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.mid, bybit.prevMid)]">
+        <!-- Real-time Price (Full Width) -->
+        <div class="mb-1 lg:mb-0.5 md:mb-1.5">
+          <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139]">
+            <div class="text-[10px] lg:text-[9px] md:text-xs text-gray-400 text-center">实时价格</div>
+            <div class="text-xl lg:text-lg md:text-2xl font-mono font-bold text-[#0ecb81] text-center">
               {{ formatPrice(bybit.mid) }}
             </div>
           </div>
-          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
-            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">ASK</div>
-            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.ask, bybit.prevAsk)]">
+        </div>
+
+        <!-- ASK and BID in one row -->
+        <div class="grid grid-cols-2 gap-1 lg:gap-0.5 md:gap-1.5 mb-1 lg:mb-0.5 md:mb-1.5">
+          <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139]">
+            <div class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">ASK</div>
+            <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(bybit.ask, bybit.prevAsk)]">
               {{ formatPrice(bybit.ask) }}
             </div>
           </div>
-          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
-            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">BID</div>
-            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(bybit.bid, bybit.prevBid)]">
+          <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139]">
+            <div class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">BID</div>
+            <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(bybit.bid, bybit.prevBid)]">
               {{ formatPrice(bybit.bid) }}
             </div>
           </div>
         </div>
 
+        <!-- Order Book Data Row (Bybit MT5 XAUUSD.s) -->
+        <div class="grid grid-cols-4 gap-0.5 mb-1 lg:mb-0.5 md:mb-1.5 text-base lg:text-sm md:text-xl">
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(bybitOrderBook.ask_volume) }}</div>
+          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(bybitOrderBook.ask_price) }}</div>
+          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(bybitOrderBook.bid_price) }}</div>
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(bybitOrderBook.bid_volume) }}</div>
+        </div>
+
         <!-- Lag Heartbeat -->
-        <div class="pt-1 lg:pt-0.5 md:pt-1.5 border-t border-[#2b3139] flex justify-between items-center">
-          <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">卡顿</span>
-          <div class="flex items-center space-x-1.5 lg:space-x-1">
+        <div class="pt-0.5 lg:pt-0.5 md:pt-1 border-t border-[#2b3139] flex justify-between items-center">
+          <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">卡顿</span>
+          <div class="flex items-center space-x-1 lg:space-x-0.5">
             <div class="flex space-x-0.5">
-              <div v-for="i in 5" :key="i" :class="['w-1 lg:w-0.5 h-2.5 lg:h-2 md:h-3 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
+              <div v-for="i in 5" :key="i" :class="['w-0.5 lg:w-0.5 h-2 lg:h-1.5 md:h-2.5 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
-            <span class="text-xs lg:text-[10px] md:text-sm font-mono">{{ bybitLagCount }}</span>
+            <span class="text-[10px] lg:text-[9px] md:text-xs font-mono">{{ bybitLagCount }}</span>
           </div>
         </div>
       </div>
 
       <!-- Binance Card -->
-      <div class="bg-[#252930] rounded p-2 lg:p-2 md:p-3 flex flex-col border border-[#2b3139]">
-        <div class="flex items-center justify-center mb-1.5 lg:mb-1 md:mb-2">
-          <div class="flex items-center space-x-2 lg:space-x-1.5">
-            <div class="w-6 h-6 lg:w-5 lg:h-5 md:w-7 md:h-7 bg-[#f0b90b] rounded flex items-center justify-center">
-              <span class="text-[#1a1d21] font-bold text-base lg:text-sm md:text-lg">B</span>
+      <div class="bg-[#252930] rounded p-1.5 lg:p-1.5 md:p-2 flex flex-col border border-[#2b3139]">
+        <div class="flex items-center justify-center mb-1 lg:mb-0.5 md:mb-1.5">
+          <div class="flex items-center space-x-1.5 lg:space-x-1">
+            <div class="w-5 h-5 lg:w-4 lg:h-4 md:w-6 md:h-6 bg-[#f0b90b] rounded flex items-center justify-center">
+              <span class="text-[#1a1d21] font-bold text-sm lg:text-xs md:text-base">B</span>
             </div>
             <div>
-              <div class="font-medium text-base lg:text-sm md:text-lg">Binance <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">XAUUSDT</span></div>
+              <div class="font-medium text-sm lg:text-xs md:text-base">Binance <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">XAUUSDT</span></div>
             </div>
           </div>
         </div>
 
-        <!-- Real-time Price, ASK and BID in one row -->
-        <div class="grid grid-cols-3 gap-1.5 lg:gap-1 md:gap-2 mb-1.5 lg:mb-1 md:mb-2">
-          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
-            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">实时价格</div>
-            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.mid, binance.prevMid)]">
+        <!-- Real-time Price (Full Width) -->
+        <div class="mb-1 lg:mb-0.5 md:mb-1.5">
+          <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139]">
+            <div class="text-[10px] lg:text-[9px] md:text-xs text-gray-400 text-center">实时价格</div>
+            <div class="text-xl lg:text-lg md:text-2xl font-mono font-bold text-[#f6465d] text-center">
               {{ formatPrice(binance.mid) }}
             </div>
           </div>
-          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
-            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">ASK</div>
-            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
+        </div>
+
+        <!-- ASK and BID in one row -->
+        <div class="grid grid-cols-2 gap-1 lg:gap-0.5 md:gap-1.5 mb-1 lg:mb-0.5 md:mb-1.5">
+          <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139] relative cursor-pointer hover:border-[#3b4149] transition-colors" @click="showPendingOrdersModal('ASK')">
+            <div class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">ASK</div>
+            <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
               {{ formatPrice(binance.ask) }}
             </div>
+            <div v-if="askOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
+              挂{{ askOrderCount }}
+            </div>
           </div>
-          <div class="bg-[#1e2329] rounded px-2 lg:px-1.5 py-1 lg:py-0.5 md:py-1.5 border border-[#2b3139]">
-            <div class="text-xs lg:text-[10px] md:text-sm text-gray-400 mb-0.5 lg:mb-0">BID</div>
-            <div :class="['text-base lg:text-sm md:text-lg font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
+          <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139] relative cursor-pointer hover:border-[#3b4149] transition-colors" @click="showPendingOrdersModal('BID')">
+            <div class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">BID</div>
+            <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
               {{ formatPrice(binance.bid) }}
+            </div>
+            <div v-if="bidOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
+              挂{{ bidOrderCount }}
             </div>
           </div>
         </div>
 
+        <!-- Order Book Data Row (Binance XAUUSDT) -->
+        <div class="grid grid-cols-4 gap-0.5 mb-1 lg:mb-0.5 md:mb-1.5 text-base lg:text-sm md:text-xl">
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(binanceOrderBook.ask_volume) }}</div>
+          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(binanceOrderBook.ask_price) }}</div>
+          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(binanceOrderBook.bid_price) }}</div>
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(binanceOrderBook.bid_volume) }}</div>
+        </div>
+
         <!-- Lag Heartbeat -->
-        <div class="pt-1 lg:pt-0.5 md:pt-1.5 border-t border-[#2b3139] flex justify-between items-center">
-          <span class="text-xs lg:text-[10px] md:text-sm text-gray-400">卡顿</span>
-          <div class="flex items-center space-x-1.5 lg:space-x-1">
+        <div class="pt-0.5 lg:pt-0.5 md:pt-1 border-t border-[#2b3139] flex justify-between items-center">
+          <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">卡顿</span>
+          <div class="flex items-center space-x-1 lg:space-x-0.5">
             <div class="flex space-x-0.5">
-              <div v-for="i in 5" :key="i" :class="['w-1 lg:w-0.5 h-2.5 lg:h-2 md:h-3 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
+              <div v-for="i in 5" :key="i" :class="['w-0.5 lg:w-0.5 h-2 lg:h-1.5 md:h-2.5 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
-            <span class="text-xs lg:text-[10px] md:text-sm font-mono">{{ binanceLagCount }}</span>
+            <span class="text-[10px] lg:text-[9px] md:text-xs font-mono">{{ binanceLagCount }}</span>
           </div>
         </div>
       </div>
 
       <!-- Spread Data Table -->
-      <SpreadDataTable />
-
-      <!-- Pending Orders -->
-      <PendingOrders />
+      <div class="mt-1">
+        <SpreadDataTable />
       </div>
+
+      <!-- Pending Orders Modal -->
+      <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click="closeModal">
+        <div class="bg-[#1e2329] rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-auto" @click.stop>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold text-white">{{ modalType === 'ASK' ? 'ASK挂单' : 'BID挂单' }}</h3>
+            <button @click="closeModal" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+          </div>
+
+          <div v-if="pendingOrders.length === 0" class="text-center text-gray-400 py-8">
+            暂无挂单
+          </div>
+
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-[#2b3139]">
+                  <th class="text-left py-2 px-3 text-gray-400">交易所</th>
+                  <th class="text-left py-2 px-3 text-gray-400">方向</th>
+                  <th class="text-right py-2 px-3 text-gray-400">价格</th>
+                  <th class="text-right py-2 px-3 text-gray-400">数量</th>
+                  <th class="text-right py-2 px-3 text-gray-400">已成交</th>
+                  <th class="text-left py-2 px-3 text-gray-400">状态</th>
+                  <th class="text-left py-2 px-3 text-gray-400">时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="order in pendingOrders" :key="order.order_id" class="border-b border-[#2b3139] hover:bg-[#2b3139]">
+                  <td class="py-2 px-3 text-white">{{ order.exchange }}</td>
+                  <td class="py-2 px-3">
+                    <span :class="order.side === 'Buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                      {{ order.side === 'Buy' ? '买入' : '卖出' }}
+                    </span>
+                  </td>
+                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price?.toFixed(2) || '-' }}</td>
+                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.qty?.toFixed(4) || '-' }}</td>
+                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.cum_exec_qty?.toFixed(4) || '0' }}</td>
+                  <td class="py-2 px-3 text-white">{{ order.order_status }}</td>
+                  <td class="py-2 px-3 text-gray-400 text-xs">{{ formatTime(order.created_time) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      </div>
+    </div>
+
+    <!-- Fixed Navigation Panel at Bottom -->
+    <div class="flex-shrink-0" style="margin-top: 10%;">
+      <NavigationPanel />
     </div>
   </div>
 </template>
@@ -122,7 +203,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
 import SpreadDataTable from './SpreadDataTable.vue'
-import PendingOrders from '@/views/PendingOrders.vue'
+import NavigationPanel from './NavigationPanel.vue'
 
 const marketStore = useMarketStore()
 
@@ -136,6 +217,19 @@ const bybitLagCount = ref(0)
 const binanceLagCount = ref(0)
 let lastUpdateTime = Date.now()
 let lagTimer = null
+
+// Pending orders data
+const askOrderCount = ref(0)
+const bidOrderCount = ref(0)
+const showModal = ref(false)
+const modalType = ref('') // 'ASK' or 'BID'
+const pendingOrders = ref([])
+let orderFetchTimer = null
+
+// Order book data
+const bybitOrderBook = ref({ bid_price: 0, bid_volume: 0, ask_price: 0, ask_volume: 0 })
+const binanceOrderBook = ref({ bid_price: 0, bid_volume: 0, ask_price: 0, ask_volume: 0 })
+let orderBookFetchTimer = null
 
 // Profit and position data
 const totalProfit = ref(0)
@@ -207,6 +301,8 @@ const forwardSpread = computed(() => {
 
 watch(() => marketStore.marketData, (data) => {
   if (!data) return
+
+  // Throttle updates to reduce re-renders
   const now = Date.now()
   if (now - lastUpdateTime > 2000) {
     bybitLagCount.value++
@@ -214,38 +310,47 @@ watch(() => marketStore.marketData, (data) => {
   }
   lastUpdateTime = now
 
-  bybit.value.prevBid = bybit.value.bid
-  bybit.value.prevAsk = bybit.value.ask
-  bybit.value.prevMid = bybit.value.mid
-  binance.value.prevBid = binance.value.bid
-  binance.value.prevAsk = binance.value.ask
-  binance.value.prevMid = binance.value.prevMid
+  // Only update if values actually changed
+  const bybitBidChanged = bybit.value.bid !== (data.bybit_bid || 0)
+  const bybitAskChanged = bybit.value.ask !== (data.bybit_ask || 0)
+  const binanceBidChanged = binance.value.bid !== (data.binance_bid || 0)
+  const binanceAskChanged = binance.value.ask !== (data.binance_ask || 0)
 
-  bybit.value.bid = data.bybit_bid || 0
-  bybit.value.ask = data.bybit_ask || 0
-  bybit.value.mid = data.bybit_mid || ((bybit.value.bid + bybit.value.ask) / 2)
+  if (bybitBidChanged || bybitAskChanged || binanceBidChanged || binanceAskChanged) {
+    bybit.value.prevBid = bybit.value.bid
+    bybit.value.prevAsk = bybit.value.ask
+    bybit.value.prevMid = bybit.value.mid
+    binance.value.prevBid = binance.value.bid
+    binance.value.prevAsk = binance.value.ask
+    binance.value.prevMid = binance.value.prevMid
 
-  binance.value.bid = data.binance_bid || 0
-  binance.value.ask = data.binance_ask || 0
-  binance.value.mid = data.binance_mid || ((binance.value.bid + binance.value.ask) / 2)
+    bybit.value.bid = data.bybit_bid || 0
+    bybit.value.ask = data.bybit_ask || 0
+    bybit.value.mid = data.bybit_mid || ((bybit.value.bid + bybit.value.ask) / 2)
 
-  bybitConnected.value = true
-  binanceConnected.value = true
-})
+    binance.value.bid = data.binance_bid || 0
+    binance.value.ask = data.binance_ask || 0
+    binance.value.mid = data.binance_mid || ((binance.value.bid + binance.value.ask) / 2)
+
+    bybitConnected.value = true
+    binanceConnected.value = true
+  }
+}, { deep: false }) // Shallow watch for better performance
 
 watch(() => marketStore.connected, (val) => {
   if (!val) {
     bybitConnected.value = false
     binanceConnected.value = false
   }
-})
+}, { deep: false })
 
 // Watch for account balance updates via WebSocket
+// Optimized: Only trigger when message type is account_balance
 watch(() => marketStore.lastMessage, (message) => {
   if (message && message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
   }
-})
+}, { deep: false })
 
 function handleAccountBalanceUpdate(data) {
   // Update total profit
@@ -348,10 +453,24 @@ onMounted(() => {
 
   // Initial fetch
   fetchAccountData()
+  fetchPendingOrderCounts()
+  fetchOrderBook()
+
+  // Fetch pending order counts every 3 seconds
+  orderFetchTimer = setInterval(() => {
+    fetchPendingOrderCounts()
+  }, 3000)
+
+  // Fetch order book every 500ms
+  orderBookFetchTimer = setInterval(() => {
+    fetchOrderBook()
+  }, 500)
 })
 
 onUnmounted(() => {
   if (lagTimer) clearInterval(lagTimer)
+  if (orderFetchTimer) clearInterval(orderFetchTimer)
+  if (orderBookFetchTimer) clearInterval(orderBookFetchTimer)
 })
 
 function formatPrice(price) {
@@ -468,6 +587,88 @@ async function fetchAccountData() {
   }
 }
 
+async function fetchPendingOrderCounts() {
+  try {
+    const response = await api.get('/api/v1/trading/orders/realtime')
+    const orders = response.data || []
+
+    // Count ASK and BID orders
+    askOrderCount.value = orders.filter(order => order.side === 'Sell').length
+    bidOrderCount.value = orders.filter(order => order.side === 'Buy').length
+  } catch (error) {
+    console.error('Failed to fetch pending orders:', error)
+  }
+}
+
+async function fetchOrderBook() {
+  try {
+    const response = await api.get('/api/v1/market/orderbook')
+    const data = response.data || {}
+
+    // Update Bybit order book (MT5 volume in lots, 1 lot = 100 oz)
+    if (data.bybit && data.bybit.bid_price) {
+      bybitOrderBook.value = {
+        bid_price: data.bybit.bid_price || 0,
+        bid_volume: data.bybit.bid_volume || 0,
+        ask_price: data.bybit.ask_price || 0,
+        ask_volume: data.bybit.ask_volume || 0
+      }
+    }
+
+    // Update Binance order book (volume in contracts, 1 contract = 1 oz)
+    if (data.binance && data.binance.bid_price) {
+      binanceOrderBook.value = {
+        bid_price: data.binance.bid_price || 0,
+        bid_volume: data.binance.bid_volume || 0,
+        ask_price: data.binance.ask_price || 0,
+        ask_volume: data.binance.ask_volume || 0
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch order book:', error)
+  }
+}
+
+async function showPendingOrdersModal(type) {
+  try {
+    const response = await api.get('/api/v1/trading/orders/realtime')
+    const orders = response.data || []
+
+    // Filter orders by type
+    if (type === 'ASK') {
+      pendingOrders.value = orders.filter(order => order.side === 'Sell')
+    } else {
+      pendingOrders.value = orders.filter(order => order.side === 'Buy')
+    }
+
+    modalType.value = type
+    showModal.value = true
+  } catch (error) {
+    console.error('Failed to fetch pending orders:', error)
+  }
+}
+
+function closeModal() {
+  showModal.value = false
+  pendingOrders.value = []
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return '-'
+  const date = new Date(timestamp)
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function formatVolume(volume) {
+  if (!volume || volume === 0) return '0'
+  return volume.toFixed(2)
+}
+
 // Export data for StrategyPanel to use
 defineExpose({
   reverseActualPosition,
@@ -482,6 +683,45 @@ defineExpose({
 </script>
 
 <style scoped>
+/* Hide scrollbar but keep scroll functionality */
+.scrollbar-hide {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* Smooth transitions for price updates */
+.text-2xl, .text-xl, .text-lg {
+  transition: color 0.3s ease-in-out, transform 0.2s ease-in-out;
+}
+
+/* Pulse animation for price changes */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.font-mono {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Smooth background transitions */
+.bg-\[#1e2329\] {
+  transition: background-color 0.3s ease-in-out;
+}
+
+/* Smooth status indicator transitions */
+.bg-green-500, .bg-red-500, .bg-gray-500 {
+  transition: background-color 0.3s ease-in-out;
+}
+
 /* 移动端H5竖屏适配 - 确保完全撑满宽度 */
 @media (orientation: portrait), (max-width: 750px) {
   /* 移除所有内边距，让内容完全撑满 */

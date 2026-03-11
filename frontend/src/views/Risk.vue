@@ -1,17 +1,8 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
     <!-- Header -->
-    <div class="px-2 py-1.5 border-b border-[#2b3139] flex-shrink-0 flex items-center justify-between">
+    <div class="px-2 py-1.5 border-b border-[#2b3139] flex-shrink-0">
       <h1 class="text-sm font-bold">风险控制</h1>
-      <button
-        @click="$emit('toggle-panel')"
-        class="p-1 hover:bg-[#2b3139] rounded transition-colors"
-        title="隐藏面板"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-        </svg>
-      </button>
     </div>
 
     <!-- Scrollable Content -->

@@ -195,22 +195,30 @@ onUnmounted(() => {
 })
 
 // Watch for account balance updates via WebSocket (when backend implements it)
+// Optimized: Only trigger when message type is account_balance
 watch(() => marketStore.lastMessage, (message) => {
   if (message && message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
   }
-})
+}, { deep: false }) // Shallow watch for better performance
 
 function handleAccountBalanceUpdate(data) {
   if (data.accounts && data.accounts.length > 0) {
     // Update existing accounts with new balance data
+    // Use Object.assign for better performance
     data.accounts.forEach(updatedAcc => {
       const index = activeAccounts.value.findIndex(acc => acc.account_id === updatedAcc.account_id)
       if (index !== -1) {
-        activeAccounts.value[index] = {
-          ...activeAccounts.value[index],
-          ...updatedAcc,
-          balance: { ...activeAccounts.value[index].balance, ...updatedAcc.balance }
+        // Only update if data actually changed
+        const currentAcc = activeAccounts.value[index]
+        const hasChanges = JSON.stringify(currentAcc.balance) !== JSON.stringify(updatedAcc.balance)
+
+        if (hasChanges) {
+          activeAccounts.value[index] = {
+            ...currentAcc,
+            ...updatedAcc,
+            balance: { ...currentAcc.balance, ...updatedAcc.balance }
+          }
         }
       }
     })
@@ -535,3 +543,50 @@ function getLiquidationPrice(account, type) {
   return '暂无'
 }
 </script>
+
+<style scoped>
+/* Smooth transitions for data updates */
+.bg-\[#252930\] {
+  transition: all 0.3s ease-in-out;
+}
+
+/* Smooth number transitions */
+.font-mono {
+  transition: color 0.2s ease-in-out;
+}
+
+/* Smooth status indicator transitions */
+.w-1\.5 {
+  transition: background-color 0.3s ease-in-out;
+}
+
+/* Fade in animation for account cards */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.bg-\[#252930\] {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+/* Smooth hover effects */
+button {
+  transition: all 0.2s ease-in-out;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+button:active {
+  transform: translateY(0);
+}
+</style>

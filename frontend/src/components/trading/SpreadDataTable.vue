@@ -50,28 +50,37 @@ onMounted(() => {
 })
 
 // 监听WebSocket市场数据更新
+// Optimized: Only update if spread values actually changed
 watch(() => marketStore.marketData, (newData) => {
   if (newData) {
     // 使用统一的点差计算管理组件
     const spreads = calculateAllSpreads(newData)
 
-    const spreadItem = {
-      id: Date.now() + Math.random(),
-      timestamp: new Date(newData.timestamp || Date.now()).getTime(),
-      bybitSpread: spreads.reverseOpening,  // 反向开仓：bybit做多点差 = binance_ask - bybit_ask
-      binanceSpread: spreads.forwardOpening,  // 正向开仓：binance做多点差 = bybit_bid - binance_bid
-      isNew: true
+    // Only add if spread values are different from last entry
+    const lastEntry = spreadHistory.value[0]
+    const hasChanged = !lastEntry ||
+      Math.abs(lastEntry.bybitSpread - spreads.reverseOpening) > 0.01 ||
+      Math.abs(lastEntry.binanceSpread - spreads.forwardOpening) > 0.01
+
+    if (hasChanged) {
+      const spreadItem = {
+        id: Date.now() + Math.random(),
+        timestamp: new Date(newData.timestamp || Date.now()).getTime(),
+        bybitSpread: spreads.reverseOpening,  // 反向开仓：bybit做多点差 = binance_ask - bybit_ask
+        binanceSpread: spreads.forwardOpening,  // 正向开仓：binance做多点差 = bybit_bid - binance_bid
+        isNew: true
+      }
+
+      // 添加到历史记录（保持最新5条）
+      spreadHistory.value = [spreadItem, ...spreadHistory.value].slice(0, 5)
+
+      // 移除新标记
+      setTimeout(() => {
+        spreadItem.isNew = false
+      }, 1000)
     }
-
-    // 添加到历史记录（保持最新5条）
-    spreadHistory.value = [spreadItem, ...spreadHistory.value].slice(0, 5)
-
-    // 移除新标记
-    setTimeout(() => {
-      spreadItem.isNew = false
-    }, 1000)
   }
-}, { immediate: false })
+}, { immediate: false, deep: false }) // Shallow watch for better performance
 
 function formatTime(timestamp) {
   return formatTimeBeijing(timestamp)
@@ -95,3 +104,36 @@ function getBinanceClass(spread, index) {
   return 'text-[#f6465d]'
 }
 </script>
+
+<style scoped>
+/* Smooth transitions for spread values */
+.text-\[\#0ecb81\], .text-\[\#f6465d\] {
+  transition: color 0.3s ease-in-out;
+}
+
+/* Fade in animation for new rows */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+tr {
+  animation: slideIn 0.3s ease-in-out;
+}
+
+/* Smooth font transitions */
+.font-mono {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Highlight new entries */
+.bg-green-500\/10, .bg-red-500\/10 {
+  transition: background-color 0.5s ease-in-out;
+}
+</style>

@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './assets/main.css'
+import './assets/transitions.css' // 全局过渡动画
 
 // Import Element Plus
 import ElementPlus from 'element-plus'

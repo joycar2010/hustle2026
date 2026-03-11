@@ -278,6 +278,107 @@ class MarketDataService:
         offset = await redis_client.get("time_offset")
         return int(offset) if offset else 0
 
+    async def get_order_book(self) -> Dict[str, Any]:
+        """
+        Get order book data from both Binance and Bybit
+
+        Returns:
+            Dict with binance and bybit order book data
+        """
+        try:
+            # Get Binance order book via API
+            binance_book = await self._get_binance_order_book("XAUUSDT")
+
+            # Get Bybit order book via API (MT5 doesn't support order book)
+            bybit_book = await self._get_bybit_order_book("XAUUSDT")
+
+            return {
+                "binance": binance_book or {},
+                "bybit": bybit_book or {},
+                "timestamp": int(time.time() * 1000)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get order book: {e}")
+            return {
+                "binance": {},
+                "bybit": {},
+                "timestamp": int(time.time() * 1000),
+                "error": str(e)
+            }
+
+    async def _get_binance_order_book(self, symbol: str = "XAUUSDT") -> Optional[Dict[str, Any]]:
+        """
+        Get Binance order book ticker (best bid/ask with volumes)
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Dict with bid_price, bid_volume, ask_price, ask_volume
+        """
+        try:
+            url = f"https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol={symbol}"
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return {
+                            'symbol': symbol,
+                            'bid_price': round(float(data["bidPrice"]), 3),
+                            'bid_volume': round(float(data["bidQty"]), 2),
+                            'ask_price': round(float(data["askPrice"]), 3),
+                            'ask_volume': round(float(data["askQty"]), 2),
+                            'timestamp': int(time.time() * 1000)
+                        }
+                    else:
+                        logger.error(f"Binance API error: {resp.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Failed to get Binance order book: {e}")
+            return None
+
+    async def _get_bybit_order_book(self, symbol: str = "XAUUSDT") -> Optional[Dict[str, Any]]:
+        """
+        Get Bybit order book ticker (best bid/ask with volumes)
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Dict with bid_price, bid_volume, ask_price, ask_volume
+        """
+        try:
+            url = f"https://api.bybit.com/v5/market/orderbook?category=linear&symbol={symbol}&limit=1"
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("retCode") == 0 and data.get("result"):
+                            result = data["result"]
+                            bids = result.get("b", [])
+                            asks = result.get("a", [])
+
+                            if bids and asks:
+                                # bids and asks are arrays of [price, size]
+                                return {
+                                    'symbol': symbol,
+                                    'bid_price': round(float(bids[0][0]), 3),
+                                    'bid_volume': round(float(bids[0][1]), 2),
+                                    'ask_price': round(float(asks[0][0]), 3),
+                                    'ask_volume': round(float(asks[0][1]), 2),
+                                    'timestamp': int(time.time() * 1000)
+                                }
+                        logger.error(f"Bybit API returned error: {data}")
+                        return None
+                    else:
+                        logger.error(f"Bybit API error: {resp.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Failed to get Bybit order book: {e}")
+            return None
+
 
 # Global instance
 market_data_service = MarketDataService()

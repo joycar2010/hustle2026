@@ -1,118 +1,135 @@
 <template>
-  <div class="flex bg-[#1a1d21] text-white lg:h-screen lg:overflow-hidden max-lg:min-h-screen max-lg:overflow-visible">
-    <!-- Left Sidebar - Account Status (Hidden on mobile/tablet) -->
-    <aside
-      v-if="showLeftPanel"
-      class="hidden lg:flex lg:w-[280px] xl:w-[320px] bg-[#1e2329] border-r border-[#2b3139] flex-col overflow-hidden flex-shrink-0"
-    >
-      <div class="flex-[6.3] overflow-y-auto">
+  <div class="trading-dashboard">
+    <!-- Left Sidebar - Account Status (Hidden on mobile) -->
+    <aside v-if="showLeftSidebar" class="sidebar-left">
+      <div class="sidebar-section account-section">
         <AccountStatusPanel />
       </div>
-      <div class="flex-[3.7] overflow-y-auto">
-        <NavigationPanel @toggle-panel="toggleLeftPanel" />
-      </div>
+      <button
+        @click="showLeftSidebar = false"
+        class="sidebar-toggle-btn"
+        title="隐藏左侧栏"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+        </svg>
+      </button>
     </aside>
 
-    <!-- Toggle Button for Left Panel (when panel is hidden) -->
+    <!-- Show Left Sidebar Button -->
     <button
-      v-if="!showLeftPanel"
-      @click="toggleLeftPanel"
-      class="hidden lg:block fixed left-0 top-1/2 -translate-y-1/2 bg-[#1e2329] border border-l-0 border-[#2b3139] rounded-r-lg p-3 px-1.5 text-white cursor-pointer transition-all duration-300 z-[100] shadow-[2px_0_8px_rgba(0,0,0,0.3)] hover:bg-[#2b3139] hover:pr-2"
-      title="显示左侧面板"
+      v-if="!showLeftSidebar"
+      @click="showLeftSidebar = true"
+      class="show-sidebar-btn left"
+      title="显示左侧栏"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
       </svg>
     </button>
 
     <!-- Main Content Area -->
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden lg:overflow-hidden max-lg:overflow-visible max-lg:h-auto">
+    <main class="main-content">
       <!-- Strategy Panels Section -->
-      <section class="flex-1 flex flex-col lg:flex-row gap-2 p-2 min-h-0 max-lg:h-auto">
-        <!-- Reverse Strategy -->
-        <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <StrategyPanel type="reverse" :market-cards-ref="marketCardsRef" />
+      <section class="section-strategies">
+        <div class="strategy-container reverse-strategy">
+          <StrategyPanel type="reverse" />
         </div>
 
-        <!-- Market Cards -->
-        <div class="w-full lg:w-[380px] xl:w-[420px] bg-[#1e2329] rounded-lg flex-shrink-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <MarketCards ref="marketCardsRef" />
+        <div class="market-cards-container">
+          <MarketCards />
         </div>
 
-        <!-- Forward Strategy -->
-        <div class="flex-1 bg-[#1e2329] rounded-lg min-w-0 lg:min-h-0 lg:overflow-hidden max-lg:overflow-visible">
-          <StrategyPanel type="forward" :market-cards-ref="marketCardsRef" />
+        <div class="strategy-container forward-strategy">
+          <StrategyPanel type="forward" />
+        </div>
+      </section>
+
+      <!-- Manual Trading Section (拆分后的两个组件) -->
+      <section class="section-manual-trading">
+        <div class="emergency-trading-wrapper">
+          <EmergencyManualTrading @orderExecuted="handleOrderExecuted" />
+        </div>
+
+        <div class="recent-records-wrapper">
+          <RecentTradingRecords ref="recentRecordsRef" />
         </div>
       </section>
     </main>
 
     <!-- Right Sidebar - Risk Management (Hidden on mobile/tablet) -->
-    <aside
-      v-if="showRiskPanel"
-      class="hidden xl:block w-[304px] 2xl:w-[342px] bg-[#1e2329] border-l border-[#2b3139] overflow-y-auto flex-shrink-0"
-    >
-      <Risk @toggle-panel="toggleRiskPanel" />
+    <aside v-if="showRightSidebar" class="sidebar-right">
+      <Risk />
+      <button
+        @click="showRightSidebar = false"
+        class="sidebar-toggle-btn-right"
+        title="隐藏右侧栏"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+        </svg>
+      </button>
     </aside>
 
-    <!-- Toggle Button (when panel is hidden) -->
+    <!-- Show Right Sidebar Button -->
     <button
-      v-if="!showRiskPanel"
-      @click="toggleRiskPanel"
-      class="hidden xl:block fixed right-0 top-1/2 -translate-y-1/2 bg-[#1e2329] border border-r-0 border-[#2b3139] rounded-l-lg p-3 px-1.5 text-white cursor-pointer transition-all duration-300 z-[100] shadow-[-2px_0_8px_rgba(0,0,0,0.3)] hover:bg-[#2b3139] hover:pl-2"
-      title="显示风险控制面板"
+      v-if="!showRightSidebar"
+      @click="showRightSidebar = true"
+      class="show-sidebar-btn right"
+      title="显示右侧栏"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
       </svg>
     </button>
 
-    <!-- Floating Action Buttons (Mobile only) -->
+    <!-- Floating Action Buttons (仅移动端显示) -->
     <FloatingActionButtons />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import AccountStatusPanel from '@/components/trading/AccountStatusPanel.vue'
-import NavigationPanel from '@/components/trading/NavigationPanel.vue'
 import MarketCards from '@/components/trading/MarketCards.vue'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
+import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
+import RecentTradingRecords from '@/components/trading/RecentTradingRecords.vue'
 import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vue'
 import Risk from '@/views/Risk.vue'
 
-// 从 localStorage 加载面板状态
-function loadPanelState(key, defaultValue = true) {
-  try {
-    const saved = localStorage.getItem(key)
-    return saved !== null ? saved === 'true' : defaultValue
-  } catch {
-    return defaultValue
+const recentRecordsRef = ref(null)
+
+// 从localStorage加载侧边栏状态
+const showLeftSidebar = ref(true)
+const showRightSidebar = ref(true)
+
+onMounted(() => {
+  const savedLeftState = localStorage.getItem('showLeftSidebar')
+  if (savedLeftState !== null) {
+    showLeftSidebar.value = savedLeftState === 'true'
   }
-}
 
-// 保存面板状态到 localStorage
-function savePanelState(key, value) {
-  try {
-    localStorage.setItem(key, value.toString())
-  } catch (error) {
-    console.error('Failed to save panel state:', error)
+  const savedRightState = localStorage.getItem('showRightSidebar')
+  if (savedRightState !== null) {
+    showRightSidebar.value = savedRightState === 'true'
   }
-}
+})
 
-const showRiskPanel = ref(loadPanelState('showRiskPanel', true))
-const showLeftPanel = ref(loadPanelState('showLeftPanel', true))
-const marketCardsRef = ref(null)
+// 监听状态变化并保存到localStorage
+watch(showLeftSidebar, (newValue) => {
+  localStorage.setItem('showLeftSidebar', newValue.toString())
+})
 
-// 切换风险控制面板显示/隐藏
-function toggleRiskPanel() {
-  showRiskPanel.value = !showRiskPanel.value
-  savePanelState('showRiskPanel', showRiskPanel.value)
-}
+watch(showRightSidebar, (newValue) => {
+  localStorage.setItem('showRightSidebar', newValue.toString())
+})
 
-// 切换左侧面板显示/隐藏
-function toggleLeftPanel() {
-  showLeftPanel.value = !showLeftPanel.value
-  savePanelState('showLeftPanel', showLeftPanel.value)
+// 当紧急交易执行后，刷新最近交易记录
+function handleOrderExecuted() {
+  if (recentRecordsRef.value) {
+    recentRecordsRef.value.fetchRecentOrders()
+  }
 }
 </script>
 
@@ -134,6 +151,7 @@ function toggleLeftPanel() {
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+  position: relative;
 }
 
 .sidebar-section {
@@ -141,19 +159,93 @@ function toggleLeftPanel() {
 }
 
 .account-section {
-  flex: 6.3;
+  flex: 1;
 }
 
-.navigation-section {
-  flex: 3.7;
+.sidebar-toggle-btn {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  padding: 8px;
+  background-color: #252930;
+  border: 1px solid #2b3139;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.sidebar-toggle-btn:hover {
+  background-color: #2b3139;
+  border-color: #f0b90b;
+  color: #f0b90b;
+}
+
+.show-sidebar-btn {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 12px 6px;
+  background-color: #252930;
+  border: 1px solid #2b3139;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+  border-radius: 0 4px 4px 0;
+}
+
+.show-sidebar-btn.left {
+  left: 0;
+}
+
+.show-sidebar-btn.right {
+  right: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.show-sidebar-btn:hover {
+  background-color: #2b3139;
+  border-color: #f0b90b;
+  color: #f0b90b;
+}
+
+.show-sidebar-btn.left:hover {
+  padding-right: 10px;
+}
+
+.show-sidebar-btn.right:hover {
+  padding-left: 10px;
 }
 
 .sidebar-right {
-  width: 304px;
+  width: 320px;
   background-color: #1e2329;
   border-left: 1px solid #2b3139;
   overflow-y: auto;
   flex-shrink: 0;
+  position: relative;
+}
+
+.sidebar-toggle-btn-right {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  padding: 8px;
+  background-color: #252930;
+  border: 1px solid #2b3139;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.sidebar-toggle-btn-right:hover {
+  background-color: #2b3139;
+  border-color: #f0b90b;
+  color: #f0b90b;
 }
 
 /* ========== 主内容区域 ========== */
@@ -167,11 +259,10 @@ function toggleLeftPanel() {
 
 /* ========== 策略面板区域 ========== */
 .section-strategies {
-  height: 63%;
+  flex: 1;
   display: flex;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: 1px solid #2b3139;
+  gap: 12px;
+  padding: 12px;
   min-height: 0;
 }
 
@@ -191,88 +282,9 @@ function toggleLeftPanel() {
   flex-shrink: 0;
 }
 
-/* ========== 订单和点差区域 ========== */
-.section-orders-spread {
-  flex: 1;
-  display: flex;
-  gap: 8px;
-  padding: 0 8px 8px 8px;
-  min-height: 0;
-}
-
-.order-monitor-wrapper {
-  flex: 1;
-  background-color: #1e2329;
-  border-radius: 8px;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.manual-trading-wrapper-pc {
-  flex: 1;
-  background-color: #1e2329;
-  border-radius: 8px;
-  overflow: hidden;
-  min-width: 0;
-}
-
-/* ========== 手动交易区域（PC端隐藏，移动端显示） ========== */
+/* ========== 手动交易区域（新增） ========== */
 .section-manual-trading {
-  display: none;
-}
-
-/* ========== 风险控制面板切换按钮 ========== */
-.risk-panel-toggle {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  background-color: #1e2329;
-  border: 1px solid #2b3139;
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  padding: 12px 6px;
-  color: #ffffff;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  z-index: 100;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
-}
-
-.risk-panel-toggle:hover {
-  background-color: #2b3139;
-  padding-left: 8px;
-}
-
-.risk-panel-toggle svg {
-  display: block;
-}
-
-/* ========== 左侧面板切换按钮 ========== */
-.left-panel-toggle {
-  position: fixed;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  background-color: #1e2329;
-  border: 1px solid #2b3139;
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  padding: 12px 6px;
-  color: #ffffff;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  z-index: 100;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
-}
-
-.left-panel-toggle:hover {
-  background-color: #2b3139;
-  padding-right: 8px;
-}
-
-.left-panel-toggle svg {
-  display: block;
+  display: none; /* PC端默认隐藏，移动端显示 */
 }
 
 /* ========== 移动端H5竖屏适配 ========== */
@@ -287,17 +299,11 @@ function toggleLeftPanel() {
     display: none;
   }
 
-  /* 隐藏面板切换按钮 */
-  .risk-panel-toggle,
-  .left-panel-toggle {
-    display: none;
-  }
-
   /* 主内容区域 */
   .main-content {
     width: 100%;
-    padding: 0;
-    gap: 0;
+    padding: 12px;
+    gap: 16px;
     overflow-y: auto;
   }
 
@@ -307,52 +313,31 @@ function toggleLeftPanel() {
     flex-direction: column;
     padding: 0;
     border-bottom: none;
-    gap: 0;
+    gap: 16px;
   }
 
   .strategy-container {
     width: 100%;
-    height: auto;
-    min-height: auto;
-    border-radius: 0;
+    max-height: 300px;
+    min-height: 300px;
   }
 
   .market-cards-container {
     width: 100%;
-    height: auto;
-    border-radius: 0;
-  }
-
-  /* 订单和手动交易区域 - 垂直排列 */
-  .section-orders-spread {
-    flex-direction: column;
-    padding: 0;
-    gap: 0;
-  }
-
-  .order-monitor-wrapper {
-    width: 100%;
-    max-height: 350px;
-    border-radius: 0;
-  }
-
-  /* PC端的ManualTrading在移动端隐藏 */
-  .manual-trading-wrapper-pc {
-    display: none;
+    max-height: 300px;
   }
 
   /* 手动交易区域 - 显示并垂直排列 */
   .section-manual-trading {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 16px;
   }
 
   .emergency-trading-wrapper,
   .recent-records-wrapper {
     width: 100%;
     max-height: 400px;
-    border-radius: 0;
   }
 }
 
@@ -363,7 +348,7 @@ function toggleLeftPanel() {
   }
 
   .sidebar-right {
-    display: none;
+    display: none; /* 平板隐藏右侧边栏 */
   }
 
   .market-cards-container {
@@ -378,7 +363,7 @@ function toggleLeftPanel() {
   }
 
   .sidebar-right {
-    width: 342px;
+    width: 360px;
   }
 
   .market-cards-container {

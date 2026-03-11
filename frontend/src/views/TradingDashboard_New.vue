@@ -1,13 +1,32 @@
 <template>
   <div class="trading-dashboard">
-    <!-- Left Sidebar - Account Status (Hidden on mobile) --><aside class="sidebar-left">
+    <!-- Left Sidebar - Account Status (Hidden on mobile) -->
+    <aside v-if="showLeftSidebar" class="sidebar-left">
       <div class="sidebar-section account-section">
         <AccountStatusPanel />
       </div>
-      <div class="sidebar-section navigation-section">
-        <NavigationPanel />
-      </div>
+      <button
+        @click="showLeftSidebar = false"
+        class="sidebar-toggle-btn"
+        title="隐藏左侧栏"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+        </svg>
+      </button>
     </aside>
+
+    <!-- Show Left Sidebar Button -->
+    <button
+      v-if="!showLeftSidebar"
+      @click="showLeftSidebar = true"
+      class="show-sidebar-btn left"
+      title="显示左侧栏"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+      </svg>
+    </button>
 
     <!-- Main Content Area -->
     <main class="main-content">
@@ -60,9 +79,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import AccountStatusPanel from '@/components/trading/AccountStatusPanel.vue'
-import NavigationPanel from '@/components/trading/NavigationPanel.vue'
 import MarketCards from '@/components/trading/MarketCards.vue'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
 import OrderMonitor from '@/components/trading/OrderMonitor.vue'
@@ -73,6 +91,21 @@ import FloatingActionButtons from '@/components/trading/FloatingActionButtons.vu
 import Risk from '@/views/Risk.vue'
 
 const recentRecordsRef = ref(null)
+
+// 从localStorage加载左侧栏状态
+const showLeftSidebar = ref(true)
+
+onMounted(() => {
+  const savedState = localStorage.getItem('showLeftSidebar')
+  if (savedState !== null) {
+    showLeftSidebar.value = savedState === 'true'
+  }
+})
+
+// 监听状态变化并保存到localStorage
+watch(showLeftSidebar, (newValue) => {
+  localStorage.setItem('showLeftSidebar', newValue.toString())
+})
 
 // 当紧急交易执行后，刷新最近交易记录
 function handleOrderExecuted() {
@@ -100,6 +133,7 @@ function handleOrderExecuted() {
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+  position: relative;
 }
 
 .sidebar-section {
@@ -107,11 +141,52 @@ function handleOrderExecuted() {
 }
 
 .account-section {
-  flex: 7;
+  flex: 1;
 }
 
-.navigation-section {
-  flex: 3;
+.sidebar-toggle-btn {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  padding: 8px;
+  background-color: #252930;
+  border: 1px solid #2b3139;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.sidebar-toggle-btn:hover {
+  background-color: #2b3139;
+  border-color: #f0b90b;
+  color: #f0b90b;
+}
+
+.show-sidebar-btn {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 12px 6px;
+  background-color: #252930;
+  border: 1px solid #2b3139;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+  border-radius: 0 4px 4px 0;
+}
+
+.show-sidebar-btn.left {
+  left: 0;
+}
+
+.show-sidebar-btn:hover {
+  background-color: #2b3139;
+  border-color: #f0b90b;
+  color: #f0b90b;
+  padding-right: 10px;
 }
 
 .sidebar-right {

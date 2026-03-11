@@ -174,3 +174,12 @@ async def get_time_offset():
         return {"offset": offset}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/orderbook")
+async def get_order_book():
+    """Get real-time order book data from Binance and Bybit MT5"""
+    try:
+        return await market_data_service.get_order_book()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

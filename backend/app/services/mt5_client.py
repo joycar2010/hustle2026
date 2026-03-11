@@ -544,6 +544,57 @@ class MT5Client:
             logger.error(f"Failed to get positions: {e}")
             return []
 
+    def get_market_book(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Get market book (order book) data for symbol
+
+        Args:
+            symbol: Trading symbol (e.g., "XAUUSD.s")
+
+        Returns:
+            Dict with bid_price, bid_volume, ask_price, ask_volume, or None if failed
+        """
+        if not self.ensure_connection():
+            return None
+
+        try:
+            # Get market book data
+            book = mt5.market_book_get(symbol)
+            if book is None:
+                error = mt5.last_error()
+                logger.error(f"Failed to get market book for {symbol}: {error}")
+                return None
+
+            # Filter bid and ask orders
+            # BOOK_TYPE_BUY (2) = Buy orders (BID side)
+            # BOOK_TYPE_SELL (1) = Sell orders (ASK side)
+            bid_book = [b for b in book if b.type == mt5.BOOK_TYPE_BUY]   # Buy orders (BID)
+            ask_book = [b for b in book if b.type == mt5.BOOK_TYPE_SELL]  # Sell orders (ASK)
+
+            if not bid_book or not ask_book:
+                logger.warning(f"Market book has no data for {symbol}")
+                return None
+
+            # Get best bid (highest buy price) and best ask (lowest sell price)
+            bid_best = max(bid_book, key=lambda x: x.price)
+            ask_best = min(ask_book, key=lambda x: x.price)
+
+            # Update last successful request timestamp
+            self.last_successful_request = datetime.utcnow()
+
+            return {
+                'symbol': symbol,
+                'bid_price': round(bid_best.price, 3),
+                'bid_volume': round(bid_best.volume, 2),  # Volume in lots (1 lot = 100 oz for XAUUSD.s)
+                'ask_price': round(ask_best.price, 3),
+                'ask_volume': round(ask_best.volume, 2),
+                'timestamp': int(time.time() * 1000)
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting market book for {symbol}: {e}")
+            return None
+
     def find_position_to_close(self, symbol: str, side: str) -> Optional[int]:
         """
         Find a position ticket to close based on symbol and side

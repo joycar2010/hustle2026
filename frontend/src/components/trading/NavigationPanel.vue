@@ -1,47 +1,43 @@
 <template>
-  <div class="p-2 space-y-1.5 border-t border-[#2b3139]">
-    <div class="flex items-center justify-between mb-2">
-      <h3 class="text-xs font-bold text-gray-400">系统状态</h3>
-      <button
-        @click="$emit('toggle-panel')"
-        class="p-1 hover:bg-[#2b3139] rounded transition-colors"
-        title="隐藏面板"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-        </svg>
-      </button>
-    </div>
-
-    <button
-      v-for="item in navItems"
-      :key="item.id"
-      @click="handleNavClick(item.id)"
-      :class="[
-        'w-full px-2 rounded text-left transition-all flex items-center justify-between',
-        'h-[32px]',
-        activeNav === item.id
-          ? 'bg-[#f0b90b]/20 text-[#f0b90b] border border-[#f0b90b]'
-          : 'bg-[#252930] hover:bg-[#2b3139] text-gray-300'
-      ]"
-    >
-      <div class="flex items-center space-x-1.5 flex-1 min-w-0">
-        <component :is="iconComponents[item.icon]" class="w-4 h-4 flex-shrink-0" />
-        <span class="text-xs font-medium truncate">{{ item.label }}</span>
-      </div>
-      <div v-if="item.badge" :class="['text-xs px-1.5 py-0.5 rounded flex-shrink-0 ml-1.5', item.badgeClass]">
-        {{ item.badge }}
-      </div>
-    </button>
-
-    <!-- System Alerts -->
-    <div class="mt-2 bg-[#252930] rounded-lg border border-[#2b3139] p-2">
+  <div class="p-2 border-t border-[#2b3139]">
+    <div class="grid grid-cols-2 gap-3">
+      <!-- Left Column: System Status Navigation -->
       <div class="space-y-1.5">
-        <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-1.5 text-xs">
-          <div class="w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
-          <div class="flex-1">
-            <div class="text-gray-300">{{ alert.message }}</div>
-            <div v-if="alert.value" class="text-gray-500 mt-0.5">{{ alert.value }}</div>
+        <h3 class="text-xs font-bold text-gray-400 mb-2">系统状态</h3>
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          @click="handleNavClick(item.id)"
+          :class="[
+            'w-full px-2 rounded text-left transition-all flex items-center justify-between',
+            'h-[32px]',
+            activeNav === item.id
+              ? 'bg-[#f0b90b]/20 text-[#f0b90b] border border-[#f0b90b]'
+              : 'bg-[#252930] hover:bg-[#2b3139] text-gray-300'
+          ]"
+        >
+          <div class="flex items-center space-x-1.5 flex-1 min-w-0">
+            <component :is="iconComponents[item.icon]" class="w-4 h-4 flex-shrink-0" />
+            <span class="text-xs font-medium truncate">{{ item.label }}</span>
+          </div>
+          <div v-if="item.badge" :class="['text-xs px-1.5 py-0.5 rounded flex-shrink-0 ml-1.5', item.badgeClass]">
+            {{ item.badge }}
+          </div>
+        </button>
+      </div>
+
+      <!-- Right Column: Service Status -->
+      <div class="space-y-1.5">
+        <h3 class="text-xs font-bold text-gray-400 mb-2">服务状态</h3>
+        <div class="bg-[#252930] rounded-lg border border-[#2b3139] p-2">
+          <div class="space-y-1.5">
+            <div v-for="alert in systemAlerts" :key="alert.id" class="flex items-start space-x-1.5 text-xs">
+              <div class="w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0" :class="getAlertColor(alert.type)"></div>
+              <div class="flex-1">
+                <div class="text-gray-300">{{ alert.message }}</div>
+                <div v-if="alert.value" class="text-gray-500 mt-0.5">{{ alert.value }}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
