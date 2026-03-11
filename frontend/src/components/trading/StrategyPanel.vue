@@ -150,19 +150,6 @@
             >
               {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
             </button>
-            <!-- Trigger Progress for Opening -->
-            <div v-if="continuousExecutionEnabled.opening" class="mt-1.5 text-xs">
-              <div class="flex justify-between text-gray-400 mb-0.5">
-                <span>触发进度</span>
-                <span>{{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}</span>
-              </div>
-              <div class="w-full bg-[#1a1d21] rounded-full h-1.5">
-                <div
-                  class="bg-[#0ecb81] h-1.5 rounded-full transition-all duration-300"
-                  :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.opening.current / continuousExecutionTriggerProgress.opening.required) * 100)}%` }"
-                ></div>
-              </div>
-            </div>
           </div>
 
           <div>
@@ -180,19 +167,6 @@
             >
               {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
             </button>
-            <!-- Trigger Progress for Closing -->
-            <div v-if="continuousExecutionEnabled.closing" class="mt-1.5 text-xs">
-              <div class="flex justify-between text-gray-400 mb-0.5">
-                <span>触发进度</span>
-                <span>{{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}</span>
-              </div>
-              <div class="w-full bg-[#1a1d21] rounded-full h-1.5">
-                <div
-                  class="bg-[#f6465d] h-1.5 rounded-full transition-all duration-300"
-                  :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.closing.current / continuousExecutionTriggerProgress.closing.required) * 100)}%` }"
-                ></div>
-              </div>
-            </div>
           </div>
         </div>
 
