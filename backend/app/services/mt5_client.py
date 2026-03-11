@@ -245,6 +245,40 @@ class MT5Client:
             # Update last successful request timestamp
             self.last_successful_request = datetime.utcnow()
 
+            # Calculate total swap from positions and history
+            total_swap = 0.0
+            position_swap = 0.0
+            deal_swap = 0.0
+
+            # Get swap from open positions
+            positions = mt5.positions_get()
+            if positions:
+                logger.info(f"Found {len(positions)} open positions")
+                for pos in positions:
+                    position_swap += pos.swap
+                    logger.debug(f"Position {pos.ticket}: swap={pos.swap}")
+                total_swap += position_swap
+            else:
+                logger.info("No open positions found")
+
+            # Get swap from historical deals (last 30 days)
+            from_date = datetime.utcnow() - timedelta(days=30)
+            deals = mt5.history_deals_get(from_date, datetime.utcnow())
+            if deals:
+                logger.info(f"Found {len(deals)} historical deals in last 30 days")
+                deal_count_with_swap = 0
+                for deal in deals:
+                    if hasattr(deal, 'swap') and deal.swap != 0:
+                        deal_swap += deal.swap
+                        deal_count_with_swap += 1
+                        logger.debug(f"Deal {deal.ticket}: swap={deal.swap}")
+                total_swap += deal_swap
+                logger.info(f"Deals with swap: {deal_count_with_swap}, total deal swap: {deal_swap}")
+            else:
+                logger.info("No historical deals found")
+
+            logger.info(f"Total swap calculation: position_swap={position_swap}, deal_swap={deal_swap}, total={total_swap}")
+
             return {
                 'login': account_info.login,
                 'balance': account_info.balance,
@@ -252,7 +286,8 @@ class MT5Client:
                 'margin': account_info.margin,
                 'margin_free': account_info.margin_free,
                 'margin_level': account_info.margin_level,
-                'profit': account_info.profit
+                'profit': account_info.profit,
+                'swap': total_swap  # 账户累计总过夜费（包含已平仓+未平仓）
             }
 
         except Exception as e:
@@ -806,3 +841,151 @@ class MT5Client:
         except Exception as e:
             logger.error(f"Failed to get orders history: {e}")
             return []
+
+    def get_positions_swap(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取当前持仓的实时Swap（过夜费）
+
+        Args:
+            symbol: 可选的品种过滤，如 "XAUUSD.s"
+
+        Returns:
+            {
+                "total_swap": 所有持仓的累计过夜费总和,
+                "positions": [
+                    {
+                        "ticket": 持仓ID,
+                        "symbol": 品种,
+                        "side": 方向（BUY/SELL）,
+                        "volume": 持仓手数,
+                        "swap": 该持仓的累计过夜费,
+                        "open_time": 开仓时间
+                    }
+                ]
+            }
+        """
+        if not self.ensure_connection():
+            return {"total_swap": 0.0, "positions": []}
+
+        try:
+            # 获取持仓
+            if symbol:
+                positions = mt5.positions_get(symbol=symbol)
+            else:
+                positions = mt5.positions_get()
+
+            if not positions:
+                return {"total_swap": 0.0, "positions": []}
+
+            # 提取Swap数据
+            total_swap = 0.0
+            position_list = []
+
+            for pos in positions:
+                side = "BUY" if pos.type == mt5.POSITION_TYPE_BUY else "SELL"
+                swap_value = round(pos.swap, 3)
+                total_swap += swap_value
+
+                position_list.append({
+                    "ticket": pos.ticket,
+                    "symbol": pos.symbol,
+                    "side": side,
+                    "volume": pos.volume,
+                    "swap": swap_value,
+                    "open_time": datetime.fromtimestamp(pos.time),
+                    "profit": pos.profit
+                })
+
+            self.last_successful_request = datetime.utcnow()
+
+            return {
+                "total_swap": round(total_swap, 3),
+                "positions": position_list
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get positions swap: {e}")
+            self.connected = False
+            return {"total_swap": 0.0, "positions": []}
+
+    def get_history_swap_summary(
+        self,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        symbol: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        获取历史平仓订单的Swap统计（用于统计面板）
+
+        Args:
+            date_from: 开始日期（默认：今天00:00）
+            date_to: 结束日期（默认：现在）
+            symbol: 可选的品种过滤
+
+        Returns:
+            {
+                "total_swap": 历史订单的总过夜费,
+                "deal_count": 有过夜费的订单数量,
+                "deals": [
+                    {
+                        "ticket": 成交ID,
+                        "symbol": 品种,
+                        "swap": 过夜费,
+                        "volume": 手数,
+                        "time": 平仓时间,
+                        "profit": 盈亏
+                    }
+                ]
+            }
+        """
+        if not self.ensure_connection():
+            return {"total_swap": 0.0, "deal_count": 0, "deals": []}
+
+        try:
+            # 默认时间范围
+            if date_from is None:
+                date_from = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            if date_to is None:
+                date_to = datetime.utcnow()
+
+            # 获取历史成交
+            if symbol:
+                deals = mt5.history_deals_get(date_from, date_to, group=symbol)
+            else:
+                deals = mt5.history_deals_get(date_from, date_to)
+
+            if not deals:
+                return {"total_swap": 0.0, "deal_count": 0, "deals": []}
+
+            # 筛选有Swap的成交记录
+            total_swap = 0.0
+            swap_deals = []
+
+            for deal in deals:
+                if deal.swap != 0:  # 只统计有过夜费的记录
+                    swap_value = round(deal.swap, 3)
+                    total_swap += swap_value
+
+                    swap_deals.append({
+                        "ticket": deal.ticket,
+                        "order": deal.order,
+                        "symbol": deal.symbol,
+                        "swap": swap_value,
+                        "volume": deal.volume,
+                        "time": datetime.fromtimestamp(deal.time),
+                        "profit": deal.profit,
+                        "commission": deal.commission
+                    })
+
+            self.last_successful_request = datetime.utcnow()
+
+            return {
+                "total_swap": round(total_swap, 3),
+                "deal_count": len(swap_deals),
+                "deals": swap_deals
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get history swap summary: {e}")
+            self.connected = False
+            return {"total_swap": 0.0, "deal_count": 0, "deals": []}

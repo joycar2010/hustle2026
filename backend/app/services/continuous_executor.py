@@ -160,14 +160,16 @@ class ContinuousStrategyExecutor:
         Returns:
             Execution result
         """
-        # ========== 强制输出调试信息 ==========
-        print(f"\n{'='*80}")
-        print(f"=== LADDER DEBUG START (ladder {ladder_idx}) ===")
-        print(f"[DEBUG] is_running initial value: {self.is_running}")
-        print(f"[DEBUG] ladder total_qty: {ladder.total_qty}")
-        print(f"[DEBUG] strategy_type: {strategy_type}")
-        print(f"[DEBUG] order_qty_limit: {order_qty_limit}")
-        print(f"{'='*80}\n")
+        # ========== 强制输出调试信息到文件 ==========
+        import datetime
+        with open("ladder_debug.log", "a") as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"[{datetime.datetime.now()}] LADDER DEBUG START (ladder {ladder_idx})\n")
+            f.write(f"[DEBUG] is_running initial value: {self.is_running}\n")
+            f.write(f"[DEBUG] ladder total_qty: {ladder.total_qty}\n")
+            f.write(f"[DEBUG] strategy_type: {strategy_type}\n")
+            f.write(f"[DEBUG] order_qty_limit: {order_qty_limit}\n")
+            f.write(f"{'='*80}\n")
 
         # Initialize trigger manager for this ladder
         trigger_key = f"{self.strategy_id}_{strategy_type}_ladder_{ladder_idx}"
@@ -179,18 +181,20 @@ class ContinuousStrategyExecutor:
         trigger_count_required = ladder.opening_trigger_count if is_opening else ladder.closing_trigger_count
         compare_op = CompareOperator.GREATER_EQUAL if is_opening else CompareOperator.LESS_EQUAL
 
-        print(f"[DEBUG] is_opening: {is_opening}")
-        print(f"[DEBUG] spread_threshold: {spread_threshold}")
-        print(f"[DEBUG] trigger_count_required: {trigger_count_required}")
-        print(f"[DEBUG] compare_op: {compare_op}\n")
+        with open("ladder_debug.log", "a") as f:
+            f.write(f"[DEBUG] is_opening: {is_opening}\n")
+            f.write(f"[DEBUG] spread_threshold: {spread_threshold}\n")
+            f.write(f"[DEBUG] trigger_count_required: {trigger_count_required}\n")
+            f.write(f"[DEBUG] compare_op: {compare_op}\n\n")
 
         logger.info(f"Starting ladder execution loop - is_running: {self.is_running}, ladder_idx: {ladder_idx}, total_qty: {ladder.total_qty}")
 
         loop_count = 0
         while self.is_running:
             loop_count += 1
-            print(f"\n[DEBUG] ===== Loop iteration {loop_count} =====")
-            print(f"[DEBUG] is_running: {self.is_running}")
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"\n[DEBUG] ===== Loop iteration {loop_count} =====\n")
+                f.write(f"[DEBUG] is_running: {self.is_running}\n")
 
             # Step 1: Check position
             position_info = self.position_mgr.get_position(
@@ -199,23 +203,29 @@ class ContinuousStrategyExecutor:
                 strategy_type
             )
             current_position = position_info['current_position']
-            print(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}")
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}\n")
             logger.info(f"Step 1 - Current position: {current_position}/{ladder.total_qty}")
 
             # Step 2: Check if ladder complete
             if current_position >= ladder.total_qty:
-                print(f"[DEBUG] BREAK: Current position ({current_position}) >= total_qty ({ladder.total_qty})")
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] BREAK: Current position ({current_position}) >= total_qty ({ladder.total_qty})\n")
                 logger.info(f"Ladder {ladder_idx} complete: {current_position}/{ladder.total_qty}")
                 break
 
             # Step 3: Check trigger count
             trigger_ready = self.trigger_mgr.is_ready(trigger_count_required)
             logger.info(f"Step 3 - Trigger ready: {trigger_ready}, current count: {self.trigger_mgr.count}, required: {trigger_count_required}")
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[DEBUG] Step 3 - Trigger ready: {trigger_ready}, current: {self.trigger_mgr.count}, required: {trigger_count_required}\n")
 
             if not trigger_ready:
                 # Accumulate triggers
                 current_spread = await self._get_current_spread(strategy_type)
                 logger.info(f"Step 3a - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}")
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 3a - Current spread: {current_spread}, threshold: {spread_threshold}\n")
 
                 triggered = await self.trigger_mgr.check_and_increment(
                     current_spread,
@@ -223,12 +233,15 @@ class ContinuousStrategyExecutor:
                     compare_op
                 )
                 logger.info(f"Step 3b - Triggered: {triggered}, new count: {self.trigger_mgr.count}")
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 3b - Triggered: {triggered}, new count: {self.trigger_mgr.count}\n")
 
                 if triggered:
                     await self._push_trigger_progress(
                         ladder_idx,
                         self.trigger_mgr.count,
-                        trigger_count_required
+                        trigger_count_required,
+                        strategy_type
                     )
 
                 await asyncio.sleep(self.trigger_check_interval)
@@ -245,7 +258,7 @@ class ContinuousStrategyExecutor:
                     f"{'<' if is_opening else '>'} {spread_threshold}"
                 )
                 self.trigger_mgr.reset()
-                await self._push_trigger_reset(ladder_idx)
+                await self._push_trigger_reset(ladder_idx, strategy_type)
                 continue
 
             # Step 5: Calculate order quantity
@@ -254,12 +267,15 @@ class ContinuousStrategyExecutor:
             logger.info(f"Step 5 - Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}")
 
             # Step 6: Check position limits
-            can_open, reason = self.position_mgr.check_can_open(
+            result = self.position_mgr.check_can_open(
                 self.strategy_id,
                 ladder_idx,
+                strategy_type,
                 order_qty,
                 ladder.total_qty
             )
+            can_open = result['can_open']
+            reason = result.get('reason', '')
             logger.info(f"Step 6 - Can open: {can_open}, reason: {reason}")
 
             if not can_open:
@@ -284,6 +300,14 @@ class ContinuousStrategyExecutor:
             )
             logger.info(f"Step 8 result - Success: {exec_result.get('success')}, Binance filled: {exec_result.get('binance_filled_qty')}, Bybit filled: {exec_result.get('bybit_filled_qty')}")
 
+            # Step 8.5: Check for single-leg trade and send alert (regardless of success status)
+            if exec_result.get('is_single_leg'):
+                logger.error(f"SINGLE LEG DETECTED in continuous execution: {exec_result.get('single_leg_details')}")
+                await self._send_single_leg_alert(
+                    strategy_type=strategy_type,
+                    exec_result=exec_result
+                )
+
             if not exec_result['success']:
                 logger.error(f"Execution failed: {exec_result}")
                 return {'success': False, 'error': exec_result.get('error')}
@@ -292,7 +316,7 @@ class ContinuousStrategyExecutor:
             if exec_result.get('binance_filled_qty', 0) == 0:
                 logger.info("Binance not filled, resetting triggers")
                 self.trigger_mgr.reset()
-                await self._push_trigger_reset(ladder_idx)
+                await self._push_trigger_reset(ladder_idx, strategy_type)
                 continue
 
             # Step 10: Record position
@@ -325,13 +349,14 @@ class ContinuousStrategyExecutor:
             await asyncio.sleep(0.01)
 
         # ========== 循环退出后输出原因 ==========
-        print(f"\n{'='*80}")
-        print(f"=== LADDER DEBUG END ===")
-        print(f"[DEBUG] Loop exited after {loop_count} iterations")
-        print(f"[DEBUG] is_running: {self.is_running}")
-        print(f"[DEBUG] Final position: {current_position}/{ladder.total_qty}")
-        print(f"[DEBUG] Exit reason: {'is_running=False' if not self.is_running else 'position >= total_qty'}")
-        print(f"{'='*80}\n")
+        with open("ladder_debug.log", "a") as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"=== LADDER DEBUG END ===\n")
+            f.write(f"[DEBUG] Loop exited after {loop_count} iterations\n")
+            f.write(f"[DEBUG] is_running: {self.is_running}\n")
+            f.write(f"[DEBUG] Final position: {current_position}/{ladder.total_qty}\n")
+            f.write(f"[DEBUG] Exit reason: {'is_running=False' if not self.is_running else 'position >= total_qty'}\n")
+            f.write(f"{'='*80}\n\n")
 
         return {'success': True}
 
@@ -371,18 +396,18 @@ class ContinuousStrategyExecutor:
         """Get appropriate Binance price for strategy type"""
         if 'opening' in strategy_type:
             if 'reverse' in strategy_type:
-                # Reverse opening: Binance SHORT, use ask + 0.01 for MAKER
-                return market_data.binance_quote.ask_price + 0.01
+                # Reverse opening: Binance SHORT, use ask (sell at ask or higher for MAKER)
+                return market_data.binance_quote.ask_price
             else:
-                # Forward opening: Binance LONG, use bid - 0.01 for MAKER
-                return market_data.binance_quote.bid_price - 0.01
+                # Forward opening: Binance LONG, use bid (buy at bid or lower for MAKER)
+                return market_data.binance_quote.bid_price
         else:
             if 'reverse' in strategy_type:
-                # Reverse closing: Binance LONG close, use bid - 0.01 for MAKER
-                return market_data.binance_quote.bid_price - 0.01
+                # Reverse closing: Binance LONG close, use bid (buy at bid or lower for MAKER)
+                return market_data.binance_quote.bid_price
             else:
-                # Forward closing: Binance SHORT close, use ask + 0.01 for MAKER
-                return market_data.binance_quote.ask_price + 0.01
+                # Forward closing: Binance SHORT close, use ask (sell at ask or higher for MAKER)
+                return market_data.binance_quote.ask_price
 
     def _get_bybit_price(self, market_data, strategy_type: str) -> float:
         """Get appropriate Bybit price for strategy type (market orders)"""
@@ -450,10 +475,21 @@ class ContinuousStrategyExecutor:
         self,
         ladder_idx: int,
         current_count: int,
-        required_count: int
+        required_count: int,
+        strategy_type: str
     ):
         """Push trigger progress update via WebSocket"""
+        import datetime
+        with open("ladder_debug.log", "a") as f:
+            f.write(f"[{datetime.datetime.now()}] PUSH TRIGGER PROGRESS: user_id={self.user_id}, strategy_id={self.strategy_id}, count={current_count}/{required_count}\n")
+
         if self.user_id:
+            # Extract action from strategy_type (e.g., 'reverse_opening' -> 'opening')
+            action = 'opening' if 'opening' in strategy_type else 'closing'
+
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[{datetime.datetime.now()}] PUSHING WebSocket: action={action}, count={current_count}/{required_count}\n")
+
             await status_pusher.push_custom_event(
                 self.strategy_id,
                 'trigger_progress',
@@ -461,18 +497,28 @@ class ContinuousStrategyExecutor:
                     'ladder_index': ladder_idx,
                     'current_count': current_count,
                     'required_count': required_count,
-                    'progress_percent': (current_count / required_count) * 100
+                    'progress_percent': (current_count / required_count) * 100,
+                    'action': action,
+                    'strategy_type': strategy_type
                 },
                 self.user_id
             )
 
-    async def _push_trigger_reset(self, ladder_idx: int):
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[{datetime.datetime.now()}] WebSocket PUSHED successfully\n")
+
+    async def _push_trigger_reset(self, ladder_idx: int, strategy_type: str):
         """Push trigger reset notification"""
         if self.user_id:
+            action = 'opening' if 'opening' in strategy_type else 'closing'
             await status_pusher.push_custom_event(
                 self.strategy_id,
                 'trigger_reset',
-                {'ladder_index': ladder_idx},
+                {
+                    'ladder_index': ladder_idx,
+                    'action': action,
+                    'strategy_type': strategy_type
+                },
                 self.user_id
             )
 
@@ -513,6 +559,73 @@ class ContinuousStrategyExecutor:
                 self.user_id
             )
 
+    async def _send_single_leg_alert(
+        self,
+        strategy_type: str,
+        exec_result: Dict
+    ):
+        """Send single-leg trade alert via WebSocket and Feishu"""
+        if not self.user_id:
+            return
+
+        # Determine strategy name and action
+        if 'reverse' in strategy_type:
+            strategy_name = "反向套利"
+        else:
+            strategy_name = "正向套利"
+
+        if 'opening' in strategy_type:
+            action = "开仓"
+        else:
+            action = "平仓"
+
+        # Prepare alert details
+        import datetime
+        details = exec_result.get('single_leg_details', {})
+        details['timestamp'] = datetime.datetime.utcnow().isoformat()
+
+        # Send WebSocket notification
+        from app.websocket.manager import manager
+        alert_message = {
+            "type": "single_leg_alert",
+            "data": {
+                "strategy_type": strategy_name,
+                "action": action,
+                "binance_filled": details.get("binance_filled", 0),
+                "bybit_filled": details.get("bybit_filled", 0),
+                "unfilled_qty": details.get("unfilled_qty", 0),
+                "timestamp": details.get("timestamp"),
+                "level": "critical",
+                "title": "单腿交易警告",
+                "message": f"{strategy_name} {action}: Binance成交 {details.get('binance_filled', 0)}, Bybit成交 {details.get('bybit_filled', 0)}, 未成交 {details.get('unfilled_qty', 0)}"
+            }
+        }
+        await manager.send_to_user(alert_message, self.user_id)
+
+        # Send Feishu notification
+        try:
+            from app.services.risk_alert_service import RiskAlertService
+            from app.core.database import get_db
+
+            # Get database session
+            async for db in get_db():
+                risk_alert_service = RiskAlertService(db)
+
+                # Determine direction based on strategy type
+                direction = "多头" if "forward" in strategy_type.lower() else "空头"
+                exchange = "Binance"  # Single-leg usually happens on Binance side
+
+                await risk_alert_service.check_single_leg(
+                    user_id=self.user_id,
+                    exchange=exchange,
+                    quantity=details.get("unfilled_qty", 0),
+                    duration=0,  # Immediate alert
+                    direction=direction
+                )
+                break  # Only need first session
+        except Exception as e:
+            logger.error(f"Failed to send Feishu single-leg alert: {e}")
+
     def stop(self):
         """Stop continuous execution"""
         logger.info(f"Stopping continuous execution for strategy {self.strategy_id}")
@@ -539,12 +652,14 @@ class ContinuousStrategyExecutor:
         Returns:
             Execution result dictionary
         """
-        print(f"=" * 80)
-        print(f"CONTINUOUS EXECUTOR: Starting forward opening")
-        print(f"Strategy ID: {self.strategy_id}")
-        print(f"Binance: {binance_account.account_name}, Bybit: {bybit_account.account_name}")
-        print(f"Ladders: {len(ladders)}, Opening M Coin: {opening_m_coin}")
-        print(f"=" * 80)
+        import datetime
+        with open("ladder_debug.log", "a") as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"[{datetime.datetime.now()}] CONTINUOUS EXECUTOR: Starting forward opening\n")
+            f.write(f"Strategy ID: {self.strategy_id}\n")
+            f.write(f"Binance: {binance_account.account_name}, Bybit: {bybit_account.account_name}\n")
+            f.write(f"Ladders: {len(ladders)}, Opening M Coin: {opening_m_coin}\n")
+            f.write(f"{'='*80}\n")
 
         logger.info(f"Starting forward opening continuous execution for strategy {self.strategy_id}")
         logger.info(f"Binance: {binance_account.account_name}, Bybit: {bybit_account.account_name}, Ladders: {len(ladders)}")

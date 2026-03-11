@@ -2,7 +2,8 @@
   <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Header -->
     <div class="p-1.5 border-b border-[#2b3139] flex-shrink-0">
-      <h3 :class="['text-sm font-bold', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
+      <!-- 标题：居中、字体放大0.5倍 (text-sm -> text-lg) -->
+      <h3 :class="['text-lg font-bold text-center', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
         {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
       </h3>
       <div v-if="marketCardsRef" class="text-2xl font-bold text-center mt-1 text-[#3b82f6]">
@@ -269,6 +270,19 @@
                      continuousExecutionStatus.opening.status }}
                 </span>
               </div>
+              <!-- Trigger Progress -->
+              <div v-if="continuousExecutionStatus.opening.status === 'running' && continuousExecutionTriggerProgress.opening.required > 0" class="mb-0.5">
+                <div class="flex justify-between text-gray-400 mb-0.5">
+                  <span>触发进度:</span>
+                  <span class="text-white">{{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}</span>
+                </div>
+                <div class="w-full bg-[#0d1117] rounded-full h-1.5">
+                  <div
+                    class="bg-[#0ecb81] h-1.5 rounded-full transition-all duration-300"
+                    :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.opening.current / continuousExecutionTriggerProgress.opening.required) * 100)}%` }"
+                  ></div>
+                </div>
+              </div>
               <div v-if="continuousExecutionStatus.opening.current_ladder !== undefined" class="flex justify-between mb-0.5">
                 <span class="text-gray-400">当前阶梯:</span>
                 <span class="text-white">{{ continuousExecutionStatus.opening.current_ladder + 1 }}</span>
@@ -295,6 +309,19 @@
                      continuousExecutionStatus.closing.status === 'failed' ? '失败' :
                      continuousExecutionStatus.closing.status }}
                 </span>
+              </div>
+              <!-- Trigger Progress -->
+              <div v-if="continuousExecutionStatus.closing.status === 'running' && continuousExecutionTriggerProgress.closing.required > 0" class="mb-0.5">
+                <div class="flex justify-between text-gray-400 mb-0.5">
+                  <span>触发进度:</span>
+                  <span class="text-white">{{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}</span>
+                </div>
+                <div class="w-full bg-[#0d1117] rounded-full h-1.5">
+                  <div
+                    class="bg-[#f6465d] h-1.5 rounded-full transition-all duration-300"
+                    :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.closing.current / continuousExecutionTriggerProgress.closing.required) * 100)}%` }"
+                  ></div>
+                </div>
               </div>
               <div v-if="continuousExecutionStatus.closing.current_ladder !== undefined" class="flex justify-between mb-0.5">
                 <span class="text-gray-400">当前阶梯:</span>
@@ -618,6 +645,7 @@ const UPDATE_THROTTLE = isMobile.value ? 100 : 50 // 移动端降低更新频率
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
+const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0 }, closing: { current: 0, required: 0 } })
 const statusPollingInterval = ref({ opening: null, closing: null })
 
 const config = ref({
@@ -798,10 +826,17 @@ watch(() => marketStore.marketData, (newData) => {
 watch(() => marketStore.lastMessage, (message) => {
   if (!message) return
 
+  // Debug: log all messages
+  if (message.type && message.type.startsWith('strategy_')) {
+    console.log('[WebSocket] Received strategy message:', message.type, message.data)
+  }
+
   if (message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
   } else if (message.type === 'strategy_trigger_progress') {
     handleTriggerProgress(message.data)
+  } else if (message.type === 'strategy_trigger_reset') {
+    handleTriggerReset(message.data)
   } else if (message.type === 'strategy_position_change') {
     handlePositionChange(message.data)
   } else if (message.type === 'strategy_execution_started') {
@@ -817,17 +852,74 @@ watch(() => marketStore.lastMessage, (message) => {
 
 // Handle strategy WebSocket events
 function handleTriggerProgress(data) {
-  // Only handle messages for this strategy
-  if (data.strategy_id !== configId.value) return
+  console.log('[WebSocket] handleTriggerProgress called with data:', data)
+  console.log('[WebSocket] configId.value:', configId.value)
+  console.log('[WebSocket] data.strategy_id:', data.strategy_id)
 
-  // Update trigger count based on action
-  if (data.action.includes('opening')) {
-    triggerCount.value.opening = data.current_count
-  } else if (data.action.includes('closing')) {
-    triggerCount.value.closing = data.current_count
+  // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_opening_continuous
+  // We need to check if this message is for continuous execution by checking if it ends with '_continuous'
+  const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
+
+  if (isContinuousExecution) {
+    // For continuous execution, accept the message (it's already filtered by user_id on backend)
+    console.log('[WebSocket] Continuous execution message accepted')
+  } else {
+    // For regular execution, check strategy_id match
+    if (data.strategy_id !== configId.value) {
+      console.log('[WebSocket] Strategy ID mismatch, ignoring message')
+      return
+    }
   }
 
   console.log(`[WebSocket] Trigger progress: ${data.current_count}/${data.required_count} for ${data.action}`)
+
+  // Check if this is for continuous execution
+  const isContinuous = continuousExecutionEnabled.value[data.action]
+
+  if (isContinuous) {
+    // Update continuous execution trigger progress
+    continuousExecutionTriggerProgress.value[data.action] = {
+      current: data.current_count,
+      required: data.required_count
+    }
+  } else {
+    // Update regular trigger count
+    if (data.action === 'opening') {
+      triggerCount.value.opening = data.current_count
+    } else if (data.action === 'closing') {
+      triggerCount.value.closing = data.current_count
+    }
+  }
+}
+
+function handleTriggerReset(data) {
+  console.log(`[WebSocket] Trigger reset for ${data.action}`)
+
+  // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_opening_continuous
+  const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
+
+  if (!isContinuousExecution) {
+    // For regular execution, check strategy_id match
+    if (data.strategy_id !== configId.value) return
+  }
+
+  // Check if this is for continuous execution
+  const isContinuous = continuousExecutionEnabled.value[data.action]
+
+  if (isContinuous) {
+    // Reset continuous execution trigger progress
+    continuousExecutionTriggerProgress.value[data.action] = {
+      current: 0,
+      required: continuousExecutionTriggerProgress.value[data.action].required
+    }
+  } else {
+    // Reset regular trigger count
+    if (data.action === 'opening') {
+      triggerCount.value.opening = 0
+    } else if (data.action === 'closing') {
+      triggerCount.value.closing = 0
+    }
+  }
 }
 
 function handlePositionChange(data) {
@@ -1842,15 +1934,23 @@ function formatNumber(num) {
 // Continuous execution methods
 async function startContinuousExecution(action) {
   try {
+    console.log('[DEBUG] startContinuousExecution called, action:', action)
+    console.log('[DEBUG] config.value:', config.value)
+    console.log('[DEBUG] accountsData.value:', accountsData.value)
+
     // Validate configuration
     const validation = validateLadderConfig(action)
+    console.log('[DEBUG] Ladder validation result:', validation)
     if (!validation.valid) {
       validationErrors.value = validation.errors
+      console.error('[DEBUG] Ladder validation failed:', validation.errors)
+      notificationStore.showStrategyNotification('配置验证失败', 'error')
       return
     }
 
     // Validate accounts
     const accountValidation = validateAccountsForExecution()
+    console.log('[DEBUG] Account validation result:', accountValidation)
     if (!accountValidation.valid) {
       notificationStore.showStrategyNotification(accountValidation.message, 'error')
       return
@@ -1858,6 +1958,8 @@ async function startContinuousExecution(action) {
 
     const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === 1)
     const bybitMT5Account = accountsData.value.accounts.find(a => a.platform_id === 2)
+    console.log('[DEBUG] Binance account:', binanceAccount)
+    console.log('[DEBUG] Bybit account:', bybitMT5Account)
 
     // Prepare ladder configurations
     const ladders = config.value.ladders
@@ -1870,6 +1972,14 @@ async function startContinuousExecution(action) {
         opening_trigger_count: config.value.openingSyncQty || 1,
         closing_trigger_count: config.value.closingSyncQty || 1
       }))
+
+    console.log('[DEBUG] Filtered ladders:', ladders)
+
+    if (ladders.length === 0) {
+      console.error('[DEBUG] No enabled ladders found!')
+      notificationStore.showStrategyNotification('没有启用的梯度配置', 'error')
+      return
+    }
 
     const requestData = {
       binance_account_id: binanceAccount.account_id,
@@ -1895,6 +2005,13 @@ async function startContinuousExecution(action) {
     if (response.data.task_id) {
       continuousExecutionTaskId.value[action] = response.data.task_id
       continuousExecutionEnabled.value[action] = true
+
+      // Initialize trigger progress
+      const triggerCount = action === 'opening' ? config.value.openingSyncQty : config.value.closingSyncQty
+      continuousExecutionTriggerProgress.value[action] = {
+        current: 0,
+        required: triggerCount || 1
+      }
 
       console.log('Task ID received:', response.data.task_id)
 
@@ -1923,6 +2040,7 @@ async function stopContinuousExecution(action) {
 
     continuousExecutionEnabled.value[action] = false
     continuousExecutionStatus.value[action] = null  // Clear status to hide the status display
+    continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0 }  // Reset trigger progress
     stopStatusPolling(action)
 
     notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已停止`, 'info')

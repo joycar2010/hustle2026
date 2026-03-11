@@ -408,6 +408,9 @@ class AccountDataService:
                 logger.error("Failed to get MT5 account info from both shared and temporary clients")
                 raise Exception("Failed to get MT5 account info")
 
+            # Log MT5 info for debugging
+            logger.info(f"MT5 account info received: login={mt5_info.get('login')}, balance={mt5_info.get('balance')}, swap={mt5_info.get('swap')}")
+
             # Extract balance fields from MT5
             balance = float(mt5_info.get("balance", 0))  # 账户总资产
             equity = float(mt5_info.get("equity", 0))  # 净资产
@@ -416,6 +419,9 @@ class AccountDataService:
             margin_balance = equity  # 保证金余额 = 净值
             unrealized_pnl = equity - balance  # 未实现盈亏 = 净值 - 余额
             account_profit = float(mt5_info.get("profit", 0))  # 累计已实现盈亏（从MT5 API获取）
+            account_total_swap = float(mt5_info.get("swap", 0))  # 账户累计总过夜费（包含已平仓+未平仓）
+
+            logger.info(f"Extracted account_total_swap: {account_total_swap}")
 
             # Calculate margin level (risk ratio)
             # 风险率(%) = (账户权益 / 已用保证金) × 100
@@ -517,6 +523,7 @@ class AccountDataService:
             logger.info(f"MT5 balance: balance={balance}, equity={equity}, free_margin={free_margin}, "
                        f"margin_used={margin_used}, positions={total_positions}, "
                        f"commission={commission_fee}, long_swap={long_swap_fee}, short_swap={short_swap_fee}, "
+                       f"account_total_swap={account_total_swap}, "
                        f"long_liquidation={long_liquidation_price}, short_liquidation={short_liquidation_price}")
 
             return AccountBalance(
@@ -529,9 +536,9 @@ class AccountDataService:
                 risk_ratio=margin_level,  # 风险率
                 total_positions=total_positions,  # 总持仓 (数量)
                 daily_pnl=daily_pnl,  # 当日盈亏
-                funding_fee=0.0,  # 资金费（MT5 无此概念，永续合约资金费体现在 swap 中）
-                long_swap_fee=long_swap_fee,  # 做多掉期费
-                short_swap_fee=short_swap_fee,  # 做空掉期费
+                funding_fee=account_total_swap,  # MT5过夜费：使用账户累计总过夜费（包含已平仓+未平仓）
+                long_swap_fee=long_swap_fee,  # 做多掉期费（今日）
+                short_swap_fee=short_swap_fee,  # 做空掉期费（今日）
                 commission_fee=commission_fee,  # 手续费
                 # Position data for liquidation price calculation
                 entry_price=avg_entry_price,  # 开仓均价
@@ -942,6 +949,9 @@ class AccountDataService:
                 "positions": [pos.model_dump() for pos in positions],
                 "daily_pnl": daily_pnl,
             }
+
+            # Log balance data for debugging
+            logger.info(f"Account {account_id_str} balance data: funding_fee={balance.funding_fee}, total_assets={balance.total_assets}")
 
             # Cache the result
             self._set_cached_data(cache_key, result)

@@ -1,12 +1,15 @@
 """Order Executor V2.0 - Optimized with shorter timeouts"""
 import asyncio
 import time
+import logging
 from typing import Dict, Any, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.account import Account
 from app.services.order_executor import order_executor as base_executor
 from app.utils.quantity_converter import quantity_converter
+
+logger = logging.getLogger(__name__)
 
 
 class OrderExecutorV2:
@@ -378,6 +381,8 @@ class OrderExecutorV2:
         5. Monitor Bybit order (0.1s timeout)
         6. Chase Bybit if not fully filled (1 retry)
         """
+        logger.info(f"[FORWARD_CLOSING] Starting execution: quantity={quantity}, binance_price={binance_price}, bybit_price={bybit_price}")
+
         # Step 0: Pre-check Bybit SHORT position before placing any orders
         from app.services.market_service import market_data_service
         mt5_client = market_data_service.mt5_client
@@ -386,7 +391,10 @@ class OrderExecutorV2:
         bybit_positions = mt5_client.get_positions("XAUUSD.s")
         short_positions = [p for p in bybit_positions if p['type'] == 1]  # type=1 is SHORT
 
+        logger.info(f"[FORWARD_CLOSING] Bybit positions check: total={len(bybit_positions)}, short={len(short_positions)}")
+
         if not short_positions:
+            logger.error(f"[FORWARD_CLOSING] No SHORT position found to close")
             return {
                 "success": False,
                 "error": "Bybit没有SHORT持仓可以平仓",
@@ -399,7 +407,10 @@ class OrderExecutorV2:
         total_short_volume = sum(p['volume'] for p in short_positions)
         required_volume = quantity_converter.xau_to_lot(quantity)
 
+        logger.info(f"[FORWARD_CLOSING] Position check: total_short={total_short_volume} Lot, required={required_volume} Lot")
+
         if total_short_volume < required_volume:
+            logger.error(f"[FORWARD_CLOSING] Insufficient SHORT position: {total_short_volume} < {required_volume}")
             return {
                 "success": False,
                 "error": f"Bybit SHORT持仓不足: 当前{total_short_volume} Lot, 需要{required_volume} Lot",
@@ -410,6 +421,7 @@ class OrderExecutorV2:
             }
 
         # Step 1: Place Binance limit SELL order with POST_ONLY (force MAKER)
+        logger.info(f"[FORWARD_CLOSING] Placing Binance SELL order: quantity={quantity}, price={binance_price}")
         binance_result = await self.base_executor.place_binance_order(
             account=binance_account,
             symbol="XAUUSDT",
@@ -422,6 +434,7 @@ class OrderExecutorV2:
         )
 
         if not binance_result["success"]:
+            logger.error(f"[FORWARD_CLOSING] Binance order failed: {binance_result}")
             return {
                 "success": False,
                 "error": "Binance下单失败",
@@ -429,6 +442,7 @@ class OrderExecutorV2:
             }
 
         binance_order_id = binance_result["order_id"]
+        logger.info(f"[FORWARD_CLOSING] Binance order placed: order_id={binance_order_id}")
 
         # Step 2: Monitor Binance order (0.2s timeout)
         binance_filled_qty = await self._monitor_binance_order(
@@ -438,8 +452,11 @@ class OrderExecutorV2:
             self.binance_timeout
         )
 
+        logger.info(f"[FORWARD_CLOSING] Binance filled: {binance_filled_qty} XAU")
+
         if binance_filled_qty == 0:
             # Binance order not filled at all, cancel and return success (will retry next time)
+            logger.info(f"[FORWARD_CLOSING] Binance not filled, cancelling order {binance_order_id}")
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
@@ -454,6 +471,8 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (close SHORT position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
+        logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU)")
+
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             "XAUUSD.s",
@@ -461,8 +480,11 @@ class OrderExecutorV2:
             close_position=True  # Close existing SHORT position
         )
 
+        logger.info(f"[FORWARD_CLOSING] Bybit filled: {bybit_filled_qty} Lot")
+
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
+            logger.error(f"[FORWARD_CLOSING] SINGLE LEG DETECTED: Binance filled {binance_filled_qty} XAU, Bybit filled 0 Lot")
             return {
                 "success": False,
                 "error": "Bybit订单未成交",
@@ -476,6 +498,11 @@ class OrderExecutorV2:
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
+
+        if is_single_leg:
+            logger.warning(f"[FORWARD_CLOSING] PARTIAL SINGLE LEG: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU ({bybit_filled_qty} Lot)")
+        else:
+            logger.info(f"[FORWARD_CLOSING] Execution completed successfully: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU")
 
         return {
             "success": True,
@@ -543,10 +570,13 @@ class OrderExecutorV2:
         Returns:
             Total filled quantity
         """
+        logger.info(f"[BYBIT_BUY] Starting: quantity={quantity} Lot, close_position={close_position}")
         total_filled = 0
         remaining = quantity
 
         for attempt in range(self.max_retries + 1):  # Initial + 1 retry
+            logger.info(f"[BYBIT_BUY] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
+
             # Place market order
             result = await self.base_executor.place_bybit_order(
                 account=account,
@@ -558,10 +588,12 @@ class OrderExecutorV2:
             )
 
             if not result["success"]:
+                logger.error(f"[BYBIT_BUY] Order placement failed: {result.get('error')}")
                 break
 
             order_id = result["order_id"]
             ticket = int(order_id)
+            logger.info(f"[BYBIT_BUY] Order placed: ticket={ticket}")
 
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
@@ -576,6 +608,8 @@ class OrderExecutorV2:
 
             actual_filled = volume_check["actual_filled"]
             is_partial = volume_check["is_partial_fill"]
+
+            logger.info(f"[BYBIT_BUY] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
 
             if actual_filled > 0:
                 total_filled += actual_filled
@@ -600,12 +634,13 @@ class OrderExecutorV2:
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
-                    print(f"Warning: Bybit order not fully filled after {self.max_retries + 1} attempts. "
-                          f"Filled: {total_filled}, Remaining: {remaining}")
+                    logger.warning(f"[BYBIT_BUY] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
             else:
                 # No fill detected, break
+                logger.warning(f"[BYBIT_BUY] No fill detected for ticket {ticket}, stopping retries")
                 break
 
+        logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot")
         return total_filled
 
     async def _execute_bybit_market_sell(
@@ -681,12 +716,13 @@ class OrderExecutorV2:
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
-                    print(f"Warning: Bybit order not fully filled after {self.max_retries + 1} attempts. "
-                          f"Filled: {total_filled}, Remaining: {remaining}")
+                    logger.warning(f"[BYBIT_BUY] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
             else:
                 # No fill detected, break
+                logger.warning(f"[BYBIT_BUY] No fill detected for ticket {ticket}, stopping retries")
                 break
 
+        logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot")
         return total_filled
 
     async def _check_mt5_filled_volume(

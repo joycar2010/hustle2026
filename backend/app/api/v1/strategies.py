@@ -472,18 +472,18 @@ async def execute_reverse_arbitrage(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Check for single-leg trade and send alert
-            if result.get("is_single_leg"):
-                import datetime
-                details = result.get("single_leg_details", {})
-                details["timestamp"] = datetime.datetime.utcnow().isoformat()
-                await send_single_leg_alert(
-                    user_id=user_id,
-                    strategy_type="反向套利",
-                    action="开仓",
-                    details=details,
-                    db=db
-                )
+        # 6. Check for single-leg trade and send alert (regardless of success status)
+        if result.get("is_single_leg"):
+            import datetime
+            details = result.get("single_leg_details", {})
+            details["timestamp"] = datetime.datetime.utcnow().isoformat()
+            await send_single_leg_alert(
+                user_id=user_id,
+                strategy_type="反向套利",
+                action="开仓",
+                details=details,
+                db=db
+            )
 
         return result
 
@@ -555,18 +555,18 @@ async def execute_forward_arbitrage(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Check for single-leg trade and send alert
-            if result.get("is_single_leg"):
-                import datetime
-                details = result.get("single_leg_details", {})
-                details["timestamp"] = datetime.datetime.utcnow().isoformat()
-                await send_single_leg_alert(
-                    user_id=user_id,
-                    strategy_type="正向套利",
-                    action="开仓",
-                    details=details,
-                    db=db
-                )
+        # 6. Check for single-leg trade and send alert (regardless of success status)
+        if result.get("is_single_leg"):
+            import datetime
+            details = result.get("single_leg_details", {})
+            details["timestamp"] = datetime.datetime.utcnow().isoformat()
+            await send_single_leg_alert(
+                user_id=user_id,
+                strategy_type="正向套利",
+                action="开仓",
+                details=details,
+                db=db
+            )
 
         return result
 
@@ -637,18 +637,18 @@ async def close_reverse_position(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Check for single-leg trade and send alert
-            if result.get("is_single_leg"):
-                import datetime
-                details = result.get("single_leg_details", {})
-                details["timestamp"] = datetime.datetime.utcnow().isoformat()
-                await send_single_leg_alert(
-                    user_id=user_id,
-                    strategy_type="反向套利",
-                    action="平仓",
-                    details=details,
-                    db=db
-                )
+        # 6. Check for single-leg trade and send alert (regardless of success status)
+        if result.get("is_single_leg"):
+            import datetime
+            details = result.get("single_leg_details", {})
+            details["timestamp"] = datetime.datetime.utcnow().isoformat()
+            await send_single_leg_alert(
+                user_id=user_id,
+                strategy_type="反向套利",
+                action="平仓",
+                details=details,
+                db=db
+            )
 
         return result
 
@@ -719,18 +719,18 @@ async def close_forward_position(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Check for single-leg trade and send alert
-            if result.get("is_single_leg"):
-                import datetime
-                details = result.get("single_leg_details", {})
-                details["timestamp"] = datetime.datetime.utcnow().isoformat()
-                await send_single_leg_alert(
-                    user_id=user_id,
-                    strategy_type="正向套利",
-                    action="平仓",
-                    details=details,
-                    db=db
-                )
+        # 6. Check for single-leg trade and send alert (regardless of success status)
+        if result.get("is_single_leg"):
+            import datetime
+            details = result.get("single_leg_details", {})
+            details["timestamp"] = datetime.datetime.utcnow().isoformat()
+            await send_single_leg_alert(
+                user_id=user_id,
+                strategy_type="正向套利",
+                action="平仓",
+                details=details,
+                db=db
+            )
 
         return result
 
@@ -1024,6 +1024,12 @@ async def execute_continuous_opening(
 
         task_id = execution_task_manager.start_task(executor, coro)
 
+        # Write debug info
+        with open("api_debug.log", "a") as f:
+            f.write(f"[{datetime.datetime.now()}] Task created: {task_id}\n")
+            f.write(f"Executor is_running: {executor.is_running}\n")
+            f.write(f"Coroutine: {coro}\n\n")
+
         return {
             "success": True,
             "task_id": task_id,
@@ -1112,6 +1118,12 @@ async def execute_continuous_closing(
             )
 
         task_id = execution_task_manager.start_task(executor, coro)
+
+        # Write debug info
+        with open("api_debug.log", "a") as f:
+            f.write(f"[{datetime.datetime.now()}] Task created: {task_id}\n")
+            f.write(f"Executor is_running: {executor.is_running}\n")
+            f.write(f"Coroutine: {coro}\n\n")
 
         return {
             "success": True,

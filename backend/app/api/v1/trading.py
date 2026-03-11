@@ -1397,8 +1397,8 @@ def _format_mt5_trades(deals):
         profit = float(deal.profit) if hasattr(deal, 'profit') else 0.00
         total_profit += profit
 
-        # 过夜费（暂时设为0，后续可以从其他地方获取）
-        overnight_fee = 0.00
+        # 获取过夜费（swap字段）- 从MT5 deal对象中提取
+        overnight_fee = float(deal.swap) if hasattr(deal, 'swap') else 0.00
 
         formatted.append({
             "timestamp": beijing_time,

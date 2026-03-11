@@ -222,6 +222,10 @@ async def get_account_balance(
     db: AsyncSession = Depends(get_db),
 ):
     """Get account balance"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"API: Getting balance for account {account_id}")
+
     result = await db.execute(
         select(Account).where(
             Account.account_id == account_id,
@@ -243,6 +247,7 @@ async def get_account_balance(
                 account.api_secret,
             )
         elif account.platform_id == 2:  # Bybit
+            logger.info(f"API: Fetching Bybit balance for account {account_id}, is_mt5={account.is_mt5_account}")
             balance = await account_data_service.get_bybit_balance(
                 account.api_key,
                 account.api_secret,
@@ -251,6 +256,7 @@ async def get_account_balance(
                 mt5_password=account.mt5_primary_pwd if account.is_mt5_account else None,
                 mt5_server=account.mt5_server if account.is_mt5_account else None,
             )
+            logger.info(f"API: Balance retrieved, funding_fee={balance.funding_fee}")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -396,6 +402,10 @@ async def get_aggregated_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """Get aggregated dashboard data for all user accounts"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"API: /dashboard/aggregated called for user {user_id}")
+
     result = await db.execute(
         select(Account).where(
             Account.user_id == UUID(user_id),
@@ -405,6 +415,8 @@ async def get_aggregated_dashboard(
 
     # Filter active accounts for data fetching
     active_accounts = [acc for acc in accounts if acc.is_active]
+
+    logger.info(f"API: Found {len(active_accounts)} active accounts")
 
     if not active_accounts:
         return {

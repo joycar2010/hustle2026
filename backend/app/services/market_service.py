@@ -1,6 +1,7 @@
 """Market data service for aggregating quotes from Binance and Bybit"""
 import asyncio
 import time
+import logging
 from typing import Dict, Any, Optional
 import redis.asyncio as redis
 import json
@@ -9,6 +10,8 @@ from app.services.binance_client import BinanceFuturesClient
 from app.services.binance_ws_client import binance_ws
 from app.services.mt5_client import MT5Client
 from app.schemas.market import MarketQuote, SpreadData
+
+logger = logging.getLogger(__name__)
 
 
 class MarketDataService:
