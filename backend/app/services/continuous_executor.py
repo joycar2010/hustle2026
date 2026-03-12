@@ -197,12 +197,108 @@ class ContinuousStrategyExecutor:
                 f.write(f"[DEBUG] is_running: {self.is_running}\n")
 
             # Step 1: Check position
-            position_info = self.position_mgr.get_position(
-                self.strategy_id,
-                ladder_idx,
-                strategy_type
-            )
-            current_position = position_info['current_position']
+            # For closing strategies, get actual positions from exchanges
+            if not is_opening:
+                try:
+                    # Initialize clients if not already done
+                    if not hasattr(binance_account, 'binance_client'):
+                        from app.services.binance_futures_client import BinanceFuturesClient
+                        binance_account.binance_client = BinanceFuturesClient(
+                            api_key=binance_account.api_key,
+                            api_secret=binance_account.api_secret
+                        )
+
+                    if not hasattr(bybit_account, 'mt5_client'):
+                        from app.services.mt5_client import MT5Client
+                        bybit_account.mt5_client = MT5Client(
+                            login=bybit_account.mt5_id,
+                            password=bybit_account.mt5_primary_pwd,
+                            server=bybit_account.mt5_server
+                        )
+                        # MT5 connection is REQUIRED for closing strategies
+                        if not bybit_account.mt5_client.connect():
+                            error_msg = f"MT5 connection failed for account {bybit_account.mt5_id}, cannot execute closing strategy"
+                            logger.error(error_msg)
+                            with open("ladder_debug.log", "a") as f:
+                                f.write(f"[DEBUG] {error_msg}\n")
+                            raise Exception(error_msg)
+
+                    # Get Binance positions
+                    binance_positions = binance_account.binance_client.get_positions(symbol="XAUUSDT")
+                    binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
+
+                    # Get Bybit positions - MT5 must be connected
+                    if not bybit_account.mt5_client.connected:
+                        error_msg = "MT5 not connected, cannot get Bybit positions"
+                        logger.error(error_msg)
+                        with open("ladder_debug.log", "a") as f:
+                            f.write(f"[DEBUG] {error_msg}\n")
+                        raise Exception(error_msg)
+
+                    bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+                    bybit_qty = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions) * 100  # Convert lots to XAU
+
+                    # For closing, we need BOTH sides to have positions
+                    # Use the minimum to ensure we don't over-close
+                    if binance_qty > 0 and bybit_qty > 0:
+                        actual_position = min(binance_qty, bybit_qty)
+                    else:
+                        # If either side has no position, we cannot close
+                        actual_position = 0
+                        with open("ladder_debug.log", "a") as f:
+                            f.write(f"[DEBUG] WARNING: Binance={binance_qty}, Bybit={bybit_qty}, cannot close without both sides\n")
+
+                    # Get memory position (how much we've already closed)
+                    position_info = self.position_mgr.get_position(
+                        self.strategy_id,
+                        ladder_idx,
+                        strategy_type
+                    )
+                    memory_position = position_info['current_position']
+
+                    # Current position = how much we've closed so far
+                    current_position = memory_position
+
+                    # Check if we still have positions to close
+                    remaining_to_close = actual_position - memory_position
+
+                    with open("ladder_debug.log", "a") as f:
+                        f.write(f"[DEBUG] Step 1 - Actual positions: Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}\n")
+                        f.write(f"[DEBUG] Step 1 - Memory position (already closed): {memory_position}\n")
+                        f.write(f"[DEBUG] Step 1 - Remaining to close: {remaining_to_close}\n")
+                        f.write(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}\n")
+
+                    logger.info(f"Step 1 - Actual positions: Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}")
+                    logger.info(f"Step 1 - Memory position: {memory_position}, Remaining: {remaining_to_close}")
+                    logger.info(f"Step 1 - Current position: {current_position}/{ladder.total_qty}")
+
+                    # If no positions left to close, break
+                    if remaining_to_close <= 0:
+                        with open("ladder_debug.log", "a") as f:
+                            f.write(f"[DEBUG] BREAK: No position left to close (remaining={remaining_to_close})\n")
+                        logger.info(f"No position left to close")
+                        break
+
+                except Exception as e:
+                    logger.error(f"Failed to get actual positions: {e}")
+                    with open("ladder_debug.log", "a") as f:
+                        f.write(f"[DEBUG] Step 1 - Failed to get actual positions: {e}\n")
+                    # Fallback to memory position
+                    position_info = self.position_mgr.get_position(
+                        self.strategy_id,
+                        ladder_idx,
+                        strategy_type
+                    )
+                    current_position = position_info['current_position']
+            else:
+                # For opening strategies, use memory position
+                position_info = self.position_mgr.get_position(
+                    self.strategy_id,
+                    ladder_idx,
+                    strategy_type
+                )
+                current_position = position_info['current_position']
+
             with open("ladder_debug.log", "a") as f:
                 f.write(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}\n")
             logger.info(f"Step 1 - Current position: {current_position}/{ladder.total_qty}")
