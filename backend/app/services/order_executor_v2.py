@@ -106,7 +106,13 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
-                "message": "Bybit订单已取消，等待下次重试"
+                "message": "Bybit订单已取消，等待下次重试",
+                "single_leg_details": {
+                    "binance_filled": binance_filled_qty,
+                    "bybit_filled": 0,
+                    "bybit_filled_xau": 0,
+                    "unfilled_qty": binance_filled_qty
+                }
             }
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
@@ -239,7 +245,13 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
-                "message": "Bybit订单已取消，等待下次重试"
+                "message": "Bybit订单已取消，等待下次重试",
+                "single_leg_details": {
+                    "binance_filled": binance_filled_qty,
+                    "bybit_filled": 0,
+                    "bybit_filled_xau": 0,
+                    "unfilled_qty": binance_filled_qty
+                }
             }
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
@@ -340,7 +352,13 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
-                "message": "Bybit订单已取消，等待下次重试"
+                "message": "Bybit订单已取消，等待下次重试",
+                "single_leg_details": {
+                    "binance_filled": binance_filled_qty,
+                    "bybit_filled": 0,
+                    "bybit_filled_xau": 0,
+                    "unfilled_qty": binance_filled_qty
+                }
             }
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
@@ -492,7 +510,13 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
-                "message": "Bybit订单已取消，等待下次重试"
+                "message": "Bybit订单已取消，等待下次重试",
+                "single_leg_details": {
+                    "binance_filled": binance_filled_qty,
+                    "bybit_filled": 0,
+                    "bybit_filled_xau": 0,
+                    "unfilled_qty": binance_filled_qty
+                }
             }
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
@@ -659,10 +683,13 @@ class OrderExecutorV2:
         Returns:
             Total filled quantity
         """
+        logger.info(f"[BYBIT_SELL] Starting: quantity={quantity} Lot, close_position={close_position}")
         total_filled = 0
         remaining = quantity
 
         for attempt in range(self.max_retries + 1):  # Initial + 1 retry
+            logger.info(f"[BYBIT_SELL] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
+
             # Place market order
             result = await self.base_executor.place_bybit_order(
                 account=account,
@@ -674,10 +701,12 @@ class OrderExecutorV2:
             )
 
             if not result["success"]:
+                logger.error(f"[BYBIT_SELL] Order placement failed: {result.get('error')}")
                 break
 
             order_id = result["order_id"]
             ticket = int(order_id)
+            logger.info(f"[BYBIT_SELL] Order placed: ticket={ticket}")
 
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
@@ -692,6 +721,8 @@ class OrderExecutorV2:
 
             actual_filled = volume_check["actual_filled"]
             is_partial = volume_check["is_partial_fill"]
+
+            logger.info(f"[BYBIT_SELL] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
 
             if actual_filled > 0:
                 total_filled += actual_filled
@@ -716,13 +747,13 @@ class OrderExecutorV2:
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
-                    logger.warning(f"[BYBIT_BUY] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
+                    logger.warning(f"[BYBIT_SELL] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
             else:
                 # No fill detected, break
-                logger.warning(f"[BYBIT_BUY] No fill detected for ticket {ticket}, stopping retries")
+                logger.warning(f"[BYBIT_SELL] No fill detected for ticket {ticket}, stopping retries")
                 break
 
-        logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot")
+        logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot")
         return total_filled
 
     async def _check_mt5_filled_volume(

@@ -68,7 +68,11 @@
             <div class="flex space-x-0.5">
               <div v-for="i in 5" :key="i" :class="['w-0.5 lg:w-0.5 h-2 lg:h-1.5 md:h-2.5 rounded-sm', i <= bybitLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
-            <span class="text-[10px] lg:text-[9px] md:text-xs font-mono">{{ bybitLagCount }}</span>
+            <span
+              @dblclick="resetBybitLag"
+              class="text-[10px] lg:text-[9px] md:text-xs font-mono cursor-pointer hover:text-[#f0b90b] transition-colors"
+              title="双击清零"
+            >{{ bybitLagCount }}</span>
           </div>
         </div>
       </div>
@@ -133,7 +137,11 @@
             <div class="flex space-x-0.5">
               <div v-for="i in 5" :key="i" :class="['w-0.5 lg:w-0.5 h-2 lg:h-1.5 md:h-2.5 rounded-sm', i <= binanceLagLevel ? 'bg-[#f6465d]' : 'bg-[#2b3139]']"></div>
             </div>
-            <span class="text-[10px] lg:text-[9px] md:text-xs font-mono">{{ binanceLagCount }}</span>
+            <span
+              @dblclick="resetBinanceLag"
+              class="text-[10px] lg:text-[9px] md:text-xs font-mono cursor-pointer hover:text-[#f0b90b] transition-colors"
+              title="双击清零"
+            >{{ binanceLagCount }}</span>
           </div>
         </div>
       </div>
@@ -213,10 +221,60 @@ const binanceConnected = ref(false)
 const bybit = ref({ bid: 0, ask: 0, mid: 0, prevBid: 0, prevAsk: 0, prevMid: 0 })
 const binance = ref({ bid: 0, ask: 0, mid: 0, prevBid: 0, prevAsk: 0, prevMid: 0 })
 
-const bybitLagCount = ref(0)
-const binanceLagCount = ref(0)
+// Lag detection with sliding window (last 60 seconds)
+const SLIDING_WINDOW_SIZE = 60 // 60 seconds
+const LAG_THRESHOLD = 2000 // 2 seconds
+const bybitUpdateTimestamps = ref([]) // Store last N update timestamps
+const binanceUpdateTimestamps = ref([]) // Store last N update timestamps
 let lastUpdateTime = Date.now()
 let lagTimer = null
+
+// Computed lag count based on sliding window
+const bybitLagCount = computed(() => {
+  const now = Date.now()
+  const windowStart = now - SLIDING_WINDOW_SIZE * 1000
+
+  // Remove old timestamps outside the window
+  const recentTimestamps = bybitUpdateTimestamps.value.filter(t => t > windowStart)
+
+  // Count gaps > LAG_THRESHOLD
+  let lagCount = 0
+  for (let i = 1; i < recentTimestamps.length; i++) {
+    if (recentTimestamps[i] - recentTimestamps[i - 1] > LAG_THRESHOLD) {
+      lagCount++
+    }
+  }
+
+  // Check if current time has a lag
+  if (recentTimestamps.length > 0 && now - recentTimestamps[recentTimestamps.length - 1] > LAG_THRESHOLD) {
+    lagCount++
+  }
+
+  return lagCount
+})
+
+const binanceLagCount = computed(() => {
+  const now = Date.now()
+  const windowStart = now - SLIDING_WINDOW_SIZE * 1000
+
+  // Remove old timestamps outside the window
+  const recentTimestamps = binanceUpdateTimestamps.value.filter(t => t > windowStart)
+
+  // Count gaps > LAG_THRESHOLD
+  let lagCount = 0
+  for (let i = 1; i < recentTimestamps.length; i++) {
+    if (recentTimestamps[i] - recentTimestamps[i - 1] > LAG_THRESHOLD) {
+      lagCount++
+    }
+  }
+
+  // Check if current time has a lag
+  if (recentTimestamps.length > 0 && now - recentTimestamps[recentTimestamps.length - 1] > LAG_THRESHOLD) {
+    lagCount++
+  }
+
+  return lagCount
+})
 
 // Pending orders data
 const askOrderCount = ref(0)
@@ -302,12 +360,18 @@ const forwardSpread = computed(() => {
 watch(() => marketStore.marketData, (data) => {
   if (!data) return
 
-  // Throttle updates to reduce re-renders
   const now = Date.now()
-  if (now - lastUpdateTime > 2000) {
-    bybitLagCount.value++
-    binanceLagCount.value++
-  }
+  const timeSinceLastUpdate = now - lastUpdateTime
+
+  // Add timestamp to sliding window
+  bybitUpdateTimestamps.value.push(now)
+  binanceUpdateTimestamps.value.push(now)
+
+  // Keep only recent timestamps (last 60 seconds + buffer)
+  const windowStart = now - (SLIDING_WINDOW_SIZE + 10) * 1000
+  bybitUpdateTimestamps.value = bybitUpdateTimestamps.value.filter(t => t > windowStart)
+  binanceUpdateTimestamps.value = binanceUpdateTimestamps.value.filter(t => t > windowStart)
+
   lastUpdateTime = now
 
   // Only update if values actually changed
@@ -444,12 +508,14 @@ function handleAccountBalanceUpdate(data) {
 
 onMounted(() => {
   marketStore.connect()
-  lagTimer = setInterval(() => {
-    if (Date.now() - lastUpdateTime > 2000) {
-      bybitLagCount.value++
-      binanceLagCount.value++
-    }
-  }, 2000)
+
+  // Initialize timestamps with current time
+  const now = Date.now()
+  bybitUpdateTimestamps.value = [now]
+  binanceUpdateTimestamps.value = [now]
+  lastUpdateTime = now
+
+  // No longer need lagTimer as we use sliding window
 
   // Initial fetch
   fetchAccountData()
@@ -490,6 +556,19 @@ function formatSpread(spread) {
   if (!spread || isNaN(spread)) return '0.00'
   const sign = spread >= 0 ? '+' : ''
   return sign + spread.toFixed(2)
+}
+
+// Reset lag count by clearing timestamp history
+function resetBybitLag() {
+  const now = Date.now()
+  bybitUpdateTimestamps.value = [now]
+  console.log('Bybit lag count reset')
+}
+
+function resetBinanceLag() {
+  const now = Date.now()
+  binanceUpdateTimestamps.value = [now]
+  console.log('Binance lag count reset')
 }
 
 async function fetchAccountData() {

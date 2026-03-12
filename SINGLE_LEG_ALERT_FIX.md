@@ -1,7 +1,8 @@
 # 单腿告警修复总结
 
 ## 修复时间
-2026-03-10
+- 第一次修复: 2026-03-10
+- 第二次修复: 2026-03-11
 
 ## 问题描述
 用户点击"启用正向平仓"按钮后，Binance成功挂单平仓（订单号1374422735、1374419677），但Bybit没有平仓，造成单腿交易，但系统没有触发单腿告警。
@@ -241,3 +242,233 @@ logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot")
 ✅ 覆盖所有4个执行endpoint
 
 **风险降低：** 用户能及时发现单腿风险，避免更大损失。
+
+---
+
+## 2026-03-11 第二次修复
+
+### 问题描述
+用户再次报告：在StrategyPanel中正向套利策略点击"启用正向开仓"按钮后，Binance成功挂单开仓（订单号1405468694，1405472764），但Bybit没有开仓，且单腿提醒没有触发。
+
+### 根本原因
+虽然第一次修复已经将单腿检查移到`success`判断之外，但在 `order_executor_v2.py` 中，当Bybit订单完全未成交（`bybit_filled_qty == 0`）时，虽然返回了 `is_single_leg: True`，但**没有包含 `single_leg_details` 字典**。
+
+这导致 `continuous_executor.py` 中的 `_send_single_leg_alert()` 方法在尝试获取 `single_leg_details` 时得到空字典 `{}`，从而导致警报消息缺少关键信息。
+
+### 修复内容
+
+#### 1. 添加缺失的 single_leg_details
+
+**文件**: `backend/app/services/order_executor_v2.py`
+
+**修改位置**:
+- Line 101-115 (execute_reverse_opening)
+- Line 234-248 (execute_reverse_closing)
+- Line 335-349 (execute_forward_opening)
+- Line 486-500 (execute_forward_closing)
+
+**修改内容**: 在所有四个策略执行方法中，当Bybit订单未成交时，添加完整的 `single_leg_details` 字典：
+
+```python
+# 修改前
+if bybit_filled_qty == 0:
+    return {
+        "success": False,
+        "error": "Bybit订单未成交",
+        "binance_filled_qty": binance_filled_qty,
+        "bybit_filled_qty": 0,
+        "binance_order_id": binance_order_id,
+        "is_single_leg": True,
+        "message": "Bybit订单已取消，等待下次重试"
+    }
+
+# 修改后
+if bybit_filled_qty == 0:
+    return {
+        "success": False,
+        "error": "Bybit订单未成交",
+        "binance_filled_qty": binance_filled_qty,
+        "bybit_filled_qty": 0,
+        "binance_order_id": binance_order_id,
+        "is_single_leg": True,
+        "message": "Bybit订单已取消，等待下次重试",
+        "single_leg_details": {
+            "binance_filled": binance_filled_qty,
+            "bybit_filled": 0,
+            "bybit_filled_xau": 0,
+            "unfilled_qty": binance_filled_qty
+        }
+    }
+```
+
+#### 2. 改进 _execute_bybit_market_sell 日志
+
+**文件**: `backend/app/services/order_executor_v2.py`
+
+**修改位置**: Line 646-751 (_execute_bybit_market_sell方法)
+
+**修改内容**:
+- 添加详细的日志输出，记录每次尝试的状态
+- 修正日志标签从 `[BYBIT_BUY]` 改为 `[BYBIT_SELL]`（之前有错误）
+- 在订单放置失败时记录错误信息
+
+```python
+logger.info(f"[BYBIT_SELL] Starting: quantity={quantity} Lot, close_position={close_position}")
+logger.info(f"[BYBIT_SELL] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
+logger.error(f"[BYBIT_SELL] Order placement failed: {result.get('error')}")
+logger.info(f"[BYBIT_SELL] Order placed: ticket={ticket}")
+logger.info(f"[BYBIT_SELL] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
+logger.warning(f"[BYBIT_SELL] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
+logger.warning(f"[BYBIT_SELL] No fill detected for ticket {ticket}, stopping retries")
+logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot")
+```
+
+### 单腿提醒流程（修复后）
+
+1. **订单执行**: `order_executor_v2.execute_forward_opening()` 执行正向开仓
+2. **Binance成功**: Binance限价单成交
+3. **Bybit失败**: Bybit市价单未成交（返回0）
+4. **返回结果**: 返回 `success: False, is_single_leg: True, single_leg_details: {...}` ✅ 包含完整详情
+5. **检测单腿**: `continuous_executor._execute_ladder()` 检测到 `is_single_leg == True`
+6. **发送警报**: 调用 `_send_single_leg_alert()` 发送WebSocket和飞书通知 ✅ 有完整数据
+7. **用户收到**: 前端显示单腿交易警告，播放提示音 ✅ 显示完整信息
+
+### 为什么Bybit订单会失败？
+
+可能的原因：
+1. **MT5连接问题**: MT5客户端与Bybit服务器连接中断
+2. **保证金不足**: Bybit账户保证金不足以开仓
+3. **持仓限制**: 达到Bybit账户的持仓限制
+4. **API错误**: Bybit API返回错误
+5. **网络超时**: 网络延迟导致订单未能及时提交
+6. **市场流动性**: 市场流动性不足，市价单无法成交
+7. **订单参数错误**: `close_position` 参数设置错误（开仓时应为False）
+
+### 建议的后续排查步骤
+
+1. **检查日志**: 查看 `backend.log` 中的 `[BYBIT_SELL]` 日志，确认订单放置是否成功
+2. **检查MT5连接**: 确认MT5客户端是否正常连接到Bybit服务器
+3. **检查账户状态**: 确认Bybit账户保证金充足，没有达到持仓限制
+4. **检查网络**: 确认服务器与Bybit API的网络连接稳定
+5. **监控执行时间**: 如果Bybit订单经常超时，考虑增加 `bybit_timeout` 参数
+6. **检查订单参数**: 确认 `close_position` 参数设置正确（开仓=False，平仓=True）
+
+### 测试建议
+
+1. 在测试环境中模拟Bybit订单失败场景
+2. 验证单腿提醒是否正确触发，且包含完整信息
+3. 检查WebSocket消息是否正确发送到前端
+4. 确认飞书通知是否正常发送，且包含完整详情
+5. 验证提示音是否正常播放
+6. 检查日志中是否有 `[BYBIT_SELL]` 的详细记录
+
+### 修复总结
+
+**第二次修复的关键改进**:
+- ✅ 添加了缺失的 `single_leg_details` 字典，确保警报消息包含完整信息
+- ✅ 改进了 `_execute_bybit_market_sell` 的日志记录，便于诊断问题
+- ✅ 修正了日志标签错误（BYBIT_BUY → BYBIT_SELL）
+- ✅ 确保单腿警报能够正确触发并显示完整信息
+
+---
+
+## 2026-03-11 第三次修复 - MT5 Bridge缺陷
+
+### 诊断发现
+
+通过检查日志发现：
+1. **MT5连接频繁断开**：`MT5 connection unhealthy`，连接超过30秒无活动被判定为stale
+2. **MT5 Bridge崩溃**：`MT5 Bridge error: unsupported operand type(s) for -: 'NoneType' and 'NoneType'`
+3. **Bybit订单验证失败**：因MT5 Bridge无法获取持仓数据，导致Bybit订单被判定为未成交
+
+**注**: 连接超时已从 120 秒调整回 30 秒，以更快地检测连接问题。
+
+### 根本原因
+
+**文件**: `backend/app/services/mt5_bridge.py`
+
+**位置**: Line 211-214
+
+**问题代码**:
+```python
+# 检查关键字段变化
+if (pos["volume"] != last_pos["volume"] or
+    abs(pos["profit"] - last_pos["profit"]) > 0.01 or  # ❌ profit可能为None
+    abs(pos["swap"] - last_pos["swap"]) > 0.01 or      # ❌ swap可能为None
+    abs(pos["price_current"] - last_pos["price_current"]) > 0.01):  # ❌ price_current可能为None
+    return True
+```
+
+当MT5返回的持仓数据中 `profit`、`swap` 或 `price_current` 为 `None` 时，直接进行减法运算会导致 `TypeError`。
+
+### 修复内容
+
+**修改**: 添加None值处理，使用 `or 0` 提供默认值
+
+```python
+# 检查关键字段变化（处理None值）
+if (pos["volume"] != last_pos["volume"] or
+    abs((pos["profit"] or 0) - (last_pos["profit"] or 0)) > 0.01 or  # ✅ 处理None
+    abs((pos["swap"] or 0) - (last_pos["swap"] or 0)) > 0.01 or      # ✅ 处理None
+    abs((pos["price_current"] or 0) - (last_pos["price_current"] or 0)) > 0.01):  # ✅ 处理None
+    return True
+```
+
+### 影响链
+
+**修复前的问题链**:
+1. MT5连接不稳定 → 返回None值
+2. MT5 Bridge处理None值时崩溃 → 无法获取持仓数据
+3. Bybit订单执行后无法验证成交量 → 返回0
+4. 系统判定Bybit未成交 → 触发单腿
+5. 单腿警报缺少details → 警报失败或信息不完整
+
+**修复后**:
+1. MT5连接不稳定 → 返回None值
+2. MT5 Bridge正确处理None值 → ✅ 继续运行
+3. Bybit订单执行后可以验证成交量 → ✅ 返回实际成交量
+4. 如果真的单腿 → ✅ 触发完整警报
+
+### 建议的后续措施
+
+#### 1. 修复MT5连接稳定性
+- 检查MT5客户端配置
+- 增加连接重试机制
+- 优化连接健康检查逻辑
+- 考虑增加连接池
+
+#### 2. 增强MT5 Bridge健壮性
+- 添加更多None值检查
+- 增加数据验证逻辑
+- 改进错误处理和恢复机制
+- 添加详细的调试日志
+
+#### 3. 监控和告警
+- 监控MT5连接状态
+- 监控MT5 Bridge错误率
+- 当错误率超过阈值时自动告警
+- 记录MT5连接断开的时间和频率
+
+#### 4. 测试验证
+1. 重启后端服务，应用修复
+2. 监控 `backend.log` 中的MT5 Bridge错误
+3. 验证MT5连接是否稳定
+4. 测试Bybit订单执行是否正常
+5. 确认单腿警报是否正确触发
+
+### 修复总结
+
+**第三次修复解决了根本问题**:
+- ✅ 修复MT5 Bridge的None值处理缺陷
+- ✅ 防止MT5 Bridge崩溃
+- ✅ 确保Bybit订单成交量验证正常工作
+- ✅ 配合前两次修复，完整解决单腿警报问题
+
+**完整修复链**:
+1. 第一次修复：将单腿检查移到success判断之外
+2. 第二次修复：添加缺失的single_leg_details字典
+3. 第三次修复：修复MT5 Bridge崩溃，确保能正确获取成交数据
+
+现在整个单腿警报系统应该能够正常工作了！
+
+

@@ -207,11 +207,11 @@ class MT5Bridge:
 
             last_pos = self.last_positions[ticket]
 
-            # 检查关键字段变化
+            # 检查关键字段变化（处理None值）
             if (pos["volume"] != last_pos["volume"] or
-                abs(pos["profit"] - last_pos["profit"]) > 0.01 or  # 盈亏变化超过0.01
-                abs(pos["swap"] - last_pos["swap"]) > 0.01 or      # 掉期费变化超过0.01
-                abs(pos["price_current"] - last_pos["price_current"]) > 0.01):  # 当前价格变化
+                abs((pos["profit"] or 0) - (last_pos["profit"] or 0)) > 0.01 or  # 盈亏变化超过0.01
+                abs((pos["swap"] or 0) - (last_pos["swap"] or 0)) > 0.01 or      # 掉期费变化超过0.01
+                abs((pos["price_current"] or 0) - (last_pos["price_current"] or 0)) > 0.01):  # 当前价格变化
                 return True
 
         return False

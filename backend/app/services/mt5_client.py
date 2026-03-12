@@ -37,7 +37,7 @@ class MT5Client:
         # Reconnection strategy
         self.reconnect_delay = 5  # Initial delay in seconds
         self.max_reconnect_delay = 60  # Maximum delay in seconds
-        self.connection_timeout = 30  # Timeout for considering connection stale
+        self.connection_timeout = 30  # Timeout for considering connection stale (30 seconds)
 
     def is_connection_healthy(self) -> bool:
         """Check if connection is healthy based on last successful request"""
