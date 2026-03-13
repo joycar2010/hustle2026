@@ -39,65 +39,70 @@ class SpreadAlertService:
         alert_settings: Dict[str, Any]
     ):
         """
-        检查点差值并发送提醒
+        检查点差值并发送提醒（兼容负数阈值）
 
         Args:
             db: 数据库会话
             user_id: 用户ID
             market_data: 市场数据 {forward_spread, reverse_spread}
             alert_settings: 提醒设置 {forwardOpenPrice, forwardClosePrice, reverseOpenPrice, reverseClosePrice}
+
+        触发规则（兼容负数阈值）：
+        - 正向开仓/平仓: 点差 >= 阈值（正数：点差超阈值触发；负数：始终触发）
+        - 反向开仓/平仓: 点差 <= 阈值（正数：点差低于阈值触发；负数：始终触发）
+        - 空值: 不触发任何提醒
         """
         alerts_to_send = []
 
-        # 1. 检查正向开仓点差值
-        if market_data.get('forward_spread') and alert_settings.get('forwardOpenPrice'):
-            if abs(market_data['forward_spread']) >= alert_settings['forwardOpenPrice']:
+        # 1. 检查正向开仓点差值（点差 >= 阈值）
+        if market_data.get('forward_spread') is not None and alert_settings.get('forwardOpenPrice') is not None:
+            spread = market_data['forward_spread']
+            threshold = alert_settings['forwardOpenPrice']
+            if spread >= threshold:
                 alerts_to_send.append({
                     'template_key': 'forward_open_spread_alert',
                     'variables': {
-                        'spread': f"{market_data['forward_spread']:.2f}",
-                        'threshold': f"{alert_settings['forwardOpenPrice']:.2f}",
-                        'market_status': '优惠价格出现',
-                        'estimated_profit': f"{abs(market_data['forward_spread']) * 10:.2f}"  # 假设10件
+                        'spread': f"{spread:.2f}",
+                        'threshold': f"{threshold:.2f}"
                     }
                 })
 
-        # 2. 检查正向平仓点差值
-        if market_data.get('forward_spread') and alert_settings.get('forwardClosePrice'):
-            if abs(market_data['forward_spread']) <= alert_settings['forwardClosePrice']:
+        # 2. 检查正向平仓点差值（点差 >= 阈值）
+        if market_data.get('forward_spread') is not None and alert_settings.get('forwardClosePrice') is not None:
+            spread = market_data['forward_spread']
+            threshold = alert_settings['forwardClosePrice']
+            if spread >= threshold:
                 alerts_to_send.append({
                     'template_key': 'forward_close_spread_alert',
                     'variables': {
-                        'spread': f"{market_data['forward_spread']:.2f}",
-                        'threshold': f"{alert_settings['forwardClosePrice']:.2f}",
-                        'market_status': '价格回归正常',
-                        'current_profit': f"{abs(market_data['forward_spread']) * 10:.2f}"
+                        'spread': f"{spread:.2f}",
+                        'threshold': f"{threshold:.2f}"
                     }
                 })
 
-        # 3. 检查反向开仓点差值
-        if market_data.get('reverse_spread') and alert_settings.get('reverseOpenPrice'):
-            if abs(market_data['reverse_spread']) >= alert_settings['reverseOpenPrice']:
+        # 3. 检查反向开仓点差值（点差 <= 阈值）
+        if market_data.get('reverse_spread') is not None and alert_settings.get('reverseOpenPrice') is not None:
+            spread = market_data['reverse_spread']
+            threshold = alert_settings['reverseOpenPrice']
+            if spread <= threshold:
                 alerts_to_send.append({
                     'template_key': 'reverse_open_spread_alert',
                     'variables': {
-                        'spread': f"{market_data['reverse_spread']:.2f}",
-                        'threshold': f"{alert_settings['reverseOpenPrice']:.2f}",
-                        'market_status': '反向优惠出现',
-                        'estimated_profit': f"{abs(market_data['reverse_spread']) * 10:.2f}"
+                        'spread': f"{spread:.2f}",
+                        'threshold': f"{threshold:.2f}"
                     }
                 })
 
-        # 4. 检查反向平仓点差值
-        if market_data.get('reverse_spread') and alert_settings.get('reverseClosePrice'):
-            if abs(market_data['reverse_spread']) <= alert_settings['reverseClosePrice']:
+        # 4. 检查反向平仓点差值（点差 <= 阈值，兼容负数）
+        if market_data.get('reverse_spread') is not None and alert_settings.get('reverseClosePrice') is not None:
+            spread = market_data['reverse_spread']
+            threshold = alert_settings['reverseClosePrice']
+            if spread <= threshold:
                 alerts_to_send.append({
                     'template_key': 'reverse_close_spread_alert',
                     'variables': {
-                        'spread': f"{market_data['reverse_spread']:.2f}",
-                        'threshold': f"{alert_settings['reverseClosePrice']:.2f}",
-                        'market_status': '反向价格回归',
-                        'current_profit': f"{abs(market_data['reverse_spread']) * 10:.2f}"
+                        'spread': f"{spread:.2f}",
+                        'threshold': f"{threshold:.2f}"
                     }
                 })
 

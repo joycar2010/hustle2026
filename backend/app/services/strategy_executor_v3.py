@@ -122,6 +122,14 @@ class ArbitrageStrategyExecutorV3:
         self.normal_check_interval = 0.01  # 10ms
         self.after_bybit_check_interval = 0.1  # 100ms
 
+        # Closing strategy wait time configuration (to prevent high-frequency order cancellation)
+        self.close_wait_after_cancel_no_trade = 3.0  # Wait 3 seconds after canceling unfilled order
+        self.close_wait_after_cancel_part = 2.0  # Wait 2 seconds after canceling partially filled order
+
+        # Opening strategy wait time configuration (to prevent high-frequency order cancellation)
+        self.open_wait_after_cancel_no_trade = 3.0  # Wait 3 seconds after canceling unfilled order
+        self.open_wait_after_cancel_part = 2.0  # Wait 2 seconds after canceling partially filled order
+
     # ========================================================================
     # Phase 2: Position Validation Methods
     # ========================================================================
@@ -578,6 +586,8 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait to prevent high-frequency order cancellation
+                        await asyncio.sleep(self.open_wait_after_cancel_no_trade)
                         return {"success": False, "error": "Spread not met, order cancelled"}
 
                 except Exception as e:
@@ -617,6 +627,8 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait to prevent high-frequency order cancellation
+                        await asyncio.sleep(self.open_wait_after_cancel_part)
                         # Place Bybit order for filled quantity
                         result = await self._handle_binance_filled_reverse(
                             config, ladder, state, filled_qty, bybit_retry_count
@@ -1017,6 +1029,8 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait to prevent high-frequency order cancellation
+                        await asyncio.sleep(self.open_wait_after_cancel_no_trade)
                         return {"success": False, "error": "Spread not met, order cancelled"}
                 except Exception as e:
                     self.logger.warning(f"Failed to check spread: {str(e)}")
@@ -1054,6 +1068,8 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait to prevent high-frequency order cancellation
+                        await asyncio.sleep(self.open_wait_after_cancel_part)
                         result = await self._handle_binance_filled_forward(
                             config, ladder, state, filled_qty, bybit_retry_count
                         )
@@ -1428,6 +1444,9 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait after canceling unfilled order to prevent high-frequency re-ordering
+                        self.logger.info(f"Waiting {self.close_wait_after_cancel_no_trade}s after canceling unfilled order")
+                        await asyncio.sleep(self.close_wait_after_cancel_no_trade)
                         return {"success": False, "error": "Spread not met, order cancelled"}
                 except Exception as e:
                     self.logger.warning(f"Failed to check spread: {str(e)}")
@@ -1463,6 +1482,9 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait after canceling partially filled order to prevent high-frequency re-ordering
+                        self.logger.info(f"Waiting {self.close_wait_after_cancel_part}s after canceling partially filled order")
+                        await asyncio.sleep(self.close_wait_after_cancel_part)
                         result = await self._handle_binance_filled_reverse_closing(
                             config, ladder, state, filled_qty, bybit_retry_count
                         )
@@ -1811,6 +1833,9 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait after canceling unfilled order to prevent high-frequency re-ordering
+                        self.logger.info(f"Waiting {self.close_wait_after_cancel_no_trade}s after canceling unfilled order")
+                        await asyncio.sleep(self.close_wait_after_cancel_no_trade)
                         return {"success": False, "error": "Spread not met, order cancelled"}
                 except Exception as e:
                     self.logger.warning(f"Failed to check spread: {str(e)}")
@@ -1846,6 +1871,9 @@ class ArbitrageStrategyExecutorV3:
                             config.symbol,
                             binance_order['orderId']
                         )
+                        # Wait after canceling partially filled order to prevent high-frequency re-ordering
+                        self.logger.info(f"Waiting {self.close_wait_after_cancel_part}s after canceling partially filled order")
+                        await asyncio.sleep(self.close_wait_after_cancel_part)
                         result = await self._handle_binance_filled_forward_closing(
                             config, ladder, state, filled_qty, bybit_retry_count
                         )

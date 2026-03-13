@@ -469,6 +469,8 @@ class RiskAlertService:
         quantity: float,
         duration: int,
         direction: str,
+        binance_filled: float = 0,
+        bybit_filled: float = 0,
     ) -> bool:
         """
         检查单腿持仓
@@ -476,9 +478,11 @@ class RiskAlertService:
         Args:
             user_id: 用户ID
             exchange: 交易所名称（如"Binance"或"Bybit"）
-            quantity: 单腿数量
+            quantity: 单腿数量（未成交量）
             duration: 持续时间（秒）
             direction: 方向（"多头"或"空头"）
+            binance_filled: Binance成交量
+            bybit_filled: Bybit成交量
 
         Returns:
             是否发送成功
@@ -499,6 +503,9 @@ class RiskAlertService:
                 "quantity": f"{quantity:.4f}",
                 "duration": duration,
                 "direction": direction,
+                "binance_filled": f"{binance_filled:.4f}",
+                "bybit_filled": f"{bybit_filled:.4f}",
+                "unfilled_qty": f"{quantity:.4f}",
             },
         )
 

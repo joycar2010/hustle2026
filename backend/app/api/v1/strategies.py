@@ -72,7 +72,9 @@ async def send_single_leg_alert(user_id: str, strategy_type: str, action: str, d
             exchange=exchange,
             quantity=details.get("unfilled_qty", 0),
             duration=0,  # Immediate alert
-            direction=direction
+            direction=direction,
+            binance_filled=details.get("binance_filled", 0),
+            bybit_filled=details.get("bybit_filled", 0)
         )
     except Exception as e:
         import logging

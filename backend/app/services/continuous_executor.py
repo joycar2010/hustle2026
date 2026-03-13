@@ -729,7 +729,9 @@ class ContinuousStrategyExecutor:
                     exchange=exchange,
                     quantity=details.get("unfilled_qty", 0),
                     duration=0,  # Immediate alert
-                    direction=direction
+                    direction=direction,
+                    binance_filled=details.get("binance_filled", 0),
+                    bybit_filled=details.get("bybit_filled", 0)
                 )
                 break  # Only need first session
         except Exception as e:
