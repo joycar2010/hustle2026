@@ -430,6 +430,12 @@ class ArbitrageStrategyExecutorV3:
                     "REVERSE_OPENING_FAILED",
                     {"ladder": state.current_ladder_index, "error": result.get("error")}
                 )
+                # Reset trigger count when order fails to prevent high-frequency re-ordering
+                self.trigger_count_manager.reset_count(
+                    strategy_id,
+                    state.current_ladder_index,
+                    "opening"
+                )
 
             await asyncio.sleep(self.normal_check_interval)
 
@@ -874,6 +880,12 @@ class ArbitrageStrategyExecutorV3:
                     "FORWARD_OPENING_FAILED",
                     {"ladder": state.current_ladder_index, "error": result.get("error")}
                 )
+                # Reset trigger count when order fails to prevent high-frequency re-ordering
+                self.trigger_count_manager.reset_count(
+                    strategy_id,
+                    state.current_ladder_index,
+                    "opening"
+                )
 
             await asyncio.sleep(self.normal_check_interval)
 
@@ -1284,6 +1296,12 @@ class ArbitrageStrategyExecutorV3:
                     "REVERSE_CLOSING_FAILED",
                     {"ladder": state.current_ladder_index, "error": result.get("error")}
                 )
+                # Reset trigger count when order fails to prevent high-frequency re-ordering
+                self.trigger_count_manager.reset_count(
+                    strategy_id,
+                    state.current_ladder_index,
+                    "closing"
+                )
 
             await asyncio.sleep(self.normal_check_interval)
 
@@ -1686,6 +1704,12 @@ class ArbitrageStrategyExecutorV3:
                     "FORWARD_CLOSING_FAILED",
                     {"ladder": state.current_ladder_index, "error": result.get("error")}
                 )
+                # Reset trigger count when order fails to prevent high-frequency re-ordering
+                self.trigger_count_manager.reset_count(
+                    strategy_id,
+                    state.current_ladder_index,
+                    "closing"
+                )
 
             await asyncio.sleep(self.normal_check_interval)
 
@@ -1944,6 +1968,35 @@ class ArbitrageStrategyExecutorV3:
 
             retry_count += 1
             if retry_count < max_retries:
+                # Check spread before retrying to prevent frequent order placement
+                try:
+                    binance_ticker = await self._api_call_with_retry(
+                        self.order_executor.get_binance_ticker,
+                        config.symbol
+                    )
+                    bybit_ticker = await self._api_call_with_retry(
+                        self.order_executor.get_bybit_ticker,
+                        config.symbol
+                    )
+                    binance_ask = float(binance_ticker.get('askPrice', 0))
+                    bybit_ask = float(bybit_ticker.get('ask1Price', 0))
+                    current_spread = self._calc_forward_closing_spread(binance_ask, bybit_ask)
+
+                    if current_spread < ladder.closing_spread:
+                        self._log_opening_operation(
+                            strategy_id,
+                            "BYBIT_CLOSING_RETRY_ABORT",
+                            {"reason": "Spread not met on retry", "spread": current_spread, "retry": retry_count}
+                        )
+                        await self._api_call_with_retry(
+                            self.order_executor.cancel_bybit_order,
+                            config.symbol,
+                            bybit_order['orderId']
+                        )
+                        return {"success": False, "error": f"Spread not met on retry {retry_count}"}
+                except Exception as e:
+                    self.logger.warning(f"Failed to check spread on retry: {str(e)}")
+
                 await self._api_call_with_retry(
                     self.order_executor.cancel_bybit_order,
                     config.symbol,
