@@ -90,12 +90,16 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (open LONG position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
+        logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU -> bybit_quantity={bybit_quantity} Lot")
+
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             "XAUUSD.s",
             bybit_quantity,
             close_position=False  # Open new LONG position
         )
+
+        logger.info(f"[REVERSE_OPENING] Bybit filled: {bybit_filled_qty} Lot")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -118,6 +122,15 @@ class OrderExecutorV2:
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
+
+        # FIX: Add detailed logging for single-leg detection
+        logger.info(
+            f"[REVERSE_OPENING] Single-leg check: "
+            f"Binance={binance_filled_qty} XAU, "
+            f"Bybit={bybit_filled_qty} Lot ({bybit_filled_xau} XAU), "
+            f"Threshold={binance_filled_qty * 0.95:.2f} XAU, "
+            f"is_single_leg={is_single_leg}"
+        )
 
         return {
             "success": True,
