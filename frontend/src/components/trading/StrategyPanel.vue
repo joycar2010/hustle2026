@@ -1711,42 +1711,23 @@ async function executeBatchClosing(ladder) {
 
 async function checkPositionForClosing() {
   try {
-    // Get current positions from both exchanges
-    const binancePosition = await getBinancePosition()
-    const bybitPosition = await getBybitPosition()
-
     // Calculate total position needed for closing
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const totalQtyNeeded = enabledLadders.reduce((sum, ladder) => sum + ladder.qtyLimit, 0)
 
-    // Check if positions are sufficient
-    if (type.value === 'forward') {
-      // Forward closing: need Binance long position and Bybit short position
-      if (binancePosition < totalQtyNeeded) {
-        return {
-          valid: false,
-          message: `Binance持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${binancePosition.toFixed(2)}`
-        }
-      }
-      if (Math.abs(bybitPosition) < totalQtyNeeded) {
-        return {
-          valid: false,
-          message: `Bybit持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${Math.abs(bybitPosition).toFixed(2)}`
-        }
-      }
+    // Get current position based on strategy type
+    let currentPosition = 0
+    if (props.type === 'forward') {
+      currentPosition = props.marketCardsRef?.forwardActualPosition || 0
     } else {
-      // Reverse closing: need Binance short position and Bybit long position
-      if (Math.abs(binancePosition) < totalQtyNeeded) {
-        return {
-          valid: false,
-          message: `Binance持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${Math.abs(binancePosition).toFixed(2)}`
-        }
-      }
-      if (bybitPosition < totalQtyNeeded) {
-        return {
-          valid: false,
-          message: `Bybit持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${bybitPosition.toFixed(2)}`
-        }
+      currentPosition = props.marketCardsRef?.reverseActualPosition || 0
+    }
+
+    // Check if position is sufficient
+    if (Math.abs(currentPosition) < totalQtyNeeded) {
+      return {
+        valid: false,
+        message: `持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${Math.abs(currentPosition).toFixed(2)}`
       }
     }
 
@@ -1757,18 +1738,6 @@ async function checkPositionForClosing() {
       message: `检查持仓失败: ${error.message}`
     }
   }
-}
-
-async function getBinancePosition() {
-  // TODO: Implement actual API call to get Binance position
-  // For now, return a placeholder value
-  return marketCardsRef.value?.forwardActualPosition || 0
-}
-
-async function getBybitPosition() {
-  // TODO: Implement actual API call to get Bybit position
-  // For now, return a placeholder value
-  return marketCardsRef.value?.reverseActualPosition || 0
 }
 
 function validateLadderConfig(action) {
