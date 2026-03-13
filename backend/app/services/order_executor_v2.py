@@ -121,14 +121,15 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
+        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
 
         # FIX: Add detailed logging for single-leg detection
         logger.info(
             f"[REVERSE_OPENING] Single-leg check: "
             f"Binance={binance_filled_qty} XAU, "
             f"Bybit={bybit_filled_qty} Lot ({bybit_filled_xau} XAU), "
-            f"Threshold={binance_filled_qty * 0.95:.2f} XAU, "
+            f"Threshold={binance_filled_qty * 0.90:.2f} XAU, "
             f"is_single_leg={is_single_leg}"
         )
 
@@ -269,7 +270,8 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
+        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
 
         return {
             "success": True,
@@ -376,7 +378,8 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
+        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
 
         return {
             "success": True,
@@ -534,7 +537,8 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.95
+        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
 
         if is_single_leg:
             logger.warning(f"[FORWARD_CLOSING] PARTIAL SINGLE LEG: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU ({bybit_filled_qty} Lot)")
@@ -635,8 +639,9 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # Additional wait for MT5 to process deals
-            await asyncio.sleep(0.3)
+            # FIX: Additional wait for MT5 to process deals (increased from 0.3s to 3s)
+            # Reason: MT5 Bridge may have delay in syncing deal data
+            await asyncio.sleep(3.0)
 
             # Check actual filled volume from MT5 deals
             volume_check = await self._check_mt5_filled_volume(
@@ -724,8 +729,9 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # Additional wait for MT5 to process deals
-            await asyncio.sleep(0.3)
+            # FIX: Additional wait for MT5 to process deals (increased from 0.3s to 3s)
+            # Reason: MT5 Bridge may have delay in syncing deal data
+            await asyncio.sleep(3.0)
 
             # Check actual filled volume from MT5 deals
             volume_check = await self._check_mt5_filled_volume(
