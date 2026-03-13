@@ -2,11 +2,34 @@
   <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Header -->
     <div class="p-1.5 border-b border-[#2b3139] flex-shrink-0">
-      <!-- 标题：居中、字体放大0.5倍 (text-sm -> text-lg) -->
-      <h3 :class="['text-lg font-bold text-center', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
-        {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
-      </h3>
-      <div v-if="marketCardsRef" class="text-2xl font-bold text-center mt-1 text-[#3b82f6]">
+      <!-- 标题行：标题居中，资产信息在两侧 -->
+      <div class="flex items-center justify-between mb-1">
+        <!-- 左侧：正向套利显示Binance资产 -->
+        <div v-if="type === 'forward'" class="text-center min-w-[120px]">
+          <div class="text-xs text-gray-400 mb-0.5">Binance可用资产</div>
+          <div class="text-sm font-mono font-bold">
+            {{ formatNumber(binanceAssets) }} USDT
+          </div>
+        </div>
+        <div v-else class="min-w-[120px]"></div>
+
+        <!-- 中间：标题 -->
+        <h3 :class="['text-lg font-bold text-center flex-1', type === 'forward' ? 'text-[#FF2433]' : 'text-[#00C98B]']">
+          {{ type === 'forward' ? '正向套利策略' : '反向套利策略' }}
+        </h3>
+
+        <!-- 右侧：反向套利显示Bybit MT5资产 -->
+        <div v-if="type === 'reverse'" class="text-center min-w-[120px]">
+          <div class="text-xs text-gray-400 mb-0.5">Bybit MT5可用资产</div>
+          <div class="text-sm font-mono font-bold">
+            {{ formatNumber(bybitAssets) }} USDT
+          </div>
+        </div>
+        <div v-else class="min-w-[120px]"></div>
+      </div>
+
+      <!-- 实仓和点差信息 -->
+      <div v-if="marketCardsRef" class="text-2xl font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
           实仓: {{ marketCardsRef.reverseActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
         </span>
@@ -34,27 +57,8 @@
       </div>
 
       <!-- Top Info Bar -->
-      <div class="bg-[#252930] rounded p-2 space-y-2">
-        <!-- Row 1: Assets (centered) -->
-        <div class="flex items-center justify-center gap-4">
-          <!-- Binance Available Assets -->
-          <div class="text-center">
-            <div class="text-xs text-gray-400 mb-0.5">Binance可用资产</div>
-            <div class="text-sm font-mono font-bold">
-              {{ formatNumber(binanceAssets) }} USDT
-            </div>
-          </div>
-
-          <!-- Bybit MT5 Available Assets -->
-          <div class="text-center">
-            <div class="text-xs text-gray-400 mb-0.5">Bybit MT5可用资产</div>
-            <div class="text-sm font-mono font-bold">
-              {{ formatNumber(bybitAssets) }} USDT
-            </div>
-          </div>
-        </div>
-
-        <!-- Row 2: Spread and Fees (centered) -->
+      <div class="bg-[#252930] rounded p-2">
+        <!-- Spread and Fees (centered) -->
         <div class="flex items-center justify-center gap-4">
           <!-- For Reverse Strategy: Bybit Fee + Spread -->
           <template v-if="type === 'reverse'">
