@@ -2,11 +2,11 @@
   <div class="h-full flex flex-col max-lg:h-auto">
     <!-- Header -->
     <div class="p-1.5 border-b border-[#2b3139] flex-shrink-0">
-      <!-- 标题和资产组件居中 -->
-      <div class="flex flex-col items-center justify-center mb-1">
+      <!-- 标题和资产组件同一行居中 -->
+      <div class="flex items-center justify-center gap-3 mb-1">
         <!-- 反向套利：Bybit MT5资产 + 标题 -->
         <template v-if="type === 'reverse'">
-          <div class="text-center mb-1">
+          <div class="text-center">
             <div class="text-xs text-gray-400 mb-0.5">Bybit MT5可用资产</div>
             <div class="text-sm font-mono font-bold">
               {{ formatNumber(bybitAssets) }} USDT
@@ -19,7 +19,7 @@
 
         <!-- 正向套利：Binance资产 + 标题 -->
         <template v-else>
-          <div class="text-center mb-1">
+          <div class="text-center">
             <div class="text-xs text-gray-400 mb-0.5">Binance可用资产</div>
             <div class="text-sm font-mono font-bold">
               {{ formatNumber(binanceAssets) }} USDT
