@@ -666,9 +666,78 @@ class ArbitrageStrategyExecutorV3:
             {"qty": filled_qty, "retry": retry_count + 1}
         )
 
-        # Place Bybit market sell order
+        # Hybrid order strategy: try limit order first, fallback to market order
         try:
+            # Step 1: Place aggressive limit order first (better price than market)
             bybit_order = await self._api_call_with_retry(
+                self.order_executor.place_bybit_limit_order,
+                config.symbol,
+                "SELL",
+                filled_qty,
+                "ask"
+            )
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_LIMIT_ORDER_PLACED",
+                {"order_id": bybit_order.get('orderId'), "qty": filled_qty, "price_type": "ask", "strategy": "hybrid"}
+            )
+
+            # Step 2: Wait 0.5 seconds to check if limit order fills
+            await asyncio.sleep(0.5)
+
+            bybit_status = await self._api_call_with_retry(
+                self.order_executor.get_bybit_order_status,
+                config.symbol,
+                bybit_order['orderId']
+            )
+            bybit_filled_qty = float(bybit_status.get('cumExecQty', 0))
+            bybit_order_status = bybit_status.get('orderStatus')
+
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_LIMIT_ORDER_STATUS",
+                {"status": bybit_order_status, "filled_qty": bybit_filled_qty, "wait_time": "0.5s"}
+            )
+
+            if bybit_order_status == 'Filled':
+                # Validate position after opening
+                valid, msg = await self.validate_position_after_opening(
+                    config,
+                    filled_qty,  # Binance long
+                    -filled_qty  # Bybit short
+                )
+
+                if valid:
+                    state.ladder_accumulated_qty += filled_qty
+                    self._log_opening_operation(
+                        strategy_id,
+                        "REVERSE_OPENING_SUCCESS_LIMIT",
+                        {"qty": filled_qty, "accumulated": state.ladder_accumulated_qty, "order_type": "limit"}
+                    )
+                    return {"success": True, "qty": filled_qty}
+                else:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "POSITION_VALIDATION_FAILED",
+                        {"reason": msg}
+                    )
+                    return {"success": False, "error": f"Position validation failed: {msg}"}
+
+            # Step 3: Limit order not filled, cancel and use market order as fallback
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_LIMIT_NOT_FILLED",
+                {"reason": "Limit order not filled in 0.5s, switching to market order"}
+            )
+
+            await self._api_call_with_retry(
+                self.order_executor.cancel_bybit_order,
+                config.symbol,
+                bybit_order['orderId']
+            )
+
+            # Place market order as fallback (100% fill guarantee)
+            bybit_market_order = await self._api_call_with_retry(
                 self.order_executor.place_bybit_market_order,
                 config.symbol,
                 "SELL",
@@ -676,97 +745,64 @@ class ArbitrageStrategyExecutorV3:
             )
             self._log_opening_operation(
                 strategy_id,
-                "BYBIT_ORDER_PLACED",
-                {"order_id": bybit_order.get('orderId'), "qty": filled_qty}
+                "BYBIT_OPENING_MARKET_ORDER_PLACED",
+                {"order_id": bybit_market_order.get('orderId'), "qty": filled_qty, "strategy": "market_fallback"}
             )
 
-            # Monitor Bybit order status with multiple checks
-            max_status_checks = 10
-            for check_count in range(max_status_checks):
-                await asyncio.sleep(self.after_bybit_check_interval)
+            # Wait briefly and check market order status
+            await asyncio.sleep(0.3)
 
-                # Check Bybit order status
-                bybit_status = await self._api_call_with_retry(
-                    self.order_executor.get_bybit_order_status,
-                    config.symbol,
-                    bybit_order['orderId']
+            market_status = await self._api_call_with_retry(
+                self.order_executor.get_bybit_order_status,
+                config.symbol,
+                bybit_market_order['orderId']
+            )
+            market_filled_qty = float(market_status.get('cumExecQty', 0))
+            market_order_status = market_status.get('orderStatus')
+
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_MARKET_ORDER_STATUS",
+                {"status": market_order_status, "filled_qty": market_filled_qty}
+            )
+
+            if market_order_status == 'Filled':
+                # Validate position after opening
+                valid, msg = await self.validate_position_after_opening(
+                    config,
+                    filled_qty,  # Binance long
+                    -filled_qty  # Bybit short
                 )
-                bybit_filled_qty = float(bybit_status.get('cumExecQty', 0))
-                bybit_order_status = bybit_status.get('orderStatus')
 
-                self._log_opening_operation(
-                    strategy_id,
-                    "BYBIT_ORDER_STATUS",
-                    {"status": bybit_order_status, "filled_qty": bybit_filled_qty, "check": check_count + 1}
-                )
-
-                if bybit_order_status == 'Filled':
-                    # Validate position after opening
-                    valid, msg = await self.validate_position_after_opening(
-                        config,
-                        filled_qty,  # Binance long
-                        -filled_qty  # Bybit short
+                if valid:
+                    state.ladder_accumulated_qty += filled_qty
+                    self._log_opening_operation(
+                        strategy_id,
+                        "REVERSE_OPENING_SUCCESS_MARKET",
+                        {"qty": filled_qty, "accumulated": state.ladder_accumulated_qty, "order_type": "market"}
                     )
+                    return {"success": True, "qty": filled_qty}
+                else:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "POSITION_VALIDATION_FAILED",
+                        {"reason": msg}
+                    )
+                    return {"success": False, "error": f"Position validation failed: {msg}"}
 
-                    if valid:
-                        state.ladder_accumulated_qty += filled_qty
-                        self._log_opening_operation(
-                            strategy_id,
-                            "REVERSE_OPENING_SUCCESS",
-                            {"qty": filled_qty, "accumulated": state.ladder_accumulated_qty}
-                        )
-                        return {"success": True, "qty": filled_qty}
-                    else:
-                        self._log_opening_operation(
-                            strategy_id,
-                            "POSITION_VALIDATION_FAILED",
-                            {"reason": msg}
-                        )
-                        return {"success": False, "error": f"Position validation failed: {msg}"}
-
-            # Bybit order not filled after max checks, retry logic
+            # Market order also not filled (rare case), retry the whole process
             retry_count += 1
             if retry_count < max_retries:
-                # Cancel unfilled Bybit order
-                await self._api_call_with_retry(
-                    self.order_executor.cancel_bybit_order,
-                    config.symbol,
-                    bybit_order['orderId']
+                self._log_opening_operation(
+                    strategy_id,
+                    "BYBIT_OPENING_MARKET_NOT_FILLED_RETRY",
+                    {"reason": "Market order not filled, retrying", "retry": retry_count}
                 )
-                # Retry
                 return await self._handle_binance_filled_reverse(
                     config, ladder, state, filled_qty, retry_count
                 )
             else:
-                # 4th attempt - check spread before retry
-                try:
-                    binance_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_binance_ticker,
-                        config.symbol
-                    )
-                    bybit_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_bybit_ticker,
-                        config.symbol
-                    )
-                    binance_bid = float(binance_ticker.get('bidPrice', 0))
-                    bybit_ask = float(bybit_ticker.get('ask1Price', 0))
-                    current_spread = self._calc_binance_long_spread(binance_bid, bybit_ask)
-
-                    if current_spread >= ladder.opening_spread:
-                        # Spread still good, retry one more time
-                        await self._api_call_with_retry(
-                            self.order_executor.cancel_bybit_order,
-                            config.symbol,
-                            bybit_order['orderId']
-                        )
-                        return await self._handle_binance_filled_reverse(
-                            config, ladder, state, filled_qty, retry_count
-                        )
-                    else:
-                        return {"success": False, "error": "Max retries reached and spread not met"}
-
-                except Exception as e:
-                    return {"success": False, "error": f"Failed to check spread on 4th retry: {str(e)}"}
+                return {"success": False, "error": "Max retries reached, market order still not filled"}
 
         except Exception as e:
             return {"success": False, "error": f"Bybit order failed: {str(e)}"}
@@ -1113,8 +1149,77 @@ class ArbitrageStrategyExecutorV3:
             {"qty": filled_qty, "retry": retry_count + 1}
         )
 
+        # Hybrid order strategy: try limit order first, fallback to market order
         try:
+            # Step 1: Place aggressive limit order first (better price than market)
             bybit_order = await self._api_call_with_retry(
+                self.order_executor.place_bybit_limit_order,
+                config.symbol,
+                "BUY",
+                filled_qty,
+                "bid"
+            )
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_LIMIT_ORDER_PLACED",
+                {"order_id": bybit_order.get('orderId'), "qty": filled_qty, "price_type": "bid", "strategy": "hybrid"}
+            )
+
+            # Step 2: Wait 0.5 seconds to check if limit order fills
+            await asyncio.sleep(0.5)
+
+            bybit_status = await self._api_call_with_retry(
+                self.order_executor.get_bybit_order_status,
+                config.symbol,
+                bybit_order['orderId']
+            )
+            bybit_filled_qty = float(bybit_status.get('cumExecQty', 0))
+            bybit_order_status = bybit_status.get('orderStatus')
+
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_LIMIT_ORDER_STATUS",
+                {"status": bybit_order_status, "filled_qty": bybit_filled_qty, "wait_time": "0.5s"}
+            )
+
+            if bybit_order_status == 'Filled':
+                valid, msg = await self.validate_position_after_opening(
+                    config,
+                    -filled_qty,  # Binance short
+                    filled_qty    # Bybit long
+                )
+
+                if valid:
+                    state.ladder_accumulated_qty += filled_qty
+                    self._log_opening_operation(
+                        strategy_id,
+                        "FORWARD_OPENING_SUCCESS_LIMIT",
+                        {"qty": filled_qty, "accumulated": state.ladder_accumulated_qty, "order_type": "limit"}
+                    )
+                    return {"success": True, "qty": filled_qty}
+                else:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "POSITION_VALIDATION_FAILED",
+                        {"reason": msg}
+                    )
+                    return {"success": False, "error": f"Position validation failed: {msg}"}
+
+            # Step 3: Limit order not filled, cancel and use market order as fallback
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_LIMIT_NOT_FILLED",
+                {"reason": "Limit order not filled in 0.5s, switching to market order"}
+            )
+
+            await self._api_call_with_retry(
+                self.order_executor.cancel_bybit_order,
+                config.symbol,
+                bybit_order['orderId']
+            )
+
+            # Place market order as fallback (100% fill guarantee)
+            bybit_market_order = await self._api_call_with_retry(
                 self.order_executor.place_bybit_market_order,
                 config.symbol,
                 "BUY",
@@ -1122,89 +1227,62 @@ class ArbitrageStrategyExecutorV3:
             )
             self._log_opening_operation(
                 strategy_id,
-                "BYBIT_ORDER_PLACED",
-                {"order_id": bybit_order.get('orderId'), "qty": filled_qty}
+                "BYBIT_OPENING_MARKET_ORDER_PLACED",
+                {"order_id": bybit_market_order.get('orderId'), "qty": filled_qty, "strategy": "market_fallback"}
             )
 
-            # Monitor Bybit order status with multiple checks
-            max_status_checks = 10
-            for check_count in range(max_status_checks):
-                await asyncio.sleep(self.after_bybit_check_interval)
+            # Wait briefly and check market order status
+            await asyncio.sleep(0.3)
 
-                bybit_status = await self._api_call_with_retry(
-                    self.order_executor.get_bybit_order_status,
-                    config.symbol,
-                    bybit_order['orderId']
+            market_status = await self._api_call_with_retry(
+                self.order_executor.get_bybit_order_status,
+                config.symbol,
+                bybit_market_order['orderId']
+            )
+            market_filled_qty = float(market_status.get('cumExecQty', 0))
+            market_order_status = market_status.get('orderStatus')
+
+            self._log_opening_operation(
+                strategy_id,
+                "BYBIT_OPENING_MARKET_ORDER_STATUS",
+                {"status": market_order_status, "filled_qty": market_filled_qty}
+            )
+
+            if market_order_status == 'Filled':
+                valid, msg = await self.validate_position_after_opening(
+                    config,
+                    -filled_qty,  # Binance short
+                    filled_qty    # Bybit long
                 )
-                bybit_filled_qty = float(bybit_status.get('cumExecQty', 0))
-                bybit_order_status = bybit_status.get('orderStatus')
 
-                self._log_opening_operation(
-                    strategy_id,
-                    "BYBIT_ORDER_STATUS",
-                    {"status": bybit_order_status, "filled_qty": bybit_filled_qty, "check": check_count + 1}
-                )
-
-                if bybit_order_status == 'Filled':
-                    valid, msg = await self.validate_position_after_opening(
-                        config,
-                        -filled_qty,  # Binance short
-                        filled_qty    # Bybit long
+                if valid:
+                    state.ladder_accumulated_qty += filled_qty
+                    self._log_opening_operation(
+                        strategy_id,
+                        "FORWARD_OPENING_SUCCESS_MARKET",
+                        {"qty": filled_qty, "accumulated": state.ladder_accumulated_qty, "order_type": "market"}
                     )
-
-                    if valid:
-                        state.ladder_accumulated_qty += filled_qty
-                        self._log_opening_operation(
-                            strategy_id,
-                            "FORWARD_OPENING_SUCCESS",
-                            {"qty": filled_qty, "accumulated": state.ladder_accumulated_qty}
-                        )
-                        return {"success": True, "qty": filled_qty}
-                    else:
-                        self._log_opening_operation(
-                            strategy_id,
-                            "POSITION_VALIDATION_FAILED",
-                            {"reason": msg}
-                        )
-                        return {"success": False, "error": f"Position validation failed: {msg}"}
+                    return {"success": True, "qty": filled_qty}
+                else:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "POSITION_VALIDATION_FAILED",
+                        {"reason": msg}
+                    )
+                    return {"success": False, "error": f"Position validation failed: {msg}"}
 
             retry_count += 1
             if retry_count < max_retries:
-                await self._api_call_with_retry(
-                    self.order_executor.cancel_bybit_order,
-                    config.symbol,
-                    bybit_order['orderId']
+                self._log_opening_operation(
+                    strategy_id,
+                    "BYBIT_OPENING_MARKET_NOT_FILLED_RETRY",
+                    {"reason": "Market order not filled, retrying", "retry": retry_count}
                 )
                 return await self._handle_binance_filled_forward(
                     config, ladder, state, filled_qty, retry_count
                 )
             else:
-                try:
-                    binance_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_binance_ticker,
-                        config.symbol
-                    )
-                    bybit_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_bybit_ticker,
-                        config.symbol
-                    )
-                    bybit_bid = float(bybit_ticker.get('bid1Price', 0))
-                    binance_ask = float(binance_ticker.get('askPrice', 0))
-                    current_spread = self._calc_bybit_long_spread(bybit_bid, binance_ask)
-
-                    if current_spread >= ladder.opening_spread:
-                        await self._api_call_with_retry(
-                            self.order_executor.cancel_bybit_order,
-                            config.symbol,
-                            bybit_order['orderId']
-                        )
-                        return await self._handle_binance_filled_forward(
-                            config, ladder, state, filled_qty, retry_count
-                        )
-                    else:
-                        return {"success": False, "error": "Max retries reached and spread not met"}
-                except Exception as e:
-                    return {"success": False, "error": f"Failed to check spread on 4th retry: {str(e)}"}
+                return {"success": False, "error": "Max retries reached, market order still not filled"}
 
         except Exception as e:
             return {"success": False, "error": f"Bybit order failed: {str(e)}"}
