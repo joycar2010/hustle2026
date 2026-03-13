@@ -253,7 +253,7 @@ class ArbitrageStrategyExecutorV3:
     # Phase 2: Control and Utility Methods
     # ========================================================================
 
-    def _should_stop(self, strategy_id: int) -> bool:
+    async def _should_stop(self, strategy_id: int) -> bool:
         """Check if strategy should stop"""
         state = self.execution_states.get(strategy_id)
         if not state:
@@ -271,6 +271,66 @@ class ArbitrageStrategyExecutorV3:
             if elapsed_hours >= config.max_runtime_hours:
                 self.logger.info(f"Strategy {strategy_id} max runtime {config.max_runtime_hours}h reached")
                 return True
+
+        # Check strategy enabled status and account connection status from database
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.strategy import StrategyConfig as StrategyConfigModel
+            from app.models.account import Account
+            from sqlalchemy import select, and_
+
+            async with AsyncSessionLocal() as db:
+                # Check if strategy is still enabled
+                result = await db.execute(
+                    select(StrategyConfigModel).where(StrategyConfigModel.id == strategy_id)
+                )
+                strategy_config = result.scalar_one_or_none()
+
+                if not strategy_config:
+                    self.logger.warning(f"Strategy {strategy_id} not found in database")
+                    return True
+
+                if not strategy_config.is_enabled:
+                    self.logger.info(f"Strategy {strategy_id} has been disabled")
+                    return True
+
+                # Check if accounts are still active
+                user_id = strategy_config.user_id
+
+                # Check Binance account
+                binance_result = await db.execute(
+                    select(Account).where(
+                        and_(
+                            Account.user_id == user_id,
+                            Account.platform_id == 1  # Binance
+                        )
+                    )
+                )
+                binance_account = binance_result.scalar_one_or_none()
+
+                if not binance_account or not binance_account.is_active:
+                    self.logger.info(f"Strategy {strategy_id} stopped: Binance account disconnected")
+                    return True
+
+                # Check Bybit/MT5 account
+                bybit_result = await db.execute(
+                    select(Account).where(
+                        and_(
+                            Account.user_id == user_id,
+                            Account.platform_id.in_([2, 3])  # Bybit or MT5
+                        )
+                    )
+                )
+                bybit_account = bybit_result.scalar_one_or_none()
+
+                if not bybit_account or not bybit_account.is_active:
+                    self.logger.info(f"Strategy {strategy_id} stopped: Bybit/MT5 account disconnected")
+                    return True
+
+        except Exception as e:
+            self.logger.error(f"Error checking strategy status: {str(e)}")
+            # Don't stop on error, continue running
+            pass
 
         return False
 
@@ -458,7 +518,7 @@ class ArbitrageStrategyExecutorV3:
         """Main cycle for reverse opening strategy"""
         strategy_id = config.strategy_id
 
-        while not self._should_stop(strategy_id):
+        while not await self._should_stop(strategy_id):
             # Get current ladder
             if state.current_ladder_index >= len(config.ladders):
                 self._log_opening_operation(
@@ -663,7 +723,7 @@ class ArbitrageStrategyExecutorV3:
         max_bybit_retries = 4
 
         while bybit_retry_count < max_bybit_retries:
-            if self._should_stop(strategy_id):
+            if await self._should_stop(strategy_id):
                 return {"success": False, "error": "Strategy stopped"}
 
             await asyncio.sleep(self.normal_check_interval)
@@ -984,7 +1044,7 @@ class ArbitrageStrategyExecutorV3:
         """Main cycle for forward opening strategy"""
         strategy_id = config.strategy_id
 
-        while not self._should_stop(strategy_id):
+        while not await self._should_stop(strategy_id):
             # Get current ladder
             if state.current_ladder_index >= len(config.ladders):
                 self._log_opening_operation(
@@ -1189,7 +1249,7 @@ class ArbitrageStrategyExecutorV3:
         max_bybit_retries = 4
 
         while bybit_retry_count < max_bybit_retries:
-            if self._should_stop(strategy_id):
+            if await self._should_stop(strategy_id):
                 return {"success": False, "error": "Strategy stopped"}
 
             await asyncio.sleep(self.normal_check_interval)
@@ -1500,7 +1560,7 @@ class ArbitrageStrategyExecutorV3:
         """Main cycle for reverse closing strategy"""
         strategy_id = config.strategy_id
 
-        while not self._should_stop(strategy_id):
+        while not await self._should_stop(strategy_id):
             if state.current_ladder_index >= len(config.ladders):
                 self._log_opening_operation(
                     strategy_id,
@@ -1660,7 +1720,7 @@ class ArbitrageStrategyExecutorV3:
         max_monitor_count = self.max_binance_limit_retries
 
         while monitor_count < max_monitor_count:
-            if self._should_stop(strategy_id):
+            if await self._should_stop(strategy_id):
                 return {"success": False, "error": "Strategy stopped"}
 
             await asyncio.sleep(self.binance_limit_check_interval)
@@ -1986,7 +2046,7 @@ class ArbitrageStrategyExecutorV3:
         """Main cycle for forward closing strategy"""
         strategy_id = config.strategy_id
 
-        while not self._should_stop(strategy_id):
+        while not await self._should_stop(strategy_id):
             if state.current_ladder_index >= len(config.ladders):
                 self._log_opening_operation(
                     strategy_id,
@@ -2132,7 +2192,7 @@ class ArbitrageStrategyExecutorV3:
         max_monitor_count = self.max_binance_limit_retries
 
         while monitor_count < max_monitor_count:
-            if self._should_stop(strategy_id):
+            if await self._should_stop(strategy_id):
                 return {"success": False, "error": "Strategy stopped"}
 
             await asyncio.sleep(self.binance_limit_check_interval)
