@@ -314,7 +314,7 @@ class ArbitrageStrategyExecutorV3:
         self,
         config: StrategyConfig,
         ladder: LadderConfig,
-        spread_type: str  # "forward_closing" or "reverse_closing"
+        spread_type: str  # "forward_opening", "reverse_opening", "forward_closing", "reverse_closing"
     ) -> Tuple[bool, float]:
         """
         Check if spread is stable (filter out transient fluctuations)
@@ -340,7 +340,15 @@ class ArbitrageStrategyExecutorV3:
                     config.symbol
                 )
 
-                if spread_type == "forward_closing":
+                if spread_type == "forward_opening":
+                    bybit_bid = float(bybit_ticker.get('bid1Price', 0))
+                    binance_ask = float(binance_ticker.get('askPrice', 0))
+                    current_spread = self._calc_bybit_long_spread(bybit_bid, binance_ask)
+                elif spread_type == "reverse_opening":
+                    binance_bid = float(binance_ticker.get('bidPrice', 0))
+                    bybit_ask = float(bybit_ticker.get('ask1Price', 0))
+                    current_spread = self._calc_binance_long_spread(binance_bid, bybit_ask)
+                elif spread_type == "forward_closing":
                     binance_ask = float(binance_ticker.get('askPrice', 0))
                     bybit_ask = float(bybit_ticker.get('ask1Price', 0))
                     current_spread = self._calc_forward_closing_spread(binance_ask, bybit_ask)
@@ -372,7 +380,7 @@ class ArbitrageStrategyExecutorV3:
         is_stable = max_deviation <= self.spread_stability_threshold
 
         self.logger.info(
-            f"Spread stability check: samples={len(spread_list)}, "
+            f"Spread stability check ({spread_type}): samples={len(spread_list)}, "
             f"avg={avg_spread:.4f}, max_deviation={max_deviation:.4f}, "
             f"stable={is_stable}"
         )
@@ -547,7 +555,48 @@ class ArbitrageStrategyExecutorV3:
             }
         )
 
-        # Get market prices
+        # Check spread stability before placing order
+        self.logger.info("Checking spread stability before placing order...")
+        is_stable, avg_spread = await self._check_spread_stability(
+            config, ladder, "reverse_opening"
+        )
+
+        if not is_stable:
+            self._log_opening_operation(
+                strategy_id,
+                "REVERSE_OPENING_SPREAD_UNSTABLE",
+                {
+                    "reason": "Spread fluctuating, order not placed",
+                    "avg_spread": avg_spread,
+                    "threshold": ladder.opening_spread
+                }
+            )
+            return {"success": False, "error": "Spread not stable, order not placed"}
+
+        # Check if stable spread meets threshold
+        if avg_spread < ladder.opening_spread:
+            self._log_opening_operation(
+                strategy_id,
+                "REVERSE_OPENING_SPREAD_NOT_MET",
+                {
+                    "reason": "Stable spread does not meet threshold",
+                    "avg_spread": avg_spread,
+                    "threshold": ladder.opening_spread
+                }
+            )
+            return {"success": False, "error": "Stable spread not met"}
+
+        self._log_opening_operation(
+            strategy_id,
+            "REVERSE_OPENING_SPREAD_STABLE",
+            {
+                "avg_spread": avg_spread,
+                "threshold": ladder.opening_spread,
+                "status": "Spread stable and meets threshold, proceeding with order"
+            }
+        )
+
+        # Get market prices (for logging)
         try:
             binance_ticker = await self._api_call_with_retry(
                 self.order_executor.get_binance_ticker,
@@ -561,16 +610,13 @@ class ArbitrageStrategyExecutorV3:
             binance_bid = float(binance_ticker.get('bidPrice', 0))
             bybit_ask = float(bybit_ticker.get('ask1Price', 0))
 
-            # Calculate spread
-            spread = self._calc_binance_long_spread(binance_bid, bybit_ask)
-
             self._log_opening_operation(
                 strategy_id,
                 "REVERSE_OPENING_SPREAD_CHECK",
                 {
                     "binance_bid": binance_bid,
                     "bybit_ask": bybit_ask,
-                    "spread": spread,
+                    "spread": avg_spread,
                     "threshold": ladder.opening_spread
                 }
             )
@@ -580,7 +626,7 @@ class ArbitrageStrategyExecutorV3:
 
         # Execute orders and monitor
         result = await self._monitor_reverse_opening_execution(
-            config, ladder, state, order_qty, spread
+            config, ladder, state, order_qty, avg_spread
         )
 
         return result
@@ -1035,7 +1081,48 @@ class ArbitrageStrategyExecutorV3:
             }
         )
 
-        # Get market prices
+        # Check spread stability before placing order
+        self.logger.info("Checking spread stability before placing order...")
+        is_stable, avg_spread = await self._check_spread_stability(
+            config, ladder, "forward_opening"
+        )
+
+        if not is_stable:
+            self._log_opening_operation(
+                strategy_id,
+                "FORWARD_OPENING_SPREAD_UNSTABLE",
+                {
+                    "reason": "Spread fluctuating, order not placed",
+                    "avg_spread": avg_spread,
+                    "threshold": ladder.opening_spread
+                }
+            )
+            return {"success": False, "error": "Spread not stable, order not placed"}
+
+        # Check if stable spread meets threshold
+        if avg_spread < ladder.opening_spread:
+            self._log_opening_operation(
+                strategy_id,
+                "FORWARD_OPENING_SPREAD_NOT_MET",
+                {
+                    "reason": "Stable spread does not meet threshold",
+                    "avg_spread": avg_spread,
+                    "threshold": ladder.opening_spread
+                }
+            )
+            return {"success": False, "error": "Stable spread not met"}
+
+        self._log_opening_operation(
+            strategy_id,
+            "FORWARD_OPENING_SPREAD_STABLE",
+            {
+                "avg_spread": avg_spread,
+                "threshold": ladder.opening_spread,
+                "status": "Spread stable and meets threshold, proceeding with order"
+            }
+        )
+
+        # Get market prices (for logging)
         try:
             binance_ticker = await self._api_call_with_retry(
                 self.order_executor.get_binance_ticker,
@@ -1049,16 +1136,13 @@ class ArbitrageStrategyExecutorV3:
             bybit_bid = float(bybit_ticker.get('bid1Price', 0))
             binance_ask = float(binance_ticker.get('askPrice', 0))
 
-            # Calculate spread
-            spread = self._calc_bybit_long_spread(bybit_bid, binance_ask)
-
             self._log_opening_operation(
                 strategy_id,
                 "FORWARD_OPENING_SPREAD_CHECK",
                 {
                     "bybit_bid": bybit_bid,
                     "binance_ask": binance_ask,
-                    "spread": spread,
+                    "spread": avg_spread,
                     "threshold": ladder.opening_spread
                 }
             )
@@ -1068,7 +1152,7 @@ class ArbitrageStrategyExecutorV3:
 
         # Execute orders and monitor
         result = await self._monitor_forward_opening_execution(
-            config, ladder, state, order_qty, spread
+            config, ladder, state, order_qty, avg_spread
         )
 
         return result
