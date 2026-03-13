@@ -130,6 +130,15 @@ class ArbitrageStrategyExecutorV3:
         self.open_wait_after_cancel_no_trade = 3.0  # Wait 3 seconds after canceling unfilled order
         self.open_wait_after_cancel_part = 2.0  # Wait 2 seconds after canceling partially filled order
 
+        # Binance limit order monitoring configuration (for closing strategies)
+        self.max_binance_limit_retries = 50  # Monitor up to 50 times (5 seconds total)
+        self.binance_limit_check_interval = 0.1  # Check every 100ms
+
+        # Spread stability check configuration
+        self.spread_stability_samples = 10  # Sample 10 times
+        self.spread_stability_interval = 0.1  # 100ms between samples
+        self.spread_stability_threshold = 0.02  # Max deviation ≤ 0.02 considered stable
+
     # ========================================================================
     # Phase 2: Position Validation Methods
     # ========================================================================
@@ -300,6 +309,75 @@ class ArbitrageStrategyExecutorV3:
         """Log opening operation with comprehensive details"""
         log_msg = f"[Strategy {strategy_id}] {operation}: {details}"
         self.logger.info(log_msg)
+
+    async def _check_spread_stability(
+        self,
+        config: StrategyConfig,
+        ladder: LadderConfig,
+        spread_type: str  # "forward_closing" or "reverse_closing"
+    ) -> Tuple[bool, float]:
+        """
+        Check if spread is stable (filter out transient fluctuations)
+
+        Args:
+            config: Strategy configuration
+            ladder: Ladder configuration
+            spread_type: Type of spread to check
+
+        Returns:
+            (is_stable, avg_spread): Whether spread is stable and average spread value
+        """
+        spread_list = []
+
+        for i in range(self.spread_stability_samples):
+            try:
+                binance_ticker = await self._api_call_with_retry(
+                    self.order_executor.get_binance_ticker,
+                    config.symbol
+                )
+                bybit_ticker = await self._api_call_with_retry(
+                    self.order_executor.get_bybit_ticker,
+                    config.symbol
+                )
+
+                if spread_type == "forward_closing":
+                    binance_ask = float(binance_ticker.get('askPrice', 0))
+                    bybit_ask = float(bybit_ticker.get('ask1Price', 0))
+                    current_spread = self._calc_forward_closing_spread(binance_ask, bybit_ask)
+                elif spread_type == "reverse_closing":
+                    binance_bid = float(binance_ticker.get('bidPrice', 0))
+                    bybit_bid = float(bybit_ticker.get('bid1Price', 0))
+                    current_spread = self._calc_reverse_closing_spread(binance_bid, bybit_bid)
+                else:
+                    self.logger.error(f"Unknown spread type: {spread_type}")
+                    return False, 0.0
+
+                spread_list.append(current_spread)
+
+                if i < self.spread_stability_samples - 1:
+                    await asyncio.sleep(self.spread_stability_interval)
+
+            except Exception as e:
+                self.logger.warning(f"Failed to sample spread (attempt {i+1}): {str(e)}")
+                continue
+
+        if not spread_list:
+            self.logger.error("No valid spread samples collected")
+            return False, 0.0
+
+        # Calculate average spread and max deviation
+        avg_spread = sum(spread_list) / len(spread_list)
+        max_deviation = max([abs(s - avg_spread) for s in spread_list])
+
+        is_stable = max_deviation <= self.spread_stability_threshold
+
+        self.logger.info(
+            f"Spread stability check: samples={len(spread_list)}, "
+            f"avg={avg_spread:.4f}, max_deviation={max_deviation:.4f}, "
+            f"stable={is_stable}"
+        )
+
+        return is_stable, avg_spread
 
     # ========================================================================
     # Phase 3: Spread Calculation Methods
@@ -1474,7 +1552,7 @@ class ArbitrageStrategyExecutorV3:
         order_qty: float,
         initial_spread: float
     ) -> dict:
-        """Monitor reverse closing execution with three scenarios"""
+        """Monitor reverse closing execution with extended monitoring time and spread debounce"""
         strategy_id = config.strategy_id
 
         try:
@@ -1493,14 +1571,16 @@ class ArbitrageStrategyExecutorV3:
         except Exception as e:
             return {"success": False, "error": f"Binance closing order failed: {str(e)}"}
 
-        bybit_retry_count = 0
-        max_bybit_retries = 4
+        # Use extended monitoring parameters for limit orders
+        monitor_count = 0
+        max_monitor_count = self.max_binance_limit_retries
 
-        while bybit_retry_count < max_bybit_retries:
+        while monitor_count < max_monitor_count:
             if self._should_stop(strategy_id):
                 return {"success": False, "error": "Strategy stopped"}
 
-            await asyncio.sleep(self.normal_check_interval)
+            await asyncio.sleep(self.binance_limit_check_interval)
+            monitor_count += 1
 
             try:
                 binance_status = await self._api_call_with_retry(
@@ -1514,86 +1594,132 @@ class ArbitrageStrategyExecutorV3:
                 self._log_opening_operation(
                     strategy_id,
                     "BINANCE_CLOSING_ORDER_STATUS",
-                    {"status": order_status, "filled_qty": filled_qty}
+                    {"status": order_status, "filled_qty": filled_qty, "monitor_count": monitor_count}
                 )
 
             except Exception as e:
                 self.logger.warning(f"Failed to get Binance order status: {str(e)}")
                 continue
+
+            # Scenario 1: Binance unfilled
             if filled_qty == 0:
-                try:
-                    binance_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_binance_ticker,
-                        config.symbol
-                    )
-                    bybit_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_bybit_ticker,
-                        config.symbol
-                    )
-                    bybit_bid = float(bybit_ticker.get('bid1Price', 0))
-                    binance_bid = float(binance_ticker.get('bidPrice', 0))
-                    current_spread = self._calc_reverse_closing_spread(bybit_bid, binance_bid)
+                # Check spread stability before canceling
+                is_stable, avg_spread = await self._check_spread_stability(
+                    config, ladder, "reverse_closing"
+                )
 
-                    if current_spread < ladder.closing_spread:
-                        self._log_opening_operation(
-                            strategy_id,
-                            "REVERSE_CLOSING_SCENARIO_1_ABORT",
-                            {"reason": "Binance unfilled and spread not met", "spread": current_spread}
-                        )
-                        await self._api_call_with_retry(
-                            self.order_executor.cancel_binance_order,
-                            config.symbol,
-                            binance_order['orderId']
-                        )
-                        # Wait after canceling unfilled order to prevent high-frequency re-ordering
-                        self.logger.info(f"Waiting {self.close_wait_after_cancel_no_trade}s after canceling unfilled order")
-                        await asyncio.sleep(self.close_wait_after_cancel_no_trade)
-                        return {"success": False, "error": "Spread not met, order cancelled"}
-                except Exception as e:
-                    self.logger.warning(f"Failed to check spread: {str(e)}")
+                if not is_stable:
+                    self.logger.info(
+                        f"Spread fluctuating (not stable), continue monitoring "
+                        f"({monitor_count}/{max_monitor_count})"
+                    )
+                    continue
 
+                # Spread is stable, check if it meets threshold
+                if avg_spread < ladder.closing_spread:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "REVERSE_CLOSING_SCENARIO_1_ABORT",
+                        {
+                            "reason": "Binance unfilled and stable spread not met",
+                            "avg_spread": avg_spread,
+                            "threshold": ladder.closing_spread
+                        }
+                    )
+                    await self._api_call_with_retry(
+                        self.order_executor.cancel_binance_order,
+                        config.symbol,
+                        binance_order['orderId']
+                    )
+                    # Wait after canceling unfilled order to prevent high-frequency re-ordering
+                    self.logger.info(f"Waiting {self.close_wait_after_cancel_no_trade}s after canceling unfilled order")
+                    await asyncio.sleep(self.close_wait_after_cancel_no_trade)
+                    return {"success": False, "error": "Stable spread not met, order cancelled"}
+
+            # Scenario 2: Binance fully filled
             if order_status == 'FILLED':
                 result = await self._handle_binance_filled_reverse_closing(
-                    config, ladder, state, filled_qty, bybit_retry_count
+                    config, ladder, state, filled_qty, 0
                 )
                 return result
 
+            # Scenario 3: Binance partially filled
             if filled_qty > 0 and filled_qty < order_qty:
-                try:
-                    binance_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_binance_ticker,
-                        config.symbol
-                    )
-                    bybit_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_bybit_ticker,
-                        config.symbol
-                    )
-                    bybit_bid = float(bybit_ticker.get('bid1Price', 0))
-                    binance_bid = float(binance_ticker.get('bidPrice', 0))
-                    current_spread = self._calc_reverse_closing_spread(bybit_bid, binance_bid)
+                # Check spread stability before canceling
+                is_stable, avg_spread = await self._check_spread_stability(
+                    config, ladder, "reverse_closing"
+                )
 
-                    if current_spread < ladder.closing_spread:
-                        self._log_opening_operation(
-                            strategy_id,
-                            "REVERSE_CLOSING_SCENARIO_3_ABORT",
-                            {"reason": "Binance partially filled and spread not met", "filled_qty": filled_qty}
-                        )
-                        await self._api_call_with_retry(
-                            self.order_executor.cancel_binance_order,
-                            config.symbol,
-                            binance_order['orderId']
-                        )
-                        # Wait after canceling partially filled order to prevent high-frequency re-ordering
-                        self.logger.info(f"Waiting {self.close_wait_after_cancel_part}s after canceling partially filled order")
-                        await asyncio.sleep(self.close_wait_after_cancel_part)
-                        result = await self._handle_binance_filled_reverse_closing(
-                            config, ladder, state, filled_qty, bybit_retry_count
-                        )
-                        return result
-                except Exception as e:
-                    self.logger.warning(f"Failed to check spread for partial fill: {str(e)}")
+                if not is_stable:
+                    self.logger.info(
+                        f"Spread fluctuating (not stable), continue monitoring "
+                        f"({monitor_count}/{max_monitor_count})"
+                    )
+                    continue
 
-        return {"success": False, "error": "Max Bybit retries reached"}
+                # Spread is stable, check if it meets threshold
+                if avg_spread < ladder.closing_spread:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "REVERSE_CLOSING_SCENARIO_3_ABORT",
+                        {
+                            "reason": "Binance partially filled and stable spread not met",
+                            "filled_qty": filled_qty,
+                            "avg_spread": avg_spread,
+                            "threshold": ladder.closing_spread
+                        }
+                    )
+                    await self._api_call_with_retry(
+                        self.order_executor.cancel_binance_order,
+                        config.symbol,
+                        binance_order['orderId']
+                    )
+                    # Wait after canceling partially filled order to prevent high-frequency re-ordering
+                    self.logger.info(f"Waiting {self.close_wait_after_cancel_part}s after canceling partially filled order")
+                    await asyncio.sleep(self.close_wait_after_cancel_part)
+                    result = await self._handle_binance_filled_reverse_closing(
+                        config, ladder, state, filled_qty, 0
+                    )
+                    return result
+
+        # Max monitoring time reached, cancel order if not filled
+        try:
+            binance_status = await self._api_call_with_retry(
+                self.order_executor.get_binance_order_status,
+                config.symbol,
+                binance_order['orderId']
+            )
+            filled_qty = float(binance_status.get('executedQty', 0))
+            order_status = binance_status.get('status')
+
+            if order_status != 'FILLED':
+                await self._api_call_with_retry(
+                    self.order_executor.cancel_binance_order,
+                    config.symbol,
+                    binance_order['orderId']
+                )
+                self.logger.info(f"Max monitoring time reached, order cancelled")
+
+                if filled_qty > 0:
+                    # Partially filled, execute Bybit order
+                    result = await self._handle_binance_filled_reverse_closing(
+                        config, ladder, state, filled_qty, 0
+                    )
+                    return result
+                else:
+                    # Not filled at all
+                    await asyncio.sleep(self.close_wait_after_cancel_no_trade)
+                    return {"success": False, "error": "Max monitoring time reached, order not filled"}
+            else:
+                # Filled in the last check
+                result = await self._handle_binance_filled_reverse_closing(
+                    config, ladder, state, filled_qty, 0
+                )
+                return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle max monitoring time: {str(e)}")
+            return {"success": False, "error": f"Monitoring failed: {str(e)}"}
 
     async def _handle_binance_filled_reverse_closing(
         self,
@@ -1898,7 +2024,7 @@ class ArbitrageStrategyExecutorV3:
         order_qty: float,
         initial_spread: float
     ) -> dict:
-        """Monitor forward closing execution with three scenarios"""
+        """Monitor forward closing execution with extended monitoring time and spread debounce"""
         strategy_id = config.strategy_id
 
         try:
@@ -1917,14 +2043,16 @@ class ArbitrageStrategyExecutorV3:
         except Exception as e:
             return {"success": False, "error": f"Binance closing order failed: {str(e)}"}
 
-        bybit_retry_count = 0
-        max_bybit_retries = 4
+        # Use extended monitoring parameters for limit orders
+        monitor_count = 0
+        max_monitor_count = self.max_binance_limit_retries
 
-        while bybit_retry_count < max_bybit_retries:
+        while monitor_count < max_monitor_count:
             if self._should_stop(strategy_id):
                 return {"success": False, "error": "Strategy stopped"}
 
-            await asyncio.sleep(self.normal_check_interval)
+            await asyncio.sleep(self.binance_limit_check_interval)
+            monitor_count += 1
 
             try:
                 binance_status = await self._api_call_with_retry(
@@ -1938,87 +2066,132 @@ class ArbitrageStrategyExecutorV3:
                 self._log_opening_operation(
                     strategy_id,
                     "BINANCE_CLOSING_ORDER_STATUS",
-                    {"status": order_status, "filled_qty": filled_qty}
+                    {"status": order_status, "filled_qty": filled_qty, "monitor_count": monitor_count}
                 )
 
             except Exception as e:
                 self.logger.warning(f"Failed to get Binance order status: {str(e)}")
                 continue
 
+            # Scenario 1: Binance unfilled
             if filled_qty == 0:
-                try:
-                    binance_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_binance_ticker,
-                        config.symbol
-                    )
-                    bybit_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_bybit_ticker,
-                        config.symbol
-                    )
-                    binance_ask = float(binance_ticker.get('askPrice', 0))
-                    bybit_ask = float(bybit_ticker.get('ask1Price', 0))
-                    current_spread = self._calc_forward_closing_spread(binance_ask, bybit_ask)
+                # Check spread stability before canceling
+                is_stable, avg_spread = await self._check_spread_stability(
+                    config, ladder, "forward_closing"
+                )
 
-                    if current_spread < ladder.closing_spread:
-                        self._log_opening_operation(
-                            strategy_id,
-                            "FORWARD_CLOSING_SCENARIO_1_ABORT",
-                            {"reason": "Binance unfilled and spread not met", "spread": current_spread}
-                        )
-                        await self._api_call_with_retry(
-                            self.order_executor.cancel_binance_order,
-                            config.symbol,
-                            binance_order['orderId']
-                        )
-                        # Wait after canceling unfilled order to prevent high-frequency re-ordering
-                        self.logger.info(f"Waiting {self.close_wait_after_cancel_no_trade}s after canceling unfilled order")
-                        await asyncio.sleep(self.close_wait_after_cancel_no_trade)
-                        return {"success": False, "error": "Spread not met, order cancelled"}
-                except Exception as e:
-                    self.logger.warning(f"Failed to check spread: {str(e)}")
+                if not is_stable:
+                    self.logger.info(
+                        f"Spread fluctuating (not stable), continue monitoring "
+                        f"({monitor_count}/{max_monitor_count})"
+                    )
+                    continue
 
+                # Spread is stable, check if it meets threshold
+                if avg_spread < ladder.closing_spread:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "FORWARD_CLOSING_SCENARIO_1_ABORT",
+                        {
+                            "reason": "Binance unfilled and stable spread not met",
+                            "avg_spread": avg_spread,
+                            "threshold": ladder.closing_spread
+                        }
+                    )
+                    await self._api_call_with_retry(
+                        self.order_executor.cancel_binance_order,
+                        config.symbol,
+                        binance_order['orderId']
+                    )
+                    # Wait after canceling unfilled order to prevent high-frequency re-ordering
+                    self.logger.info(f"Waiting {self.close_wait_after_cancel_no_trade}s after canceling unfilled order")
+                    await asyncio.sleep(self.close_wait_after_cancel_no_trade)
+                    return {"success": False, "error": "Stable spread not met, order cancelled"}
+
+            # Scenario 2: Binance fully filled
             if order_status == 'FILLED':
                 result = await self._handle_binance_filled_forward_closing(
-                    config, ladder, state, filled_qty, bybit_retry_count
+                    config, ladder, state, filled_qty, 0
                 )
                 return result
 
+            # Scenario 3: Binance partially filled
             if filled_qty > 0 and filled_qty < order_qty:
-                try:
-                    binance_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_binance_ticker,
-                        config.symbol
-                    )
-                    bybit_ticker = await self._api_call_with_retry(
-                        self.order_executor.get_bybit_ticker,
-                        config.symbol
-                    )
-                    binance_ask = float(binance_ticker.get('askPrice', 0))
-                    bybit_ask = float(bybit_ticker.get('ask1Price', 0))
-                    current_spread = self._calc_forward_closing_spread(binance_ask, bybit_ask)
+                # Check spread stability before canceling
+                is_stable, avg_spread = await self._check_spread_stability(
+                    config, ladder, "forward_closing"
+                )
 
-                    if current_spread < ladder.closing_spread:
-                        self._log_opening_operation(
-                            strategy_id,
-                            "FORWARD_CLOSING_SCENARIO_3_ABORT",
-                            {"reason": "Binance partially filled and spread not met", "filled_qty": filled_qty}
-                        )
-                        await self._api_call_with_retry(
-                            self.order_executor.cancel_binance_order,
-                            config.symbol,
-                            binance_order['orderId']
-                        )
-                        # Wait after canceling partially filled order to prevent high-frequency re-ordering
-                        self.logger.info(f"Waiting {self.close_wait_after_cancel_part}s after canceling partially filled order")
-                        await asyncio.sleep(self.close_wait_after_cancel_part)
-                        result = await self._handle_binance_filled_forward_closing(
-                            config, ladder, state, filled_qty, bybit_retry_count
-                        )
-                        return result
-                except Exception as e:
-                    self.logger.warning(f"Failed to check spread for partial fill: {str(e)}")
+                if not is_stable:
+                    self.logger.info(
+                        f"Spread fluctuating (not stable), continue monitoring "
+                        f"({monitor_count}/{max_monitor_count})"
+                    )
+                    continue
 
-        return {"success": False, "error": "Max Bybit retries reached"}
+                # Spread is stable, check if it meets threshold
+                if avg_spread < ladder.closing_spread:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "FORWARD_CLOSING_SCENARIO_3_ABORT",
+                        {
+                            "reason": "Binance partially filled and stable spread not met",
+                            "filled_qty": filled_qty,
+                            "avg_spread": avg_spread,
+                            "threshold": ladder.closing_spread
+                        }
+                    )
+                    await self._api_call_with_retry(
+                        self.order_executor.cancel_binance_order,
+                        config.symbol,
+                        binance_order['orderId']
+                    )
+                    # Wait after canceling partially filled order to prevent high-frequency re-ordering
+                    self.logger.info(f"Waiting {self.close_wait_after_cancel_part}s after canceling partially filled order")
+                    await asyncio.sleep(self.close_wait_after_cancel_part)
+                    result = await self._handle_binance_filled_forward_closing(
+                        config, ladder, state, filled_qty, 0
+                    )
+                    return result
+
+        # Max monitoring time reached, cancel order if not filled
+        try:
+            binance_status = await self._api_call_with_retry(
+                self.order_executor.get_binance_order_status,
+                config.symbol,
+                binance_order['orderId']
+            )
+            filled_qty = float(binance_status.get('executedQty', 0))
+            order_status = binance_status.get('status')
+
+            if order_status != 'FILLED':
+                await self._api_call_with_retry(
+                    self.order_executor.cancel_binance_order,
+                    config.symbol,
+                    binance_order['orderId']
+                )
+                self.logger.info(f"Max monitoring time reached, order cancelled")
+
+                if filled_qty > 0:
+                    # Partially filled, execute Bybit order
+                    result = await self._handle_binance_filled_forward_closing(
+                        config, ladder, state, filled_qty, 0
+                    )
+                    return result
+                else:
+                    # Not filled at all
+                    await asyncio.sleep(self.close_wait_after_cancel_no_trade)
+                    return {"success": False, "error": "Max monitoring time reached, order not filled"}
+            else:
+                # Filled in the last check
+                result = await self._handle_binance_filled_forward_closing(
+                    config, ladder, state, filled_qty, 0
+                )
+                return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle max monitoring time: {str(e)}")
+            return {"success": False, "error": f"Monitoring failed: {str(e)}"}
 
     async def _handle_binance_filled_forward_closing(
         self,
