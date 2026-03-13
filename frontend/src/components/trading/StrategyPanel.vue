@@ -134,7 +134,8 @@
         </div>
 
         <!-- Opening/Closing Position Toggles -->
-        <div>
+        <div class="grid grid-cols-2 gap-2">
+          <!-- Opening Control -->
           <div>
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
@@ -149,6 +150,24 @@
               ]"
             >
               {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
+            </button>
+          </div>
+
+          <!-- Closing Control -->
+          <div>
+            <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
+            <button
+              @click="toggleClosingExecution"
+              :disabled="executing && !continuousExecutionEnabled.closing"
+              :class="[
+                'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
+                executing && !continuousExecutionEnabled.closing ? 'bg-gray-600 text-gray-400 cursor-not-allowed' :
+                continuousExecutionEnabled.closing
+                  ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
+                  : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
+              ]"
+            >
+              {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
             </button>
           </div>
         </div>
@@ -192,6 +211,49 @@
               <div v-if="continuousExecutionStatus.opening.trades_executed !== undefined" class="flex justify-between">
                 <span class="text-gray-400">已执行交易:</span>
                 <span class="text-white">{{ continuousExecutionStatus.opening.trades_executed }}</span>
+              </div>
+            </div>
+          </div>
+
+        <!-- Execution Status Display - Closing -->
+        <div v-if="continuousExecutionStatus.closing" class="mt-2 space-y-1.5">
+            <div v-if="continuousExecutionStatus.closing" class="p-1.5 bg-[#1a1d21] rounded text-xs">
+              <div class="text-[#f6465d] font-bold mb-0.5">平仓状态</div>
+              <div class="flex justify-between mb-0.5">
+                <span class="text-gray-400">状态:</span>
+                <span :class="[
+                  'font-bold',
+                  continuousExecutionStatus.closing.status === 'running' ? 'text-[#0ecb81]' :
+                  continuousExecutionStatus.closing.status === 'completed' ? 'text-[#00C98B]' :
+                  continuousExecutionStatus.closing.status === 'failed' ? 'text-[#f6465d]' :
+                  'text-gray-400'
+                ]">
+                  {{ continuousExecutionStatus.closing.status === 'running' ? '运行中' :
+                     continuousExecutionStatus.closing.status === 'completed' ? '已完成' :
+                     continuousExecutionStatus.closing.status === 'failed' ? '失败' :
+                     continuousExecutionStatus.closing.status }}
+                </span>
+              </div>
+              <!-- Trigger Progress -->
+              <div v-if="continuousExecutionStatus.closing.status === 'running' && continuousExecutionTriggerProgress.closing.required > 0" class="mb-0.5">
+                <div class="flex justify-between text-gray-400 mb-0.5">
+                  <span>触发进度:</span>
+                  <span class="text-white">{{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}</span>
+                </div>
+                <div class="w-full bg-[#0d1117] rounded-full h-1.5">
+                  <div
+                    class="bg-[#f6465d] h-1.5 rounded-full transition-all duration-300"
+                    :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.closing.current / continuousExecutionTriggerProgress.closing.required) * 100)}%` }"
+                  ></div>
+                </div>
+              </div>
+              <div v-if="continuousExecutionStatus.closing.current_ladder !== undefined" class="flex justify-between mb-0.5">
+                <span class="text-gray-400">当前阶梯:</span>
+                <span class="text-white">{{ continuousExecutionStatus.closing.current_ladder + 1 }}</span>
+              </div>
+              <div v-if="continuousExecutionStatus.closing.trades_executed !== undefined" class="flex justify-between">
+                <span class="text-gray-400">已执行交易:</span>
+                <span class="text-white">{{ continuousExecutionStatus.closing.trades_executed }}</span>
               </div>
             </div>
           </div>
@@ -1114,41 +1176,40 @@ const toggleOpeningExecution = debounce(async function() {
   }
 }, 500)
 
-// 平仓功能已移除
-// async function toggleClosingExecution() {
-//   if (continuousExecutionEnabled.value.closing) {
-//     // Stop execution
-//     await stopContinuousExecution('closing')
-//   } else {
-//     // Start execution
-//     // Clear previous errors
-//     validationErrors.value = []
-//
-//     // Validate accounts
-//     const accountValidation = validateAccountsForExecution()
-//     if (!accountValidation.valid) {
-//       validationErrors.value = [accountValidation.message]
-//       return
-//     }
-//
-//     // Validate ladder configuration
-//     const configValidation = validateLadderConfig('closing')
-//     if (!configValidation.valid) {
-//       validationErrors.value = configValidation.errors
-//       return
-//     }
-//
-//     // Check position sufficiency
-//     const positionCheck = await checkPositionForClosing()
-//     if (!positionCheck.valid) {
-//       validationErrors.value = [positionCheck.message]
-//       return
-//     }
-//
-//     // Start continuous execution
-//     await startContinuousExecution('closing')
-//   }
-// }
+const toggleClosingExecution = debounce(async function() {
+  if (continuousExecutionEnabled.value.closing) {
+    // Stop execution
+    await stopContinuousExecution('closing')
+  } else {
+    // Start execution
+    // Clear previous errors
+    validationErrors.value = []
+
+    // Validate accounts
+    const accountValidation = validateAccountsForExecution()
+    if (!accountValidation.valid) {
+      validationErrors.value = [accountValidation.message]
+      return
+    }
+
+    // Validate ladder configuration
+    const configValidation = validateLadderConfig('closing')
+    if (!configValidation.valid) {
+      validationErrors.value = configValidation.errors
+      return
+    }
+
+    // Check position sufficiency
+    const positionCheck = await checkPositionForClosing()
+    if (!positionCheck.valid) {
+      validationErrors.value = [positionCheck.message]
+      return
+    }
+
+    // Start continuous execution
+    await startContinuousExecution('closing')
+  }
+}, 500)
 
 async function executeLadderOpening(ladderIndex, ladder) {
   // Phase 3: 检查阶梯失败次数，决定是否跳过
@@ -1648,10 +1709,67 @@ async function executeBatchClosing(ladder) {
   }
 }
 
-// 平仓功能已移除
-// async function checkPositionForClosing() {
-//   ... (function body removed)
-// }
+async function checkPositionForClosing() {
+  try {
+    // Get current positions from both exchanges
+    const binancePosition = await getBinancePosition()
+    const bybitPosition = await getBybitPosition()
+
+    // Calculate total position needed for closing
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    const totalQtyNeeded = enabledLadders.reduce((sum, ladder) => sum + ladder.qtyLimit, 0)
+
+    // Check if positions are sufficient
+    if (type.value === 'forward') {
+      // Forward closing: need Binance long position and Bybit short position
+      if (binancePosition < totalQtyNeeded) {
+        return {
+          valid: false,
+          message: `Binance持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${binancePosition.toFixed(2)}`
+        }
+      }
+      if (Math.abs(bybitPosition) < totalQtyNeeded) {
+        return {
+          valid: false,
+          message: `Bybit持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${Math.abs(bybitPosition).toFixed(2)}`
+        }
+      }
+    } else {
+      // Reverse closing: need Binance short position and Bybit long position
+      if (Math.abs(binancePosition) < totalQtyNeeded) {
+        return {
+          valid: false,
+          message: `Binance持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${Math.abs(binancePosition).toFixed(2)}`
+        }
+      }
+      if (bybitPosition < totalQtyNeeded) {
+        return {
+          valid: false,
+          message: `Bybit持仓不足: 需要${totalQtyNeeded.toFixed(2)}, 当前${bybitPosition.toFixed(2)}`
+        }
+      }
+    }
+
+    return { valid: true }
+  } catch (error) {
+    return {
+      valid: false,
+      message: `检查持仓失败: ${error.message}`
+    }
+  }
+}
+
+async function getBinancePosition() {
+  // TODO: Implement actual API call to get Binance position
+  // For now, return a placeholder value
+  return marketCardsRef.value?.forwardActualPosition || 0
+}
+
+async function getBybitPosition() {
+  // TODO: Implement actual API call to get Bybit position
+  // For now, return a placeholder value
+  return marketCardsRef.value?.reverseActualPosition || 0
+}
 
 function validateLadderConfig(action) {
   const errors = []
