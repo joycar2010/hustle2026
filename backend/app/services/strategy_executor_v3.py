@@ -561,14 +561,42 @@ class ArbitrageStrategyExecutorV3:
             result = await self._reverse_opening_place_orders(config, ladder, state)
 
             if result["success"]:
-                # Reset trigger count and move to next ladder
+                # Update accumulated quantity
+                filled_qty = result.get("qty", 0)
+                state.ladder_accumulated_qty += filled_qty
+
+                self._log_opening_operation(
+                    strategy_id,
+                    "REVERSE_OPENING_SUCCESS",
+                    {
+                        "ladder": state.current_ladder_index,
+                        "filled_qty": filled_qty,
+                        "accumulated": state.ladder_accumulated_qty,
+                        "total": ladder.total_qty
+                    }
+                )
+
+                # Check if current ladder is completed
+                if state.ladder_accumulated_qty >= ladder.total_qty:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "REVERSE_OPENING_LADDER_COMPLETE",
+                        {
+                            "ladder": state.current_ladder_index,
+                            "accumulated": state.ladder_accumulated_qty,
+                            "total": ladder.total_qty
+                        }
+                    )
+                    # Move to next ladder
+                    state.current_ladder_index += 1
+                    state.ladder_accumulated_qty = 0.0
+
+                # Reset trigger count for next order
                 self.trigger_count_manager.reset_count(
                     strategy_id,
                     state.current_ladder_index,
                     "opening"
                 )
-                state.current_ladder_index += 1
-                state.ladder_accumulated_qty = 0.0
             else:
                 # Log error and continue
                 self._log_opening_operation(
@@ -1087,14 +1115,42 @@ class ArbitrageStrategyExecutorV3:
             result = await self._forward_opening_place_orders(config, ladder, state)
 
             if result["success"]:
-                # Reset trigger count and move to next ladder
+                # Update accumulated quantity
+                filled_qty = result.get("qty", 0)
+                state.ladder_accumulated_qty += filled_qty
+
+                self._log_opening_operation(
+                    strategy_id,
+                    "FORWARD_OPENING_SUCCESS",
+                    {
+                        "ladder": state.current_ladder_index,
+                        "filled_qty": filled_qty,
+                        "accumulated": state.ladder_accumulated_qty,
+                        "total": ladder.total_qty
+                    }
+                )
+
+                # Check if current ladder is completed
+                if state.ladder_accumulated_qty >= ladder.total_qty:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "FORWARD_OPENING_LADDER_COMPLETE",
+                        {
+                            "ladder": state.current_ladder_index,
+                            "accumulated": state.ladder_accumulated_qty,
+                            "total": ladder.total_qty
+                        }
+                    )
+                    # Move to next ladder
+                    state.current_ladder_index += 1
+                    state.ladder_accumulated_qty = 0.0
+
+                # Reset trigger count for next order
                 self.trigger_count_manager.reset_count(
                     strategy_id,
                     state.current_ladder_index,
                     "opening"
                 )
-                state.current_ladder_index += 1
-                state.ladder_accumulated_qty = 0.0
             else:
                 # Log error and continue
                 self._log_opening_operation(
@@ -1588,13 +1644,42 @@ class ArbitrageStrategyExecutorV3:
             result = await self._reverse_closing_place_orders(config, ladder, state)
 
             if result["success"]:
+                # Update accumulated quantity
+                filled_qty = result.get("qty", 0)
+                state.ladder_accumulated_qty += filled_qty
+
+                self._log_opening_operation(
+                    strategy_id,
+                    "REVERSE_CLOSING_SUCCESS",
+                    {
+                        "ladder": state.current_ladder_index,
+                        "filled_qty": filled_qty,
+                        "accumulated": state.ladder_accumulated_qty,
+                        "total": ladder.total_qty
+                    }
+                )
+
+                # Check if current ladder is completed
+                if state.ladder_accumulated_qty >= ladder.total_qty:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "REVERSE_CLOSING_LADDER_COMPLETE",
+                        {
+                            "ladder": state.current_ladder_index,
+                            "accumulated": state.ladder_accumulated_qty,
+                            "total": ladder.total_qty
+                        }
+                    )
+                    # Move to next ladder
+                    state.current_ladder_index += 1
+                    state.ladder_accumulated_qty = 0.0
+
+                # Reset trigger count for next order
                 self.trigger_count_manager.reset_count(
                     strategy_id,
                     state.current_ladder_index,
                     "closing"
                 )
-                state.current_ladder_index += 1
-                state.ladder_accumulated_qty = 0.0
             else:
                 self._log_opening_operation(
                     strategy_id,
@@ -2074,13 +2159,42 @@ class ArbitrageStrategyExecutorV3:
             result = await self._forward_closing_place_orders(config, ladder, state)
 
             if result["success"]:
+                # Update accumulated quantity
+                filled_qty = result.get("qty", 0)
+                state.ladder_accumulated_qty += filled_qty
+
+                self._log_opening_operation(
+                    strategy_id,
+                    "FORWARD_CLOSING_SUCCESS",
+                    {
+                        "ladder": state.current_ladder_index,
+                        "filled_qty": filled_qty,
+                        "accumulated": state.ladder_accumulated_qty,
+                        "total": ladder.total_qty
+                    }
+                )
+
+                # Check if current ladder is completed
+                if state.ladder_accumulated_qty >= ladder.total_qty:
+                    self._log_opening_operation(
+                        strategy_id,
+                        "FORWARD_CLOSING_LADDER_COMPLETE",
+                        {
+                            "ladder": state.current_ladder_index,
+                            "accumulated": state.ladder_accumulated_qty,
+                            "total": ladder.total_qty
+                        }
+                    )
+                    # Move to next ladder
+                    state.current_ladder_index += 1
+                    state.ladder_accumulated_qty = 0.0
+
+                # Reset trigger count for next order
                 self.trigger_count_manager.reset_count(
                     strategy_id,
                     state.current_ladder_index,
                     "closing"
                 )
-                state.current_ladder_index += 1
-                state.ladder_accumulated_qty = 0.0
             else:
                 self._log_opening_operation(
                     strategy_id,
