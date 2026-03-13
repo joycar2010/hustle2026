@@ -312,7 +312,6 @@ const binanceOrderBook = ref({ bid_price: 0, bid_volume: 0, ask_price: 0, ask_vo
 let orderBookFetchTimer = null
 
 // Profit and position data
-const totalProfit = ref(0)
 const forwardActualPosition = ref(0)
 const reverseActualPosition = ref(0)
 
@@ -327,6 +326,10 @@ const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
 const binanceLongFundingRate = ref(0)
 const binanceShortFundingRate = ref(0)
+
+// USD/USDT exchange rate
+const usdToUsdtRate = ref(1.0)
+let exchangeRateTimer = null
 
 const bybitLagLevel = computed(() => Math.min(Math.floor(bybitLagCount.value / 10), 5))
 const binanceLagLevel = computed(() => Math.min(Math.floor(binanceLagCount.value / 10), 5))
@@ -377,6 +380,50 @@ const forwardSpread = computed(() => {
 
   // Forward spread = Bybit SHORT cost - Binance LONG cost
   return bybitShortAvg - binanceLongAvg
+})
+
+// Calculate Binance floating profit (USDT)
+const binanceFloatingProfit = computed(() => {
+  let profit = 0
+
+  // Binance LONG positions: (current_price - entry_price) × size
+  binanceLongPositions.value.forEach(pos => {
+    const currentPrice = binance.value.mid || pos.current_price
+    profit += (currentPrice - pos.entry_price) * pos.size
+  })
+
+  // Binance SHORT positions: (entry_price - current_price) × size
+  binanceShortPositions.value.forEach(pos => {
+    const currentPrice = binance.value.mid || pos.current_price
+    profit += (pos.entry_price - currentPrice) * pos.size
+  })
+
+  return profit
+})
+
+// Calculate Bybit floating profit (USD converted to USDT)
+const bybitFloatingProfit = computed(() => {
+  let profitUSD = 0
+
+  // Bybit LONG positions: (current_price - entry_price) × size
+  bybitLongPositions.value.forEach(pos => {
+    const currentPrice = bybit.value.mid || pos.current_price
+    profitUSD += (currentPrice - pos.entry_price) * pos.size
+  })
+
+  // Bybit SHORT positions: (entry_price - current_price) × size
+  bybitShortPositions.value.forEach(pos => {
+    const currentPrice = bybit.value.mid || pos.current_price
+    profitUSD += (pos.entry_price - currentPrice) * pos.size
+  })
+
+  // Convert USD to USDT using real-time exchange rate
+  return profitUSD * usdToUsdtRate.value
+})
+
+// Calculate total dual-side floating profit (USDT)
+const totalProfit = computed(() => {
+  return binanceFloatingProfit.value + bybitFloatingProfit.value
 })
 
 watch(() => marketStore.marketData, (data) => {
@@ -438,11 +485,6 @@ watch(() => marketStore.lastMessage, (message) => {
 }, { deep: false })
 
 function handleAccountBalanceUpdate(data) {
-  // Update total profit
-  if (data.summary) {
-    totalProfit.value = data.summary.daily_pnl || 0
-  }
-
   // Extract fee data from accounts
   if (data.accounts && data.accounts.length > 0) {
     // Reset fee values
@@ -518,13 +560,8 @@ function handleAccountBalanceUpdate(data) {
         }
       }
     })
-  } else {
-    // No positions, reset position arrays only
-    binanceShortPositions.value = []
-    binanceLongPositions.value = []
-    bybitShortPositions.value = []
-    bybitLongPositions.value = []
   }
+  // Note: If positions is empty or undefined, keep existing position arrays unchanged
 }
 
 onMounted(() => {
@@ -543,6 +580,7 @@ onMounted(() => {
   fetchPendingOrderCounts()
   fetchOrderBook()
   fetchRedisStatus()
+  fetchExchangeRate()
 
   // Fetch pending order counts every 3 seconds
   orderFetchTimer = setInterval(() => {
@@ -553,6 +591,11 @@ onMounted(() => {
   orderBookFetchTimer = setInterval(() => {
     fetchOrderBook()
   }, 500)
+
+  // Fetch exchange rate every 10 minutes
+  exchangeRateTimer = setInterval(() => {
+    fetchExchangeRate()
+  }, 600000)
 
   // 监听 Redis 状态推送
   watch(() => marketStore.lastMessage, (message) => {
@@ -580,6 +623,7 @@ onUnmounted(() => {
   if (lagTimer) clearInterval(lagTimer)
   if (orderFetchTimer) clearInterval(orderFetchTimer)
   if (orderBookFetchTimer) clearInterval(orderBookFetchTimer)
+  if (exchangeRateTimer) clearInterval(exchangeRateTimer)
 })
 
 function formatPrice(price) {
@@ -610,11 +654,6 @@ function resetBinanceLag() {
 
 // Update account balance from WebSocket push
 function updateAccountBalanceFromWebSocket(data) {
-  // Update total profit
-  if (data.summary) {
-    totalProfit.value = data.summary.daily_pnl || 0
-  }
-
   // Extract fee data from accounts
   if (data.accounts && data.accounts.length > 0) {
     // Reset fee values
@@ -663,32 +702,37 @@ function updateAccountBalanceFromWebSocket(data) {
 
     // Categorize positions by platform and side
     data.positions.forEach(pos => {
+      const posSize = Math.abs(pos.size || 0)
+      const posData = {
+        size: posSize,
+        entry_price: pos.entry_price || 0,
+        current_price: pos.current_price || 0
+      }
+
       if (pos.platform_id === 1) {
-        // Binance positions
-        if (pos.side === 'SHORT') {
-          binanceShortPositions.value.push(pos)
-        } else if (pos.side === 'LONG') {
-          binanceLongPositions.value.push(pos)
+        // Binance positions - check both 'SHORT'/'LONG' and 'Sell'/'Buy' formats
+        if (pos.side === 'SHORT' || pos.side === 'Sell') {
+          binanceShortPositions.value.push(posData)
+        } else if (pos.side === 'LONG' || pos.side === 'Buy') {
+          binanceLongPositions.value.push(posData)
         }
       } else if (pos.platform_id === 2) {
-        // Bybit positions
-        if (pos.side === 'SHORT') {
-          bybitShortPositions.value.push(pos)
-        } else if (pos.side === 'LONG') {
-          bybitLongPositions.value.push(pos)
+        // Bybit positions - check both 'SHORT'/'LONG' and 'Sell'/'Buy' formats
+        if (pos.side === 'SHORT' || pos.side === 'Sell') {
+          bybitShortPositions.value.push(posData)
+        } else if (pos.side === 'LONG' || pos.side === 'Buy') {
+          bybitLongPositions.value.push(posData)
         }
       }
     })
   }
+  // Note: If positions is empty or undefined, keep existing position arrays unchanged
 }
 
 async function fetchAccountData() {
   try {
     const response = await api.get('/api/v1/accounts/dashboard/aggregated')
     const data = response.data
-    if (data.summary) {
-      totalProfit.value = data.summary.daily_pnl || 0
-    }
 
     // Extract fee data and positions from accounts
     if (data.accounts && data.accounts.length > 0) {
@@ -765,13 +809,8 @@ async function fetchAccountData() {
           }
         }
       })
-    } else {
-      // No positions, reset position arrays only
-      binanceShortPositions.value = []
-      binanceLongPositions.value = []
-      bybitShortPositions.value = []
-      bybitLongPositions.value = []
     }
+    // Note: If positions is empty or undefined, keep existing position arrays unchanged
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
@@ -951,6 +990,27 @@ async function fetchRedisStatus() {
   } catch (error) {
     console.error('Failed to fetch Redis status:', error)
     redisStatus.value = { healthy: false, last_error: 'Failed to fetch status' }
+  }
+}
+
+// Fetch USD/USDT exchange rate from Binance API
+async function fetchExchangeRate() {
+  try {
+    // Use Binance public API to get USDT price relative to USD
+    // We use USDC/USDT as a proxy since USDC ≈ USD
+    const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDCUSDT')
+    const data = await response.json()
+
+    if (data.price) {
+      // USDC/USDT price represents how many USDT = 1 USDC (≈ 1 USD)
+      // So USD/USDT rate = USDC/USDT rate
+      usdToUsdtRate.value = parseFloat(data.price)
+      console.log('USD/USDT exchange rate updated:', usdToUsdtRate.value)
+    }
+  } catch (error) {
+    console.error('Failed to fetch exchange rate, using default 1.0:', error)
+    // Fallback to 1:1 if API fails
+    usdToUsdtRate.value = 1.0
   }
 }
 
