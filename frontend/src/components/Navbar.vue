@@ -67,7 +67,6 @@
               v-for="item in navItems"
               :key="item.path"
               :to="item.path"
-              @click="handleNavClick(item.path)"
               class="nav-link"
             >
               <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
@@ -450,12 +449,6 @@ function toggleNavbarVisibility() {
   } else {
     document.body.style.overflow = ''
   }
-}
-
-function handleNavClick(path) {
-  // 直接使用路由跳转，不强制刷新页面
-  // Vue Router 会自动处理相同路由的情况
-  router.push(path)
 }
 
 // Icon components

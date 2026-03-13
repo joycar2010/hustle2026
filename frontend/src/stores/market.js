@@ -5,6 +5,7 @@ const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://13.115.21.77:8000') + '/ws'
 
 export const useMarketStore = defineStore('market', () => {
   const marketData = ref(null)
+  const accountBalanceData = ref(null) // 新增：账户余额数据
   const connected = ref(false)
   const lastMessage = ref(null)
 
@@ -58,6 +59,10 @@ export const useMarketStore = defineStore('market', () => {
             bybit_mid: d.bybit_mid ?? ((d.bybit_quote?.bid_price + d.bybit_quote?.ask_price) / 2) ?? 0,
             timestamp: d.timestamp,
           }
+        }
+        // Handle account balance updates
+        else if (msg.type === 'account_balance' && msg.data) {
+          accountBalanceData.value = msg.data
         }
         // Handle risk alert messages from backend
         else if (msg.type === 'risk_alert' && msg.data) {
@@ -121,6 +126,7 @@ export const useMarketStore = defineStore('market', () => {
 
   return {
     marketData,
+    accountBalanceData, // 导出账户余额数据
     connected,
     lastMessage,
     connect,
