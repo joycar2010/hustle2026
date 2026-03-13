@@ -58,7 +58,7 @@
           </div>
         </div>
 
-        <div class="p-1.5 md:p-2 space-y-0.5 md:space-y-1 text-[10px]">
+        <div class="p-1.5 md:p-2 space-y-0.5 md:space-y-1 text-[13px]">
           <div class="flex justify-between">
             <span class="text-gray-400">账户总资产</span>
             <span class="font-mono">{{ getDisplayValue(account, 'total_assets') }}</span>

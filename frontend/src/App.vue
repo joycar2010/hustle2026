@@ -23,8 +23,19 @@ if (isAuthenticated.value) {
   useAlertMonitoring()
 }
 
-// 通知加载完成
-onMounted(() => {
+// Verify token validity on app mount
+onMounted(async () => {
+  // If user has a token, verify it's valid
+  if (authStore.isAuthenticated) {
+    try {
+      await authStore.fetchUser()
+    } catch (error) {
+      // Token is invalid, clear it
+      authStore.logout()
+    }
+  }
+
+  // Notify app loaded
   setTimeout(() => {
     window.dispatchEvent(new Event('app-loaded'))
   }, 500)

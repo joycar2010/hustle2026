@@ -12,7 +12,7 @@ import asyncio
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer
 from app.tasks.redis_monitor import redis_monitor
@@ -275,6 +275,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     return response
 
 # Include API routers
+app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["Accounts"])

@@ -1,8 +1,8 @@
 <template>
-  <Transition :name="isMobile ? 'slide-down' : 'slide-up'">
+  <Transition :name="isMobile ? 'slide-down' : 'slide-down'">
     <div
       v-if="shouldShowPopup"
-      class="fixed md:bottom-6 md:right-6 top-4 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:top-auto md:right-6 z-50 w-[45vw] max-w-[160px] md:w-96 md:max-w-none bg-[#1e2329] border border-[#2b3139] rounded-lg shadow-2xl overflow-hidden"
+      class="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[45vw] max-w-[160px] md:w-96 md:max-w-none bg-[#1e2329] border border-[#2b3139] rounded-lg shadow-2xl overflow-hidden"
     >
       <!-- Header -->
       <div class="flex items-center justify-between px-2 md:px-4 py-1.5 md:py-3 border-b border-[#2b3139]">

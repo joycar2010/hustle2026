@@ -6,12 +6,6 @@
         <div class="flex items-center space-x-6">
           <!-- Alert Switches -->
           <div class="hidden xl:flex items-center space-x-2 mr-8" :class="{ 'xl:hidden': navbarCollapsed }">
-            <!-- Connection Status -->
-            <div class="flex items-center space-x-2 px-3 py-1.5 bg-dark-200 rounded-lg">
-              <div :class="['w-2 h-2 rounded-full', isConnected ? 'bg-success animate-pulse' : 'bg-danger']"></div>
-              <span class="text-xs text-text-tertiary">{{ isConnected ? 'Connected' : 'Offline' }}</span>
-            </div>
-
             <!-- Alert Sound Switch -->
             <div class="flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
               <svg class="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -21,7 +15,7 @@
               <button
                 @click="toggleAlertSound"
                 :class="[
-                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0',
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 cursor-pointer hover:opacity-80',
                   notificationStore.alertSoundEnabled ? 'bg-primary' : 'bg-gray-600'
                 ]"
               >
@@ -43,7 +37,7 @@
               <button
                 @click="toggleSingleLegAlert"
                 :class="[
-                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0',
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 cursor-pointer hover:opacity-80',
                   notificationStore.singleLegAlertEnabled ? 'bg-primary' : 'bg-gray-600'
                 ]"
               >
@@ -282,7 +276,6 @@ const notificationStore = useNotificationStore()
 const mobileMenuOpen = ref(false)
 const userMenuOpen = ref(false)
 const userMenuRef = ref(null)
-const isConnected = ref(true)
 const editProfileModalOpen = ref(false)
 const changePasswordModalOpen = ref(false)
 const pageManagementModalOpen = ref(false)

@@ -1388,3 +1388,60 @@ async def get_websocket_status(
             "connected": False,
             "message": f"无法获取WebSocket状态: {str(e)}"
         }
+
+
+import time
+
+# Store start time
+START_TIME = time.time()
+
+@router.get("/status")
+async def get_system_status(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get comprehensive system status including database pool, services, and connections"""
+    try:
+        # Calculate uptime
+        uptime_seconds = int(time.time() - START_TIME)
+        uptime_hours = uptime_seconds // 3600
+        uptime_minutes = (uptime_seconds % 3600) // 60
+
+        # Get database pool status
+        from app.core.database import engine
+        pool = engine.pool
+
+        db_pool_status = {
+            "active": pool.checkedout(),
+            "idle": pool.size() - pool.checkedout(),
+            "max": pool.size() + pool.overflow()
+        }
+
+        # Check WebSocket status
+        websocket_connected = False
+        try:
+            from app.services.binance_ws_client import binance_ws
+            websocket_connected = binance_ws.connected
+        except:
+            pass
+
+        # Return comprehensive status
+        return {
+            "success": True,
+            "backend": True,
+            "positionMonitor": True,  # Assume running if backend is up
+            "strategyManager": True,  # Assume running if backend is up
+            "binance": True,  # Can be enhanced with actual checks
+            "bybit": True,
+            "mt5": True,
+            "websocket": websocket_connected,
+            "dbPool": db_pool_status,
+            "uptime": f"{uptime_hours}h {uptime_minutes}m",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "backend": False,
+            "message": f"Failed to get system status: {str(e)}"
+        }

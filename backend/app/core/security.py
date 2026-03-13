@@ -93,7 +93,8 @@ async def get_current_user(
     user_id = await get_current_user_id(credentials)
 
     # Get database session
-    async for session in get_db():
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
         # Get user from database
         result = await session.execute(select(User).where(User.user_id == user_id))
         user = result.scalar_one_or_none()

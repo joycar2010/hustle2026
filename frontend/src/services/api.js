@@ -27,9 +27,15 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       // Only redirect if not already on login page to prevent redirect loop
       if (window.location.pathname !== '/login') {
+        // Clear token from localStorage and authStore
         localStorage.removeItem('token')
-        // Use Vue Router instead of window.location to avoid full page reload
-        router.push('/login')
+        // Import authStore dynamically to avoid circular dependency
+        import('@/stores/auth').then(({ useAuthStore }) => {
+          const authStore = useAuthStore()
+          authStore.logout()
+          // Use Vue Router to redirect
+          router.push('/login')
+        })
       }
     }
     return Promise.reject(error)

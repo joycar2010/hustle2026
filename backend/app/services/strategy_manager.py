@@ -78,7 +78,8 @@ class StrategyManager:
 
         try:
             while True:
-                async for db in get_db():
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as db:
                     try:
                         # Load strategy
                         result = await db.execute(select(Strategy).where(Strategy.id == strategy_id))

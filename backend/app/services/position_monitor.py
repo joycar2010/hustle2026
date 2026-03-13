@@ -52,7 +52,9 @@ class PositionMonitor:
         """Main monitoring loop"""
         try:
             while self.monitoring:
-                async for db in get_db():
+                # 使用单个数据库会话，而不是每次循环都创建新的
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as db:
                     try:
                         await self._check_all_positions(db)
                     except Exception as e:

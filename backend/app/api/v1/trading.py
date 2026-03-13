@@ -577,8 +577,13 @@ async def get_realtime_pending_orders(
         from app.utils.time_utils import utc_ms_to_beijing
 
         # 获取用户账户
-        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
-        if not accounts:
+        try:
+            accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+            if not accounts:
+                return []
+        except Exception as db_error:
+            logger.error(f"Database error in get_realtime_pending_orders: {str(db_error)}")
+            # 如果数据库连接失败，返回空列表而不是500错误
             return []
 
         # 实时获取 Binance 挂单
@@ -618,8 +623,9 @@ async def get_realtime_pending_orders(
 
         return pending_orders
     except Exception as e:
-        logger.error(f"Realtime pending orders error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Realtime pending orders error: {str(e)}", exc_info=True)
+        # 返回空列表而不是抛出500错误，避免前端不断重试
+        return []
 
 
 class ManualOrderRequest(BaseModel):

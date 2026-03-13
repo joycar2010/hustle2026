@@ -283,14 +283,14 @@
           <!-- Quick Actions -->
           <div class="pt-2 lg:pt-1 border-t border-gray-700 grid grid-cols-2 gap-2 lg:gap-1">
             <button
-              @click="closeAllPositions"
+              @click.stop="closeAllPositions"
               :disabled="manualTrading.loading"
               class="px-2 py-1.5 lg:py-1 bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded text-xs lg:text-[10px] font-bold"
             >
               ⚠️ 平仓所有持仓
             </button>
             <button
-              @click="cancelAllOrders"
+              @click.stop="cancelAllOrders"
               :disabled="manualTrading.loading"
               class="px-2 py-1.5 lg:py-1 bg-gray-600 hover:bg-gray-700 disabled:opacity-50 rounded text-xs lg:text-[10px] font-bold"
             >
@@ -499,17 +499,33 @@ async function executeTrade(side) {
 }
 
 async function closeAllPositions() {
-  if (!confirm('确定要平仓所有持仓吗？')) return
-  if (manualTrading.value.loading) return
+  console.log('[DEBUG] closeAllPositions called')
+  console.log('[DEBUG] manualTrading.loading:', manualTrading.value.loading)
+
+  if (!confirm('确定要平仓所有持仓吗？')) {
+    console.log('[DEBUG] User cancelled confirmation')
+    return
+  }
+
+  if (manualTrading.value.loading) {
+    console.log('[DEBUG] Already loading, skipping')
+    return
+  }
+
   manualTrading.value.loading = true
+  console.log('[DEBUG] Starting close all positions request')
+
   try {
     const res = await api.post('/api/v1/trading/manual/close-all')
+    console.log('[DEBUG] Close all positions response:', res.data)
     showTradeStatus(`平仓指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
     await fetchRecentOrders()
   } catch (e) {
+    console.error('[DEBUG] Close all positions error:', e)
     showTradeStatus(e.response?.data?.detail || '平仓失败', false)
   } finally {
     manualTrading.value.loading = false
+    console.log('[DEBUG] Close all positions completed')
   }
 }
 

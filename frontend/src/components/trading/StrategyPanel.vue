@@ -392,6 +392,17 @@ import api from '@/services/api'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 import { xauToLot } from '@/composables/useQuantityConverter'
 
+// 防抖函数
+function debounce(fn, delay = 500) {
+  let timeoutId = null
+  return function (...args) {
+    if (timeoutId) clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => {
+      fn.apply(this, args)
+    }, delay)
+  }
+}
+
 const props = defineProps({
   type: {
     type: String,
@@ -1074,7 +1085,8 @@ async function waitForOrderFill(orderIds, maxWaitTime = 10000) {
   console.warn('Order monitoring timeout - proceeding anyway')
 }
 
-async function toggleOpeningExecution() {
+// 使用防抖包装开仓执行函数
+const toggleOpeningExecution = debounce(async function() {
   if (continuousExecutionEnabled.value.opening) {
     // Stop execution
     await stopContinuousExecution('opening')
@@ -1100,7 +1112,7 @@ async function toggleOpeningExecution() {
     // Start continuous execution
     await startContinuousExecution('opening')
   }
-}
+}, 500)
 
 // 平仓功能已移除
 // async function toggleClosingExecution() {
@@ -1840,7 +1852,7 @@ function startStatusPolling(action) {
 
   statusPollingInterval.value[action] = setInterval(async () => {
     await fetchExecutionStatus(action)
-  }, 1000) // Poll every second
+  }, 5000) // Poll every 5 seconds (降低频率，减少数据库压力)
 }
 
 function stopStatusPolling(action) {
@@ -1874,6 +1886,13 @@ async function fetchExecutionStatus(action) {
     }
   } catch (error) {
     console.error('Failed to fetch execution status:', error)
+    // 失败后延长轮询间隔，避免雪崩
+    if (statusPollingInterval.value[action]) {
+      clearInterval(statusPollingInterval.value[action])
+      statusPollingInterval.value[action] = setInterval(async () => {
+        await fetchExecutionStatus(action)
+      }, 10000) // 失败后改为10秒轮询
+    }
   }
 }
 
