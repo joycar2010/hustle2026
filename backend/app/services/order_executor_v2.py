@@ -127,7 +127,7 @@ class OrderExecutorV2:
             "is_single_leg": is_single_leg,
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
-                "bybit_filled": bybit_filled_qty,
+                "bybit_filled": bybit_filled_xau,  # 修复：使用XAU而不是Lot
                 "bybit_filled_xau": bybit_filled_xau,
                 "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
@@ -266,7 +266,7 @@ class OrderExecutorV2:
             "is_single_leg": is_single_leg,
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
-                "bybit_filled": bybit_filled_qty,
+                "bybit_filled": bybit_filled_xau,  # 修复：使用XAU而不是Lot
                 "bybit_filled_xau": bybit_filled_xau,
                 "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
@@ -373,7 +373,7 @@ class OrderExecutorV2:
             "is_single_leg": is_single_leg,
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
-                "bybit_filled": bybit_filled_qty,
+                "bybit_filled": bybit_filled_xau,  # 修复：使用XAU而不是Lot
                 "bybit_filled_xau": bybit_filled_xau,
                 "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
