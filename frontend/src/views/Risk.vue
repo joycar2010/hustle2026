@@ -222,83 +222,7 @@
       </div>
 
       <!-- Emergency Manual Trading -->
-      <div class="card p-1.5 lg:p-1">
-        <div class="flex items-center justify-between mb-2 lg:mb-1">
-          <h2 class="text-xs lg:text-[10px] font-bold">紧急手动交易</h2>
-          <div class="flex items-center gap-1">
-            <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-            <span class="text-[10px] lg:text-[9px] font-bold text-red-500">紧急模式</span>
-          </div>
-        </div>
-
-        <div class="space-y-2 lg:space-y-1">
-          <!-- Exchange Selection -->
-          <div>
-            <label class="block text-[10px] lg:text-[9px] mb-1 lg:mb-0.5">交易平台</label>
-            <select v-model="manualTrading.exchange" class="w-full px-2 lg:px-1.5 py-1 lg:py-0.5 text-xs lg:text-[10px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
-              <option value="binance">Binance (XAUUSDT)</option>
-              <option value="bybit">Bybit MT5 (XAUUSD.s)</option>
-            </select>
-          </div>
-
-          <!-- Quantity -->
-          <div>
-            <label class="block text-[10px] lg:text-[9px] mb-1 lg:mb-0.5">下单总手数 (XAU)</label>
-            <input
-              v-model.number="manualTrading.quantity"
-              type="number"
-              step="1"
-              min="1"
-              class="w-full px-2 lg:px-1.5 py-1 lg:py-0.5 text-xs lg:text-[10px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-              placeholder="1"
-            />
-            <div class="text-[9px] lg:text-[8px] text-gray-400 mt-0.5">
-              Bybit 实际下单量: {{ xauToLot(manualTrading.quantity).toFixed(2) }} Lot
-            </div>
-          </div>
-
-          <!-- Action Buttons -->
-          <div class="grid grid-cols-2 gap-2 lg:gap-1">
-            <button
-              @click="executeTrade('buy')"
-              :disabled="manualTrading.loading"
-              class="px-2 py-1.5 lg:py-1 bg-green-500 hover:bg-green-600 disabled:opacity-50 rounded text-xs lg:text-[10px] font-bold"
-            >
-              买入开多
-            </button>
-            <button
-              @click="executeTrade('sell')"
-              :disabled="manualTrading.loading"
-              class="px-2 py-1.5 lg:py-1 bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded text-xs lg:text-[10px] font-bold"
-            >
-              卖出开空
-            </button>
-          </div>
-
-          <!-- Status message -->
-          <div v-if="manualTrading.statusMsg" :class="['text-[10px] lg:text-[9px] px-2 py-1 rounded', manualTrading.statusOk ? 'text-green-500 bg-green-500/10' : 'text-red-500 bg-red-500/10']">
-            {{ manualTrading.statusMsg }}
-          </div>
-
-          <!-- Quick Actions -->
-          <div class="pt-2 lg:pt-1 border-t border-gray-700 grid grid-cols-2 gap-2 lg:gap-1">
-            <button
-              @click.stop="closeAllPositions"
-              :disabled="manualTrading.loading"
-              class="px-2 py-1.5 lg:py-1 bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded text-xs lg:text-[10px] font-bold"
-            >
-              ⚠️ 平仓所有持仓
-            </button>
-            <button
-              @click.stop="cancelAllOrders"
-              :disabled="manualTrading.loading"
-              class="px-2 py-1.5 lg:py-1 bg-gray-600 hover:bg-gray-700 disabled:opacity-50 rounded text-xs lg:text-[10px] font-bold"
-            >
-              取消所有挂单
-            </button>
-          </div>
-        </div>
-      </div>
+      <EmergencyManualTrading />
 
       <!-- Recent Trading Records -->
       <div class="card p-1.5 lg:p-1">
@@ -345,8 +269,8 @@ import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
-import { xauToLot, convertForPlatform } from '@/composables/useQuantityConverter'
 import { formatTimeBeijing } from '@/utils/timeUtils'
+import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
 
 const router = useRouter()
 const marketStore = useMarketStore()
@@ -379,15 +303,6 @@ const alertSettings = ref({
   forwardOpenSyncCount: 3,
   forwardClosePrice: 0.2,
   forwardCloseSyncCount: 3
-})
-
-// Manual Trading
-const manualTrading = ref({
-  exchange: 'binance',
-  quantity: 1,
-  loading: false,
-  statusMsg: '',
-  statusOk: true
 })
 
 // Recent Orders
@@ -479,79 +394,6 @@ async function toggleEmergencyStop() {
     await fetchRiskData()
   } catch (error) {
     console.error('Failed to toggle emergency stop:', error)
-  }
-}
-
-// Manual Trading Functions
-function showTradeStatus(msg, ok = true) {
-  manualTrading.value.statusMsg = msg
-  manualTrading.value.statusOk = ok
-  setTimeout(() => { manualTrading.value.statusMsg = '' }, 4000)
-}
-
-async function executeTrade(side) {
-  if (manualTrading.value.loading) return
-  manualTrading.value.loading = true
-  try {
-    const actualQuantity = convertForPlatform(manualTrading.value.quantity, manualTrading.value.exchange)
-
-    await api.post('/api/v1/trading/manual/order', {
-      exchange: manualTrading.value.exchange,
-      side,
-      quantity: actualQuantity,
-    })
-    showTradeStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送`, true)
-    await fetchRecentOrders()
-  } catch (e) {
-    showTradeStatus(e.response?.data?.detail || '下单失败', false)
-  } finally {
-    manualTrading.value.loading = false
-  }
-}
-
-async function closeAllPositions() {
-  console.log('[DEBUG] closeAllPositions called')
-  console.log('[DEBUG] manualTrading.loading:', manualTrading.value.loading)
-
-  if (!confirm('确定要平仓所有持仓吗？')) {
-    console.log('[DEBUG] User cancelled confirmation')
-    return
-  }
-
-  if (manualTrading.value.loading) {
-    console.log('[DEBUG] Already loading, skipping')
-    return
-  }
-
-  manualTrading.value.loading = true
-  console.log('[DEBUG] Starting close all positions request')
-
-  try {
-    const res = await api.post('/api/v1/trading/manual/close-all')
-    console.log('[DEBUG] Close all positions response:', res.data)
-    showTradeStatus(`平仓指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
-    await fetchRecentOrders()
-  } catch (e) {
-    console.error('[DEBUG] Close all positions error:', e)
-    showTradeStatus(e.response?.data?.detail || '平仓失败', false)
-  } finally {
-    manualTrading.value.loading = false
-    console.log('[DEBUG] Close all positions completed')
-  }
-}
-
-async function cancelAllOrders() {
-  if (!confirm('确定要取消所有挂单吗？')) return
-  if (manualTrading.value.loading) return
-  manualTrading.value.loading = true
-  try {
-    const res = await api.post('/api/v1/trading/manual/cancel-all')
-    showTradeStatus(`撤单指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
-    await fetchRecentOrders()
-  } catch (e) {
-    showTradeStatus(e.response?.data?.detail || '撤单失败', false)
-  } finally {
-    manualTrading.value.loading = false
   }
 }
 
