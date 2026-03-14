@@ -1706,8 +1706,41 @@ class ArbitrageStrategyExecutorV3:
         """Place orders for reverse closing (Binance bid + Bybit bid)"""
         strategy_id = config.strategy_id
 
+        # Get current position to check available quantity
+        try:
+            positions = await self.position_manager.get_positions(
+                strategy_id=strategy_id,
+                strategy_type="reverse"
+            )
+            # Calculate total current position
+            current_position = sum(abs(pos.get('size', 0)) for pos in positions)
+
+            self._log_opening_operation(
+                strategy_id,
+                "REVERSE_CLOSING_POSITION_CHECK",
+                {
+                    "current_position": current_position,
+                    "accumulated": state.ladder_accumulated_qty,
+                    "target": ladder.total_qty
+                }
+            )
+
+            # If no position available, cannot close
+            if current_position <= 0:
+                self._log_opening_operation(
+                    strategy_id,
+                    "REVERSE_CLOSING_NO_POSITION",
+                    {"reason": "No position available to close"}
+                )
+                return {"success": False, "error": "No position available to close"}
+
+        except Exception as e:
+            self.logger.warning(f"Failed to get position info: {str(e)}, proceeding with order")
+            current_position = float('inf')  # If position check fails, proceed anyway
+
+        # Calculate order quantity considering: remaining target, single order limit, and actual position
         remaining_qty = ladder.total_qty - state.ladder_accumulated_qty
-        order_qty = min(ladder.single_order_qty, remaining_qty)
+        order_qty = min(ladder.single_order_qty, remaining_qty, current_position)
         order_qty = round_quantity(order_qty)
 
         if not validate_quantity(order_qty, config.min_trade_qty):
@@ -1720,7 +1753,8 @@ class ArbitrageStrategyExecutorV3:
                 "ladder": state.current_ladder_index,
                 "order_qty": order_qty,
                 "accumulated": state.ladder_accumulated_qty,
-                "total": ladder.total_qty
+                "total": ladder.total_qty,
+                "current_position": current_position
             }
         )
 
@@ -2221,8 +2255,41 @@ class ArbitrageStrategyExecutorV3:
         """Place orders for forward closing (Binance ask + Bybit ask)"""
         strategy_id = config.strategy_id
 
+        # Get current position to check available quantity
+        try:
+            positions = await self.position_manager.get_positions(
+                strategy_id=strategy_id,
+                strategy_type="forward"
+            )
+            # Calculate total current position
+            current_position = sum(abs(pos.get('size', 0)) for pos in positions)
+
+            self._log_opening_operation(
+                strategy_id,
+                "FORWARD_CLOSING_POSITION_CHECK",
+                {
+                    "current_position": current_position,
+                    "accumulated": state.ladder_accumulated_qty,
+                    "target": ladder.total_qty
+                }
+            )
+
+            # If no position available, cannot close
+            if current_position <= 0:
+                self._log_opening_operation(
+                    strategy_id,
+                    "FORWARD_CLOSING_NO_POSITION",
+                    {"reason": "No position available to close"}
+                )
+                return {"success": False, "error": "No position available to close"}
+
+        except Exception as e:
+            self.logger.warning(f"Failed to get position info: {str(e)}, proceeding with order")
+            current_position = float('inf')  # If position check fails, proceed anyway
+
+        # Calculate order quantity considering: remaining target, single order limit, and actual position
         remaining_qty = ladder.total_qty - state.ladder_accumulated_qty
-        order_qty = min(ladder.single_order_qty, remaining_qty)
+        order_qty = min(ladder.single_order_qty, remaining_qty, current_position)
         order_qty = round_quantity(order_qty)
 
         if not validate_quantity(order_qty, config.min_trade_qty):
@@ -2235,7 +2302,8 @@ class ArbitrageStrategyExecutorV3:
                 "ladder": state.current_ladder_index,
                 "order_qty": order_qty,
                 "accumulated": state.ladder_accumulated_qty,
-                "total": ladder.total_qty
+                "total": ladder.total_qty,
+                "current_position": current_position
             }
         )
 

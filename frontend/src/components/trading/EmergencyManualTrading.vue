@@ -52,6 +52,24 @@
         </button>
       </div>
 
+      <!-- Close Position Buttons -->
+      <div class="close-buttons">
+        <button
+          @click="closePosition('short')"
+          :disabled="loading"
+          class="btn btn-close-short"
+        >
+          空仓平多
+        </button>
+        <button
+          @click="closePosition('long')"
+          :disabled="loading"
+          class="btn btn-close-long"
+        >
+          多仓平空
+        </button>
+      </div>
+
       <!-- Status message -->
       <div v-if="statusMsg" :class="['status-msg', statusOk ? 'status-success' : 'status-error']">
         {{ statusMsg }}
@@ -117,8 +135,29 @@ async function executeTrade(side) {
   }
 }
 
+async function closePosition(positionType) {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const actualQuantity = convertForPlatform(quantity.value, exchange.value)
+    const endpoint = positionType === 'short' ? '/api/v1/trading/manual/close-short' : '/api/v1/trading/manual/close-long'
+
+    await api.post(endpoint, {
+      exchange: exchange.value,
+      quantity: actualQuantity,
+    })
+    showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
+    emit('orderExecuted')
+  } catch (e) {
+    showStatus(e.response?.data?.detail || '平仓失败', false)
+  } finally {
+    loading.value = false
+  }
+}
+
 async function closeAllPositions() {
-  if (!confirm('确定要平仓所有持仓吗？')) return
+  if (!confirm('确定要平仓所有持仓吗？此操作不可撤销！')) return
+  if (!confirm('再次确认：真的要平仓所有持仓吗？')) return
   if (loading.value) return
   loading.value = true
   try {
@@ -249,6 +288,13 @@ async function cancelAllOrders() {
   gap: 12px;
 }
 
+.close-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .btn {
   padding: 12px 16px;
   border: none;
@@ -279,6 +325,22 @@ async function cancelAllOrders() {
 
 .btn-sell:hover:not(:disabled) {
   background-color: #e03d52;
+}
+
+.btn-close-short {
+  background-color: #f0b90b;
+}
+
+.btn-close-short:hover:not(:disabled) {
+  background-color: #d9a509;
+}
+
+.btn-close-long {
+  background-color: #f0b90b;
+}
+
+.btn-close-long:hover:not(:disabled) {
+  background-color: #d9a509;
 }
 
 .btn-danger {

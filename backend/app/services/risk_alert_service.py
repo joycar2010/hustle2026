@@ -547,7 +547,7 @@ class RiskAlertService:
         # 2. Binance净资产
         binance_asset = account_data.get("binance_net_asset", 0)
         binance_threshold = risk_settings.get("binance_net_asset_threshold")
-        if binance_threshold and binance_asset < binance_threshold:
+        if binance_threshold is not None and binance_asset < binance_threshold:
             results["binance_net_asset"] = await self.check_binance_net_asset(
                 user_id=user_id,
                 current_asset=binance_asset,
@@ -558,7 +558,7 @@ class RiskAlertService:
         # 3. Bybit净资产
         bybit_asset = account_data.get("bybit_net_asset", 0)
         bybit_threshold = risk_settings.get("bybit_net_asset_threshold")
-        if bybit_threshold and bybit_asset < bybit_threshold:
+        if bybit_threshold is not None and bybit_asset < bybit_threshold:
             results["bybit_net_asset"] = await self.check_bybit_net_asset(
                 user_id=user_id,
                 current_asset=bybit_asset,

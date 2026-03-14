@@ -453,8 +453,19 @@ async function fetchAlertSettings() {
 
 async function saveAlertSettings() {
   try {
-    await api.post('/api/v1/risk/alert-settings', alertSettings.value)
-    alert('警报设置保存成功！')
+    // Convert empty strings and undefined to null for all numeric fields
+    const settingsToSave = {}
+    for (const [key, value] of Object.entries(alertSettings.value)) {
+      // If value is empty string, undefined, or NaN, set to null
+      if (value === '' || value === undefined || (typeof value === 'number' && isNaN(value))) {
+        settingsToSave[key] = null
+      } else {
+        settingsToSave[key] = value
+      }
+    }
+
+    await api.post('/api/v1/risk/alert-settings', settingsToSave)
+    alert('警报设置保存成功！空值字段将停止提醒。')
   } catch (error) {
     console.error('Failed to save alert settings:', error)
     alert('警报设置保存失败')

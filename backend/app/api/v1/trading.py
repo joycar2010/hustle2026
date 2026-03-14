@@ -670,18 +670,18 @@ async def place_manual_order(
 
         # Determine price based on side and exchange
         if req.exchange == "binance":
-            # Binance: 买入开多用bid价，卖出开空用ask价
+            # Binance: 买入开多用bid价挂单，卖出开空用ask价挂单
             if req.side == "buy":
                 price = spread_data.binance_quote.bid_price
             else:  # sell
                 price = spread_data.binance_quote.ask_price
             symbol = "XAUUSDT"
         else:  # bybit
-            # Bybit: 买入开多用bid价，卖出开空用ask价
+            # Bybit: 买入开多用ask价挂单，卖出开空用bid价挂单
             if req.side == "buy":
-                price = spread_data.bybit_quote.bid_price
-            else:  # sell
                 price = spread_data.bybit_quote.ask_price
+            else:  # sell
+                price = spread_data.bybit_quote.bid_price
             symbol = "XAUUSD.s"
 
         # Import order executor
@@ -829,12 +829,12 @@ async def close_all_positions(
                         if volume == 0:
                             continue
 
-                        # 多单用ask价平仓，空单用bid价平仓
+                        # Bybit: 多头仓位用bid价平仓，空头仓位用ask价平仓
                         if pos.type == mt5.POSITION_TYPE_BUY:  # LONG position
-                            price = spread_data.bybit_quote.ask_price
+                            price = spread_data.bybit_quote.bid_price
                             side = "Sell"
                         else:  # SHORT position
-                            price = spread_data.bybit_quote.bid_price
+                            price = spread_data.bybit_quote.ask_price
                             side = "Buy"
 
                         result = await order_executor.place_bybit_order(
@@ -1063,6 +1063,179 @@ async def sync_trades_from_exchanges(
             "errors": errors if errors else None
         }
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ClosePositionRequest(BaseModel):
+    exchange: str  # "binance" or "bybit"
+    quantity: float
+
+
+@router.post("/manual/close-short")
+async def close_short_position(
+    req: ClosePositionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """空仓平多：平掉空头仓位
+
+    Binance: 持有的空仓以ask价挂单
+    Bybit: 持有的空仓以bid价挂单
+    """
+    try:
+        # Get user accounts
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            raise HTTPException(status_code=404, detail="No trading accounts found")
+
+        # Find the account for the specified exchange
+        target_account = None
+        for account in accounts:
+            if req.exchange == "binance" and account.platform_id == 1:
+                target_account = account
+                break
+            elif req.exchange == "bybit" and account.platform_id == 2:
+                target_account = account
+                break
+
+        if not target_account:
+            raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
+
+        # Get current market prices
+        spread_data = await market_data_service.get_current_spread(use_cache=False)
+
+        # Determine price based on exchange
+        if req.exchange == "binance":
+            # Binance: 空仓以ask价挂单平仓
+            price = spread_data.binance_quote.ask_price
+            symbol = "XAUUSDT"
+        else:  # bybit
+            # Bybit: 空仓以bid价挂单平仓
+            price = spread_data.bybit_quote.bid_price
+            symbol = "XAUUSD.s"
+
+        # Import order executor
+        from app.services.order_executor import order_executor
+
+        # Place order to close short position (buy to close)
+        if req.exchange == "binance":
+            result = await order_executor.place_binance_order(
+                account=target_account,
+                symbol=symbol,
+                side="BUY",
+                position_side="SHORT",
+                order_type="LIMIT",
+                quantity=str(req.quantity),
+                price=str(price),
+                time_in_force="GTC",
+            )
+        else:  # bybit
+            result = await order_executor.place_bybit_order(
+                account=target_account,
+                symbol=symbol,
+                side="Buy",
+                order_type="Limit",
+                quantity=str(req.quantity),
+                price=str(price),
+                close_position=False,
+            )
+
+        return {
+            "success": result.get("success"),
+            "order_id": result.get("order_id"),
+            "price": price,
+            "quantity": req.quantity,
+            "exchange": req.exchange,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Close short position error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/manual/close-long")
+async def close_long_position(
+    req: ClosePositionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """多仓平空：平掉多头仓位
+
+    Binance: 持有的多仓以bid价挂单
+    Bybit: 持有的多仓以ask价挂单
+    """
+    try:
+        # Get user accounts
+        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        if not accounts:
+            raise HTTPException(status_code=404, detail="No trading accounts found")
+
+        # Find the account for the specified exchange
+        target_account = None
+        for account in accounts:
+            if req.exchange == "binance" and account.platform_id == 1:
+                target_account = account
+                break
+            elif req.exchange == "bybit" and account.platform_id == 2:
+                target_account = account
+                break
+
+        if not target_account:
+            raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
+
+        # Get current market prices
+        spread_data = await market_data_service.get_current_spread(use_cache=False)
+
+        # Determine price based on exchange
+        if req.exchange == "binance":
+            # Binance: 多仓以bid价挂单平仓
+            price = spread_data.binance_quote.bid_price
+            symbol = "XAUUSDT"
+        else:  # bybit
+            # Bybit: 多仓以ask价挂单平仓
+            price = spread_data.bybit_quote.ask_price
+            symbol = "XAUUSD.s"
+
+        # Import order executor
+        from app.services.order_executor import order_executor
+
+        # Place order to close long position (sell to close)
+        if req.exchange == "binance":
+            result = await order_executor.place_binance_order(
+                account=target_account,
+                symbol=symbol,
+                side="SELL",
+                position_side="LONG",
+                order_type="LIMIT",
+                quantity=str(req.quantity),
+                price=str(price),
+                time_in_force="GTC",
+            )
+        else:  # bybit
+            result = await order_executor.place_bybit_order(
+                account=target_account,
+                symbol=symbol,
+                side="Sell",
+                order_type="Limit",
+                quantity=str(req.quantity),
+                price=str(price),
+                close_position=False,
+            )
+
+        return {
+            "success": result.get("success"),
+            "order_id": result.get("order_id"),
+            "price": price,
+            "quantity": req.quantity,
+            "exchange": req.exchange,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Close long position error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/manual/cancel-all")
