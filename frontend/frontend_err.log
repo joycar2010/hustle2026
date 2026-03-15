@@ -1,0 +1,6 @@
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+(node:5984) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/app/hustle2026/frontend/postcss.config.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\app\hustle2026\frontend\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+npm warn exec The following package was not found and will be installed: serve@14.2.5
