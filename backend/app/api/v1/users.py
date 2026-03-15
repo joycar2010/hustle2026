@@ -6,10 +6,10 @@ from uuid import UUID
 from typing import List
 import logging
 from app.core.database import get_db
-from app.core.security import get_current_user_id, get_password_hash
+from app.core.security import get_current_user_id, get_password_hash, verify_password
 from app.models.user import User
 from app.models.position import Position
-from app.schemas.user import UserResponse, UserUpdate, UserCreate
+from app.schemas.user import UserResponse, UserUpdate, UserCreate, PasswordChange
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -87,6 +87,37 @@ async def update_current_user(
     await db.refresh(user)
 
     return user
+
+
+@router.put("/password", status_code=status.HTTP_200_OK)
+async def change_password(
+    password_change: PasswordChange,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change current user's password"""
+    # Get current user
+    result = await db.execute(select(User).where(User.user_id == UUID(user_id)))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    # Verify current password
+    if not verify_password(password_change.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前密码不正确",
+        )
+
+    # Update password
+    user.password_hash = get_password_hash(password_change.new_password)
+    await db.commit()
+
+    return {"message": "密码修改成功"}
 
 
 @router.get("/")

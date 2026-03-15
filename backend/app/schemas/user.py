@@ -70,6 +70,24 @@ class UserUpdate(BaseModel):
         str_strip_whitespace = True
 
 
+class PasswordChange(BaseModel):
+    """Schema for changing password"""
+
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """Validate password strength"""
+        if len(v) < 8:
+            raise ValueError('密码至少需要8个字符')
+        return v
+
+    class Config:
+        str_strip_whitespace = True
+
+
 class UserResponse(BaseModel):
     """Schema for user response"""
 

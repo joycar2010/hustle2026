@@ -365,20 +365,14 @@ const navItems = computed(() => {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  // 检查导航栏隐藏状态并设置滚动条
-  if (navbarHidden.value) {
-    document.body.style.overflow = 'hidden'
-    // 如果是首次加载且自动隐藏，保存状态
-    if (isFirstLoad && isSmallScreen) {
-      localStorage.setItem('navbarHidden', 'true')
-    }
+  // 如果是首次加载且自动隐藏，保存状态
+  if (navbarHidden.value && isFirstLoad && isSmallScreen) {
+    localStorage.setItem('navbarHidden', 'true')
   }
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  // 清理滚动条样式
-  document.body.style.overflow = ''
 })
 
 function handleClickOutside(event) {
@@ -438,12 +432,6 @@ function toggleNavbar() {
 function toggleNavbarVisibility() {
   navbarHidden.value = !navbarHidden.value
   localStorage.setItem('navbarHidden', navbarHidden.value.toString())
-  // 同时控制页面滚动条
-  if (navbarHidden.value) {
-    document.body.style.overflow = 'hidden'
-  } else {
-    document.body.style.overflow = ''
-  }
 }
 
 // Icon components

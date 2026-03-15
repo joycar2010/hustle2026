@@ -10,8 +10,21 @@ echo.
 REM Change to project directory
 cd /d C:\app\hustle2026
 
+REM Check and Start Nginx
+echo [1/4] Checking Nginx Service...
+tasklist /FI "IMAGENAME eq nginx.exe" 2>NUL | find /I /N "nginx.exe">NUL
+if "%ERRORLEVEL%"=="0" (
+    echo Nginx is already running, skipping...
+) else (
+    echo Starting Nginx Service...
+    cd /d C:\nginx
+    start "" nginx.exe
+    cd /d C:\app\hustle2026
+    timeout /t 2 /nobreak >nul
+)
+
 REM Check and Start MetaTrader 5 Client
-echo [1/3] Checking MetaTrader 5 Client...
+echo [2/4] Checking MetaTrader 5 Client...
 tasklist /FI "IMAGENAME eq terminal64.exe" 2>NUL | find /I /N "terminal64.exe">NUL
 if "%ERRORLEVEL%"=="0" (
     echo MetaTrader 5 is already running, skipping...
@@ -23,7 +36,7 @@ if "%ERRORLEVEL%"=="0" (
 )
 
 REM Start Backend Service
-echo [2/3] Checking Backend Service...
+echo [3/4] Checking Backend Service...
 netstat -ano | findstr ":8000" >NUL
 if "%ERRORLEVEL%"=="0" (
     echo Backend service is already running on port 8000, skipping...
@@ -34,7 +47,7 @@ if "%ERRORLEVEL%"=="0" (
 )
 
 REM Start Frontend Service
-echo [3/3] Checking Frontend Service...
+echo [4/4] Checking Frontend Service...
 netstat -ano | findstr ":5173" >NUL
 if "%ERRORLEVEL%"=="0" (
     echo Frontend service is already running on port 5173, skipping...
@@ -48,6 +61,7 @@ echo.
 echo ========================================
 echo All Services Started Successfully!
 echo ========================================
+echo Nginx: https://app.hustle2026.xyz
 echo MetaTrader 5: Running
 echo Backend: http://localhost:8000
 echo Frontend: http://localhost:5173
