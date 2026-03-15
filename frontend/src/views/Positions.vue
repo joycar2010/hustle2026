@@ -1,6 +1,6 @@
 <template>
   <div class="container mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-6">点差记录分析</h1>
+    <h1 class="text-3xl font-bold mb-6">套利机会分析</h1>
 
     <!-- Weekend Market Closed Notice -->
     <div v-if="isWeekend && queryType === 'recent'" class="card mb-6 bg-yellow-900/20 border-yellow-600">
@@ -11,10 +11,10 @@
         <div>
           <h3 class="text-lg font-semibold text-yellow-500 mb-2">MT5市场休市提醒</h3>
           <p class="text-sm text-gray-300 mb-2">
-            当前为周末时间，MT5市场休市（周六、周日不交易）。由于点差数据需要同时获取Binance和Bybit MT5的价格，因此周末期间无法生成新的点差记录。
+            当前为周末时间，MT5市场休市（周六、周日不交易）。由于套利机会数据需要同时获取Binance和Bybit MT5的价格，因此周末期间无法生成新的套利机会记录。
           </p>
           <p class="text-sm text-gray-400">
-            💡 您可以查询历史数据（选择"按日"或"自定义时间段"）来查看工作日的点差记录。
+            💡 您可以查询历史数据（选择"按日"或"自定义时间段"）来查看工作日的套利机会记录。
           </p>
         </div>
       </div>
@@ -29,9 +29,10 @@
         <div>
           <h3 class="text-lg font-semibold text-red-500 mb-2">无数据</h3>
           <p class="text-sm text-gray-300">
-            所选时间段内没有点差记录。这可能是因为：
+            所选时间段内没有套利机会记录。这可能是因为：
           </p>
           <ul class="text-sm text-gray-400 mt-2 ml-4 list-disc">
+            <li>所选时间段内点差未达到套利阈值</li>
             <li>市场数据服务未运行</li>
             <li>所选时间段在MT5休市期间（周末）</li>
             <li>账户未启用或API配置有误</li>
@@ -43,7 +44,7 @@
     <!-- Query Controls -->
     <div class="card mb-6">
       <h2 class="text-xl font-semibold mb-4">查询条件</h2>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
         <!-- Query Type -->
         <div>
           <label class="block text-sm text-gray-400 mb-2">查询类型</label>
@@ -52,6 +53,19 @@
             <option value="recent">近2小时</option>
             <option value="day">按日</option>
             <option value="custom">自定义时间段</option>
+          </select>
+        </div>
+
+        <!-- Opportunity Type Filter -->
+        <div>
+          <label class="block text-sm text-gray-400 mb-2">套利类型</label>
+          <select v-model="opportunityType"
+                  class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
+            <option value="">全部</option>
+            <option value="forward_open">正向开仓</option>
+            <option value="forward_close">正向平仓</option>
+            <option value="reverse_open">反向开仓</option>
+            <option value="reverse_close">反向平仓</option>
           </select>
         </div>
 
@@ -89,22 +103,26 @@
     </div>
 
     <!-- Statistics Overview -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
       <div class="card">
-        <div class="text-sm text-gray-400 mb-1">总记录数</div>
+        <div class="text-sm text-gray-400 mb-1">总机会数</div>
         <div class="text-2xl font-bold">{{ spreadRecords.length }}</div>
       </div>
       <div class="card">
-        <div class="text-sm text-gray-400 mb-1">平均点差</div>
-        <div class="text-2xl font-bold">{{ averageSpread.toFixed(2) }}</div>
+        <div class="text-sm text-gray-400 mb-1">正向开仓</div>
+        <div class="text-2xl font-bold text-green-500">{{ forwardOpenCount }}</div>
       </div>
       <div class="card">
-        <div class="text-sm text-gray-400 mb-1">最大点差</div>
-        <div class="text-2xl font-bold text-red-500">{{ maxSpread.toFixed(2) }}</div>
+        <div class="text-sm text-gray-400 mb-1">正向平仓</div>
+        <div class="text-2xl font-bold text-blue-500">{{ forwardCloseCount }}</div>
       </div>
       <div class="card">
-        <div class="text-sm text-gray-400 mb-1">最小点差</div>
-        <div class="text-2xl font-bold text-green-500">{{ minSpread.toFixed(2) }}</div>
+        <div class="text-sm text-gray-400 mb-1">反向开仓</div>
+        <div class="text-2xl font-bold text-orange-500">{{ reverseOpenCount }}</div>
+      </div>
+      <div class="card">
+        <div class="text-sm text-gray-400 mb-1">反向平仓</div>
+        <div class="text-2xl font-bold text-purple-500">{{ reverseCloseCount }}</div>
       </div>
     </div>
 
@@ -128,7 +146,7 @@
     <!-- Spread Records Table -->
     <div class="card">
       <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-semibold">点差记录列表</h2>
+        <h2 class="text-xl font-semibold">套利机会列表</h2>
         <button @click="exportData" class="btn-secondary">
           导出数据
         </button>
@@ -139,16 +157,31 @@
           <thead>
             <tr class="text-left text-gray-400 border-b border-gray-700">
               <th class="pb-2">时间</th>
-              <th class="pb-2">正向开仓点差</th>
-              <th class="pb-2">反向开仓点差</th>
+              <th class="pb-2">套利类型</th>
+              <th class="pb-2">正向点差</th>
+              <th class="pb-2">反向点差</th>
               <th class="pb-2">Binance买/卖</th>
               <th class="pb-2">Bybit买/卖</th>
-              <th class="pb-2">状态</th>
+              <th class="pb-2">目标点差</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="record in paginatedRecords" :key="record.id" class="border-b border-gray-800">
               <td class="py-3">{{ formatDateTimeBeijing(record.timestamp) }}</td>
+              <td>
+                <span v-if="record.opportunity_type === 'forward_open'" class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">
+                  正向开仓
+                </span>
+                <span v-else-if="record.opportunity_type === 'forward_close'" class="px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs">
+                  正向平仓
+                </span>
+                <span v-else-if="record.opportunity_type === 'reverse_open'" class="px-2 py-1 bg-orange-900 text-orange-300 rounded text-xs">
+                  反向开仓
+                </span>
+                <span v-else-if="record.opportunity_type === 'reverse_close'" class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">
+                  反向平仓
+                </span>
+              </td>
               <td :class="record.forward_spread >= 2.0 ? 'text-green-500' : record.forward_spread <= -2.0 ? 'text-red-500' : 'text-gray-400'">
                 {{ record.forward_spread.toFixed(2) }}
               </td>
@@ -163,15 +196,7 @@
                 <span class="text-green-500">{{ record.bybit_bid.toFixed(2) }}</span> /
                 <span class="text-red-500">{{ record.bybit_ask.toFixed(2) }}</span>
               </td>
-              <td>
-                <span v-if="Math.abs(record.forward_spread) >= 2.0 || Math.abs(record.reverse_spread) >= 2.0"
-                      class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">
-                  可套利
-                </span>
-                <span v-else class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">
-                  正常
-                </span>
-              </td>
+              <td class="text-gray-400">{{ record.target_spread.toFixed(2) }}</td>
             </tr>
           </tbody>
         </table>
@@ -213,6 +238,7 @@ const selectedWeek = ref('')
 const selectedMonth = ref('')
 const startDate = ref('')
 const endDate = ref('')
+const opportunityType = ref('') // 套利类型筛选
 const loading = ref(false)
 
 // Data
@@ -234,6 +260,22 @@ const isWeekend = computed(() => {
 })
 
 // Computed Statistics
+const forwardOpenCount = computed(() => {
+  return spreadRecords.value.filter(r => r.opportunity_type === 'forward_open').length
+})
+
+const forwardCloseCount = computed(() => {
+  return spreadRecords.value.filter(r => r.opportunity_type === 'forward_close').length
+})
+
+const reverseOpenCount = computed(() => {
+  return spreadRecords.value.filter(r => r.opportunity_type === 'reverse_open').length
+})
+
+const reverseCloseCount = computed(() => {
+  return spreadRecords.value.filter(r => r.opportunity_type === 'reverse_close').length
+})
+
 const averageSpread = computed(() => {
   if (spreadRecords.value.length === 0) return 0
   const sum = spreadRecords.value.reduce((acc, r) => acc + Math.abs(r.forward_spread) + Math.abs(r.reverse_spread), 0)
@@ -315,44 +357,6 @@ async function querySpreadData() {
       const dateStr = selectedDate.value
       start_time = `${dateStr}T00:00:00.000Z`
       end_time = `${dateStr}T23:59:59.999Z`
-    } else if (queryType.value === 'week') {
-      // Query for selected week
-      if (!selectedWeek.value) {
-        alert('请选择周')
-        loading.value = false
-        return
-      }
-      // Warn about large data query
-      if (!confirm('查询一周的数据可能需要较长时间，是否继续？')) {
-        loading.value = false
-        return
-      }
-      const [year, week] = selectedWeek.value.split('-W')
-      const firstDay = getFirstDayOfWeek(parseInt(year), parseInt(week))
-      const lastDay = new Date(firstDay)
-      lastDay.setDate(lastDay.getDate() + 6)
-
-      start_time = `${firstDay.toISOString().split('T')[0]}T00:00:00.000Z`
-      end_time = `${lastDay.toISOString().split('T')[0]}T23:59:59.999Z`
-    } else if (queryType.value === 'month') {
-      // Query for selected month
-      if (!selectedMonth.value) {
-        alert('请选择月份')
-        loading.value = false
-        return
-      }
-      // Warn about large data query
-      if (!confirm('查询一个月的数据可能需要较长时间且数据量较大，是否继续？')) {
-        loading.value = false
-        return
-      }
-      const [year, month] = selectedMonth.value.split('-')
-      const firstDay = `${year}-${month}-01`
-      const lastDayOfMonth = new Date(parseInt(year), parseInt(month), 0).getDate()
-      const lastDay = `${year}-${month}-${lastDayOfMonth.toString().padStart(2, '0')}`
-
-      start_time = `${firstDay}T00:00:00.000Z`
-      end_time = `${lastDay}T23:59:59.999Z`
     } else if (queryType.value === 'custom') {
       // Query for custom date range
       console.log('Custom query - startDate:', startDate.value, 'endDate:', endDate.value)
@@ -362,9 +366,7 @@ async function querySpreadData() {
         loading.value = false
         return
       }
-      // For datetime-local input, format without timezone conversion
-      // datetime-local gives us "YYYY-MM-DDTHH:mm" which is already in local time
-      // Backend expects ISO format without timezone (database uses TIMESTAMP WITHOUT TIME ZONE)
+
       const start = new Date(startDate.value)
       const end = new Date(endDate.value)
       console.log('Parsed dates - start:', start, 'end:', end)
@@ -378,45 +380,52 @@ async function querySpreadData() {
         return
       }
 
-      // Format as ISO string without timezone conversion
-      // Use the datetime-local value directly and append seconds
       start_time = `${startDate.value}:00`
       end_time = `${endDate.value}:59`
       console.log('ISO times - start_time:', start_time, 'end_time:', end_time)
     }
 
-    // Fetch spread records from database with extended timeout for large queries
-    const response = await api.get('/api/v1/market/spread/history', {
-      params: {
-        start_time,
-        end_time,
-        binance_symbol: 'XAUUSDT',
-        bybit_symbol: 'XAUUSDT'
-      },
+    // Fetch arbitrage opportunities from new API
+    const params = {
+      start_time,
+      end_time,
+      symbol: 'XAUUSD',
+      limit: 10000
+    }
+
+    // Add opportunity type filter if selected
+    if (opportunityType.value) {
+      params.opportunity_type = opportunityType.value
+    }
+
+    const response = await api.get('/api/v1/opportunities', {
+      params,
       timeout: 60000 // 60 seconds timeout for large data queries
     })
 
     // Show warning if data count is large
-    if (response.data.length > 10000) {
+    if (response.data.length > 5000) {
       alert(`查询返回${response.data.length}条记录，数据量较大，页面渲染可能需要一些时间`)
     }
 
     // Map the response data to the expected format
-    spreadRecords.value = response.data.map((item, index) => ({
-      id: item.id || index + 1,
+    spreadRecords.value = response.data.map((item) => ({
+      id: item.id,
       timestamp: item.timestamp,
+      opportunity_type: item.opportunity_type,
       forward_spread: item.forward_spread || 0,
       reverse_spread: item.reverse_spread || 0,
-      binance_bid: item.binance_quote?.bid || item.binance_bid || 0,
-      binance_ask: item.binance_quote?.ask || item.binance_ask || 0,
-      bybit_bid: item.bybit_quote?.bid || item.bybit_bid || 0,
-      bybit_ask: item.bybit_quote?.ask || item.bybit_ask || 0
+      binance_bid: item.binance_bid || 0,
+      binance_ask: item.binance_ask || 0,
+      bybit_bid: item.bybit_bid || 0,
+      bybit_ask: item.bybit_ask || 0,
+      target_spread: item.target_spread || 0
     }))
 
     currentPage.value = 1
   } catch (error) {
-    console.error('Failed to query spread data:', error)
-    alert('获取点差数据失败: ' + (error.response?.data?.detail || error.message))
+    console.error('Failed to query arbitrage opportunities:', error)
+    alert('获取套利机会数据失败: ' + (error.response?.data?.detail || error.message))
     spreadRecords.value = []
   } finally {
     loading.value = false
@@ -531,22 +540,27 @@ function updateCharts() {
 
 function exportData() {
   const csv = [
-    ['时间', '正向开仓点差', '反向开仓点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价'],
+    ['时间', '套利类型', '正向点差', '反向点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价', '目标点差'],
     ...spreadRecords.value.map(r => [
       formatDateTimeBeijing(r.timestamp),
+      r.opportunity_type === 'forward_open' ? '正向开仓' :
+      r.opportunity_type === 'forward_close' ? '正向平仓' :
+      r.opportunity_type === 'reverse_open' ? '反向开仓' :
+      r.opportunity_type === 'reverse_close' ? '反向平仓' : '',
       r.forward_spread.toFixed(2),
       r.reverse_spread.toFixed(2),
       r.binance_bid.toFixed(2),
       r.binance_ask.toFixed(2),
       r.bybit_bid.toFixed(2),
-      r.bybit_ask.toFixed(2)
+      r.bybit_ask.toFixed(2),
+      r.target_spread.toFixed(2)
     ])
   ].map(row => row.join(',')).join('\n')
 
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
-  link.download = `spread_records_${new Date().toISOString().split('T')[0]}.csv`
+  link.download = `arbitrage_opportunities_${new Date().toISOString().split('T')[0]}.csv`
   link.click()
 }
 </script>

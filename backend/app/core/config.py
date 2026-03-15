@@ -6,13 +6,13 @@ import json
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
-    # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/postgres"
-    DB_HOST: str = "localhost"
+    # Database (从.env文件读取，以下为默认值)
+    DATABASE_URL: str = "postgresql://postgres:Lk106504@127.0.0.1:5432/postgres"
+    DB_HOST: str = "127.0.0.1"
     DB_PORT: int = 5432
     DB_NAME: str = "postgres"
     DB_USER: str = "postgres"
-    DB_PASSWORD: str = "postgres"
+    DB_PASSWORD: str = "Lk106504"
 
     # Redis
     REDIS_HOST: str = "localhost"

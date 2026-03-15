@@ -8,6 +8,7 @@ from app.models.order import OrderRecord
 from app.models.arbitrage import ArbitrageTask
 from app.models.risk_alert import RiskAlert
 from app.models.market_data import MarketData, SpreadRecord
+from app.models.arbitrage_opportunity import ArbitrageOpportunity
 from app.models.position import Position
 from app.models.strategy_performance import StrategyPerformance
 from app.models.account_snapshot import AccountSnapshot
@@ -35,6 +36,7 @@ __all__ = [
     "RiskAlert",
     "MarketData",
     "SpreadRecord",
+    "ArbitrageOpportunity",
     "Position",
     "StrategyPerformance",
     "AccountSnapshot",

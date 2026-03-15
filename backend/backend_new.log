@@ -1,0 +1,290 @@
+INFO:     Will watch for changes in these directories: ['C:\\app\\hustle2026\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [5836] using WatchFiles
+INFO:     Started server process [4660]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Redis monitor started successfully
+2026-03-15 08:37:43,170 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+2026-03-15 08:37:43,170 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-03-15 08:37:43,172 INFO sqlalchemy.engine.Engine select current_schema()
+2026-03-15 08:37:43,172 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-03-15 08:37:43,173 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+2026-03-15 08:37:43,173 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-03-15 08:37:43,174 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,293 INFO sqlalchemy.engine.Engine SELECT notification_configs.config_id, notification_configs.service_type, notification_configs.is_enabled, notification_configs.config_data, notification_configs.created_at, notification_configs.updated_at 
+FROM notification_configs 
+WHERE notification_configs.service_type = $1::VARCHAR AND notification_configs.is_enabled = true
+2026-03-15 08:37:43,293 INFO sqlalchemy.engine.Engine [generated in 0.00031s] ('feishu',)
+2026-03-15 08:37:43,298 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:43,370 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+2026-03-15 08:37:43,370 INFO sqlalchemy.engine.Engine [raw sql] {}
+2026-03-15 08:37:43,370 INFO sqlalchemy.engine.Engine select current_schema()
+2026-03-15 08:37:43,370 INFO sqlalchemy.engine.Engine [raw sql] {}
+2026-03-15 08:37:43,371 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+2026-03-15 08:37:43,371 INFO sqlalchemy.engine.Engine [raw sql] {}
+2026-03-15 08:37:43,371 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,374 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:43,374 INFO sqlalchemy.engine.Engine [generated in 0.00016s] {'platform_name_1': 'binance', 'param_1': 1}
+2026-03-15 08:37:43,379 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:43,379 INFO sqlalchemy.engine.Engine [cached since 0.005238s ago] {'platform_name_1': 'bybit', 'param_1': 1}
+2026-03-15 08:37:43,406 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,409 INFO sqlalchemy.engine.Engine SELECT pending_orders.id, pending_orders.user_id, pending_orders.strategy_type, pending_orders.platform, pending_orders.order_id, pending_orders.symbol, pending_orders.side, pending_orders.quantity, pending_orders.price, pending_orders.order_type, pending_orders.status, pending_orders.filled_quantity, pending_orders.created_at, pending_orders.updated_at, pending_orders.expires_at, pending_orders.extra_data 
+FROM pending_orders 
+WHERE pending_orders.created_at > $1::TIMESTAMP WITHOUT TIME ZONE AND pending_orders.status = $2::VARCHAR ORDER BY pending_orders.created_at DESC
+2026-03-15 08:37:43,409 INFO sqlalchemy.engine.Engine [generated in 0.00023s] (datetime.datetime(2026, 3, 15, 7, 37, 43, 298444), 'PENDING')
+2026-03-15 08:37:43,538 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:43,621 INFO sqlalchemy.engine.Engine COMMIT
+2026-03-15 08:37:43,625 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,628 INFO sqlalchemy.engine.Engine SELECT strategy_configs.config_id, strategy_configs.user_id, strategy_configs.strategy_type, strategy_configs.target_spread, strategy_configs.order_qty, strategy_configs.retry_times, strategy_configs.mt5_stuck_threshold, strategy_configs.opening_sync_count, strategy_configs.closing_sync_count, strategy_configs.m_coin, strategy_configs.opening_m_coin, strategy_configs.closing_m_coin, strategy_configs.ladders, strategy_configs.is_enabled, strategy_configs.create_time, strategy_configs.update_time 
+FROM strategy_configs 
+WHERE strategy_configs.is_enabled = true
+2026-03-15 08:37:43,628 INFO sqlalchemy.engine.Engine [generated in 0.00025s] ()
+2026-03-15 08:37:43,629 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,629 INFO sqlalchemy.engine.Engine SELECT strategy_configs.config_id, strategy_configs.user_id, strategy_configs.strategy_type, strategy_configs.target_spread, strategy_configs.order_qty, strategy_configs.retry_times, strategy_configs.mt5_stuck_threshold, strategy_configs.opening_sync_count, strategy_configs.closing_sync_count, strategy_configs.m_coin, strategy_configs.opening_m_coin, strategy_configs.closing_m_coin, strategy_configs.ladders, strategy_configs.is_enabled, strategy_configs.create_time, strategy_configs.update_time 
+FROM strategy_configs
+2026-03-15 08:37:43,630 INFO sqlalchemy.engine.Engine [generated in 0.00016s] ()
+2026-03-15 08:37:43,630 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,631 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:43,631 INFO sqlalchemy.engine.Engine [generated in 0.00015s] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:43,632 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,633 INFO sqlalchemy.engine.Engine SELECT accounts.account_id, accounts.user_id, accounts.platform_id, accounts.account_name, accounts.api_key, accounts.api_secret, accounts.passphrase, accounts.mt5_id, accounts.mt5_server, accounts.mt5_primary_pwd, accounts.is_mt5_account, accounts.leverage, accounts.is_default, accounts.is_active, accounts.create_time, accounts.update_time 
+FROM accounts 
+WHERE accounts.is_active = true
+2026-03-15 08:37:43,633 INFO sqlalchemy.engine.Engine [generated in 0.00013s] ()
+2026-03-15 08:37:43,638 INFO sqlalchemy.engine.Engine ROLLBACK
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+2026-03-15 08:37:43,643 INFO sqlalchemy.engine.Engine SELECT spread_records.id, spread_records.symbol, spread_records.binance_bid, spread_records.binance_ask, spread_records.bybit_bid, spread_records.bybit_ask, spread_records.forward_spread, spread_records.reverse_spread, spread_records.timestamp 
+FROM spread_records 
+WHERE spread_records.timestamp >= $1::TIMESTAMP WITHOUT TIME ZONE
+2026-03-15 08:37:43,644 INFO sqlalchemy.engine.Engine [generated in 0.00094s] (datetime.datetime(2026, 3, 14, 8, 37, 43, 642194),)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+2026-03-15 08:37:43,646 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:43,646 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:43,655 INFO sqlalchemy.engine.Engine COMMIT
+2026-03-15 08:37:43,776 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:43,779 INFO sqlalchemy.engine.Engine SELECT risk_settings.settings_id, risk_settings.user_id, risk_settings.binance_net_asset, risk_settings.bybit_mt5_net_asset, risk_settings.total_net_asset, risk_settings.binance_liquidation_price, risk_settings.bybit_mt5_liquidation_price, risk_settings.mt5_lag_count, risk_settings.reverse_open_price, risk_settings.reverse_open_sync_count, risk_settings.reverse_close_price, risk_settings.reverse_close_sync_count, risk_settings.forward_open_price, risk_settings.forward_open_sync_count, risk_settings.forward_close_price, risk_settings.forward_close_sync_count, risk_settings.single_leg_alert_sound, risk_settings.single_leg_alert_repeat_count, risk_settings.spread_alert_sound, risk_settings.spread_alert_repeat_count, risk_settings.net_asset_alert_sound, risk_settings.net_asset_alert_repeat_count, risk_settings.mt5_alert_sound, risk_settings.mt5_alert_repeat_count, risk_settings.liquidation_alert_sound, risk_settings.liquidation_alert_repeat_count, risk_settings.create_time, risk_settings.update_time 
+FROM risk_settings 
+WHERE risk_settings.user_id IN ($1::UUID, $2::UUID)
+2026-03-15 08:37:43,779 INFO sqlalchemy.engine.Engine [generated in 0.00033s] (UUID('0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24'), UUID('66764cd6-d1c9-4468-a478-85b526a16927'))
+Failed to get tick for XAUUSD.s: (-10004, 'No IPC connection')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD.s
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+2026-03-15 08:37:45,648 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:45,648 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:45,649 INFO sqlalchemy.engine.Engine [cached since 2.017s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:45,651 INFO sqlalchemy.engine.Engine ROLLBACK
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD.s
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+Waiting 5.0s before next reconnection attempt
+Error checking spread alerts for user 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+Waiting 5.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+2026-03-15 08:37:45,790 INFO sqlalchemy.engine.Engine ROLLBACK
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD.s
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+2026-03-15 08:37:47,650 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:47,650 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:47,650 INFO sqlalchemy.engine.Engine [cached since 4.02s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:47,651 INFO sqlalchemy.engine.Engine ROLLBACK
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD.s
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD.s
+2026-03-15 08:37:48,599 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:48,599 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:48,599 INFO sqlalchemy.engine.Engine [cached since 5.225s ago] {'platform_name_1': 'binance', 'param_1': 1}
+2026-03-15 08:37:48,601 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:48,601 INFO sqlalchemy.engine.Engine [cached since 5.227s ago] {'platform_name_1': 'bybit', 'param_1': 1}
+2026-03-15 08:37:48,602 INFO sqlalchemy.engine.Engine COMMIT
+2026-03-15 08:37:49,642 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:49,642 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:49,642 INFO sqlalchemy.engine.Engine [cached since 6.011s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:49,645 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:51,639 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:51,639 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:51,639 INFO sqlalchemy.engine.Engine [cached since 8.008s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:51,642 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:53,599 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:53,600 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:53,600 INFO sqlalchemy.engine.Engine [cached since 10.23s ago] {'platform_name_1': 'binance', 'param_1': 1}
+2026-03-15 08:37:53,601 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:53,601 INFO sqlalchemy.engine.Engine [cached since 10.23s ago] {'platform_name_1': 'bybit', 'param_1': 1}
+2026-03-15 08:37:53,602 INFO sqlalchemy.engine.Engine COMMIT
+2026-03-15 08:37:53,623 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:53,624 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:53,624 INFO sqlalchemy.engine.Engine [cached since 9.993s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:53,624 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:53,656 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:53,657 INFO sqlalchemy.engine.Engine SELECT strategy_configs.config_id, strategy_configs.user_id, strategy_configs.strategy_type, strategy_configs.target_spread, strategy_configs.order_qty, strategy_configs.retry_times, strategy_configs.mt5_stuck_threshold, strategy_configs.opening_sync_count, strategy_configs.closing_sync_count, strategy_configs.m_coin, strategy_configs.opening_m_coin, strategy_configs.closing_m_coin, strategy_configs.ladders, strategy_configs.is_enabled, strategy_configs.create_time, strategy_configs.update_time 
+FROM strategy_configs 
+WHERE strategy_configs.is_enabled = true
+2026-03-15 08:37:53,657 INFO sqlalchemy.engine.Engine [cached since 10.03s ago] ()
+2026-03-15 08:37:53,659 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:55,626 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:55,626 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:55,626 INFO sqlalchemy.engine.Engine [cached since 12s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:55,627 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:57,639 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:57,639 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:57,639 INFO sqlalchemy.engine.Engine [cached since 14.01s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:57,640 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:37:58,607 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:58,607 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:58,607 INFO sqlalchemy.engine.Engine [cached since 15.23s ago] {'platform_name_1': 'binance', 'param_1': 1}
+2026-03-15 08:37:58,609 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:37:58,609 INFO sqlalchemy.engine.Engine [cached since 15.23s ago] {'platform_name_1': 'bybit', 'param_1': 1}
+2026-03-15 08:37:58,610 INFO sqlalchemy.engine.Engine COMMIT
+2026-03-15 08:37:59,653 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:37:59,653 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:37:59,653 INFO sqlalchemy.engine.Engine [cached since 16.02s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:37:59,654 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:38:01,658 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:38:01,658 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:38:01,658 INFO sqlalchemy.engine.Engine [cached since 18.03s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:38:01,660 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:38:03,615 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:38:03,616 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:38:03,616 INFO sqlalchemy.engine.Engine [cached since 20.24s ago] {'platform_name_1': 'binance', 'param_1': 1}
+2026-03-15 08:38:03,618 INFO sqlalchemy.engine.Engine SELECT accounts.account_id AS accounts_account_id, accounts.user_id AS accounts_user_id, accounts.platform_id AS accounts_platform_id, accounts.account_name AS accounts_account_name, accounts.api_key AS accounts_api_key, accounts.api_secret AS accounts_api_secret, accounts.passphrase AS accounts_passphrase, accounts.mt5_id AS accounts_mt5_id, accounts.mt5_server AS accounts_mt5_server, accounts.mt5_primary_pwd AS accounts_mt5_primary_pwd, accounts.is_mt5_account AS accounts_is_mt5_account, accounts.leverage AS accounts_leverage, accounts.is_default AS accounts_is_default, accounts.is_active AS accounts_is_active, accounts.create_time AS accounts_create_time, accounts.update_time AS accounts_update_time 
+FROM accounts JOIN platforms ON platforms.platform_id = accounts.platform_id 
+WHERE platforms.platform_name = %(platform_name_1)s AND accounts.is_active IS true 
+ LIMIT %(param_1)s
+2026-03-15 08:38:03,618 INFO sqlalchemy.engine.Engine [cached since 20.24s ago] {'platform_name_1': 'bybit', 'param_1': 1}
+2026-03-15 08:38:03,619 INFO sqlalchemy.engine.Engine COMMIT
+2026-03-15 08:38:03,660 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:38:03,660 INFO sqlalchemy.engine.Engine SELECT strategy_configs.config_id, strategy_configs.user_id, strategy_configs.strategy_type, strategy_configs.target_spread, strategy_configs.order_qty, strategy_configs.retry_times, strategy_configs.mt5_stuck_threshold, strategy_configs.opening_sync_count, strategy_configs.closing_sync_count, strategy_configs.m_coin, strategy_configs.opening_m_coin, strategy_configs.closing_m_coin, strategy_configs.ladders, strategy_configs.is_enabled, strategy_configs.create_time, strategy_configs.update_time 
+FROM strategy_configs 
+WHERE strategy_configs.is_enabled = true
+2026-03-15 08:38:03,660 INFO sqlalchemy.engine.Engine [cached since 20.03s ago] ()
+2026-03-15 08:38:03,660 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:38:03,661 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:38:03,661 INFO sqlalchemy.engine.Engine [cached since 20.03s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:38:03,661 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:38:03,662 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:38:05,657 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:38:05,658 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:38:05,658 INFO sqlalchemy.engine.Engine [cached since 22.03s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:38:05,659 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-03-15 08:38:07,670 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-03-15 08:38:07,671 INFO sqlalchemy.engine.Engine SELECT arbitrage_tasks.task_id, arbitrage_tasks.user_id, arbitrage_tasks.strategy_type, arbitrage_tasks.open_spread, arbitrage_tasks.close_spread, arbitrage_tasks.status, arbitrage_tasks.open_time, arbitrage_tasks.close_time, arbitrage_tasks.profit 
+FROM arbitrage_tasks 
+WHERE arbitrage_tasks.status = $1::VARCHAR
+2026-03-15 08:38:07,671 INFO sqlalchemy.engine.Engine [cached since 24.04s ago] (<TaskStatus.OPEN: 'open'>,)
+2026-03-15 08:38:07,672 INFO sqlalchemy.engine.Engine ROLLBACK

@@ -526,38 +526,24 @@ async def delete_table_record(
 async def get_version_history(
     user_id: str = Depends(get_current_user_id),
 ) -> List[Dict[str, Any]]:
-    """Get Git commit history"""
+    """Get Git commit history from GitHub main branch"""
     try:
         import subprocess
 
-        # Fetch latest commits from remote to sync with GitHub
+        # Fetch latest commits from remote main branch
         fetch_result = subprocess.run(
-            ["git", "fetch", "origin"],
+            ["git", "fetch", "origin", "main"],
             capture_output=True,
             text=True,
             cwd=".."
         )
 
-        # Don't fail if fetch fails (might be offline), just log it
         if fetch_result.returncode != 0:
-            print(f"Warning: Git fetch failed: {fetch_result.stderr}")
+            raise Exception(f"Failed to fetch from GitHub: {fetch_result.stderr}")
 
-        # Get current branch name
-        branch_result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=".."
-        )
-
-        if branch_result.returncode != 0:
-            raise Exception(f"Failed to get current branch: {branch_result.stderr}")
-
-        current_branch = branch_result.stdout.strip()
-
-        # Get last 20 commits from current branch
+        # Get last 20 commits from origin/main (GitHub main branch)
         result = subprocess.run(
-            ["git", "log", current_branch, "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
+            ["git", "log", "origin/main", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
             capture_output=True,
             text=True,
             encoding='utf-8',

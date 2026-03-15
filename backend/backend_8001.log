@@ -1,0 +1,690 @@
+INFO:     Started server process [3860]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+Failed to initialize Feishu service: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Order recovery failed: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Initialization completed with errors: ['Feishu init failed: password authentication failed for user "postgres"', 'Order recovery failed: password authentication failed for user "postgres"']
+Failed to get active strategies count: password authentication failed for user "postgres"
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+Database session error: password authentication failed for user "postgres"
+Error in risk metrics stream: password authentication failed for user "postgres"
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\broadcast_tasks.py", line 264, in _stream_loop
+    result = await asyncio.wait_for(
+  File "C:\Python39\lib\asyncio\tasks.py", line 479, in wait_for
+    return fut.result()
+  File "C:\Python39\lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 455, in execute
+    result = await greenlet_spawn(
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 200, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2308, in execute
+    return self._execute_internal(
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2180, in _execute_internal
+    conn = self._connection_for_bind(bind)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2047, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 1143, in _connection_for_bind
+    conn = bind.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3269, in connect
+    return self._connection_cls(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    self._dbapi_connection = engine.raw_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3293, in raw_connection
+    return self.pool.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 452, in connect
+    return _ConnectionFairy._checkout(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 1269, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 716, in checkout
+    rec = pool._do_get()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 170, in _do_get
+    self._dec_overflow()
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 167, in _do_get
+    return self._create_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 393, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 678, in __init__
+    self.__connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 903, in __connect
+    pool.logger.debug("Error on connect(): %s", e)
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 898, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\default.py", line 616, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 941, in connect
+    await_only(creator_fn(*arg, **kw)),
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 130, in await_only
+    return current.driver.switch(awaitable)  # type: ignore[no-any-return]
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 195, in greenlet_spawn
+    value = await result
+  File "C:\Python39\lib\site-packages\asyncpg\connection.py", line 2329, in connect
+    return await connect_utils._connect(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 991, in _connect
+    conn = await _connect_addr(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 828, in _connect_addr
+    return await __connect_addr(params, True, *args)
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 876, in __connect_addr
+    await connected
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Redis monitor started successfully
+INFO:     127.0.0.1:50273 - "GET /health HTTP/1.1" 200 OK
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Database session error: password authentication failed for user "postgres"
+Error in risk metrics stream: password authentication failed for user "postgres"
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\broadcast_tasks.py", line 264, in _stream_loop
+    result = await asyncio.wait_for(
+  File "C:\Python39\lib\asyncio\tasks.py", line 479, in wait_for
+    return fut.result()
+  File "C:\Python39\lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 455, in execute
+    result = await greenlet_spawn(
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 200, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2308, in execute
+    return self._execute_internal(
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2180, in _execute_internal
+    conn = self._connection_for_bind(bind)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2047, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 1143, in _connection_for_bind
+    conn = bind.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3269, in connect
+    return self._connection_cls(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    self._dbapi_connection = engine.raw_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3293, in raw_connection
+    return self.pool.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 452, in connect
+    return _ConnectionFairy._checkout(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 1269, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 716, in checkout
+    rec = pool._do_get()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 170, in _do_get
+    self._dec_overflow()
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 167, in _do_get
+    return self._create_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 393, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 678, in __init__
+    self.__connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 903, in __connect
+    pool.logger.debug("Error on connect(): %s", e)
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 898, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\default.py", line 616, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 941, in connect
+    await_only(creator_fn(*arg, **kw)),
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 130, in await_only
+    return current.driver.switch(awaitable)  # type: ignore[no-any-return]
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 195, in greenlet_spawn
+    value = await result
+  File "C:\Python39\lib\site-packages\asyncpg\connection.py", line 2329, in connect
+    return await connect_utils._connect(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 991, in _connect
+    conn = await _connect_addr(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 828, in _connect_addr
+    return await __connect_addr(params, True, *args)
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 876, in __connect_addr
+    await connected
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Database session error: password authentication failed for user "postgres"
+Error in risk metrics stream: password authentication failed for user "postgres"
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\broadcast_tasks.py", line 264, in _stream_loop
+    result = await asyncio.wait_for(
+  File "C:\Python39\lib\asyncio\tasks.py", line 479, in wait_for
+    return fut.result()
+  File "C:\Python39\lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 455, in execute
+    result = await greenlet_spawn(
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 200, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2308, in execute
+    return self._execute_internal(
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2180, in _execute_internal
+    conn = self._connection_for_bind(bind)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2047, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 1143, in _connection_for_bind
+    conn = bind.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3269, in connect
+    return self._connection_cls(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    self._dbapi_connection = engine.raw_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3293, in raw_connection
+    return self.pool.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 452, in connect
+    return _ConnectionFairy._checkout(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 1269, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 716, in checkout
+    rec = pool._do_get()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 170, in _do_get
+    self._dec_overflow()
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 167, in _do_get
+    return self._create_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 393, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 678, in __init__
+    self.__connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 903, in __connect
+    pool.logger.debug("Error on connect(): %s", e)
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 898, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\default.py", line 616, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 941, in connect
+    await_only(creator_fn(*arg, **kw)),
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 130, in await_only
+    return current.driver.switch(awaitable)  # type: ignore[no-any-return]
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 195, in greenlet_spawn
+    value = await result
+  File "C:\Python39\lib\site-packages\asyncpg\connection.py", line 2329, in connect
+    return await connect_utils._connect(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 991, in _connect
+    conn = await _connect_addr(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 828, in _connect_addr
+    return await __connect_addr(params, True, *args)
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 876, in __connect_addr
+    await connected
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Database session error: password authentication failed for user "postgres"
+Error in risk metrics stream: password authentication failed for user "postgres"
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\broadcast_tasks.py", line 264, in _stream_loop
+    result = await asyncio.wait_for(
+  File "C:\Python39\lib\asyncio\tasks.py", line 479, in wait_for
+    return fut.result()
+  File "C:\Python39\lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 455, in execute
+    result = await greenlet_spawn(
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 200, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2308, in execute
+    return self._execute_internal(
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2180, in _execute_internal
+    conn = self._connection_for_bind(bind)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2047, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 1143, in _connection_for_bind
+    conn = bind.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3269, in connect
+    return self._connection_cls(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    self._dbapi_connection = engine.raw_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3293, in raw_connection
+    return self.pool.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 452, in connect
+    return _ConnectionFairy._checkout(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 1269, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 716, in checkout
+    rec = pool._do_get()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 170, in _do_get
+    self._dec_overflow()
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 167, in _do_get
+    return self._create_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 393, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 678, in __init__
+    self.__connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 903, in __connect
+    pool.logger.debug("Error on connect(): %s", e)
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 898, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\default.py", line 616, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 941, in connect
+    await_only(creator_fn(*arg, **kw)),
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 130, in await_only
+    return current.driver.switch(awaitable)  # type: ignore[no-any-return]
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 195, in greenlet_spawn
+    value = await result
+  File "C:\Python39\lib\site-packages\asyncpg\connection.py", line 2329, in connect
+    return await connect_utils._connect(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 991, in _connect
+    conn = await _connect_addr(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 828, in _connect_addr
+    return await __connect_addr(params, True, *args)
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 876, in __connect_addr
+    await connected
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Database session error: password authentication failed for user "postgres"
+Error in risk metrics stream: password authentication failed for user "postgres"
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\broadcast_tasks.py", line 264, in _stream_loop
+    result = await asyncio.wait_for(
+  File "C:\Python39\lib\asyncio\tasks.py", line 479, in wait_for
+    return fut.result()
+  File "C:\Python39\lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 455, in execute
+    result = await greenlet_spawn(
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 200, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2308, in execute
+    return self._execute_internal(
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2180, in _execute_internal
+    conn = self._connection_for_bind(bind)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 2047, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Python39\lib\site-packages\sqlalchemy\orm\session.py", line 1143, in _connection_for_bind
+    conn = bind.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3269, in connect
+    return self._connection_cls(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    self._dbapi_connection = engine.raw_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\base.py", line 3293, in raw_connection
+    return self.pool.connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 452, in connect
+    return _ConnectionFairy._checkout(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 1269, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 716, in checkout
+    rec = pool._do_get()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 170, in _do_get
+    self._dec_overflow()
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\impl.py", line 167, in _do_get
+    return self._create_connection()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 393, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 678, in __init__
+    self.__connect()
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 903, in __connect
+    pool.logger.debug("Error on connect(): %s", e)
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Python39\lib\site-packages\sqlalchemy\pool\base.py", line 898, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\create.py", line 645, in connect
+    return dialect.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\engine\default.py", line 616, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+  File "C:\Python39\lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 941, in connect
+    await_only(creator_fn(*arg, **kw)),
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 130, in await_only
+    return current.driver.switch(awaitable)  # type: ignore[no-any-return]
+  File "C:\Python39\lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 195, in greenlet_spawn
+    value = await result
+  File "C:\Python39\lib\site-packages\asyncpg\connection.py", line 2329, in connect
+    return await connect_utils._connect(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 991, in _connect
+    conn = await _connect_addr(
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 828, in _connect_addr
+    return await __connect_addr(params, True, *args)
+  File "C:\Python39\lib\site-packages\asyncpg\connect_utils.py", line 876, in __connect_addr
+    await connected
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"
+Error checking active accounts: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Error in position monitoring: password authentication failed for user "postgres"
+Failed to get active strategies count: password authentication failed for user "postgres"
+Error in position monitoring: password authentication failed for user "postgres"

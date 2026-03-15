@@ -11,3 +11,4 @@
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
 [2m4:59:41 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/System.vue, /src/assets/main.css[22m
+[2m5:25:50 AM[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Navbar.vue, /src/assets/main.css[22m

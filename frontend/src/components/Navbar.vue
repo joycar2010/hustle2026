@@ -352,11 +352,6 @@ const allNavItems = [
     icon: 'AccountsIcon',
   },
   {
-    path: '/risk',
-    label: '风险管理',
-    icon: 'RiskIcon',
-  },
-  {
     path: '/system',
     label: '系统管理',
     icon: 'SystemIcon',
