@@ -44,11 +44,6 @@
         <!-- Asset Dashboard -->
         <AssetDashboard />
 
-        <!-- Profit/Loss Curve Chart (Double Height) -->
-        <div class="card-elevated" style="height: 630px;">
-          <SpreadChart />
-        </div>
-
         <!-- Real-Time Market Data and Spread (Single Row) -->
         <div class="grid grid-cols-3 gap-4">
           <!-- Bybit MT5 Real-Time Market (Green) -->
@@ -151,6 +146,7 @@ import AssetDashboard from '@/components/dashboard/AssetDashboard.vue'
 import SpreadHistory from '@/components/dashboard/SpreadHistory.vue'
 import { useMarketStore } from '@/stores/market'
 import { calculateAllSpreads, calculateBidAskSpread } from '@/composables/useSpreadCalculator'
+import api from '@/services/api'
 
 const marketStore = useMarketStore()
 const lastUpdated = ref('')
@@ -190,11 +186,14 @@ const reverseSpread = computed(() => {
 
 let updateInterval = null
 
-onMounted(() => {
+onMounted(async () => {
   // Ensure WebSocket connection
   if (!marketStore.connected) {
     marketStore.connect()
   }
+
+  // Fetch initial data immediately
+  await fetchPrices()
 
   // Update timestamp every second
   updateLastUpdated()
@@ -224,8 +223,10 @@ function updateLastUpdated() {
 
 async function fetchPrices() {
   try {
-    const data = await marketStore.fetchMarketData()
-    if (data) {
+    // Fetch latest market data from API
+    const response = await api.get('/api/v1/market/data/latest')
+    if (response.data) {
+      const data = response.data
       binancePrice.value.bid = data.binance_bid || 0
       binancePrice.value.ask = data.binance_ask || 0
       bybitPrice.value.bid = data.bybit_bid || 0

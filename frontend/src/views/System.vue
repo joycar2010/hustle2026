@@ -2367,6 +2367,7 @@ async function pushToGitHub() {
     }
 
     pushRemark.value = '' // Clear remark after successful push
+    await loadSystemInfo() // Reload system info to get updated version numbers
     await loadVersionHistory()
   } catch (error) {
     console.error('Failed to push to GitHub:', error)
