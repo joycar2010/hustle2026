@@ -624,12 +624,17 @@ async def push_to_github(
         )
 
         if status_result.stdout.strip():
+            # Increment version numbers before committing
+            version_data = version_service.increment_on_backup()
+            frontend_ver = version_data["frontend_version"]
+            backend_ver = version_data["backend_version"]
+
             # There are uncommitted changes - commit them
             timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S") + " UTC"
             if remark:
-                commit_message = f"Backup: {timestamp} - {remark}"
+                commit_message = f"Version {frontend_ver}/{backend_ver}: {timestamp} - {remark}"
             else:
-                commit_message = f"Backup: {timestamp}"
+                commit_message = f"Version {frontend_ver}/{backend_ver}: {timestamp}"
 
             # Check for large files before adding (GitHub limit is 100MB)
             import os
