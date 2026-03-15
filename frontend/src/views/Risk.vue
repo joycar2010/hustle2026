@@ -35,6 +35,8 @@
 
       <!-- Alert Settings -->
       <div class="card p-1">
+        <h2 class="text-[10px] font-bold mb-1">提醒设置</h2>
+
         <!-- Reverse Arbitrage Alerts -->
         <div class="mb-1">
           <h3 class="text-[10px] font-semibold mb-1 text-primary">反向提醒</h3>
