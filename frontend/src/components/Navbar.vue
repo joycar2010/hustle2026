@@ -214,7 +214,7 @@
   <button
     v-show="navbarHidden"
     @click="toggleNavbarVisibility"
-    class="fixed bottom-4 right-4 z-50 p-3 bg-primary hover:bg-primary-hover rounded-lg shadow-lg transition-colors"
+    class="fixed bottom-4 left-4 z-50 p-3 bg-primary hover:bg-primary-hover rounded-lg shadow-lg transition-colors lg:right-4 lg:left-auto"
     title="显示顶部导航栏"
   >
     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

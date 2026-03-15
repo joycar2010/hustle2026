@@ -1720,7 +1720,12 @@ async function checkPositionForClosing() {
   try {
     // Calculate total position needed for closing
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    const totalQtyNeeded = enabledLadders.reduce((sum, ladder) => sum + ladder.qtyLimit, 0)
+    let totalQtyNeeded = enabledLadders.reduce((sum, ladder) => sum + ladder.qtyLimit, 0)
+
+    // For reverse strategy, convert lots to Bybit oz (1 lot = 0.01 oz for Bybit XAUUSD)
+    if (props.type === 'reverse') {
+      totalQtyNeeded = totalQtyNeeded * 0.01
+    }
 
     // Get current position based on strategy type
     let currentPosition = 0

@@ -21,30 +21,30 @@ router = APIRouter()
 
 # Pydantic models
 class AlertSettings(BaseModel):
-    binanceNetAsset: float = 10000
-    bybitMT5NetAsset: float = 10000
-    totalNetAsset: float = 20000
-    binanceLiquidationPrice: float = 2000
-    bybitMT5LiquidationPrice: float = 2000
-    mt5LagCount: int = 5
-    reverseOpenPrice: float = 0.5
-    reverseOpenSyncCount: int = 3
-    reverseClosePrice: float = 0.2
-    reverseCloseSyncCount: int = 3
-    forwardOpenPrice: float = 0.5
-    forwardOpenSyncCount: int = 3
-    forwardClosePrice: float = 0.2
-    forwardCloseSyncCount: int = 3
+    binanceNetAsset: Optional[float] = None
+    bybitMT5NetAsset: Optional[float] = None
+    totalNetAsset: Optional[float] = None
+    binanceLiquidationDistance: Optional[float] = None  # Changed from binanceLiquidationPrice
+    bybitMT5LiquidationDistance: Optional[float] = None  # Changed from bybitMT5LiquidationPrice
+    mt5LagCount: Optional[int] = None
+    reverseOpenPrice: Optional[float] = None
+    reverseOpenSyncCount: Optional[int] = None
+    reverseClosePrice: Optional[float] = None
+    reverseCloseSyncCount: Optional[int] = None
+    forwardOpenPrice: Optional[float] = None
+    forwardOpenSyncCount: Optional[int] = None
+    forwardClosePrice: Optional[float] = None
+    forwardCloseSyncCount: Optional[int] = None
     singleLegAlertSound: Optional[str] = None
-    singleLegAlertRepeatCount: int = 3
+    singleLegAlertRepeatCount: Optional[int] = None
     spreadAlertSound: Optional[str] = None
-    spreadAlertRepeatCount: int = 3
+    spreadAlertRepeatCount: Optional[int] = None
     netAssetAlertSound: Optional[str] = None
-    netAssetAlertRepeatCount: int = 3
+    netAssetAlertRepeatCount: Optional[int] = None
     mt5AlertSound: Optional[str] = None
-    mt5AlertRepeatCount: int = 3
+    mt5AlertRepeatCount: Optional[int] = None
     liquidationAlertSound: Optional[str] = None
-    liquidationAlertRepeatCount: int = 3
+    liquidationAlertRepeatCount: Optional[int] = None
 
 
 @router.get("/status")
@@ -86,8 +86,8 @@ async def get_alert_settings(
                 binanceNetAsset=settings.binance_net_asset,
                 bybitMT5NetAsset=settings.bybit_mt5_net_asset,
                 totalNetAsset=settings.total_net_asset,
-                binanceLiquidationPrice=settings.binance_liquidation_price,
-                bybitMT5LiquidationPrice=settings.bybit_mt5_liquidation_price,
+                binanceLiquidationDistance=settings.binance_liquidation_price,  # Map to Distance
+                bybitMT5LiquidationDistance=settings.bybit_mt5_liquidation_price,  # Map to Distance
                 mt5LagCount=settings.mt5_lag_count,
                 reverseOpenPrice=settings.reverse_open_price,
                 reverseOpenSyncCount=settings.reverse_open_sync_count,
@@ -137,8 +137,8 @@ async def save_alert_settings(
             existing_settings.binance_net_asset = settings.binanceNetAsset
             existing_settings.bybit_mt5_net_asset = settings.bybitMT5NetAsset
             existing_settings.total_net_asset = settings.totalNetAsset
-            existing_settings.binance_liquidation_price = settings.binanceLiquidationPrice
-            existing_settings.bybit_mt5_liquidation_price = settings.bybitMT5LiquidationPrice
+            existing_settings.binance_liquidation_price = settings.binanceLiquidationDistance  # Map from Distance
+            existing_settings.bybit_mt5_liquidation_price = settings.bybitMT5LiquidationDistance  # Map from Distance
             existing_settings.mt5_lag_count = settings.mt5LagCount
             existing_settings.reverse_open_price = settings.reverseOpenPrice
             existing_settings.reverse_open_sync_count = settings.reverseOpenSyncCount
@@ -166,8 +166,8 @@ async def save_alert_settings(
                 binance_net_asset=settings.binanceNetAsset,
                 bybit_mt5_net_asset=settings.bybitMT5NetAsset,
                 total_net_asset=settings.totalNetAsset,
-                binance_liquidation_price=settings.binanceLiquidationPrice,
-                bybit_mt5_liquidation_price=settings.bybitMT5LiquidationPrice,
+                binance_liquidation_price=settings.binanceLiquidationDistance,  # Map from Distance
+                bybit_mt5_liquidation_price=settings.bybitMT5LiquidationDistance,  # Map from Distance
                 mt5_lag_count=settings.mt5LagCount,
                 reverse_open_price=settings.reverseOpenPrice,
                 reverse_open_sync_count=settings.reverseOpenSyncCount,

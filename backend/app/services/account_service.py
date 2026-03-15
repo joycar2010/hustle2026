@@ -601,10 +601,12 @@ class AccountDataService:
                 # Sum up position quantities (not values) and unrealized PnL
                 for pos in positions_list:
                     size = float(pos.get("size", 0))
-                    # Sum position quantity instead of value
-                    total_positions += abs(size)
+                    # Bybit XAUUSD: 1 contract = 0.01 oz, convert to actual oz
+                    # For example: 77 contracts = 77 * 0.01 = 0.77 oz
+                    actual_size = abs(size) * 0.01
+                    total_positions += actual_size
                     total_unrealized_pnl += float(pos.get("unrealisedPnl", 0))
-            logger.info(f"Total positions calculated: {total_positions} (quantity), unrealized PnL: {total_unrealized_pnl}")
+            logger.info(f"Total positions calculated: {total_positions} (oz), unrealized PnL: {total_unrealized_pnl}")
         except Exception as e:
             logger.error(f"Failed to fetch Bybit positions: {str(e)}")
 

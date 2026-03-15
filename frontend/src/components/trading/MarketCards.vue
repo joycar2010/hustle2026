@@ -236,6 +236,7 @@ const showSystemStatusModal = ref(false)
 const systemStatusText = ref('系统正常运行')
 const systemHealthy = ref(true)
 const redisStatus = ref({ healthy: false, last_error: null })
+const sslCertStatus = ref({ status: 'unknown', days_remaining: 0 })
 
 const bybitConnected = ref(false)
 const binanceConnected = ref(false)
@@ -580,6 +581,7 @@ onMounted(() => {
   fetchPendingOrderCounts()
   fetchOrderBook()
   fetchRedisStatus()
+  fetchSSLCertStatus()
   fetchExchangeRate()
 
   // Fetch pending order counts every 3 seconds
@@ -963,6 +965,15 @@ async function updateSystemStatus() {
       statuses.push('Redis异常')
     }
 
+    // SSL证书状态
+    if (sslCertStatus.value.status === 'healthy') {
+      statuses.push(`SSL证书正常(${sslCertStatus.value.days_remaining}天)`)
+    } else if (sslCertStatus.value.status === 'warning') {
+      statuses.push(`SSL证书即将过期(${sslCertStatus.value.days_remaining}天)`)
+    } else if (sslCertStatus.value.status === 'critical' || sslCertStatus.value.status === 'expired') {
+      statuses.push('SSL证书异常')
+    }
+
     // 系统运行时间
     if (data.uptime) {
       statuses.push(`运行:${data.uptime}`)
@@ -972,11 +983,13 @@ async function updateSystemStatus() {
 
     // 判断系统健康状态
     const dbUsage = data.dbPool ? (data.dbPool.active / data.dbPool.max) : 0
+    const sslHealthy = sslCertStatus.value.status === 'healthy' || sslCertStatus.value.status === 'warning'
     systemHealthy.value = data.backend &&
                           marketStore.connected &&
                           dbUsage < 0.8 &&
                           notificationStore.feishuServiceStatus &&
-                          redisStatus.value.healthy
+                          redisStatus.value.healthy &&
+                          sslHealthy
   } catch (error) {
     systemStatusText.value = '无法获取系统状态'
     systemHealthy.value = false
@@ -990,6 +1003,21 @@ async function fetchRedisStatus() {
   } catch (error) {
     console.error('Failed to fetch Redis status:', error)
     redisStatus.value = { healthy: false, last_error: 'Failed to fetch status' }
+  }
+}
+
+async function fetchSSLCertStatus() {
+  try {
+    const response = await api.get('/api/v1/monitor/ssl/current')
+    if (response.data && response.data.exists) {
+      sslCertStatus.value = {
+        status: response.data.status,
+        days_remaining: response.data.days_remaining
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch SSL cert status:', error)
+    sslCertStatus.value = { status: 'error', days_remaining: 0 }
   }
 }
 

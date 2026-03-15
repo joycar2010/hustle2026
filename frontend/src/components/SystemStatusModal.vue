@@ -146,6 +146,91 @@
                 </div>
               </div>
 
+              <!-- Infrastructure Services -->
+              <div class="bg-dark-200 rounded-lg p-4">
+                <h3 class="font-medium mb-3">基础设施服务</h3>
+                <div class="space-y-3">
+                  <!-- Redis -->
+                  <div class="bg-dark-300 rounded p-3">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium">Redis</span>
+                      <div class="flex items-center space-x-2">
+                        <div :class="['w-2 h-2 rounded-full', systemMonitor.redis?.connected ? 'bg-success' : 'bg-danger']"></div>
+                        <span :class="['text-sm', systemMonitor.redis?.connected ? 'text-success' : 'text-danger']">
+                          {{ systemMonitor.redis?.connected ? '已连接' : '未连接' }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="systemMonitor.redis?.connected" class="space-y-1 text-xs text-text-tertiary">
+                      <div class="flex justify-between">
+                        <span>版本</span>
+                        <span>{{ systemMonitor.redis.version }}</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>内存使用</span>
+                        <span>{{ systemMonitor.redis.used_memory_human }}</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>连接数</span>
+                        <span>{{ systemMonitor.redis.connected_clients }}</span>
+                      </div>
+                    </div>
+                    <div v-else-if="systemMonitor.redis?.error" class="text-xs text-danger mt-1">
+                      {{ systemMonitor.redis.error }}
+                    </div>
+                  </div>
+
+                  <!-- Feishu -->
+                  <div class="bg-dark-300 rounded p-3">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium">飞书通知</span>
+                      <div class="flex items-center space-x-2">
+                        <div :class="['w-2 h-2 rounded-full', getFeishuStatusClass()]"></div>
+                        <span :class="['text-sm', getFeishuStatusTextClass()]">
+                          {{ getFeishuStatusText() }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="systemMonitor.feishu?.configured" class="text-xs text-text-tertiary">
+                      Webhook: {{ systemMonitor.feishu.webhook_url }}
+                    </div>
+                    <div v-else-if="systemMonitor.feishu?.error" class="text-xs text-danger mt-1">
+                      {{ systemMonitor.feishu.error }}
+                    </div>
+                  </div>
+
+                  <!-- SSL Certificate -->
+                  <div class="bg-dark-300 rounded p-3">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium">SSL证书</span>
+                      <div class="flex items-center space-x-2">
+                        <div :class="['w-2 h-2 rounded-full', getSSLStatusClass()]"></div>
+                        <span :class="['text-sm', getSSLStatusTextClass()]">
+                          {{ getSSLStatusText() }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="systemMonitor.ssl_certificate?.exists" class="space-y-1 text-xs text-text-tertiary">
+                      <div class="flex justify-between">
+                        <span>剩余天数</span>
+                        <span :class="getSSLDaysClass()">{{ systemMonitor.ssl_certificate.days_remaining }} 天</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>过期时间</span>
+                        <span>{{ formatDate(systemMonitor.ssl_certificate.expires_at) }}</span>
+                      </div>
+                      <div v-if="systemMonitor.ssl_certificate.domain_names?.length" class="flex justify-between">
+                        <span>域名</span>
+                        <span>{{ systemMonitor.ssl_certificate.domain_names[0] }}</span>
+                      </div>
+                    </div>
+                    <div v-else-if="systemMonitor.ssl_certificate?.error" class="text-xs text-danger mt-1">
+                      {{ systemMonitor.ssl_certificate.error }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- System Info -->
               <div class="bg-dark-200 rounded-lg p-4">
                 <div class="flex items-center justify-between">
@@ -162,7 +247,7 @@
 
           <!-- Footer -->
           <div class="flex items-center justify-between p-6 border-t border-border-secondary">
-            <span class="text-sm text-text-tertiary">自动刷新: 5秒</span>
+            <span class="text-sm text-text-tertiary">自动刷新: 30秒</span>
             <button
               @click="fetchStatus"
               class="px-4 py-2 bg-primary hover:bg-primary-hover rounded-lg transition-colors"
@@ -203,6 +288,12 @@ const statusData = ref({
   timestamp: ''
 })
 
+const systemMonitor = ref({
+  redis: null,
+  feishu: null,
+  ssl_certificate: null
+})
+
 let refreshInterval = null
 
 async function fetchStatus() {
@@ -210,6 +301,10 @@ async function fetchStatus() {
     loading.value = true
     const response = await api.get('/api/v1/system/status')
     statusData.value = response.data
+
+    // Fetch system monitor data
+    const monitorResponse = await api.get('/api/v1/monitor/status')
+    systemMonitor.value = monitorResponse.data
   } catch (error) {
     console.error('Failed to fetch system status:', error)
   } finally {
@@ -262,10 +357,82 @@ function formatTimestamp(timestamp) {
   })
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return 'N/A'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+// Feishu status helpers
+function getFeishuStatusClass() {
+  if (!systemMonitor.value.feishu) return 'bg-gray-500'
+  if (systemMonitor.value.feishu.status === 'healthy') return 'bg-success'
+  if (systemMonitor.value.feishu.status === 'not_configured') return 'bg-warning'
+  return 'bg-danger'
+}
+
+function getFeishuStatusTextClass() {
+  if (!systemMonitor.value.feishu) return 'text-gray-500'
+  if (systemMonitor.value.feishu.status === 'healthy') return 'text-success'
+  if (systemMonitor.value.feishu.status === 'not_configured') return 'text-warning'
+  return 'text-danger'
+}
+
+function getFeishuStatusText() {
+  if (!systemMonitor.value.feishu) return '未知'
+  if (systemMonitor.value.feishu.status === 'healthy') return '正常'
+  if (systemMonitor.value.feishu.status === 'not_configured') return '未配置'
+  return '异常'
+}
+
+// SSL status helpers
+function getSSLStatusClass() {
+  if (!systemMonitor.value.ssl_certificate) return 'bg-gray-500'
+  const status = systemMonitor.value.ssl_certificate.status
+  if (status === 'healthy') return 'bg-success'
+  if (status === 'warning') return 'bg-warning'
+  if (status === 'critical' || status === 'expired') return 'bg-danger'
+  return 'bg-gray-500'
+}
+
+function getSSLStatusTextClass() {
+  if (!systemMonitor.value.ssl_certificate) return 'text-gray-500'
+  const status = systemMonitor.value.ssl_certificate.status
+  if (status === 'healthy') return 'text-success'
+  if (status === 'warning') return 'text-warning'
+  if (status === 'critical' || status === 'expired') return 'text-danger'
+  return 'text-gray-500'
+}
+
+function getSSLStatusText() {
+  if (!systemMonitor.value.ssl_certificate) return '未知'
+  if (!systemMonitor.value.ssl_certificate.exists) return '未找到'
+  const status = systemMonitor.value.ssl_certificate.status
+  if (status === 'healthy') return '正常'
+  if (status === 'warning') return '即将过期'
+  if (status === 'critical') return '紧急'
+  if (status === 'expired') return '已过期'
+  return '错误'
+}
+
+function getSSLDaysClass() {
+  if (!systemMonitor.value.ssl_certificate) return ''
+  const days = systemMonitor.value.ssl_certificate.days_remaining
+  if (days <= 7) return 'text-danger font-bold'
+  if (days <= 30) return 'text-warning font-bold'
+  return 'text-success'
+}
+
 watch(() => props.isOpen, (newVal) => {
   if (newVal) {
     fetchStatus()
-    refreshInterval = setInterval(fetchStatus, 5000)
+    refreshInterval = setInterval(fetchStatus, 30000)
   } else {
     if (refreshInterval) {
       clearInterval(refreshInterval)

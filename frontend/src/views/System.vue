@@ -746,6 +746,104 @@
       <div v-if="activeTab === 'websocket'" class="space-y-6">
         <WebSocketMonitor />
       </div>
+
+      <!-- SSL Certificate Management Tab -->
+      <div v-if="activeTab === 'ssl'" class="space-y-6">
+        <!-- 当前使用的证书 -->
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">当前SSL证书</h2>
+            <button @click="refreshCurrentCert" class="btn-secondary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              刷新
+            </button>
+          </div>
+
+          <div v-if="currentCert && currentCert.exists" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-dark-200 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">证书状态</div>
+                <div class="flex items-center space-x-2">
+                  <span class="badge" :class="getCertStatusClass(currentCert.status)">
+                    {{ getCertStatusText(currentCert.status) }}
+                  </span>
+                  <span v-if="currentCert.is_valid" class="text-success text-sm">✓ 有效</span>
+                  <span v-else class="text-danger text-sm">✗ 已过期</span>
+                </div>
+              </div>
+
+              <div class="bg-dark-200 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">剩余天数</div>
+                <div class="text-2xl font-mono" :class="getDaysRemainingClass(currentCert.days_remaining)">
+                  {{ currentCert.days_remaining }} 天
+                </div>
+              </div>
+
+              <div class="bg-dark-200 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">域名</div>
+                <div class="text-sm">
+                  <div v-for="domain in currentCert.domain_names" :key="domain" class="text-primary">
+                    {{ domain }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="bg-dark-200 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">颁发者</div>
+                <div class="text-sm break-all">{{ currentCert.issuer }}</div>
+              </div>
+
+              <div class="bg-dark-200 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">颁发时间</div>
+                <div class="text-sm">{{ formatDate(currentCert.issued_at) }}</div>
+              </div>
+
+              <div class="bg-dark-200 rounded p-4">
+                <div class="text-sm text-text-secondary mb-1">过期时间</div>
+                <div class="text-sm" :class="currentCert.days_remaining <= 30 ? 'text-warning' : ''">
+                  {{ formatDate(currentCert.expires_at) }}
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-dark-200 rounded p-4">
+              <div class="text-sm text-text-secondary mb-2">证书文件路径</div>
+              <div class="space-y-1 text-sm font-mono">
+                <div><span class="text-text-secondary">证书:</span> {{ currentCert.cert_path }}</div>
+                <div><span class="text-text-secondary">私钥:</span> {{ currentCert.key_path }}</div>
+              </div>
+            </div>
+
+            <div v-if="currentCert.days_remaining <= 30" class="bg-warning/10 border border-warning rounded p-4">
+              <div class="flex items-start space-x-2">
+                <svg class="w-5 h-5 text-warning flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div>
+                  <div class="font-medium text-warning">证书即将过期</div>
+                  <div class="text-sm text-text-secondary mt-1">
+                    证书将在 {{ currentCert.days_remaining }} 天后过期，请及时续期。
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="currentCert && !currentCert.exists" class="text-center py-8">
+            <svg class="w-16 h-16 mx-auto text-text-tertiary mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div class="text-text-secondary">未找到SSL证书文件</div>
+            <div class="text-sm text-text-tertiary mt-2">{{ currentCert.error }}</div>
+          </div>
+
+          <div v-else class="text-center py-8 text-text-secondary">
+            加载中...
+          </div>
+        </div>
+      </div>
     </div>
 
 
@@ -1324,6 +1422,7 @@ const editingRoleId = ref(null)
 
 // SSL Certificate state
 const certificates = ref([])
+const currentCert = ref(null)
 const showCertModal = ref(false)
 
 const certForm = ref({
@@ -1585,6 +1684,63 @@ async function deleteRole(roleId) {
 }
 
 // SSL Certificate Functions
+async function loadCurrentCert() {
+  try {
+    const response = await api.get('/api/v1/monitor/ssl/current')
+    currentCert.value = response.data
+  } catch (error) {
+    console.error('Failed to load current certificate:', error)
+    currentCert.value = {
+      exists: false,
+      error: error.response?.data?.detail || error.message
+    }
+  }
+}
+
+async function refreshCurrentCert() {
+  await loadCurrentCert()
+}
+
+function getCertStatusClass(status) {
+  const classes = {
+    'healthy': 'badge-success',
+    'warning': 'badge-warning',
+    'critical': 'badge-danger',
+    'expired': 'badge-danger',
+    'error': 'badge-danger'
+  }
+  return classes[status] || 'badge-info'
+}
+
+function getCertStatusText(status) {
+  const texts = {
+    'healthy': '正常',
+    'warning': '即将过期',
+    'critical': '紧急',
+    'expired': '已过期',
+    'error': '错误'
+  }
+  return texts[status] || status
+}
+
+function getDaysRemainingClass(days) {
+  if (days <= 7) return 'text-danger'
+  if (days <= 30) return 'text-warning'
+  return 'text-success'
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return 'N/A'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 async function loadCertificates() {
   try {
     const response = await api.get('/api/v1/ssl/certificates')
@@ -1634,15 +1790,6 @@ function getCertStatusLabel(status) {
   return labels[status] || status
 }
 
-function getCertStatusClass(status) {
-  const classes = {
-    'active': 'text-success',
-    'inactive': 'text-text-secondary',
-    'expired': 'text-danger',
-    'expiring_soon': 'text-warning'
-  }
-  return classes[status] || 'text-text-secondary'
-}
 
 
 
@@ -2111,17 +2258,6 @@ function closeCertModal() {
   }
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
 
 
 // Refresh management state (simplified for WebSocket era)
@@ -2265,6 +2401,7 @@ const wsConnected = computed(() => marketStore.connected)
 onMounted(async () => {
   loadRoles()
   loadCertificates()
+  loadCurrentCert()
   loadAllPermissions()
   loadSecurityComponents()
   loadUsers()

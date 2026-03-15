@@ -1,0 +1,88 @@
+[2026-03-15 17:16:40.150030] Task created: 4c02417d-b5a2-474c-9d23-0496b4585cc4
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000125680B6BC0>
+
+[2026-03-15 22:18:22.978811] Task created: 8514ac65-dc24-42e3-b323-a43efeded73d
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291C9F240>
+
+[2026-03-15 22:19:56.571624] Task created: cabf71f8-7a40-4017-b108-92c1a26171b4
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291C9F3C0>
+
+[2026-03-15 22:20:09.305727] Task created: 89589a69-5651-44e1-8adf-844d9d82f368
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291D078C0>
+
+[2026-03-15 22:20:31.086643] Task created: b3c2014f-cd75-46cf-90f3-1bb41e3f9d19
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x00000262919695C0>
+
+[2026-03-15 22:20:44.289702] Task created: 8f5e4c44-7e8e-4969-9b14-59fb0dd33afd
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AAF3C0>
+
+[2026-03-15 22:21:54.523261] Task created: 686005ca-ab4f-4481-a4de-104a5a7b8f1a
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291969340>
+
+[2026-03-15 22:22:58.006727] Task created: 8d65ce23-1c20-4be9-adfc-9e8ea238f845
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x00000262915E92C0>
+
+[2026-03-15 22:23:14.412634] Task created: 5ca1dd1d-983b-4014-85c7-d698e3321553
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AA74C0>
+
+[2026-03-15 22:23:26.350335] Task created: d6be53c4-a865-45a4-bcb8-7ee847571b3d
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291C14D40>
+
+[2026-03-15 22:24:42.099173] Task created: cc76f169-c7e6-439c-ac05-c9396a1e60b0
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AA7EC0>
+
+[2026-03-15 22:25:15.067604] Task created: f95251a4-581e-4b2e-8d81-535edca98a5f
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AA7740>
+
+[2026-03-15 22:25:45.786064] Task created: 49a3309e-554a-4d96-b0ee-8f18432b0efd
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291C14140>
+
+[2026-03-15 22:26:13.223335] Task created: 38f77dfe-3995-424b-9169-8c6897252545
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291C149C0>
+
+[2026-03-15 22:26:40.801595] Task created: 6d3f0f39-28f2-4e6b-97fc-98f8b36dc1c3
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AA7BC0>
+
+[2026-03-15 22:27:08.816977] Task created: bf917864-936c-4da1-a55c-60d150417689
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AA7DC0>
+
+[2026-03-15 22:27:17.479009] Task created: c7df8084-2dc0-4cb1-8830-e1e85d0e62bf
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291A9FDC0>
+
+[2026-03-15 22:27:50.175606] Task created: a870bca3-6728-4f8d-a8fe-beb866a0dee0
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AAF140>
+
+[2026-03-15 22:28:02.113040] Task created: fad2a93b-901d-4215-b2c1-a717d732d0f9
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291C25DC0>
+
+[2026-03-15 22:28:20.362866] Task created: cc813438-d80d-4d86-b7dc-063260421929
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000026291AAF2C0>
+
+[2026-03-15 22:41:31.764850] Task created: 369689eb-52b0-4518-a577-d1af8f719ddd
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x00000208CE1B82C0>
+
+[2026-03-15 22:43:00.637764] Task created: bcf6a914-bbfd-4518-b6dd-40a138b6272e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x00000208CE4DF040>
+

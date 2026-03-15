@@ -569,10 +569,16 @@ class RiskAlertService:
         # 4. Binance爆仓价
         binance_liq = account_data.get("binance_liquidation_price")
         binance_price = account_data.get("binance_current_price")
-        if binance_liq and binance_price:
+        binance_liq_threshold_pct = risk_settings.get("binance_liquidation_distance_pct")
+
+        if binance_liq and binance_price and binance_liq_threshold_pct is not None:
             distance = abs(binance_price - binance_liq)
-            if distance < binance_liq * 0.1:  # 距离小于10%
-                status = "⚠️ 接近安全线" if distance < binance_liq * 0.05 else "注意价格变化"
+            # Use user-configured distance percentage
+            distance_threshold = binance_liq * (binance_liq_threshold_pct / 100.0)
+
+            if distance < distance_threshold:
+                # Critical if within half of threshold
+                status = "⚠️ 接近安全线" if distance < distance_threshold * 0.5 else "注意价格变化"
                 results["binance_liquidation"] = (
                     await self.check_binance_liquidation(
                         user_id=user_id,
@@ -586,10 +592,16 @@ class RiskAlertService:
         # 5. Bybit爆仓价
         bybit_liq = account_data.get("bybit_liquidation_price")
         bybit_price = account_data.get("bybit_current_price")
-        if bybit_liq and bybit_price:
+        bybit_liq_threshold_pct = risk_settings.get("bybit_liquidation_distance_pct")
+
+        if bybit_liq and bybit_price and bybit_liq_threshold_pct is not None:
             distance = abs(bybit_price - bybit_liq)
-            if distance < bybit_liq * 0.1:  # 距离小于10%
-                status = "⚠️ 接近安全线" if distance < bybit_liq * 0.05 else "注意价格变化"
+            # Use user-configured distance percentage
+            distance_threshold = bybit_liq * (bybit_liq_threshold_pct / 100.0)
+
+            if distance < distance_threshold:
+                # Critical if within half of threshold
+                status = "⚠️ 接近安全线" if distance < distance_threshold * 0.5 else "注意价格变化"
                 results["bybit_liquidation"] = (
                     await self.check_bybit_liquidation(
                         user_id=user_id,

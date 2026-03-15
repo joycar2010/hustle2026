@@ -202,7 +202,7 @@ class ContinuousStrategyExecutor:
                 try:
                     # Initialize clients if not already done
                     if not hasattr(binance_account, 'binance_client'):
-                        from app.services.binance_futures_client import BinanceFuturesClient
+                        from app.services.binance_client import BinanceFuturesClient
                         binance_account.binance_client = BinanceFuturesClient(
                             api_key=binance_account.api_key,
                             api_secret=binance_account.api_secret

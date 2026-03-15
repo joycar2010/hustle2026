@@ -407,9 +407,14 @@ class RiskMetricsStreamer:
                             binance_price = summary.get("binance_current_price")
                             if binance_liq and binance_price:
                                 distance = abs(binance_price - binance_liq)
-                                # Alert if distance is less than 10% of liquidation price
-                                if distance < binance_liq * 0.1:
-                                    status = "⚠️ 接近安全线" if distance < binance_liq * 0.05 else "注意价格变化"
+                                # Use user-configured distance percentage (stored in binance_liquidation_price field)
+                                # Field stores percentage value (e.g., 10 means 10%)
+                                distance_threshold_pct = risk_settings.binance_liquidation_price / 100.0
+                                distance_threshold = binance_liq * distance_threshold_pct
+
+                                if distance < distance_threshold:
+                                    # Critical if within half of threshold
+                                    status = "⚠️ 接近安全线" if distance < distance_threshold * 0.5 else "注意价格变化"
                                     await risk_alert_service.check_binance_liquidation(
                                         user_id=user_id,
                                         current_price=binance_price,
@@ -424,9 +429,14 @@ class RiskMetricsStreamer:
                             bybit_price = summary.get("bybit_current_price")
                             if bybit_liq and bybit_price:
                                 distance = abs(bybit_price - bybit_liq)
-                                # Alert if distance is less than 10% of liquidation price
-                                if distance < bybit_liq * 0.1:
-                                    status = "⚠️ 接近安全线" if distance < bybit_liq * 0.05 else "注意价格变化"
+                                # Use user-configured distance percentage (stored in bybit_mt5_liquidation_price field)
+                                # Field stores percentage value (e.g., 10 means 10%)
+                                distance_threshold_pct = risk_settings.bybit_mt5_liquidation_price / 100.0
+                                distance_threshold = bybit_liq * distance_threshold_pct
+
+                                if distance < distance_threshold:
+                                    # Critical if within half of threshold
+                                    status = "⚠️ 接近安全线" if distance < distance_threshold * 0.5 else "注意价格变化"
                                     await risk_alert_service.check_bybit_liquidation(
                                         user_id=user_id,
                                         current_price=bybit_price,

@@ -41,11 +41,9 @@ class ArbitrageStrategy:
                 "error": f"Spread {spread_data.forward_entry_spread} below target {target_spread}",
             }
 
-        # Use market prices directly for maker orders
-        binance_buy_price = round(spread_data.binance_quote.bid_price, 2)
+        # Adjust Binance price for better fill rate: bid - 0.01
+        binance_buy_price = round(spread_data.binance_quote.bid_price - 0.01, 2)
         bybit_sell_price = round(spread_data.bybit_quote.ask_price, 2)
-
-        # Create arbitrage task
         task = ArbitrageTask(
             user_id=user_id,
             strategy_type="forward",
@@ -124,11 +122,9 @@ class ArbitrageStrategy:
                 "error": f"Spread {spread_data.reverse_entry_spread} below target {target_spread}",
             }
 
-        # Use market prices directly for maker orders
-        binance_sell_price = round(spread_data.binance_quote.ask_price, 2)
+        # Adjust Binance price for better fill rate: ask + 0.01
+        binance_sell_price = round(spread_data.binance_quote.ask_price + 0.01, 2)
         bybit_buy_price = round(spread_data.bybit_quote.bid_price, 2)
-
-        # Create arbitrage task
         task = ArbitrageTask(
             user_id=user_id,
             strategy_type="reverse",
@@ -209,8 +205,8 @@ class ArbitrageStrategy:
         # Get current market data
         spread_data = await market_data_service.get_current_spread(use_cache=False)
 
-        # Use market prices directly for maker orders
-        binance_sell_price = round(spread_data.binance_quote.ask_price, 2)
+        # Adjust Binance price for better fill rate: ask + 0.01
+        binance_sell_price = round(spread_data.binance_quote.ask_price + 0.01, 2)
         bybit_buy_price = round(spread_data.bybit_quote.bid_price, 2)
 
         # Execute closing orders (reverse of opening)
@@ -273,8 +269,8 @@ class ArbitrageStrategy:
         # Get current market data
         spread_data = await market_data_service.get_current_spread(use_cache=False)
 
-        # Use market prices directly for maker orders
-        binance_buy_price = round(spread_data.binance_quote.bid_price, 2)
+        # Adjust Binance price for better fill rate: bid - 0.01
+        binance_buy_price = round(spread_data.binance_quote.bid_price - 0.01, 2)
         bybit_sell_price = round(spread_data.bybit_quote.ask_price, 2)
 
         # Execute closing orders

@@ -53,8 +53,8 @@ class SpreadAlertService:
 
         触发规则：
         - 正向开仓: 点差 >= forwardOpenPrice 且连续满足 forwardOpenSyncCount 次
-        - 正向平仓: 点差 >= forwardClosePrice 且连续满足 forwardCloseSyncCount 次
-        - 反向开仓: 点差 <= reverseOpenPrice 且连续满足 reverseOpenSyncCount 次
+        - 正向平仓: 点差 <= forwardClosePrice 且连续满足 forwardCloseSyncCount 次
+        - 反向开仓: 点差 >= reverseOpenPrice 且连续满足 reverseOpenSyncCount 次
         - 反向平仓: 点差 <= reverseClosePrice 且连续满足 reverseCloseSyncCount 次
         - 空值: 不触发任何提醒
         """
@@ -90,14 +90,14 @@ class SpreadAlertService:
                 # 条件不满足，重置计数
                 self.condition_counters[user_id][alert_type] = 0
 
-        # 2. 检查正向平仓点差值（点差 >= 阈值）
+        # 2. 检查正向平仓点差值（点差 <= 阈值）
         if market_data.get('forward_spread') is not None and alert_settings.get('forwardClosePrice') is not None:
             spread = market_data['forward_spread']
             threshold = alert_settings['forwardClosePrice']
             sync_count = alert_settings.get('forwardCloseSyncCount', 1)  # 默认1次
 
             alert_type = 'forward_close'
-            if spread >= threshold:
+            if spread <= threshold:
                 # 条件满足，增加计数
                 self.condition_counters[user_id][alert_type] = self.condition_counters[user_id].get(alert_type, 0) + 1
 
@@ -116,14 +116,14 @@ class SpreadAlertService:
                 # 条件不满足，重置计数
                 self.condition_counters[user_id][alert_type] = 0
 
-        # 3. 检查反向开仓点差值（点差 <= 阈值）
+        # 3. 检查反向开仓点差值（点差 >= 阈值）
         if market_data.get('reverse_spread') is not None and alert_settings.get('reverseOpenPrice') is not None:
             spread = market_data['reverse_spread']
             threshold = alert_settings['reverseOpenPrice']
             sync_count = alert_settings.get('reverseOpenSyncCount', 1)  # 默认1次
 
             alert_type = 'reverse_open'
-            if spread <= threshold:
+            if spread >= threshold:
                 # 条件满足，增加计数
                 self.condition_counters[user_id][alert_type] = self.condition_counters[user_id].get(alert_type, 0) + 1
 

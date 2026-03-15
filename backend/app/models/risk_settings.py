@@ -15,40 +15,40 @@ class RiskSettings(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, unique=True, index=True)
 
     # Account Net Asset Alerts
-    binance_net_asset = Column(Float, default=10000, nullable=False)
-    bybit_mt5_net_asset = Column(Float, default=10000, nullable=False)
-    total_net_asset = Column(Float, default=20000, nullable=False)
+    binance_net_asset = Column(Float, nullable=True)
+    bybit_mt5_net_asset = Column(Float, nullable=True)
+    total_net_asset = Column(Float, nullable=True)
 
     # Liquidation Price Alerts
-    binance_liquidation_price = Column(Float, default=2000, nullable=False)
-    bybit_mt5_liquidation_price = Column(Float, default=2000, nullable=False)
+    binance_liquidation_price = Column(Float, nullable=True)
+    bybit_mt5_liquidation_price = Column(Float, nullable=True)
 
     # MT5 Lag Count
-    mt5_lag_count = Column(Integer, default=5, nullable=False)
+    mt5_lag_count = Column(Integer, nullable=True)
 
     # Reverse Arbitrage (Long Bybit)
-    reverse_open_price = Column(Float, default=0.5, nullable=False)
-    reverse_open_sync_count = Column(Integer, default=3, nullable=False)
-    reverse_close_price = Column(Float, default=0.2, nullable=False)
-    reverse_close_sync_count = Column(Integer, default=3, nullable=False)
+    reverse_open_price = Column(Float, nullable=True)
+    reverse_open_sync_count = Column(Integer, nullable=True)
+    reverse_close_price = Column(Float, nullable=True)
+    reverse_close_sync_count = Column(Integer, nullable=True)
 
     # Forward Arbitrage (Long Binance)
-    forward_open_price = Column(Float, default=0.5, nullable=False)
-    forward_open_sync_count = Column(Integer, default=3, nullable=False)
-    forward_close_price = Column(Float, default=0.2, nullable=False)
-    forward_close_sync_count = Column(Integer, default=3, nullable=False)
+    forward_open_price = Column(Float, nullable=True)
+    forward_open_sync_count = Column(Integer, nullable=True)
+    forward_close_price = Column(Float, nullable=True)
+    forward_close_sync_count = Column(Integer, nullable=True)
 
     # Alert Sound Settings (file paths for uploaded MP3 files)
     single_leg_alert_sound = Column(String, nullable=True)  # Sound for single-leg trading alerts
-    single_leg_alert_repeat_count = Column(Integer, default=3, nullable=False)  # Number of times to repeat single-leg alert sound
+    single_leg_alert_repeat_count = Column(Integer, nullable=True)  # Number of times to repeat single-leg alert sound
     spread_alert_sound = Column(String, nullable=True)  # Sound for spread alerts
-    spread_alert_repeat_count = Column(Integer, default=3, nullable=False)  # Number of times to repeat spread alert sound
+    spread_alert_repeat_count = Column(Integer, nullable=True)  # Number of times to repeat spread alert sound
     net_asset_alert_sound = Column(String, nullable=True)  # Sound for net asset alerts
-    net_asset_alert_repeat_count = Column(Integer, default=3, nullable=False)  # Number of times to repeat net asset alert sound
+    net_asset_alert_repeat_count = Column(Integer, nullable=True)  # Number of times to repeat net asset alert sound
     mt5_alert_sound = Column(String, nullable=True)  # Sound for MT5 status alerts
-    mt5_alert_repeat_count = Column(Integer, default=3, nullable=False)  # Number of times to repeat MT5 alert sound
+    mt5_alert_repeat_count = Column(Integer, nullable=True)  # Number of times to repeat MT5 alert sound
     liquidation_alert_sound = Column(String, nullable=True)  # Sound for liquidation alerts
-    liquidation_alert_repeat_count = Column(Integer, default=3, nullable=False)  # Number of times to repeat liquidation alert sound
+    liquidation_alert_repeat_count = Column(Integer, nullable=True)  # Number of times to repeat liquidation alert sound
 
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     update_time = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
