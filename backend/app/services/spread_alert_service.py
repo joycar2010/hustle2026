@@ -30,6 +30,7 @@ class SpreadAlertService:
 
     def __init__(self):
         self.last_alert_time = {}  # 记录上次提醒时间，避免频繁通知
+        self.condition_counters = {}  # 记录连续满足条件的次数 {user_id: {alert_type: count}}
 
     async def check_and_send_spread_alerts(
         self,
@@ -39,72 +40,133 @@ class SpreadAlertService:
         alert_settings: Dict[str, Any]
     ):
         """
-        检查点差值并发送提醒（兼容负数阈值）
+        检查点差值并发送提醒（支持同步次数确认）
 
         Args:
             db: 数据库会话
             user_id: 用户ID
             market_data: 市场数据 {forward_spread, reverse_spread}
-            alert_settings: 提醒设置 {forwardOpenPrice, forwardClosePrice, reverseOpenPrice, reverseClosePrice}
+            alert_settings: 提醒设置 {
+                forwardOpenPrice, forwardClosePrice, reverseOpenPrice, reverseClosePrice,
+                forwardOpenSyncCount, forwardCloseSyncCount, reverseOpenSyncCount, reverseCloseSyncCount
+            }
 
-        触发规则（兼容负数阈值）：
-        - 正向开仓/平仓: 点差 >= 阈值（正数：点差超阈值触发；负数：始终触发）
-        - 反向开仓/平仓: 点差 <= 阈值（正数：点差低于阈值触发；负数：始终触发）
+        触发规则：
+        - 正向开仓: 点差 >= forwardOpenPrice 且连续满足 forwardOpenSyncCount 次
+        - 正向平仓: 点差 >= forwardClosePrice 且连续满足 forwardCloseSyncCount 次
+        - 反向开仓: 点差 <= reverseOpenPrice 且连续满足 reverseOpenSyncCount 次
+        - 反向平仓: 点差 <= reverseClosePrice 且连续满足 reverseCloseSyncCount 次
         - 空值: 不触发任何提醒
         """
         alerts_to_send = []
+
+        # 初始化用户的计数器
+        if user_id not in self.condition_counters:
+            self.condition_counters[user_id] = {}
 
         # 1. 检查正向开仓点差值（点差 >= 阈值）
         if market_data.get('forward_spread') is not None and alert_settings.get('forwardOpenPrice') is not None:
             spread = market_data['forward_spread']
             threshold = alert_settings['forwardOpenPrice']
+            sync_count = alert_settings.get('forwardOpenSyncCount', 1)  # 默认1次
+
+            alert_type = 'forward_open'
             if spread >= threshold:
-                alerts_to_send.append({
-                    'template_key': 'forward_open_spread_alert',
-                    'variables': {
-                        'spread': f"{spread:.2f}",
-                        'threshold': f"{threshold:.2f}"
-                    }
-                })
+                # 条件满足，增加计数
+                self.condition_counters[user_id][alert_type] = self.condition_counters[user_id].get(alert_type, 0) + 1
+
+                # 检查是否达到同步次数
+                if self.condition_counters[user_id][alert_type] >= sync_count:
+                    alerts_to_send.append({
+                        'template_key': 'forward_open_spread_alert',
+                        'variables': {
+                            'spread': f"{spread:.2f}",
+                            'threshold': f"{threshold:.2f}"
+                        }
+                    })
+                    # 重置计数器
+                    self.condition_counters[user_id][alert_type] = 0
+            else:
+                # 条件不满足，重置计数
+                self.condition_counters[user_id][alert_type] = 0
 
         # 2. 检查正向平仓点差值（点差 >= 阈值）
         if market_data.get('forward_spread') is not None and alert_settings.get('forwardClosePrice') is not None:
             spread = market_data['forward_spread']
             threshold = alert_settings['forwardClosePrice']
+            sync_count = alert_settings.get('forwardCloseSyncCount', 1)  # 默认1次
+
+            alert_type = 'forward_close'
             if spread >= threshold:
-                alerts_to_send.append({
-                    'template_key': 'forward_close_spread_alert',
-                    'variables': {
-                        'spread': f"{spread:.2f}",
-                        'threshold': f"{threshold:.2f}"
-                    }
-                })
+                # 条件满足，增加计数
+                self.condition_counters[user_id][alert_type] = self.condition_counters[user_id].get(alert_type, 0) + 1
+
+                # 检查是否达到同步次数
+                if self.condition_counters[user_id][alert_type] >= sync_count:
+                    alerts_to_send.append({
+                        'template_key': 'forward_close_spread_alert',
+                        'variables': {
+                            'spread': f"{spread:.2f}",
+                            'threshold': f"{threshold:.2f}"
+                        }
+                    })
+                    # 重置计数器
+                    self.condition_counters[user_id][alert_type] = 0
+            else:
+                # 条件不满足，重置计数
+                self.condition_counters[user_id][alert_type] = 0
 
         # 3. 检查反向开仓点差值（点差 <= 阈值）
         if market_data.get('reverse_spread') is not None and alert_settings.get('reverseOpenPrice') is not None:
             spread = market_data['reverse_spread']
             threshold = alert_settings['reverseOpenPrice']
-            if spread <= threshold:
-                alerts_to_send.append({
-                    'template_key': 'reverse_open_spread_alert',
-                    'variables': {
-                        'spread': f"{spread:.2f}",
-                        'threshold': f"{threshold:.2f}"
-                    }
-                })
+            sync_count = alert_settings.get('reverseOpenSyncCount', 1)  # 默认1次
 
-        # 4. 检查反向平仓点差值（点差 <= 阈值，兼容负数）
+            alert_type = 'reverse_open'
+            if spread <= threshold:
+                # 条件满足，增加计数
+                self.condition_counters[user_id][alert_type] = self.condition_counters[user_id].get(alert_type, 0) + 1
+
+                # 检查是否达到同步次数
+                if self.condition_counters[user_id][alert_type] >= sync_count:
+                    alerts_to_send.append({
+                        'template_key': 'reverse_open_spread_alert',
+                        'variables': {
+                            'spread': f"{spread:.2f}",
+                            'threshold': f"{threshold:.2f}"
+                        }
+                    })
+                    # 重置计数器
+                    self.condition_counters[user_id][alert_type] = 0
+            else:
+                # 条件不满足，重置计数
+                self.condition_counters[user_id][alert_type] = 0
+
+        # 4. 检查反向平仓点差值（点差 <= 阈值）
         if market_data.get('reverse_spread') is not None and alert_settings.get('reverseClosePrice') is not None:
             spread = market_data['reverse_spread']
             threshold = alert_settings['reverseClosePrice']
+            sync_count = alert_settings.get('reverseCloseSyncCount', 1)  # 默认1次
+
+            alert_type = 'reverse_close'
             if spread <= threshold:
-                alerts_to_send.append({
-                    'template_key': 'reverse_close_spread_alert',
-                    'variables': {
-                        'spread': f"{spread:.2f}",
-                        'threshold': f"{threshold:.2f}"
-                    }
-                })
+                # 条件满足，增加计数
+                self.condition_counters[user_id][alert_type] = self.condition_counters[user_id].get(alert_type, 0) + 1
+
+                # 检查是否达到同步次数
+                if self.condition_counters[user_id][alert_type] >= sync_count:
+                    alerts_to_send.append({
+                        'template_key': 'reverse_close_spread_alert',
+                        'variables': {
+                            'spread': f"{spread:.2f}",
+                            'threshold': f"{threshold:.2f}"
+                        }
+                    })
+                    # 重置计数器
+                    self.condition_counters[user_id][alert_type] = 0
+            else:
+                # 条件不满足，重置计数
+                self.condition_counters[user_id][alert_type] = 0
 
         # 发送所有提醒（冷却时间检查在_send_alert中进行）
         for alert in alerts_to_send:

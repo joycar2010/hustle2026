@@ -189,7 +189,6 @@ async function cancelAllOrders() {
 
 <style scoped>
 .emergency-trading-container {
-  height: 100%;
   display: flex;
   flex-direction: column;
   background-color: #1e2329;
@@ -201,13 +200,13 @@ async function cancelAllOrders() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 6px 12px;
   border-bottom: 1px solid #2b3139;
   flex-shrink: 0;
 }
 
 .title {
-  font-size: 14px;
+  font-size: 11px;
   font-weight: bold;
   color: #ffffff;
   margin: 0;
@@ -233,29 +232,27 @@ async function cancelAllOrders() {
 }
 
 .badge-text {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: bold;
   color: #f6465d;
 }
 
 .content {
-  flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  min-height: 0;
+  gap: 8px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .label {
-  font-size: 12px;
+  font-size: 10px;
   color: #848e9c;
 }
 
@@ -265,8 +262,8 @@ async function cancelAllOrders() {
   background-color: #252930;
   border: 1px solid #2b3139;
   border-radius: 4px;
-  padding: 10px 12px;
-  font-size: 14px;
+  padding: 6px 8px;
+  font-size: 12px;
   color: #ffffff;
   box-sizing: border-box;
 }
@@ -278,28 +275,27 @@ async function cancelAllOrders() {
 }
 
 .hint-text {
-  font-size: 12px;
+  font-size: 10px;
   color: #848e9c;
 }
 
 .action-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 .close-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 8px;
 }
 
 .btn {
-  padding: 12px 16px;
+  padding: 6px 10px;
   border: none;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: bold;
   cursor: pointer;
   transition: all 0.2s;
@@ -360,9 +356,9 @@ async function cancelAllOrders() {
 }
 
 .status-msg {
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .status-success {
@@ -376,11 +372,11 @@ async function cancelAllOrders() {
 }
 
 .quick-actions {
-  padding-top: 16px;
+  padding-top: 8px;
   border-top: 1px solid #2b3139;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* 移动端H5竖屏适配 */
