@@ -68,6 +68,13 @@ async def get_opportunities(
         symbol: 交易对
         limit: 返回记录数限制
     """
+    # Convert timezone-aware datetimes to naive (database uses TIMESTAMP without timezone)
+    if start_time and start_time.tzinfo is not None:
+        start_time = start_time.replace(tzinfo=None)
+
+    if end_time and end_time.tzinfo is not None:
+        end_time = end_time.replace(tzinfo=None)
+
     # 构建查询条件
     conditions = [ArbitrageOpportunity.symbol == symbol]
 
@@ -122,6 +129,13 @@ async def get_opportunity_stats(
         end_time: 结束时间
         symbol: 交易对
     """
+    # Convert timezone-aware datetimes to naive (database uses TIMESTAMP without timezone)
+    if start_time and start_time.tzinfo is not None:
+        start_time = start_time.replace(tzinfo=None)
+
+    if end_time and end_time.tzinfo is not None:
+        end_time = end_time.replace(tzinfo=None)
+
     # 构建查询条件
     conditions = [ArbitrageOpportunity.symbol == symbol]
 

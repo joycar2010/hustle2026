@@ -777,9 +777,9 @@ async function fetchPendingOrderCounts() {
     const response = await api.get('/api/v1/trading/orders/realtime')
     const orders = response.data || []
 
-    // Count ASK and BID orders
-    askOrderCount.value = orders.filter(order => order.side === 'Sell').length
-    bidOrderCount.value = orders.filter(order => order.side === 'Buy').length
+    // Count ASK and BID orders (backend returns lowercase 'buy' and 'sell')
+    askOrderCount.value = orders.filter(order => order.side === 'sell').length
+    bidOrderCount.value = orders.filter(order => order.side === 'buy').length
   } catch (error) {
     console.error('Failed to fetch pending orders:', error)
   }
@@ -819,11 +819,11 @@ async function showPendingOrdersModal(type) {
     const response = await api.get('/api/v1/trading/orders/realtime')
     const orders = response.data || []
 
-    // Filter orders by type
+    // Filter orders by type (backend returns lowercase 'buy' and 'sell')
     if (type === 'ASK') {
-      pendingOrders.value = orders.filter(order => order.side === 'Sell')
+      pendingOrders.value = orders.filter(order => order.side === 'sell')
     } else {
-      pendingOrders.value = orders.filter(order => order.side === 'Buy')
+      pendingOrders.value = orders.filter(order => order.side === 'buy')
     }
 
     modalType.value = type

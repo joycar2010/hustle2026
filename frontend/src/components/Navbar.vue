@@ -338,7 +338,7 @@ const allNavItems = [
   },
   {
     path: '/strategies',
-    label: '策略控制',
+    label: '策略配置',
     icon: 'StrategiesIcon',
   },
   {

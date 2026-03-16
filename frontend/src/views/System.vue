@@ -2839,7 +2839,7 @@ function getFileName(path) {
 
 // Cleanup on unmount
 onUnmounted(() => {
-  stopLogRefresh()
+  // Cleanup if needed
 })
 
 // Push stream management functions

@@ -2,9 +2,88 @@
 import hmac
 import hashlib
 import time
+import re
+from datetime import datetime
 from typing import Dict, Any, Optional
 import aiohttp
 from app.core.config import settings
+
+
+def format_binance_error(error_data: Dict[str, Any]) -> str:
+    """
+    格式化Binance API错误信息为中文
+
+    Args:
+        error_data: Binance API返回的错误数据
+
+    Returns:
+        格式化后的中文错误信息
+    """
+    if not isinstance(error_data, dict):
+        return str(error_data)
+
+    code = error_data.get('code', '')
+    msg = error_data.get('msg', '')
+
+    # 错误代码映射
+    error_messages = {
+        -1003: "请求频率过高",
+        -1021: "时间戳不同步",
+        -2010: "余额不足",
+        -2011: "订单不存在",
+        -2013: "订单不存在",
+        -2014: "API密钥无效",
+        -2015: "API密钥格式无效",
+        -1022: "签名验证失败",
+        -4000: "参数无效",
+    }
+
+    base_msg = error_messages.get(code, f"API错误 (代码: {code})")
+
+    # 特殊处理IP封禁错误
+    if code == -1003 and 'banned until' in msg:
+        # 提取IP和解禁时间戳
+        ip_match = re.search(r'IP\(([^)]+)\)', msg)
+        timestamp_match = re.search(r'banned until (\d+)', msg)
+
+        if ip_match and timestamp_match:
+            ip = ip_match.group(1)
+            ban_until_ms = int(timestamp_match.group(1))
+
+            # 转换为北京时间
+            ban_until_dt = datetime.fromtimestamp(ban_until_ms / 1000)
+            beijing_time = ban_until_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            # 计算剩余时间
+            now_ms = int(time.time() * 1000)
+            remaining_ms = ban_until_ms - now_ms
+
+            if remaining_ms > 0:
+                remaining_seconds = remaining_ms // 1000
+                remaining_minutes = remaining_seconds // 60
+                remaining_hours = remaining_minutes // 60
+
+                if remaining_hours > 0:
+                    time_str = f"{remaining_hours}小时{remaining_minutes % 60}分钟"
+                elif remaining_minutes > 0:
+                    time_str = f"{remaining_minutes}分钟{remaining_seconds % 60}秒"
+                else:
+                    time_str = f"{remaining_seconds}秒"
+
+                return (
+                    f"⚠️ IP地址 {ip} 因请求频率过高已被封禁\n"
+                    f"📅 解禁时间: {beijing_time} (北京时间)\n"
+                    f"⏱️ 剩余时间: {time_str}\n"
+                    f"💡 建议: 请使用WebSocket获取实时数据以避免封禁"
+                )
+            else:
+                return f"IP地址 {ip} 的封禁已解除，可以重新连接"
+
+    # 其他错误
+    if msg:
+        return f"{base_msg}: {msg}"
+
+    return base_msg
 
 
 class BinanceFuturesClient:
@@ -62,10 +141,11 @@ class BinanceFuturesClient:
                 async with session.request(method, full_url, headers=headers, **kwargs) as resp:
                     data = await resp.json()
                     if resp.status != 200:
-                        raise Exception(f"Binance API error: {data}")
+                        error_msg = format_binance_error(data)
+                        raise Exception(f"Binance API 错误: {error_msg}")
                     return data
             except aiohttp.ClientError as e:
-                raise Exception(f"Network error: {str(e)}")
+                raise Exception(f"网络错误: {str(e)}")
 
         session = await self._get_session()
 
@@ -74,11 +154,12 @@ class BinanceFuturesClient:
                 data = await resp.json()
 
                 if resp.status != 200:
-                    raise Exception(f"Binance API error: {data}")
+                    error_msg = format_binance_error(data)
+                    raise Exception(f"Binance API 错误: {error_msg}")
 
                 return data
         except aiohttp.ClientError as e:
-            raise Exception(f"Network error: {str(e)}")
+            raise Exception(f"网络错误: {str(e)}")
 
     # Public endpoints (no authentication required)
 

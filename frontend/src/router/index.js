@@ -35,7 +35,7 @@ const routes = [
   {
     path: '/strategies',
     name: 'Strategies',
-    component: () => import('@/views/Strategies.vue'),
+    component: () => import('@/views/StrategiesWorkflow.vue'),
     meta: { requiresAuth: true }
   },
   {

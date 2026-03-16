@@ -2,12 +2,101 @@
 import hmac
 import hashlib
 import time
+import re
 import logging
+from datetime import datetime
 from typing import Dict, Any, Optional
 import aiohttp
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def format_bybit_error(ret_code: int, ret_msg: str) -> str:
+    """
+    格式化Bybit API错误信息为中文
+
+    Args:
+        ret_code: Bybit API返回的错误代码
+        ret_msg: Bybit API返回的错误信息
+
+    Returns:
+        格式化后的中文错误信息
+    """
+    # 错误代码映射
+    error_messages = {
+        10001: "参数错误",
+        10002: "请求无效",
+        10003: "API密钥无效",
+        10004: "签名验证失败",
+        10005: "权限不足",
+        10006: "请求频率过高",
+        10016: "服务器繁忙",
+        10018: "IP地址被限制",
+        20001: "订单不存在",
+        20003: "订单数量无效",
+        20004: "订单价格无效",
+        20006: "余额不足",
+        20007: "持仓不足",
+        110001: "订单不存在",
+        110003: "订单已关闭",
+        110004: "订单已取消",
+        110007: "订单数量超过限制",
+        110025: "订单价格超出限制",
+        110043: "余额不足",
+        170130: "风险限额不足",
+        170131: "持仓风险过高",
+    }
+
+    base_msg = error_messages.get(ret_code, f"API错误 (代码: {ret_code})")
+
+    # 特殊处理IP封禁错误
+    if ret_code == 10006 or ret_code == 10018:
+        # 检查是否包含封禁时间信息
+        timestamp_match = re.search(r'banned until (\d+)', ret_msg)
+        ip_match = re.search(r'IP[:\s]*([0-9.]+)', ret_msg)
+
+        if timestamp_match:
+            ban_until_ms = int(timestamp_match.group(1))
+            ip = ip_match.group(1) if ip_match else "当前IP"
+
+            # 转换为北京时间
+            ban_until_dt = datetime.fromtimestamp(ban_until_ms / 1000)
+            beijing_time = ban_until_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            # 计算剩余时间
+            now_ms = int(time.time() * 1000)
+            remaining_ms = ban_until_ms - now_ms
+
+            if remaining_ms > 0:
+                remaining_seconds = remaining_ms // 1000
+                remaining_minutes = remaining_seconds // 60
+                remaining_hours = remaining_minutes // 60
+
+                if remaining_hours > 0:
+                    time_str = f"{remaining_hours}小时{remaining_minutes % 60}分钟"
+                elif remaining_minutes > 0:
+                    time_str = f"{remaining_minutes}分钟{remaining_seconds % 60}秒"
+                else:
+                    time_str = f"{remaining_seconds}秒"
+
+                return (
+                    f"⚠️ IP地址 {ip} 因请求频率过高已被封禁\n"
+                    f"📅 解禁时间: {beijing_time} (北京时间)\n"
+                    f"⏱️ 剩余时间: {time_str}\n"
+                    f"💡 建议: 请使用WebSocket获取实时数据以避免封禁"
+                )
+            else:
+                return f"IP地址 {ip} 的封禁已解除，可以重新连接"
+        else:
+            # 没有具体时间信息的频率限制
+            return f"{base_msg}: 请求过于频繁，请稍后再试"
+
+    # 其他错误
+    if ret_msg and ret_msg != "OK":
+        return f"{base_msg}: {ret_msg}"
+
+    return base_msg
 
 
 class BybitV5Client:
@@ -107,7 +196,7 @@ class BybitV5Client:
                     logger.error(f"Request URL: {url}")
                     logger.error(f"Request params: {kwargs.get('params', {})}")
                     logger.error(f"Response status: {resp.status}")
-                    raise Exception("Bybit API returned empty response")
+                    raise Exception("Bybit API 返回空响应")
 
                 # Log Bybit API response for debugging
                 if data.get("retCode") != 0:
@@ -117,12 +206,15 @@ class BybitV5Client:
                     logger.error(f"Full response: {data}")
 
                 if data.get("retCode") != 0:
-                    raise Exception(f"Bybit API error: {data.get('retMsg', 'Unknown error')}")
+                    ret_code = data.get("retCode", 0)
+                    ret_msg = data.get("retMsg", "未知错误")
+                    error_msg = format_bybit_error(ret_code, ret_msg)
+                    raise Exception(f"Bybit API 错误: {error_msg}")
 
                 return data.get("result", {})
         except aiohttp.ClientError as e:
             logger.error(f"Network error calling Bybit API: {str(e)}")
-            raise Exception(f"Network error: {str(e)}")
+            raise Exception(f"网络错误: {str(e)}")
 
     # Public endpoints (no authentication required)
 
