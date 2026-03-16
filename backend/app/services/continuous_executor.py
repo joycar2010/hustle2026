@@ -211,7 +211,7 @@ class ContinuousStrategyExecutor:
                     if not hasattr(bybit_account, 'mt5_client'):
                         from app.services.mt5_client import MT5Client
                         bybit_account.mt5_client = MT5Client(
-                            login=bybit_account.mt5_id,
+                            login=int(bybit_account.mt5_id),  # Convert to int
                             password=bybit_account.mt5_primary_pwd,
                             server=bybit_account.mt5_server
                         )
@@ -224,7 +224,7 @@ class ContinuousStrategyExecutor:
                             raise Exception(error_msg)
 
                     # Get Binance positions
-                    binance_positions = binance_account.binance_client.get_positions(symbol="XAUUSDT")
+                    binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
                     binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
                     # Get Bybit positions - MT5 must be connected
@@ -454,8 +454,8 @@ class ContinuousStrategyExecutor:
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
 
-            # Small delay to prevent API spam
-            await asyncio.sleep(0.01)
+            # Small delay to prevent API spam (increased to 2 seconds to avoid Binance rate limit)
+            await asyncio.sleep(2.0)
 
         # ========== 循环退出后输出原因 ==========
         with open("ladder_debug.log", "a") as f:

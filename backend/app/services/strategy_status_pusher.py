@@ -30,7 +30,7 @@ class StrategyExecutionStatusPusher:
             websocket_manager: WebSocket manager instance (uses global if not provided)
         """
         self.manager = websocket_manager or manager
-        self._push_queue = asyncio.Queue()
+        self._push_queue = None  # Will be created in start()
         self._is_running = False
         self._push_task: Optional[asyncio.Task] = None
 
@@ -40,6 +40,8 @@ class StrategyExecutionStatusPusher:
             logger.warning("Status pusher already running")
             return
 
+        # Create queue in the current event loop
+        self._push_queue = asyncio.Queue()
         self._is_running = True
         self._push_task = asyncio.create_task(self._push_worker())
         logger.info("Strategy execution status pusher started")

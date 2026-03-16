@@ -322,6 +322,20 @@ const binanceLongPositions = ref([]) // Binance LONG positions
 const bybitShortPositions = ref([]) // Bybit SHORT positions
 const bybitLongPositions = ref([]) // Bybit LONG positions
 
+// Computed position totals
+const binanceLongTotal = computed(() => {
+  return binanceLongPositions.value.reduce((sum, pos) => sum + (pos.size || 0), 0)
+})
+const binanceShortTotal = computed(() => {
+  return binanceShortPositions.value.reduce((sum, pos) => sum + (pos.size || 0), 0)
+})
+const bybitLongTotal = computed(() => {
+  return bybitLongPositions.value.reduce((sum, pos) => sum + (pos.size || 0), 0)
+})
+const bybitShortTotal = computed(() => {
+  return bybitShortPositions.value.reduce((sum, pos) => sum + (pos.size || 0), 0)
+})
+
 // Fee data
 const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
@@ -485,7 +499,20 @@ watch(() => marketStore.lastMessage, (message) => {
   }
 }, { deep: false })
 
+// Watch for Redis status updates via WebSocket
+watch(() => marketStore.lastMessage, (message) => {
+  if (message && message.type === 'redis_status') {
+    redisStatus.value = message.data
+  }
+}, { deep: false })
+
 function handleAccountBalanceUpdate(data) {
+  console.log('[handleAccountBalanceUpdate] Received data:', {
+    accountsCount: data.accounts?.length,
+    positionsCount: data.positions?.length,
+    positions: data.positions
+  })
+
   // Extract fee data from accounts
   if (data.accounts && data.accounts.length > 0) {
     // Reset fee values
@@ -526,6 +553,13 @@ function handleAccountBalanceUpdate(data) {
 
   // Extract actual positions from positions array for spread calculation
   if (data.positions && data.positions.length > 0) {
+    console.log('[handleAccountBalanceUpdate] Before reset:', {
+      binanceLong: binanceLongPositions.value.length,
+      binanceShort: binanceShortPositions.value.length,
+      bybitLong: bybitLongPositions.value.length,
+      bybitShort: bybitShortPositions.value.length
+    })
+
     // Reset position arrays
     binanceShortPositions.value = []
     binanceLongPositions.value = []
@@ -560,6 +594,17 @@ function handleAccountBalanceUpdate(data) {
           binanceShortPositions.value.push(posData)
         }
       }
+    })
+
+    console.log('[handleAccountBalanceUpdate] After processing:', {
+      binanceLong: binanceLongPositions.value,
+      binanceShort: binanceShortPositions.value,
+      bybitLong: bybitLongPositions.value,
+      bybitShort: bybitShortPositions.value,
+      binanceLongTotal: binanceLongTotal.value,
+      binanceShortTotal: binanceShortTotal.value,
+      bybitLongTotal: bybitLongTotal.value,
+      bybitShortTotal: bybitShortTotal.value
     })
   }
   // Note: If positions is empty or undefined, keep existing position arrays unchanged
@@ -598,20 +643,6 @@ onMounted(() => {
   exchangeRateTimer = setInterval(() => {
     fetchExchangeRate()
   }, 600000)
-
-  // 监听 Redis 状态推送
-  watch(() => marketStore.lastMessage, (message) => {
-    if (message && message.type === 'redis_status') {
-      redisStatus.value = message.data
-    }
-  })
-
-  // 监听账户余额WebSocket推送（替代定时轮询）
-  watch(() => marketStore.accountBalanceData, (data) => {
-    if (data) {
-      updateAccountBalanceFromWebSocket(data)
-    }
-  })
 
   // 初始化系统状态并开始轮询
   updateSystemStatus()
@@ -652,83 +683,6 @@ function resetBinanceLag() {
   const now = Date.now()
   binanceUpdateTimestamps.value = [now]
   console.log('Binance lag count reset')
-}
-
-// Update account balance from WebSocket push
-function updateAccountBalanceFromWebSocket(data) {
-  // Extract fee data from accounts
-  if (data.accounts && data.accounts.length > 0) {
-    // Reset fee values
-    bybitLongSwapFee.value = 0
-    bybitShortSwapFee.value = 0
-    binanceLongFundingRate.value = 0
-    binanceShortFundingRate.value = 0
-
-    // Reset position values
-    forwardActualPosition.value = 0
-    reverseActualPosition.value = 0
-
-    // Get first account's positions and aggregate fees from all accounts
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
-    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
-
-    // Use first account's total_positions instead of aggregating
-    if (bybitAccounts.length > 0) {
-      reverseActualPosition.value = bybitAccounts[0].balance?.total_positions || 0
-    }
-    if (binanceAccounts.length > 0) {
-      forwardActualPosition.value = binanceAccounts[0].balance?.total_positions || 0
-    }
-
-    // Aggregate fees from all accounts
-    data.accounts.forEach(account => {
-      if (account.platform_id === 2) {
-        // Bybit accounts
-        bybitLongSwapFee.value += account.balance?.long_swap_fee || 0
-        bybitShortSwapFee.value += account.balance?.short_swap_fee || 0
-      } else if (account.platform_id === 1) {
-        // Binance accounts
-        binanceLongFundingRate.value += account.balance?.long_funding_rate || 0
-        binanceShortFundingRate.value += account.balance?.short_funding_rate || 0
-      }
-    })
-  }
-
-  // Extract actual positions from positions array for spread calculation
-  if (data.positions && data.positions.length > 0) {
-    // Reset position arrays
-    binanceShortPositions.value = []
-    binanceLongPositions.value = []
-    bybitShortPositions.value = []
-    bybitLongPositions.value = []
-
-    // Categorize positions by platform and side
-    data.positions.forEach(pos => {
-      const posSize = Math.abs(pos.size || 0)
-      const posData = {
-        size: posSize,
-        entry_price: pos.entry_price || 0,
-        current_price: pos.current_price || 0
-      }
-
-      if (pos.platform_id === 1) {
-        // Binance positions - check both 'SHORT'/'LONG' and 'Sell'/'Buy' formats
-        if (pos.side === 'SHORT' || pos.side === 'Sell') {
-          binanceShortPositions.value.push(posData)
-        } else if (pos.side === 'LONG' || pos.side === 'Buy') {
-          binanceLongPositions.value.push(posData)
-        }
-      } else if (pos.platform_id === 2) {
-        // Bybit positions - check both 'SHORT'/'LONG' and 'Sell'/'Buy' formats
-        if (pos.side === 'SHORT' || pos.side === 'Sell') {
-          bybitShortPositions.value.push(posData)
-        } else if (pos.side === 'LONG' || pos.side === 'Buy') {
-          bybitLongPositions.value.push(posData)
-        }
-      }
-    })
-  }
-  // Note: If positions is empty or undefined, keep existing position arrays unchanged
 }
 
 async function fetchAccountData() {
@@ -1051,7 +1005,11 @@ defineExpose({
   bybitLongSwapFee,
   bybitShortSwapFee,
   binanceLongFundingRate,
-  binanceShortFundingRate
+  binanceShortFundingRate,
+  binanceLongTotal,
+  binanceShortTotal,
+  bybitLongTotal,
+  bybitShortTotal
 })
 </script>
 

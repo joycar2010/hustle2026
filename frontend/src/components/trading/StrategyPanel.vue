@@ -32,12 +32,12 @@
       </div>
 
       <!-- 实仓和点差信息 -->
-      <div v-if="marketCardsRef" class="text-2xl font-bold text-center text-[#3b82f6]">
+      <div v-if="marketCardsRef" class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
-          实仓: {{ marketCardsRef.reverseActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
+          B多仓: {{ marketCardsRef.bybitLongTotal?.toFixed(2) || '0.00' }} A空仓: {{ marketCardsRef.binanceShortTotal?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
         </span>
         <span v-else>
-          实仓: {{ marketCardsRef.forwardActualPosition?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.forwardSpread?.toFixed(2) || '0.00' }}
+          A多仓: {{ marketCardsRef.binanceLongTotal?.toFixed(2) || '0.00' }} B空仓: {{ marketCardsRef.bybitShortTotal?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.forwardSpread?.toFixed(2) || '0.00' }}
         </span>
       </div>
     </div>
@@ -899,26 +899,74 @@ function handlePositionChange(data) {
 }
 
 function handleExecutionStarted(data) {
-  if (data.strategy_id !== configId.value) return
+  // Check if this is for continuous execution or regular execution
+  const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
 
-  executing.value = true
-  console.log(`[WebSocket] Execution started: ${data.action}`)
+  if (!isContinuousExecution && data.strategy_id !== configId.value) return
+
+  // For continuous execution, extract action from strategy_id
+  if (isContinuousExecution) {
+    const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
+    console.log(`[WebSocket] Continuous execution started: ${action}`)
+
+    // Initialize status display
+    continuousExecutionStatus.value[action] = {
+      status: 'running',
+      current_ladder: 0,
+      trades_executed: 0
+    }
+  } else {
+    executing.value = true
+    console.log(`[WebSocket] Execution started: ${data.action}`)
+  }
 }
 
 function handleExecutionCompleted(data) {
-  if (data.strategy_id !== configId.value) return
+  // Check if this is for continuous execution or regular execution
+  const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
 
-  executing.value = false
-  notificationStore.showStrategyNotification(`策略执行完成: ${data.action}`, 'success')
-  console.log(`[WebSocket] Execution completed: ${data.action}`)
+  if (!isContinuousExecution && data.strategy_id !== configId.value) return
+
+  // For continuous execution, extract action from strategy_id
+  if (isContinuousExecution) {
+    const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
+    console.log(`[WebSocket] Continuous execution completed: ${action}`)
+
+    // Update status
+    if (continuousExecutionStatus.value[action]) {
+      continuousExecutionStatus.value[action].status = 'completed'
+    }
+
+    notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
+  } else {
+    executing.value = false
+    notificationStore.showStrategyNotification(`策略执行完成: ${data.action}`, 'success')
+    console.log(`[WebSocket] Execution completed: ${data.action}`)
+  }
 }
 
 function handleExecutionError(data) {
-  if (data.strategy_id !== configId.value) return
+  // Check if this is for continuous execution or regular execution
+  const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
 
-  executing.value = false
-  notificationStore.showStrategyNotification(`策略执行错误: ${data.error_message}`, 'error')
-  console.log(`[WebSocket] Execution error: ${data.error_message}`)
+  if (!isContinuousExecution && data.strategy_id !== configId.value) return
+
+  // For continuous execution, extract action from strategy_id
+  if (isContinuousExecution) {
+    const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
+    console.log(`[WebSocket] Continuous execution error: ${action}, ${data.error_message}`)
+
+    // Update status
+    if (continuousExecutionStatus.value[action]) {
+      continuousExecutionStatus.value[action].status = 'failed'
+    }
+
+    notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}错误: ${data.error_message}`, 'error')
+  } else {
+    executing.value = false
+    notificationStore.showStrategyNotification(`策略执行错误: ${data.error_message}`, 'error')
+    console.log(`[WebSocket] Execution error: ${data.error_message}`)
+  }
 }
 
 function handleOrderExecuted(data) {
@@ -1184,16 +1232,21 @@ const toggleOpeningExecution = debounce(async function() {
 }, 500)
 
 const toggleClosingExecution = debounce(async function() {
+  console.log('[toggleClosingExecution] Called, current state:', continuousExecutionEnabled.value.closing)
+
   if (continuousExecutionEnabled.value.closing) {
     // Stop execution
+    console.log('[toggleClosingExecution] Stopping execution')
     await stopContinuousExecution('closing')
   } else {
     // Start execution
+    console.log('[toggleClosingExecution] Starting execution')
     // Clear previous errors
     validationErrors.value = []
 
     // Validate accounts
     const accountValidation = validateAccountsForExecution()
+    console.log('[toggleClosingExecution] Account validation:', accountValidation)
     if (!accountValidation.valid) {
       validationErrors.value = [accountValidation.message]
       return
@@ -1201,6 +1254,7 @@ const toggleClosingExecution = debounce(async function() {
 
     // Validate ladder configuration
     const configValidation = validateLadderConfig('closing')
+    console.log('[toggleClosingExecution] Config validation:', configValidation)
     if (!configValidation.valid) {
       validationErrors.value = configValidation.errors
       return
@@ -1208,12 +1262,14 @@ const toggleClosingExecution = debounce(async function() {
 
     // Check position sufficiency
     const positionCheck = await checkPositionForClosing()
+    console.log('[toggleClosingExecution] Position check:', positionCheck)
     if (!positionCheck.valid) {
       validationErrors.value = [positionCheck.message]
       return
     }
 
     // Start continuous execution
+    console.log('[toggleClosingExecution] All validations passed, starting continuous execution')
     await startContinuousExecution('closing')
   }
 }, 500)

@@ -968,9 +968,21 @@ class AccountDataService:
         """Aggregate data from multiple accounts"""
         import asyncio
 
-        # Fetch data from all accounts concurrently
+        # Deduplicate accounts by (platform_id, api_key, mt5_id) to avoid duplicate data
+        seen = set()
+        unique_accounts = []
+        for account in accounts:
+            # Create a unique key based on platform, API key, and MT5 ID
+            key = (account.platform_id, account.api_key, account.mt5_id or '')
+            if key not in seen:
+                seen.add(key)
+                unique_accounts.append(account)
+            else:
+                logger.warning(f"Skipping duplicate account: {account.account_name} (ID: {account.account_id})")
+
+        # Fetch data from all unique accounts concurrently
         account_data_list = await asyncio.gather(
-            *[self.get_account_data(account) for account in accounts],
+            *[self.get_account_data(account) for account in unique_accounts],
             return_exceptions=True,
         )
 
@@ -987,11 +999,11 @@ class AccountDataService:
                     error_msg = f"RATE_LIMIT:{ban_until_ms}"
 
                 failed_accounts.append({
-                    "account_id": str(accounts[i].account_id),
-                    "account_name": accounts[i].account_name,
-                    "platform_id": accounts[i].platform_id,
-                    "is_mt5_account": accounts[i].is_mt5_account,
-                    "is_active": accounts[i].is_active,  # Include is_active status
+                    "account_id": str(unique_accounts[i].account_id),
+                    "account_name": unique_accounts[i].account_name,
+                    "platform_id": unique_accounts[i].platform_id,
+                    "is_mt5_account": unique_accounts[i].is_mt5_account,
+                    "is_active": unique_accounts[i].is_active,  # Include is_active status
                     "error": error_msg,
                 })
             else:
@@ -1006,15 +1018,33 @@ class AccountDataService:
         total_unrealized_pnl = sum(acc["balance"]["unrealized_pnl"] for acc in successful_accounts)
         total_daily_pnl = sum(acc["daily_pnl"] for acc in successful_accounts)
 
-        # Aggregate positions
+        # Aggregate positions with deduplication
         all_positions = []
+        seen_positions = set()  # Track unique positions by (platform_id, symbol, side, size, entry_price)
+
         for acc in successful_accounts:
             for pos in acc["positions"]:
-                pos["account_id"] = acc["account_id"]
-                pos["account_name"] = acc["account_name"]
-                pos["platform_id"] = acc["platform_id"]
-                pos["is_mt5_account"] = acc["is_mt5_account"]
-                all_positions.append(pos)
+                # Create a unique key for this position including entry_price
+                # This ensures we only deduplicate truly identical positions from duplicate accounts
+                # while preserving multiple positions with same size but different entry prices
+                pos_key = (
+                    acc["platform_id"],
+                    pos.get("symbol", ""),
+                    pos.get("side", ""),
+                    round(float(pos.get("size", 0)), 6),  # Round to avoid floating point issues
+                    round(float(pos.get("entry_price", 0)), 2)  # Include entry price in key
+                )
+
+                # Only add if not seen before
+                if pos_key not in seen_positions:
+                    seen_positions.add(pos_key)
+                    pos["account_id"] = acc["account_id"]
+                    pos["account_name"] = acc["account_name"]
+                    pos["platform_id"] = acc["platform_id"]
+                    pos["is_mt5_account"] = acc["is_mt5_account"]
+                    all_positions.append(pos)
+                else:
+                    logger.warning(f"Skipping duplicate position: {acc['account_name']} {pos.get('symbol')} {pos.get('side')} {pos.get('size')} @ {pos.get('entry_price')}")
 
         # Calculate average risk ratio (weighted by margin balance)
         total_risk_weighted = 0

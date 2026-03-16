@@ -18,7 +18,10 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   function connect() {
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      console.log('[WebSocket] Already connected or connecting, skipping')
+      return
+    }
 
     token = getToken()
 
@@ -29,10 +32,12 @@ export const useMarketStore = defineStore('market', () => {
     }
 
     const url = `${WS_URL}?token=${token}`
+    console.log('[WebSocket] Connecting to:', url)
 
     ws = new WebSocket(url)
 
     ws.onopen = () => {
+      console.log('[WebSocket] Connected successfully')
       connected.value = true
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
@@ -43,6 +48,11 @@ export const useMarketStore = defineStore('market', () => {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
+
+        // Debug: log account_balance messages
+        if (msg.type === 'account_balance') {
+          console.log('[WebSocket] Received account_balance message', new Date().toISOString())
+        }
 
         // Store last message for components to watch
         lastMessage.value = msg

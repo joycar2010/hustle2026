@@ -399,22 +399,46 @@ function getAlertColor(type) {
 function getBanInfo(account) {
   if (!account.error) return null
 
+  console.log('[getBanInfo] account.error:', account.error)
+
   // Check if error is a rate limit ban
   if (account.error.startsWith('RATE_LIMIT:')) {
     const banUntilMs = parseInt(account.error.split(':')[1])
-    if (banUntilMs && banUntilMs > 0) {
-      const banUntilDate = new Date(banUntilMs)
-      const now = new Date()
-      const minutesLeft = Math.ceil((banUntilDate - now) / 1000 / 60)
+    console.log('[getBanInfo] banUntilMs:', banUntilMs)
 
-      if (minutesLeft > 0) {
+    if (banUntilMs && banUntilMs > 0) {
+      const now = Date.now()
+      const remainingMs = banUntilMs - now
+      console.log('[getBanInfo] now:', now, 'remainingMs:', remainingMs)
+
+      if (remainingMs > 0) {
+        // Convert to Beijing time (UTC+8)
+        const banUntilDate = new Date(banUntilMs)
+        const beijingOffset = 8 * 60 // Beijing is UTC+8
+        const localOffset = banUntilDate.getTimezoneOffset() // Local timezone offset in minutes
+        const beijingTime = new Date(banUntilMs + (beijingOffset + localOffset) * 60 * 1000)
+
         // Format as Beijing time (24-hour format)
-        const hours = banUntilDate.getHours()
-        const minutes = banUntilDate.getMinutes()
-        const seconds = banUntilDate.getSeconds()
+        const hours = beijingTime.getHours()
+        const minutes = beijingTime.getMinutes()
+        const seconds = beijingTime.getSeconds()
         const displayTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 
-        return `API限流至 ${displayTime} (约${minutesLeft}分钟)`
+        // Calculate remaining time
+        const remainingSeconds = Math.ceil(remainingMs / 1000)
+        const remainingMinutes = Math.floor(remainingSeconds / 60)
+        const remainingSecondsOnly = remainingSeconds % 60
+
+        let remainingText = ''
+        if (remainingMinutes > 0) {
+          remainingText = `${remainingMinutes}分${remainingSecondsOnly}秒`
+        } else {
+          remainingText = `${remainingSecondsOnly}秒`
+        }
+
+        const result = `API限流至北京时间 ${displayTime} (剩余 ${remainingText})`
+        console.log('[getBanInfo] result:', result)
+        return result
       }
     }
   }
