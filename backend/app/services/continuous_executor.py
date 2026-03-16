@@ -41,7 +41,7 @@ class ContinuousStrategyExecutor:
         strategy_id: int,
         order_executor: OrderExecutorV2,
         position_mgr: Optional[PositionManager] = None,
-        trigger_check_interval: float = 0.05  # 50ms default
+        trigger_check_interval: float = 0.1  # 100ms default (increased to reduce API calls)
     ):
         """
         Initialize continuous executor.
