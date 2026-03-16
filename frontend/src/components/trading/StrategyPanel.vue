@@ -265,8 +265,8 @@
             </div>
           </div>
 
-        <!-- Data Sync Quantities -->
-        <div class="grid grid-cols-3 gap-2">
+        <!-- Data Sync Quantities and Trigger Intervals -->
+        <div class="grid grid-cols-4 gap-2">
           <div>
             <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
               {{ type === 'forward' ? '正开次数' : '反开次数' }}
@@ -279,6 +279,22 @@
               min="1"
               class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
+          </div>
+
+          <div>
+            <label :for="`openingTriggerCheckInterval-${type}`" class="text-xs text-gray-400 mb-1 block">
+              {{ type === 'forward' ? '正开频率' : '反开频率' }}
+            </label>
+            <input
+              :id="`openingTriggerCheckInterval-${type}`"
+              v-model.number="config.openingTriggerCheckInterval"
+              type="number"
+              step="100"
+              min="500"
+              max="1000"
+              class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
+            />
+            <div class="text-xs text-[#0ecb81] mt-1 text-center">{{ config.openingTriggerCheckInterval }}ms</div>
           </div>
 
           <div>
@@ -296,22 +312,19 @@
           </div>
 
           <div>
-            <label :for="`triggerCheckInterval-${type}`" class="text-xs text-gray-400 mb-1 block">
-              触发频率
-              <span class="text-[#0ecb81] ml-1">{{ config.triggerCheckInterval }}ms</span>
+            <label :for="`closingTriggerCheckInterval-${type}`" class="text-xs text-gray-400 mb-1 block">
+              {{ type === 'forward' ? '正平频率' : '反平频率' }}
             </label>
             <input
-              :id="`triggerCheckInterval-${type}`"
-              v-model.number="config.triggerCheckInterval"
+              :id="`closingTriggerCheckInterval-${type}`"
+              v-model.number="config.closingTriggerCheckInterval"
               type="number"
-              step="10"
-              min="10"
+              step="100"
+              min="500"
               max="1000"
               class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
-            <div class="text-xs text-gray-500 mt-0.5">
-              建议值: 50ms
-            </div>
+            <div class="text-xs text-[#f6465d] mt-1 text-center">{{ config.closingTriggerCheckInterval }}ms</div>
           </div>
         </div>
 
@@ -580,7 +593,7 @@ const triggerCount = ref({ opening: 0, closing: 0 })
 // 移动端性能优化：检测是否为移动设备
 const isMobile = ref(window.innerWidth < 768)
 let lastUpdateTime = 0
-const UPDATE_THROTTLE = isMobile.value ? 100 : 50 // 移动端降低更新频率
+const UPDATE_THROTTLE = isMobile.value ? 100 : 500 // 移动端降低更新频率
 
 // Continuous execution state - separate for opening and closing
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
@@ -596,7 +609,8 @@ const config = ref({
   closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING, false),
   openingSyncQty: 3,
   closingSyncQty: 3,
-  triggerCheckInterval: 50, // 触发器检测频率（毫秒）
+  openingTriggerCheckInterval: 500, // 开仓触发器检测频率（毫秒）
+  closingTriggerCheckInterval: 500, // 平仓触发器检测频率（毫秒）
   ladders: [
     { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3 },
     { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3 },
@@ -660,6 +674,19 @@ async function loadConfigFromDB() {
     config.value.closingMCoin = data.closing_m_coin || data.m_coin || 5
     config.value.openingSyncQty = data.opening_sync_count
     config.value.closingSyncQty = data.closing_sync_count
+
+    // Load trigger check intervals (convert from seconds to ms, default 500ms)
+    if (data.opening_trigger_check_interval !== undefined) {
+      config.value.openingTriggerCheckInterval = data.opening_trigger_check_interval * 1000
+    }
+    if (data.closing_trigger_check_interval !== undefined) {
+      config.value.closingTriggerCheckInterval = data.closing_trigger_check_interval * 1000
+    }
+    // Fallback to old single trigger_check_interval field for backward compatibility
+    if (data.trigger_check_interval !== undefined && !data.opening_trigger_check_interval && !data.closing_trigger_check_interval) {
+      config.value.openingTriggerCheckInterval = data.trigger_check_interval * 1000
+      config.value.closingTriggerCheckInterval = data.trigger_check_interval * 1000
+    }
 
     // 保留策略启用状态（如果数据库中有保存）
     if (data.opening_enabled !== undefined) {
@@ -1035,6 +1062,8 @@ async function saveConfig() {
       closing_sync_count: Math.floor(config.value.closingSyncQty),
       opening_m_coin: Number(config.value.openingMCoin),
       closing_m_coin: Number(config.value.closingMCoin),
+      opening_trigger_check_interval: (config.value.openingTriggerCheckInterval || 500) / 1000, // Convert ms to seconds
+      closing_trigger_check_interval: (config.value.closingTriggerCheckInterval || 500) / 1000, // Convert ms to seconds
       ladders: config.value.ladders.map(l => ({
         enabled: l.enabled,
         openPrice: Number(Number(l.openPrice).toFixed(2)),
@@ -1936,7 +1965,7 @@ async function startContinuousExecution(action) {
       opening_m_coin: config.value.openingMCoin || 5,
       closing_m_coin: config.value.closingMCoin || 5,
       ladders: ladders,
-      trigger_check_interval: (config.value.triggerCheckInterval || 50) / 1000 // Convert ms to seconds
+      trigger_check_interval: (action === 'opening' ? (config.value.openingTriggerCheckInterval || 500) : (config.value.closingTriggerCheckInterval || 500)) / 1000 // Convert ms to seconds, use opening or closing interval based on action
     }
 
     // Determine endpoint based on action and strategy type

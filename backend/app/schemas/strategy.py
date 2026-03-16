@@ -23,6 +23,9 @@ class StrategyConfigCreate(BaseModel):
     m_coin: Optional[float] = Field(default=None, gt=0)  # Deprecated, kept for backward compatibility
     opening_m_coin: float = Field(default=5.0, gt=0)
     closing_m_coin: float = Field(default=5.0, gt=0)
+    trigger_check_interval: Optional[float] = Field(default=None, gt=0, le=10)  # Deprecated, kept for backward compatibility
+    opening_trigger_check_interval: float = Field(default=0.5, gt=0, le=10)  # Opening trigger check interval in seconds (default 500ms)
+    closing_trigger_check_interval: float = Field(default=0.5, gt=0, le=10)  # Closing trigger check interval in seconds (default 500ms)
     ladders: List[LadderConfig] = Field(default_factory=lambda: [
         LadderConfig(enabled=True, openPrice=3.0, threshold=2.0, qtyLimit=3.0),
         LadderConfig(enabled=True, openPrice=3.0, threshold=3.0, qtyLimit=3.0),
@@ -42,6 +45,9 @@ class StrategyConfigUpdate(BaseModel):
     m_coin: Optional[float] = Field(None, gt=0)  # Deprecated
     opening_m_coin: Optional[float] = Field(None, gt=0)
     closing_m_coin: Optional[float] = Field(None, gt=0)
+    trigger_check_interval: Optional[float] = Field(None, gt=0, le=10)  # Deprecated
+    opening_trigger_check_interval: Optional[float] = Field(None, gt=0, le=10)  # Opening trigger check interval in seconds
+    closing_trigger_check_interval: Optional[float] = Field(None, gt=0, le=10)  # Closing trigger check interval in seconds
     ladders: Optional[List[LadderConfig]] = None
     is_enabled: Optional[bool] = None
 
@@ -60,6 +66,9 @@ class StrategyConfigResponse(BaseModel):
     m_coin: float  # Kept for backward compatibility
     opening_m_coin: float
     closing_m_coin: float
+    trigger_check_interval: float  # Deprecated, kept for backward compatibility
+    opening_trigger_check_interval: float  # Opening trigger check interval in seconds
+    closing_trigger_check_interval: float  # Closing trigger check interval in seconds
     ladders: List[Any]
     is_enabled: bool
     create_time: datetime

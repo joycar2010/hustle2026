@@ -118,9 +118,9 @@ class ArbitrageStrategyExecutorV3:
         self.api_retry_times = 3
         self.api_retry_delay = 0.5  # seconds
 
-        # Detection interval configuration
-        self.normal_check_interval = 0.01  # 10ms
-        self.after_bybit_check_interval = 0.1  # 100ms
+        # Detection interval configuration (increased to reduce API calls and avoid frequent order cancellations)
+        self.normal_check_interval = 0.5  # 500ms (increased from 10ms)
+        self.after_bybit_check_interval = 0.5  # 500ms (increased from 100ms)
 
         # Closing strategy wait time configuration (to prevent high-frequency order cancellation)
         self.close_wait_after_cancel_no_trade = 3.0  # Wait 3 seconds after canceling unfilled order
@@ -131,12 +131,12 @@ class ArbitrageStrategyExecutorV3:
         self.open_wait_after_cancel_part = 2.0  # Wait 2 seconds after canceling partially filled order
 
         # Binance limit order monitoring configuration (for closing strategies)
-        self.max_binance_limit_retries = 50  # Monitor up to 50 times (5 seconds total)
-        self.binance_limit_check_interval = 0.1  # Check every 100ms
+        self.max_binance_limit_retries = 25  # Monitor up to 25 times (5 seconds total with 200ms interval)
+        self.binance_limit_check_interval = 0.2  # Check every 200ms (increased from 100ms)
 
         # Spread stability check configuration
         self.spread_stability_samples = 10  # Sample 10 times
-        self.spread_stability_interval = 0.1  # 100ms between samples
+        self.spread_stability_interval = 0.2  # 200ms between samples (increased from 100ms)
         self.spread_stability_threshold = 0.02  # Max deviation ≤ 0.02 considered stable
 
     # ========================================================================

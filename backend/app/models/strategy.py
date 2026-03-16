@@ -54,6 +54,9 @@ class StrategyConfig(Base):
     m_coin = Column(Float, default=5, nullable=False)  # Max lots per batch order (deprecated, use opening_m_coin)
     opening_m_coin = Column(Float, default=5, nullable=False)  # Opening max lots per batch order
     closing_m_coin = Column(Float, default=5, nullable=False)  # Closing max lots per batch order
+    trigger_check_interval = Column(Float, default=0.5, nullable=False)  # Trigger check interval in seconds (deprecated, use opening/closing specific)
+    opening_trigger_check_interval = Column(Float, default=0.5, nullable=False)  # Opening trigger check interval in seconds (default 500ms)
+    closing_trigger_check_interval = Column(Float, default=0.5, nullable=False)  # Closing trigger check interval in seconds (default 500ms)
     ladders = Column(JSONB, default=list, nullable=False)  # Ladder configs array
     is_enabled = Column(Boolean, default=False, nullable=False)
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)

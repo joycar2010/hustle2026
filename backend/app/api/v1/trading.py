@@ -1127,7 +1127,6 @@ async def close_short_position(
                 order_type="LIMIT",
                 quantity=str(req.quantity),
                 price=str(price),
-                time_in_force="GTC",
             )
         else:  # bybit
             result = await order_executor.place_bybit_order(
@@ -1211,7 +1210,6 @@ async def close_long_position(
                 order_type="LIMIT",
                 quantity=str(req.quantity),
                 price=str(price),
-                time_in_force="GTC",
             )
         else:  # bybit
             result = await order_executor.place_bybit_order(

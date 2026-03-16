@@ -41,7 +41,7 @@ class ContinuousStrategyExecutor:
         strategy_id: int,
         order_executor: OrderExecutorV2,
         position_mgr: Optional[PositionManager] = None,
-        trigger_check_interval: float = 0.1  # 100ms default (increased to reduce API calls)
+        trigger_check_interval: float = 0.5  # 500ms default (increased to reduce API calls and avoid frequent order cancellations)
     ):
         """
         Initialize continuous executor.
@@ -50,7 +50,7 @@ class ContinuousStrategyExecutor:
             strategy_id: Unique strategy identifier
             order_executor: Order execution engine
             position_mgr: Position manager (uses global if not provided)
-            trigger_check_interval: Interval between trigger checks in seconds (default 0.05 = 50ms)
+            trigger_check_interval: Interval between trigger checks in seconds (default 0.5 = 500ms)
         """
         self.strategy_id = strategy_id
         self.order_executor = order_executor
@@ -179,6 +179,8 @@ class ContinuousStrategyExecutor:
         is_opening = 'opening' in strategy_type
         spread_threshold = ladder.opening_spread if is_opening else ladder.closing_spread
         trigger_count_required = ladder.opening_trigger_count if is_opening else ladder.closing_trigger_count
+        # Opening: spread >= threshold (large spread, good for opening)
+        # Closing: spread <= threshold (small/negative spread, good for closing)
         compare_op = CompareOperator.GREATER_EQUAL if is_opening else CompareOperator.LESS_EQUAL
 
         with open("ladder_debug.log", "a") as f:
@@ -195,9 +197,18 @@ class ContinuousStrategyExecutor:
             with open("ladder_debug.log", "a") as f:
                 f.write(f"\n[DEBUG] ===== Loop iteration {loop_count} =====\n")
                 f.write(f"[DEBUG] is_running: {self.is_running}\n")
+                f.write(f"[DEBUG] trigger_count at loop start: {self.trigger_mgr.count}\n")
 
             # Step 1: Check position
-            # For closing strategies, get actual positions from exchanges
+            # Get memory position (how much we've opened/closed so far)
+            position_info = self.position_mgr.get_position(
+                self.strategy_id,
+                ladder_idx,
+                strategy_type
+            )
+            current_position = position_info['current_position']
+
+            # For closing strategies, also log actual exchange positions for monitoring
             if not is_opening:
                 try:
                     # Initialize clients if not already done
@@ -211,7 +222,7 @@ class ContinuousStrategyExecutor:
                     if not hasattr(bybit_account, 'mt5_client'):
                         from app.services.mt5_client import MT5Client
                         bybit_account.mt5_client = MT5Client(
-                            login=int(bybit_account.mt5_id),  # Convert to int
+                            login=int(bybit_account.mt5_id),
                             password=bybit_account.mt5_primary_pwd,
                             server=bybit_account.mt5_server
                         )
@@ -223,11 +234,10 @@ class ContinuousStrategyExecutor:
                                 f.write(f"[DEBUG] {error_msg}\n")
                             raise Exception(error_msg)
 
-                    # Get Binance positions
+                    # Get actual positions for monitoring only (not for execution control)
                     binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
                     binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
-                    # Get Bybit positions - MT5 must be connected
                     if not bybit_account.mt5_client.connected:
                         error_msg = "MT5 not connected, cannot get Bybit positions"
                         logger.error(error_msg)
@@ -236,68 +246,22 @@ class ContinuousStrategyExecutor:
                         raise Exception(error_msg)
 
                     bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
-                    bybit_qty = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions) * 100  # Convert lots to XAU
+                    bybit_qty = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions) * 100
 
-                    # For closing, we need BOTH sides to have positions
-                    # Use the minimum to ensure we don't over-close
-                    if binance_qty > 0 and bybit_qty > 0:
-                        actual_position = min(binance_qty, bybit_qty)
-                    else:
-                        # If either side has no position, we cannot close
-                        actual_position = 0
-                        with open("ladder_debug.log", "a") as f:
-                            f.write(f"[DEBUG] WARNING: Binance={binance_qty}, Bybit={bybit_qty}, cannot close without both sides\n")
-
-                    # Get memory position (how much we've already closed)
-                    position_info = self.position_mgr.get_position(
-                        self.strategy_id,
-                        ladder_idx,
-                        strategy_type
-                    )
-                    memory_position = position_info['current_position']
-
-                    # Current position = how much we've closed so far
-                    current_position = memory_position
-
-                    # Check if we still have positions to close
-                    remaining_to_close = actual_position - memory_position
+                    actual_position = min(binance_qty, bybit_qty) if (binance_qty > 0 and bybit_qty > 0) else 0
 
                     with open("ladder_debug.log", "a") as f:
-                        f.write(f"[DEBUG] Step 1 - Actual positions: Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}\n")
-                        f.write(f"[DEBUG] Step 1 - Memory position (already closed): {memory_position}\n")
-                        f.write(f"[DEBUG] Step 1 - Remaining to close: {remaining_to_close}\n")
-                        f.write(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}\n")
+                        f.write(f"[DEBUG] Step 1 - Actual positions (monitoring): Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}\n")
+                        f.write(f"[DEBUG] Step 1 - Memory position (already closed): {current_position}\n")
+                        f.write(f"[DEBUG] Step 1 - Target total_qty: {ladder.total_qty}\n")
 
-                    logger.info(f"Step 1 - Actual positions: Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}")
-                    logger.info(f"Step 1 - Memory position: {memory_position}, Remaining: {remaining_to_close}")
-                    logger.info(f"Step 1 - Current position: {current_position}/{ladder.total_qty}")
-
-                    # If no positions left to close, break
-                    if remaining_to_close <= 0:
-                        with open("ladder_debug.log", "a") as f:
-                            f.write(f"[DEBUG] BREAK: No position left to close (remaining={remaining_to_close})\n")
-                        logger.info(f"No position left to close")
-                        break
+                    logger.info(f"Step 1 - Actual positions (monitoring): Binance={binance_qty}, Bybit={bybit_qty}")
+                    logger.info(f"Step 1 - Memory position: {current_position}, Target: {ladder.total_qty}")
 
                 except Exception as e:
-                    logger.error(f"Failed to get actual positions: {e}")
+                    logger.error(f"Failed to get actual positions (monitoring only): {e}")
                     with open("ladder_debug.log", "a") as f:
                         f.write(f"[DEBUG] Step 1 - Failed to get actual positions: {e}\n")
-                    # Fallback to memory position
-                    position_info = self.position_mgr.get_position(
-                        self.strategy_id,
-                        ladder_idx,
-                        strategy_type
-                    )
-                    current_position = position_info['current_position']
-            else:
-                # For opening strategies, use memory position
-                position_info = self.position_mgr.get_position(
-                    self.strategy_id,
-                    ladder_idx,
-                    strategy_type
-                )
-                current_position = position_info['current_position']
 
             with open("ladder_debug.log", "a") as f:
                 f.write(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}\n")
@@ -343,19 +307,15 @@ class ContinuousStrategyExecutor:
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
 
-            # Step 4: Validate spread still meets threshold
+            # Step 4: Log current spread (for monitoring, but don't block execution)
             current_spread = await self._get_current_spread(strategy_type)
-            spread_condition_met = self._check_spread_condition(current_spread, spread_threshold, compare_op)
-            logger.info(f"Step 4 - Spread condition met: {spread_condition_met}, current: {current_spread}, threshold: {spread_threshold}")
+            logger.info(f"Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}")
 
-            if not spread_condition_met:
-                logger.info(
-                    f"Spread no longer meets threshold: {current_spread} "
-                    f"{'<' if is_opening else '>'} {spread_threshold}"
-                )
-                self.trigger_mgr.reset()
-                await self._push_trigger_reset(ladder_idx, strategy_type)
-                continue
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[DEBUG] Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}\n")
+
+            # Note: We don't reset triggers here even if spread doesn't meet threshold
+            # Once trigger count is reached, we should execute the order to meet the total quantity target
 
             # Step 5: Calculate order quantity
             remaining = ladder.total_qty - current_position
@@ -392,17 +352,23 @@ class ContinuousStrategyExecutor:
                 bybit_account,
                 order_qty,
                 binance_price,
-                bybit_price
+                bybit_price,
+                spread_threshold
             )
             logger.info(f"Step 8 result - Success: {exec_result.get('success')}, Binance filled: {exec_result.get('binance_filled_qty')}, Bybit filled: {exec_result.get('bybit_filled_qty')}")
 
-            # Step 8.5: Check for single-leg trade and send alert (regardless of success status)
+            # Step 8.5: Schedule delayed single-leg check (10 seconds + double verification)
+            # This prevents false alerts due to exchange API data sync delays
             if exec_result.get('is_single_leg'):
-                logger.error(f"SINGLE LEG DETECTED in continuous execution: {exec_result.get('single_leg_details')}")
-                await self._send_single_leg_alert(
+                logger.warning(f"Potential single-leg detected, scheduling delayed verification in 10 seconds")
+                # Schedule async delayed check (non-blocking)
+                import asyncio
+                asyncio.create_task(self._delayed_single_leg_check(
                     strategy_type=strategy_type,
-                    exec_result=exec_result
-                )
+                    exec_result=exec_result,
+                    binance_account=binance_account,
+                    bybit_account=bybit_account
+                ))
 
             if not exec_result['success']:
                 logger.error(f"Execution failed: {exec_result}")
@@ -443,19 +409,25 @@ class ContinuousStrategyExecutor:
             await self._push_position_change(ladder_idx, filled_qty, position_info)
             await self._push_order_executed(ladder_idx, exec_result, current_spread)
 
-            # Step 12: Handle Scenario 2 vs Scenario 3
-            # Check if fully filled (use 95% threshold to account for rounding)
-            if binance_filled >= order_qty * 0.95:
-                # Scenario 2: Fully filled - DO NOT reset triggers
-                logger.info(f"Scenario 2: Fully filled ({binance_filled}/{order_qty}), keeping trigger count")
-            else:
-                # Scenario 3: Partially filled - Reset triggers
-                logger.info(f"Scenario 3: Partially filled ({binance_filled}/{order_qty}), resetting triggers")
-                self.trigger_mgr.reset()
-                await self._push_trigger_reset(ladder_idx, strategy_type)
+            # Step 12: Reset triggers after successful execution
+            # CRITICAL FIX: Always reset triggers after order execution to allow next cycle to accumulate fresh triggers
+            # This prevents the issue where trigger count remains high and blocks subsequent executions
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[DEBUG] Step 12 - Order executed successfully\n")
+                f.write(f"[DEBUG] Step 12 - binance_filled={binance_filled}, order_qty={order_qty}, ratio={binance_filled/order_qty if order_qty > 0 else 0:.2%}\n")
+                f.write(f"[DEBUG] Step 12 - Current trigger count before reset: {self.trigger_mgr.count}\n")
+                f.write(f"[DEBUG] Step 12 - Current position after fill: {current_position + filled_qty}/{ladder.total_qty}\n")
+                f.write(f"[DEBUG] Step 12 - Resetting trigger count to allow next cycle\n")
 
-            # Small delay to prevent API spam (increased to 2 seconds to avoid Binance rate limit)
-            await asyncio.sleep(2.0)
+            logger.info(f"Order executed: {binance_filled}/{order_qty} filled, resetting triggers from {self.trigger_mgr.count} to 0")
+            self.trigger_mgr.reset()
+            await self._push_trigger_reset(ladder_idx, strategy_type)
+
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[DEBUG] Step 12 - Trigger count after reset: {self.trigger_mgr.count}\n")
+
+            # Small delay to prevent API spam (increased to 3 seconds to avoid Binance rate limit)
+            await asyncio.sleep(3.0)
 
         # ========== 循环退出后输出原因 ==========
         with open("ladder_debug.log", "a") as f:
@@ -542,7 +514,8 @@ class ContinuousStrategyExecutor:
         bybit_account: Account,
         quantity: float,
         binance_price: float,
-        bybit_price: float
+        bybit_price: float,
+        spread_threshold: float = None
     ) -> Dict:
         """Execute order based on strategy type"""
         if strategy_type == 'reverse_opening':
@@ -551,7 +524,8 @@ class ContinuousStrategyExecutor:
                 bybit_account=bybit_account,
                 quantity=quantity,
                 binance_price=binance_price,
-                bybit_price=bybit_price
+                bybit_price=bybit_price,
+                spread_threshold=spread_threshold
             )
         elif strategy_type == 'reverse_closing':
             return await self.order_executor.execute_reverse_closing(
@@ -559,7 +533,8 @@ class ContinuousStrategyExecutor:
                 bybit_account=bybit_account,
                 quantity=quantity,
                 binance_price=binance_price,
-                bybit_price=bybit_price
+                bybit_price=bybit_price,
+                spread_threshold=spread_threshold
             )
         elif strategy_type == 'forward_opening':
             return await self.order_executor.execute_forward_opening(
@@ -567,7 +542,8 @@ class ContinuousStrategyExecutor:
                 bybit_account=bybit_account,
                 quantity=quantity,
                 binance_price=binance_price,
-                bybit_price=bybit_price
+                bybit_price=bybit_price,
+                spread_threshold=spread_threshold
             )
         elif strategy_type == 'forward_closing':
             return await self.order_executor.execute_forward_closing(
@@ -575,7 +551,8 @@ class ContinuousStrategyExecutor:
                 bybit_account=bybit_account,
                 quantity=quantity,
                 binance_price=binance_price,
-                bybit_price=bybit_price
+                bybit_price=bybit_price,
+                spread_threshold=spread_threshold
             )
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
@@ -667,6 +644,121 @@ class ContinuousStrategyExecutor:
                 current_spread,
                 self.user_id
             )
+
+    async def _delayed_single_leg_check(
+        self,
+        strategy_type: str,
+        exec_result: Dict,
+        binance_account: Account,
+        bybit_account: Account
+    ):
+        """
+        Delayed single-leg check with 10-second wait + double verification.
+        This prevents false alerts due to exchange API data sync delays.
+
+        Args:
+            strategy_type: Strategy type (e.g., 'reverse_closing')
+            exec_result: Original execution result
+            binance_account: Binance account
+            bybit_account: Bybit account
+        """
+        try:
+            logger.info(f"[SINGLE_LEG_CHECK] Starting 10-second delayed verification for {strategy_type}")
+
+            # Step 1: Wait 10 seconds for exchange data to fully sync
+            await asyncio.sleep(10)
+
+            # Step 2: First verification - get actual positions
+            try:
+                # Initialize clients if needed
+                if not hasattr(binance_account, 'binance_client'):
+                    from app.services.binance_client import BinanceFuturesClient
+                    binance_account.binance_client = BinanceFuturesClient(
+                        api_key=binance_account.api_key,
+                        api_secret=binance_account.api_secret
+                    )
+
+                if not hasattr(bybit_account, 'mt5_client'):
+                    from app.services.mt5_client import MT5Client
+                    bybit_account.mt5_client = MT5Client(
+                        login=int(bybit_account.mt5_id),
+                        password=bybit_account.mt5_primary_pwd,
+                        server=bybit_account.mt5_server
+                    )
+                    if not bybit_account.mt5_client.connect():
+                        logger.error("[SINGLE_LEG_CHECK] MT5 connection failed, cannot verify positions")
+                        return
+
+                # Get actual positions
+                binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
+                binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
+
+                bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+                bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
+                bybit_qty = bybit_qty_lot * 100  # Convert Lot to XAU
+
+                pos_diff = abs(binance_qty - bybit_qty)
+
+                logger.info(
+                    f"[SINGLE_LEG_CHECK] First verification (10s delay): "
+                    f"Binance={binance_qty} XAU, Bybit={bybit_qty} XAU, Diff={pos_diff}"
+                )
+
+                # If positions match (within 0.01 XAU tolerance), no single-leg risk
+                if pos_diff < 0.01:
+                    logger.info("[SINGLE_LEG_CHECK] First verification passed: positions are consistent, no alert needed")
+                    return
+
+                # Step 3: Second verification (1 second later) to rule out temporary data fluctuation
+                await asyncio.sleep(1)
+
+                binance_positions2 = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
+                binance_qty2 = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions2)
+
+                bybit_positions2 = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+                bybit_qty_lot2 = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions2)
+                bybit_qty2 = bybit_qty_lot2 * 100
+
+                pos_diff2 = abs(binance_qty2 - bybit_qty2)
+
+                logger.info(
+                    f"[SINGLE_LEG_CHECK] Second verification (11s delay): "
+                    f"Binance={binance_qty2} XAU, Bybit={bybit_qty2} XAU, Diff={pos_diff2}"
+                )
+
+                # Step 4: Final decision - only alert if both verifications show inconsistency
+                if pos_diff2 >= 0.01:
+                    logger.error(
+                        f"[SINGLE_LEG_CHECK] CONFIRMED SINGLE-LEG after double verification: "
+                        f"Binance={binance_qty2} XAU, Bybit={bybit_qty2} XAU, Diff={pos_diff2}"
+                    )
+
+                    # Update exec_result with verified positions
+                    exec_result['single_leg_details'] = {
+                        'binance_filled': binance_qty2,
+                        'bybit_filled': bybit_qty2,
+                        'bybit_filled_xau': bybit_qty2,
+                        'unfilled_qty': pos_diff2,
+                        'verification_time': '10s_double_check'
+                    }
+
+                    # Send alert
+                    await self._send_single_leg_alert(
+                        strategy_type=strategy_type,
+                        exec_result=exec_result
+                    )
+                else:
+                    logger.info(
+                        f"[SINGLE_LEG_CHECK] Second verification passed: positions synced, "
+                        f"first check was due to data delay (false positive avoided)"
+                    )
+
+            except Exception as e:
+                logger.error(f"[SINGLE_LEG_CHECK] Error during position verification: {e}")
+                # Don't send alert on verification errors to avoid false positives
+
+        except Exception as e:
+            logger.error(f"[SINGLE_LEG_CHECK] Delayed check failed: {e}")
 
     async def _send_single_leg_alert(
         self,

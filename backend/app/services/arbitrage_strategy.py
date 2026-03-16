@@ -27,7 +27,7 @@ class ArbitrageStrategy:
     ) -> Dict[str, Any]:
         """Execute forward arbitrage (long Binance, short Bybit)
 
-        Entry: Sell Bybit (ask - 0.01), Buy Binance (bid + 0.01)
+        Entry: Sell Bybit (ask), Buy Binance (bid)
         """
         # Get current market data
         spread_data = await market_data_service.get_current_spread(
@@ -41,8 +41,8 @@ class ArbitrageStrategy:
                 "error": f"Spread {spread_data.forward_entry_spread} below target {target_spread}",
             }
 
-        # Adjust Binance price for better fill rate: bid - 0.01
-        binance_buy_price = round(spread_data.binance_quote.bid_price - 0.01, 2)
+        # Use Binance bid price directly
+        binance_buy_price = round(spread_data.binance_quote.bid_price, 2)
         bybit_sell_price = round(spread_data.bybit_quote.ask_price, 2)
         task = ArbitrageTask(
             user_id=user_id,
@@ -108,7 +108,7 @@ class ArbitrageStrategy:
     ) -> Dict[str, Any]:
         """Execute reverse arbitrage (short Binance, long Bybit)
 
-        Entry: Sell Binance (ask - 0.01), Buy Bybit (bid + 0.01)
+        Entry: Sell Binance (ask), Buy Bybit (bid)
         """
         # Get current market data
         spread_data = await market_data_service.get_current_spread(
@@ -122,8 +122,8 @@ class ArbitrageStrategy:
                 "error": f"Spread {spread_data.reverse_entry_spread} below target {target_spread}",
             }
 
-        # Adjust Binance price for better fill rate: ask + 0.01
-        binance_sell_price = round(spread_data.binance_quote.ask_price + 0.01, 2)
+        # Use Binance ask price directly
+        binance_sell_price = round(spread_data.binance_quote.ask_price, 2)
         bybit_buy_price = round(spread_data.bybit_quote.bid_price, 2)
         task = ArbitrageTask(
             user_id=user_id,
@@ -188,7 +188,7 @@ class ArbitrageStrategy:
     ) -> Dict[str, Any]:
         """Close forward arbitrage position
 
-        Exit: Sell Binance (ask - 0.01), Buy Bybit (bid + 0.01)
+        Exit: Sell Binance (ask), Buy Bybit (bid)
         """
         # Get task
         result = await db.execute(
@@ -205,8 +205,8 @@ class ArbitrageStrategy:
         # Get current market data
         spread_data = await market_data_service.get_current_spread(use_cache=False)
 
-        # Adjust Binance price for better fill rate: ask + 0.01
-        binance_sell_price = round(spread_data.binance_quote.ask_price + 0.01, 2)
+        # Use Binance ask price directly
+        binance_sell_price = round(spread_data.binance_quote.ask_price, 2)
         bybit_buy_price = round(spread_data.bybit_quote.bid_price, 2)
 
         # Execute closing orders (reverse of opening)
@@ -252,7 +252,7 @@ class ArbitrageStrategy:
     ) -> Dict[str, Any]:
         """Close reverse arbitrage position
 
-        Exit: Buy Binance (bid + 0.01), Sell Bybit (ask - 0.01)
+        Exit: Buy Binance (bid), Sell Bybit (ask)
         """
         # Get task
         result = await db.execute(
@@ -269,8 +269,8 @@ class ArbitrageStrategy:
         # Get current market data
         spread_data = await market_data_service.get_current_spread(use_cache=False)
 
-        # Adjust Binance price for better fill rate: bid - 0.01
-        binance_buy_price = round(spread_data.binance_quote.bid_price - 0.01, 2)
+        # Use Binance bid price directly
+        binance_buy_price = round(spread_data.binance_quote.bid_price, 2)
         bybit_sell_price = round(spread_data.bybit_quote.ask_price, 2)
 
         # Execute closing orders

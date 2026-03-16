@@ -358,7 +358,7 @@ class ArbitrageStrategyExecutorV2:
                 )
 
             # Short wait before next check
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.5)
 
     async def _calc_bybit_long_spread(self) -> float:
         """

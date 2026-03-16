@@ -292,6 +292,23 @@ export const useNotificationStore = defineStore('notification', () => {
     // Check if single-leg alert is enabled
     if (!singleLegAlertEnabled.value) return
 
+    // Create a unique key for deduplication based on strategy, action, and quantities
+    const alertKey = `${data.strategy_type}_${data.action}_${data.binance_filled}_${data.bybit_filled}`
+
+    // Check if we already have a recent alert with the same key (within last 5 minutes)
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
+    const existingAlert = alerts.value.find(a =>
+      a.type === 'single_leg_alert' &&
+      a.alertKey === alertKey &&
+      new Date(a.timestamp).getTime() > fiveMinutesAgo
+    )
+
+    // If duplicate found within 5 minutes, skip
+    if (existingAlert) {
+      console.log('Skipping duplicate single-leg alert:', alertKey)
+      return
+    }
+
     const alert = {
       id: Date.now() + '_single_leg',
       type: 'single_leg_alert',
@@ -299,6 +316,7 @@ export const useNotificationStore = defineStore('notification', () => {
       title: data.title || '单腿交易警告',
       message: data.message,
       timestamp: data.timestamp || new Date().toISOString(),
+      alertKey: alertKey,  // Store key for deduplication
       details: {
         strategy_type: data.strategy_type,
         action: data.action,
@@ -454,6 +472,23 @@ export const useNotificationStore = defineStore('notification', () => {
     activePopup.value = null
   }
 
+  // Clear old alerts (older than 30 minutes)
+  function clearOldAlerts() {
+    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000
+    const beforeCount = alerts.value.length
+    alerts.value = alerts.value.filter(a => {
+      const alertTime = new Date(a.timestamp).getTime()
+      return alertTime > thirtyMinutesAgo
+    })
+    const removedCount = beforeCount - alerts.value.length
+    if (removedCount > 0) {
+      console.log(`Cleared ${removedCount} old alerts (older than 30 minutes)`)
+    }
+  }
+
+  // Auto-clear old alerts every 5 minutes
+  setInterval(clearOldAlerts, 5 * 60 * 1000)
+
   // Update system alerts from account data
   function updateSystemAlerts(data) {
     const newAlerts = []
@@ -583,6 +618,7 @@ export const useNotificationStore = defineStore('notification', () => {
     checkSingleLegAlert,
     dismissAlert,
     dismissPopup,
+    clearOldAlerts,
     toggleAlertSound,
     toggleSingleLegAlert,
     updateSystemAlerts,

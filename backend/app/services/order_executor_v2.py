@@ -21,7 +21,7 @@ class OrderExecutorV2:
     """
 
     def __init__(self):
-        self.binance_timeout = 0.6  # 600ms (increased from 300ms)
+        self.binance_timeout = 5.0  # 5 seconds (increased to reduce order cancellations and avoid rate limit)
         self.bybit_timeout = 0.1    # 100ms
         self.max_retries = 1        # Only 1 retry (循环一次)
         self.base_executor = base_executor
@@ -34,6 +34,7 @@ class OrderExecutorV2:
         binance_price: float,
         bybit_price: float,
         db: Optional[AsyncSession] = None,
+        spread_threshold: float = None,
     ) -> Dict[str, Any]:
         """
         Execute reverse opening (Binance short, Bybit long).
@@ -67,25 +68,32 @@ class OrderExecutorV2:
         binance_order_id = binance_result["order_id"]
 
         # Step 2: Monitor Binance order (0.2s timeout)
-        binance_filled_qty = await self._monitor_binance_order(
+        monitor_result = await self._monitor_binance_order(
             binance_account,
             "XAUUSDT",
             binance_order_id,
-            self.binance_timeout
+            self.binance_timeout,
+            spread_threshold=spread_threshold,
+            compare_op='<=',
+            strategy_type='reverse_opening'
         )
+
+        binance_filled_qty = monitor_result["filled_qty"]
+        spread_cancelled = monitor_result["spread_cancelled"]
 
         if binance_filled_qty == 0:
             # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
+            message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
-                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
+                "message": message
             }
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (open LONG position)
@@ -121,15 +129,17 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
+        # Only consider it single-leg if Bybit filled < 80% of Binance filled
+        # This tolerates normal fill variance and exchange data delays
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
 
-        # FIX: Add detailed logging for single-leg detection
+        # Add detailed logging for single-leg detection
         logger.info(
             f"[REVERSE_OPENING] Single-leg check: "
             f"Binance={binance_filled_qty} XAU, "
             f"Bybit={bybit_filled_qty} Lot ({bybit_filled_xau} XAU), "
-            f"Threshold={binance_filled_qty * 0.90:.2f} XAU, "
+            f"Fill ratio={bybit_filled_xau/binance_filled_qty*100:.1f}%, "
+            f"Threshold=80%, "
             f"is_single_leg={is_single_leg}"
         )
 
@@ -155,6 +165,7 @@ class OrderExecutorV2:
         binance_price: float,
         bybit_price: float,
         db: Optional[AsyncSession] = None,
+        spread_threshold: float = None,
     ) -> Dict[str, Any]:
         """
         Execute reverse closing (Binance long close, Bybit short close).
@@ -220,25 +231,32 @@ class OrderExecutorV2:
         binance_order_id = binance_result["order_id"]
 
         # Step 2: Monitor Binance order (0.2s timeout)
-        binance_filled_qty = await self._monitor_binance_order(
+        monitor_result = await self._monitor_binance_order(
             binance_account,
             "XAUUSDT",
             binance_order_id,
-            self.binance_timeout
+            self.binance_timeout,
+            spread_threshold=spread_threshold,
+            compare_op='>',
+            strategy_type='reverse_closing'
         )
+
+        binance_filled_qty = monitor_result["filled_qty"]
+        spread_cancelled = monitor_result["spread_cancelled"]
 
         if binance_filled_qty == 0:
             # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
+            message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
-                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
+                "message": message
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (close LONG position)
@@ -270,8 +288,8 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
+        # Only consider it single-leg if Bybit filled < 80% of Binance filled
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
 
         return {
             "success": True,
@@ -295,6 +313,7 @@ class OrderExecutorV2:
         binance_price: float,
         bybit_price: float,
         db: Optional[AsyncSession] = None,
+        spread_threshold: float = None,
     ) -> Dict[str, Any]:
         """
         Execute forward opening (Binance long, Bybit short).
@@ -328,25 +347,32 @@ class OrderExecutorV2:
         binance_order_id = binance_result["order_id"]
 
         # Step 2: Monitor Binance order (0.2s timeout)
-        binance_filled_qty = await self._monitor_binance_order(
+        monitor_result = await self._monitor_binance_order(
             binance_account,
             "XAUUSDT",
             binance_order_id,
-            self.binance_timeout
+            self.binance_timeout,
+            spread_threshold=spread_threshold,
+            compare_op='<=',
+            strategy_type='forward_opening'
         )
+
+        binance_filled_qty = monitor_result["filled_qty"]
+        spread_cancelled = monitor_result["spread_cancelled"]
 
         if binance_filled_qty == 0:
             # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
+            message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
-                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
+                "message": message
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (open SHORT position)
@@ -378,8 +404,8 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
+        # Only consider it single-leg if Bybit filled < 80% of Binance filled
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
 
         return {
             "success": True,
@@ -403,6 +429,7 @@ class OrderExecutorV2:
         binance_price: float,
         bybit_price: float,
         db: Optional[AsyncSession] = None,
+        spread_threshold: float = None,
     ) -> Dict[str, Any]:
         """
         Execute forward closing (Binance short close, Bybit long close).
@@ -479,12 +506,18 @@ class OrderExecutorV2:
         logger.info(f"[FORWARD_CLOSING] Binance order placed: order_id={binance_order_id}")
 
         # Step 2: Monitor Binance order (0.2s timeout)
-        binance_filled_qty = await self._monitor_binance_order(
+        monitor_result = await self._monitor_binance_order(
             binance_account,
             "XAUUSDT",
             binance_order_id,
-            self.binance_timeout
+            self.binance_timeout,
+            spread_threshold=spread_threshold,
+            compare_op='>',
+            strategy_type='forward_closing'
         )
+
+        binance_filled_qty = monitor_result["filled_qty"]
+        spread_cancelled = monitor_result["spread_cancelled"]
 
         logger.info(f"[FORWARD_CLOSING] Binance filled: {binance_filled_qty} XAU")
 
@@ -494,13 +527,14 @@ class OrderExecutorV2:
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
             )
+            message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
-                "message": "Binance未匹配到订单，取消策略执行，下次再试!"
+                "message": message
             }
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (close SHORT position)
@@ -537,8 +571,8 @@ class OrderExecutorV2:
 
         # Check for single-leg scenario (convert Bybit Lot to XAU for comparison)
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
-        # FIX: Relax threshold from 95% to 90% to tolerate larger fill variance
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.90
+        # Only consider it single-leg if Bybit filled < 80% of Binance filled
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
 
         if is_single_leg:
             logger.warning(f"[FORWARD_CLOSING] PARTIAL SINGLE LEG: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU ({bybit_filled_qty} Lot)")
@@ -553,7 +587,7 @@ class OrderExecutorV2:
             "is_single_leg": is_single_leg,
             "single_leg_details": {
                 "binance_filled": binance_filled_qty,
-                "bybit_filled": bybit_filled_qty,
+                "bybit_filled": bybit_filled_xau,  # 修复：使用XAU而不是Lot，保持一致性
                 "bybit_filled_xau": bybit_filled_xau,
                 "unfilled_qty": binance_filled_qty - bybit_filled_xau
             } if is_single_leg else None
@@ -564,24 +598,90 @@ class OrderExecutorV2:
         account: Account,
         symbol: str,
         order_id: int,
-        timeout: float
-    ) -> float:
+        timeout: float,
+        spread_threshold: float = None,
+        compare_op: str = None,
+        strategy_type: str = None
+    ) -> dict:
         """
-        Monitor Binance order with timeout.
+        Monitor Binance order with timeout and real-time spread checking.
+
+        Args:
+            spread_threshold: Spread threshold for real-time checking
+            compare_op: Comparison operator ('>' or '<=')
+            strategy_type: Strategy type for spread calculation
 
         Returns:
-            Filled quantity (0 if not filled)
+            dict with 'filled_qty' and 'spread_cancelled' flag
         """
         start_time = time.time()
-        check_interval = 0.01  # 10ms check interval
+        check_interval = 0.2  # 200ms check interval (increased to reduce API calls)
+        last_spread_check = 0
 
         while time.time() - start_time < timeout:
+            # Check order status
             status = await self.base_executor.check_binance_order_status(
                 account, symbol, order_id
             )
 
             if status.get("success") and status.get("filled"):
-                return status.get("filled_qty", 0)
+                return {
+                    "filled_qty": status.get("filled_qty", 0),
+                    "spread_cancelled": False
+                }
+
+            # Real-time spread checking (every 2 seconds to avoid excessive API calls)
+            current_time = time.time()
+            if spread_threshold is not None and compare_op is not None and strategy_type is not None:
+                if current_time - last_spread_check >= 2.0:  # Check spread every 2 seconds (increased from 500ms)
+                    last_spread_check = current_time
+
+                    try:
+                        # Get current spread
+                        from app.services.market_service import market_data_service
+                        market_data = await market_data_service.get_current_spread()
+                        spreads = market_data_service.calculate_spread(
+                            market_data.binance_quote,
+                            market_data.bybit_quote
+                        )
+
+                        # Get spread based on strategy type
+                        if strategy_type == 'reverse_closing':
+                            current_spread = spreads.reverse_exit_spread
+                        elif strategy_type == 'reverse_opening':
+                            current_spread = spreads.reverse_entry_spread
+                        elif strategy_type == 'forward_closing':
+                            current_spread = spreads.forward_exit_spread
+                        elif strategy_type == 'forward_opening':
+                            current_spread = spreads.forward_entry_spread
+                        else:
+                            current_spread = None
+
+                        # Check if spread condition is still met
+                        if current_spread is not None:
+                            spread_met = False
+                            if compare_op == '>':
+                                spread_met = current_spread > spread_threshold
+                            elif compare_op == '<=':
+                                spread_met = current_spread <= spread_threshold
+
+                            # If spread no longer meets condition, cancel order immediately
+                            if not spread_met:
+                                logger.info(f"Spread condition no longer met: {current_spread} {compare_op} {spread_threshold}, cancelling order")
+                                await self.base_executor.cancel_binance_order(account, symbol, order_id)
+
+                                # Check final status after cancellation
+                                final_status = await self.base_executor.check_binance_order_status(
+                                    account, symbol, order_id
+                                )
+
+                                return {
+                                    "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
+                                    "spread_cancelled": True
+                                }
+                    except Exception as e:
+                        logger.error(f"Error checking spread during order monitoring: {e}")
+                        # Continue monitoring even if spread check fails
 
             await asyncio.sleep(check_interval)
 
@@ -593,7 +693,10 @@ class OrderExecutorV2:
             account, symbol, order_id
         )
 
-        return final_status.get("filled_qty", 0) if final_status.get("success") else 0
+        return {
+            "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
+            "spread_cancelled": False
+        }
 
     async def _execute_bybit_market_buy(
         self,
