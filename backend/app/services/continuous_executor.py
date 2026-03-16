@@ -304,7 +304,14 @@ class ContinuousStrategyExecutor:
                         strategy_type
                     )
 
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 3c - About to sleep for {self.trigger_check_interval} seconds\n")
+
                 await asyncio.sleep(self.trigger_check_interval)
+
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 3d - Woke up from sleep, is_running={self.is_running}\n")
+
                 continue
 
             # Step 4: Log current spread (for monitoring, but don't block execution)
@@ -362,7 +369,6 @@ class ContinuousStrategyExecutor:
             if exec_result.get('is_single_leg'):
                 logger.warning(f"Potential single-leg detected, scheduling delayed verification in 10 seconds")
                 # Schedule async delayed check (non-blocking)
-                import asyncio
                 asyncio.create_task(self._delayed_single_leg_check(
                     strategy_type=strategy_type,
                     exec_result=exec_result,
