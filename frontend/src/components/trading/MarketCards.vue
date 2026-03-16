@@ -224,12 +224,14 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
+import { useProxyStore } from '@/stores/proxy'
 import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
 import SpreadDataTable from './SpreadDataTable.vue'
 
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
+const proxyStore = useProxyStore()
 
 // System Status Modal
 const showSystemStatusModal = ref(false)
@@ -237,6 +239,7 @@ const systemStatusText = ref('系统正常运行')
 const systemHealthy = ref(true)
 const redisStatus = ref({ healthy: false, last_error: null })
 const sslCertStatus = ref({ status: 'unknown', days_remaining: 0 })
+const proxyHealthStatus = ref({ total: 0, active: 0, failed: 0, avgHealth: 100 })
 
 const bybitConnected = ref(false)
 const binanceConnected = ref(false)
@@ -627,6 +630,7 @@ onMounted(() => {
   fetchOrderBook()
   fetchRedisStatus()
   fetchSSLCertStatus()
+  fetchProxyHealthStatus()
   fetchExchangeRate()
 
   // Fetch pending order counts every 3 seconds
@@ -647,8 +651,10 @@ onMounted(() => {
   // 初始化系统状态并开始轮询
   updateSystemStatus()
   const statusInterval = setInterval(updateSystemStatus, 10000)
+  const proxyHealthInterval = setInterval(fetchProxyHealthStatus, 30000) // 每30秒刷新代理健康状态
   onUnmounted(() => {
     clearInterval(statusInterval)
+    clearInterval(proxyHealthInterval)
   })
 })
 
@@ -933,17 +939,31 @@ async function updateSystemStatus() {
       statuses.push(`运行:${data.uptime}`)
     }
 
+    // 代理健康状态
+    if (proxyHealthStatus.value.total > 0) {
+      const proxyStatus = `代理:${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total}活跃`
+      if (proxyHealthStatus.value.avgHealth < 50) {
+        statuses.push(`⚠️${proxyStatus}(健康度:${proxyHealthStatus.value.avgHealth})`)
+      } else if (proxyHealthStatus.value.failed > 0) {
+        statuses.push(`${proxyStatus}(${proxyHealthStatus.value.failed}失败)`)
+      } else {
+        statuses.push(proxyStatus)
+      }
+    }
+
     systemStatusText.value = statuses.join(' | ') || '系统正常运行'
 
     // 判断系统健康状态
     const dbUsage = data.dbPool ? (data.dbPool.active / data.dbPool.max) : 0
     const sslHealthy = sslCertStatus.value.status === 'healthy' || sslCertStatus.value.status === 'warning'
+    const proxyHealthy = proxyHealthStatus.value.avgHealth >= 50 && proxyHealthStatus.value.failed === 0
     systemHealthy.value = data.backend &&
                           marketStore.connected &&
                           dbUsage < 0.8 &&
                           notificationStore.feishuServiceStatus &&
                           redisStatus.value.healthy &&
-                          sslHealthy
+                          sslHealthy &&
+                          proxyHealthy
   } catch (error) {
     systemStatusText.value = '无法获取系统状态'
     systemHealthy.value = false
@@ -972,6 +992,29 @@ async function fetchSSLCertStatus() {
   } catch (error) {
     console.error('Failed to fetch SSL cert status:', error)
     sslCertStatus.value = { status: 'error', days_remaining: 0 }
+  }
+}
+
+async function fetchProxyHealthStatus() {
+  try {
+    const response = await api.get('/api/v1/proxies')
+    const proxies = response.data
+
+    const total = proxies.length
+    const active = proxies.filter(p => p.status === 'active').length
+    const failed = proxies.filter(p => p.status === 'failed').length
+
+    // 计算平均健康度
+    let avgHealth = 100
+    if (total > 0) {
+      const totalHealth = proxies.reduce((sum, p) => sum + (p.health_score || 0), 0)
+      avgHealth = Math.round(totalHealth / total)
+    }
+
+    proxyHealthStatus.value = { total, active, failed, avgHealth }
+  } catch (error) {
+    console.error('Failed to fetch proxy health status:', error)
+    proxyHealthStatus.value = { total: 0, active: 0, failed: 0, avgHealth: 0 }
   }
 }
 

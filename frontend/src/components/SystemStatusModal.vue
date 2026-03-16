@@ -228,6 +228,53 @@
                       {{ systemMonitor.ssl_certificate.error }}
                     </div>
                   </div>
+
+                  <!-- Proxy Health -->
+                  <div class="bg-dark-300 rounded p-3">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium">IP代理池</span>
+                      <div class="flex items-center space-x-2">
+                        <div :class="['w-2 h-2 rounded-full', getProxyStatusClass()]"></div>
+                        <span :class="['text-sm', getProxyStatusTextClass()]">
+                          {{ getProxyStatusText() }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="systemMonitor.proxies" class="space-y-1 text-xs text-text-tertiary">
+                      <div class="flex justify-between">
+                        <span>总代理数</span>
+                        <span>{{ systemMonitor.proxies.total }}</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>活跃代理</span>
+                        <span class="text-success">{{ systemMonitor.proxies.active }}</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>失败代理</span>
+                        <span :class="systemMonitor.proxies.failed > 0 ? 'text-danger' : ''">{{ systemMonitor.proxies.failed }}</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>已过期</span>
+                        <span :class="systemMonitor.proxies.expired > 0 ? 'text-warning' : ''">{{ systemMonitor.proxies.expired }}</span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span>平均健康度</span>
+                        <span :class="getProxyHealthClass()">{{ systemMonitor.proxies.avgHealth }}/100</span>
+                      </div>
+                      <!-- Progress Bar -->
+                      <div class="mt-2">
+                        <div class="w-full bg-dark-400 rounded-full h-2">
+                          <div
+                            :class="['h-2 rounded-full transition-all', getProxyHealthBarColor()]"
+                            :style="{ width: systemMonitor.proxies.avgHealth + '%' }"
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="text-xs text-text-tertiary mt-1">
+                      暂无代理数据
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -291,7 +338,8 @@ const statusData = ref({
 const systemMonitor = ref({
   redis: null,
   feishu: null,
-  ssl_certificate: null
+  ssl_certificate: null,
+  proxies: null
 })
 
 let refreshInterval = null
@@ -305,6 +353,29 @@ async function fetchStatus() {
     // Fetch system monitor data
     const monitorResponse = await api.get('/api/v1/monitor/status')
     systemMonitor.value = monitorResponse.data
+
+    // Fetch proxy health data
+    try {
+      const proxyResponse = await api.get('/api/v1/proxies')
+      const proxies = proxyResponse.data
+      const total = proxies.length
+      const active = proxies.filter(p => p.status === 'active').length
+      const failed = proxies.filter(p => p.status === 'failed').length
+      const expired = proxies.filter(p => p.status === 'expired').length
+      const avgHealth = total > 0 ? Math.round(proxies.reduce((sum, p) => sum + (p.health_score || 0), 0) / total) : 100
+
+      systemMonitor.value.proxies = {
+        total,
+        active,
+        failed,
+        expired,
+        avgHealth,
+        list: proxies.slice(0, 5) // 只显示前5个
+      }
+    } catch (error) {
+      console.error('Failed to fetch proxy data:', error)
+      systemMonitor.value.proxies = null
+    }
   } catch (error) {
     console.error('Failed to fetch system status:', error)
   } finally {
@@ -427,6 +498,47 @@ function getSSLDaysClass() {
   if (days <= 7) return 'text-danger font-bold'
   if (days <= 30) return 'text-warning font-bold'
   return 'text-success'
+}
+
+function getProxyStatusClass() {
+  if (!systemMonitor.value.proxies) return 'bg-gray-500'
+  const { avgHealth, failed } = systemMonitor.value.proxies
+  if (avgHealth >= 80 && failed === 0) return 'bg-success'
+  if (avgHealth >= 50) return 'bg-warning'
+  return 'bg-danger'
+}
+
+function getProxyStatusTextClass() {
+  if (!systemMonitor.value.proxies) return 'text-gray-500'
+  const { avgHealth, failed } = systemMonitor.value.proxies
+  if (avgHealth >= 80 && failed === 0) return 'text-success'
+  if (avgHealth >= 50) return 'text-warning'
+  return 'text-danger'
+}
+
+function getProxyStatusText() {
+  if (!systemMonitor.value.proxies) return '未配置'
+  const { total, active, failed, avgHealth } = systemMonitor.value.proxies
+  if (total === 0) return '无代理'
+  if (avgHealth >= 80 && failed === 0) return '健康'
+  if (avgHealth >= 50) return '警告'
+  return '异常'
+}
+
+function getProxyHealthClass() {
+  if (!systemMonitor.value.proxies) return ''
+  const health = systemMonitor.value.proxies.avgHealth
+  if (health >= 80) return 'text-success font-bold'
+  if (health >= 50) return 'text-warning font-bold'
+  return 'text-danger font-bold'
+}
+
+function getProxyHealthBarColor() {
+  if (!systemMonitor.value.proxies) return 'bg-gray-500'
+  const health = systemMonitor.value.proxies.avgHealth
+  if (health >= 80) return 'bg-success'
+  if (health >= 50) return 'bg-warning'
+  return 'bg-danger'
 }
 
 watch(() => props.isOpen, (newVal) => {

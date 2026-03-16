@@ -399,6 +399,143 @@
         <RolePermissionAssign />
       </div>
 
+      <!-- IP代理管理 Tab -->
+      <div v-if="activeTab === 'proxy'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">IP代理池管理</h2>
+            <div class="flex space-x-3">
+              <button @click="showAddLocalProxyModal = true" class="btn-secondary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                添加本地代理
+              </button>
+              <button @click="showFetchQingguoModal = true" class="btn-primary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                从青果获取
+              </button>
+              <button @click="loadProxies" class="btn-secondary">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                刷新
+              </button>
+            </div>
+          </div>
+
+          <!-- 青果余额显示 -->
+          <div v-if="qingguoBalance" class="bg-dark-200 rounded p-4 mb-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold mb-1">青果网络余额</h3>
+                <div class="text-2xl font-mono text-primary">¥{{ qingguoBalance.balance }}</div>
+              </div>
+              <button @click="loadQingguoBalance" class="btn-secondary text-sm">
+                刷新余额
+              </button>
+            </div>
+          </div>
+
+          <!-- 代理列表 -->
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-border-primary">
+                  <th class="text-left py-3 px-4">ID</th>
+                  <th class="text-left py-3 px-4">类型</th>
+                  <th class="text-left py-3 px-4">地址</th>
+                  <th class="text-left py-3 px-4">来源</th>
+                  <th class="text-left py-3 px-4">健康度</th>
+                  <th class="text-left py-3 px-4">延迟</th>
+                  <th class="text-left py-3 px-4">状态</th>
+                  <th class="text-left py-3 px-4">过期时间</th>
+                  <th class="text-left py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="proxy in proxyStore.proxies" :key="proxy.id" class="border-b border-border-secondary hover:bg-dark-50">
+                  <td class="py-3 px-4 font-mono text-sm">{{ proxy.id }}</td>
+                  <td class="py-3 px-4">
+                    <span class="px-2 py-1 rounded text-xs" :class="{
+                      'bg-blue-500/20 text-blue-400': proxy.proxy_type === 'http',
+                      'bg-green-500/20 text-green-400': proxy.proxy_type === 'https',
+                      'bg-purple-500/20 text-purple-400': proxy.proxy_type === 'socks5'
+                    }">
+                      {{ proxy.proxy_type.toUpperCase() }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 font-mono text-sm">{{ proxy.host }}:{{ proxy.port }}</td>
+                  <td class="py-3 px-4">
+                    <span class="px-2 py-1 rounded text-xs" :class="{
+                      'bg-gray-500/20 text-gray-400': proxy.provider === 'local',
+                      'bg-yellow-500/20 text-yellow-400': proxy.provider === 'qingguo',
+                      'bg-cyan-500/20 text-cyan-400': proxy.provider === 'custom'
+                    }">
+                      {{ proxy.provider === 'local' ? '本地' : proxy.provider === 'qingguo' ? '青果' : '自定义' }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <div class="flex items-center">
+                      <div class="w-16 bg-dark-300 rounded-full h-2 mr-2">
+                        <div class="h-2 rounded-full" :class="{
+                          'bg-success': proxy.health_score >= 80,
+                          'bg-warning': proxy.health_score >= 50 && proxy.health_score < 80,
+                          'bg-danger': proxy.health_score < 50
+                        }" :style="{ width: proxy.health_score + '%' }"></div>
+                      </div>
+                      <span class="text-sm">{{ proxy.health_score }}</span>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-sm">
+                    <span v-if="proxy.avg_latency_ms">{{ proxy.avg_latency_ms }}ms</span>
+                    <span v-else class="text-text-secondary">-</span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span class="px-2 py-1 rounded text-xs" :class="{
+                      'bg-success/20 text-success': proxy.status === 'active',
+                      'bg-gray-500/20 text-gray-400': proxy.status === 'inactive',
+                      'bg-warning/20 text-warning': proxy.status === 'expired',
+                      'bg-danger/20 text-danger': proxy.status === 'failed'
+                    }">
+                      {{ proxy.status === 'active' ? '活跃' : proxy.status === 'inactive' ? '未激活' : proxy.status === 'expired' ? '已过期' : '失败' }}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-sm text-text-secondary">
+                    <span v-if="proxy.expire_at">{{ formatDateTime(proxy.expire_at) }}</span>
+                    <span v-else>-</span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <div class="flex space-x-2">
+                      <button @click="checkProxyHealth(proxy.id)" class="text-primary hover:text-blue-400" title="健康检查">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </button>
+                      <button @click="editProxy(proxy)" class="text-warning hover:text-yellow-400" title="编辑">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button @click="deleteProxy(proxy.id)" class="text-danger hover:text-red-400" title="删除">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="proxyStore.proxies.length === 0" class="text-center py-8 text-text-secondary">
+              暂无代理数据
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 系统日志管理 Tab -->
       <div v-if="activeTab === 'systemlogs'" class="space-y-6">
         <div class="card">
@@ -1387,6 +1524,87 @@
       </div>
     </div>
 
+    <!-- Add Local Proxy Modal -->
+    <div v-if="showAddLocalProxyModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-xl font-bold mb-4">添加本地代理</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">代理类型</label>
+            <select v-model="localProxyForm.proxy_type" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">主机地址</label>
+            <input v-model="localProxyForm.host" type="text" placeholder="例如: 127.0.0.1" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">端口</label>
+            <input v-model.number="localProxyForm.port" type="number" placeholder="例如: 7890" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">用户名（可选）</label>
+            <input v-model="localProxyForm.username" type="text" placeholder="如果需要认证" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">密码（可选）</label>
+            <input v-model="localProxyForm.password" type="password" placeholder="如果需要认证" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">备注（可选）</label>
+            <input v-model="localProxyForm.remark" type="text" placeholder="代理备注信息" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+        </div>
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="showAddLocalProxyModal = false" class="btn-secondary">取消</button>
+          <button @click="addLocalProxy" class="btn-primary">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fetch from Qingguo Modal -->
+    <div v-if="showFetchQingguoModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
+        <h3 class="text-xl font-bold mb-4">从青果网络获取代理</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-2">数量</label>
+            <input v-model.number="qingguoForm.num" type="number" min="1" max="100" placeholder="1-100" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">地区</label>
+            <select v-model="qingguoForm.region" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
+              <option value="">不限</option>
+              <option value="CN">中国</option>
+              <option value="US">美国</option>
+              <option value="HK">香港</option>
+              <option value="SG">新加坡</option>
+              <option value="JP">日本</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">协议类型</label>
+            <select v-model="qingguoForm.protocol" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-2">有效期（分钟）</label>
+            <input v-model.number="qingguoForm.expire_time" type="number" min="1" placeholder="例如: 60" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
+          </div>
+        </div>
+        <div class="flex justify-end space-x-3 mt-6">
+          <button @click="showFetchQingguoModal = false" class="btn-secondary">取消</button>
+          <button @click="fetchFromQingguo" class="btn-primary">获取</button>
+        </div>
+      </div>
+    </div>
+
 </template>
 
 <script setup>
@@ -1401,12 +1619,35 @@ import NotificationServiceConfig from '@/components/system/NotificationServiceCo
 import SoundFileManager from '@/components/system/SoundFileManager.vue'
 import RolePermissionAssign from '@/components/RolePermissionAssign.vue'
 import { useMarketStore } from '@/stores/market'
+import { useProxyStore } from '@/stores/proxy'
+import { useNotificationStore } from '@/stores/notification'
 
 // 引入market store以获取WebSocket连接状态
 const marketStore = useMarketStore()
+const proxyStore = useProxyStore()
+const notificationStore = useNotificationStore()
 const router = useRouter()
 
 const activeTab = ref('version')
+
+// Proxy Management state
+const showAddLocalProxyModal = ref(false)
+const showFetchQingguoModal = ref(false)
+const qingguoBalance = ref(null)
+const localProxyForm = ref({
+  proxy_type: 'http',
+  host: '',
+  port: null,
+  username: '',
+  password: '',
+  remark: ''
+})
+const qingguoForm = ref({
+  num: 1,
+  region: '',
+  protocol: 'http',
+  expire_time: 60
+})
 
 // RBAC state
 const roles = ref([])
@@ -1563,6 +1804,7 @@ const componentConfigJson = computed({
 const tabs = [
   { id: 'users', label: '用户管理' },
   { id: 'rbac', label: '角色权限管理' },
+  { id: 'proxy', label: 'IP代理管理' },
   { id: 'notifications', label: '通知服务' },
   { id: 'refresh', label: '实时推送管理' },
   { id: 'websocket', label: 'WebSocket监控' },
@@ -2258,6 +2500,107 @@ function closeCertModal() {
   }
 }
 
+// Proxy Management Functions
+async function loadProxies() {
+  try {
+    await proxyStore.fetchProxies()
+  } catch (error) {
+    console.error('Failed to load proxies:', error)
+    notificationStore.addNotification('error', '加载代理列表失败')
+  }
+}
+
+async function loadQingguoBalance() {
+  try {
+    const balance = await proxyStore.fetchQingguoBalance()
+    qingguoBalance.value = balance
+  } catch (error) {
+    console.error('Failed to load Qingguo balance:', error)
+    notificationStore.addNotification('error', '获取青果余额失败')
+  }
+}
+
+async function addLocalProxy() {
+  try {
+    if (!localProxyForm.value.host || !localProxyForm.value.port) {
+      notificationStore.addNotification('error', '请填写主机地址和端口')
+      return
+    }
+    await proxyStore.createLocalProxy(localProxyForm.value)
+    notificationStore.addNotification('success', '本地代理添加成功')
+    showAddLocalProxyModal.value = false
+    localProxyForm.value = {
+      proxy_type: 'http',
+      host: '',
+      port: null,
+      username: '',
+      password: '',
+      remark: ''
+    }
+  } catch (error) {
+    console.error('Failed to add local proxy:', error)
+    notificationStore.addNotification('error', '添加本地代理失败')
+  }
+}
+
+async function fetchFromQingguo() {
+  try {
+    if (!qingguoForm.value.num || qingguoForm.value.num < 1) {
+      notificationStore.addNotification('error', '请输入有效的数量')
+      return
+    }
+    await proxyStore.fetchFromQingguo(qingguoForm.value)
+    notificationStore.addNotification('success', `成功从青果获取${qingguoForm.value.num}个代理`)
+    showFetchQingguoModal.value = false
+    qingguoForm.value = {
+      num: 1,
+      region: '',
+      protocol: 'http',
+      expire_time: 60
+    }
+  } catch (error) {
+    console.error('Failed to fetch from Qingguo:', error)
+    notificationStore.addNotification('error', '从青果获取代理失败')
+  }
+}
+
+async function checkProxyHealth(proxyId) {
+  try {
+    await proxyStore.checkProxyHealth(proxyId)
+    notificationStore.addNotification('success', '代理健康检查完成')
+  } catch (error) {
+    console.error('Failed to check proxy health:', error)
+    notificationStore.addNotification('error', '代理健康检查失败')
+  }
+}
+
+async function deleteProxy(proxyId) {
+  if (!confirm('确定要删除此代理吗？')) return
+  try {
+    await proxyStore.deleteProxy(proxyId)
+    notificationStore.addNotification('success', '代理删除成功')
+  } catch (error) {
+    console.error('Failed to delete proxy:', error)
+    notificationStore.addNotification('error', '删除代理失败')
+  }
+}
+
+function editProxy(proxy) {
+  // TODO: Implement edit proxy functionality
+  notificationStore.addNotification('info', '编辑功能开发中')
+}
+
+function formatDateTime(dateStr) {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 
 // Refresh management state (simplified for WebSocket era)
@@ -2407,6 +2750,8 @@ onMounted(async () => {
   loadUsers()
   loadSystemLogs()
   loadCurrentIntervals()  // Load current push frequencies
+  loadProxies()  // Load proxy list
+  loadQingguoBalance()  // Load Qingguo balance
 
   // Ensure WebSocket connection
   if (!marketStore.connected) {

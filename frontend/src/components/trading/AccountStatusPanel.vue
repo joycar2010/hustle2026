@@ -11,6 +11,14 @@
                 <span class="text-sm font-bold text-[#D4B106]">{{ account.account_name }}</span>
               </div>
               <span class="font-semibold text-xs">{{ getPlatformName(account.platform_id, account.is_mt5_account) }}</span>
+
+              <!-- Proxy Status -->
+              <div v-if="getProxyStatus(account)" class="flex items-center space-x-1 text-[10px]">
+                <div class="w-1 h-1 rounded-full" :class="getProxyStatusColor(account)"></div>
+                <span class="text-gray-400">代理:</span>
+                <span :class="getProxyStatusTextColor(account)">{{ getProxyStatusText(account) }}</span>
+              </div>
+
               <span class="text-[10px]" :class="account.error ? 'text-[#f0b90b]' : 'text-gray-500'">
                 {{ account.error ? '连接失败' : (account.is_active ? '已激活' : '未连接') }}
               </span>
@@ -29,14 +37,14 @@
             <div class="flex space-x-1 self-center">
               <button
                 @click="toggleConnection(account.account_id)"
-                class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
+                class="px-1.5 py-0.5 text-[10px] rounded transition-colors whitespace-nowrap"
                 :class="disconnectedAccounts.has(account.account_id) ? 'bg-[#0ecb81] hover:bg-[#0db774]' : 'bg-[#f6465d] hover:bg-[#e03d52]'"
               >
                 {{ disconnectedAccounts.has(account.account_id) ? '连接' : '断开' }}
               </button>
               <button
                 @click="toggleDisable(account.account_id)"
-                class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
+                class="px-1.5 py-0.5 text-[10px] rounded transition-colors whitespace-nowrap"
                 :class="disconnectedAccounts.has(account.account_id) ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gray-500 opacity-50 cursor-not-allowed'"
                 :disabled="!disconnectedAccounts.has(account.account_id)"
                 :title="!disconnectedAccounts.has(account.account_id) ? '请先断开连接再禁用' : ''"
@@ -141,6 +149,7 @@ const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 
 const activeAccounts = ref([])
+const accountProxies = ref({}) // 存储账户代理信息 { account_id: { proxy_data, platform_id } }
 
 // Persist disconnected state across page refreshes
 const STORAGE_KEY = 'disconnectedAccounts'
@@ -176,6 +185,7 @@ function setWsConnectedState(connected) {
   localStorage.setItem(WS_CONNECTED_KEY, connected.toString())
 }
 const disconnectedAccounts = ref(loadDisconnected())
+let proxyRefreshTimer = null
 
 onMounted(() => {
   // Ensure WebSocket connection
@@ -188,10 +198,18 @@ onMounted(() => {
 
   // Initial fetch only
   fetchAccountData()
+
+  // Refresh proxy status every 30 seconds
+  proxyRefreshTimer = setInterval(() => {
+    fetchProxyStatus()
+  }, 30000)
 })
 
 onUnmounted(() => {
-  // Cleanup if needed
+  // Cleanup
+  if (proxyRefreshTimer) {
+    clearInterval(proxyRefreshTimer)
+  }
 })
 
 // Watch for account balance updates via WebSocket (when backend implements it)
@@ -270,9 +288,74 @@ async function fetchAccountData() {
     activeAccounts.value = allAccounts
 
     notificationStore.updateSystemAlerts(data)
+
+    // Fetch proxy status for each account
+    await fetchProxyStatus()
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
+}
+
+async function fetchProxyStatus() {
+  try {
+    for (const account of activeAccounts.value) {
+      // 为每个平台获取代理状态
+      const platforms = [account.platform_id]
+
+      for (const platformId of platforms) {
+        try {
+          const response = await api.get(`/api/v1/accounts/${account.account_id}/proxy/${platformId}`)
+          const key = `${account.account_id}_${platformId}`
+          accountProxies.value[key] = {
+            ...response.data,
+            platform_id: platformId
+          }
+        } catch (error) {
+          // 如果没有绑定代理，忽略错误
+          if (error.response?.status !== 404) {
+            console.error(`Failed to fetch proxy for account ${account.account_id} platform ${platformId}:`, error)
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to fetch proxy status:', error)
+  }
+}
+
+function getProxyStatus(account) {
+  const key = `${account.account_id}_${account.platform_id}`
+  return accountProxies.value[key]
+}
+
+function getProxyStatusColor(account) {
+  const proxy = getProxyStatus(account)
+  if (!proxy) return 'bg-gray-500'
+
+  const health = proxy.health_score || 0
+  if (health >= 80) return 'bg-[#0ecb81]'
+  if (health >= 50) return 'bg-[#f0b90b]'
+  return 'bg-[#f6465d]'
+}
+
+function getProxyStatusTextColor(account) {
+  const proxy = getProxyStatus(account)
+  if (!proxy) return 'text-gray-400'
+
+  const health = proxy.health_score || 0
+  if (health >= 80) return 'text-[#0ecb81]'
+  if (health >= 50) return 'text-[#f0b90b]'
+  return 'text-[#f6465d]'
+}
+
+function getProxyStatusText(account) {
+  const proxy = getProxyStatus(account)
+  if (!proxy) return '直连'
+
+  const health = proxy.health_score || 0
+  const latency = proxy.avg_latency_ms ? `${Math.round(proxy.avg_latency_ms)}ms` : '-'
+
+  return `${proxy.host}:${proxy.port} (${health}/100, ${latency})`
 }
 
 function toggleConnection(accountId) {

@@ -102,7 +102,7 @@ def format_bybit_error(ret_code: int, ret_msg: str) -> str:
 class BybitV5Client:
     """Async client for Bybit V5 API"""
 
-    def __init__(self, api_key: str = "", api_secret: str = ""):
+    def __init__(self, api_key: str = "", api_secret: str = "", proxy_url: Optional[str] = None):
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = settings.BYBIT_API_BASE
@@ -110,18 +110,12 @@ class BybitV5Client:
         self.mt5_base_url = settings.BYBIT_API_BASE
         self.session: Optional[aiohttp.ClientSession] = None
         self.recv_window = "5000"
+        self.proxy_url = proxy_url  # 代理URL，格式: http://user:pass@host:port
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
         if self.session is None or self.session.closed:
-            # Configure proxy if available
-            connector = None
-            if settings.HTTP_PROXY or settings.HTTPS_PROXY:
-                proxy_url = settings.HTTPS_PROXY or settings.HTTP_PROXY
-                logger.info(f"Using proxy: {proxy_url}")
-                connector = aiohttp.TCPConnector(ssl=False)  # Disable SSL verification for proxy
-
-            self.session = aiohttp.ClientSession(connector=connector)
+            self.session = aiohttp.ClientSession()
         return self.session
 
     async def close(self):
@@ -178,8 +172,8 @@ class BybitV5Client:
 
         session = await self._get_session()
 
-        # Configure proxy if available
-        proxy = settings.HTTPS_PROXY or settings.HTTP_PROXY or None
+        # 使用实例级代理（优先）或全局代理
+        proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else (settings.HTTPS_PROXY or settings.HTTP_PROXY or None)
 
         try:
             async with session.request(method, url, headers=headers, proxy=proxy, **kwargs) as resp:

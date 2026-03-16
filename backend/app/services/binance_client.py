@@ -89,12 +89,13 @@ def format_binance_error(error_data: Dict[str, Any]) -> str:
 class BinanceFuturesClient:
     """Async client for Binance Futures API"""
 
-    def __init__(self, api_key: str = "", api_secret: str = ""):
+    def __init__(self, api_key: str = "", api_secret: str = "", proxy_url: Optional[str] = None):
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = settings.BINANCE_API_BASE
         self.spot_base_url = "https://api.binance.com"  # Spot API base URL
         self.session: Optional[aiohttp.ClientSession] = None
+        self.proxy_url = proxy_url  # 代理URL，格式: http://user:pass@host:port
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
@@ -138,7 +139,9 @@ class BinanceFuturesClient:
             full_url = f"{url}?{query_string}&signature={signature}"
             session = await self._get_session()
             try:
-                async with session.request(method, full_url, headers=headers, **kwargs) as resp:
+                # 使用代理（如果配置了）
+                proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None
+                async with session.request(method, full_url, headers=headers, proxy=proxy, **kwargs) as resp:
                     data = await resp.json()
                     if resp.status != 200:
                         error_msg = format_binance_error(data)
@@ -150,7 +153,9 @@ class BinanceFuturesClient:
         session = await self._get_session()
 
         try:
-            async with session.request(method, url, headers=headers, **kwargs) as resp:
+            # 使用代理（如果配置了）
+            proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None
+            async with session.request(method, url, headers=headers, proxy=proxy, **kwargs) as resp:
                 data = await resp.json()
 
                 if resp.status != 200:

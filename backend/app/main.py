@@ -12,7 +12,7 @@ import asyncio
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer
 from app.tasks.redis_monitor import redis_monitor
@@ -297,6 +297,7 @@ app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["
 app.include_router(sound_files.router, prefix="/api/v1", tags=["声音文件管理"])
 app.include_router(timing_configs.router, prefix="/api/v1", tags=["时间配置管理"])
 app.include_router(arbitrage_opportunities.router, prefix="/api/v1", tags=["套利机会"])
+app.include_router(proxies.router, prefix="/api/v1", tags=["代理管理"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds

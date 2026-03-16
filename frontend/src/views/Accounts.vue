@@ -104,6 +104,12 @@
 
         <!-- Action Buttons -->
         <div class="flex gap-2">
+          <button @click="openProxyConfig(account)" class="btn-secondary flex-1" title="配置代理">
+            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+            </svg>
+            代理
+          </button>
           <button @click="openEditModal(account)" class="btn-secondary flex-1">
             编辑
           </button>
@@ -313,12 +319,79 @@
         </div>
       </div>
     </div>
+
+    <!-- Proxy Configuration Modal -->
+    <div v-if="showProxyModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div class="bg-gray-900 rounded-lg max-w-md w-full">
+        <div class="p-6">
+          <h2 class="text-2xl font-bold mb-6">代理配置 - {{ currentAccount?.account_name }}</h2>
+
+          <div class="space-y-4">
+            <!-- Platform Selection -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-2">平台</label>
+              <select v-model="proxyConfigForm.platform_id"
+                      class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
+                <option :value="1">Binance</option>
+                <option :value="2">Bybit</option>
+              </select>
+            </div>
+
+            <!-- Proxy Selection -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-2">代理</label>
+              <select v-model="proxyConfigForm.proxy_id"
+                      class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
+                <option :value="null">直连（不使用代理）</option>
+                <option v-for="proxy in proxyStore.activeProxies" :key="proxy.id" :value="proxy.id">
+                  {{ proxy.provider === 'local' ? '本地' : proxy.provider === 'qingguo' ? '青果' : '自定义' }} -
+                  {{ proxy.host }}:{{ proxy.port }}
+                  (健康度: {{ proxy.health_score }})
+                </option>
+              </select>
+            </div>
+
+            <!-- Current Proxy Info -->
+            <div v-if="currentProxyBinding" class="bg-dark-200 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-2">当前代理</div>
+              <div class="text-sm">
+                <div class="flex justify-between items-center mb-1">
+                  <span class="text-gray-500">地址:</span>
+                  <span class="font-mono text-xs">{{ currentProxyBinding.host }}:{{ currentProxyBinding.port }}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-500">健康度:</span>
+                  <span class="text-xs">{{ currentProxyBinding.health_score }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex gap-3 mt-6">
+            <button @click="saveProxyConfig" class="btn-primary flex-1">
+              保存
+            </button>
+            <button @click="unbindProxy" class="btn-secondary flex-1">
+              解绑
+            </button>
+            <button @click="closeProxyModal" class="btn-secondary flex-1">
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '@/services/api'
+import { useProxyStore } from '@/stores/proxy'
+import { useNotificationStore } from '@/stores/notification'
+
+const proxyStore = useProxyStore()
+const notificationStore = useNotificationStore()
 
 // Data
 const accounts = ref([])
@@ -330,6 +403,13 @@ const showMt5Password = ref(false)
 const viewingSecretType = ref('') // 'api' or 'mt5'
 const verificationPassword = ref('')
 const passwordError = ref('')
+const showProxyModal = ref(false)
+const currentAccount = ref(null)
+const currentProxyBinding = ref(null)
+const proxyConfigForm = ref({
+  platform_id: 1,
+  proxy_id: null
+})
 const accountForm = ref({
   account_id: null,
   account_name: '',
@@ -556,6 +636,83 @@ async function deleteAccount(accountId) {
   } catch (error) {
     console.error('Failed to delete account:', error)
     alert('删除失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+// Proxy Configuration Functions
+async function openProxyConfig(account) {
+  currentAccount.value = account
+  proxyConfigForm.value.platform_id = account.platform_id
+  showProxyModal.value = true
+
+  // Load proxies if not already loaded
+  if (proxyStore.proxies.length === 0) {
+    await proxyStore.fetchProxies()
+  }
+
+  // Load current proxy binding
+  try {
+    const binding = await proxyStore.getAccountProxy(account.account_id, account.platform_id)
+    if (binding && binding.proxy_id) {
+      currentProxyBinding.value = binding
+      proxyConfigForm.value.proxy_id = binding.proxy_id
+    } else {
+      currentProxyBinding.value = null
+      proxyConfigForm.value.proxy_id = null
+    }
+  } catch (error) {
+    console.error('Failed to load proxy binding:', error)
+    currentProxyBinding.value = null
+    proxyConfigForm.value.proxy_id = null
+  }
+}
+
+async function saveProxyConfig() {
+  try {
+    if (proxyConfigForm.value.proxy_id) {
+      await proxyStore.bindProxyToAccount(
+        currentAccount.value.account_id,
+        proxyConfigForm.value.platform_id,
+        proxyConfigForm.value.proxy_id
+      )
+      notificationStore.addNotification('success', '代理配置已保存')
+    } else {
+      await proxyStore.unbindProxyFromAccount(
+        currentAccount.value.account_id,
+        proxyConfigForm.value.platform_id
+      )
+      notificationStore.addNotification('success', '代理已解绑')
+    }
+    closeProxyModal()
+  } catch (error) {
+    console.error('Failed to save proxy config:', error)
+    notificationStore.addNotification('error', '保存代理配置失败')
+  }
+}
+
+async function unbindProxy() {
+  if (!confirm('确定要解绑此账户的代理吗？')) return
+
+  try {
+    await proxyStore.unbindProxyFromAccount(
+      currentAccount.value.account_id,
+      proxyConfigForm.value.platform_id
+    )
+    notificationStore.addNotification('success', '代理已解绑')
+    closeProxyModal()
+  } catch (error) {
+    console.error('Failed to unbind proxy:', error)
+    notificationStore.addNotification('error', '解绑代理失败')
+  }
+}
+
+function closeProxyModal() {
+  showProxyModal.value = false
+  currentAccount.value = null
+  currentProxyBinding.value = null
+  proxyConfigForm.value = {
+    platform_id: 1,
+    proxy_id: null
   }
 }
 
