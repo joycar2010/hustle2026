@@ -4779,3 +4779,1509 @@ Ladders: 1, Opening M Coin: 1.0
 [DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
 [DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
 [DEBUG] Step 6 - Can open: True, reason: None
+
+================================================================================
+[2026-03-17 10:52:58.090549] LADDER DEBUG START (ladder 0)
+[DEBUG] is_running initial value: True
+[DEBUG] ladder total_qty: 2.0
+[DEBUG] strategy_type: forward_closing
+[DEBUG] order_qty_limit: 1.0
+================================================================================
+[DEBUG] is_opening: False
+[DEBUG] spread_threshold: -0.7
+[DEBUG] trigger_count_required: 3
+[DEBUG] compare_op: <=
+
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.7700000000004366, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:52:58.106275] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:52:58.117828] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:52:58.117828] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.7700000000004366, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:52:58.629981] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:52:58.629981] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:52:58.629981] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.7600000000002183, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:52:59.136576] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:52:59.136576] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:52:59.136576] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.7600000000002183, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.7600000000002183, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:52:59.692251] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:52:59.692251] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:52:59.692251] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.7899999999999636, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:00.215326] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:00.215326] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:00.215326] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.7899999999999636, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:00.723660] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:00.723660] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:00.723660] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8500000000003638, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8500000000003638, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:01.324914] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:01.324914] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:01.324914] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8500000000003638, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:01.836304] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:01.836304] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:01.836304] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.0300000000006548, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:02.340360] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:02.340360] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:02.340360] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.0300000000006548, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.0300000000006548, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:02.961179] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:02.961179] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:02.961179] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.1900000000005093, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:03.461598] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:03.461598] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:03.461598] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.1900000000005093, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:03.950038] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:03.950038] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:03.950038] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.1900000000005093, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.2100000000000364, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:04.521740] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:04.521740] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:04.521740] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.2100000000000364, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:05.027532] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:05.027532] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:05.027532] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.2200000000002547, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:05.528020] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:05.528020] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:05.528020] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.2200000000002547, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.2200000000002547, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:06.099048] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:06.099048] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:06.099048] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.2000000000007276, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:06.622099] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:06.622099] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:06.622099] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.2000000000007276, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:07.137600] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:07.137600] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:07.137600] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.110000000000582, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.110000000000582, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:07.742499] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:07.742499] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:07.742499] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.110000000000582, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:08.248062] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:08.248062] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:08.248062] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.1200000000008004, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:08.773741] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:08.773741] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:08.773741] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.1200000000008004, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.1200000000008004, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:09.367585] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:09.373636] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:09.373636] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:09.881100] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:09.881100] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:09.881100] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:10.367415] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:10.367415] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:10.367415] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.0600000000004002, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:10.936248] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:10.936248] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:10.936248] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:11.451491] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:11.451491] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:11.451491] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:11.961483] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:11.961483] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:11.975032] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.0600000000004002, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:12.554952] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:12.554952] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:12.554952] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:13.080984] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:13.080984] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:13.080984] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.0600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:13.586277] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:13.586277] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:13.586277] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.7400000000006912, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.7400000000006912, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:14.148953] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:14.148953] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:14.148953] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.7400000000006912, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:14.662943] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:14.662943] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:14.662943] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.7400000000006912, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:15.154608] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:15.154608] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:15.154608] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.7400000000006912, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.7400000000006912, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:15.711648] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:15.711648] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:15.711648] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8800000000001091, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:16.200272] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:16.200272] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:16.200272] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.8800000000001091, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:16.711586] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:16.711586] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:16.711586] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8000000000001819, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:17.305187] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:17.305187] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:17.305187] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:17.805240] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:17.805240] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:17.805240] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.9200000000000728, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:18.309815] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:18.309815] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:18.309815] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.9200000000000728, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.9200000000000728, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:18.904868] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:18.904868] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:18.904868] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.9500000000007276, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:19.411874] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:19.411874] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:19.411874] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.9500000000007276, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:19.914428] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:19.914428] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:19.914428] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8900000000003274, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8900000000003274, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:20.492897] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:20.492897] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:20.492897] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8900000000003274, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:20.992427] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:20.992427] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:20.992427] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.7700000000004366, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:21.497666] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:21.497666] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:21.497666] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.7700000000004366, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.7700000000004366, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:22.068955] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:22.068955] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:22.068955] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.7600000000002183, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:22.575496] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:22.575496] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:22.575496] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.7600000000002183, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:23.067976] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:23.067976] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:23.067976] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.7600000000002183, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:23.623379] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:23.623379] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:23.623379] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:24.130706] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:24.130706] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:24.130706] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:24.637757] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:24.637757] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:24.637757] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8000000000001819, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:25.218759] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:25.218759] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:25.219414] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8299999999999272, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:25.748002] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:25.748002] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:25.748002] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.8299999999999272, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:26.273921] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:26.273921] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:26.273921] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8000000000001819, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:26.842148] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:26.842148] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:26.842148] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.8000000000001819, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 10:53:27.367451] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 10:53:27.367451] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 10:53:27.367451] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.8400000000001455, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 10:53:27.872972] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 10:53:27.872972] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 10:53:27.872972] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8400000000001455, threshold: -0.7, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.8400000000001455, threshold: -0.7
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 10:53:28.430131] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 10:53:28.430131] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 10:53:28.430131] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5600000000004002, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5999999999994543, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5999999999994543, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5999999999994543, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6300000000001091, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6300000000001091, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6300000000001091, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.6199999999998909, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5900000000001455, threshold: -0.7
+[DEBUG] Step 3b - Triggered: False, new count: 1
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+
+================================================================================
+[2026-03-17 11:29:45.209313] LADDER DEBUG START (ladder 0)
+[DEBUG] is_running initial value: True
+[DEBUG] ladder total_qty: 2.0
+[DEBUG] strategy_type: forward_closing
+[DEBUG] order_qty_limit: 1.0
+================================================================================
+[DEBUG] is_opening: False
+[DEBUG] spread_threshold: -0.2
+[DEBUG] trigger_count_required: 3
+[DEBUG] compare_op: <=
+
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.07000000000061846, threshold: -0.2
+[DEBUG] Step 3b - Triggered: False, new count: 0
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.07000000000061846, threshold: -0.2
+[DEBUG] Step 3b - Triggered: False, new count: 0
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.07999999999992724, threshold: -0.2
+[DEBUG] Step 3b - Triggered: False, new count: 0
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.07999999999992724, threshold: -0.2
+[DEBUG] Step 3b - Triggered: False, new count: 0
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.47000000000025466, threshold: -0.2
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 11:29:47.271122] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 11:29:47.271122] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 11:29:47.271122] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.47000000000025466, threshold: -0.2
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 11:29:47.766445] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 11:29:47.766445] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 11:29:47.766445] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.47000000000025466, threshold: -0.2
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 11:29:48.265216] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 11:29:48.265216] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 11:29:48.266205] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.5200000000004366, threshold: -0.2, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.5100000000002183, threshold: -0.2
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 11:29:53.842997] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 11:29:53.843999] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 11:29:53.843999] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.5200000000004366, threshold: -0.2
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 11:29:54.347579] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 11:29:54.347579] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 11:29:54.348577] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.5200000000004366, threshold: -0.2
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 11:29:54.848097] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 11:29:54.848097] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 11:29:54.849094] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=5.641, Bybit=5.0, Min=5.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.5200000000004366, threshold: -0.2, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+
+================================================================================
+[2026-03-17 13:10:07.126659] LADDER DEBUG START (ladder 0)
+[DEBUG] is_running initial value: True
+[DEBUG] ladder total_qty: 2.0
+[DEBUG] strategy_type: forward_closing
+[DEBUG] order_qty_limit: 1.0
+================================================================================
+[DEBUG] is_opening: False
+[DEBUG] spread_threshold: -0.5
+[DEBUG] trigger_count_required: 3
+[DEBUG] compare_op: <=
+
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -0.9099999999998545, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 13:10:07.143115] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 13:10:07.143115] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 13:10:07.144117] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -0.9099999999998545, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 13:10:07.651175] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 13:10:07.651175] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 13:10:07.652187] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -0.8099999999994907, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 13:10:08.161865] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 13:10:08.162874] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 13:10:08.162874] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -0.8099999999994907, threshold: -0.5, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.0399999999999636, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 13:10:13.823170] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 13:10:13.823170] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 13:10:13.823170] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.0399999999999636, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 13:10:14.359658] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 13:10:14.359658] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 13:10:14.359658] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.0499999999992724, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 13:10:14.877801] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 13:10:14.877801] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 13:10:14.877801] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.0499999999992724, threshold: -0.5, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.1599999999998545, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 13:10:20.540311] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 13:10:20.540311] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 13:10:20.541345] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.1599999999998545, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 13:10:21.040429] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 13:10:21.040429] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 13:10:21.040429] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.2399999999997817, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 13:10:21.563828] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 13:10:21.563828] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 13:10:21.563828] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.2399999999997817, threshold: -0.5, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 0, required: 3
+[DEBUG] Step 3a - Current spread: -1.3800000000001091, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 1
+[2026-03-17 13:10:27.243647] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=1/3
+[2026-03-17 13:10:27.243647] PUSHING WebSocket: action=closing, count=1/3
+[2026-03-17 13:10:27.243647] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 1, required: 3
+[DEBUG] Step 3a - Current spread: -1.069999999999709, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 2
+[2026-03-17 13:10:27.767606] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=2/3
+[2026-03-17 13:10:27.767606] PUSHING WebSocket: action=closing, count=2/3
+[2026-03-17 13:10:27.767606] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: False, current: 2, required: 3
+[DEBUG] Step 3a - Current spread: -1.069999999999709, threshold: -0.5
+[DEBUG] Step 3b - Triggered: True, new count: 3
+[2026-03-17 13:10:28.257840] PUSH TRIGGER PROGRESS: user_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24, strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, count=3/3
+[2026-03-17 13:10:28.258849] PUSHING WebSocket: action=closing, count=3/3
+[2026-03-17 13:10:28.258849] WebSocket PUSHED successfully
+[DEBUG] Step 3c - About to sleep for 0.5 seconds
+[DEBUG] Step 3d - Woke up from sleep, is_running=True
+[DEBUG] Step 1 - Actual positions (monitoring): Binance=4.641, Bybit=4.0, Min=4.0
+[DEBUG] Step 1 - Memory position (already closed): 0.0
+[DEBUG] Step 1 - Target total_qty: 2.0
+[DEBUG] Step 1 - Current position: 0.0/2.0
+[DEBUG] Step 3 - Trigger ready: True, current: 3, required: 3
+[DEBUG] Step 4 - Current spread: -1.069999999999709, threshold: -0.5, compare_op: <=
+[DEBUG] Step 4 - About to proceed to Step 5
+[DEBUG] Step 4.5 - Reached after comment, before Step 5
+[DEBUG] Step 5 - About to calculate order_qty
+[DEBUG] Step 5 - ladder.total_qty=2.0, current_position=0.0, order_qty_limit=1.0
+[DEBUG] Step 5 - Order qty: 1.0, remaining: 2.0, limit: 1.0
+[DEBUG] Step 5.5 - About to call check_can_open
+[DEBUG] Step 6 - About to call check_can_open with strategy_id=0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24_forward_closing_continuous, ladder_idx=0, order_qty=1.0, total_qty=2.0
+[DEBUG] Step 6 - check_can_open returned: {'can_open': True, 'current_position': 0.0, 'requested_quantity': 1.0, 'max_position': 2.0, 'remaining_capacity': 2.0, 'reason': None}
+[DEBUG] Step 6 - Can open: True, reason: None

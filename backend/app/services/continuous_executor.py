@@ -11,6 +11,7 @@ from app.services.position_manager import PositionManager, position_manager
 from app.services.trigger_manager import TriggerCountManager, CompareOperator
 from app.services.market_service import market_data_service
 from app.services.strategy_status_pusher import status_pusher
+from app.utils.quantity_converter import quantity_converter
 
 
 logger = logging.getLogger(__name__)
@@ -400,6 +401,9 @@ class ContinuousStrategyExecutor:
             bybit_price = self._get_bybit_price(market_data, strategy_type)
             logger.info(f"Step 7 - Binance price: {binance_price}, Bybit price: {bybit_price}")
 
+            # Step 7.5: Snapshot positions before execution (for single-leg detection)
+            pre_snapshot = await self._snapshot_positions(binance_account, bybit_account)
+
             # Step 8: Execute order
             logger.info(f"Step 8 - Executing {strategy_type}: {order_qty} units")
             exec_result = await self._execute_order(
@@ -413,16 +417,16 @@ class ContinuousStrategyExecutor:
             )
             logger.info(f"Step 8 result - Success: {exec_result.get('success')}, Binance filled: {exec_result.get('binance_filled_qty')}, Bybit filled: {exec_result.get('bybit_filled_qty')}")
 
-            # Step 8.5: Schedule delayed single-leg check (10 seconds + double verification)
-            # This prevents false alerts due to exchange API data sync delays
-            if exec_result.get('is_single_leg'):
-                logger.warning(f"Potential single-leg detected, scheduling delayed verification in 10 seconds")
-                # Schedule async delayed check (non-blocking)
+            # Step 8.5: Schedule single-leg check if Binance had any fill
+            # Non-blocking: uses asyncio.create_task so it never interrupts the main execution loop
+            binance_filled_qty = exec_result.get('binance_filled_qty', 0)
+            if binance_filled_qty and binance_filled_qty > 0:
                 asyncio.create_task(self._delayed_single_leg_check(
                     strategy_type=strategy_type,
                     exec_result=exec_result,
                     binance_account=binance_account,
-                    bybit_account=bybit_account
+                    bybit_account=bybit_account,
+                    pre_snapshot=pre_snapshot
                 ))
 
             if not exec_result['success']:
@@ -440,10 +444,12 @@ class ContinuousStrategyExecutor:
                 continue
 
             # Step 10: Record position
-            filled_qty = min(
-                exec_result.get('binance_filled_qty', 0),
-                exec_result.get('bybit_filled_qty', 0)
-            )
+            # binance_filled_qty is in XAU, bybit_filled_qty is in Lot (1 Lot = 100 XAU)
+            # Convert bybit Lot → XAU before comparing
+            binance_filled_xau = exec_result.get('binance_filled_qty', 0)
+            bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
+            bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_lot)
+            filled_qty = min(binance_filled_xau, bybit_filled_xau)
 
             # For both opening and closing, use record_opening (additive) to track
             # how many lots have been executed toward the ladder's total_qty target.
@@ -699,32 +705,75 @@ class ContinuousStrategyExecutor:
                 self.user_id
             )
 
+    async def _snapshot_positions(
+        self,
+        binance_account: Account,
+        bybit_account: Account
+    ) -> Dict:
+        """
+        Snapshot current positions for both accounts before order execution.
+        Used as baseline for single-leg detection via position delta comparison.
+        """
+        try:
+            # Init Binance client if needed
+            if not hasattr(binance_account, 'binance_client'):
+                from app.services.binance_client import BinanceFuturesClient
+                binance_account.binance_client = BinanceFuturesClient(
+                    api_key=binance_account.api_key,
+                    api_secret=binance_account.api_secret
+                )
+
+            # Init MT5 client if needed
+            if not hasattr(bybit_account, 'mt5_client'):
+                from app.services.mt5_client import MT5Client
+                bybit_account.mt5_client = MT5Client(
+                    login=int(bybit_account.mt5_id),
+                    password=bybit_account.mt5_primary_pwd,
+                    server=bybit_account.mt5_server
+                )
+                if not bybit_account.mt5_client.connect():
+                    logger.warning("[SNAPSHOT] MT5 connection failed, snapshot will be empty")
+                    return {'binance_qty': None, 'bybit_qty_xau': None}
+
+            binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
+            binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
+
+            bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+            bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
+            bybit_qty_xau = bybit_qty_lot * 100  # 1 Lot = 100 XAU
+
+            logger.info(f"[SNAPSHOT] Pre-execution: Binance={binance_qty} XAU, Bybit={bybit_qty_xau} XAU ({bybit_qty_lot} Lot)")
+            return {'binance_qty': binance_qty, 'bybit_qty_xau': bybit_qty_xau}
+
+        except Exception as e:
+            logger.warning(f"[SNAPSHOT] Failed to snapshot positions: {e}")
+            return {'binance_qty': None, 'bybit_qty_xau': None}
+
     async def _delayed_single_leg_check(
         self,
         strategy_type: str,
         exec_result: Dict,
         binance_account: Account,
-        bybit_account: Account
+        bybit_account: Account,
+        pre_snapshot: Dict = None
     ):
         """
-        Delayed single-leg check with 10-second wait + double verification.
-        This prevents false alerts due to exchange API data sync delays.
+        Single-leg detection based on position DELTA comparison after 3-second wait.
 
-        Args:
-            strategy_type: Strategy type (e.g., 'reverse_closing')
-            exec_result: Original execution result
-            binance_account: Binance account
-            bybit_account: Bybit account
+        Rules:
+        1. Wait 3 seconds after Binance fill for exchange data to sync
+        2. Compute position delta: post - pre for both sides
+        3. If both sides fully filled → no alert
+        4. If partial: bybit_delta_xau / binance_delta_xau < 0.6 → alert
+           (ratio accounts for 1 XAU Binance = 0.01 Lot Bybit conversion)
+        5. Alert is non-blocking: never interrupts the main execution loop
         """
         try:
-            logger.info(f"[SINGLE_LEG_CHECK] Starting {self.delayed_single_leg_check_delay}-second delayed verification for {strategy_type}")
+            logger.info(f"[SINGLE_LEG_CHECK] Waiting 3s after Binance fill for {strategy_type}")
+            await asyncio.sleep(3)
 
-            # Step 1: Wait for exchange data to fully sync (configurable delay)
-            await asyncio.sleep(self.delayed_single_leg_check_delay)
-
-            # Step 2: First verification - get actual positions
+            # Ensure clients are initialized
             try:
-                # Initialize clients if needed
                 if not hasattr(binance_account, 'binance_client'):
                     from app.services.binance_client import BinanceFuturesClient
                     binance_account.binance_client = BinanceFuturesClient(
@@ -740,76 +789,75 @@ class ContinuousStrategyExecutor:
                         server=bybit_account.mt5_server
                     )
                     if not bybit_account.mt5_client.connect():
-                        logger.error("[SINGLE_LEG_CHECK] MT5 connection failed, cannot verify positions")
+                        logger.error("[SINGLE_LEG_CHECK] MT5 connection failed, skipping check")
                         return
 
-                # Get actual positions
+                # Get post-execution positions
                 binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
-                binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
+                post_binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
                 bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
                 bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
-                bybit_qty = bybit_qty_lot * 100  # Convert Lot to XAU
+                post_bybit_qty_xau = bybit_qty_lot * 100  # 1 Lot = 100 XAU
 
-                pos_diff = abs(binance_qty - bybit_qty)
+                # Compute deltas using pre-snapshot
+                if pre_snapshot and pre_snapshot.get('binance_qty') is not None:
+                    binance_delta = abs(post_binance_qty - pre_snapshot['binance_qty'])
+                    bybit_delta_xau = abs(post_bybit_qty_xau - pre_snapshot['bybit_qty_xau'])
+                else:
+                    # Fallback: use exec_result filled quantities
+                    binance_delta = exec_result.get('binance_filled_qty', 0)
+                    bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
+                    bybit_delta_xau = bybit_filled_lot * 100
 
                 logger.info(
-                    f"[SINGLE_LEG_CHECK] First verification (10s delay): "
-                    f"Binance={binance_qty} XAU, Bybit={bybit_qty} XAU, Diff={pos_diff}"
+                    f"[SINGLE_LEG_CHECK] Delta: Binance={binance_delta:.4f} XAU, "
+                    f"Bybit={bybit_delta_xau:.4f} XAU | "
+                    f"Post: Binance={post_binance_qty} XAU, Bybit={post_bybit_qty_xau} XAU"
                 )
 
-                # If positions match (within 0.01 XAU tolerance), no single-leg risk
-                if pos_diff < 0.01:
-                    logger.info("[SINGLE_LEG_CHECK] First verification passed: positions are consistent, no alert needed")
+                # No Binance fill detected → nothing to check
+                if binance_delta < 0.001:
+                    logger.info("[SINGLE_LEG_CHECK] No Binance position change detected, skipping")
                     return
 
-                # Step 3: Second verification (configurable delay) to rule out temporary data fluctuation
-                await asyncio.sleep(self.delayed_single_leg_second_check_delay)
-
-                binance_positions2 = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
-                binance_qty2 = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions2)
-
-                bybit_positions2 = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
-                bybit_qty_lot2 = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions2)
-                bybit_qty2 = bybit_qty_lot2 * 100
-
-                pos_diff2 = abs(binance_qty2 - bybit_qty2)
-
-                logger.info(
-                    f"[SINGLE_LEG_CHECK] Second verification (11s delay): "
-                    f"Binance={binance_qty2} XAU, Bybit={bybit_qty2} XAU, Diff={pos_diff2}"
-                )
-
-                # Step 4: Final decision - only alert if both verifications show inconsistency
-                if pos_diff2 >= 0.01:
-                    logger.error(
-                        f"[SINGLE_LEG_CHECK] CONFIRMED SINGLE-LEG after double verification: "
-                        f"Binance={binance_qty2} XAU, Bybit={bybit_qty2} XAU, Diff={pos_diff2}"
+                # Both sides fully matched (within 5% tolerance) → no alert
+                if bybit_delta_xau >= binance_delta * 0.95:
+                    logger.info(
+                        f"[SINGLE_LEG_CHECK] Both sides matched: "
+                        f"Bybit/Binance ratio={bybit_delta_xau/binance_delta:.2%}, no alert"
                     )
+                    return
 
-                    # Update exec_result with verified positions
+                # Compute fill ratio
+                ratio = bybit_delta_xau / binance_delta if binance_delta > 0 else 0
+
+                if ratio < 0.6:
+                    logger.error(
+                        f"[SINGLE_LEG_CHECK] SINGLE-LEG CONFIRMED: "
+                        f"Binance delta={binance_delta:.4f} XAU, "
+                        f"Bybit delta={bybit_delta_xau:.4f} XAU, "
+                        f"ratio={ratio:.2%} < 60%"
+                    )
                     exec_result['single_leg_details'] = {
-                        'binance_filled': binance_qty2,
-                        'bybit_filled': bybit_qty2,
-                        'bybit_filled_xau': bybit_qty2,
-                        'unfilled_qty': pos_diff2,
-                        'verification_time': '10s_double_check'
+                        'binance_filled': binance_delta,
+                        'bybit_filled': bybit_delta_xau,
+                        'bybit_filled_xau': bybit_delta_xau,
+                        'unfilled_qty': binance_delta - bybit_delta_xau,
+                        'fill_ratio': ratio,
+                        'verification_method': 'position_delta_3s'
                     }
-
-                    # Send alert
                     await self._send_single_leg_alert(
                         strategy_type=strategy_type,
                         exec_result=exec_result
                     )
                 else:
                     logger.info(
-                        f"[SINGLE_LEG_CHECK] Second verification passed: positions synced, "
-                        f"first check was due to data delay (false positive avoided)"
+                        f"[SINGLE_LEG_CHECK] Partial fill but ratio={ratio:.2%} >= 60%, no alert"
                     )
 
             except Exception as e:
-                logger.error(f"[SINGLE_LEG_CHECK] Error during position verification: {e}")
-                # Don't send alert on verification errors to avoid false positives
+                logger.error(f"[SINGLE_LEG_CHECK] Position check error: {e}")
 
         except Exception as e:
             logger.error(f"[SINGLE_LEG_CHECK] Delayed check failed: {e}")

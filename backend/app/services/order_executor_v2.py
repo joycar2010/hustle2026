@@ -74,7 +74,7 @@ class OrderExecutorV2:
             binance_order_id,
             self.binance_timeout,
             spread_threshold=spread_threshold,
-            compare_op='<=',
+            compare_op='>=',  # Reverse opening: spread >= threshold triggers opening
             strategy_type='reverse_opening'
         )
 
@@ -237,7 +237,7 @@ class OrderExecutorV2:
             binance_order_id,
             self.binance_timeout,
             spread_threshold=spread_threshold,
-            compare_op='>',
+            compare_op='<=',  # Reverse closing: spread <= threshold triggers closing
             strategy_type='reverse_closing'
         )
 
@@ -353,7 +353,7 @@ class OrderExecutorV2:
             binance_order_id,
             self.binance_timeout,
             spread_threshold=spread_threshold,
-            compare_op='<=',
+            compare_op='>=',  # Forward opening: spread >= threshold triggers opening
             strategy_type='forward_opening'
         )
 
@@ -512,7 +512,7 @@ class OrderExecutorV2:
             binance_order_id,
             self.binance_timeout,
             spread_threshold=spread_threshold,
-            compare_op='>',
+            compare_op='<=',  # Forward closing: spread <= threshold triggers closing
             strategy_type='forward_closing'
         )
 

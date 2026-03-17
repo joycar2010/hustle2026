@@ -484,3 +484,15 @@ Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_
 Executor is_running: False
 Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000026BF03281C0>
 
+[2026-03-17 10:52:58.090549] Task created: 4d70c675-8037-4e13-aba5-31a262d60fcf
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000021FB1FB6D40>
+
+[2026-03-17 11:29:45.208319] Task created: 1d60941f-a756-4dfa-9bdb-9a53651a3166
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000229897D62C0>
+
+[2026-03-17 13:10:07.125647] Task created: e1118879-2c93-4608-8f26-6127ffa34fea
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000029C3C1F0640>
+

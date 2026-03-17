@@ -1033,6 +1033,9 @@ async def execute_continuous_opening(
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_opening_continuous"
+        # Reset position tracker for this strategy before each new execution
+        from app.services.position_manager import position_manager
+        position_manager.reset_strategy(strategy_id)
         executor = ContinuousStrategyExecutor(
             strategy_id=strategy_id,
             order_executor=order_executor_v2,
@@ -1146,6 +1149,9 @@ async def execute_continuous_closing(
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_closing_continuous"
+        # Reset position tracker for this strategy before each new execution
+        from app.services.position_manager import position_manager
+        position_manager.reset_strategy(strategy_id)
         executor = ContinuousStrategyExecutor(
             strategy_id=strategy_id,
             order_executor=order_executor_v2,
