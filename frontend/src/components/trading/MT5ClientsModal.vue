@@ -46,14 +46,14 @@
                         :class="getStatusClass(client.connection_status)">
                     {{ getStatusText(client.connection_status) }}
                   </span>
-                  <span v-if="!client.active" class="text-xs px-2 py-1 bg-gray-700 text-gray-400 rounded">
+                  <span v-if="!client.is_active" class="text-xs px-2 py-1 bg-gray-700 text-gray-400 rounded">
                     未启用
                   </span>
                   <span class="text-xs text-gray-500">优先级: {{ client.priority }}</span>
                 </div>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" :checked="client.active"
+                <input type="checkbox" :checked="client.is_active"
                        @change="toggleClientActive(client)"
                        class="sr-only peer">
                 <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
@@ -235,7 +235,7 @@
             <!-- Active Toggle -->
             <div class="flex items-center gap-3">
               <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" v-model="clientForm.active" class="sr-only peer">
+                <input type="checkbox" v-model="clientForm.is_active" class="sr-only peer">
                 <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
                             peer-checked:after:translate-x-full peer-checked:after:border-white
                             after:content-[''] after:absolute after:top-[2px] after:left-[2px]
@@ -292,7 +292,7 @@ const clientForm = ref({
   mt5_data_path: '',
   proxy_id: null,
   priority: 1,
-  active: true
+  is_active: true
 })
 
 const clients = computed(() => {
@@ -334,7 +334,7 @@ function openAddClientModal() {
     mt5_data_path: '',
     proxy_id: null,
     priority: 1,
-    active: true
+    is_active: true
   }
   showClientForm.value = true
 }
@@ -352,7 +352,7 @@ function openEditClientModal(client) {
     mt5_data_path: client.mt5_data_path || '',
     proxy_id: client.proxy_id,
     priority: client.priority,
-    active: client.active
+    is_active: client.is_active
   }
   showClientForm.value = true
 }
@@ -386,7 +386,7 @@ async function saveClient() {
 async function toggleClientActive(client) {
   try {
     await mt5ClientStore.updateClient(client.client_id, {
-      active: !client.active
+      is_active: !client.is_active
     })
     emit('updated')
   } catch (error) {

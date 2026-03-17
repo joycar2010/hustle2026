@@ -1,5 +1,54 @@
 <template>
   <div class="container mx-auto px-4 py-6">
+    <!-- Notification Toast Container -->
+    <div class="fixed top-4 right-4 z-50 space-y-2" style="max-width: 400px;">
+      <transition-group name="notification">
+        <div
+          v-for="notification in notificationStore.notifications"
+          :key="notification.id"
+          :class="[
+            'px-4 py-3 rounded-lg shadow-lg flex items-start gap-3',
+            'transform transition-all duration-300',
+            notification.type === 'success' ? 'bg-green-600 text-white' :
+            notification.type === 'error' ? 'bg-red-600 text-white' :
+            notification.type === 'warning' ? 'bg-yellow-600 text-white' :
+            'bg-blue-600 text-white'
+          ]"
+        >
+          <!-- Icon -->
+          <div class="flex-shrink-0 mt-0.5">
+            <svg v-if="notification.type === 'success'" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <svg v-else-if="notification.type === 'error'" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+            </svg>
+            <svg v-else-if="notification.type === 'warning'" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+
+          <!-- Message -->
+          <div class="flex-1 text-sm font-medium">
+            {{ notification.message }}
+          </div>
+
+          <!-- Close Button -->
+          <button
+            @click="notificationStore.dismissNotification(notification.id)"
+            class="flex-shrink-0 hover:opacity-75 transition-opacity"
+          >
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+      </transition-group>
+    </div>
+
     <h1 class="text-3xl font-bold mb-6">系统管理</h1>
 
     <div class="flex flex-wrap gap-2 mb-6 border-b border-border-primary pb-2">
@@ -1690,6 +1739,7 @@
             <label class="block text-sm text-gray-400 mb-2">MT5 登录账号 *</label>
             <input type="text" v-model="mt5ClientForm.mt5_login" required
                    pattern="[0-9]+"
+                   autocomplete="off"
                    class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono"
                    placeholder="例如: 3971962" />
             <p class="text-xs text-gray-500 mt-1">请输入纯数字的MT5账号</p>
@@ -1698,11 +1748,25 @@
           <!-- MT5 Password -->
           <div>
             <label class="block text-sm text-gray-400 mb-2">MT5 密码 *</label>
-            <input type="password" v-model="mt5ClientForm.mt5_password"
-                   :required="!isEditMT5Mode"
-                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono"
-                   :placeholder="isEditMT5Mode ? '留空表示不修改' : '输入MT5密码'" />
+            <div class="flex gap-2">
+              <input :type="mt5PasswordVisible ? 'text' : 'password'" v-model="mt5ClientForm.mt5_password"
+                     :required="!isEditMT5Mode"
+                     autocomplete="new-password"
+                     class="flex-1 px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono"
+                     :placeholder="isEditMT5Mode ? '留空表示不修改' : '输入MT5密码'" />
+              <button v-if="isEditMT5Mode && currentMT5Client" type="button" @click="togglePasswordVisibility"
+                      class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm whitespace-nowrap">
+                <svg v-if="!mt5PasswordVisible" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                </svg>
+              </button>
+            </div>
             <p class="text-xs text-gray-500 mt-1" v-if="!isEditMT5Mode">请输入MT5账户的登录密码</p>
+            <p class="text-xs text-gray-500 mt-1" v-if="isEditMT5Mode">留空表示不修改密码，点击眼睛图标可查看当前密码</p>
           </div>
 
           <!-- Password Type -->
@@ -1914,6 +1978,8 @@ const mt5ClientsLoading = ref(false)
 const showMT5ClientForm = ref(false)
 const isEditMT5Mode = ref(false)
 const currentMT5Client = ref(null)
+const showMT5Password = ref(false)
+const mt5PasswordVisible = ref(false)
 const mt5ClientForm = ref({
   client_name: '',
   mt5_login: '',
@@ -2810,15 +2876,22 @@ async function loadMT5Accounts() {
 }
 
 async function loadMT5ClientsForAccount() {
+  console.log('=== loadMT5ClientsForAccount called ===')
+  console.log('selectedMT5AccountId:', selectedMT5AccountId.value)
+
   if (!selectedMT5AccountId.value) {
+    console.log('No account selected, clearing list')
     mt5ClientsList.value = []
     return
   }
 
   mt5ClientsLoading.value = true
   try {
+    console.log('Fetching clients from store...')
     await mt5ClientStore.fetchClients(selectedMT5AccountId.value)
+    console.log('Clients fetched, updating list')
     mt5ClientsList.value = mt5ClientStore.getClientsByAccount(selectedMT5AccountId.value)
+    console.log('MT5 clients list updated:', mt5ClientsList.value.length, 'clients')
   } catch (error) {
     console.error('Failed to load MT5 clients:', error)
     notificationStore.addNotification('error', '加载MT5客户端失败')
@@ -2828,6 +2901,7 @@ async function loadMT5ClientsForAccount() {
 }
 
 function openAddMT5ClientModal() {
+  console.log('=== openAddMT5ClientModal called ===')
   if (!selectedMT5AccountId.value) {
     notificationStore.addNotification('error', '请先选择MT5账户')
     return
@@ -2846,12 +2920,14 @@ function openAddMT5ClientModal() {
     priority: 1,
     is_active: true
   }
+  console.log('Form reset to:', mt5ClientForm.value)
   showMT5ClientForm.value = true
 }
 
 function openEditMT5ClientModal(client) {
   isEditMT5Mode.value = true
   currentMT5Client.value = client
+  mt5PasswordVisible.value = false
   mt5ClientForm.value = {
     client_name: client.client_name,
     mt5_login: client.mt5_login,
@@ -2898,15 +2974,22 @@ async function saveMT5Client() {
     console.log('Saving MT5 client:', { isEditMode: isEditMT5Mode.value, accountId: selectedMT5AccountId.value, data })
 
     if (isEditMT5Mode.value) {
+      console.log('Updating client...')
       await mt5ClientStore.updateClient(currentMT5Client.value.client_id, data)
+      console.log('Update successful, showing notification')
       notificationStore.addNotification('success', 'MT5客户端更新成功')
     } else {
+      console.log('Creating client...')
       await mt5ClientStore.createClient(selectedMT5AccountId.value, data)
+      console.log('Create successful, showing notification')
       notificationStore.addNotification('success', 'MT5客户端创建成功')
     }
 
+    console.log('Closing modal and refreshing list')
     showMT5ClientForm.value = false
+    mt5PasswordVisible.value = false
     await loadMT5ClientsForAccount()
+    console.log('List refreshed')
   } catch (error) {
     console.error('Failed to save MT5 client:', error)
     const errorMsg = error.response?.data?.detail || error.message || '保存失败'
@@ -2927,13 +3010,18 @@ async function toggleMT5ClientActive(client) {
 }
 
 async function connectMT5Client(client) {
+  console.log('=== connectMT5Client called ===', client)
   try {
+    console.log('Connecting to client:', client.client_id)
     await mt5ClientStore.connectClient(client.client_id)
+    console.log('Connection successful')
     notificationStore.addNotification('success', `客户端 ${client.client_name} 连接成功`)
     await loadMT5ClientsForAccount()
   } catch (error) {
     console.error('Failed to connect MT5 client:', error)
-    notificationStore.addNotification('error', error.response?.data?.detail || '连接失败')
+    const errorMsg = error.response?.data?.detail || error.message || '连接失败'
+    console.log('Connection error:', errorMsg)
+    notificationStore.addNotification('error', errorMsg)
   }
 }
 
@@ -2948,13 +3036,45 @@ async function disconnectMT5Client(client) {
   }
 }
 
+async function togglePasswordVisibility() {
+  if (!mt5PasswordVisible.value) {
+    // 需要查看密码，先二次确认
+    if (!confirm('确定要查看MT5密码吗？\n\n密码是敏感信息，请确保周围环境安全。')) {
+      return
+    }
+
+    // 从后端获取密码
+    try {
+      const response = await api.get(`/api/v1/mt5-clients/${currentMT5Client.value.client_id}/password`)
+      mt5ClientForm.value.mt5_password = response.data.mt5_password || ''
+      mt5PasswordVisible.value = true
+      notificationStore.addNotification('success', '密码已显示')
+    } catch (error) {
+      console.error('Failed to fetch password:', error)
+      notificationStore.addNotification('error', '获取密码失败')
+    }
+  } else {
+    // 隐藏密码
+    mt5PasswordVisible.value = false
+    mt5ClientForm.value.mt5_password = ''
+  }
+}
+
 async function deleteMT5Client(client) {
-  if (!confirm(`确定要删除客户端 "${client.client_name}" 吗？`)) return
+  console.log('=== deleteMT5Client called ===', client)
+  if (!confirm(`确定要删除客户端 "${client.client_name}" 吗？`)) {
+    console.log('User cancelled deletion')
+    return
+  }
 
   try {
+    console.log('Deleting client:', client.client_id)
     await mt5ClientStore.deleteClient(client.client_id)
+    console.log('Delete successful, showing notification')
     notificationStore.addNotification('success', 'MT5客户端删除成功')
+    console.log('Refreshing list')
     await loadMT5ClientsForAccount()
+    console.log('List refreshed')
   } catch (error) {
     console.error('Failed to delete MT5 client:', error)
     notificationStore.addNotification('error', '删除失败')
@@ -3917,6 +4037,26 @@ async function saveRefreshSettings() {
 </script>
 
 <style scoped>
+/* Notification animations */
+.notification-enter-active,
+.notification-leave-active {
+  transition: all 0.3s ease;
+}
+
+.notification-enter-from {
+  opacity: 0;
+  transform: translateX(100px);
+}
+
+.notification-leave-to {
+  opacity: 0;
+  transform: translateX(100px);
+}
+
+.notification-move {
+  transition: transform 0.3s ease;
+}
+
 .btn-primary {
   @apply inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-hover text-dark-300 rounded-lg transition-colors font-medium;
 }

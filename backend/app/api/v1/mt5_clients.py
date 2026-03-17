@@ -244,12 +244,45 @@ async def connect_mt5_client(
         raise HTTPException(status_code=404, detail="MT5 client not found")
 
     if not client.is_active:
-        raise HTTPException(status_code=400, detail="Client is not active")
+        raise HTTPException(status_code=400, detail="客户端未激活")
 
-    # TODO: 实际的MT5连接逻辑
-    # 这里需要调用MT5连接服务
+    # 验证MT5路径
+    if not client.mt5_path:
+        raise HTTPException(status_code=400, detail="MT5安装路径未设置")
 
-    return {"message": "MT5 client connection initiated", "client_id": client_id}
+    import os
+    if not os.path.exists(client.mt5_path):
+        raise HTTPException(status_code=400, detail=f"MT5安装路径不存在: {client.mt5_path}")
+
+    # 检查terminal64.exe是否存在
+    terminal_exe = os.path.join(client.mt5_path, "terminal64.exe")
+    if not os.path.exists(terminal_exe):
+        raise HTTPException(status_code=400, detail=f"未找到MT5可执行文件: {terminal_exe}")
+
+    # 实际的MT5连接逻辑
+    try:
+        from app.services.mt5_client import MT5Client as MT5ClientService
+
+        mt5_service = MT5ClientService(
+            login=int(client.mt5_login),
+            password=client.mt5_password,
+            server=client.mt5_server,
+            path=client.mt5_path
+        )
+
+        if not mt5_service.connect():
+            error_msg = mt5_service.get_last_error() or "连接失败，请检查账号、密码和服务器设置"
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # 连接成功后断开（这里只是测试连接）
+        mt5_service.disconnect()
+
+        return {"message": "MT5客户端连接测试成功", "client_id": client_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"MT5 connection error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"连接失败: {str(e)}")
 
 
 @router.post("/mt5-clients/{client_id}/disconnect")
@@ -300,6 +333,38 @@ async def get_mt5_client_status(
         raise HTTPException(status_code=404, detail="MT5 client not found")
 
     return client
+
+
+@router.get("/mt5-clients/{client_id}/password")
+async def get_mt5_client_password(
+    client_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取MT5客户端密码（敏感操作）"""
+    try:
+        logger.info(f"User {user_id} requesting password for MT5 client {client_id}")
+
+        result = await db.execute(
+            select(MT5Client)
+            .join(Account)
+            .where(
+                and_(
+                    MT5Client.client_id == client_id,
+                    Account.user_id == uuid.UUID(user_id)
+                )
+            )
+        )
+        client = result.scalar_one_or_none()
+        if not client:
+            raise HTTPException(status_code=404, detail="MT5 client not found")
+
+        return {"mt5_password": client.mt5_password}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting MT5 client password: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.get("/mt5/detect-installations", response_model=List[MT5PathDetection])

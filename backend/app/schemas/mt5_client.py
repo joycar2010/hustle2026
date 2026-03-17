@@ -4,6 +4,7 @@ MT5客户端Schema定义
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 from datetime import datetime
+from uuid import UUID
 import os
 
 
@@ -62,7 +63,7 @@ class MT5ClientUpdate(BaseModel):
 class MT5ClientResponse(MT5ClientBase):
     """MT5客户端响应"""
     client_id: int
-    account_id: str
+    account_id: UUID
     connection_status: str
     last_connected_at: Optional[datetime] = None
     last_disconnected_at: Optional[datetime] = None

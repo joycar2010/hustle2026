@@ -600,6 +600,39 @@ export const useNotificationStore = defineStore('notification', () => {
     }
   }
 
+  // Simple notification system for general UI messages
+  const notifications = ref([])
+  let notificationIdCounter = 0
+
+  function addNotification(type, message, duration = 3000) {
+    const id = ++notificationIdCounter
+    const notification = {
+      id,
+      type, // 'success', 'error', 'warning', 'info'
+      message,
+      timestamp: Date.now()
+    }
+
+    notifications.value.push(notification)
+    console.log(`[Notification] ${type.toUpperCase()}: ${message}`)
+
+    // Auto-dismiss after duration
+    if (duration > 0) {
+      setTimeout(() => {
+        dismissNotification(id)
+      }, duration)
+    }
+
+    return id
+  }
+
+  function dismissNotification(id) {
+    const index = notifications.value.findIndex(n => n.id === id)
+    if (index !== -1) {
+      notifications.value.splice(index, 1)
+    }
+  }
+
   return {
     alerts,
     alertSettings,
@@ -610,6 +643,7 @@ export const useNotificationStore = defineStore('notification', () => {
     systemAlerts,
     riskAlerts,
     feishuServiceStatus,
+    notifications,
     loadAlertSettings,
     checkMarketAlerts,
     checkAccountAlerts,
@@ -624,6 +658,8 @@ export const useNotificationStore = defineStore('notification', () => {
     updateSystemAlerts,
     handleRiskAlert,
     dismissRiskAlert,
-    showStrategyNotification
+    showStrategyNotification,
+    addNotification,
+    dismissNotification
   }
 })
