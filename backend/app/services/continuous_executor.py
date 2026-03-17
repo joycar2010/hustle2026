@@ -41,7 +41,10 @@ class ContinuousStrategyExecutor:
         strategy_id: int,
         order_executor: OrderExecutorV2,
         position_mgr: Optional[PositionManager] = None,
-        trigger_check_interval: float = 0.5  # 500ms default (increased to reduce API calls and avoid frequent order cancellations)
+        trigger_check_interval: float = 0.5,  # 500ms default (increased to reduce API calls and avoid frequent order cancellations)
+        api_spam_prevention_delay: float = 3.0,  # Default 3 seconds to prevent API spam
+        delayed_single_leg_check_delay: float = 10.0,  # Default 10 seconds for first single-leg check
+        delayed_single_leg_second_check_delay: float = 1.0  # Default 1 second for second single-leg check
     ):
         """
         Initialize continuous executor.
@@ -51,11 +54,17 @@ class ContinuousStrategyExecutor:
             order_executor: Order execution engine
             position_mgr: Position manager (uses global if not provided)
             trigger_check_interval: Interval between trigger checks in seconds (default 0.5 = 500ms)
+            api_spam_prevention_delay: Delay after order execution to prevent API spam (default 3.0 seconds)
+            delayed_single_leg_check_delay: Delay before first single-leg verification (default 10.0 seconds)
+            delayed_single_leg_second_check_delay: Delay before second single-leg verification (default 1.0 seconds)
         """
         self.strategy_id = strategy_id
         self.order_executor = order_executor
         self.position_mgr = position_mgr or position_manager
         self.trigger_check_interval = trigger_check_interval
+        self.api_spam_prevention_delay = api_spam_prevention_delay
+        self.delayed_single_leg_check_delay = delayed_single_leg_check_delay
+        self.delayed_single_leg_second_check_delay = delayed_single_leg_second_check_delay
 
         # Execution state
         self.is_running = False
@@ -194,10 +203,9 @@ class ContinuousStrategyExecutor:
         loop_count = 0
         while self.is_running:
             loop_count += 1
-            with open("ladder_debug.log", "a") as f:
-                f.write(f"\n[DEBUG] ===== Loop iteration {loop_count} =====\n")
-                f.write(f"[DEBUG] is_running: {self.is_running}\n")
-                f.write(f"[DEBUG] trigger_count at loop start: {self.trigger_mgr.count}\n")
+            # Only log every 100 iterations to reduce I/O
+            if loop_count % 100 == 1:
+                logger.info(f"Loop iteration {loop_count}, trigger_count: {self.trigger_mgr.count}")
 
             # Step 1: Check position
             # Get memory position (how much we've opened/closed so far)
@@ -320,29 +328,70 @@ class ContinuousStrategyExecutor:
 
             with open("ladder_debug.log", "a") as f:
                 f.write(f"[DEBUG] Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}\n")
+                f.write(f"[DEBUG] Step 4 - About to proceed to Step 5\n")
 
             # Note: We don't reset triggers here even if spread doesn't meet threshold
             # Once trigger count is reached, we should execute the order to meet the total quantity target
 
+            with open("ladder_debug.log", "a") as f:
+                f.write(f"[DEBUG] Step 4.5 - Reached after comment, before Step 5\n")
+
             # Step 5: Calculate order quantity
-            remaining = ladder.total_qty - current_position
-            order_qty = min(order_qty_limit, remaining)
-            logger.info(f"Step 5 - Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}")
+            try:
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 5 - About to calculate order_qty\n")
+                    f.write(f"[DEBUG] Step 5 - ladder.total_qty={ladder.total_qty}, current_position={current_position}, order_qty_limit={order_qty_limit}\n")
+
+                remaining = ladder.total_qty - current_position
+                order_qty = min(order_qty_limit, remaining)
+                logger.info(f"Step 5 - Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}")
+
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 5 - Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}\n")
+                    f.flush()
+                    f.write(f"[DEBUG] Step 5.5 - About to call check_can_open\n")
+                    f.flush()
+            except Exception as e:
+                logger.error(f"Step 5 - Exception calculating order_qty: {e}")
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 5 - EXCEPTION: {e}\n")
+                break
 
             # Step 6: Check position limits
-            result = self.position_mgr.check_can_open(
-                self.strategy_id,
-                ladder_idx,
-                strategy_type,
-                order_qty,
-                ladder.total_qty
-            )
-            can_open = result['can_open']
-            reason = result.get('reason', '')
-            logger.info(f"Step 6 - Can open: {can_open}, reason: {reason}")
+            try:
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 6 - About to call check_can_open with strategy_id={self.strategy_id}, ladder_idx={ladder_idx}, order_qty={order_qty}, total_qty={ladder.total_qty}\n")
+                    f.flush()
 
-            if not can_open:
-                logger.warning(f"Cannot open: {reason}")
+                result = self.position_mgr.check_can_open(
+                    self.strategy_id,
+                    ladder_idx,
+                    strategy_type,
+                    order_qty,
+                    ladder.total_qty
+                )
+
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 6 - check_can_open returned: {result}\n")
+                    f.flush()
+
+                can_open = result['can_open']
+                reason = result.get('reason', '')
+                logger.info(f"Step 6 - Can open: {can_open}, reason: {reason}")
+
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 6 - Can open: {can_open}, reason: {reason}\n")
+                    f.flush()
+
+                if not can_open:
+                    logger.warning(f"Cannot open: {reason}")
+                    with open("ladder_debug.log", "a") as f:
+                        f.write(f"[DEBUG] BREAK: Cannot open - {reason}\n")
+                    break
+            except Exception as e:
+                logger.error(f"Step 6 - Exception in check_can_open: {e}")
+                with open("ladder_debug.log", "a") as f:
+                    f.write(f"[DEBUG] Step 6 - EXCEPTION: {e}\n")
                 break
 
             # Step 7: Get current prices
@@ -396,18 +445,16 @@ class ContinuousStrategyExecutor:
                 exec_result.get('bybit_filled_qty', 0)
             )
 
-            if is_opening:
-                self.position_mgr.record_opening(
-                    self.strategy_id,
-                    ladder_idx,
-                    filled_qty
-                )
-            else:
-                self.position_mgr.record_closing(
-                    self.strategy_id,
-                    ladder_idx,
-                    filled_qty
-                )
+            # For both opening and closing, use record_opening (additive) to track
+            # how many lots have been executed toward the ladder's total_qty target.
+            # record_closing uses subtraction and requires current_position > 0,
+            # which would prevent the completion check (current_position >= total_qty) from ever triggering.
+            self.position_mgr.record_opening(
+                self.strategy_id,
+                ladder_idx,
+                strategy_type,
+                filled_qty
+            )
 
             logger.info(f"Position updated: {'+'if is_opening else '-'}{filled_qty}")
 
@@ -432,8 +479,9 @@ class ContinuousStrategyExecutor:
             with open("ladder_debug.log", "a") as f:
                 f.write(f"[DEBUG] Step 12 - Trigger count after reset: {self.trigger_mgr.count}\n")
 
-            # Small delay to prevent API spam (increased to 3 seconds to avoid Binance rate limit)
-            await asyncio.sleep(3.0)
+            # Small delay to prevent API spam (configurable via api_spam_prevention_delay)
+            logger.info(f"Waiting {self.api_spam_prevention_delay} seconds to prevent API spam")
+            await asyncio.sleep(self.api_spam_prevention_delay)
 
         # ========== 循环退出后输出原因 ==========
         with open("ladder_debug.log", "a") as f:
@@ -669,10 +717,10 @@ class ContinuousStrategyExecutor:
             bybit_account: Bybit account
         """
         try:
-            logger.info(f"[SINGLE_LEG_CHECK] Starting 10-second delayed verification for {strategy_type}")
+            logger.info(f"[SINGLE_LEG_CHECK] Starting {self.delayed_single_leg_check_delay}-second delayed verification for {strategy_type}")
 
-            # Step 1: Wait 10 seconds for exchange data to fully sync
-            await asyncio.sleep(10)
+            # Step 1: Wait for exchange data to fully sync (configurable delay)
+            await asyncio.sleep(self.delayed_single_leg_check_delay)
 
             # Step 2: First verification - get actual positions
             try:
@@ -715,8 +763,8 @@ class ContinuousStrategyExecutor:
                     logger.info("[SINGLE_LEG_CHECK] First verification passed: positions are consistent, no alert needed")
                     return
 
-                # Step 3: Second verification (1 second later) to rule out temporary data fluctuation
-                await asyncio.sleep(1)
+                # Step 3: Second verification (configurable delay) to rule out temporary data fluctuation
+                await asyncio.sleep(self.delayed_single_leg_second_check_delay)
 
                 binance_positions2 = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
                 binance_qty2 = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions2)

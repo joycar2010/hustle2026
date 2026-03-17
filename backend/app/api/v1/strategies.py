@@ -1,5 +1,6 @@
 """Strategy configuration API endpoints"""
 import datetime
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from app.services.market_service import market_data_service
 from app.services.risk_alert_service import RiskAlertService
 from app.websocket.manager import manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 order_executor_v2 = OrderExecutorV2()
 
@@ -914,7 +916,7 @@ async def sync_positions_from_exchange(
 # ============================================================================
 
 class LadderConfigSchema(BaseModel):
-    """Ladder configuration schema"""
+    """Ladder configuration schema for opening strategies"""
     enabled: bool
     opening_spread: float
     closing_spread: float
@@ -923,15 +925,31 @@ class LadderConfigSchema(BaseModel):
     closing_trigger_count: int
 
 
+class ClosingLadderConfigSchema(BaseModel):
+    """Ladder configuration schema for closing strategies"""
+    enabled: bool
+    closing_spread: float
+    total_qty: float
+    closing_trigger_count: int
+
+
 class ContinuousExecuteRequest(BaseModel):
-    """Request schema for continuous execution"""
+    """Request schema for continuous opening execution"""
     binance_account_id: UUID
     bybit_account_id: UUID
     opening_m_coin: float
     closing_m_coin: float
     trigger_check_interval: float = Field(default=0.05, ge=0.01, le=1.0)  # 10ms to 1000ms
     ladders: List[LadderConfigSchema]
-    trigger_check_interval: float = 0.05
+
+
+class ContinuousClosingRequest(BaseModel):
+    """Request schema for continuous closing execution"""
+    binance_account_id: UUID
+    bybit_account_id: UUID
+    closing_m_coin: float
+    trigger_check_interval: float = Field(default=0.05, ge=0.01, le=1.0)  # 10ms to 1000ms
+    ladders: List[ClosingLadderConfigSchema]
 
 
 @router.post("/execute/{strategy_type}/continuous")
@@ -999,12 +1017,29 @@ async def execute_continuous_opening(
             for ladder in request.ladders
         ]
 
+        # 2.5. Get timing configuration for this strategy type
+        from app.services.timing_config_service import TimingConfigService
+        strategy_type_name = f"{strategy_type}_opening"
+        timing_config = await TimingConfigService.get_effective_config(
+            db=db,
+            strategy_type=strategy_type_name
+        )
+        api_spam_prevention_delay = timing_config.get('api_spam_prevention_delay', 3.0)
+        trigger_check_interval = timing_config.get('trigger_check_interval', request.trigger_check_interval)
+        delayed_single_leg_check_delay = timing_config.get('delayed_single_leg_check_delay', 10.0)
+        delayed_single_leg_second_check_delay = timing_config.get('delayed_single_leg_second_check_delay', 1.0)
+
+        logger.info(f"Using timing config for {strategy_type_name}: api_spam_prevention_delay={api_spam_prevention_delay}, trigger_check_interval={trigger_check_interval}, delayed_single_leg_check_delay={delayed_single_leg_check_delay}, delayed_single_leg_second_check_delay={delayed_single_leg_second_check_delay}")
+
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_opening_continuous"
         executor = ContinuousStrategyExecutor(
             strategy_id=strategy_id,
             order_executor=order_executor_v2,
-            trigger_check_interval=request.trigger_check_interval
+            trigger_check_interval=trigger_check_interval,
+            api_spam_prevention_delay=api_spam_prevention_delay,
+            delayed_single_leg_check_delay=delayed_single_leg_check_delay,
+            delayed_single_leg_second_check_delay=delayed_single_leg_second_check_delay
         )
 
         # 4. Start continuous execution in background based on strategy type
@@ -1050,7 +1085,7 @@ async def execute_continuous_opening(
 @router.post("/close/{strategy_type}/continuous")
 async def execute_continuous_closing(
     strategy_type: str,
-    request: ContinuousExecuteRequest,
+    request: ContinuousClosingRequest,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1082,24 +1117,42 @@ async def execute_continuous_closing(
             raise HTTPException(status_code=404, detail="Account not found")
 
         # 2. Convert ladder schemas to LadderConfig objects
+        # For closing, we don't need opening_spread and opening_trigger_count
         ladders = [
             LadderConfig(
                 enabled=ladder.enabled,
-                opening_spread=ladder.opening_spread,
+                opening_spread=0.0,  # Not used for closing
                 closing_spread=ladder.closing_spread,
                 total_qty=ladder.total_qty,
-                opening_trigger_count=ladder.opening_trigger_count,
+                opening_trigger_count=1,  # Not used for closing
                 closing_trigger_count=ladder.closing_trigger_count
             )
             for ladder in request.ladders
         ]
+
+        # 2.5. Get timing configuration for this strategy type
+        from app.services.timing_config_service import TimingConfigService
+        strategy_type_name = f"{strategy_type}_closing"
+        timing_config = await TimingConfigService.get_effective_config(
+            db=db,
+            strategy_type=strategy_type_name
+        )
+        api_spam_prevention_delay = timing_config.get('api_spam_prevention_delay', 3.0)
+        trigger_check_interval = timing_config.get('trigger_check_interval', request.trigger_check_interval)
+        delayed_single_leg_check_delay = timing_config.get('delayed_single_leg_check_delay', 10.0)
+        delayed_single_leg_second_check_delay = timing_config.get('delayed_single_leg_second_check_delay', 1.0)
+
+        logger.info(f"Using timing config for {strategy_type_name}: api_spam_prevention_delay={api_spam_prevention_delay}, trigger_check_interval={trigger_check_interval}, delayed_single_leg_check_delay={delayed_single_leg_check_delay}, delayed_single_leg_second_check_delay={delayed_single_leg_second_check_delay}")
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_closing_continuous"
         executor = ContinuousStrategyExecutor(
             strategy_id=strategy_id,
             order_executor=order_executor_v2,
-            trigger_check_interval=request.trigger_check_interval
+            trigger_check_interval=trigger_check_interval,
+            api_spam_prevention_delay=api_spam_prevention_delay,
+            delayed_single_leg_check_delay=delayed_single_leg_check_delay,
+            delayed_single_leg_second_check_delay=delayed_single_leg_second_check_delay
         )
 
         # 4. Start continuous execution in background based on strategy type

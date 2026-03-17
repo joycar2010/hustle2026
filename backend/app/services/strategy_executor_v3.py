@@ -452,17 +452,21 @@ class ArbitrageStrategyExecutorV3:
     # ========================================================================
 
     def _calc_binance_long_spread(self, binance_bid: float, bybit_ask: float) -> float:
-        """Calculate spread for Binance long (reverse opening)"""
-        if bybit_ask <= 0:
-            return 0.0
-        spread = (binance_bid - bybit_ask) / bybit_ask
+        """Calculate spread for Binance long (reverse opening)
+
+        Formula: binance_price - bybit_price (same direction as market_service)
+        Note: This uses binance_bid and bybit_ask for monitoring actual execution prices
+        """
+        spread = binance_bid - bybit_ask
         return round(spread, 4)
 
     def _calc_bybit_long_spread(self, bybit_bid: float, binance_ask: float) -> float:
-        """Calculate spread for Bybit long (forward opening)"""
-        if binance_ask <= 0:
-            return 0.0
-        spread = (bybit_bid - binance_ask) / binance_ask
+        """Calculate spread for Bybit long (forward opening)
+
+        Formula: bybit_price - binance_price (same direction as market_service)
+        Note: This uses bybit_bid and binance_ask for monitoring actual execution prices
+        """
+        spread = bybit_bid - binance_ask
         return round(spread, 4)
 
     # ========================================================================
@@ -1794,17 +1798,19 @@ class ArbitrageStrategyExecutorV3:
         return result
 
     def _calc_reverse_closing_spread(self, bybit_bid: float, binance_bid: float) -> float:
-        """Calculate spread for reverse closing"""
-        if binance_bid <= 0:
-            return 0.0
-        spread = (bybit_bid - binance_bid) / binance_bid
+        """Calculate spread for reverse closing
+
+        Formula: binance_bid - bybit_bid (same as market_service)
+        """
+        spread = binance_bid - bybit_bid
         return round(spread, 4)
 
     def _calc_forward_closing_spread(self, binance_ask: float, bybit_ask: float) -> float:
-        """Calculate spread for forward closing"""
-        if bybit_ask <= 0:
-            return 0.0
-        spread = (binance_ask - bybit_ask) / bybit_ask
+        """Calculate spread for forward closing
+
+        Formula: bybit_ask - binance_ask (same as market_service)
+        """
+        spread = bybit_ask - binance_ask
         return round(spread, 4)
 
     async def _monitor_reverse_closing_execution(
@@ -1879,7 +1885,8 @@ class ArbitrageStrategyExecutorV3:
                     continue
 
                 # Spread is stable, check if it meets threshold
-                if avg_spread < ladder.closing_spread:
+                # Cancel if spread does NOT meet threshold (opposite of trigger condition)
+                if avg_spread > ladder.closing_spread:
                     self._log_opening_operation(
                         strategy_id,
                         "REVERSE_CLOSING_SCENARIO_1_ABORT",
@@ -1921,7 +1928,8 @@ class ArbitrageStrategyExecutorV3:
                     continue
 
                 # Spread is stable, check if it meets threshold
-                if avg_spread < ladder.closing_spread:
+                # Cancel if spread does NOT meet threshold (opposite of trigger condition)
+                if avg_spread > ladder.closing_spread:
                     self._log_opening_operation(
                         strategy_id,
                         "REVERSE_CLOSING_SCENARIO_3_ABORT",
@@ -2414,7 +2422,8 @@ class ArbitrageStrategyExecutorV3:
                     continue
 
                 # Spread is stable, check if it meets threshold
-                if avg_spread < ladder.closing_spread:
+                # Cancel if spread does NOT meet threshold (opposite of trigger condition)
+                if avg_spread > ladder.closing_spread:
                     self._log_opening_operation(
                         strategy_id,
                         "FORWARD_CLOSING_SCENARIO_1_ABORT",
@@ -2456,7 +2465,8 @@ class ArbitrageStrategyExecutorV3:
                     continue
 
                 # Spread is stable, check if it meets threshold
-                if avg_spread < ladder.closing_spread:
+                # Cancel if spread does NOT meet threshold (opposite of trigger condition)
+                if avg_spread > ladder.closing_spread:
                     self._log_opening_operation(
                         strategy_id,
                         "FORWARD_CLOSING_SCENARIO_3_ABORT",

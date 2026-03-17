@@ -67,25 +67,6 @@
             </div>
           </div>
 
-          <!-- MT5 Info (Only for MT5 accounts) -->
-          <div v-if="account.is_mt5_account" class="bg-gray-800 p-3 rounded">
-            <div class="text-xs text-gray-400 mb-2">MT5 配置</div>
-            <div class="text-sm">
-              <div class="flex justify-between items-center mb-1">
-                <span class="text-gray-500">MT5 ID:</span>
-                <span class="font-mono text-xs">{{ account.mt5_id || 'N/A' }}</span>
-              </div>
-              <div class="flex justify-between items-center mb-1">
-                <span class="text-gray-500">MT5 Password:</span>
-                <span class="font-mono text-xs">{{ maskSecret(account.mt5_primary_pwd) }}</span>
-              </div>
-              <div class="flex justify-between items-center">
-                <span class="text-gray-500">Server:</span>
-                <span class="font-mono text-xs">{{ account.mt5_server || 'N/A' }}</span>
-              </div>
-            </div>
-          </div>
-
           <!-- Account Metadata -->
           <div class="bg-gray-800 p-3 rounded">
             <div class="text-xs text-gray-400 mb-2">账户信息</div>
@@ -110,10 +91,10 @@
             </svg>
             代理
           </button>
-          <button @click="openEditModal(account)" class="btn-secondary flex-1">
+          <button @click="openEditModal(account)" class="btn-secondary flex-1 whitespace-nowrap">
             编辑
           </button>
-          <button @click="deleteAccount(account.account_id)" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded flex-1">
+          <button @click="deleteAccount(account.account_id)" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded flex-1 whitespace-nowrap">
             删除
           </button>
         </div>
@@ -166,6 +147,9 @@
                 </div>
               </label>
               <span class="text-sm text-gray-400">这是 MT5 账户</span>
+              <span v-if="accountForm.is_mt5_account" class="text-xs text-yellow-400">
+                (MT5配置请在系统管理 > MT5客户端管理中设置)
+              </span>
             </div>
 
             <!-- API Configuration Section -->
@@ -204,44 +188,6 @@
                   <input type="password" v-model="accountForm.passphrase"
                          class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
                          placeholder="输入 Bybit API Passphrase (如果需要)" />
-                </div>
-              </div>
-            </div>
-
-            <!-- MT5 Section (Only for MT5 accounts) -->
-            <div v-if="accountForm.platform_id === 2 && accountForm.is_mt5_account" class="border-t border-gray-700 pt-4">
-              <h3 class="text-lg font-semibold mb-3">MT5 配置</h3>
-
-              <div class="space-y-3">
-                <div>
-                  <label class="block text-sm text-gray-400 mb-2">MT5 ID *</label>
-                  <input type="text" v-model="accountForm.mt5_id" :required="accountForm.is_mt5_account"
-                         class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         placeholder="输入 MT5 账户 ID" />
-                </div>
-
-                <div>
-                  <label class="block text-sm text-gray-400 mb-2">MT5 Password *</label>
-                  <div class="flex gap-2">
-                    <input :type="showMt5Password ? 'text' : 'password'"
-                           v-model="accountForm.mt5_primary_pwd"
-                           :required="accountForm.is_mt5_account"
-                           class="flex-1 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                           :placeholder="isEditMode ? '留空表示不修改' : '输入 MT5 密码'" />
-                    <button v-if="isEditMode"
-                            type="button"
-                            @click="requestViewMt5Password"
-                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm whitespace-nowrap">
-                      查看密码
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label class="block text-sm text-gray-400 mb-2">MT5 Server *</label>
-                  <input type="text" v-model="accountForm.mt5_server" :required="accountForm.is_mt5_account"
-                         class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         placeholder="例如: Bybit-Demo" />
                 </div>
               </div>
             </div>
@@ -417,9 +363,6 @@ const accountForm = ref({
   api_key: '',
   api_secret: '',
   passphrase: '',
-  mt5_id: '',
-  mt5_primary_pwd: '',
-  mt5_server: '',
   is_mt5_account: false,
   is_default: false,
   is_active: true,
@@ -494,9 +437,6 @@ function openEditModal(account) {
     api_key: account.api_key || '',
     api_secret: '********', // Show masked secret
     passphrase: '',
-    mt5_id: account.mt5_id || '',
-    mt5_primary_pwd: account.mt5_primary_pwd ? '********' : '', // Show masked password if exists
-    mt5_server: account.mt5_server || '',
     is_mt5_account: account.is_mt5_account,
     is_default: account.is_default,
     is_active: account.is_active,
@@ -536,19 +476,13 @@ async function saveAccount() {
       leverage: accountForm.value.leverage || (accountForm.value.platform_id === 1 ? 20 : 100)
     }
 
-    // Add MT5 fields if it's an MT5 account
-    if (accountForm.value.is_mt5_account) {
-      data.mt5_id = accountForm.value.mt5_id
-      data.mt5_primary_pwd = accountForm.value.mt5_primary_pwd
-      data.mt5_server = accountForm.value.mt5_server
-    }
-
     if (isEditMode.value) {
       // For edit mode, only send fields that are not empty
       const updateData = {
         account_name: accountForm.value.account_name,
         is_default: accountForm.value.is_default,
         is_active: accountForm.value.is_active,
+        is_mt5_account: accountForm.value.is_mt5_account,
         leverage: accountForm.value.leverage
       }
 
@@ -561,19 +495,6 @@ async function saveAccount() {
       }
       if (accountForm.value.passphrase) {
         updateData.passphrase = accountForm.value.passphrase
-      }
-
-      // Only include MT5 password if it was changed (not empty and not masked)
-      if (accountForm.value.is_mt5_account) {
-        if (accountForm.value.mt5_id) {
-          updateData.mt5_id = accountForm.value.mt5_id
-        }
-        if (accountForm.value.mt5_primary_pwd && accountForm.value.mt5_primary_pwd !== '********') {
-          updateData.mt5_primary_pwd = accountForm.value.mt5_primary_pwd
-        }
-        if (accountForm.value.mt5_server) {
-          updateData.mt5_server = accountForm.value.mt5_server
-        }
       }
 
       await api.put(`/api/v1/accounts/${accountForm.value.account_id}`, updateData)

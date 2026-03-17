@@ -2,8 +2,8 @@
   <div class="container mx-auto px-4 py-6">
     <h1 class="text-3xl font-bold mb-6">系统管理</h1>
 
-    <div class="flex space-x-2 mb-6 border-b border-border-primary">
-      <button v-for="tab in tabs" :key="tab.id" @click="activeTab = tab.id" :class="['px-4 py-2 font-medium transition-colors relative', activeTab === tab.id ? 'text-primary' : 'text-text-secondary hover:text-text-primary']">
+    <div class="flex flex-wrap gap-2 mb-6 border-b border-border-primary pb-2">
+      <button v-for="tab in tabs" :key="tab.id" @click="activeTab = tab.id" :class="['px-4 py-2 font-medium transition-colors relative whitespace-nowrap', activeTab === tab.id ? 'text-primary' : 'text-text-secondary hover:text-text-primary']">
         {{ tab.label }}
         <div v-if="activeTab === tab.id" class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"></div>
       </button>
@@ -670,6 +670,152 @@
           <div class="bg-dark-200 rounded p-4">
             <div class="text-sm text-text-secondary mb-1">CRITICAL</div>
             <div class="text-2xl font-bold text-danger">{{ criticalLogsCount }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT5客户端管理 -->
+      <div v-if="activeTab === 'mt5clients'" class="space-y-6">
+        <div class="card">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">MT5客户端管理</h2>
+            <button @click="openAddMT5ClientModal" class="btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              新增客户端
+            </button>
+          </div>
+
+          <!-- 账户选择器 -->
+          <div class="mb-4">
+            <label class="block text-sm text-gray-400 mb-2">选择MT5账户</label>
+            <select v-model="selectedMT5AccountId" @change="loadMT5ClientsForAccount"
+                    class="w-full md:w-64 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
+              <option :value="null">-- 选择账户 --</option>
+              <option v-for="account in mt5Accounts" :key="account.account_id" :value="account.account_id">
+                {{ account.account_name }} (ID: {{ account.account_id }})
+              </option>
+            </select>
+          </div>
+
+          <!-- 客户端列表 -->
+          <div v-if="selectedMT5AccountId">
+            <div v-if="mt5ClientsLoading" class="text-center py-8">
+              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p class="text-gray-400 mt-2">加载中...</p>
+            </div>
+
+            <div v-else-if="mt5ClientsList.length === 0" class="text-center py-12">
+              <div class="text-gray-500 mb-4">该账户暂无MT5客户端</div>
+              <button @click="openAddMT5ClientModal" class="btn-primary">
+                + 新增第一个客户端
+              </button>
+            </div>
+
+            <div v-else class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div v-for="client in mt5ClientsList" :key="client.client_id"
+                   class="card border"
+                   :class="getMT5ClientBorderClass(client)">
+                <!-- Client Header -->
+                <div class="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 class="text-lg font-bold">{{ client.client_name }}</h3>
+                    <div class="flex items-center gap-2 mt-1">
+                      <span class="text-xs px-2 py-1 rounded"
+                            :class="getMT5StatusClass(client.connection_status)">
+                        {{ getMT5StatusText(client.connection_status) }}
+                      </span>
+                      <span v-if="!client.is_active" class="text-xs px-2 py-1 bg-gray-700 text-gray-400 rounded">
+                        未启用
+                      </span>
+                      <span class="text-xs text-gray-500">优先级: {{ client.priority }}</span>
+                    </div>
+                  </div>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" :checked="client.is_active"
+                           @change="toggleMT5ClientActive(client)"
+                           class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
+                                peer-checked:after:translate-x-full peer-checked:after:border-white
+                                after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                                after:bg-white after:border-gray-300 after:border after:rounded-full
+                                after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600">
+                    </div>
+                  </label>
+                </div>
+
+                <!-- Client Details -->
+                <div class="space-y-2 mb-3 text-sm">
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">MT5 登录:</span>
+                    <span class="font-mono">{{ client.mt5_login }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">服务器:</span>
+                    <span class="font-mono text-xs">{{ client.mt5_server }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">密码类型:</span>
+                    <span>{{ client.password_type === 'primary' ? '主密码' : '只读密码' }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">MT5 路径:</span>
+                    <span class="font-mono text-xs truncate max-w-[200px]" :title="client.mt5_path">
+                      {{ client.mt5_path }}
+                    </span>
+                  </div>
+                  <div v-if="client.proxy_id" class="flex justify-between">
+                    <span class="text-gray-400">代理:</span>
+                    <span class="text-xs">ID: {{ client.proxy_id }}</span>
+                  </div>
+                  <div v-else class="flex justify-between">
+                    <span class="text-gray-400">代理:</span>
+                    <span class="text-gray-500">直连</span>
+                  </div>
+                </div>
+
+                <!-- Connection Stats -->
+                <div v-if="client.total_connections > 0" class="bg-gray-800 p-2 rounded mb-3 text-xs">
+                  <div class="flex justify-between mb-1">
+                    <span class="text-gray-400">连接统计:</span>
+                    <span>{{ client.total_connections }} 次</span>
+                  </div>
+                  <div class="flex justify-between mb-1">
+                    <span class="text-gray-400">失败次数:</span>
+                    <span :class="client.failed_connections > 0 ? 'text-red-400' : ''">
+                      {{ client.failed_connections }} 次
+                    </span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">平均延迟:</span>
+                    <span>{{ client.avg_latency_ms?.toFixed(0) || 0 }} ms</span>
+                  </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-2">
+                  <button v-if="client.connection_status !== 'connected'"
+                          @click="connectMT5Client(client)"
+                          class="btn-primary flex-1 text-sm py-1.5">
+                    连接
+                  </button>
+                  <button v-else
+                          @click="disconnectMT5Client(client)"
+                          class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1.5 rounded flex-1 text-sm">
+                    断开
+                  </button>
+                  <button @click="openEditMT5ClientModal(client)"
+                          class="btn-secondary flex-1 text-sm py-1.5">
+                    编辑
+                  </button>
+                  <button @click="deleteMT5Client(client)"
+                          class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded flex-1 text-sm">
+                    删除
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1524,6 +1670,134 @@
       </div>
     </div>
 
+    <!-- MT5 Client Form Modal -->
+    <div v-if="showMT5ClientForm" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-bold mb-4">{{ isEditMT5Mode ? '编辑MT5客户端' : '新增MT5客户端' }}</h3>
+
+        <form @submit.prevent="saveMT5Client" class="space-y-4">
+          <!-- Client Name -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">客户端名称 *</label>
+            <input type="text" v-model="mt5ClientForm.client_name" required
+                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                   placeholder="例如: 主客户端、备用客户端1" />
+            <p class="text-xs text-gray-500 mt-1">每个账户下的客户端名称必须唯一</p>
+          </div>
+
+          <!-- MT5 Login -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">MT5 登录账号 *</label>
+            <input type="text" v-model="mt5ClientForm.mt5_login" required
+                   pattern="[0-9]+"
+                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono"
+                   placeholder="例如: 3971962" />
+            <p class="text-xs text-gray-500 mt-1">请输入纯数字的MT5账号</p>
+          </div>
+
+          <!-- MT5 Password -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">MT5 密码 *</label>
+            <input type="password" v-model="mt5ClientForm.mt5_password"
+                   :required="!isEditMT5Mode"
+                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono"
+                   :placeholder="isEditMT5Mode ? '留空表示不修改' : '输入MT5密码'" />
+            <p class="text-xs text-gray-500 mt-1" v-if="!isEditMT5Mode">请输入MT5账户的登录密码</p>
+          </div>
+
+          <!-- Password Type -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">密码类型 *</label>
+            <select v-model="mt5ClientForm.password_type" required
+                    class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
+              <option value="primary">主密码（可交易）</option>
+              <option value="readonly">只读密码（仅查看）</option>
+            </select>
+            <p class="text-xs text-gray-500 mt-1">主密码可以进行交易操作，只读密码仅能查看账户信息</p>
+          </div>
+
+          <!-- MT5 Server -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">MT5 服务器 *</label>
+            <input type="text" v-model="mt5ClientForm.mt5_server" required
+                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono"
+                   placeholder="例如: Bybit-Live-2" />
+            <p class="text-xs text-gray-500 mt-1">请输入MT5服务器名称，可在MT5客户端中查看</p>
+          </div>
+
+          <!-- MT5 Path -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">MT5 安装路径 *</label>
+            <div class="flex gap-2">
+              <input type="text" v-model="mt5ClientForm.mt5_path" required
+                     class="flex-1 px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
+                     placeholder="C:\Program Files\MetaTrader 5\terminal64.exe" />
+              <button type="button" @click="detectMT5Paths"
+                      class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm whitespace-nowrap">
+                自动检测
+              </button>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">必须是完整的可执行文件路径（.exe结尾），点击"自动检测"可自动填充</p>
+          </div>
+
+          <!-- MT5 Data Path (Optional) -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">MT5 数据路径 (可选)</label>
+            <input type="text" v-model="mt5ClientForm.mt5_data_path"
+                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
+                   placeholder="留空使用默认路径" />
+            <p class="text-xs text-gray-500 mt-1">通常留空即可，系统会使用MT5的默认数据目录</p>
+          </div>
+
+          <!-- Proxy Selection -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">代理 (可选)</label>
+            <select v-model="mt5ClientForm.proxy_id"
+                    class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
+              <option :value="null">直连 (不使用代理)</option>
+              <option v-for="proxy in proxyStore.proxies" :key="proxy.proxy_id" :value="proxy.proxy_id">
+                {{ proxy.proxy_ip }}:{{ proxy.proxy_port }} - {{ proxy.proxy_name }}
+              </option>
+            </select>
+            <p class="text-xs text-gray-500 mt-1">选择此客户端使用的代理IP，不选择则直连</p>
+          </div>
+
+          <!-- Priority -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">优先级 *</label>
+            <input type="number" v-model.number="mt5ClientForm.priority" required min="1" max="100"
+                   class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary"
+                   placeholder="输入1-100之间的数字" />
+            <p class="text-xs text-gray-500 mt-1">数字越小优先级越高（1最高，100最低），用于多客户端故障转移</p>
+          </div>
+
+          <!-- Active Toggle -->
+          <div class="flex items-center gap-3">
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" v-model="mt5ClientForm.is_active" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
+                          peer-checked:after:translate-x-full peer-checked:after:border-white
+                          after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                          after:bg-white after:border-gray-300 after:border after:rounded-full
+                          after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600">
+              </div>
+            </label>
+            <span class="text-sm text-gray-400">启用此客户端</span>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="flex gap-3 pt-4">
+            <button type="submit" class="btn-primary flex-1">
+              {{ isEditMT5Mode ? '保存' : '创建' }}
+            </button>
+            <button type="button" @click="showMT5ClientForm = false" class="btn-secondary flex-1">
+              取消
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Add Local Proxy Modal -->
     <div v-if="showAddLocalProxyModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
@@ -1621,14 +1895,37 @@ import RolePermissionAssign from '@/components/RolePermissionAssign.vue'
 import { useMarketStore } from '@/stores/market'
 import { useProxyStore } from '@/stores/proxy'
 import { useNotificationStore } from '@/stores/notification'
+import { useMT5ClientStore } from '@/stores/mt5Client'
 
 // 引入market store以获取WebSocket连接状态
 const marketStore = useMarketStore()
 const proxyStore = useProxyStore()
 const notificationStore = useNotificationStore()
+const mt5ClientStore = useMT5ClientStore()
 const router = useRouter()
 
 const activeTab = ref('version')
+
+// MT5 Clients Management state
+const mt5Accounts = ref([])
+const selectedMT5AccountId = ref(null)
+const mt5ClientsList = ref([])
+const mt5ClientsLoading = ref(false)
+const showMT5ClientForm = ref(false)
+const isEditMT5Mode = ref(false)
+const currentMT5Client = ref(null)
+const mt5ClientForm = ref({
+  client_name: '',
+  mt5_login: '',
+  mt5_password: '',
+  password_type: 'primary',
+  mt5_server: '',
+  mt5_path: '',
+  mt5_data_path: '',
+  proxy_id: null,
+  priority: 1,
+  is_active: true
+})
 
 // Proxy Management state
 const showAddLocalProxyModal = ref(false)
@@ -1805,6 +2102,7 @@ const tabs = [
   { id: 'users', label: '用户管理' },
   { id: 'rbac', label: '角色权限管理' },
   { id: 'proxy', label: 'IP代理管理' },
+  { id: 'mt5clients', label: 'MT5客户端管理' },
   { id: 'notifications', label: '通知服务' },
   { id: 'refresh', label: '实时推送管理' },
   { id: 'websocket', label: 'WebSocket监控' },
@@ -2500,6 +2798,211 @@ function closeCertModal() {
   }
 }
 
+// MT5 Clients Management Functions
+async function loadMT5Accounts() {
+  try {
+    const response = await api.get('/api/v1/accounts')
+    mt5Accounts.value = response.data.filter(acc => acc.is_mt5_account)
+  } catch (error) {
+    console.error('Failed to load MT5 accounts:', error)
+    notificationStore.addNotification('error', '加载MT5账户失败')
+  }
+}
+
+async function loadMT5ClientsForAccount() {
+  if (!selectedMT5AccountId.value) {
+    mt5ClientsList.value = []
+    return
+  }
+
+  mt5ClientsLoading.value = true
+  try {
+    await mt5ClientStore.fetchClients(selectedMT5AccountId.value)
+    mt5ClientsList.value = mt5ClientStore.getClientsByAccount(selectedMT5AccountId.value)
+  } catch (error) {
+    console.error('Failed to load MT5 clients:', error)
+    notificationStore.addNotification('error', '加载MT5客户端失败')
+  } finally {
+    mt5ClientsLoading.value = false
+  }
+}
+
+function openAddMT5ClientModal() {
+  if (!selectedMT5AccountId.value) {
+    notificationStore.addNotification('error', '请先选择MT5账户')
+    return
+  }
+  isEditMT5Mode.value = false
+  currentMT5Client.value = null
+  mt5ClientForm.value = {
+    client_name: '',
+    mt5_login: '',
+    mt5_password: '',
+    password_type: 'primary',
+    mt5_server: '',
+    mt5_path: '',
+    mt5_data_path: '',
+    proxy_id: null,
+    priority: 1,
+    is_active: true
+  }
+  showMT5ClientForm.value = true
+}
+
+function openEditMT5ClientModal(client) {
+  isEditMT5Mode.value = true
+  currentMT5Client.value = client
+  mt5ClientForm.value = {
+    client_name: client.client_name,
+    mt5_login: client.mt5_login,
+    mt5_password: '',
+    password_type: client.password_type,
+    mt5_server: client.mt5_server,
+    mt5_path: client.mt5_path,
+    mt5_data_path: client.mt5_data_path || '',
+    proxy_id: client.proxy_id,
+    priority: client.priority,
+    is_active: client.is_active
+  }
+  showMT5ClientForm.value = true
+}
+
+async function saveMT5Client() {
+  console.log('=== saveMT5Client called ===')
+  console.log('selectedMT5AccountId:', selectedMT5AccountId.value)
+  console.log('isEditMT5Mode:', isEditMT5Mode.value)
+  console.log('mt5ClientForm:', mt5ClientForm.value)
+
+  try {
+    // Validate account selection
+    if (!isEditMT5Mode.value && !selectedMT5AccountId.value) {
+      console.error('No account selected!')
+      notificationStore.addNotification('error', '请先选择MT5账户')
+      return
+    }
+
+    const data = { ...mt5ClientForm.value }
+
+    // Clean up data: ensure null values are properly set
+    if (!data.proxy_id || data.proxy_id === '') {
+      data.proxy_id = null
+    }
+    if (!data.mt5_data_path || data.mt5_data_path === '') {
+      data.mt5_data_path = null
+    }
+
+    if (isEditMT5Mode.value && !data.mt5_password) {
+      delete data.mt5_password
+    }
+
+    console.log('Saving MT5 client:', { isEditMode: isEditMT5Mode.value, accountId: selectedMT5AccountId.value, data })
+
+    if (isEditMT5Mode.value) {
+      await mt5ClientStore.updateClient(currentMT5Client.value.client_id, data)
+      notificationStore.addNotification('success', 'MT5客户端更新成功')
+    } else {
+      await mt5ClientStore.createClient(selectedMT5AccountId.value, data)
+      notificationStore.addNotification('success', 'MT5客户端创建成功')
+    }
+
+    showMT5ClientForm.value = false
+    await loadMT5ClientsForAccount()
+  } catch (error) {
+    console.error('Failed to save MT5 client:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '保存失败'
+    notificationStore.addNotification('error', errorMsg)
+  }
+}
+
+async function toggleMT5ClientActive(client) {
+  try {
+    await mt5ClientStore.updateClient(client.client_id, {
+      is_active: !client.is_active
+    })
+    await loadMT5ClientsForAccount()
+  } catch (error) {
+    console.error('Failed to toggle MT5 client:', error)
+    notificationStore.addNotification('error', '切换状态失败')
+  }
+}
+
+async function connectMT5Client(client) {
+  try {
+    await mt5ClientStore.connectClient(client.client_id)
+    notificationStore.addNotification('success', `客户端 ${client.client_name} 连接成功`)
+    await loadMT5ClientsForAccount()
+  } catch (error) {
+    console.error('Failed to connect MT5 client:', error)
+    notificationStore.addNotification('error', error.response?.data?.detail || '连接失败')
+  }
+}
+
+async function disconnectMT5Client(client) {
+  try {
+    await mt5ClientStore.disconnectClient(client.client_id)
+    notificationStore.addNotification('success', `客户端 ${client.client_name} 已断开`)
+    await loadMT5ClientsForAccount()
+  } catch (error) {
+    console.error('Failed to disconnect MT5 client:', error)
+    notificationStore.addNotification('error', error.response?.data?.detail || '断开失败')
+  }
+}
+
+async function deleteMT5Client(client) {
+  if (!confirm(`确定要删除客户端 "${client.client_name}" 吗？`)) return
+
+  try {
+    await mt5ClientStore.deleteClient(client.client_id)
+    notificationStore.addNotification('success', 'MT5客户端删除成功')
+    await loadMT5ClientsForAccount()
+  } catch (error) {
+    console.error('Failed to delete MT5 client:', error)
+    notificationStore.addNotification('error', '删除失败')
+  }
+}
+
+async function detectMT5Paths() {
+  try {
+    const paths = await mt5ClientStore.detectMT5Installations()
+    if (paths && paths.length > 0) {
+      mt5ClientForm.value.mt5_path = paths[0]
+      notificationStore.addNotification('success', `检测到 ${paths.length} 个MT5安装路径`)
+    } else {
+      notificationStore.addNotification('warning', '未检测到MT5安装路径')
+    }
+  } catch (error) {
+    console.error('Failed to detect MT5 paths:', error)
+    notificationStore.addNotification('error', '检测失败')
+  }
+}
+
+function getMT5ClientBorderClass(client) {
+  if (client.connection_status === 'connected') return 'border-green-600'
+  if (client.connection_status === 'connecting') return 'border-yellow-600'
+  if (client.connection_status === 'error') return 'border-red-600'
+  return 'border-gray-700'
+}
+
+function getMT5StatusClass(status) {
+  const classes = {
+    connected: 'bg-green-900 text-green-300',
+    connecting: 'bg-yellow-900 text-yellow-300',
+    disconnected: 'bg-gray-700 text-gray-400',
+    error: 'bg-red-900 text-red-300'
+  }
+  return classes[status] || classes.disconnected
+}
+
+function getMT5StatusText(status) {
+  const texts = {
+    connected: '已连接',
+    connecting: '连接中',
+    disconnected: '未连接',
+    error: '错误'
+  }
+  return texts[status] || '未知'
+}
+
 // Proxy Management Functions
 async function loadProxies() {
   try {
@@ -2752,6 +3255,7 @@ onMounted(async () => {
   loadCurrentIntervals()  // Load current push frequencies
   loadProxies()  // Load proxy list
   loadQingguoBalance()  // Load Qingguo balance
+  loadMT5Accounts()  // Load MT5 accounts
 
   // Ensure WebSocket connection
   if (!marketStore.connected) {

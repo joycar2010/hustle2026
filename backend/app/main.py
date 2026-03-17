@@ -12,11 +12,12 @@ import asyncio
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer
 from app.tasks.redis_monitor import redis_monitor
 from app.tasks.arbitrage_opportunity_scheduler import arbitrage_opportunity_scheduler
+from app.tasks.timing_config_subscriber import timing_config_subscriber
 from app.services.position_monitor import position_monitor
 from app.services.realtime_market_service import market_data_service
 from app.services.binance_ws_client import binance_ws
@@ -59,6 +60,7 @@ async def init_redis_and_feishu():
     try:
         await redis_client.connect()
         await redis_monitor.start()
+        await timing_config_subscriber.start()
         app_state["redis_connected"] = True
         logger.info("Redis connected successfully")
 
@@ -203,6 +205,7 @@ async def lifespan(app: FastAPI):
         await position_monitor.stop_monitoring()
         await market_data_service.stop()
         await status_pusher.stop()
+        await timing_config_subscriber.stop()
         await redis_monitor.stop()
         await redis_client.disconnect()
     except Exception as e:
@@ -244,8 +247,23 @@ app.add_middleware(
 # Add request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    print(f"[REQUEST] {request.method} {request.url.path}")
     logger.info(f"[REQUEST] {request.method} {request.url.path}")
+    if "mt5-clients" in request.url.path:
+        print(f"[MT5-CLIENTS REQUEST] Headers: {dict(request.headers)}")
+        print(f"[MT5-CLIENTS REQUEST] Method: {request.method}")
+        print(f"[MT5-CLIENTS REQUEST] Path: {request.url.path}")
+        logger.info(f"[MT5-CLIENTS REQUEST] Headers: {dict(request.headers)}")
+        logger.info(f"[MT5-CLIENTS REQUEST] Method: {request.method}")
+        logger.info(f"[MT5-CLIENTS REQUEST] Path: {request.url.path}")
+
     response = await call_next(request)
+
+    if "mt5-clients" in request.url.path:
+        print(f"[MT5-CLIENTS RESPONSE] Status: {response.status_code}")
+        logger.info(f"[MT5-CLIENTS RESPONSE] Status: {response.status_code}")
+
+    print(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
     logger.info(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
     return response
 
@@ -298,6 +316,7 @@ app.include_router(sound_files.router, prefix="/api/v1", tags=["声音文件管�
 app.include_router(timing_configs.router, prefix="/api/v1", tags=["时间配置管理"])
 app.include_router(arbitrage_opportunities.router, prefix="/api/v1", tags=["套利机会"])
 app.include_router(proxies.router, prefix="/api/v1", tags=["代理管理"])
+app.include_router(mt5_clients.router, prefix="/api/v1", tags=["MT5客户端管理"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds

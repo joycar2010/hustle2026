@@ -24,6 +24,8 @@ from app.models.ssl_certificate import SSLCertificate, SSLCertificateLog
 from app.models.system_alert import SystemAlert
 from app.models.trade import Trade
 from app.models.version_backup import VersionBackup
+from app.models.proxy import ProxyPool, AccountProxyBinding, ProxyHealthLog, ProxyUsageStats
+from app.models.mt5_client import MT5Client
 
 __all__ = [
     "Base",
@@ -54,4 +56,9 @@ __all__ = [
     "SystemAlert",
     "Trade",
     "VersionBackup",
+    "ProxyPool",
+    "AccountProxyBinding",
+    "ProxyHealthLog",
+    "ProxyUsageStats",
+    "MT5Client",
 ]
