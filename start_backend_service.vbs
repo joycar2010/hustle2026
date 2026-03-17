@@ -1,3 +1,6 @@
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "cmd /c cd /d C:\app\hustle2026\backend && C:\Python39\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > backend_live.log 2>&1", 0, False
+
+' Use PowerShell script to kill existing process and start backend
+WshShell.Run "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\app\hustle2026\start_backend.ps1", 0, False
+
 Set WshShell = Nothing

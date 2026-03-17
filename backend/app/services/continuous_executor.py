@@ -172,7 +172,7 @@ class ContinuousStrategyExecutor:
         """
         # ========== 强制输出调试信息到文件 ==========
         import datetime
-        with open("ladder_debug.log", "a") as f:
+        with open("ladder_debug.log", "a", encoding="utf-8") as f:
             f.write(f"\n{'='*80}\n")
             f.write(f"[{datetime.datetime.now()}] LADDER DEBUG START (ladder {ladder_idx})\n")
             f.write(f"[DEBUG] is_running initial value: {self.is_running}\n")
@@ -193,7 +193,7 @@ class ContinuousStrategyExecutor:
         # Closing: spread <= threshold (small/negative spread, good for closing)
         compare_op = CompareOperator.GREATER_EQUAL if is_opening else CompareOperator.LESS_EQUAL
 
-        with open("ladder_debug.log", "a") as f:
+        with open("ladder_debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] is_opening: {is_opening}\n")
             f.write(f"[DEBUG] spread_threshold: {spread_threshold}\n")
             f.write(f"[DEBUG] trigger_count_required: {trigger_count_required}\n")
@@ -239,7 +239,7 @@ class ContinuousStrategyExecutor:
                         if not bybit_account.mt5_client.connect():
                             error_msg = f"MT5 connection failed for account {bybit_account.mt5_id}, cannot execute closing strategy"
                             logger.error(error_msg)
-                            with open("ladder_debug.log", "a") as f:
+                            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                                 f.write(f"[DEBUG] {error_msg}\n")
                             raise Exception(error_msg)
 
@@ -250,7 +250,7 @@ class ContinuousStrategyExecutor:
                     if not bybit_account.mt5_client.connected:
                         error_msg = "MT5 not connected, cannot get Bybit positions"
                         logger.error(error_msg)
-                        with open("ladder_debug.log", "a") as f:
+                        with open("ladder_debug.log", "a", encoding="utf-8") as f:
                             f.write(f"[DEBUG] {error_msg}\n")
                         raise Exception(error_msg)
 
@@ -259,7 +259,7 @@ class ContinuousStrategyExecutor:
 
                     actual_position = min(binance_qty, bybit_qty) if (binance_qty > 0 and bybit_qty > 0) else 0
 
-                    with open("ladder_debug.log", "a") as f:
+                    with open("ladder_debug.log", "a", encoding="utf-8") as f:
                         f.write(f"[DEBUG] Step 1 - Actual positions (monitoring): Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}\n")
                         f.write(f"[DEBUG] Step 1 - Memory position (already closed): {current_position}\n")
                         f.write(f"[DEBUG] Step 1 - Target total_qty: {ladder.total_qty}\n")
@@ -269,16 +269,16 @@ class ContinuousStrategyExecutor:
 
                 except Exception as e:
                     logger.error(f"Failed to get actual positions (monitoring only): {e}")
-                    with open("ladder_debug.log", "a") as f:
+                    with open("ladder_debug.log", "a", encoding="utf-8") as f:
                         f.write(f"[DEBUG] Step 1 - Failed to get actual positions: {e}\n")
 
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 1 - Current position: {current_position}/{ladder.total_qty}\n")
             logger.info(f"Step 1 - Current position: {current_position}/{ladder.total_qty}")
 
             # Step 2: Check if ladder complete
             if current_position >= ladder.total_qty:
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] BREAK: Current position ({current_position}) >= total_qty ({ladder.total_qty})\n")
                 logger.info(f"Ladder {ladder_idx} complete: {current_position}/{ladder.total_qty}")
                 break
@@ -286,14 +286,14 @@ class ContinuousStrategyExecutor:
             # Step 3: Check trigger count
             trigger_ready = self.trigger_mgr.is_ready(trigger_count_required)
             logger.info(f"Step 3 - Trigger ready: {trigger_ready}, current count: {self.trigger_mgr.count}, required: {trigger_count_required}")
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 3 - Trigger ready: {trigger_ready}, current: {self.trigger_mgr.count}, required: {trigger_count_required}\n")
 
             if not trigger_ready:
                 # Accumulate triggers
                 current_spread = await self._get_current_spread(strategy_type)
                 logger.info(f"Step 3a - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}")
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 3a - Current spread: {current_spread}, threshold: {spread_threshold}\n")
 
                 triggered = await self.trigger_mgr.check_and_increment(
@@ -302,7 +302,7 @@ class ContinuousStrategyExecutor:
                     compare_op
                 )
                 logger.info(f"Step 3b - Triggered: {triggered}, new count: {self.trigger_mgr.count}")
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 3b - Triggered: {triggered}, new count: {self.trigger_mgr.count}\n")
 
                 if triggered:
@@ -313,12 +313,12 @@ class ContinuousStrategyExecutor:
                         strategy_type
                     )
 
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 3c - About to sleep for {self.trigger_check_interval} seconds\n")
 
                 await asyncio.sleep(self.trigger_check_interval)
 
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 3d - Woke up from sleep, is_running={self.is_running}\n")
 
                 continue
@@ -327,19 +327,19 @@ class ContinuousStrategyExecutor:
             current_spread = await self._get_current_spread(strategy_type)
             logger.info(f"Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}")
 
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}\n")
                 f.write(f"[DEBUG] Step 4 - About to proceed to Step 5\n")
 
             # Note: We don't reset triggers here even if spread doesn't meet threshold
             # Once trigger count is reached, we should execute the order to meet the total quantity target
 
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 4.5 - Reached after comment, before Step 5\n")
 
             # Step 5: Calculate order quantity
             try:
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 5 - About to calculate order_qty\n")
                     f.write(f"[DEBUG] Step 5 - ladder.total_qty={ladder.total_qty}, current_position={current_position}, order_qty_limit={order_qty_limit}\n")
 
@@ -347,20 +347,20 @@ class ContinuousStrategyExecutor:
                 order_qty = min(order_qty_limit, remaining)
                 logger.info(f"Step 5 - Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}")
 
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 5 - Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}\n")
                     f.flush()
                     f.write(f"[DEBUG] Step 5.5 - About to call check_can_open\n")
                     f.flush()
             except Exception as e:
                 logger.error(f"Step 5 - Exception calculating order_qty: {e}")
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 5 - EXCEPTION: {e}\n")
                 break
 
             # Step 6: Check position limits
             try:
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 6 - About to call check_can_open with strategy_id={self.strategy_id}, ladder_idx={ladder_idx}, order_qty={order_qty}, total_qty={ladder.total_qty}\n")
                     f.flush()
 
@@ -372,7 +372,7 @@ class ContinuousStrategyExecutor:
                     ladder.total_qty
                 )
 
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 6 - check_can_open returned: {result}\n")
                     f.flush()
 
@@ -380,42 +380,86 @@ class ContinuousStrategyExecutor:
                 reason = result.get('reason', '')
                 logger.info(f"Step 6 - Can open: {can_open}, reason: {reason}")
 
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 6 - Can open: {can_open}, reason: {reason}\n")
                     f.flush()
 
                 if not can_open:
                     logger.warning(f"Cannot open: {reason}")
-                    with open("ladder_debug.log", "a") as f:
+                    with open("ladder_debug.log", "a", encoding="utf-8") as f:
                         f.write(f"[DEBUG] BREAK: Cannot open - {reason}\n")
                     break
             except Exception as e:
                 logger.error(f"Step 6 - Exception in check_can_open: {e}")
-                with open("ladder_debug.log", "a") as f:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] Step 6 - EXCEPTION: {e}\n")
                 break
 
             # Step 7: Get current prices
-            market_data = await market_data_service.get_current_spread()
-            binance_price = self._get_binance_price(market_data, strategy_type)
-            bybit_price = self._get_bybit_price(market_data, strategy_type)
-            logger.info(f"Step 7 - Binance price: {binance_price}, Bybit price: {bybit_price}")
+            try:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 7 - Getting market data\n")
+                    f.flush()
+                market_data = await market_data_service.get_current_spread()
+                binance_price = self._get_binance_price(market_data, strategy_type)
+                bybit_price = self._get_bybit_price(market_data, strategy_type)
+                logger.info(f"Step 7 - Binance price: {binance_price}, Bybit price: {bybit_price}")
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 7 - Binance price: {binance_price}, Bybit price: {bybit_price}\n")
+                    f.flush()
+            except Exception as e:
+                logger.error(f"Step 7 - Failed to get market data: {e}")
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 7 - EXCEPTION getting market data: {e}\n")
+                    f.flush()
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
 
             # Step 7.5: Snapshot positions before execution (for single-leg detection)
-            pre_snapshot = await self._snapshot_positions(binance_account, bybit_account)
+            try:
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 7.5 - Snapshotting positions\n")
+                    f.flush()
+                pre_snapshot = await self._snapshot_positions(binance_account, bybit_account)
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 7.5 - Snapshot done: {pre_snapshot}\n")
+                    f.flush()
+            except Exception as e:
+                logger.error(f"Step 7.5 - Failed to snapshot positions: {e}")
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 7.5 - EXCEPTION snapshotting: {e}\n")
+                    f.flush()
+                pre_snapshot = {}
 
             # Step 8: Execute order
             logger.info(f"Step 8 - Executing {strategy_type}: {order_qty} units")
-            exec_result = await self._execute_order(
-                strategy_type,
-                binance_account,
-                bybit_account,
-                order_qty,
-                binance_price,
-                bybit_price,
-                spread_threshold
-            )
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[DEBUG] Step 8 - Executing {strategy_type}: {order_qty} units\n")
+                f.flush()
+            try:
+                exec_result = await self._execute_order(
+                    strategy_type,
+                    binance_account,
+                    bybit_account,
+                    order_qty,
+                    binance_price,
+                    bybit_price,
+                    spread_threshold
+                )
+            except Exception as e:
+                logger.error(f"Step 8 - Exception executing order: {e}")
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 8 - EXCEPTION executing order: {e}\n")
+                    f.flush()
+                self.trigger_mgr.reset()
+                await self._push_trigger_reset(ladder_idx, strategy_type)
+                await asyncio.sleep(self.api_spam_prevention_delay)
+                continue
+
             logger.info(f"Step 8 result - Success: {exec_result.get('success')}, Binance filled: {exec_result.get('binance_filled_qty')}, Bybit filled: {exec_result.get('bybit_filled_qty')}")
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[DEBUG] Step 8 result - Success: {exec_result.get('success')}, Binance filled: {exec_result.get('binance_filled_qty')}, Bybit filled: {exec_result.get('bybit_filled_qty')}\n")
+                f.flush()
 
             # Step 8.5: Schedule single-leg check if Binance had any fill
             # Non-blocking: uses asyncio.create_task so it never interrupts the main execution loop
@@ -431,7 +475,13 @@ class ContinuousStrategyExecutor:
 
             if not exec_result['success']:
                 logger.error(f"Execution failed: {exec_result}")
-                return {'success': False, 'error': exec_result.get('error')}
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 8 - Execution failed, resetting triggers and continuing: {exec_result.get('error')}\n")
+                    f.flush()
+                self.trigger_mgr.reset()
+                await self._push_trigger_reset(ladder_idx, strategy_type)
+                await asyncio.sleep(self.api_spam_prevention_delay)
+                continue
 
             # Step 9: Handle three scenarios
             binance_filled = exec_result.get('binance_filled_qty', 0)
@@ -471,7 +521,7 @@ class ContinuousStrategyExecutor:
             # Step 12: Reset triggers after successful execution
             # CRITICAL FIX: Always reset triggers after order execution to allow next cycle to accumulate fresh triggers
             # This prevents the issue where trigger count remains high and blocks subsequent executions
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 12 - Order executed successfully\n")
                 f.write(f"[DEBUG] Step 12 - binance_filled={binance_filled}, order_qty={order_qty}, ratio={binance_filled/order_qty if order_qty > 0 else 0:.2%}\n")
                 f.write(f"[DEBUG] Step 12 - Current trigger count before reset: {self.trigger_mgr.count}\n")
@@ -482,7 +532,7 @@ class ContinuousStrategyExecutor:
             self.trigger_mgr.reset()
             await self._push_trigger_reset(ladder_idx, strategy_type)
 
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 12 - Trigger count after reset: {self.trigger_mgr.count}\n")
 
             # Small delay to prevent API spam (configurable via api_spam_prevention_delay)
@@ -490,7 +540,7 @@ class ContinuousStrategyExecutor:
             await asyncio.sleep(self.api_spam_prevention_delay)
 
         # ========== 循环退出后输出原因 ==========
-        with open("ladder_debug.log", "a") as f:
+        with open("ladder_debug.log", "a", encoding="utf-8") as f:
             f.write(f"\n{'='*80}\n")
             f.write(f"=== LADDER DEBUG END ===\n")
             f.write(f"[DEBUG] Loop exited after {loop_count} iterations\n")
@@ -626,14 +676,14 @@ class ContinuousStrategyExecutor:
     ):
         """Push trigger progress update via WebSocket"""
         import datetime
-        with open("ladder_debug.log", "a") as f:
+        with open("ladder_debug.log", "a", encoding="utf-8") as f:
             f.write(f"[{datetime.datetime.now()}] PUSH TRIGGER PROGRESS: user_id={self.user_id}, strategy_id={self.strategy_id}, count={current_count}/{required_count}\n")
 
         if self.user_id:
             # Extract action from strategy_type (e.g., 'reverse_opening' -> 'opening')
             action = 'opening' if 'opening' in strategy_type else 'closing'
 
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[{datetime.datetime.now()}] PUSHING WebSocket: action={action}, count={current_count}/{required_count}\n")
 
             await status_pusher.push_custom_event(
@@ -650,7 +700,7 @@ class ContinuousStrategyExecutor:
                 self.user_id
             )
 
-            with open("ladder_debug.log", "a") as f:
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[{datetime.datetime.now()}] WebSocket PUSHED successfully\n")
 
     async def _push_trigger_reset(self, ladder_idx: int, strategy_type: str):
@@ -958,7 +1008,7 @@ class ContinuousStrategyExecutor:
             Execution result dictionary
         """
         import datetime
-        with open("ladder_debug.log", "a") as f:
+        with open("ladder_debug.log", "a", encoding="utf-8") as f:
             f.write(f"\n{'='*80}\n")
             f.write(f"[{datetime.datetime.now()}] CONTINUOUS EXECUTOR: Starting forward opening\n")
             f.write(f"Strategy ID: {self.strategy_id}\n")

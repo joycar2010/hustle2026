@@ -1,13 +1,6 @@
 Set WshShell = CreateObject("WScript.Shell")
-' Check if Nginx is already running
-Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
-Set colProcesses = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name = 'nginx.exe'")
 
-If colProcesses.Count = 0 Then
-    ' Nginx not running, start it
-    WshShell.Run "cmd /c cd /d C:\nginx && start nginx.exe", 0, False
-End If
+' Use PowerShell to start nginx with proper permissions
+WshShell.Run "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\app\hustle2026\start_nginx.ps1", 0, False
 
-Set colProcesses = Nothing
-Set objWMIService = Nothing
 Set WshShell = Nothing

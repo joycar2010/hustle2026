@@ -753,12 +753,16 @@ class MT5Client:
                 return []
 
             # Filter deals by order ticket
+            # MT5: for closing orders, deal.order matches the close order ticket
+            # but deal.position_id matches the original position ticket
+            # We check both to handle all cases
             result = []
             for deal in deals:
-                if deal.order == ticket:
+                if deal.order == ticket or deal.position_id == ticket:
                     result.append({
                         'ticket': deal.ticket,
                         'order': deal.order,
+                        'position_id': deal.position_id,
                         'time': datetime.fromtimestamp(deal.time),
                         'type': deal.type,
                         'volume': deal.volume,
