@@ -1,0 +1,5 @@
+2026/03/17 16:56:26 [emerg] 3888#3192: CreateFile() "C:\app\hustle2026/conf/nginx.conf" failed (3: The system cannot find the path specified)
+2026/03/17 16:56:26 [emerg] 2588#7620: CreateFile() "C:\app\hustle2026/conf/nginx.conf" failed (3: The system cannot find the path specified)
+2026/03/17 16:59:15 [emerg] 1712#5352: CreateDirectory() "C:\app\hustle2026/temp/client_body_temp" failed (3: The system cannot find the path specified)
+2026/03/17 16:59:15 [notice] 3776#7656: signal process started
+2026/03/17 16:59:15 [error] 3776#7656: invalid PID number "" in "C:\app\hustle2026/logs/nginx.pid"

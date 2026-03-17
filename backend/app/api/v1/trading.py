@@ -1480,23 +1480,26 @@ async def _get_binance_realized_pnl(account, start_time_ms, end_time_ms):
 
 
 async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms):
-    from app.services.market_service import market_data_service
-    mt5_client = market_data_service.mt5_client
-    if not mt5_client or not mt5_client.connected:
-        if not mt5_client or not mt5_client.connect():
-            logger.warning("MT5 client not connected")
-            return []
+    from app.services.mt5_client import MT5Client
+    mt5_login = account.mt5_id or account.api_key
+    mt5_password = account.mt5_primary_pwd or account.api_secret
+    mt5_server = account.mt5_server or "Bybit-Live-2"
+    mt5_client = MT5Client(login=int(mt5_login), password=mt5_password, server=mt5_server)
+    if not mt5_client.connect():
+        logger.warning(f"MT5 client failed to connect for account {account.account_name} (login={mt5_login})")
+        return []
     start_dt = datetime.fromtimestamp(start_time_ms / 1000, tz=timezone.utc)
     end_dt = datetime.fromtimestamp(end_time_ms / 1000, tz=timezone.utc)
-    logger.info(f"Fetching MT5 deals from {start_dt} to {end_dt}")
+    logger.info(f"Fetching MT5 deals for account {mt5_login} from {start_dt} to {end_dt}")
     loop = asyncio.get_event_loop()
     history_deals = await loop.run_in_executor(None, lambda: mt5.history_deals_get(start_dt, end_dt))
     if not history_deals:
-        logger.warning("No MT5 deals found")
+        logger.warning(f"No MT5 deals found for account {mt5_login}")
         return []
-    filtered_deals = [d for d in history_deals if d.symbol == "XAUUSD+"]
-    logger.info(f"Found {len(filtered_deals)} MT5 deals for XAUUSD+ (total deals: {len(history_deals)})")
-    return filtered_deals
+    target_symbols = {"XAUUSD+", "XAUUSD.s"}
+    filtered = [d for d in history_deals if d.symbol in target_symbols]
+    logger.info(f"Found {len(filtered)} deals (XAUUSD+/XAUUSD.s) out of {len(history_deals)} total for account {mt5_login}")
+    return [(deal, account.account_name) for deal in filtered]
 
 
 def _format_binance_trades(trades):
@@ -1541,59 +1544,49 @@ def _format_binance_trades(trades):
 
 
 def _format_mt5_trades(deals):
-    """格式化MT5交易数据"""
+    """格式化MT5交易数据，支持 (deal, account_name) 元组或裸deal对象"""
     from app.utils.time_utils import mt5_time_to_beijing
     formatted = []
     total_profit = 0.0
-    for deal in deals:
-        # MT5时间戳转北京时间
+    for item in deals:
+        if isinstance(item, tuple):
+            deal, account_name = item
+        else:
+            deal, account_name = item, "Bybit MT5"
+
         beijing_time = mt5_time_to_beijing(deal.time)
 
-        # 获取交易方向
-        # MT5的deal.type: 0=BUY, 1=SELL
-        if deal.type == 0:  # mt5.DEAL_TYPE_BUY
+        if deal.type == 0:
             side = "buy"
-        elif deal.type == 1:  # mt5.DEAL_TYPE_SELL
+        elif deal.type == 1:
             side = "sell"
         else:
             side = "unknown"
 
-        # 获取价格和数量
         price = deal.price
         quantity = deal.volume
-        amount = price * quantity  # 成交额
+        amount = price * quantity
 
-        # 获取手续费（优先使用commission字段）
-        if hasattr(deal, 'commission') and deal.commission != 0:
-            fee = abs(float(deal.commission))
-        else:
-            # 如果没有commission字段，显示0.00
-            fee = 0.00
-
-        # 获取盈亏（profit字段）
+        fee = abs(float(deal.commission)) if hasattr(deal, 'commission') and deal.commission != 0 else 0.00
         profit = float(deal.profit) if hasattr(deal, 'profit') else 0.00
         total_profit += profit
-
-        # 获取过夜费（swap字段）- 从MT5 deal对象中提取
         overnight_fee = float(deal.swap) if hasattr(deal, 'swap') else 0.00
 
         formatted.append({
             "timestamp": beijing_time,
-            "account_name": "Bybit MT5",
-            "symbol": "XAUUSD+",  # 交易对
-            "product": "产品",  # 产品名称
+            "account_name": account_name,
+            "symbol": deal.symbol,
             "side": side,
             "price": price,
             "quantity": quantity,
-            "amount": round(amount, 2),  # 成交额
-            "overnight_fee": round(overnight_fee, 2),  # 过夜费
-            "fee": round(fee, 2),  # 保留2位小数
-            "profit": round(profit, 2),  # 已实现盈亏
+            "amount": round(amount, 2),
+            "overnight_fee": round(overnight_fee, 2),
+            "fee": round(fee, 2),
+            "profit": round(profit, 2),
             "id": str(deal.ticket),
         })
 
     logger.info(f"Formatted {len(formatted)} MT5 trades, total profit: {total_profit:.2f}")
-    # 降序排序（最新的在最上面）
     return sorted(formatted, key=lambda x: x["timestamp"], reverse=True)
 
 

@@ -21,24 +21,28 @@
           </div>
 
           <!-- Content -->
-          <div class="p-6 space-y-6">
+          <div class="p-6 space-y-4">
             <!-- Loading State -->
             <div v-if="loading" class="flex items-center justify-center py-12">
               <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
             </div>
 
-            <!-- Status Grid -->
             <div v-else class="space-y-4">
+
               <!-- WebSocket Status -->
               <div class="bg-dark-200 rounded-lg p-4">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center space-x-3">
-                    <div :class="['w-3 h-3 rounded-full', statusData.websocket ? 'bg-success animate-pulse' : 'bg-danger']"></div>
+                    <div :class="['w-3 h-3 rounded-full', monitors.websocket ? (statusData.websocket ? 'bg-success animate-pulse' : 'bg-danger') : 'bg-gray-600']"></div>
                     <span class="font-medium">WebSocket连接</span>
                   </div>
-                  <span :class="['text-sm', statusData.websocket ? 'text-success' : 'text-danger']">
-                    {{ statusData.websocket ? '已连接' : '未连接' }}
-                  </span>
+                  <div class="flex items-center space-x-3">
+                    <span v-if="monitors.websocket" :class="['text-sm', statusData.websocket ? 'text-success' : 'text-danger']">
+                      {{ statusData.websocket ? '已连接' : '未连接' }}
+                    </span>
+                    <span v-else class="text-sm text-gray-500">监控已关闭</span>
+                    <button @click="toggleMonitor('websocket')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.websocket ? 'bg-primary' : 'bg-gray-600']" :title="monitors.websocket ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.websocket ? 'translate-x-5' : 'translate-x-1']" /></button>
+                  </div>
                 </div>
               </div>
 
@@ -46,14 +50,16 @@
               <div class="bg-dark-200 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center space-x-3">
-                    <div :class="['w-3 h-3 rounded-full', getDbPoolStatus()]"></div>
+                    <div :class="['w-3 h-3 rounded-full', monitors.dbPool ? getDbPoolStatus() : 'bg-gray-600']"></div>
                     <span class="font-medium">数据库连接池</span>
                   </div>
-                  <span :class="['text-sm', getDbPoolStatusColor()]">
-                    {{ getDbPoolUsageText() }}
-                  </span>
+                  <div class="flex items-center space-x-3">
+                    <span v-if="monitors.dbPool" :class="['text-sm', getDbPoolStatusColor()]">{{ getDbPoolUsageText() }}</span>
+                    <span v-else class="text-sm text-gray-500">监控已关闭</span>
+                    <button @click="toggleMonitor('dbPool')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.dbPool ? 'bg-primary' : 'bg-gray-600']" :title="monitors.dbPool ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.dbPool ? 'translate-x-5' : 'translate-x-1']" /></button>
+                  </div>
                 </div>
-                <div v-if="statusData.dbPool" class="space-y-2">
+                <div v-if="monitors.dbPool && statusData.dbPool" class="space-y-2">
                   <div class="flex justify-between text-sm">
                     <span class="text-text-tertiary">活跃连接</span>
                     <span>{{ statusData.dbPool.active }}</span>
@@ -66,7 +72,6 @@
                     <span class="text-text-tertiary">最大连接数</span>
                     <span>{{ statusData.dbPool.max }}</span>
                   </div>
-                  <!-- Progress Bar -->
                   <div class="mt-3">
                     <div class="w-full bg-dark-300 rounded-full h-2">
                       <div
@@ -80,8 +85,11 @@
 
               <!-- Backend Services -->
               <div class="bg-dark-200 rounded-lg p-4">
-                <h3 class="font-medium mb-3">后端服务</h3>
-                <div class="space-y-2">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-medium">后端服务</h3>
+                  <button @click="toggleMonitor('backend')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.backend ? 'bg-primary' : 'bg-gray-600']" :title="monitors.backend ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.backend ? 'translate-x-5' : 'translate-x-1']" /></button>
+                </div>
+                <div v-if="monitors.backend" class="space-y-2">
                   <div class="flex items-center justify-between">
                     <span class="text-sm text-text-tertiary">API服务</span>
                     <div class="flex items-center space-x-2">
@@ -110,12 +118,16 @@
                     </div>
                   </div>
                 </div>
+                <div v-else class="text-sm text-gray-500">监控已关闭</div>
               </div>
 
               <!-- Exchange Connections -->
               <div class="bg-dark-200 rounded-lg p-4">
-                <h3 class="font-medium mb-3">交易所连接</h3>
-                <div class="space-y-2">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-medium">交易所连接</h3>
+                  <button @click="toggleMonitor('exchanges')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.exchanges ? 'bg-primary' : 'bg-gray-600']" :title="monitors.exchanges ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.exchanges ? 'translate-x-5' : 'translate-x-1']" /></button>
+                </div>
+                <div v-if="monitors.exchanges" class="space-y-2">
                   <div class="flex items-center justify-between">
                     <span class="text-sm text-text-tertiary">Binance</span>
                     <div class="flex items-center space-x-2">
@@ -144,38 +156,35 @@
                     </div>
                   </div>
                 </div>
+                <div v-else class="text-sm text-gray-500">监控已关闭</div>
               </div>
 
               <!-- Infrastructure Services -->
               <div class="bg-dark-200 rounded-lg p-4">
                 <h3 class="font-medium mb-3">基础设施服务</h3>
                 <div class="space-y-3">
+
                   <!-- Redis -->
                   <div class="bg-dark-300 rounded p-3">
                     <div class="flex items-center justify-between mb-2">
                       <span class="text-sm font-medium">Redis</span>
-                      <div class="flex items-center space-x-2">
-                        <div :class="['w-2 h-2 rounded-full', systemMonitor.redis?.connected ? 'bg-success' : 'bg-danger']"></div>
-                        <span :class="['text-sm', systemMonitor.redis?.connected ? 'text-success' : 'text-danger']">
-                          {{ systemMonitor.redis?.connected ? '已连接' : '未连接' }}
-                        </span>
+                      <div class="flex items-center space-x-3">
+                        <div v-if="monitors.redis" class="flex items-center space-x-2">
+                          <div :class="['w-2 h-2 rounded-full', systemMonitor.redis?.connected ? 'bg-success' : 'bg-danger']"></div>
+                          <span :class="['text-sm', systemMonitor.redis?.connected ? 'text-success' : 'text-danger']">
+                            {{ systemMonitor.redis?.connected ? '已连接' : '未连接' }}
+                          </span>
+                        </div>
+                        <span v-else class="text-sm text-gray-500">监控已关闭</span>
+                        <button @click="toggleMonitor('redis')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.redis ? 'bg-primary' : 'bg-gray-600']" :title="monitors.redis ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.redis ? 'translate-x-5' : 'translate-x-1']" /></button>
                       </div>
                     </div>
-                    <div v-if="systemMonitor.redis?.connected" class="space-y-1 text-xs text-text-tertiary">
-                      <div class="flex justify-between">
-                        <span>版本</span>
-                        <span>{{ systemMonitor.redis.version }}</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>内存使用</span>
-                        <span>{{ systemMonitor.redis.used_memory_human }}</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>连接数</span>
-                        <span>{{ systemMonitor.redis.connected_clients }}</span>
-                      </div>
+                    <div v-if="monitors.redis && systemMonitor.redis?.connected" class="space-y-1 text-xs text-text-tertiary">
+                      <div class="flex justify-between"><span>版本</span><span>{{ systemMonitor.redis.version }}</span></div>
+                      <div class="flex justify-between"><span>内存使用</span><span>{{ systemMonitor.redis.used_memory_human }}</span></div>
+                      <div class="flex justify-between"><span>连接数</span><span>{{ systemMonitor.redis.connected_clients }}</span></div>
                     </div>
-                    <div v-else-if="systemMonitor.redis?.error" class="text-xs text-danger mt-1">
+                    <div v-else-if="monitors.redis && systemMonitor.redis?.error" class="text-xs text-danger mt-1">
                       {{ systemMonitor.redis.error }}
                     </div>
                   </div>
@@ -184,17 +193,19 @@
                   <div class="bg-dark-300 rounded p-3">
                     <div class="flex items-center justify-between mb-2">
                       <span class="text-sm font-medium">飞书通知</span>
-                      <div class="flex items-center space-x-2">
-                        <div :class="['w-2 h-2 rounded-full', getFeishuStatusClass()]"></div>
-                        <span :class="['text-sm', getFeishuStatusTextClass()]">
-                          {{ getFeishuStatusText() }}
-                        </span>
+                      <div class="flex items-center space-x-3">
+                        <div v-if="monitors.feishu" class="flex items-center space-x-2">
+                          <div :class="['w-2 h-2 rounded-full', getFeishuStatusClass()]"></div>
+                          <span :class="['text-sm', getFeishuStatusTextClass()]">{{ getFeishuStatusText() }}</span>
+                        </div>
+                        <span v-else class="text-sm text-gray-500">监控已关闭</span>
+                        <button @click="toggleMonitor('feishu')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.feishu ? 'bg-primary' : 'bg-gray-600']" :title="monitors.feishu ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.feishu ? 'translate-x-5' : 'translate-x-1']" /></button>
                       </div>
                     </div>
-                    <div v-if="systemMonitor.feishu?.configured" class="text-xs text-text-tertiary">
+                    <div v-if="monitors.feishu && systemMonitor.feishu?.configured" class="text-xs text-text-tertiary">
                       Webhook: {{ systemMonitor.feishu.webhook_url }}
                     </div>
-                    <div v-else-if="systemMonitor.feishu?.error" class="text-xs text-danger mt-1">
+                    <div v-else-if="monitors.feishu && systemMonitor.feishu?.error" class="text-xs text-danger mt-1">
                       {{ systemMonitor.feishu.error }}
                     </div>
                   </div>
@@ -203,28 +214,23 @@
                   <div class="bg-dark-300 rounded p-3">
                     <div class="flex items-center justify-between mb-2">
                       <span class="text-sm font-medium">SSL证书</span>
-                      <div class="flex items-center space-x-2">
-                        <div :class="['w-2 h-2 rounded-full', getSSLStatusClass()]"></div>
-                        <span :class="['text-sm', getSSLStatusTextClass()]">
-                          {{ getSSLStatusText() }}
-                        </span>
+                      <div class="flex items-center space-x-3">
+                        <div v-if="monitors.ssl" class="flex items-center space-x-2">
+                          <div :class="['w-2 h-2 rounded-full', getSSLStatusClass()]"></div>
+                          <span :class="['text-sm', getSSLStatusTextClass()]">{{ getSSLStatusText() }}</span>
+                        </div>
+                        <span v-else class="text-sm text-gray-500">监控已关闭</span>
+                        <button @click="toggleMonitor('ssl')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.ssl ? 'bg-primary' : 'bg-gray-600']" :title="monitors.ssl ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.ssl ? 'translate-x-5' : 'translate-x-1']" /></button>
                       </div>
                     </div>
-                    <div v-if="systemMonitor.ssl_certificate?.exists" class="space-y-1 text-xs text-text-tertiary">
-                      <div class="flex justify-between">
-                        <span>剩余天数</span>
-                        <span :class="getSSLDaysClass()">{{ systemMonitor.ssl_certificate.days_remaining }} 天</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>过期时间</span>
-                        <span>{{ formatDate(systemMonitor.ssl_certificate.expires_at) }}</span>
-                      </div>
+                    <div v-if="monitors.ssl && systemMonitor.ssl_certificate?.exists" class="space-y-1 text-xs text-text-tertiary">
+                      <div class="flex justify-between"><span>剩余天数</span><span :class="getSSLDaysClass()">{{ systemMonitor.ssl_certificate.days_remaining }} 天</span></div>
+                      <div class="flex justify-between"><span>过期时间</span><span>{{ formatDate(systemMonitor.ssl_certificate.expires_at) }}</span></div>
                       <div v-if="systemMonitor.ssl_certificate.domain_names?.length" class="flex justify-between">
-                        <span>域名</span>
-                        <span>{{ systemMonitor.ssl_certificate.domain_names[0] }}</span>
+                        <span>域名</span><span>{{ systemMonitor.ssl_certificate.domain_names[0] }}</span>
                       </div>
                     </div>
-                    <div v-else-if="systemMonitor.ssl_certificate?.error" class="text-xs text-danger mt-1">
+                    <div v-else-if="monitors.ssl && systemMonitor.ssl_certificate?.error" class="text-xs text-danger mt-1">
                       {{ systemMonitor.ssl_certificate.error }}
                     </div>
                   </div>
@@ -233,48 +239,30 @@
                   <div class="bg-dark-300 rounded p-3">
                     <div class="flex items-center justify-between mb-2">
                       <span class="text-sm font-medium">IP代理池</span>
-                      <div class="flex items-center space-x-2">
-                        <div :class="['w-2 h-2 rounded-full', getProxyStatusClass()]"></div>
-                        <span :class="['text-sm', getProxyStatusTextClass()]">
-                          {{ getProxyStatusText() }}
-                        </span>
+                      <div class="flex items-center space-x-3">
+                        <div v-if="monitors.proxy" class="flex items-center space-x-2">
+                          <div :class="['w-2 h-2 rounded-full', getProxyStatusClass()]"></div>
+                          <span :class="['text-sm', getProxyStatusTextClass()]">{{ getProxyStatusText() }}</span>
+                        </div>
+                        <span v-else class="text-sm text-gray-500">监控已关闭</span>
+                        <button @click="toggleMonitor('proxy')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.proxy ? 'bg-primary' : 'bg-gray-600']" :title="monitors.proxy ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.proxy ? 'translate-x-5' : 'translate-x-1']" /></button>
                       </div>
                     </div>
-                    <div v-if="systemMonitor.proxies" class="space-y-1 text-xs text-text-tertiary">
-                      <div class="flex justify-between">
-                        <span>总代理数</span>
-                        <span>{{ systemMonitor.proxies.total }}</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>活跃代理</span>
-                        <span class="text-success">{{ systemMonitor.proxies.active }}</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>失败代理</span>
-                        <span :class="systemMonitor.proxies.failed > 0 ? 'text-danger' : ''">{{ systemMonitor.proxies.failed }}</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>已过期</span>
-                        <span :class="systemMonitor.proxies.expired > 0 ? 'text-warning' : ''">{{ systemMonitor.proxies.expired }}</span>
-                      </div>
-                      <div class="flex justify-between">
-                        <span>平均健康度</span>
-                        <span :class="getProxyHealthClass()">{{ systemMonitor.proxies.avgHealth }}/100</span>
-                      </div>
-                      <!-- Progress Bar -->
+                    <div v-if="monitors.proxy && systemMonitor.proxies" class="space-y-1 text-xs text-text-tertiary">
+                      <div class="flex justify-between"><span>总代理数</span><span>{{ systemMonitor.proxies.total }}</span></div>
+                      <div class="flex justify-between"><span>活跃代理</span><span class="text-success">{{ systemMonitor.proxies.active }}</span></div>
+                      <div class="flex justify-between"><span>失败代理</span><span :class="systemMonitor.proxies.failed > 0 ? 'text-danger' : ''">{{ systemMonitor.proxies.failed }}</span></div>
+                      <div class="flex justify-between"><span>已过期</span><span :class="systemMonitor.proxies.expired > 0 ? 'text-warning' : ''">{{ systemMonitor.proxies.expired }}</span></div>
+                      <div class="flex justify-between"><span>平均健康度</span><span :class="getProxyHealthClass()">{{ systemMonitor.proxies.avgHealth }}/100</span></div>
                       <div class="mt-2">
                         <div class="w-full bg-dark-400 rounded-full h-2">
-                          <div
-                            :class="['h-2 rounded-full transition-all', getProxyHealthBarColor()]"
-                            :style="{ width: systemMonitor.proxies.avgHealth + '%' }"
-                          ></div>
+                          <div :class="['h-2 rounded-full transition-all', getProxyHealthBarColor()]" :style="{ width: systemMonitor.proxies.avgHealth + '%' }"></div>
                         </div>
                       </div>
                     </div>
-                    <div v-else class="text-xs text-text-tertiary mt-1">
-                      暂无代理数据
-                    </div>
+                    <div v-else-if="monitors.proxy" class="text-xs text-text-tertiary mt-1">暂无代理数据</div>
                   </div>
+
                 </div>
               </div>
 
@@ -289,6 +277,7 @@
                   <span class="text-sm">{{ formatTimestamp(statusData.timestamp) }}</span>
                 </div>
               </div>
+
             </div>
           </div>
 
@@ -309,17 +298,43 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, reactive, watch, onUnmounted } from 'vue'
 import api from '@/services/api'
 
 const props = defineProps({
-  isOpen: {
-    type: Boolean,
-    required: true
-  }
+  isOpen: { type: Boolean, required: true }
 })
 
 const emit = defineEmits(['close'])
+
+const STORAGE_KEY = 'system_monitor_switches'
+
+const defaultMonitors = {
+  websocket: true,
+  dbPool: true,
+  backend: true,
+  exchanges: true,
+  redis: true,
+  feishu: true,
+  ssl: true,
+  proxy: true,
+}
+
+function loadMonitors() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    return saved ? { ...defaultMonitors, ...JSON.parse(saved) } : { ...defaultMonitors }
+  } catch {
+    return { ...defaultMonitors }
+  }
+}
+
+const monitors = reactive(loadMonitors())
+
+function toggleMonitor(key) {
+  monitors[key] = !monitors[key]
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...monitors }))
+}
 
 const loading = ref(false)
 const statusData = ref({
@@ -347,34 +362,33 @@ let refreshInterval = null
 async function fetchStatus() {
   try {
     loading.value = true
-    const response = await api.get('/api/v1/system/status')
-    statusData.value = response.data
 
-    // Fetch system monitor data
-    const monitorResponse = await api.get('/api/v1/monitor/status')
-    systemMonitor.value = monitorResponse.data
+    const needsSystemStatus = monitors.websocket || monitors.dbPool || monitors.backend || monitors.exchanges
+    const needsMonitorStatus = monitors.redis || monitors.feishu || monitors.ssl
 
-    // Fetch proxy health data
-    try {
-      const proxyResponse = await api.get('/api/v1/proxies')
-      const proxies = proxyResponse.data
-      const total = proxies.length
-      const active = proxies.filter(p => p.status === 'active').length
-      const failed = proxies.filter(p => p.status === 'failed').length
-      const expired = proxies.filter(p => p.status === 'expired').length
-      const avgHealth = total > 0 ? Math.round(proxies.reduce((sum, p) => sum + (p.health_score || 0), 0) / total) : 100
+    if (needsSystemStatus) {
+      const response = await api.get('/api/v1/system/status')
+      statusData.value = response.data
+    }
 
-      systemMonitor.value.proxies = {
-        total,
-        active,
-        failed,
-        expired,
-        avgHealth,
-        list: proxies.slice(0, 5) // 只显示前5个
+    if (needsMonitorStatus) {
+      const monitorResponse = await api.get('/api/v1/monitor/status')
+      systemMonitor.value = { ...systemMonitor.value, ...monitorResponse.data }
+    }
+
+    if (monitors.proxy) {
+      try {
+        const proxyResponse = await api.get('/api/v1/proxies')
+        const proxies = proxyResponse.data
+        const total = proxies.length
+        const active = proxies.filter(p => p.status === 'active').length
+        const failed = proxies.filter(p => p.status === 'failed').length
+        const expired = proxies.filter(p => p.status === 'expired').length
+        const avgHealth = total > 0 ? Math.round(proxies.reduce((sum, p) => sum + (p.health_score || 0), 0) / total) : 100
+        systemMonitor.value.proxies = { total, active, failed, expired, avgHealth, list: proxies.slice(0, 5) }
+      } catch {
+        systemMonitor.value.proxies = null
       }
-    } catch (error) {
-      console.error('Failed to fetch proxy data:', error)
-      systemMonitor.value.proxies = null
     }
   } catch (error) {
     console.error('Failed to fetch system status:', error)
@@ -417,30 +431,20 @@ function getDbPoolBarColor() {
 
 function formatTimestamp(timestamp) {
   if (!timestamp) return 'N/A'
-  const date = new Date(timestamp)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
+  return new Date(timestamp).toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
   })
 }
 
 function formatDate(dateStr) {
   if (!dateStr) return 'N/A'
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
+  return new Date(dateStr).toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
   })
 }
 
-// Feishu status helpers
 function getFeishuStatusClass() {
   if (!systemMonitor.value.feishu) return 'bg-gray-500'
   if (systemMonitor.value.feishu.status === 'healthy') return 'bg-success'
@@ -462,33 +466,32 @@ function getFeishuStatusText() {
   return '异常'
 }
 
-// SSL status helpers
 function getSSLStatusClass() {
   if (!systemMonitor.value.ssl_certificate) return 'bg-gray-500'
-  const status = systemMonitor.value.ssl_certificate.status
-  if (status === 'healthy') return 'bg-success'
-  if (status === 'warning') return 'bg-warning'
-  if (status === 'critical' || status === 'expired') return 'bg-danger'
+  const s = systemMonitor.value.ssl_certificate.status
+  if (s === 'healthy') return 'bg-success'
+  if (s === 'warning') return 'bg-warning'
+  if (s === 'critical' || s === 'expired') return 'bg-danger'
   return 'bg-gray-500'
 }
 
 function getSSLStatusTextClass() {
   if (!systemMonitor.value.ssl_certificate) return 'text-gray-500'
-  const status = systemMonitor.value.ssl_certificate.status
-  if (status === 'healthy') return 'text-success'
-  if (status === 'warning') return 'text-warning'
-  if (status === 'critical' || status === 'expired') return 'text-danger'
+  const s = systemMonitor.value.ssl_certificate.status
+  if (s === 'healthy') return 'text-success'
+  if (s === 'warning') return 'text-warning'
+  if (s === 'critical' || s === 'expired') return 'text-danger'
   return 'text-gray-500'
 }
 
 function getSSLStatusText() {
   if (!systemMonitor.value.ssl_certificate) return '未知'
   if (!systemMonitor.value.ssl_certificate.exists) return '未找到'
-  const status = systemMonitor.value.ssl_certificate.status
-  if (status === 'healthy') return '正常'
-  if (status === 'warning') return '即将过期'
-  if (status === 'critical') return '紧急'
-  if (status === 'expired') return '已过期'
+  const s = systemMonitor.value.ssl_certificate.status
+  if (s === 'healthy') return '正常'
+  if (s === 'warning') return '即将过期'
+  if (s === 'critical') return '紧急'
+  if (s === 'expired') return '已过期'
   return '错误'
 }
 
@@ -518,7 +521,7 @@ function getProxyStatusTextClass() {
 
 function getProxyStatusText() {
   if (!systemMonitor.value.proxies) return '未配置'
-  const { total, active, failed, avgHealth } = systemMonitor.value.proxies
+  const { total, avgHealth, failed } = systemMonitor.value.proxies
   if (total === 0) return '无代理'
   if (avgHealth >= 80 && failed === 0) return '健康'
   if (avgHealth >= 50) return '警告'
@@ -527,17 +530,17 @@ function getProxyStatusText() {
 
 function getProxyHealthClass() {
   if (!systemMonitor.value.proxies) return ''
-  const health = systemMonitor.value.proxies.avgHealth
-  if (health >= 80) return 'text-success font-bold'
-  if (health >= 50) return 'text-warning font-bold'
+  const h = systemMonitor.value.proxies.avgHealth
+  if (h >= 80) return 'text-success font-bold'
+  if (h >= 50) return 'text-warning font-bold'
   return 'text-danger font-bold'
 }
 
 function getProxyHealthBarColor() {
   if (!systemMonitor.value.proxies) return 'bg-gray-500'
-  const health = systemMonitor.value.proxies.avgHealth
-  if (health >= 80) return 'bg-success'
-  if (health >= 50) return 'bg-warning'
+  const h = systemMonitor.value.proxies.avgHealth
+  if (h >= 80) return 'bg-success'
+  if (h >= 50) return 'bg-warning'
   return 'bg-danger'
 }
 
@@ -554,9 +557,7 @@ watch(() => props.isOpen, (newVal) => {
 })
 
 onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  if (refreshInterval) clearInterval(refreshInterval)
 })
 </script>
 

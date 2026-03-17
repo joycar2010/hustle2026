@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, and_
+from sqlalchemy import select, delete, func
 from app.models.market_data import SpreadRecord
 from app.models.arbitrage_opportunity import ArbitrageOpportunity
 from app.models.strategy import StrategyConfig
@@ -33,14 +33,27 @@ class ArbitrageOpportunityService:
                 logger.warning("No strategy configs found")
                 return {"extracted": 0, "error": "No strategy configs"}
 
-            # 获取最近24小时的spread_records
-            cutoff_time = datetime.utcnow() - timedelta(hours=24)
+            # 获取最新已处理的时间戳，只处理新数据
+            latest_result = await db.execute(
+                select(ArbitrageOpportunity.timestamp).order_by(
+                    ArbitrageOpportunity.timestamp.desc()
+                ).limit(1)
+            )
+            latest_ts = latest_result.scalar_one_or_none()
+
+            # 如果没有历史记录，回溯24小时；否则从最新记录时间开始
+            if latest_ts is None:
+                cutoff_time = datetime.utcnow() - timedelta(hours=24)
+            else:
+                cutoff_time = latest_ts
+
             result = await db.execute(
-                select(SpreadRecord).where(SpreadRecord.timestamp >= cutoff_time)
+                select(SpreadRecord).where(SpreadRecord.timestamp > cutoff_time)
+                .order_by(SpreadRecord.timestamp.asc())
             )
             spread_records = result.scalars().all()
 
-            logger.info(f"Found {len(spread_records)} spread records in last 24 hours")
+            logger.info(f"Found {len(spread_records)} new spread records since {cutoff_time}")
 
             opportunities_created = 0
 
@@ -104,21 +117,6 @@ class ArbitrageOpportunityService:
         target_spread: float
     ):
         """创建套利机会记录"""
-        # 检查是否已存在相同的记录（避免重复）
-        result = await db.execute(
-            select(ArbitrageOpportunity).where(
-                and_(
-                    ArbitrageOpportunity.timestamp == record.timestamp,
-                    ArbitrageOpportunity.symbol == record.symbol,
-                    ArbitrageOpportunity.opportunity_type == opportunity_type
-                )
-            )
-        )
-        existing = result.scalar_one_or_none()
-
-        if existing:
-            return  # 已存在，跳过
-
         opportunity = ArbitrageOpportunity(
             symbol=record.symbol,
             binance_bid=record.binance_bid,

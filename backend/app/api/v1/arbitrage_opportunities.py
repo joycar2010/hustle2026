@@ -53,7 +53,7 @@ async def get_opportunities(
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
     opportunity_type: Optional[str] = None,
-    symbol: str = "XAUUSD",
+    symbol: str = "XAUUSDT",
     limit: int = Query(1000, le=10000),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
@@ -117,7 +117,7 @@ async def get_opportunities(
 async def get_opportunity_stats(
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
-    symbol: str = "XAUUSD",
+    symbol: str = "XAUUSDT",
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):

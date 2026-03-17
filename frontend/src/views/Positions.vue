@@ -389,7 +389,7 @@ async function querySpreadData() {
     const params = {
       start_time,
       end_time,
-      symbol: 'XAUUSD',
+      symbol: 'XAUUSDT',
       limit: 10000
     }
 
