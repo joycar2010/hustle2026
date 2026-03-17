@@ -101,8 +101,8 @@ def _build_stats(orders, accounts_map, enable_logging=True):
             if not order.symbol or order.symbol.upper() != 'XAUUSDT':
                 continue
         elif is_mt5:
-            # MT5: Only allow XAUUSD.s
-            if not order.symbol or order.symbol != 'XAUUSD.s':
+            # MT5: Only allow XAUUSD+
+            if not order.symbol or order.symbol != 'XAUUSD+':
                 continue
 
         amount = qty * (order.price or 0)
@@ -682,7 +682,7 @@ async def place_manual_order(
                 price = spread_data.bybit_quote.ask_price
             else:  # sell
                 price = spread_data.bybit_quote.bid_price
-            symbol = "XAUUSD.s"
+            symbol = "XAUUSD+"
 
         # Import order executor
         from app.services.order_executor import order_executor
@@ -821,7 +821,7 @@ async def close_all_positions(
                 # Get Bybit MT5 positions
                 import MetaTrader5 as mt5
                 loop = asyncio.get_event_loop()
-                positions = await loop.run_in_executor(None, mt5.positions_get, "XAUUSD.s")
+                positions = await loop.run_in_executor(None, mt5.positions_get, "XAUUSD+")
 
                 if positions:
                     for pos in positions:
@@ -839,7 +839,7 @@ async def close_all_positions(
 
                         result = await order_executor.place_bybit_order(
                             account=bybit_account,
-                            symbol="XAUUSD.s",
+                            symbol="XAUUSD+",
                             side=side,
                             order_type="Limit",
                             quantity=str(volume),
@@ -1011,7 +1011,7 @@ async def sync_trades_from_exchanges(
 
                         xauusd_count = 0
                         for deal in history_deals:
-                            if deal.symbol != "XAUUSD.s":
+                            if deal.symbol != "XAUUSD+":
                                 continue
                             xauusd_count += 1
 
@@ -1049,7 +1049,7 @@ async def sync_trades_from_exchanges(
                                       f"side={'buy' if deal.type == mt5.DEAL_TYPE_BUY else 'sell'}, "
                                       f"qty={deal.volume}, price={deal.price}")
                         logger.info(f"MT5账户 {account.account_name}: 共 {len(history_deals)} 笔交易，"
-                                  f"其中 {xauusd_count} 笔XAUUSD.s交易")
+                                  f"其中 {xauusd_count} 笔XAUUSD+交易")
                     else:
                         logger.warning(f"MT5账户 {account.account_name} 未返回交易记录，错误: {mt5.last_error()}")
 
@@ -1112,7 +1112,7 @@ async def close_short_position(
         else:  # bybit
             # Bybit: 空仓以bid价挂单平仓
             price = spread_data.bybit_quote.bid_price
-            symbol = "XAUUSD.s"
+            symbol = "XAUUSD+"
 
         # Import order executor
         from app.services.order_executor import order_executor
@@ -1195,7 +1195,7 @@ async def close_long_position(
         else:  # bybit
             # Bybit: 多仓以ask价挂单平仓
             price = spread_data.bybit_quote.ask_price
-            symbol = "XAUUSD.s"
+            symbol = "XAUUSD+"
 
         # Import order executor
         from app.services.order_executor import order_executor
@@ -1299,14 +1299,14 @@ async def cancel_all_orders(
                 # Get Bybit MT5 open orders
                 import MetaTrader5 as mt5
                 loop = asyncio.get_event_loop()
-                orders = await loop.run_in_executor(None, mt5.orders_get, "XAUUSD.s")
+                orders = await loop.run_in_executor(None, mt5.orders_get, "XAUUSD+")
 
                 if orders:
                     for order in orders:
                         order_id = str(order.ticket)
                         result = await order_executor.cancel_bybit_order(
                             bybit_account,
-                            "XAUUSD.s",
+                            "XAUUSD+",
                             order_id
                         )
 
@@ -1494,8 +1494,8 @@ async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms):
     if not history_deals:
         logger.warning("No MT5 deals found")
         return []
-    filtered_deals = [d for d in history_deals if d.symbol == "XAUUSD.s"]
-    logger.info(f"Found {len(filtered_deals)} MT5 deals for XAUUSD.s (total deals: {len(history_deals)})")
+    filtered_deals = [d for d in history_deals if d.symbol == "XAUUSD+"]
+    logger.info(f"Found {len(filtered_deals)} MT5 deals for XAUUSD+ (total deals: {len(history_deals)})")
     return filtered_deals
 
 
@@ -1580,7 +1580,7 @@ def _format_mt5_trades(deals):
         formatted.append({
             "timestamp": beijing_time,
             "account_name": "Bybit MT5",
-            "symbol": "XAUUSD.s",  # 交易对
+            "symbol": "XAUUSD+",  # 交易对
             "product": "产品",  # 产品名称
             "side": side,
             "price": price,

@@ -1,7 +1,8 @@
 """Timing Configuration Schemas"""
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime
+from uuid import UUID
 
 
 class TimingConfigBase(BaseModel):
@@ -80,11 +81,11 @@ class TimingConfigResponse(TimingConfigBase):
     strategy_instance_id: Optional[int]
     template: Optional[str]
     is_locked: bool
-    locked_by: Optional[int]
+    locked_by: Optional[Union[UUID, str]]
     locked_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[int]
+    created_by: Optional[Union[UUID, str]]
 
     class Config:
         from_attributes = True
@@ -100,7 +101,7 @@ class TimingConfigHistoryResponse(BaseModel):
     config_data: dict
     template: Optional[str]
     created_at: datetime
-    created_by: Optional[int]
+    created_by: Optional[Union[UUID, str]]
     change_reason: Optional[str]
 
     class Config:

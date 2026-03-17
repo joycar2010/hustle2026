@@ -146,8 +146,8 @@ class RealTimeMarketDataService:
             logger.error(f"Error fetching Binance ticker for {symbol}: {e}")
             return None
 
-    async def fetch_bybit_ticker(self, symbol: str = "XAUUSD.s") -> Optional[Dict[str, Any]]:
-        """Fetch ticker data from Bybit MT5 (using XAUUSD.s for gold)"""
+    async def fetch_bybit_ticker(self, symbol: str = "XAUUSD+") -> Optional[Dict[str, Any]]:
+        """Fetch ticker data from Bybit MT5 (using XAUUSD+ for gold)"""
         try:
             # MT5 operations are synchronous, run in executor to avoid blocking
             loop = asyncio.get_event_loop()
@@ -170,7 +170,7 @@ class RealTimeMarketDataService:
         """Fetch market data from both exchanges and store spread data only
 
         Note:
-        - Binance uses XAUUSDT, Bybit MT5 uses XAUUSD.s for gold
+        - Binance uses XAUUSDT, Bybit MT5 uses XAUUSD+ for gold
         - Market data (MarketData) is NOT stored to database anymore
         - Only spread records (SpreadRecord) are stored
         - Old spread records (>24 hours) are automatically cleaned up
@@ -202,7 +202,7 @@ class RealTimeMarketDataService:
                 return
 
             # Map symbols for different exchanges
-            bybit_symbol = "XAUUSD.s" if symbol == "XAUUSDT" else symbol
+            bybit_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
 
             # Fetch data only from platforms with enabled accounts
             binance_data = None

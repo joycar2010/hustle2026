@@ -17,7 +17,7 @@ print("Connecting to MT5...")
 if mt5_client.connect():
     print("[OK] MT5 connected successfully")
 
-    symbol = "XAUUSD.s"
+    symbol = "XAUUSD+"
     print(f"\nTesting order book for {symbol}...")
 
     # Test market_book_get

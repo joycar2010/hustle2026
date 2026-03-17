@@ -64,7 +64,7 @@ async def test_mt5_positions_history():
     positions_map = {}
 
     for deal in deals:
-        if deal.symbol != "XAUUSD.s":
+        if deal.symbol != "XAUUSD+":
             continue
 
         # Check if deal has position_id

@@ -215,7 +215,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Hustle XAU Arbitrage System",
-    description="Cross-platform arbitrage system for Binance XAUUSDT and Bybit MT5 XAUUSD.s",
+    description="Cross-platform arbitrage system for Binance XAUUSDT and Bybit MT5 XAUUSD+",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

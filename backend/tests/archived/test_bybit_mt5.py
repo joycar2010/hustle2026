@@ -55,7 +55,7 @@ else:
 
 # Step 4: Test symbol access
 print("\n[Step 4] Testing symbol access...")
-test_symbols = ["XAUUSD.s", "XAUUSD", "GOLD"]
+test_symbols = ["XAUUSD+", "XAUUSD", "GOLD"]
 
 for symbol in test_symbols:
     symbol_info = mt5.symbol_info(symbol)

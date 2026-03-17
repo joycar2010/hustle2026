@@ -66,11 +66,11 @@ class MarketDataService:
     ) -> MarketQuote:
         """Get Bybit market quote via MT5
 
-        Note: Bybit MT5 uses XAUUSD.s for gold
+        Note: Bybit MT5 uses XAUUSD+ for gold
         """
         try:
             # Map symbols for Bybit MT5
-            mt5_symbol = "XAUUSD.s" if symbol == "XAUUSDT" else symbol
+            mt5_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
 
             # MT5 operations are synchronous, run in executor
             loop = asyncio.get_event_loop()
@@ -124,13 +124,13 @@ class MarketDataService:
     async def get_current_spread(
         self,
         binance_symbol: str = "XAUUSDT",
-        bybit_symbol: str = "XAUUSDT",  # Keep as XAUUSDT, will be mapped to XAUUSD.s internally
+        bybit_symbol: str = "XAUUSDT",  # Keep as XAUUSDT, will be mapped to XAUUSD+ internally
         bybit_category: str = "linear",  # Not used for MT5
         use_cache: bool = True,
     ) -> SpreadData:
         """Get current spread data with caching
 
-        Note: For gold trading, Bybit MT5 uses XAUUSD.s
+        Note: For gold trading, Bybit MT5 uses XAUUSD+
         """
         cache_key = f"spread:{binance_symbol}:{bybit_symbol}"
 

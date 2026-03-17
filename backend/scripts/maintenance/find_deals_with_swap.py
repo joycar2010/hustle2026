@@ -81,17 +81,17 @@ async def find_deals_with_swap():
         print("  1. Swap is only recorded in specific deal types")
         print("  2. Or swap is accumulated elsewhere and not in individual deals")
 
-    # Also check all XAUUSD.s deals
-    xau_deals = [d for d in deals if d.symbol == "XAUUSD.s"]
+    # Also check all XAUUSD+ deals
+    xau_deals = [d for d in deals if d.symbol == "XAUUSD+"]
     xau_with_swap = [d for d in xau_deals if hasattr(d, 'swap') and d.swap != 0]
 
-    print(f"\n=== XAUUSD.s Specific ===")
-    print(f"Total XAUUSD.s deals: {len(xau_deals)}")
-    print(f"XAUUSD.s deals with swap: {len(xau_with_swap)}")
+    print(f"\n=== XAUUSD+ Specific ===")
+    print(f"Total XAUUSD+ deals: {len(xau_deals)}")
+    print(f"XAUUSD+ deals with swap: {len(xau_with_swap)}")
 
     if xau_with_swap:
         total_xau_swap = sum(d.swap for d in xau_with_swap)
-        print(f"Total XAUUSD.s swap: {total_xau_swap:.2f} USD")
+        print(f"Total XAUUSD+ swap: {total_xau_swap:.2f} USD")
 
     mt5.shutdown()
 

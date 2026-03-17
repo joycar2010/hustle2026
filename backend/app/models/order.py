@@ -25,7 +25,7 @@ class OrderRecord(Base):
 
     order_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.account_id"), nullable=False, index=True)
-    symbol = Column(String(20), nullable=False)  # XAUUSDT, XAUUSD.s
+    symbol = Column(String(20), nullable=False)  # XAUUSDT, XAUUSD+
     order_side = Column(String(10), nullable=False)  # buy, sell
     order_type = Column(String(10), nullable=False)  # limit, market
     price = Column(Float, nullable=False)

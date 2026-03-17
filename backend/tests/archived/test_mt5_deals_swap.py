@@ -43,9 +43,9 @@ async def test_mt5_deals_swap():
 
     print(f"[OK] Found {len(deals)} total deals")
 
-    # Filter XAUUSD.s deals
-    xau_deals = [d for d in deals if d.symbol == "XAUUSD.s"]
-    print(f"[OK] Found {len(xau_deals)} XAUUSD.s deals")
+    # Filter XAUUSD+ deals
+    xau_deals = [d for d in deals if d.symbol == "XAUUSD+"]
+    print(f"[OK] Found {len(xau_deals)} XAUUSD+ deals")
 
     # Analyze swap fees
     total_swap = 0.0

@@ -15,13 +15,13 @@ async def check_positions():
 
     print("[OK] MT5 connected")
     print("\n" + "="*60)
-    print("Checking XAUUSD.s positions")
+    print("Checking XAUUSD+ positions")
     print("="*60)
 
-    positions = mt5_client.get_positions("XAUUSD.s")
+    positions = mt5_client.get_positions("XAUUSD+")
 
     if not positions:
-        print("[WARNING] No XAUUSD.s positions found")
+        print("[WARNING] No XAUUSD+ positions found")
     else:
         print(f"\nFound {len(positions)} position(s):\n")
         for i, pos in enumerate(positions, 1):
@@ -40,14 +40,14 @@ async def check_positions():
     print("="*60)
 
     print("\n1. Find SHORT position (for forward closing):")
-    short_ticket = mt5_client.find_position_to_close("XAUUSD.s", "Buy")
+    short_ticket = mt5_client.find_position_to_close("XAUUSD+", "Buy")
     if short_ticket:
         print(f"   [OK] Found SHORT position: ticket={short_ticket}")
     else:
         print(f"   [ERROR] No SHORT position found")
 
     print("\n2. Find LONG position (for reverse closing):")
-    long_ticket = mt5_client.find_position_to_close("XAUUSD.s", "Sell")
+    long_ticket = mt5_client.find_position_to_close("XAUUSD+", "Sell")
     if long_ticket:
         print(f"   [OK] Found LONG position: ticket={long_ticket}")
     else:

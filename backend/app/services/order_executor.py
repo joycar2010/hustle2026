@@ -363,7 +363,7 @@ class OrderExecutor:
             binance_account: Binance account
             bybit_account: Bybit account
             binance_symbol: Binance symbol (e.g., XAUUSDT)
-            bybit_symbol: Bybit symbol (e.g., XAUUSD.s)
+            bybit_symbol: Bybit symbol (e.g., XAUUSD+)
             binance_side: Binance order side (BUY/SELL)
             bybit_side: Bybit order side (Buy/Sell)
             quantity: Binance order quantity (in contracts)
@@ -380,7 +380,7 @@ class OrderExecutor:
 
         Note:
             Binance XAUUSDT: 1 contract = 1 XAU (ounce)
-            Bybit XAUUSD.s: 1 lot = 100 XAU (ounces)
+            Bybit XAUUSD+: 1 lot = 100 XAU (ounces)
             Therefore: bybit_quantity = binance_quantity / 100
         """
         # Check fund sufficiency before placing orders
@@ -420,14 +420,14 @@ class OrderExecutor:
             print(f"Warning: Fund sufficiency check failed: {e}")
 
         # Calculate Bybit quantity if not provided
-        # Binance XAUUSDT: 1 contract = 1 XAU; Bybit XAUUSD.s: 1 lot = 100 XAU
+        # Binance XAUUSDT: 1 contract = 1 XAU; Bybit XAUUSD+: 1 lot = 100 XAU
         if bybit_quantity is None:
             bybit_quantity = quantity / 100.0
 
         # Round quantities to correct precision
         # Binance XAUUSDT: min 0.001, step 0.001 → 3 decimal places
         quantity = round(quantity, 3)
-        # Bybit MT5 XAUUSD.s: min 0.01 lot, step 0.01 → 2 decimal places
+        # Bybit MT5 XAUUSD+: min 0.01 lot, step 0.01 → 2 decimal places
         bybit_quantity = round(bybit_quantity, 2)
 
         # Validate minimum quantities
@@ -438,7 +438,7 @@ class OrderExecutor:
                 "error": f"Binance数量不足: {quantity} XAU < 0.001 XAU (最小交易量)",
             }
 
-        # Bybit MT5 XAUUSD.s: minimum 0.01 Lot
+        # Bybit MT5 XAUUSD+: minimum 0.01 Lot
         if bybit_quantity < 0.01:
             return {
                 "success": False,
@@ -460,7 +460,7 @@ class OrderExecutor:
             binance_price = round(binance_price, 2)
             if original_binance_price != binance_price:
                 print(f"WARNING: Binance price rounded from {original_binance_price} to {binance_price}")
-        # Bybit MT5 XAUUSD.s: 2 decimal places (强制精度处理，防止浮点数精度问题)
+        # Bybit MT5 XAUUSD+: 2 decimal places (强制精度处理，防止浮点数精度问题)
         if bybit_price is not None:
             original_bybit_price = bybit_price
             bybit_price = round(bybit_price, 2)

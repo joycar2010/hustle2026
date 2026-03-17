@@ -29,7 +29,7 @@ if mt5.initialize():
         print(f"  - Trade allowed: {terminal_info.trade_allowed}")
 
     # Test symbol
-    symbol = "XAUUSD.s"
+    symbol = "XAUUSD+"
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info:
         print(f"[OK] Symbol {symbol} found:")

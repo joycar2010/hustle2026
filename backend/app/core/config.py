@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     BYBIT_MT5_PASSWORD: str = ""
 
     # MT5 Trading Configuration
-    MT5_DEFAULT_SYMBOL: str = "XAUUSD.s"  # Default trading symbol for MT5
-    MT5_DEFAULT_SYMBOLS: List[str] = ["XAUUSD.s"]  # List of default symbols to monitor
+    MT5_DEFAULT_SYMBOL: str = "XAUUSD+"  # Default trading symbol for MT5
+    MT5_DEFAULT_SYMBOLS: List[str] = ["XAUUSD+"]  # List of default symbols to monitor
 
     # System
     APP_NAME: str = "Hustle2026"

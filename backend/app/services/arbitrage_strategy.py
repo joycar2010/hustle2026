@@ -60,7 +60,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSD.s",
+            bybit_symbol="XAUUSD+",
             binance_side="BUY",
             bybit_side="Sell",
             quantity=quantity,
@@ -141,7 +141,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSD.s",
+            bybit_symbol="XAUUSD+",
             binance_side="SELL",
             bybit_side="Buy",
             quantity=quantity,
@@ -214,7 +214,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSD.s",
+            bybit_symbol="XAUUSD+",
             binance_side="SELL",  # Close long position
             bybit_side="Buy",  # Close short position
             quantity=quantity,
@@ -278,7 +278,7 @@ class ArbitrageStrategy:
             binance_account=binance_account,
             bybit_account=bybit_account,
             binance_symbol="XAUUSDT",
-            bybit_symbol="XAUUSD.s",
+            bybit_symbol="XAUUSD+",
             binance_side="BUY",  # Close short position
             bybit_side="Sell",  # Close long position
             quantity=quantity,

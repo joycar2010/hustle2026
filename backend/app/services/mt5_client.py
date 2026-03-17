@@ -118,7 +118,7 @@ class MT5Client:
             self.last_successful_request = datetime.utcnow()
             logger.info(f"MT5 connected successfully to account {self.login}")
 
-            # Initialize default symbols (ensure XAUUSD.s is visible and ready)
+            # Initialize default symbols (ensure XAUUSD+ is visible and ready)
             self._initialize_default_symbols()
 
             return True
@@ -192,7 +192,7 @@ class MT5Client:
         Get latest tick data for symbol with auto-reconnection
 
         Args:
-            symbol: Trading symbol (e.g., "XAUUSD.s")
+            symbol: Trading symbol (e.g., "XAUUSD+")
 
         Returns:
             Dict with bid, ask, time, etc.
@@ -362,7 +362,7 @@ class MT5Client:
                 logger.error(f"Failed to get symbol info for {symbol}: {mt5.last_error()}")
                 return None
 
-            # Ensure symbol is visible (XAUUSD.s may be hidden by default)
+            # Ensure symbol is visible (XAUUSD+ may be hidden by default)
             if not symbol_info.visible:
                 if not mt5.symbol_select(symbol, True):
                     logger.error(f"Failed to activate symbol {symbol}: {mt5.last_error()}")
@@ -393,10 +393,10 @@ class MT5Client:
                 original_price = price
                 normalized_price = round(price, digits)
 
-                # XAUUSD.s specific validation: price range 1000-5000
+                # XAUUSD+ specific validation: price range 1000-5000
                 if symbol.upper() == "XAUUSD.S":
                     if normalized_price < 1000 or normalized_price > 5000:
-                        logger.error(f"XAUUSD.s price out of valid range: {normalized_price}")
+                        logger.error(f"XAUUSD+ price out of valid range: {normalized_price}")
                         return {
                             'retcode': 10015,  # Invalid price
                             'deal': 0,
@@ -549,7 +549,7 @@ class MT5Client:
         Get market book (order book) data for symbol
 
         Args:
-            symbol: Trading symbol (e.g., "XAUUSD.s")
+            symbol: Trading symbol (e.g., "XAUUSD+")
 
         Returns:
             Dict with bid_price, bid_volume, ask_price, ask_volume, or None if failed
@@ -585,7 +585,7 @@ class MT5Client:
             return {
                 'symbol': symbol,
                 'bid_price': round(bid_best.price, 3),
-                'bid_volume': round(bid_best.volume, 2),  # Volume in lots (1 lot = 100 oz for XAUUSD.s)
+                'bid_volume': round(bid_best.volume, 2),  # Volume in lots (1 lot = 100 oz for XAUUSD+)
                 'ask_price': round(ask_best.price, 3),
                 'ask_volume': round(ask_best.volume, 2),
                 'timestamp': int(time.time() * 1000)
@@ -691,7 +691,7 @@ class MT5Client:
         Get the default trading symbol from configuration
 
         Returns:
-            Default symbol string (e.g., "XAUUSD.s")
+            Default symbol string (e.g., "XAUUSD+")
         """
         from app.core.config import settings
         return settings.MT5_DEFAULT_SYMBOL
@@ -902,7 +902,7 @@ class MT5Client:
         获取当前持仓的实时Swap（过夜费）
 
         Args:
-            symbol: 可选的品种过滤，如 "XAUUSD.s"
+            symbol: 可选的品种过滤，如 "XAUUSD+"
 
         Returns:
             {

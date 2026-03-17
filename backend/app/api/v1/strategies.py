@@ -170,6 +170,8 @@ async def upsert_strategy_config(
             config.opening_m_coin = config_data.opening_m_coin
             config.closing_m_coin = config_data.closing_m_coin
             config.m_coin = config_data.opening_m_coin  # Keep m_coin for backward compatibility
+        config.opening_trigger_check_interval = config_data.opening_trigger_check_interval
+        config.closing_trigger_check_interval = config_data.closing_trigger_check_interval
         config.ladders = ladders_data
         config.is_enabled = config_data.is_enabled
     else:
@@ -195,6 +197,8 @@ async def upsert_strategy_config(
             m_coin=m_coin,
             opening_m_coin=opening_m_coin,
             closing_m_coin=closing_m_coin,
+            opening_trigger_check_interval=config_data.opening_trigger_check_interval,
+            closing_trigger_check_interval=config_data.closing_trigger_check_interval,
             ladders=ladders_data,
             is_enabled=config_data.is_enabled,
         )
@@ -1028,8 +1032,30 @@ async def execute_continuous_opening(
         trigger_check_interval = timing_config.get('trigger_check_interval', request.trigger_check_interval)
         delayed_single_leg_check_delay = timing_config.get('delayed_single_leg_check_delay', 10.0)
         delayed_single_leg_second_check_delay = timing_config.get('delayed_single_leg_second_check_delay', 1.0)
+        binance_timeout = timing_config.get('binance_timeout', 5.0)
+        bybit_timeout = timing_config.get('bybit_timeout', 0.1)
+        order_check_interval = timing_config.get('order_check_interval', 0.2)
+        spread_check_interval = timing_config.get('spread_check_interval', 2.0)
+        mt5_deal_sync_wait = timing_config.get('mt5_deal_sync_wait', 3.0)
+        api_retry_times = timing_config.get('api_retry_times', 1)
+        api_retry_delay = timing_config.get('api_retry_delay', 0.5)
+        max_binance_limit_retries = timing_config.get('max_binance_limit_retries', 25)
+        open_wait_after_cancel_no_trade = timing_config.get('open_wait_after_cancel_no_trade', 3.0)
+        open_wait_after_cancel_part = timing_config.get('open_wait_after_cancel_part', 2.0)
 
-        logger.info(f"Using timing config for {strategy_type_name}: api_spam_prevention_delay={api_spam_prevention_delay}, trigger_check_interval={trigger_check_interval}, delayed_single_leg_check_delay={delayed_single_leg_check_delay}, delayed_single_leg_second_check_delay={delayed_single_leg_second_check_delay}")
+        # 动态更新OrderExecutorV2的timing参数
+        order_executor_v2.binance_timeout = binance_timeout
+        order_executor_v2.bybit_timeout = bybit_timeout
+        order_executor_v2.max_retries = api_retry_times
+        order_executor_v2.order_check_interval = order_check_interval
+        order_executor_v2.spread_check_interval = spread_check_interval
+        order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
+        order_executor_v2.api_retry_delay = api_retry_delay
+        order_executor_v2.max_binance_limit_retries = max_binance_limit_retries
+        order_executor_v2.open_wait_after_cancel_no_trade = open_wait_after_cancel_no_trade
+        order_executor_v2.open_wait_after_cancel_part = open_wait_after_cancel_part
+
+        logger.info(f"Using timing config for {strategy_type_name}: binance_timeout={binance_timeout}, bybit_timeout={bybit_timeout}, trigger_check_interval={trigger_check_interval}, api_spam_prevention_delay={api_spam_prevention_delay}, mt5_deal_sync_wait={mt5_deal_sync_wait}, api_retry_times={api_retry_times}")
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_opening_continuous"
@@ -1144,8 +1170,30 @@ async def execute_continuous_closing(
         trigger_check_interval = timing_config.get('trigger_check_interval', request.trigger_check_interval)
         delayed_single_leg_check_delay = timing_config.get('delayed_single_leg_check_delay', 10.0)
         delayed_single_leg_second_check_delay = timing_config.get('delayed_single_leg_second_check_delay', 1.0)
+        binance_timeout = timing_config.get('binance_timeout', 5.0)
+        bybit_timeout = timing_config.get('bybit_timeout', 0.1)
+        order_check_interval = timing_config.get('order_check_interval', 0.2)
+        spread_check_interval = timing_config.get('spread_check_interval', 2.0)
+        mt5_deal_sync_wait = timing_config.get('mt5_deal_sync_wait', 3.0)
+        api_retry_times = timing_config.get('api_retry_times', 1)
+        api_retry_delay = timing_config.get('api_retry_delay', 0.5)
+        max_binance_limit_retries = timing_config.get('max_binance_limit_retries', 25)
+        close_wait_after_cancel_no_trade = timing_config.get('close_wait_after_cancel_no_trade', 3.0)
+        close_wait_after_cancel_part = timing_config.get('close_wait_after_cancel_part', 2.0)
 
-        logger.info(f"Using timing config for {strategy_type_name}: api_spam_prevention_delay={api_spam_prevention_delay}, trigger_check_interval={trigger_check_interval}, delayed_single_leg_check_delay={delayed_single_leg_check_delay}, delayed_single_leg_second_check_delay={delayed_single_leg_second_check_delay}")
+        # 动态更新OrderExecutorV2的timing参数
+        order_executor_v2.binance_timeout = binance_timeout
+        order_executor_v2.bybit_timeout = bybit_timeout
+        order_executor_v2.max_retries = api_retry_times
+        order_executor_v2.order_check_interval = order_check_interval
+        order_executor_v2.spread_check_interval = spread_check_interval
+        order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
+        order_executor_v2.api_retry_delay = api_retry_delay
+        order_executor_v2.max_binance_limit_retries = max_binance_limit_retries
+        order_executor_v2.close_wait_after_cancel_no_trade = close_wait_after_cancel_no_trade
+        order_executor_v2.close_wait_after_cancel_part = close_wait_after_cancel_part
+
+        logger.info(f"Using timing config for {strategy_type_name}: binance_timeout={binance_timeout}, bybit_timeout={bybit_timeout}, trigger_check_interval={trigger_check_interval}, api_spam_prevention_delay={api_spam_prevention_delay}, mt5_deal_sync_wait={mt5_deal_sync_wait}, api_retry_times={api_retry_times}")
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_closing_continuous"

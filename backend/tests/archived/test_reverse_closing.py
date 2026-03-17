@@ -78,7 +78,7 @@ def test_reverse_closing_logic():
 
     # Mock find_position_to_close
     print("\nStep 3: Find Bybit LONG position")
-    print(f"  Call: find_position_to_close('XAUUSD.s', 'Sell')")
+    print(f"  Call: find_position_to_close('XAUUSD+', 'Sell')")
     print(f"  Logic: side='Sell' -> find LONG position (type=0)")
     print(f"  Result: [OK] Found LONG position")
 

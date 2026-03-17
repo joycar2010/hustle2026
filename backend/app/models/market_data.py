@@ -11,7 +11,7 @@ class MarketData(Base):
     __tablename__ = "market_data"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    symbol = Column(String(20), nullable=False)  # XAUUSDT, XAUUSD.s
+    symbol = Column(String(20), nullable=False)  # XAUUSDT, XAUUSD+
     platform = Column(String(20), nullable=False)  # binance, bybit
     bid_price = Column(Float, nullable=False)
     ask_price = Column(Float, nullable=False)

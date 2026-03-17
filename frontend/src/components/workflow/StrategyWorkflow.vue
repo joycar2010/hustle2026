@@ -562,7 +562,25 @@ const getTriggerParams = () => {
 
 // 定义工作流节点和边
 const elements = ref([
-  // 节点定义
+  // ── 节点定义 ──────────────────────────────────────────────
+
+  // 节点0: 手数循环控制（总手数 / 单手数）
+  {
+    id: '0',
+    type: 'custom',
+    position: { x: 100, y: -180 },
+    data: {
+      id: '0',
+      type: 'loop',
+      icon: '🔁',
+      label: '手数循环控制',
+      description: '每轮执行单手数，累计达到总手数后结束。remaining = total_qty - current_position',
+      impact: '单手数越小执行越灵活，总手数决定本次任务目标',
+      params: []
+    }
+  },
+
+  // 节点1: 触发控制
   {
     id: '1',
     type: 'custom',
@@ -572,11 +590,13 @@ const elements = ref([
       type: 'trigger',
       icon: '🎯',
       label: '触发控制',
-      description: '检查点差是否满足触发条件',
+      description: '每隔检查间隔轮询点差，累计满足触发次数后进入执行',
       impact: '触发次数越多越稳定，但响应越慢',
       params: getTriggerParams()
     }
   },
+
+  // 节点2: Binance限价单执行
   {
     id: '2',
     type: 'custom',
@@ -585,13 +605,13 @@ const elements = ref([
       id: '2',
       type: 'order',
       icon: '📝',
-      label: '订单执行',
-      description: 'Binance和Bybit订单执行',
-      impact: '超时时间 = 检查间隔 × 最大重试次数',
+      label: 'Binance限价单',
+      description: 'POST_ONLY挂单，每隔检查间隔轮询成交状态，超时后撤单',
+      impact: 'Binance超时 = 检查间隔 × 轮询次数上限',
       params: [
         {
           key: 'binance_timeout',
-          label: 'Binance超时',
+          label: 'Binance挂单超时',
           value: 5.0,
           unit: '秒',
           step: 0.5,
@@ -600,43 +620,18 @@ const elements = ref([
           recommended: 5.0
         },
         {
-          key: 'bybit_timeout',
-          label: 'Bybit超时',
-          value: 0.1,
-          unit: '秒',
-          step: 0.01,
-          min: 0.01,
-          max: 10,
-          recommended: 0.1
-        },
-        {
           key: 'order_check_interval',
-          label: '状态检查间隔',
+          label: '成交状态检查间隔',
           value: 0.2,
           unit: '秒',
           step: 0.05,
           min: 0.05,
           max: 5,
           recommended: 0.2
-        }
-      ]
-    }
-  },
-  {
-    id: '3',
-    type: 'custom',
-    position: { x: 500, y: 280 },
-    data: {
-      id: '3',
-      type: 'monitor',
-      icon: '👁️',
-      label: '点差监控',
-      description: '实时监控点差变化',
-      impact: '检查频率越高越及时，但API调用越多',
-      params: [
+        },
         {
           key: 'spread_check_interval',
-          label: '检查间隔',
+          label: '点差监控间隔(挂单中)',
           value: 2.0,
           unit: '秒',
           step: 0.1,
@@ -647,21 +642,33 @@ const elements = ref([
       ]
     }
   },
+
+  // 节点3: Bybit MT5市价单执行
   {
-    id: '4',
+    id: '3',
     type: 'custom',
-    position: { x: 100, y: 550 },
+    position: { x: 100, y: 530 },
     data: {
-      id: '4',
-      type: 'wait',
-      icon: '⏱️',
-      label: '执行后等待',
-      description: '防止API频繁调用',
-      impact: '等待时间影响下一轮执行的间隔',
+      id: '3',
+      type: 'bybit',
+      icon: '⚡',
+      label: 'Bybit MT5市价单',
+      description: 'Binance成交后立即下Bybit市价单，等待MT5成交数据同步',
+      impact: 'MT5同步等待时间决定成交量读取准确性',
       params: [
         {
-          key: 'api_spam_prevention_delay',
-          label: '等待时间',
+          key: 'bybit_timeout',
+          label: 'Bybit下单等待',
+          value: 0.1,
+          unit: '秒',
+          step: 0.01,
+          min: 0.01,
+          max: 10,
+          recommended: 0.1
+        },
+        {
+          key: 'mt5_deal_sync_wait',
+          label: 'MT5成交同步等待',
           value: 3.0,
           unit: '秒',
           step: 0.5,
@@ -672,66 +679,33 @@ const elements = ref([
       ]
     }
   },
+
+  // 节点4: Bybit成交量验证与重试
   {
-    id: '5',
+    id: '4',
     type: 'custom',
-    position: { x: 500, y: 550 },
+    position: { x: 500, y: 530 },
     data: {
-      id: '5',
-      type: 'check',
-      icon: '🔍',
-      label: '单腿检查',
-      description: '检测单腿成交情况',
-      impact: '延迟时间决定何时检查单腿',
-      params: [
-        {
-          key: 'delayed_single_leg_check_delay',
-          label: '第一次延迟',
-          value: 10.0,
-          unit: '秒',
-          step: 1,
-          min: 1,
-          max: 60,
-          recommended: 10.0
-        },
-        {
-          key: 'delayed_single_leg_second_check_delay',
-          label: '第二次延迟',
-          value: 1.0,
-          unit: '秒',
-          step: 0.1,
-          min: 0.1,
-          max: 10,
-          recommended: 1.0
-        }
-      ]
-    }
-  },
-  {
-    id: '6',
-    type: 'custom',
-    position: { x: 100, y: 780 },
-    data: {
-      id: '6',
+      id: '4',
       type: 'retry',
       icon: '🔄',
-      label: '重试配置',
-      description: 'API调用失败重试',
-      impact: '重试次数越多越可靠，但失败时等待越久',
+      label: 'Bybit成交验证/重试',
+      description: '读取MT5 deals验证实际成交量，不足95%则重试补单',
+      impact: '重试次数越多越能保证双边成交，但耗时更长',
       params: [
         {
           key: 'api_retry_times',
-          label: '重试次数',
-          value: 3,
+          label: 'Bybit补单重试次数',
+          value: 1,
           unit: '次',
           step: 1,
-          min: 1,
-          max: 10,
-          recommended: 3
+          min: 0,
+          max: 5,
+          recommended: 1
         },
         {
           key: 'api_retry_delay',
-          label: '重试延迟',
+          label: '重试间隔',
           value: 0.5,
           unit: '秒',
           step: 0.1,
@@ -741,7 +715,7 @@ const elements = ref([
         },
         {
           key: 'max_binance_limit_retries',
-          label: 'Binance限价单重试',
+          label: 'Binance限价单最大轮询次数',
           value: 25,
           unit: '次',
           step: 1,
@@ -752,6 +726,72 @@ const elements = ref([
       ]
     }
   },
+
+  // 节点5: 单腿检测
+  {
+    id: '5',
+    type: 'custom',
+    position: { x: 500, y: 280 },
+    data: {
+      id: '5',
+      type: 'check',
+      icon: '🔍',
+      label: '单腿检测(异步)',
+      description: '非阻塞异步任务：等待后对比仓位快照，Bybit/Binance < 60%则报警',
+      impact: '延迟时间越长检测越准确，但报警越滞后',
+      params: [
+        {
+          key: 'delayed_single_leg_check_delay',
+          label: '第一次检测延迟',
+          value: 10.0,
+          unit: '秒',
+          step: 1,
+          min: 1,
+          max: 60,
+          recommended: 10.0
+        },
+        {
+          key: 'delayed_single_leg_second_check_delay',
+          label: '第二次检测延迟',
+          value: 1.0,
+          unit: '秒',
+          step: 0.1,
+          min: 0.1,
+          max: 10,
+          recommended: 1.0
+        }
+      ]
+    }
+  },
+
+  // 节点6: 手数累计与完成判断
+  {
+    id: '6',
+    type: 'custom',
+    position: { x: 100, y: 780 },
+    data: {
+      id: '6',
+      type: 'complete',
+      icon: '✅',
+      label: '手数累计 & 完成判断',
+      description: 'record_opening累加Binance成交量(主腿)，current_position >= total_qty则结束循环',
+      impact: '每轮成交量以Binance主腿成交量计入，Bybit单腿由异步检测处理',
+      params: [
+        {
+          key: 'api_spam_prevention_delay',
+          label: '执行后防频繁延迟',
+          value: 3.0,
+          unit: '秒',
+          step: 0.5,
+          min: 0.5,
+          max: 30,
+          recommended: 3.0
+        }
+      ]
+    }
+  },
+
+  // 节点7: 撤单后等待
   {
     id: '7',
     type: 'custom',
@@ -760,13 +800,13 @@ const elements = ref([
       id: '7',
       type: 'cancel',
       icon: '❌',
-      label: '取消后等待',
-      description: '订单取消后的等待时间',
-      impact: '等待时间影响重新下单的速度',
+      label: '撤单后等待',
+      description: 'Binance超时撤单后等待，区分未成交和部分成交两种情况',
+      impact: '等待时间影响重新挂单的速度',
       params: [
         {
           key: 'open_wait_after_cancel_no_trade',
-          label: '开仓未成交',
+          label: '开仓撤单-未成交等待',
           value: 3.0,
           unit: '秒',
           step: 0.5,
@@ -776,7 +816,7 @@ const elements = ref([
         },
         {
           key: 'open_wait_after_cancel_part',
-          label: '开仓部分成交',
+          label: '开仓撤单-部分成交等待',
           value: 2.0,
           unit: '秒',
           step: 0.5,
@@ -786,7 +826,7 @@ const elements = ref([
         },
         {
           key: 'close_wait_after_cancel_no_trade',
-          label: '平仓未成交',
+          label: '平仓撤单-未成交等待',
           value: 3.0,
           unit: '秒',
           step: 0.5,
@@ -796,7 +836,7 @@ const elements = ref([
         },
         {
           key: 'close_wait_after_cancel_part',
-          label: '平仓部分成交',
+          label: '平仓撤单-部分成交等待',
           value: 2.0,
           unit: '秒',
           step: 0.5,
@@ -807,6 +847,8 @@ const elements = ref([
       ]
     }
   },
+
+  // 节点8: 前端交互
   {
     id: '8',
     type: 'custom',
@@ -816,7 +858,7 @@ const elements = ref([
       type: 'frontend',
       icon: '🖥️',
       label: '前端交互',
-      description: '前端轮询和防抖配置',
+      description: '前端轮询状态和防抖配置',
       impact: '轮询频率影响界面更新速度',
       params: [
         {
@@ -842,14 +884,29 @@ const elements = ref([
       ]
     }
   },
-  // 边定义（连接线）
-  { id: 'e1-2', source: '1', target: '2', type: 'smoothstep', animated: true, label: '触发成功' },
-  { id: 'e2-3', source: '2', target: '3', type: 'smoothstep', label: '执行中' },
-  { id: 'e2-4', source: '2', target: '4', type: 'smoothstep', label: '执行完成' },
-  { id: 'e2-5', source: '2', target: '5', type: 'smoothstep', label: '检查单腿' },
-  { id: 'e4-1', source: '4', target: '1', type: 'smoothstep', animated: true, label: '下一轮' },
-  { id: 'e2-6', source: '2', target: '6', type: 'smoothstep', style: { stroke: '#ff6b6b' }, label: '失败重试' },
-  { id: 'e2-7', source: '2', target: '7', type: 'smoothstep', style: { stroke: '#ffa500' }, label: '取消订单' }
+
+  // ── 边定义（连接线）──────────────────────────────────────
+
+  // 主流程
+  { id: 'e0-1', source: '0', target: '1', type: 'smoothstep', animated: true, label: '开始每轮' },
+  { id: 'e1-2', source: '1', target: '2', type: 'smoothstep', animated: true, label: '触发成功→挂Binance限价单' },
+  { id: 'e2-3', source: '2', target: '3', type: 'smoothstep', animated: true, label: 'Binance成交→下Bybit市价单' },
+  { id: 'e3-4', source: '3', target: '4', type: 'smoothstep', animated: true, label: '验证MT5成交量' },
+  { id: 'e4-6', source: '4', target: '6', type: 'smoothstep', animated: true, label: '成交≥95%→累计手数' },
+  { id: 'e6-0', source: '6', target: '0', type: 'smoothstep', animated: true, style: { stroke: '#4ade80' }, label: '未达总手数→下一轮' },
+
+  // 单腿检测（异步，不阻塞主流程）
+  { id: 'e3-5', source: '3', target: '5', type: 'smoothstep', style: { stroke: '#a78bfa', strokeDasharray: '5,5' }, label: '异步检测单腿' },
+
+  // 撤单分支
+  { id: 'e2-7', source: '2', target: '7', type: 'smoothstep', style: { stroke: '#f97316' }, label: 'Binance超时撤单' },
+  { id: 'e7-1', source: '7', target: '1', type: 'smoothstep', style: { stroke: '#f97316' }, label: '等待后重新触发' },
+
+  // Bybit重试分支
+  { id: 'e4-3', source: '4', target: '3', type: 'smoothstep', style: { stroke: '#fb923c', strokeDasharray: '5,5' }, label: '成交不足→补单重试' },
+
+  // Binance未成交分支
+  { id: 'e2-1', source: '2', target: '1', type: 'smoothstep', style: { stroke: '#94a3b8', strokeDasharray: '5,5' }, label: 'Binance未成交→重置触发' }
 ])
 
 onMounted(async () => {
@@ -1233,12 +1290,14 @@ function restoreHistory(history) {
     return
   }
 
+  const historyConfig = history.config_data || history.config || {}
+
   // 应用历史配置
   elements.value.forEach(element => {
     if (element.data && element.data.params) {
       element.data.params.forEach(param => {
-        if (history.config[param.key] !== undefined) {
-          param.value = history.config[param.key]
+        if (historyConfig[param.key] !== undefined) {
+          param.value = historyConfig[param.key]
           configData.value[param.key] = param.value
           validateParam(param)
         }
@@ -1256,8 +1315,9 @@ function restoreHistory(history) {
 
 // 对比历史配置
 function compareWithHistory(history) {
+  const historyConfig = history.config_data || history.config || {}
   compareSource.value = 'history_' + history.id
-  generateCompareData(history.config)
+  generateCompareData(historyConfig)
   showHistoryModal.value = false
   showCompareModal.value = true
 }
@@ -1516,7 +1576,7 @@ async function saveConfig() {
 async function resetConfig() {
   if (!confirm('确定要重置为默认值吗？')) return
 
-  // 应用平衡型模板
+  // 应用平衡型模板并同步configData
   const template = templates.balanced
   elements.value.forEach(element => {
     if (element.data && element.data.params) {
@@ -1525,10 +1585,14 @@ async function resetConfig() {
           param.value = template.config[param.key]
           param.warning = null
           param.error = null
+          configData.value[param.key] = param.value
         }
       })
     }
   })
+  currentTemplate.value = 'balanced'
+  successMessage.value = '已重置为平衡型默认值'
+  setTimeout(() => { successMessage.value = null }, 2000)
 }
 </script>
 
@@ -1661,6 +1725,20 @@ async function resetConfig() {
 
 .custom-node.check {
   border-color: #00BCD4;
+}
+
+.custom-node.loop {
+  border-color: #4ade80;
+  border-width: 2px;
+  border-style: dashed;
+}
+
+.custom-node.bybit {
+  border-color: #f59e0b;
+}
+
+.custom-node.complete {
+  border-color: #22c55e;
 }
 
 .custom-node.retry {

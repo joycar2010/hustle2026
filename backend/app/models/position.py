@@ -14,7 +14,7 @@ class Position(Base):
     position_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.account_id"), nullable=False, index=True)
-    symbol = Column(String(20), nullable=False)  # XAUUSDT, XAUUSD.s
+    symbol = Column(String(20), nullable=False)  # XAUUSDT, XAUUSD+
     platform = Column(String(20), nullable=False)  # binance, bybit
     side = Column(String(10), nullable=False)  # long, short
     entry_price = Column(Float, nullable=False)

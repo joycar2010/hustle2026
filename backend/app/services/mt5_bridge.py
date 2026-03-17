@@ -150,7 +150,7 @@ class MT5Bridge:
                     return []
 
             # 获取持仓
-            positions = mt5_client.get_positions(symbol="XAUUSD.s")
+            positions = mt5_client.get_positions(symbol="XAUUSD+")
 
             if not positions:
                 return []

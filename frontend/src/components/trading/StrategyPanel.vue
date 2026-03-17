@@ -609,8 +609,8 @@ const config = ref({
   closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING, false),
   openingSyncQty: 3,
   closingSyncQty: 3,
-  openingTriggerCheckInterval: 500, // 开仓触发器检测频率（毫秒）
-  closingTriggerCheckInterval: 500, // 平仓触发器检测频率（毫秒）
+  openingTriggerCheckInterval: 200, // 开仓触发器检测频率（毫秒）
+  closingTriggerCheckInterval: 200, // 平仓触发器检测频率（毫秒）
   ladders: [
     { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3 },
     { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3 },
@@ -1062,8 +1062,8 @@ async function saveConfig() {
       closing_sync_count: Math.floor(config.value.closingSyncQty),
       opening_m_coin: Number(config.value.openingMCoin),
       closing_m_coin: Number(config.value.closingMCoin),
-      opening_trigger_check_interval: (config.value.openingTriggerCheckInterval || 500) / 1000, // Convert ms to seconds
-      closing_trigger_check_interval: (config.value.closingTriggerCheckInterval || 500) / 1000, // Convert ms to seconds
+      opening_trigger_check_interval: (config.value.openingTriggerCheckInterval || 200) / 1000, // Convert ms to seconds
+      closing_trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000, // Convert ms to seconds
       ladders: config.value.ladders.map(l => ({
         enabled: l.enabled,
         openPrice: Number(Number(l.openPrice).toFixed(2)),
@@ -1965,7 +1965,7 @@ async function startContinuousExecution(action) {
       opening_m_coin: config.value.openingMCoin || 5,
       closing_m_coin: config.value.closingMCoin || 5,
       ladders: ladders,
-      trigger_check_interval: (action === 'opening' ? (config.value.openingTriggerCheckInterval || 500) : (config.value.closingTriggerCheckInterval || 500)) / 1000 // Convert ms to seconds, use opening or closing interval based on action
+      trigger_check_interval: (action === 'opening' ? (config.value.openingTriggerCheckInterval || 200) : (config.value.closingTriggerCheckInterval || 200)) / 1000 // Convert ms to seconds, use opening or closing interval based on action
     }
 
     // Determine endpoint based on action and strategy type

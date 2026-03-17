@@ -102,7 +102,7 @@ class TestOrderExecutorV2:
 
             filled_qty = await executor._execute_bybit_market_buy(
                 mock_bybit_account,
-                "XAUUSD.s",
+                "XAUUSD+",
                 0.05
             )
 
@@ -129,7 +129,7 @@ class TestOrderExecutorV2:
 
             filled_qty = await executor._execute_bybit_market_buy(
                 mock_bybit_account,
-                "XAUUSD.s",
+                "XAUUSD+",
                 0.05
             )
 

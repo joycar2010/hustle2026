@@ -254,7 +254,7 @@ class ContinuousStrategyExecutor:
                             f.write(f"[DEBUG] {error_msg}\n")
                         raise Exception(error_msg)
 
-                    bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+                    bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD+")
                     bybit_qty = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions) * 100
 
                     actual_position = min(binance_qty, bybit_qty) if (binance_qty > 0 and bybit_qty > 0) else 0
@@ -485,21 +485,44 @@ class ContinuousStrategyExecutor:
 
             # Step 9: Handle three scenarios
             binance_filled = exec_result.get('binance_filled_qty', 0)
+            spread_cancelled = exec_result.get('spread_cancelled', False)
+            is_partial = binance_filled > 0 and binance_filled < order_qty * 0.95
 
-            # Scenario 1: Binance not filled
+            # Scenario 1: Binance not filled or spread cancelled
             if binance_filled == 0:
                 logger.info("Scenario 1: Binance not filled, resetting triggers")
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
+                # 区分撤单原因：点差撤单 vs 超时未成交
+                is_opening = strategy_type in ('reverse_opening', 'forward_opening')
+                if spread_cancelled:
+                    wait_time = (self.order_executor.open_wait_after_cancel_no_trade
+                                 if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
+                else:
+                    wait_time = (self.order_executor.open_wait_after_cancel_no_trade
+                                 if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
+                logger.info(f"Waiting {wait_time}s after cancel ({'spread' if spread_cancelled else 'timeout'}, {'open' if is_opening else 'close'})")
+                await asyncio.sleep(wait_time)
                 continue
 
+            # Scenario 1b: Partial fill after cancel
+            if is_partial:
+                is_opening = strategy_type in ('reverse_opening', 'forward_opening')
+                wait_time = (self.order_executor.open_wait_after_cancel_part
+                             if is_opening else self.order_executor.close_wait_after_cancel_part)
+                logger.info(f"Partial fill {binance_filled}/{order_qty}, waiting {wait_time}s before continuing")
+
             # Step 10: Record position
-            # binance_filled_qty is in XAU, bybit_filled_qty is in Lot (1 Lot = 100 XAU)
-            # Convert bybit Lot → XAU before comparing
+            # Use Binance filled qty as the position basis (Binance is primary leg).
+            # Bybit MT5 fill may lag or return 0 due to sync delay — using min() would
+            # cause position to never accumulate and the loop to never terminate.
             binance_filled_xau = exec_result.get('binance_filled_qty', 0)
             bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
             bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_lot)
-            filled_qty = min(binance_filled_xau, bybit_filled_xau)
+            filled_qty = binance_filled_xau  # primary leg determines position progress
+
+            with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[DEBUG] Step 10 - binance_filled={binance_filled_xau} XAU, bybit_filled={bybit_filled_xau} XAU (from {bybit_filled_lot} Lot), recording filled_qty={filled_qty}\n")
 
             # For both opening and closing, use record_opening (additive) to track
             # how many lots have been executed toward the ladder's total_qty target.
@@ -788,7 +811,7 @@ class ContinuousStrategyExecutor:
             binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
             binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
-            bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+            bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD+")
             bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
             bybit_qty_xau = bybit_qty_lot * 100  # 1 Lot = 100 XAU
 
@@ -819,8 +842,8 @@ class ContinuousStrategyExecutor:
         5. Alert is non-blocking: never interrupts the main execution loop
         """
         try:
-            logger.info(f"[SINGLE_LEG_CHECK] Waiting 3s after Binance fill for {strategy_type}")
-            await asyncio.sleep(3)
+            logger.info(f"[SINGLE_LEG_CHECK] Waiting {self.delayed_single_leg_check_delay}s after Binance fill for {strategy_type}")
+            await asyncio.sleep(self.delayed_single_leg_check_delay)
 
             # Ensure clients are initialized
             try:
@@ -846,7 +869,7 @@ class ContinuousStrategyExecutor:
                 binance_positions = await binance_account.binance_client.get_position_risk(symbol="XAUUSDT")
                 post_binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
-                bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD.s")
+                bybit_positions = bybit_account.mt5_client.get_positions(symbol="XAUUSD+")
                 bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
                 post_bybit_qty_xau = bybit_qty_lot * 100  # 1 Lot = 100 XAU
 

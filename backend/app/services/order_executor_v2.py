@@ -21,9 +21,18 @@ class OrderExecutorV2:
     """
 
     def __init__(self):
-        self.binance_timeout = 5.0  # 5 seconds (increased to reduce order cancellations and avoid rate limit)
-        self.bybit_timeout = 0.1    # 100ms
-        self.max_retries = 1        # Only 1 retry (循环一次)
+        self.binance_timeout = 5.0
+        self.bybit_timeout = 0.1
+        self.max_retries = 1
+        self.order_check_interval = 0.2
+        self.spread_check_interval = 2.0
+        self.mt5_deal_sync_wait = 3.0
+        self.api_retry_delay = 0.5
+        self.max_binance_limit_retries = 25
+        self.open_wait_after_cancel_no_trade = 3.0
+        self.open_wait_after_cancel_part = 2.0
+        self.close_wait_after_cancel_no_trade = 3.0
+        self.close_wait_after_cancel_part = 2.0
         self.base_executor = base_executor
 
     async def execute_reverse_opening(
@@ -102,7 +111,7 @@ class OrderExecutorV2:
 
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
-            "XAUUSD.s",
+            "XAUUSD+",
             bybit_quantity,
             close_position=False  # Open new LONG position
         )
@@ -183,7 +192,7 @@ class OrderExecutorV2:
         mt5_client = market_data_service.mt5_client
 
         # Check if LONG position exists
-        bybit_positions = mt5_client.get_positions("XAUUSD.s")
+        bybit_positions = mt5_client.get_positions("XAUUSD+")
         long_positions = [p for p in bybit_positions if p['type'] == 0]  # type=0 is LONG
 
         if not long_positions:
@@ -263,7 +272,7 @@ class OrderExecutorV2:
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
-            "XAUUSD.s",
+            "XAUUSD+",
             bybit_quantity,
             close_position=True  # Close existing LONG position
         )
@@ -379,7 +388,7 @@ class OrderExecutorV2:
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
-            "XAUUSD.s",
+            "XAUUSD+",
             bybit_quantity,
             close_position=False  # Open new SHORT position
         )
@@ -449,7 +458,7 @@ class OrderExecutorV2:
         mt5_client = market_data_service.mt5_client
 
         # Check if SHORT position exists
-        bybit_positions = mt5_client.get_positions("XAUUSD.s")
+        bybit_positions = mt5_client.get_positions("XAUUSD+")
         short_positions = [p for p in bybit_positions if p['type'] == 1]  # type=1 is SHORT
 
         logger.info(f"[FORWARD_CLOSING] Bybit positions check: total={len(bybit_positions)}, short={len(short_positions)}")
@@ -543,7 +552,7 @@ class OrderExecutorV2:
 
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
-            "XAUUSD.s",
+            "XAUUSD+",
             bybit_quantity,
             close_position=True  # Close existing SHORT position
         )
@@ -615,7 +624,7 @@ class OrderExecutorV2:
             dict with 'filled_qty' and 'spread_cancelled' flag
         """
         start_time = time.time()
-        check_interval = 0.2  # 200ms check interval (increased to reduce API calls)
+        check_interval = self.order_check_interval
         last_spread_check = 0
 
         while time.time() - start_time < timeout:
@@ -633,7 +642,7 @@ class OrderExecutorV2:
             # Real-time spread checking (every 2 seconds to avoid excessive API calls)
             current_time = time.time()
             if spread_threshold is not None and compare_op is not None and strategy_type is not None:
-                if current_time - last_spread_check >= 2.0:  # Check spread every 2 seconds (increased from 500ms)
+                if current_time - last_spread_check >= self.spread_check_interval:
                     last_spread_check = current_time
 
                     try:
@@ -742,9 +751,8 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # FIX: Additional wait for MT5 to process deals (increased from 0.3s to 3s)
-            # Reason: MT5 Bridge may have delay in syncing deal data
-            await asyncio.sleep(3.0)
+            # Wait for MT5 to process deals (configurable via mt5_deal_sync_wait)
+            await asyncio.sleep(self.mt5_deal_sync_wait)
 
             # Check actual filled volume from MT5 deals
             volume_check = await self._check_mt5_filled_volume(
@@ -832,9 +840,8 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # FIX: Additional wait for MT5 to process deals (increased from 0.3s to 3s)
-            # Reason: MT5 Bridge may have delay in syncing deal data
-            await asyncio.sleep(3.0)
+            # Wait for MT5 to process deals (configurable via mt5_deal_sync_wait)
+            await asyncio.sleep(self.mt5_deal_sync_wait)
 
             # Check actual filled volume from MT5 deals
             volume_check = await self._check_mt5_filled_volume(
