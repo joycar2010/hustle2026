@@ -22,7 +22,7 @@
                 {{ getPlatformName(account.platform_id, account.is_mt5_account) }}
               </span>
               <span v-if="account.is_default" class="px-2 py-1 bg-yellow-900 text-yellow-300 rounded text-xs">
-                默认
+                {{ account.platform_id === 1 ? 'Binance默认' : 'Bybit MT5默认' }}
               </span>
               <span v-if="!account.is_active" class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">
                 未启用
@@ -214,7 +214,7 @@
                             after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-600">
                 </div>
               </label>
-              <span class="text-sm text-gray-400">设为默认账户</span>
+              <span class="text-sm text-gray-400">设为{{ accountForm.platform_id === 1 ? 'Binance' : 'Bybit MT5' }}默认账户</span>
             </div>
 
             <!-- Form Actions -->

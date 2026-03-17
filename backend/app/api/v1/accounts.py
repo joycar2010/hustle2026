@@ -40,10 +40,15 @@ async def create_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new account"""
-    # If this is set as default, unset other default accounts
+    # If this is set as default, unset other default accounts of the same platform type
     if account_data.is_default:
         result = await db.execute(
-            select(Account).where(Account.user_id == UUID(user_id), Account.is_default == True)
+            select(Account).where(
+                Account.user_id == UUID(user_id),
+                Account.is_default == True,
+                Account.platform_id == account_data.platform_id,
+                Account.is_mt5_account == account_data.is_mt5_account,
+            )
         )
         existing_defaults = result.scalars().all()
 
@@ -161,12 +166,14 @@ async def update_account(
 
     if account_update.is_default is not None:
         if account_update.is_default:
-            # Unset other default accounts
+            # Unset other default accounts of the same platform type
             result = await db.execute(
                 select(Account).where(
                     Account.user_id == UUID(user_id),
                     Account.is_default == True,
                     Account.account_id != account_id,
+                    Account.platform_id == account.platform_id,
+                    Account.is_mt5_account == account.is_mt5_account,
                 )
             )
             existing_defaults = result.scalars().all()

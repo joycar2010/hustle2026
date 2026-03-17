@@ -350,7 +350,7 @@ function getProxyStatusTextColor(account) {
 
 function getProxyStatusText(account) {
   const proxy = getProxyStatus(account)
-  if (!proxy) return '直连'
+  if (!proxy) return '直连 (0/100, -)'
 
   const health = proxy.health_score || 0
   const latency = proxy.avg_latency_ms ? `${Math.round(proxy.avg_latency_ms)}ms` : '-'
