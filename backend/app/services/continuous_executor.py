@@ -109,6 +109,7 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.user_id = user_id
+        self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
             # Execute each ladder sequentially
@@ -323,19 +324,30 @@ class ContinuousStrategyExecutor:
 
                 continue
 
-            # Step 4: Log current spread (for monitoring, but don't block execution)
+            # Step 4: Re-check spread after trigger count is satisfied
+            # If spread no longer meets threshold, reset triggers and wait again
             current_spread = await self._get_current_spread(strategy_type)
-            logger.info(f"Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}")
+            logger.info(f"Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}")
+
+            spread_ok = (
+                (compare_op == CompareOperator.GREATER_EQUAL and current_spread >= spread_threshold) or
+                (compare_op == CompareOperator.LESS_EQUAL and current_spread <= spread_threshold)
+            )
 
             with open("ladder_debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[DEBUG] Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}\n")
-                f.write(f"[DEBUG] Step 4 - About to proceed to Step 5\n")
+                f.write(f"[DEBUG] Step 4 - Current spread: {current_spread}, threshold: {spread_threshold}, compare_op: {compare_op}, spread_ok: {spread_ok}\n")
 
-            # Note: We don't reset triggers here even if spread doesn't meet threshold
-            # Once trigger count is reached, we should execute the order to meet the total quantity target
+            if not spread_ok:
+                # Spread no longer satisfies condition — reset trigger count and wait
+                self.trigger_mgr.reset()
+                await self._push_trigger_reset(ladder_idx, strategy_type)
+                with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Step 4 - Spread not satisfied, resetting triggers and waiting\n")
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
 
             with open("ladder_debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[DEBUG] Step 4.5 - Reached after comment, before Step 5\n")
+                f.write(f"[DEBUG] Step 4.5 - Spread satisfied, proceeding to Step 5\n")
 
             # Step 5: Calculate order quantity
             try:
@@ -1059,6 +1071,7 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.user_id = user_id
+        self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
             for ladder_idx, ladder in enumerate(ladders):
@@ -1120,6 +1133,7 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.user_id = user_id
+        self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
             for ladder_idx, ladder in enumerate(ladders):
@@ -1182,6 +1196,7 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.user_id = user_id
+        self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
             for ladder_idx, ladder in enumerate(ladders):

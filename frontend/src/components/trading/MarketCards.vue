@@ -5,13 +5,15 @@
       <button
         @click="showSystemStatusModal = true"
         :class="[
-          'w-full marquee-container flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
+          'w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
           systemHealthy ? 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30' : 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
         ]"
         :title="'点击查看详细系统状态'"
       >
-        <div class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-          {{ systemStatusText }}
+        <div class="marquee-container w-full overflow-hidden">
+          <div class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ systemStatusText }}
+          </div>
         </div>
       </button>
     </div>
@@ -38,7 +40,7 @@
               <span class="text-white font-bold text-sm lg:text-xs md:text-base">B</span>
             </div>
             <div>
-              <div class="font-medium text-sm lg:text-xs md:text-base">Bybit MT5 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">XAUUSD.s</span></div>
+              <div class="font-medium text-sm lg:text-xs md:text-base">Bybit MT5 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">XAUUSD+</span></div>
             </div>
           </div>
         </div>
@@ -1071,12 +1073,16 @@ defineExpose({
 .marquee-container {
   overflow: hidden;
   position: relative;
+  width: 100%;
 }
 
 .marquee-content {
   display: inline-block;
+  white-space: nowrap;
   animation: marquee 20s linear infinite;
-  padding-left: 100%;
+  will-change: transform;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .marquee-content:hover {
@@ -1085,7 +1091,7 @@ defineExpose({
 
 @keyframes marquee {
   0% {
-    transform: translateX(0);
+    transform: translateX(100vw);
   }
   100% {
     transform: translateX(-100%);

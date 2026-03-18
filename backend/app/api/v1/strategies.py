@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional, Union
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -173,6 +174,7 @@ async def upsert_strategy_config(
         config.opening_trigger_check_interval = config_data.opening_trigger_check_interval
         config.closing_trigger_check_interval = config_data.closing_trigger_check_interval
         config.ladders = ladders_data
+        flag_modified(config, 'ladders')
         config.is_enabled = config_data.is_enabled
     else:
         # Handle backward compatibility for new records
@@ -220,9 +222,9 @@ async def get_strategy_config_by_type(
         select(StrategyConfig).where(
             StrategyConfig.user_id == UUID(user_id),
             StrategyConfig.strategy_type == strategy_type,
-        )
+        ).order_by(StrategyConfig.create_time.desc())
     )
-    config = result.scalar_one_or_none()
+    config = result.scalars().first()
 
     if not config:
         raise HTTPException(
@@ -296,6 +298,7 @@ async def update_strategy_config(
         config.m_coin = config_update.m_coin
     if config_update.ladders is not None:
         config.ladders = [l.model_dump() for l in config_update.ladders]
+        flag_modified(config, 'ladders')
     if config_update.is_enabled is not None:
         config.is_enabled = config_update.is_enabled
 

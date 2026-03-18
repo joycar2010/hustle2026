@@ -519,18 +519,7 @@ const templates = {
 
 // 根据策略类型生成触发控制参数
 const getTriggerParams = () => {
-  const baseParams = [
-    {
-      key: 'trigger_check_interval',
-      label: '检查间隔',
-      value: 0.5,
-      unit: '秒',
-      step: 0.1,
-      min: 0.1,
-      max: 10,
-      recommended: 0.5
-    }
-  ]
+  const baseParams = []
 
   // 根据策略类型添加相应的触发次数参数
   if (props.strategyType === 'reverse_opening' || props.strategyType === 'forward_opening') {
@@ -1098,10 +1087,7 @@ function validateLogicalConstraints(param) {
 
   // 8. 触发次数验证
   if (key === 'opening_trigger_count' || key === 'closing_trigger_count') {
-    const triggerInterval = findParam('trigger_check_interval')
-    if (triggerInterval && param.value * triggerInterval.value > 5) {
-      param.warning = `总触发时间 (${(param.value * triggerInterval.value).toFixed(1)}秒) 过长，可能错过机会`
-    }
+    // trigger_check_interval removed from workflow config
   }
 
   // 9. MT5成交同步等待验证

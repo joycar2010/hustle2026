@@ -152,7 +152,7 @@
           <!-- Hide Entire Navbar Button -->
           <button
             @click="toggleNavbarVisibility"
-            class="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-dark-50 transition-colors"
+            class="flex items-center justify-center p-2 rounded-lg hover:bg-dark-50 transition-colors"
             title="隐藏顶部导航栏"
           >
             <svg class="w-5 h-5 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">

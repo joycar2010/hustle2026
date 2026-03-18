@@ -294,7 +294,10 @@
               max="1000"
               class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
-            <div class="text-xs text-[#0ecb81] mt-1 text-center">{{ config.openingTriggerCheckInterval }}ms</div>
+            <div class="text-xs text-[#0ecb81] mt-1 text-center">
+              {{ config.openingTriggerCheckInterval }}ms
+              <span v-if="effectiveTriggerInterval.opening !== null" class="text-yellow-400 ml-1">(生效: {{ effectiveTriggerInterval.opening }}ms)</span>
+            </div>
           </div>
 
           <div>
@@ -324,7 +327,10 @@
               max="1000"
               class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
-            <div class="text-xs text-[#f6465d] mt-1 text-center">{{ config.closingTriggerCheckInterval }}ms</div>
+            <div class="text-xs text-[#f6465d] mt-1 text-center">
+              {{ config.closingTriggerCheckInterval }}ms
+              <span v-if="effectiveTriggerInterval.closing !== null" class="text-yellow-400 ml-1">(生效: {{ effectiveTriggerInterval.closing }}ms)</span>
+            </div>
           </div>
         </div>
 
@@ -446,21 +452,6 @@
           保存策略
         </button>
 
-        <!-- Phase 3: Reset Failure Counts Buttons -->
-        <div class="grid grid-cols-2 gap-1.5 mt-1.5">
-          <button
-            @click="resetLadderFailures('opening')"
-            class="px-2 py-1 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
-          >
-            重置开仓失败计数
-          </button>
-          <button
-            @click="resetLadderFailures('closing')"
-            class="px-2 py-1 bg-[#2b3139] text-gray-300 rounded text-xs hover:bg-[#3b4149] transition-colors"
-          >
-            重置平仓失败计数
-          </button>
-        </div>
       </div>
     </div>
   </div>
@@ -631,12 +622,35 @@ const ladderFailureCounts = ref({
   closing: {}
 })
 
+// Effective timing config values from server (overrides local settings)
+const effectiveTriggerInterval = ref({ opening: null, closing: null })
+
+async function loadEffectiveTriggerInterval() {
+  try {
+    const openingType = props.type === 'forward' ? 'forward_opening' : 'reverse_opening'
+    const closingType = props.type === 'forward' ? 'forward_closing' : 'reverse_closing'
+    const [openingRes, closingRes] = await Promise.all([
+      api.get(`/api/v1/timing-configs/effective/${openingType}`),
+      api.get(`/api/v1/timing-configs/effective/${closingType}`)
+    ])
+    const openingInterval = openingRes.data?.trigger_check_interval
+    const closingInterval = closingRes.data?.trigger_check_interval
+    effectiveTriggerInterval.value.opening = openingInterval != null ? Math.round(openingInterval * 1000) : null
+    effectiveTriggerInterval.value.closing = closingInterval != null ? Math.round(closingInterval * 1000) : null
+  } catch (e) {
+    // silently ignore
+  }
+}
+
 onMounted(async () => {
   // Load config from database (including enabled states)
   await loadConfigFromDB()
 
   // Load ladder failure counts after configId is set
   loadLadderFailureCounts()
+
+  // Load effective timing config from server
+  loadEffectiveTriggerInterval()
 
   // Ensure WebSocket connection
   if (!marketStore.connected) {
