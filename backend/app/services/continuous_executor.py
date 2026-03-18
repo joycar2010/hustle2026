@@ -778,6 +778,21 @@ class ContinuousStrategyExecutor:
                 self.user_id
             )
 
+    async def _push_execution_completed(self, strategy_type: str, reason: str = 'completed'):
+        """Push execution completed notification via WebSocket"""
+        if self.user_id:
+            action = 'opening' if 'opening' in strategy_type else 'closing'
+            await status_pusher.push_custom_event(
+                self.strategy_id,
+                'execution_completed',
+                {
+                    'action': action,
+                    'strategy_type': strategy_type,
+                    'reason': reason
+                },
+                self.user_id
+            )
+
     async def _snapshot_positions(
         self,
         binance_account: Account,
@@ -1133,6 +1148,7 @@ class ContinuousStrategyExecutor:
                     }
 
             logger.info("All ladders completed successfully")
+            await self._push_execution_completed('reverse_closing')
             return {'success': True, 'message': 'All ladders completed'}
 
         except Exception as e:
@@ -1194,6 +1210,7 @@ class ContinuousStrategyExecutor:
                     }
 
             logger.info("All ladders completed successfully")
+            await self._push_execution_completed('forward_closing')
             return {'success': True, 'message': 'All ladders completed'}
 
         except Exception as e:

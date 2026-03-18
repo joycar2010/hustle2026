@@ -959,7 +959,9 @@ function handleExecutionCompleted(data) {
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
 
-    // Update status
+    // Update status and stop execution
+    continuousExecutionEnabled.value[action] = false
+    stopStatusPolling(action)
     if (continuousExecutionStatus.value[action]) {
       continuousExecutionStatus.value[action].status = 'completed'
     }
@@ -983,7 +985,9 @@ function handleExecutionError(data) {
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution error: ${action}, ${data.error_message}`)
 
-    // Update status
+    // Update status and stop execution
+    continuousExecutionEnabled.value[action] = false
+    stopStatusPolling(action)
     if (continuousExecutionStatus.value[action]) {
       continuousExecutionStatus.value[action].status = 'failed'
     }
@@ -1295,6 +1299,17 @@ const toggleClosingExecution = debounce(async function() {
     if (!positionCheck.valid) {
       validationErrors.value = [positionCheck.message]
       return
+    }
+
+    // Check spread condition for closing: current spread must be <= closing threshold
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    if (enabledLadders.length > 0) {
+      const firstLadder = enabledLadders[0]
+      const threshold = firstLadder.threshold || 0
+      if (closingSpread.value > threshold) {
+        validationErrors.value = [`当前点差 ${closingSpread.value.toFixed(2)} 大于反平差值 ${threshold.toFixed(2)}，不满足平仓条件`]
+        return
+      }
     }
 
     // Start continuous execution
