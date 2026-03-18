@@ -18,7 +18,7 @@ if "%ERRORLEVEL%"=="0" (
 ) else (
     echo Starting Nginx Service...
     cd /d C:\nginx
-    start "" nginx.exe
+    start "" nginx.exe -c C:\nginx\conf\nginx.conf
     cd /d C:\app\hustle2026
     timeout /t 2 /nobreak >nul
 )
@@ -35,11 +35,21 @@ if "%ERRORLEVEL%"=="0" (
     timeout /t 10 /nobreak >nul
 )
 
-REM Start Backend Service
+REM Start Backend Service - kill stale processes first
 echo [3/4] Checking Backend Service...
-netstat -ano | findstr ":8000" >NUL
+REM Kill any stale uvicorn/python processes holding port 8000
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
+    echo Killing stale process on port 8000 (PID: %%a)...
+    taskkill /PID %%a /F >nul 2>&1
+)
+REM Also kill any orphaned uvicorn processes
+taskkill /FI "WINDOWTITLE eq Hustle2026-Backend" /F >nul 2>&1
+timeout /t 2 /nobreak >nul
+
+REM Now check if port is truly free
+netstat -ano | findstr ":8000" | findstr "LISTENING" >NUL
 if "%ERRORLEVEL%"=="0" (
-    echo Backend service is already running on port 8000, skipping...
+    echo WARNING: Port 8000 still in use, backend may already be running...
 ) else (
     echo Starting Backend Service...
     start "Hustle2026-Backend" /D "C:\app\hustle2026\backend" cmd /k "C:\Python39\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
@@ -48,7 +58,7 @@ if "%ERRORLEVEL%"=="0" (
 
 REM Start Frontend Service
 echo [4/4] Checking Frontend Service...
-netstat -ano | findstr ":5173" >NUL
+netstat -ano | findstr ":5173" | findstr "LISTENING" >NUL
 if "%ERRORLEVEL%"=="0" (
     echo Frontend service is already running on port 5173, skipping...
 ) else (

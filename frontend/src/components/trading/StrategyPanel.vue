@@ -290,7 +290,7 @@
               v-model.number="config.openingTriggerCheckInterval"
               type="number"
               step="100"
-              min="500"
+              min="100"
               max="1000"
               class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />
@@ -323,7 +323,7 @@
               v-model.number="config.closingTriggerCheckInterval"
               type="number"
               step="100"
-              min="500"
+              min="100"
               max="1000"
               class="w-full bg-[#1a1d21] border border-[#2b3139] rounded px-2 py-1 text-xs focus:border-[#f0b90b] focus:outline-none"
             />

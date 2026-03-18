@@ -208,6 +208,36 @@ async def upsert_strategy_config(
 
     await db.commit()
     await db.refresh(config)
+
+    # Update timing_config for both opening and closing
+    from app.services.timing_config_service import TimingConfigService
+    from app.models.timing_config import TimingConfig
+
+    for action in ['opening', 'closing']:
+        strategy_type_name = f"{config_data.strategy_type}_{action}"
+        interval = config_data.opening_trigger_check_interval if action == 'opening' else config_data.closing_trigger_check_interval
+
+        result = await db.execute(
+            select(TimingConfig).where(
+                TimingConfig.config_level == 'strategy_type',
+                TimingConfig.strategy_type == strategy_type_name
+            )
+        )
+        timing_config = result.scalar_one_or_none()
+
+        if timing_config:
+            timing_config.trigger_check_interval = interval
+        else:
+            timing_config = TimingConfig(
+                config_level='strategy_type',
+                strategy_type=strategy_type_name,
+                trigger_check_interval=interval
+            )
+            db.add(timing_config)
+
+        await db.commit()
+        await TimingConfigService._clear_cache_and_notify('strategy_type', strategy_type_name, None)
+
     return config
 
 
@@ -1032,7 +1062,7 @@ async def execute_continuous_opening(
             strategy_type=strategy_type_name
         )
         api_spam_prevention_delay = timing_config.get('api_spam_prevention_delay', 3.0)
-        trigger_check_interval = timing_config.get('trigger_check_interval', request.trigger_check_interval)
+        trigger_check_interval = request.trigger_check_interval  # Use user-configured value from panel
         delayed_single_leg_check_delay = timing_config.get('delayed_single_leg_check_delay', 10.0)
         delayed_single_leg_second_check_delay = timing_config.get('delayed_single_leg_second_check_delay', 1.0)
         binance_timeout = timing_config.get('binance_timeout', 5.0)
@@ -1170,7 +1200,7 @@ async def execute_continuous_closing(
             strategy_type=strategy_type_name
         )
         api_spam_prevention_delay = timing_config.get('api_spam_prevention_delay', 3.0)
-        trigger_check_interval = timing_config.get('trigger_check_interval', request.trigger_check_interval)
+        trigger_check_interval = request.trigger_check_interval  # Use user-configured value from panel
         delayed_single_leg_check_delay = timing_config.get('delayed_single_leg_check_delay', 10.0)
         delayed_single_leg_second_check_delay = timing_config.get('delayed_single_leg_second_check_delay', 1.0)
         binance_timeout = timing_config.get('binance_timeout', 5.0)

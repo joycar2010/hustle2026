@@ -287,17 +287,14 @@ class BinanceFuturesClient:
             if price is None:
                 raise ValueError("Price is required for LIMIT orders")
             params["price"] = price
-            params["timeInForce"] = time_in_force
+            # GTX (Good Till Crossing): POST_ONLY mode, reject if order would be TAKER
+            params["timeInForce"] = "GTX" if post_only else time_in_force
 
         if reduce_only:
             params["reduceOnly"] = "true"
 
         if position_side:
             params["positionSide"] = position_side.upper()
-
-        # POST_ONLY: Force MAKER mode, reject if order would be TAKER
-        if post_only:
-            params["postOnly"] = "true"
 
         return await self._request("POST", "/fapi/v1/order", signed=True, params=params)
 
