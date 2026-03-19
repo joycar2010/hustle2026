@@ -282,16 +282,25 @@ class RiskAlertService:
         Returns:
             是否发送成功
         """
-        if failure_count > 0:
-            return await self._send_alert(
-                user_id=user_id,
-                template_key="mt5_lag_alert",
-                variables={
-                    "failure_count": failure_count,
-                    "last_response_time": last_response_time,
-                },
-            )
-        return False
+        if failure_count <= 0:
+            return False
+
+        from app.utils.trading_time import is_bybit_trading_hours
+        is_open, market_message = is_bybit_trading_hours()
+
+        if is_open:
+            status_prefix = "[交易时段] MT5卡顿"
+        else:
+            status_prefix = f"[停市] {market_message}"
+
+        return await self._send_alert(
+            user_id=user_id,
+            template_key="mt5_lag_alert",
+            variables={
+                "failure_count": failure_count,
+                "last_response_time": f"{status_prefix} | {last_response_time}",
+            },
+        )
 
     # ========================================================================
     # 净资产监控

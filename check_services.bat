@@ -1,6 +1,6 @@
 @echo off
-chcp 65001 >nul
-title Hustle2026 Services Status Check
+chcp 437 >nul
+title Hustle2026 Services Status
 color 0A
 
 echo.
@@ -9,72 +9,46 @@ echo   Hustle2026 Services Status Check
 echo ========================================
 echo.
 
-REM Check PostgreSQL
-echo [1/5] PostgreSQL Database Service
+echo [1/4] PostgreSQL
 sc query postgresql-x64-16 | findstr "RUNNING" >nul
 if %ERRORLEVEL%==0 (
-    echo     Status: ✓ Running
+    echo     Status: [OK] Running
 ) else (
-    echo     Status: ✗ Not Running
+    echo     Status: [!!] Not Running
 )
 echo.
 
-REM Check Nginx
-echo [2/5] Nginx Web Server
-tasklist /FI "IMAGENAME eq nginx.exe" 2>NUL | find /I /N "nginx.exe">NUL
+echo [2/4] Nginx
+tasklist /FI "IMAGENAME eq nginx.exe" 2>NUL | find /I "nginx.exe" >NUL
 if %ERRORLEVEL%==0 (
-    echo     Status: ✓ Running
-    echo     URL: https://app.hustle2026.xyz
+    echo     Status: [OK] Running  -  https://app.hustle2026.xyz
 ) else (
-    echo     Status: ✗ Not Running
+    echo     Status: [!!] Not Running  -  run start_services.bat
 )
 echo.
 
-REM Check MetaTrader 5
-echo [3/5] MetaTrader 5 Client
-tasklist /FI "IMAGENAME eq terminal64.exe" 2>NUL | find /I /N "terminal64.exe">NUL
+echo [3/4] MetaTrader 5
+tasklist /FI "IMAGENAME eq terminal64.exe" 2>NUL | find /I "terminal64.exe" >NUL
 if %ERRORLEVEL%==0 (
-    echo     Status: ✓ Running
+    echo     Status: [OK] Running
 ) else (
-    echo     Status: ✗ Not Running
+    echo     Status: [!!] Not Running
 )
 echo.
 
-REM Check Backend
-echo [4/5] Backend API Service
+echo [4/4] Backend API (port 8000)
 netstat -ano | findstr ":8000" | findstr "LISTENING" >nul
 if %ERRORLEVEL%==0 (
-    echo     Status: ✓ Running
-    echo     URL: http://172.31.5.62:8000
-    curl -s --max-time 3 http://172.31.5.62:8000/api/v1/market/orderbook >nul 2>&1
-    if %ERRORLEVEL%==0 (
-        echo     Health: ✓ API responding
-    ) else (
-        echo     Health: ✗ API not responding ^(CLOSE_WAIT issue - run fix_backend.bat^)
-    )
+    echo     Status: [OK] Port 8000 listening  -  http://172.31.5.62:8000
 ) else (
-    echo     Status: ✗ Not Running
-)
-echo.
-
-REM Check Frontend
-echo [5/5] Frontend Dev Server
-netstat -ano | findstr ":3000" | findstr "LISTENING" >nul
-if %ERRORLEVEL%==0 (
-    echo     Status: ✓ Running
-    echo     URL: http://172.31.5.62:3000
-) else (
-    echo     Status: ✗ Not Running
+    echo     Status: [!!] Not Running  -  run fix_backend.bat
 )
 echo.
 
 echo ========================================
-echo   Scheduled Tasks Status
+echo   Frontend: served by Nginx (static)
+echo   Log: C:\app\hustle2026\backend\backend_live.log
 echo ========================================
 echo.
-powershell -Command "Get-ScheduledTask | Where-Object {$_.TaskName -like 'Hustle*'} | Select-Object TaskName, State | Format-Table -AutoSize"
-
-echo.
-echo ========================================
 echo Press any key to exit...
 pause >nul
