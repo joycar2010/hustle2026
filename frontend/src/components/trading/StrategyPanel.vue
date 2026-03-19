@@ -32,12 +32,12 @@
       </div>
 
       <!-- 实仓和点差信息 -->
-      <div v-if="marketCardsRef" class="text-base font-bold text-center text-[#3b82f6]">
+      <div class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
-          B多仓: {{ ((marketCardsRef.bybitLongTotal || 0) * 100).toFixed(0) }} A空仓: {{ marketCardsRef.binanceShortTotal?.toFixed(2) || '0.00' }}
+          B多仓: {{ (localBybitLong * 100).toFixed(0) }} A空仓: {{ localBinanceShort.toFixed(2) }}
         </span>
         <span v-else>
-          A多仓: {{ marketCardsRef.binanceLongTotal?.toFixed(2) || '0.00' }} B空仓: {{ ((marketCardsRef.bybitShortTotal || 0) * 100).toFixed(0) }}
+          A多仓: {{ localBinanceLong.toFixed(2) }} B空仓: {{ (localBybitShort * 100).toFixed(0) }}
         </span>
       </div>
     </div>
@@ -415,8 +415,8 @@
                   :id="`openPrice-${type}-${index}`"
                   v-model.number="ladder.openPrice"
                   type="number"
-                  step="0.01"
-                  :placeholder="(0).toFixed(2)"
+                  step="0.1"
+                  :placeholder="(0).toFixed(1)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
@@ -429,8 +429,8 @@
                   :id="`threshold-${type}-${index}`"
                   v-model.number="ladder.threshold"
                   type="number"
-                  step="0.01"
-                  :placeholder="(0).toFixed(2)"
+                  step="0.1"
+                  :placeholder="(0).toFixed(1)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
@@ -576,6 +576,21 @@ function resetLadderFailures(type) {
 
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
+
+// Local position refs — driven directly by marketStore.positionSnapshot (WebSocket position_snapshot)
+// Decoupled from MarketCards computed chain; updates whenever backend pushes a snapshot
+const localBinanceLong = ref(0)
+const localBinanceShort = ref(0)
+const localBybitLong = ref(0)
+const localBybitShort = ref(0)
+
+watch(() => marketStore.positionSnapshot, (snap) => {
+  if (!snap) return
+  localBybitLong.value = snap.bybit_long_lots ?? 0
+  localBybitShort.value = snap.bybit_short_lots ?? 0
+  localBinanceLong.value = snap.binance_long_xau ?? 0
+  localBinanceShort.value = snap.binance_short_xau ?? 0
+}, { immediate: true })
 const currentSpread = ref(0)
 const closingSpread = ref(0)
 const binanceAssets = ref(10000)
@@ -1097,8 +1112,8 @@ async function saveConfig() {
       closing_trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000, // Convert ms to seconds
       ladders: config.value.ladders.map(l => ({
         enabled: l.enabled,
-        openPrice: Number(Number(l.openPrice).toFixed(2)),
-        threshold: Number(Number(l.threshold).toFixed(2)),
+        openPrice: Number(Number(l.openPrice).toFixed(1)),
+        threshold: Number(Number(l.threshold).toFixed(1)),
         qtyLimit: Number(l.qtyLimit)
       })),
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
@@ -1334,7 +1349,7 @@ const toggleClosingExecution = debounce(async function() {
       const firstLadder = enabledLadders[0]
       const threshold = firstLadder.threshold || 0
       if (closingSpread.value > threshold) {
-        validationErrors.value = [`当前点差 ${closingSpread.value.toFixed(2)} 大于反平差值 ${threshold.toFixed(2)}，不满足平仓条件`]
+        validationErrors.value = [`当前点差 ${closingSpread.value.toFixed(1)} 大于反平差值 ${threshold.toFixed(1)}，不满足平仓条件`]
         return
       }
     }
@@ -1855,11 +1870,13 @@ async function checkPositionForClosing() {
     }
 
     // Get current position based on strategy type
+    // forward: Binance long (A多仓) is the reference position
+    // reverse: Bybit long lots × 100 (B多仓 in oz) is the reference position
     let currentPosition = 0
     if (props.type === 'forward') {
-      currentPosition = props.marketCardsRef?.forwardActualPosition || 0
+      currentPosition = localBinanceLong.value
     } else {
-      currentPosition = props.marketCardsRef?.reverseActualPosition || 0
+      currentPosition = localBybitLong.value * 100  // lots → oz
     }
 
     // Check if position is sufficient

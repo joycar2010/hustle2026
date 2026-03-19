@@ -8,6 +8,13 @@ export const useMarketStore = defineStore('market', () => {
   const accountBalanceData = ref(null) // 新增：账户余额数据
   const connected = ref(false)
   const lastMessage = ref(null)
+  // Real-time position snapshot — updated on every position_snapshot WebSocket message
+  const positionSnapshot = ref({
+    bybit_long_lots: 0,
+    bybit_short_lots: 0,
+    binance_long_xau: 0,
+    binance_short_xau: 0,
+  })
 
   let ws = null
   let reconnectTimer = null
@@ -58,6 +65,41 @@ export const useMarketStore = defineStore('market', () => {
 
         // Store last message for components to watch
         lastMessage.value = msg
+
+        if (msg.type === 'position_snapshot' && msg.data) {
+          // Update positionSnapshot ref directly — StrategyPanel watches this for real-time position display
+          positionSnapshot.value = {
+            bybit_long_lots: msg.data.bybit_long_lots ?? 0,
+            bybit_short_lots: msg.data.bybit_short_lots ?? 0,
+            binance_long_xau: msg.data.binance_long_xau ?? 0,
+            binance_short_xau: msg.data.binance_short_xau ?? 0,
+          }
+        } else if (msg.type === 'account_balance' && msg.data) {
+          // Also sync positionSnapshot from account_balance if positions are present
+          const positions = msg.data.positions || []
+          const accounts = msg.data.accounts || []
+          if (positions.length > 0) {
+            let bybitLong = 0, bybitShort = 0, binanceLong = 0, binanceShort = 0
+            positions.forEach(pos => {
+              const acc = accounts.find(a => a.account_id === pos.account_id)
+              if (!acc) return
+              const size = Math.abs(pos.size || 0)
+              if (acc.platform_id === 2) {
+                if (pos.side === 'Buy') bybitLong += size
+                else if (pos.side === 'Sell') bybitShort += size
+              } else if (acc.platform_id === 1) {
+                if (pos.side === 'Buy') binanceLong += size
+                else if (pos.side === 'Sell') binanceShort += size
+              }
+            })
+            positionSnapshot.value = {
+              bybit_long_lots: bybitLong,
+              bybit_short_lots: bybitShort,
+              binance_long_xau: binanceLong,
+              binance_short_xau: binanceShort,
+            }
+          }
+        }
 
         if (msg.type === 'market_data' && msg.data) {
           const d = msg.data
@@ -145,9 +187,10 @@ export const useMarketStore = defineStore('market', () => {
 
   return {
     marketData,
-    accountBalanceData, // 导出账户余额数据
+    accountBalanceData,
     connected,
     lastMessage,
+    positionSnapshot,
     connect,
     disconnect,
     fetchMarketData,

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
 
 
@@ -9,6 +9,11 @@ class LadderConfig(BaseModel):
     openPrice: float = Field(default=3.0)
     threshold: float = Field(default=2.0)
     qtyLimit: float = Field(default=3.0, gt=0)
+
+    @field_validator('openPrice', 'threshold')
+    @classmethod
+    def round_to_1dp(cls, v: float) -> float:
+        return round(v, 1)
 
 
 class StrategyConfigCreate(BaseModel):
