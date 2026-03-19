@@ -67,6 +67,13 @@ class AccountBalanceStreamer:
             return True
         return False
 
+    def trigger_immediate_refresh(self):
+        """Signal the stream loop to broadcast immediately, skipping the remaining wait interval."""
+        try:
+            self._immediate_refresh.set()
+        except Exception:
+            pass
+
     async def start(self):
         """Start the account balance streaming task"""
         if self.running:

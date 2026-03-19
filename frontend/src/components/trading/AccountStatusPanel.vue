@@ -116,6 +116,14 @@
             </span>
           </div>
           <div v-if="account.platform_id === 1" class="flex justify-between">
+            <span class="text-gray-400">BNB持仓</span>
+            <span class="font-mono text-[#f0b90b]">{{ getBnbBalance(account) }}</span>
+          </div>
+          <div v-if="account.platform_id === 1" class="flex justify-between">
+            <span class="text-gray-400">手续费率(挂/吃)</span>
+            <span class="font-mono text-gray-300">{{ getCommissionRate(account) }}</span>
+          </div>
+          <div v-if="account.platform_id === 1" class="flex justify-between">
             <span class="text-gray-400">资金费(多头)</span>
             <span class="font-mono" :class="getValueColor(account, 'long_funding_rate')">
               {{ getDisplayValue(account, 'long_funding_rate', true) }}
@@ -569,6 +577,21 @@ function getDisplayValue(account, field, showSign = false, isPercent = false, is
   }
 
   return formatNumber(value) + ' USDT'
+}
+
+function getBnbBalance(account) {
+  if (account.error || !account.balance) return '暂无'
+  const v = account.balance.bnb_balance
+  if (v == null) return '暂无'
+  return v.toFixed(4) + ' BNB'
+}
+
+function getCommissionRate(account) {
+  if (account.error || !account.balance) return '暂无'
+  const maker = account.balance.maker_commission_rate
+  const taker = account.balance.taker_commission_rate
+  if (maker == null || taker == null) return '暂无'
+  return (maker * 100).toFixed(4) + '% / ' + (taker * 100).toFixed(4) + '%'
 }
 
 function getValueColor(account, field) {

@@ -62,12 +62,15 @@ class AccountDataService:
 
             # Fetch all account data concurrently
             fetch_tasks = [
-                client.get_account(),           # USDT-M Futures
-                client.get_position_risk(),     # Futures positions
-                client.get_income(income_type="REALIZED_PNL", start_time=start_time, limit=1000),
-                client.get_income(income_type="FUNDING_FEE", start_time=start_time, limit=1000),
-                client.get_income(income_type="COMMISSION", start_time=start_time, limit=1000),  # Commission fees
-                client.get_margin_account(),    # Cross Margin
+                client.get_account(),           # USDT-M Futures  [0]
+                client.get_position_risk(),     # Futures positions [1]
+                client.get_income(income_type="REALIZED_PNL", start_time=start_time, limit=1000),  # [2]
+                client.get_income(income_type="FUNDING_FEE", start_time=start_time, limit=1000),   # [3]
+                client.get_income(income_type="COMMISSION", start_time=start_time, limit=1000),    # [4]
+                client.get_margin_account(),    # Cross Margin     [5]
+                client.get_commission_rate("XAUUSDT"),  # Maker/taker fee rate [6]
+                client.get_spot_price("BNBUSDT"),       # BNB/USDT price for fee conversion [7]
+                client.get_balance(),           # Futures wallet balances (includes BNB) [8]
             ]
 
             # Only fetch prices for assets we actually hold
@@ -83,11 +86,19 @@ class AccountDataService:
             funding_fee_data = results[3]
             commission_fee_data = results[4]
             margin_account_data = results[5]
+            commission_rate_data = results[6]
+            bnb_price_data = results[7]
+            futures_balance_data = results[8]
 
-            # Build price map from individual price queries
+            # BNB/USDT price for commission conversion (when BNB fee discount is enabled)
+            bnb_usdt_price = 1.0
+            if not isinstance(bnb_price_data, Exception):
+                bnb_usdt_price = float(bnb_price_data.get("price", 1.0)) or 1.0
+
+            # Build price map from individual price queries (now offset by 9)
             price_map = {}
             for i, asset in enumerate(assets_to_price[:10]):
-                price_result = results[6 + i]
+                price_result = results[9 + i]
                 if not isinstance(price_result, Exception):
                     price_map[f"{asset}USDT"] = float(price_result.get("price", 0))
 
@@ -264,13 +275,44 @@ class AccountDataService:
             else:
                 logger.warning(f"Failed to fetch funding fee data: {funding_fee_data}")
 
-            # Calculate commission fees
+            # 当日手续费汇总（USDT等值）
+            # COMMISSION income 为负值，asset 字段标明币种
+            # 若开启 BNB 手续费折扣，asset="BNB"，需乘以 BNB/USDT 价格换算
             commission_fee = 0.0
             if not isinstance(commission_fee_data, Exception):
                 for item in commission_fee_data:
-                    commission_fee += abs(float(item.get("income", 0)))
+                    amount = abs(float(item.get("income", 0)))
+                    asset = item.get("asset", "USDT")
+                    if asset == "BNB":
+                        commission_fee += amount * bnb_usdt_price
+                    else:
+                        commission_fee += amount  # USDT or other stablecoins
             else:
                 logger.warning(f"Failed to fetch commission fee data: {commission_fee_data}")
+
+            # Extract BNB holdings from futures wallet balance (/fapi/v2/balance returns all assets)
+            # /fapi/v2/account assets[] only shows assets with margin activity; /fapi/v2/balance is comprehensive
+            bnb_balance = 0.0
+            if not isinstance(futures_balance_data, Exception):
+                for item in futures_balance_data:
+                    if item.get("asset") == "BNB":
+                        bnb_balance = float(item.get("balance", 0))
+                        break
+            elif not isinstance(futures_account_data, Exception):
+                # Fallback: try assets array from account info
+                for asset in futures_account_data.get("assets", []):
+                    if asset.get("asset") == "BNB":
+                        bnb_balance = float(asset.get("walletBalance", 0))
+                        break
+
+            # Extract maker/taker commission rates
+            maker_commission_rate = None
+            taker_commission_rate = None
+            if not isinstance(commission_rate_data, Exception):
+                maker_commission_rate = float(commission_rate_data.get("makerCommissionRate", 0))
+                taker_commission_rate = float(commission_rate_data.get("takerCommissionRate", 0))
+            else:
+                logger.warning(f"Failed to fetch commission rate: {commission_rate_data}")
 
             # Calculate final metrics according to Binance API documentation
             # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalMarginBalance (含未实现盈亏)
@@ -305,6 +347,9 @@ class AccountDataService:
                 long_funding_rate=long_funding_rate,
                 short_funding_rate=short_funding_rate,
                 commission_fee=commission_fee,
+                bnb_balance=bnb_balance,
+                maker_commission_rate=maker_commission_rate,
+                taker_commission_rate=taker_commission_rate,
                 # Position data for liquidation price calculation
                 entry_price=avg_entry_price,  # 开仓均价
                 leverage=leverage,  # 杠杆倍数
@@ -474,15 +519,13 @@ class AccountDataService:
             long_liquidation_price = 0.0
             short_liquidation_price = 0.0
 
-            # Accumulators for fallback liquidation price calculation (account-level, not per-position)
+            # Accumulators for liquidation price calculation (account-level cross-margin)
             long_volume_total = 0.0
             long_price_weighted = 0.0
             long_margin_total = 0.0
-            long_native_liq = 0.0   # native price_liquidation from MT5 (last seen)
             short_volume_total = 0.0
             short_price_weighted = 0.0
             short_margin_total = 0.0
-            short_native_liq = 0.0
 
             # Get account leverage for liquidation price calculation
             account_leverage = int(mt5_info.get("leverage", 1))
@@ -496,43 +539,40 @@ class AccountDataService:
                 total_positions += abs(volume)
                 total_volume_weighted += abs(volume) * price_open
 
-                price_liquidation = float(pos.get("price_liquidation", 0))
-
                 if pos_type == 0:  # Long
                     long_volume_total += volume
                     long_price_weighted += volume * price_open
                     long_margin_total += pos_margin
-                    if price_liquidation > 0:
-                        long_native_liq = price_liquidation
                 else:  # Short
                     short_volume_total += volume
                     short_price_weighted += volume * price_open
                     short_margin_total += pos_margin
-                    if price_liquidation > 0:
-                        short_native_liq = price_liquidation
 
-            # Prefer native MT5 liquidation price; fall back to correct MT5 formula
-            # MT5 formula (Bybit XAUUSD+, contract_unit=100, liq_threshold=50%):
-            #   Long liq  = avg_entry - (equity - total_margin * 0.50) / (100 * total_lots)
-            #   Short liq = avg_entry + (equity - total_margin * 0.50) / (100 * total_lots)
+            # Bybit Tradfi MT5 全仓模式强平价公式（官方规则）：
+            # 触发条件：账户净值 ≤ 全部已用保证金 × 50%（stop-out level = 50%）
+            # 全仓模式下，强平价使用账户级别的 margin_used（mt5_info.margin），而非单方向保证金
+            #
+            #   Long  liq = avg_entry_long  - (equity - margin_used × 0.50) / (100 × long_lots)
+            #   Short liq = avg_entry_short + (equity - margin_used × 0.50) / (100 × short_lots)
+            #
+            # 注意：MT5 原生 price_liquidation 字段按单仓孤立模式计算，全仓模式下不准确，不使用。
             CONTRACT_UNIT = 100   # Bybit XAUUSD+: 1 lot = 100 oz
             LIQ_THRESHOLD = 0.50  # Bybit MT5 stop-out level = 50%
 
-            if long_native_liq > 0:
-                long_liquidation_price = long_native_liq
-            elif long_volume_total > 0:
+            # 安全垫 = 净值 - 全部已用保证金 × 50%（全仓共享）
+            safety_buffer = equity - margin_used * LIQ_THRESHOLD
+
+            if long_volume_total > 0:
                 long_avg_entry = long_price_weighted / long_volume_total
                 long_liquidation_price = round(
-                    long_avg_entry - (equity - long_margin_total * LIQ_THRESHOLD) / (CONTRACT_UNIT * long_volume_total),
+                    long_avg_entry - safety_buffer / (CONTRACT_UNIT * long_volume_total),
                     2
                 )
 
-            if short_native_liq > 0:
-                short_liquidation_price = short_native_liq
-            elif short_volume_total > 0:
+            if short_volume_total > 0:
                 short_avg_entry = short_price_weighted / short_volume_total
                 short_liquidation_price = round(
-                    short_avg_entry + (equity - short_margin_total * LIQ_THRESHOLD) / (CONTRACT_UNIT * short_volume_total),
+                    short_avg_entry + safety_buffer / (CONTRACT_UNIT * short_volume_total),
                     2
                 )
 

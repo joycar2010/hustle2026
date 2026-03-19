@@ -81,6 +81,9 @@ class AccountBalance(BaseModel):
     # Binance-specific fees
     long_funding_rate: Optional[float] = None  # Binance做多资金费
     short_funding_rate: Optional[float] = None  # Binance做空资金费
+    bnb_balance: Optional[float] = None        # Binance BNB余额
+    maker_commission_rate: Optional[float] = None  # Binance maker手续费率
+    taker_commission_rate: Optional[float] = None  # Binance taker手续费率
 
     # Position data for liquidation price calculation
     entry_price: Optional[float] = None  # 开仓均价

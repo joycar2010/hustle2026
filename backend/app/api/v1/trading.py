@@ -710,6 +710,14 @@ async def place_manual_order(
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
 
+        # Trigger immediate position snapshot so frontend updates without waiting 30s
+        try:
+            from app.websocket.manager import manager as ws_manager
+            from app.tasks.broadcast_tasks import account_balance_streamer
+            account_balance_streamer.trigger_immediate_refresh()
+        except Exception:
+            pass
+
         return {
             "success": True,
             "exchange": req.exchange,

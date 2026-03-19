@@ -937,6 +937,11 @@ function handleTriggerReset(data) {
   }
 }
 
+// Request immediate position snapshot from backend (bypasses 30s broadcast cycle)
+function refreshPositions() {
+  marketStore.requestSnapshot()
+}
+
 function handlePositionChange(data) {
   // Only handle messages for this strategy
   if (data.strategy_id !== configId.value) return

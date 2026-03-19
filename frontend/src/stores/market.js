@@ -136,6 +136,13 @@ export const useMarketStore = defineStore('market', () => {
     return Promise.resolve(marketData.value)
   }
 
+  // Request an immediate position snapshot from the backend (bypasses 30s broadcast cycle)
+  function requestSnapshot() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_snapshot' }))
+    }
+  }
+
   return {
     marketData,
     accountBalanceData, // 导出账户余额数据
@@ -144,5 +151,6 @@ export const useMarketStore = defineStore('market', () => {
     connect,
     disconnect,
     fetchMarketData,
+    requestSnapshot,
   }
 })

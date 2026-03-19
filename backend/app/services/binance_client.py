@@ -269,6 +269,10 @@ class BinanceFuturesClient:
         """Get spot price for a specific symbol"""
         return await self._request("GET", "/api/v3/ticker/price", params={"symbol": symbol}, use_spot_api=True)
 
+    async def get_commission_rate(self, symbol: str = "XAUUSDT") -> Dict[str, Any]:
+        """Get user commission rate for a symbol (maker/taker fee tier)"""
+        return await self._request("GET", "/fapi/v1/commissionRate", signed=True, params={"symbol": symbol})
+
     async def place_order(
         self,
         symbol: str,
