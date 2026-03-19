@@ -180,11 +180,13 @@ class AccountDataService:
                 logger.warning(f"Failed to fetch margin account data: {margin_account_data}")
 
             # Calculate total positions from position risk (sum of position quantities)
-            # Also get entry price and leverage
+            # Also get entry price, leverage, and liquidation prices
             total_positions = 0.0
             avg_entry_price = 0.0
             total_volume_weighted = 0.0
             leverage = 0
+            long_liquidation_price = 0.0
+            short_liquidation_price = 0.0
 
             if not isinstance(position_risk_data, Exception):
                 for pos in position_risk_data:
@@ -194,11 +196,36 @@ class AccountDataService:
                         abs_amt = abs(position_amt)
                         total_positions += abs_amt
                         total_volume_weighted += abs_amt * entry_price
-                        # Get leverage from first position
                         if leverage == 0:
                             leverage = int(pos.get("leverage", 0))
 
-                # Calculate weighted average entry price
+                        position_side = pos.get("positionSide", "BOTH")
+                        is_long = position_side == "LONG" or (position_side == "BOTH" and position_amt > 0)
+                        is_short = position_side == "SHORT" or (position_side == "BOTH" and position_amt < 0)
+
+                        # Prefer native liquidationPrice from API (most accurate, already accounts for isolated wallet)
+                        liq_price = float(pos.get("liquidationPrice", 0))
+                        if liq_price > 0:
+                            if is_long:
+                                long_liquidation_price = liq_price
+                            elif is_short:
+                                short_liquidation_price = liq_price
+                        else:
+                            # Fallback: precise isolated-margin formula
+                            # Long:  liq = (entry * qty - isolated_wallet) / (qty * (1 - maint_margin_ratio))
+                            # Short: liq = (entry * qty + isolated_wallet) / (qty * (1 + maint_margin_ratio))
+                            isolated_wallet = float(pos.get("isolatedWallet", 0))
+                            maint_margin_ratio = float(pos.get("maintMarginRatio", 0.005))
+                            if abs_amt > 0 and entry_price > 0:
+                                if is_long:
+                                    long_liquidation_price = round(
+                                        (entry_price * abs_amt - isolated_wallet) / (abs_amt * (1 - maint_margin_ratio)), 2
+                                    )
+                                elif is_short:
+                                    short_liquidation_price = round(
+                                        (entry_price * abs_amt + isolated_wallet) / (abs_amt * (1 + maint_margin_ratio)), 2
+                                    )
+
                 if total_positions > 0:
                     avg_entry_price = total_volume_weighted / total_positions
             else:
@@ -246,8 +273,8 @@ class AccountDataService:
                 logger.warning(f"Failed to fetch commission fee data: {commission_fee_data}")
 
             # Calculate final metrics according to Binance API documentation
-            # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalWalletBalance
-            total_assets = spot_total_usdt + margin_total_usdt + futures_total_wallet_balance
+            # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalMarginBalance (含未实现盈亏)
+            total_assets = spot_total_usdt + margin_total_usdt + futures_total_margin_balance
 
             # 可用总资产 = 现货free + 杠杆free + 合约availableBalance
             available_balance = spot_free_usdt + margin_free_usdt + futures_available_balance
@@ -281,6 +308,9 @@ class AccountDataService:
                 # Position data for liquidation price calculation
                 entry_price=avg_entry_price,  # 开仓均价
                 leverage=leverage,  # 杠杆倍数
+                # Binance native liquidation prices from positionRisk API
+                long_liquidation_price=long_liquidation_price,
+                short_liquidation_price=short_liquidation_price,
             )
         except Exception as e:
             error_msg = str(e)
@@ -444,6 +474,16 @@ class AccountDataService:
             long_liquidation_price = 0.0
             short_liquidation_price = 0.0
 
+            # Accumulators for fallback liquidation price calculation (account-level, not per-position)
+            long_volume_total = 0.0
+            long_price_weighted = 0.0
+            long_margin_total = 0.0
+            long_native_liq = 0.0   # native price_liquidation from MT5 (last seen)
+            short_volume_total = 0.0
+            short_price_weighted = 0.0
+            short_margin_total = 0.0
+            short_native_liq = 0.0
+
             # Get account leverage for liquidation price calculation
             account_leverage = int(mt5_info.get("leverage", 1))
 
@@ -451,46 +491,50 @@ class AccountDataService:
                 volume = float(pos.get("volume", 0))
                 price_open = float(pos.get("price_open", 0))
                 pos_type = pos.get("type", 0)  # 0=Buy(Long), 1=Sell(Short)
-                symbol = pos.get("symbol", "")
+                pos_margin = float(pos.get("margin", 0))
 
                 total_positions += abs(volume)
                 total_volume_weighted += abs(volume) * price_open
 
-                # Try to get native liquidation price from MT5 API
                 price_liquidation = float(pos.get("price_liquidation", 0))
 
-                # If native liquidation price exists, use it
-                if price_liquidation > 0:
-                    if pos_type == 0:  # Long position
-                        long_liquidation_price = price_liquidation
-                    elif pos_type == 1:  # Short position
-                        short_liquidation_price = price_liquidation
-                else:
-                    # Fallback: Calculate liquidation price using Bybit simplified formula
-                    # This formula assumes isolated margin mode
-                    symbol_config = get_symbol_config(symbol)
-                    margin_rate_maintenance = symbol_config["margin_rate_maintenance"]
-                    digits = symbol_config["digits"]
+                if pos_type == 0:  # Long
+                    long_volume_total += volume
+                    long_price_weighted += volume * price_open
+                    long_margin_total += pos_margin
+                    if price_liquidation > 0:
+                        long_native_liq = price_liquidation
+                else:  # Short
+                    short_volume_total += volume
+                    short_price_weighted += volume * price_open
+                    short_margin_total += pos_margin
+                    if price_liquidation > 0:
+                        short_native_liq = price_liquidation
 
-                    if account_leverage > 0 and price_open > 0:
-                        if pos_type == 0:  # Long position
-                            # 多头强平价 = 开仓价 × (1 - 1/杠杆 + 维持保证金率)
-                            calculated_liq_price = price_open * (1 - 1/account_leverage + margin_rate_maintenance)
-                            if calculated_liq_price > 0:
-                                long_liquidation_price = round(calculated_liq_price, digits)
-                                logger.info(f"Calculated LONG liquidation price for {symbol}: "
-                                           f"open={price_open:.{digits}f}, leverage={account_leverage}, "
-                                           f"maintenance_rate={margin_rate_maintenance}, "
-                                           f"liquidation={long_liquidation_price:.{digits}f}")
-                        else:  # Short position
-                            # 空头强平价 = 开仓价 × (1 + 1/杠杆 - 维持保证金率)
-                            calculated_liq_price = price_open * (1 + 1/account_leverage - margin_rate_maintenance)
-                            if calculated_liq_price > 0:
-                                short_liquidation_price = round(calculated_liq_price, digits)
-                                logger.info(f"Calculated SHORT liquidation price for {symbol}: "
-                                           f"open={price_open:.{digits}f}, leverage={account_leverage}, "
-                                           f"maintenance_rate={margin_rate_maintenance}, "
-                                           f"liquidation={short_liquidation_price:.{digits}f}")
+            # Prefer native MT5 liquidation price; fall back to correct MT5 formula
+            # MT5 formula (Bybit XAUUSD+, contract_unit=100, liq_threshold=50%):
+            #   Long liq  = avg_entry - (equity - total_margin * 0.50) / (100 * total_lots)
+            #   Short liq = avg_entry + (equity - total_margin * 0.50) / (100 * total_lots)
+            CONTRACT_UNIT = 100   # Bybit XAUUSD+: 1 lot = 100 oz
+            LIQ_THRESHOLD = 0.50  # Bybit MT5 stop-out level = 50%
+
+            if long_native_liq > 0:
+                long_liquidation_price = long_native_liq
+            elif long_volume_total > 0:
+                long_avg_entry = long_price_weighted / long_volume_total
+                long_liquidation_price = round(
+                    long_avg_entry - (equity - long_margin_total * LIQ_THRESHOLD) / (CONTRACT_UNIT * long_volume_total),
+                    2
+                )
+
+            if short_native_liq > 0:
+                short_liquidation_price = short_native_liq
+            elif short_volume_total > 0:
+                short_avg_entry = short_price_weighted / short_volume_total
+                short_liquidation_price = round(
+                    short_avg_entry + (equity - short_margin_total * LIQ_THRESHOLD) / (CONTRACT_UNIT * short_volume_total),
+                    2
+                )
 
             # Calculate weighted average entry price
             if total_positions > 0:
@@ -807,7 +851,8 @@ class AccountDataService:
                         entry_price=float(pos.get("price_open", 0)),
                         mark_price=float(pos.get("price_current", 0)),
                         unrealized_pnl=float(pos.get("profit", 0)),
-                        leverage=1,  # MT5 doesn't expose leverage in position data
+                        leverage=1,
+                        ticket=pos.get("ticket"),
                     )
                 )
 
@@ -946,7 +991,8 @@ class AccountDataService:
                 "account_name": account.account_name,
                 "platform_id": platform_id,
                 "is_mt5_account": account.is_mt5_account,
-                "is_active": account.is_active,  # Include is_active status
+                "mt5_id": account.mt5_id,  # Used for MT5 position deduplication across duplicate DB accounts
+                "is_active": account.is_active,
                 "balance": balance.model_dump(),
                 "positions": [pos.model_dump() for pos in positions],
                 "daily_pnl": daily_pnl,
@@ -968,14 +1014,27 @@ class AccountDataService:
         """Aggregate data from multiple accounts"""
         import asyncio
 
-        # Deduplicate accounts by (platform_id, api_key, mt5_id) to avoid duplicate data
+        # Deduplicate accounts — same physical exchange account may be registered under multiple users
         seen = set()
+        seen_names = set()  # Secondary dedup by (platform_id, account_name) for same-name accounts
         unique_accounts = []
         for account in accounts:
-            # Create a unique key based on platform, API key, and MT5 ID
-            key = (account.platform_id, account.api_key, account.mt5_id or '')
-            if key not in seen:
+            # MT5: deduplicate by mt5_id
+            if account.is_mt5_account and account.mt5_id:
+                key = (account.platform_id, 'mt5', account.mt5_id)
+            # REST accounts: deduplicate by api_key
+            elif account.api_key:
+                key = (account.platform_id, account.api_key)
+            else:
+                key = (account.platform_id, account.account_name or account.account_id)
+
+            # Also deduplicate by account_name within same platform (catches same account with different API keys)
+            name_key = (account.platform_id, (account.account_name or '').strip())
+
+            if key not in seen and name_key not in seen_names:
                 seen.add(key)
+                if name_key[1]:  # Only track non-empty names
+                    seen_names.add(name_key)
                 unique_accounts.append(account)
             else:
                 logger.warning(f"Skipping duplicate account: {account.account_name} (ID: {account.account_id})")
@@ -1020,20 +1079,24 @@ class AccountDataService:
 
         # Aggregate positions with deduplication
         all_positions = []
-        seen_positions = set()  # Track unique positions by (platform_id, symbol, side, size, entry_price)
+        seen_positions = set()  # Deduplicate by (platform_id, ticket) for MT5, or (account_id, symbol, side) for Binance
 
         for acc in successful_accounts:
             for pos in acc["positions"]:
-                # Create a unique key for this position including entry_price
-                # This ensures we only deduplicate truly identical positions from duplicate accounts
-                # while preserving multiple positions with same size but different entry prices
-                pos_key = (
-                    acc["platform_id"],
-                    pos.get("symbol", ""),
-                    pos.get("side", ""),
-                    round(float(pos.get("size", 0)), 6),  # Round to avoid floating point issues
-                    round(float(pos.get("entry_price", 0)), 2)  # Include entry price in key
-                )
+                # MT5: deduplicate by (platform_id + mt5_id + ticket) — same physical MT5 account may appear under multiple DB accounts
+                # Binance: deduplicate by (account_id + symbol + side) — hedge mode has one position per side
+                ticket = pos.get("ticket")
+                if ticket and acc.get("is_mt5_account"):
+                    mt5_id = acc.get("mt5_id", acc["account_id"])
+                    pos_key = (acc["platform_id"], mt5_id, ticket)
+                else:
+                    pos_key = (
+                        acc["account_id"],
+                        pos.get("symbol", ""),
+                        pos.get("side", ""),
+                        round(float(pos.get("size", 0)), 6),
+                        round(float(pos.get("entry_price", 0)), 2)
+                    )
 
                 # Only add if not seen before
                 if pos_key not in seen_positions:

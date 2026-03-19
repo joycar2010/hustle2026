@@ -183,3 +183,86 @@ async def get_order_book():
         return await market_data_service.get_order_book()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/funding-rate")
+async def get_binance_funding_rate():
+    """
+    Get real-time Binance XAUUSDT funding rate and convert to per-lot cost.
+
+    Returns:
+        funding_rate: Current funding rate (e.g. 0.0001 = 0.01%)
+        next_funding_time: Next settlement timestamp (ms)
+        mark_price: Current mark price (USD)
+        long_cost_per_lot: Amount LONG pays per lot (100 XAU) at next settlement (USDT)
+                           Positive = long pays short; Negative = short pays long
+        short_cost_per_lot: Amount SHORT pays per lot (100 XAU) at next settlement (USDT)
+                            Opposite sign of long_cost_per_lot
+    """
+    try:
+        from app.services.binance_client import BinanceFuturesClient
+        # Use anonymous client — premiumIndex is a public endpoint, no auth needed
+        client = BinanceFuturesClient("", "")
+        try:
+            data = await client.get_premium_index("XAUUSDT")
+        finally:
+            await client.close()
+
+        funding_rate = float(data.get("lastFundingRate", 0))
+        mark_price = float(data.get("markPrice", 0))
+        next_funding_time = int(data.get("nextFundingTime", 0))
+
+        # 1 XAU; cost = funding_rate × mark_price × 1
+        # Positive funding_rate: longs pay shorts
+        # Negative funding_rate: shorts pay longs
+        cost_per_lot = round(funding_rate * mark_price, 4)
+
+        return {
+            "symbol": "XAUUSDT",
+            "funding_rate": funding_rate,
+            "funding_rate_pct": round(funding_rate * 100, 6),  # percentage display
+            "mark_price": mark_price,
+            "next_funding_time": next_funding_time,
+            "long_cost_per_lot": cost_per_lot,    # >0 long pays, <0 long receives
+            "short_cost_per_lot": -cost_per_lot,  # opposite direction
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/bybit-swap-rate")
+async def get_bybit_swap_rate():
+    """
+    Get real-time Bybit XAUUSD+ swap (overnight) rates from MT5 symbol info.
+
+    Returns:
+        long_swap_per_lot:  Daily swap cost for LONG 1 lot (negative = long pays)
+        short_swap_per_lot: Daily swap cost for SHORT 1 lot (positive = short receives)
+    """
+    try:
+        import MetaTrader5 as mt5
+        from app.services.realtime_market_service import market_data_service as realtime_service
+
+        mt5_client = realtime_service.mt5_client
+        if not mt5_client.ensure_connection():
+            raise HTTPException(status_code=503, detail="MT5 not connected")
+
+        symbol = "XAUUSD+"
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            raise HTTPException(status_code=404, detail=f"Symbol {symbol} not found in MT5")
+
+        # swap_long/swap_short: USD per lot per day (swap_mode=1), divided by 100
+        # Negative swap_long = long pays; Positive swap_short = short receives
+        return {
+            "symbol": symbol,
+            "long_swap_per_lot": round(info.swap_long / 100, 4),
+            "short_swap_per_lot": round(info.swap_short / 100, 4),
+            "swap_mode": info.swap_mode,
+            "rollover_day": info.swap_rollover3days,
+            "contract_size": info.trade_contract_size,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

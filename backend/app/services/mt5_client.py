@@ -595,16 +595,20 @@ class MT5Client:
             logger.error(f"Error getting market book for {symbol}: {e}")
             return None
 
-    def find_position_to_close(self, symbol: str, side: str) -> Optional[int]:
+    def find_position_to_close(
+        self, symbol: str, side: str, required_volume: float = 0.0
+    ) -> Optional[Dict[str, Any]]:
         """
-        Find a position ticket to close based on symbol and side
+        Find a position to close based on symbol and side.
 
         Args:
             symbol: Trading symbol
             side: 'Buy' to close SHORT positions, 'Sell' to close LONG positions
+            required_volume: Minimum volume needed (in lots). When > 0, prefer positions
+                             with sufficient volume; fall back to largest if none qualify.
 
         Returns:
-            Position ticket number, or None if no matching position found
+            Dict with 'ticket' and 'volume', or None if no matching position found.
         """
         if not self.connected:
             if not self.connect():
@@ -618,22 +622,38 @@ class MT5Client:
                 return None
 
             # MT5 position types: 0=BUY(LONG), 1=SELL(SHORT)
-            # To close LONG position, we SELL
-            # To close SHORT position, we BUY
-            target_type = 1 if side.lower() == 'buy' else 0  # Buy closes SHORT(1), Sell closes LONG(0)
+            # To close LONG position, we SELL; to close SHORT position, we BUY
+            target_type = 1 if side.lower() == 'buy' else 0
 
-            # Find matching position (prefer oldest/largest)
             matching_positions = [pos for pos in positions if pos.type == target_type]
 
             if not matching_positions:
                 logger.warning(f"No {['LONG', 'SHORT'][target_type]} positions found for {symbol}")
                 return None
 
-            # Return the oldest position (first in list)
-            selected_pos = matching_positions[0]
-            logger.info(f"Found position to close: ticket={selected_pos.ticket}, "
-                       f"type={['LONG', 'SHORT'][selected_pos.type]}, volume={selected_pos.volume}")
-            return selected_pos.ticket
+            # Prefer a position whose volume >= required_volume (exact fit first)
+            if required_volume > 0:
+                sufficient = [p for p in matching_positions if p.volume >= required_volume]
+                if sufficient:
+                    # Among sufficient positions, pick the one closest to required_volume
+                    selected_pos = min(sufficient, key=lambda p: p.volume - required_volume)
+                else:
+                    # No single position covers the full amount — pick the largest available
+                    selected_pos = max(matching_positions, key=lambda p: p.volume)
+                    logger.warning(
+                        f"No position with volume >= {required_volume} lots for {symbol}. "
+                        f"Using largest available: ticket={selected_pos.ticket}, volume={selected_pos.volume}"
+                    )
+            else:
+                # No volume requirement — use oldest position (first in list)
+                selected_pos = matching_positions[0]
+
+            logger.info(
+                f"Found position to close: ticket={selected_pos.ticket}, "
+                f"type={['LONG', 'SHORT'][selected_pos.type]}, "
+                f"volume={selected_pos.volume}, required={required_volume}"
+            )
+            return {"ticket": selected_pos.ticket, "volume": selected_pos.volume}
 
         except Exception as e:
             logger.error(f"Failed to find position to close: {e}")

@@ -13,10 +13,10 @@
               <span class="font-semibold text-xs">{{ getPlatformName(account.platform_id, account.is_mt5_account) }}</span>
 
               <!-- Proxy Status -->
-              <div v-if="getProxyStatus(account)" class="flex items-center space-x-1 text-[10px]">
-                <div class="w-1 h-1 rounded-full" :class="getProxyStatusColor(account)"></div>
-                <span class="text-gray-400">代理:</span>
-                <span :class="getProxyStatusTextColor(account)">{{ getProxyStatusText(account) }}</span>
+              <div class="flex items-center space-x-1 text-[10px]">
+                <div class="w-1 h-1 rounded-full" :class="getProxyStatus(account) ? getProxyStatusColor(account) : 'bg-gray-500'"></div>
+                <span class="text-gray-400">代理IP:</span>
+                <span :class="getProxyStatus(account) ? getProxyStatusTextColor(account) : 'text-gray-400'">{{ getProxyStatus(account) ? getProxyStatusText(account) : '当前直连' }}</span>
               </div>
 
               <span class="text-[10px]" :class="account.error ? 'text-[#f0b90b]' : 'text-gray-500'">
@@ -116,13 +116,13 @@
             </span>
           </div>
           <div v-if="account.platform_id === 1" class="flex justify-between">
-            <span class="text-gray-400">手续费汇总(USDT)</span>
+            <span class="text-gray-400">资金费(多头)</span>
             <span class="font-mono" :class="getValueColor(account, 'long_funding_rate')">
               {{ getDisplayValue(account, 'long_funding_rate', true) }}
             </span>
           </div>
           <div v-if="account.platform_id === 1" class="flex justify-between">
-            <span class="text-gray-400">手续费汇总(BNB)</span>
+            <span class="text-gray-400">资金费(空头)</span>
             <span class="font-mono" :class="getValueColor(account, 'short_funding_rate')">
               {{ getDisplayValue(account, 'short_funding_rate', true) }}
             </span>
@@ -306,9 +306,14 @@ async function fetchProxyStatus() {
         try {
           const response = await api.get(`/api/v1/accounts/${account.account_id}/proxy/${platformId}`)
           const key = `${account.account_id}_${platformId}`
-          accountProxies.value[key] = {
-            ...response.data,
-            platform_id: platformId
+          if (response.data) {
+            accountProxies.value[key] = {
+              ...response.data,
+              platform_id: platformId
+            }
+          } else {
+            // null means no proxy bound (direct connection) — remove any stale entry
+            delete accountProxies.value[key]
           }
         } catch (error) {
           // 如果没有绑定代理，忽略错误
@@ -626,12 +631,16 @@ function getLiquidationPrice(account, type) {
 
   // Binance calculation
   if (account.platform_id === 1) {
-    // 多仓强平价 = 开仓价 × (1 − 1/杠杆)
-    // 空仓强平价 = 开仓价 × (1 + 1/杠杆)
+    // Prefer API-provided liquidation prices from /fapi/v1/positionRisk
+    if (type === 'long' && balance.long_liquidation_price > 0) {
+      return formatNumber(balance.long_liquidation_price)
+    }
+    if (type === 'short' && balance.short_liquidation_price > 0) {
+      return formatNumber(balance.short_liquidation_price)
+    }
 
-    // 使用 entryPrice 或 entry_price 作为开仓均价
+    // Fallback: simplified formula (entryPrice × (1 ± 1/leverage))
     const entryPrice = balance.entryPrice || balance.entry_price || 0
-    // 使用 leverage 作为杠杆倍数
     const leverage = balance.leverage || 0
 
     if (entryPrice === 0 || leverage === 0) {

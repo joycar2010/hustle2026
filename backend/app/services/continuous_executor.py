@@ -69,6 +69,7 @@ class ContinuousStrategyExecutor:
 
         # Execution state
         self.is_running = False
+        self.stop_requested = False  # Graceful stop: wait for safe exit point before stopping
         self.current_ladder_index = 0
         self.trigger_mgr: Optional[TriggerCountManager] = None
         self.user_id: Optional[str] = None
@@ -108,7 +109,10 @@ class ContinuousStrategyExecutor:
         logger.info(f"Starting reverse opening continuous execution for strategy {self.strategy_id}")
 
         self.is_running = True
+        self.stop_requested = False
         self.user_id = user_id
+        self._bybit_account = bybit_account
+        self._binance_account = binance_account  # stored for position snapshot
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
@@ -203,7 +207,7 @@ class ContinuousStrategyExecutor:
         logger.info(f"Starting ladder execution loop - is_running: {self.is_running}, ladder_idx: {ladder_idx}, total_qty: {ladder.total_qty}")
 
         loop_count = 0
-        while self.is_running:
+        while self.is_running and not self.stop_requested:
             loop_count += 1
             # Only log every 100 iterations to reduce I/O
             if loop_count % 100 == 1:
@@ -488,8 +492,31 @@ class ContinuousStrategyExecutor:
             if not exec_result['success']:
                 logger.error(f"Execution failed: {exec_result}")
                 with open("ladder_debug.log", "a", encoding="utf-8") as f:
-                    f.write(f"[DEBUG] Step 8 - Execution failed, resetting triggers and continuing: {exec_result.get('error')}\n")
+                    f.write(f"[DEBUG] Step 8 - Execution failed: {exec_result.get('error')}\n")
                     f.flush()
+
+                # CRITICAL: Binance API outage detected — stop strategy and send emergency alert
+                if exec_result.get('binance_api_error'):
+                    logger.error(f"[EMERGENCY] Binance API outage during {strategy_type} execution — stopping strategy immediately")
+                    self.is_running = False
+                    await self._send_binance_api_emergency_alert(strategy_type, exec_result)
+                    return
+
+                # CRITICAL FIX: Even if execution failed, record Binance filled qty to prevent over-trading
+                binance_filled = exec_result.get('binance_filled_qty', 0)
+                if binance_filled > 0:
+                    # Record the filled quantity to position manager
+                    self.position_mgr.record_opening(
+                        self.strategy_id,
+                        ladder_idx,
+                        strategy_type,
+                        binance_filled
+                    )
+                    logger.warning(f"Execution failed but Binance filled {binance_filled} XAU - recorded to prevent over-trading")
+                    with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                        f.write(f"[DEBUG] Step 8 - Recorded Binance filled qty: {binance_filled} to prevent over-trading\n")
+                        f.flush()
+
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
                 await asyncio.sleep(self.api_spam_prevention_delay)
@@ -514,6 +541,11 @@ class ContinuousStrategyExecutor:
                     wait_time = (self.order_executor.open_wait_after_cancel_no_trade
                                  if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
                 logger.info(f"Waiting {wait_time}s after cancel ({'spread' if spread_cancelled else 'timeout'}, {'open' if is_opening else 'close'})")
+                # Safe exit point 1: Binance order cancelled — no single-leg risk
+                if self.stop_requested:
+                    logger.info(f"[GRACEFUL STOP] Stop requested — exiting after Binance cancel (safe, no single-leg)")
+                    self.is_running = False
+                    break
                 await asyncio.sleep(wait_time)
                 continue
 
@@ -570,6 +602,12 @@ class ContinuousStrategyExecutor:
             with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 12 - Trigger count after reset: {self.trigger_mgr.count}\n")
 
+            # Safe exit point 2: Both legs filled — no single-leg risk
+            if self.stop_requested:
+                logger.info(f"[GRACEFUL STOP] Stop requested — exiting after dual-leg fill (safe, binance={binance_filled} bybit={exec_result.get('bybit_filled_qty', 0)})")
+                self.is_running = False
+                break
+
             # Small delay to prevent API spam (configurable via api_spam_prevention_delay)
             logger.info(f"Waiting {self.api_spam_prevention_delay} seconds to prevent API spam")
             await asyncio.sleep(self.api_spam_prevention_delay)
@@ -579,9 +617,14 @@ class ContinuousStrategyExecutor:
             f.write(f"\n{'='*80}\n")
             f.write(f"=== LADDER DEBUG END ===\n")
             f.write(f"[DEBUG] Loop exited after {loop_count} iterations\n")
-            f.write(f"[DEBUG] is_running: {self.is_running}\n")
+            f.write(f"[DEBUG] is_running: {self.is_running}, stop_requested: {self.stop_requested}\n")
             f.write(f"[DEBUG] Final position: {current_position}/{ladder.total_qty}\n")
-            f.write(f"[DEBUG] Exit reason: {'is_running=False' if not self.is_running else 'position >= total_qty'}\n")
+            if self.stop_requested:
+                f.write(f"[DEBUG] Exit reason: graceful stop at safe point\n")
+            elif not self.is_running:
+                f.write(f"[DEBUG] Exit reason: is_running=False\n")
+            else:
+                f.write(f"[DEBUG] Exit reason: position >= total_qty\n")
             f.write(f"{'='*80}\n\n")
 
         return {'success': True}
@@ -759,7 +802,7 @@ class ContinuousStrategyExecutor:
         filled_qty: float,
         position_info: Dict
     ):
-        """Push position change notification"""
+        """Push position change notification and broadcast real-time MT5 position snapshot."""
         if self.user_id:
             await status_pusher.push_position_change(
                 self.strategy_id,
@@ -771,6 +814,49 @@ class ContinuousStrategyExecutor:
                 position_info['total_closed'],
                 self.user_id
             )
+
+        # Read MT5 + Binance positions directly (bypasses 60s cache) and push to frontend immediately
+        try:
+            from app.websocket.manager import manager as ws_manager
+            from app.services.binance_client import BinanceFuturesClient
+
+            bybit_account = getattr(self, '_bybit_account', None)
+            binance_account = getattr(self, '_binance_account', None)
+
+            long_lots = 0.0
+            short_lots = 0.0
+            binance_long_xau = 0.0
+            binance_short_xau = 0.0
+
+            # Bybit: read from MT5 directly
+            if bybit_account and hasattr(bybit_account, 'mt5_client') and bybit_account.mt5_client:
+                loop = asyncio.get_event_loop()
+                positions = await loop.run_in_executor(
+                    None,
+                    lambda: bybit_account.mt5_client.get_positions("XAUUSD+")
+                )
+                long_lots = round(sum(p['volume'] for p in positions if p.get('type') == 0), 2)
+                short_lots = round(sum(p['volume'] for p in positions if p.get('type') == 1), 2)
+
+            # Binance: read from REST API directly
+            if binance_account and binance_account.api_key and binance_account.api_secret:
+                try:
+                    client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+                    pos_data = await client.get_position_risk("XAUUSDT")
+                    await client.close()
+                    for pos in pos_data:
+                        amt = float(pos.get("positionAmt", 0))
+                        if amt > 0:
+                            binance_long_xau = round(amt, 3)
+                        elif amt < 0:
+                            binance_short_xau = round(abs(amt), 3)
+                except Exception as be:
+                    logger.warning(f"[POSITION_SNAPSHOT] Binance fetch failed: {be}")
+
+            await ws_manager.broadcast_position_snapshot(long_lots, short_lots, binance_long_xau, binance_short_xau)
+            logger.info(f"[POSITION_SNAPSHOT] bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
+        except Exception as e:
+            logger.warning(f"[POSITION_SNAPSHOT] Failed: {e}")
 
     async def _push_order_executed(
         self,
@@ -962,6 +1048,76 @@ class ContinuousStrategyExecutor:
         except Exception as e:
             logger.error(f"[SINGLE_LEG_CHECK] Delayed check failed: {e}")
 
+    async def _send_binance_api_emergency_alert(
+        self,
+        strategy_type: str,
+        exec_result: Dict
+    ):
+        """
+        Send emergency alert when Binance API is down during execution.
+        Strategy is stopped immediately. Alert sent via WebSocket and Feishu.
+        """
+        if not self.user_id:
+            return
+
+        strategy_name = "正向套利" if "forward" in strategy_type else "反向套利"
+        action = "开仓" if "opening" in strategy_type else "平仓"
+        order_id = exec_result.get("binance_order_id", "未知")
+
+        import datetime
+        timestamp = datetime.datetime.utcnow().isoformat()
+
+        # WebSocket emergency alert
+        try:
+            from app.websocket.manager import manager
+            alert_message = {
+                "type": "binance_api_emergency",
+                "data": {
+                    "strategy_type": strategy_name,
+                    "action": action,
+                    "order_id": order_id,
+                    "timestamp": timestamp,
+                    "level": "critical",
+                    "title": "🚨 Binance交易系统异常 — 策略已紧急停止",
+                    "message": (
+                        f"{strategy_name} {action}：Binance API连续查询失败，"
+                        f"订单 {order_id} 状态未知，策略已自动停止。"
+                        f"请立即登录Binance交易软件人工核查持仓和挂单！"
+                    )
+                }
+            }
+            await manager.send_to_user(alert_message, self.user_id)
+            logger.error(f"[EMERGENCY] WebSocket alert sent for Binance API outage: order_id={order_id}")
+        except Exception as e:
+            logger.error(f"[EMERGENCY] Failed to send WebSocket alert: {e}")
+
+        # Feishu emergency alert
+        try:
+            from app.services.feishu_service import get_feishu_service
+            from app.core.database import get_db
+            from app.models.user import User
+            from sqlalchemy import select as sa_select
+            feishu = get_feishu_service()
+            if feishu:
+                async for db in get_db():
+                    result = await db.execute(sa_select(User).where(User.user_id == self.user_id))
+                    user = result.scalar_one_or_none()
+                    if user and (user.feishu_open_id or user.email):
+                        receiver_id = user.feishu_open_id if user.feishu_open_id else user.email
+                        receive_id_type = "open_id" if user.feishu_open_id else "email"
+                        content = (
+                            f"🚨 Binance交易系统异常\n"
+                            f"策略：{strategy_name} {action}\n"
+                            f"订单号：{order_id}\n"
+                            f"时间：{timestamp}\n"
+                            f"原因：Binance API连续{exec_result.get('api_error_count', 3)}次查询失败\n"
+                            f"处理：策略已自动停止，请立即人工核查Binance持仓和挂单！"
+                        )
+                        await feishu.send_text_message(receiver_id, receive_id_type, content)
+                    break
+        except Exception as e:
+            logger.error(f"[EMERGENCY] Failed to send Feishu alert: {e}")
+
     async def _send_single_leg_alert(
         self,
         strategy_type: str,
@@ -1032,9 +1188,16 @@ class ContinuousStrategyExecutor:
             logger.error(f"Failed to send Feishu single-leg alert: {e}")
 
     def stop(self):
-        """Stop continuous execution"""
-        logger.info(f"Stopping continuous execution for strategy {self.strategy_id}")
-        self.is_running = False
+        """Request graceful stop.
+
+        Sets stop_requested=True so the loop exits only at a safe point:
+        - After Binance+Bybit both fill (双边成交完成)
+        - After Binance order is cancelled (撤单，无单腿风险)
+        Never interrupts mid-execution to prevent single-leg exposure.
+        """
+        logger.info(f"Stop requested for strategy {self.strategy_id} — will exit at next safe point")
+        self.stop_requested = True
+        self.is_running = False  # also set for legacy checks
 
     async def execute_forward_opening_continuous(
         self,
@@ -1070,7 +1233,10 @@ class ContinuousStrategyExecutor:
         logger.info(f"Binance: {binance_account.account_name}, Bybit: {bybit_account.account_name}, Ladders: {len(ladders)}")
 
         self.is_running = True
+        self.stop_requested = False
         self.user_id = user_id
+        self._bybit_account = bybit_account
+        self._binance_account = binance_account
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
@@ -1132,7 +1298,10 @@ class ContinuousStrategyExecutor:
         logger.info(f"Starting reverse closing continuous execution for strategy {self.strategy_id}")
 
         self.is_running = True
+        self.stop_requested = False
         self.user_id = user_id
+        self._bybit_account = bybit_account
+        self._binance_account = binance_account
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
@@ -1195,7 +1364,10 @@ class ContinuousStrategyExecutor:
         logger.info(f"Starting forward closing continuous execution for strategy {self.strategy_id}")
 
         self.is_running = True
+        self.stop_requested = False
         self.user_id = user_id
+        self._bybit_account = bybit_account
+        self._binance_account = binance_account
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:

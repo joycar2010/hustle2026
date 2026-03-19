@@ -677,11 +677,7 @@ async def place_manual_order(
                 price = spread_data.binance_quote.ask_price
             symbol = "XAUUSDT"
         else:  # bybit
-            # Bybit: 买入开多用ask价挂单，卖出开空用bid价挂单
-            if req.side == "buy":
-                price = spread_data.bybit_quote.ask_price
-            else:  # sell
-                price = spread_data.bybit_quote.bid_price
+            # Bybit: Market单不需要价格，直接以市价成交
             symbol = "XAUUSD+"
 
         # Import order executor
@@ -699,14 +695,15 @@ async def place_manual_order(
                 position_side="LONG" if req.side == "buy" else "SHORT",
                 post_only=True,
             )
-        else:  # bybit
+        else:  # bybit — 紧急交易用Market单立即成交，quantity已由前端换算为Lot
+            bybit_qty = round(float(req.quantity), 2)
             result = await order_executor.place_bybit_order(
                 account=target_account,
                 symbol=symbol,
                 side="Buy" if req.side == "buy" else "Sell",
-                order_type="Limit",
-                quantity=str(req.quantity),
-                price=str(price),
+                order_type="Market",
+                quantity=str(bybit_qty),
+                price=None,
                 close_position=False,
             )
 
@@ -718,7 +715,6 @@ async def place_manual_order(
             "exchange": req.exchange,
             "side": req.side,
             "quantity": req.quantity,
-            "price": price,
             "order_id": result.get("order_id"),
         }
 
@@ -825,25 +821,23 @@ async def close_all_positions(
 
                 if positions:
                     for pos in positions:
-                        volume = pos.volume
+                        volume = round(pos.volume, 2)
                         if volume == 0:
                             continue
 
-                        # Bybit: 多头仓位用bid价平仓，空头仓位用ask价平仓
-                        if pos.type == mt5.POSITION_TYPE_BUY:  # LONG position
-                            price = spread_data.bybit_quote.bid_price
+                        # Bybit: Market Taker单平仓，close_position=True关联持仓ticket
+                        if pos.type == mt5.POSITION_TYPE_BUY:  # LONG position → Sell to close
                             side = "Sell"
-                        else:  # SHORT position
-                            price = spread_data.bybit_quote.ask_price
+                        else:  # SHORT position → Buy to close
                             side = "Buy"
 
                         result = await order_executor.place_bybit_order(
                             account=bybit_account,
                             symbol="XAUUSD+",
                             side=side,
-                            order_type="Limit",
+                            order_type="Market",
                             quantity=str(volume),
-                            price=str(price),
+                            price=None,
                             close_position=True,
                         )
 
@@ -851,7 +845,6 @@ async def close_all_positions(
                             "exchange": "bybit",
                             "position_type": "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT",
                             "quantity": volume,
-                            "price": price,
                             "success": result.get("success"),
                             "order_id": result.get("order_id"),
                         })
@@ -1110,8 +1103,6 @@ async def close_short_position(
             price = spread_data.binance_quote.ask_price
             symbol = "XAUUSDT"
         else:  # bybit
-            # Bybit: 空仓以bid价挂单平仓
-            price = spread_data.bybit_quote.bid_price
             symbol = "XAUUSD+"
 
         # Import order executor
@@ -1128,21 +1119,21 @@ async def close_short_position(
                 quantity=str(req.quantity),
                 price=str(price),
             )
-        else:  # bybit
+        else:  # bybit — Market Taker单平空仓，close_position=True关联持仓ticket
+            bybit_qty = round(float(req.quantity), 2)
             result = await order_executor.place_bybit_order(
                 account=target_account,
                 symbol=symbol,
                 side="Buy",
-                order_type="Limit",
-                quantity=str(req.quantity),
-                price=str(price),
-                close_position=False,
+                order_type="Market",
+                quantity=str(bybit_qty),
+                price=None,
+                close_position=True,
             )
 
         return {
             "success": result.get("success"),
             "order_id": result.get("order_id"),
-            "price": price,
             "quantity": req.quantity,
             "exchange": req.exchange,
         }
@@ -1193,8 +1184,6 @@ async def close_long_position(
             price = spread_data.binance_quote.bid_price
             symbol = "XAUUSDT"
         else:  # bybit
-            # Bybit: 多仓以ask价挂单平仓
-            price = spread_data.bybit_quote.ask_price
             symbol = "XAUUSD+"
 
         # Import order executor
@@ -1211,21 +1200,21 @@ async def close_long_position(
                 quantity=str(req.quantity),
                 price=str(price),
             )
-        else:  # bybit
+        else:  # bybit — Market Taker单平多仓，close_position=True关联持仓ticket
+            bybit_qty = round(float(req.quantity), 2)
             result = await order_executor.place_bybit_order(
                 account=target_account,
                 symbol=symbol,
                 side="Sell",
-                order_type="Limit",
-                quantity=str(req.quantity),
-                price=str(price),
-                close_position=False,
+                order_type="Market",
+                quantity=str(bybit_qty),
+                price=None,
+                close_position=True,
             )
 
         return {
             "success": result.get("success"),
             "order_id": result.get("order_id"),
-            "price": price,
             "quantity": req.quantity,
             "exchange": req.exchange,
         }

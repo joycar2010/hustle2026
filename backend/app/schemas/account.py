@@ -103,3 +103,4 @@ class AccountPosition(BaseModel):
     mark_price: float
     unrealized_pnl: float
     leverage: int
+    ticket: Optional[int] = None  # MT5 position ticket (unique per position)

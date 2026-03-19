@@ -43,6 +43,8 @@ export const useMarketStore = defineStore('market', () => {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
       }
+      // 连接成功后立即请求持仓快照，避免等待30s定时广播
+      ws.send(JSON.stringify({ type: 'request_snapshot' }))
     }
 
     ws.onmessage = (event) => {

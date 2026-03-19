@@ -34,10 +34,10 @@
       <!-- 实仓和点差信息 -->
       <div v-if="marketCardsRef" class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
-          B多仓: {{ marketCardsRef.bybitLongTotal?.toFixed(2) || '0.00' }} A空仓: {{ marketCardsRef.binanceShortTotal?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.reverseSpread?.toFixed(2) || '0.00' }}
+          B多仓: {{ ((marketCardsRef.bybitLongTotal || 0) * 100).toFixed(0) }} A空仓: {{ marketCardsRef.binanceShortTotal?.toFixed(2) || '0.00' }}
         </span>
         <span v-else>
-          A多仓: {{ marketCardsRef.binanceLongTotal?.toFixed(2) || '0.00' }} B空仓: {{ marketCardsRef.bybitShortTotal?.toFixed(2) || '0.00' }} 点差: {{ marketCardsRef.forwardSpread?.toFixed(2) || '0.00' }}
+          A多仓: {{ marketCardsRef.binanceLongTotal?.toFixed(2) || '0.00' }} B空仓: {{ ((marketCardsRef.bybitShortTotal || 0) * 100).toFixed(0) }}
         </span>
       </div>
     </div>
@@ -69,8 +69,12 @@
             <div v-if="marketCardsRef" class="text-center">
               <div class="text-xs text-gray-400 mb-0.5">Bybit 过夜费</div>
               <div class="flex gap-2 justify-center">
-                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.bybitLongSwapFee?.toFixed(2) || '0.00' }}</span>
-                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.bybitShortSwapFee?.toFixed(2) || '0.00' }}</span>
+                <span :class="marketCardsRef.bybitLongSwapFee <= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
+                  多: {{ marketCardsRef.bybitLongSwapFee <= 0 ? '-' : '+' }}{{ Math.abs(marketCardsRef.bybitLongSwapFee ?? 0).toFixed(2) }}
+                </span>
+                <span :class="marketCardsRef.bybitShortSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
+                  空: {{ marketCardsRef.bybitShortSwapFee >= 0 ? '+' : '-' }}{{ Math.abs(marketCardsRef.bybitShortSwapFee ?? 0).toFixed(2) }}
+                </span>
               </div>
             </div>
 
@@ -95,11 +99,16 @@
 
             <!-- Binance Funding Rate -->
             <div v-if="marketCardsRef" class="text-center">
-              <div class="text-xs text-gray-400 mb-0.5">Binance 资金费</div>
+              <div class="text-xs text-gray-400 mb-0.5">Binance 资金费/手</div>
               <div class="flex gap-2 justify-center">
-                <span class="text-[#0ecb81] text-xs font-mono">多: {{ marketCardsRef.binanceLongFundingRate?.toFixed(2) || '0.00' }}</span>
-                <span class="text-[#f6465d] text-xs font-mono">空: {{ marketCardsRef.binanceShortFundingRate?.toFixed(2) || '0.00' }}</span>
+                <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
+                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs(marketCardsRef.binanceLongFundingRate ?? 0).toFixed(2) }}
+                </span>
+                <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
+                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs(marketCardsRef.binanceLongFundingRate ?? 0).toFixed(2) }}
+                </span>
               </div>
+              <div class="text-[10px] text-gray-500 mt-0.5">费率: {{ (marketCardsRef.binanceFundingRatePct ?? 0).toFixed(4) }}%</div>
             </div>
           </template>
         </div>
@@ -365,7 +374,6 @@
           <div
             v-for="(ladder, index) in config.ladders"
             :key="index"
-            v-memo="[ladder.enabled, ladder.openPrice, ladder.threshold, ladder.qtyLimit, ladderFailureCounts.opening[index], ladderFailureCounts.closing[index]]"
             class="bg-[#1a1d21] rounded p-1.5"
           >
             <div class="flex items-center justify-between mb-1.5">

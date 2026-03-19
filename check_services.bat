@@ -45,9 +45,13 @@ echo [4/5] Backend API Service
 netstat -ano | findstr ":8000" | findstr "LISTENING" >nul
 if %ERRORLEVEL%==0 (
     echo     Status: ✓ Running
-    echo     URL: http://localhost:8000
-    echo     Health:
-    curl -s http://localhost:8000/api/v1/health 2>nul
+    echo     URL: http://172.31.5.62:8000
+    curl -s --max-time 3 http://172.31.5.62:8000/api/v1/market/orderbook >nul 2>&1
+    if %ERRORLEVEL%==0 (
+        echo     Health: ✓ API responding
+    ) else (
+        echo     Health: ✗ API not responding ^(CLOSE_WAIT issue - run fix_backend.bat^)
+    )
 ) else (
     echo     Status: ✗ Not Running
 )
@@ -55,10 +59,10 @@ echo.
 
 REM Check Frontend
 echo [5/5] Frontend Dev Server
-netstat -ano | findstr ":5173" | findstr "LISTENING" >nul
+netstat -ano | findstr ":3000" | findstr "LISTENING" >nul
 if %ERRORLEVEL%==0 (
     echo     Status: ✓ Running
-    echo     URL: http://localhost:5173
+    echo     URL: http://172.31.5.62:3000
 ) else (
     echo     Status: ✗ Not Running
 )

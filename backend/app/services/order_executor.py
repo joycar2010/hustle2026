@@ -85,10 +85,25 @@ class OrderExecutor:
             close_position: If True, find and close existing position instead of opening new one
         """
         from app.services.market_service import market_data_service
+        from app.services.mt5_client import MT5Client
         import logging
         logger = logging.getLogger(__name__)
 
-        mt5_client = market_data_service.mt5_client
+        # Use account-specific MT5 client if account has MT5 credentials, else fall back to shared client
+        if account and getattr(account, 'mt5_id', None) and getattr(account, 'mt5_primary_pwd', None) and getattr(account, 'mt5_server', None):
+            mt5_client = MT5Client(
+                login=int(account.mt5_id),
+                password=account.mt5_primary_pwd,
+                server=account.mt5_server
+            )
+            if not mt5_client.connect():
+                logger.error(f"[BYBIT_ORDER] Failed to connect MT5 for account {account.account_id}, falling back to shared client")
+                mt5_client = market_data_service.mt5_client
+            else:
+                logger.info(f"[BYBIT_ORDER] Using account-specific MT5 client for account {account.account_id} (login={account.mt5_id})")
+        else:
+            mt5_client = market_data_service.mt5_client
+            logger.info(f"[BYBIT_ORDER] Using shared MT5 client (no account-specific credentials)")
 
         try:
             # Map side to MT5 order type
@@ -98,7 +113,7 @@ class OrderExecutor:
                 mt5_order_type = mt5.ORDER_TYPE_SELL_LIMIT if order_type.lower() == "limit" else mt5.ORDER_TYPE_SELL
 
             price_val = float(price) if price else None
-            qty_val = float(quantity)
+            qty_val = round(float(quantity), 2)
 
             # Find position to close if this is a closing order
             position_ticket = None
@@ -112,12 +127,21 @@ class OrderExecutor:
                 )
                 logger.info(f"Current positions for {symbol}: {all_positions}")
 
-                position_ticket = await loop.run_in_executor(
+                pos_info = await loop.run_in_executor(
                     None,
-                    lambda: mt5_client.find_position_to_close(symbol, side)
+                    lambda: mt5_client.find_position_to_close(symbol, side, required_volume=qty_val)
                 )
-                if position_ticket:
-                    logger.info(f"Found position to close: ticket={position_ticket}")
+                if pos_info:
+                    position_ticket = pos_info["ticket"]
+                    pos_volume = pos_info["volume"]
+                    # Cap close volume to actual position size to prevent retcode 10014
+                    if qty_val > pos_volume:
+                        logger.warning(
+                            f"[BYBIT_CLOSE] Requested volume {qty_val} > position volume {pos_volume}. "
+                            f"Capping to {pos_volume} to avoid MT5 retcode 10014."
+                        )
+                        qty_val = round(pos_volume, 2)
+                    logger.info(f"Found position to close: ticket={position_ticket}, pos_volume={pos_volume}, close_volume={qty_val}")
                 else:
                     # This should not happen if pre-check in order_executor_v2 works correctly
                     logger.error(f"CRITICAL: No position found to close for {symbol} {side}. "
@@ -215,8 +239,14 @@ class OrderExecutor:
     ) -> Dict[str, Any]:
         """Check Bybit order status via MT5"""
         from app.services.market_service import market_data_service
+        from app.services.mt5_client import MT5Client
 
-        mt5_client = market_data_service.mt5_client
+        if account and getattr(account, 'mt5_id', None) and getattr(account, 'mt5_primary_pwd', None) and getattr(account, 'mt5_server', None):
+            mt5_client = MT5Client(login=int(account.mt5_id), password=account.mt5_primary_pwd, server=account.mt5_server)
+            if not mt5_client.connect():
+                mt5_client = market_data_service.mt5_client
+        else:
+            mt5_client = market_data_service.mt5_client
 
         try:
             ticket = int(order_id)

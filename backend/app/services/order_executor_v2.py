@@ -12,6 +12,23 @@ from app.utils.quantity_converter import quantity_converter
 logger = logging.getLogger(__name__)
 
 
+def _get_mt5_client_for_account(account: Account):
+    """Get account-specific MT5 client, falling back to shared client if credentials missing."""
+    from app.services.market_service import market_data_service
+    from app.services.mt5_client import MT5Client
+    if account and getattr(account, 'mt5_id', None) and getattr(account, 'mt5_primary_pwd', None) and getattr(account, 'mt5_server', None):
+        client = MT5Client(
+            login=int(account.mt5_id),
+            password=account.mt5_primary_pwd,
+            server=account.mt5_server
+        )
+        if client.connect():
+            logger.info(f"[MT5] Using account-specific client for account {account.account_id} (login={account.mt5_id})")
+            return client
+        logger.error(f"[MT5] Failed to connect account-specific client for {account.account_id}, falling back to shared")
+    return market_data_service.mt5_client
+
+
 class OrderExecutorV2:
     """
     Optimized order executor with V2.0 specifications:
@@ -89,8 +106,20 @@ class OrderExecutorV2:
 
         binance_filled_qty = monitor_result["filled_qty"]
         spread_cancelled = monitor_result["spread_cancelled"]
+        binance_api_error = monitor_result.get("api_error", False)
 
         if binance_filled_qty == 0:
+            if binance_api_error:
+                logger.error(f"[REVERSE_OPENING] CRITICAL: Binance API outage detected for order {binance_order_id}, NOT cancelling order")
+                return {
+                    "success": False,
+                    "binance_filled_qty": 0,
+                    "bybit_filled_qty": 0,
+                    "binance_order_id": binance_order_id,
+                    "is_single_leg": False,
+                    "binance_api_error": True,
+                    "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
+                }
             # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
@@ -104,8 +133,6 @@ class OrderExecutorV2:
                 "is_single_leg": False,
                 "message": message
             }
-
-        # Step 3: Place Bybit market BUY order with Binance filled quantity (open LONG position)
         bybit_quantity = quantity_converter.xau_to_lot(binance_filled_qty)
         logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU -> bybit_quantity={bybit_quantity} Lot")
 
@@ -188,8 +215,7 @@ class OrderExecutorV2:
         6. Chase Bybit if not fully filled (1 retry)
         """
         # Step 0: Pre-check Bybit LONG position before placing any orders
-        from app.services.market_service import market_data_service
-        mt5_client = market_data_service.mt5_client
+        mt5_client = _get_mt5_client_for_account(bybit_account)
 
         # Check if LONG position exists
         bybit_positions = mt5_client.get_positions("XAUUSD+")
@@ -252,8 +278,20 @@ class OrderExecutorV2:
 
         binance_filled_qty = monitor_result["filled_qty"]
         spread_cancelled = monitor_result["spread_cancelled"]
+        binance_api_error = monitor_result.get("api_error", False)
 
         if binance_filled_qty == 0:
+            if binance_api_error:
+                logger.error(f"[REVERSE_CLOSING] CRITICAL: Binance API outage detected for order {binance_order_id}, NOT cancelling order")
+                return {
+                    "success": False,
+                    "binance_filled_qty": 0,
+                    "bybit_filled_qty": 0,
+                    "binance_order_id": binance_order_id,
+                    "is_single_leg": False,
+                    "binance_api_error": True,
+                    "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
+                }
             # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
@@ -368,8 +406,20 @@ class OrderExecutorV2:
 
         binance_filled_qty = monitor_result["filled_qty"]
         spread_cancelled = monitor_result["spread_cancelled"]
+        binance_api_error = monitor_result.get("api_error", False)
 
         if binance_filled_qty == 0:
+            if binance_api_error:
+                logger.error(f"[FORWARD_OPENING] CRITICAL: Binance API outage detected for order {binance_order_id}, NOT cancelling order")
+                return {
+                    "success": False,
+                    "binance_filled_qty": 0,
+                    "bybit_filled_qty": 0,
+                    "binance_order_id": binance_order_id,
+                    "is_single_leg": False,
+                    "binance_api_error": True,
+                    "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
+                }
             # Binance order not filled at all, cancel and return success (will retry next time)
             await self.base_executor.cancel_binance_order(
                 binance_account, "XAUUSDT", binance_order_id
@@ -454,8 +504,7 @@ class OrderExecutorV2:
         logger.info(f"[FORWARD_CLOSING] Starting execution: quantity={quantity}, binance_price={binance_price}, bybit_price={bybit_price}")
 
         # Step 0: Pre-check Bybit SHORT position before placing any orders
-        from app.services.market_service import market_data_service
-        mt5_client = market_data_service.mt5_client
+        mt5_client = _get_mt5_client_for_account(bybit_account)
 
         # Check if SHORT position exists
         bybit_positions = mt5_client.get_positions("XAUUSD+")
@@ -527,10 +576,22 @@ class OrderExecutorV2:
 
         binance_filled_qty = monitor_result["filled_qty"]
         spread_cancelled = monitor_result["spread_cancelled"]
+        binance_api_error = monitor_result.get("api_error", False)
 
         logger.info(f"[FORWARD_CLOSING] Binance filled: {binance_filled_qty} XAU")
 
         if binance_filled_qty == 0:
+            if binance_api_error:
+                logger.error(f"[FORWARD_CLOSING] CRITICAL: Binance API outage detected for order {binance_order_id}, NOT cancelling order")
+                return {
+                    "success": False,
+                    "binance_filled_qty": 0,
+                    "bybit_filled_qty": 0,
+                    "binance_order_id": binance_order_id,
+                    "is_single_leg": False,
+                    "binance_api_error": True,
+                    "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
+                }
             # Binance order not filled at all, cancel and return success (will retry next time)
             logger.info(f"[FORWARD_CLOSING] Binance not filled, cancelling order {binance_order_id}")
             await self.base_executor.cancel_binance_order(
@@ -626,6 +687,8 @@ class OrderExecutorV2:
         start_time = time.time()
         check_interval = self.order_check_interval
         last_spread_check = 0
+        api_error_count = 0
+        MAX_API_ERRORS = 3  # Consecutive API failures before treating as exchange outage
 
         while time.time() - start_time < timeout:
             # Check order status
@@ -636,8 +699,26 @@ class OrderExecutorV2:
             if status.get("success") and status.get("filled"):
                 return {
                     "filled_qty": status.get("filled_qty", 0),
-                    "spread_cancelled": False
+                    "spread_cancelled": False,
+                    "api_error": False
                 }
+
+            if not status.get("success"):
+                api_error_count += 1
+                logger.error(f"[BINANCE_MONITOR] API error #{api_error_count} for order {order_id}: {status.get('error')}")
+                if api_error_count >= MAX_API_ERRORS:
+                    # Binance API is down — do NOT cancel the order (cancel may also fail)
+                    # Return with api_error flag so caller can trigger emergency alert
+                    logger.error(f"[BINANCE_MONITOR] CRITICAL: Binance API consecutive failures={api_error_count}, treating as exchange outage for order {order_id}")
+                    return {
+                        "filled_qty": 0,
+                        "spread_cancelled": False,
+                        "api_error": True,
+                        "api_error_count": api_error_count,
+                        "order_id": order_id
+                    }
+            else:
+                api_error_count = 0  # Reset on successful API call
 
             # Real-time spread checking (every 2 seconds to avoid excessive API calls)
             current_time = time.time()
@@ -666,17 +747,22 @@ class OrderExecutorV2:
                         else:
                             current_spread = None
 
-                        # Check if spread condition is still met
+                        # Check if spread condition is still met (with 0.5 USD tolerance)
                         if current_spread is not None:
                             spread_met = False
-                            if compare_op == '>':
-                                spread_met = current_spread > spread_threshold
+                            tolerance = 0.5  # 0.5 USD tolerance to avoid cancelling due to minor fluctuations
+                            if compare_op == '>=':
+                                # Opening: allow 0.5 USD below threshold
+                                spread_met = current_spread >= (spread_threshold - tolerance)
+                            elif compare_op == '>':
+                                spread_met = current_spread > (spread_threshold - tolerance)
                             elif compare_op == '<=':
-                                spread_met = current_spread <= spread_threshold
+                                # Closing: allow 0.5 USD above threshold
+                                spread_met = current_spread <= (spread_threshold + tolerance)
 
-                            # If spread no longer meets condition, cancel order immediately
+                            # If spread no longer meets condition (with tolerance), cancel order immediately
                             if not spread_met:
-                                logger.info(f"Spread condition no longer met: {current_spread} {compare_op} {spread_threshold}, cancelling order")
+                                logger.info(f"Spread condition no longer met (tolerance={tolerance}): {current_spread} {compare_op} {spread_threshold}, cancelling order")
                                 await self.base_executor.cancel_binance_order(account, symbol, order_id)
 
                                 # Check final status after cancellation
@@ -686,7 +772,8 @@ class OrderExecutorV2:
 
                                 return {
                                     "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-                                    "spread_cancelled": True
+                                    "spread_cancelled": True,
+                                    "api_error": False
                                 }
                     except Exception as e:
                         logger.error(f"Error checking spread during order monitoring: {e}")
@@ -704,7 +791,8 @@ class OrderExecutorV2:
 
         return {
             "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-            "spread_cancelled": False
+            "spread_cancelled": False,
+            "api_error": False
         }
 
     async def _execute_bybit_market_buy(
@@ -725,7 +813,7 @@ class OrderExecutorV2:
         """
         logger.info(f"[BYBIT_BUY] Starting: quantity={quantity} Lot, close_position={close_position}")
         total_filled = 0
-        remaining = quantity
+        remaining = round(quantity, 2)
 
         for attempt in range(self.max_retries + 1):  # Initial + 1 retry
             logger.info(f"[BYBIT_BUY] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
@@ -736,7 +824,7 @@ class OrderExecutorV2:
                 symbol=symbol,
                 side="Buy",
                 order_type="Market",
-                quantity=str(remaining),
+                quantity=str(round(remaining, 2)),
                 close_position=close_position,
             )
 
@@ -783,7 +871,7 @@ class OrderExecutorV2:
                     break
 
                 # Partially filled, update remaining
-                remaining -= actual_filled
+                remaining = round(remaining - actual_filled, 2)
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
@@ -814,7 +902,7 @@ class OrderExecutorV2:
         """
         logger.info(f"[BYBIT_SELL] Starting: quantity={quantity} Lot, close_position={close_position}")
         total_filled = 0
-        remaining = quantity
+        remaining = round(quantity, 2)
 
         for attempt in range(self.max_retries + 1):  # Initial + 1 retry
             logger.info(f"[BYBIT_SELL] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
@@ -825,7 +913,7 @@ class OrderExecutorV2:
                 symbol=symbol,
                 side="Sell",
                 order_type="Market",
-                quantity=str(remaining),
+                quantity=str(round(remaining, 2)),
                 close_position=close_position,
             )
 
@@ -872,7 +960,7 @@ class OrderExecutorV2:
                     break
 
                 # Partially filled, update remaining
-                remaining -= actual_filled
+                remaining = round(remaining - actual_filled, 2)
 
                 if attempt == self.max_retries:
                     # Last attempt, log warning
@@ -902,10 +990,8 @@ class OrderExecutorV2:
         Returns:
             Dict with actual_filled, expected, is_partial_fill, fill_ratio
         """
-        from app.services.market_service import market_data_service
-
         try:
-            mt5_client = market_data_service.mt5_client
+            mt5_client = _get_mt5_client_for_account(account)
 
             # Get deals for this ticket
             deals = mt5_client.get_deals_by_ticket(ticket)

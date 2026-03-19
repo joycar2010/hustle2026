@@ -52,15 +52,15 @@ if "%ERRORLEVEL%"=="0" (
     echo WARNING: Port 8000 still in use, backend may already be running...
 ) else (
     echo Starting Backend Service...
-    start "Hustle2026-Backend" /D "C:\app\hustle2026\backend" cmd /k "C:\Python39\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    start "Hustle2026-Backend" /D "C:\app\hustle2026\backend" cmd /k "C:\Python39\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 >> backend_live.log 2>&1"
     timeout /t 5 /nobreak >nul
 )
 
 REM Start Frontend Service
 echo [4/4] Checking Frontend Service...
-netstat -ano | findstr ":5173" | findstr "LISTENING" >NUL
+netstat -ano | findstr ":3000" | findstr "LISTENING" >NUL
 if "%ERRORLEVEL%"=="0" (
-    echo Frontend service is already running on port 5173, skipping...
+    echo Frontend service is already running on port 3000, skipping...
 ) else (
     echo Starting Frontend Service...
     start "Hustle2026-Frontend" /D "C:\app\hustle2026\frontend" cmd /k "npm run dev"
@@ -73,8 +73,8 @@ echo All Services Started Successfully!
 echo ========================================
 echo Nginx: https://app.hustle2026.xyz
 echo MetaTrader 5: Running
-echo Backend: http://localhost:8000
-echo Frontend: http://localhost:5173
+echo Backend: http://172.31.5.62:8000
+echo Frontend: http://172.31.5.62:3000
 echo.
 echo Press any key to close this window...
 pause >nul

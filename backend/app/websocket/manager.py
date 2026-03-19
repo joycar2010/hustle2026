@@ -104,6 +104,27 @@ class ConnectionManager:
         }
         await self.broadcast(message)
 
+    async def broadcast_position_snapshot(
+        self,
+        bybit_long_lots: float,
+        bybit_short_lots: float,
+        binance_long_xau: float = 0.0,
+        binance_short_xau: float = 0.0,
+    ):
+        """Broadcast real-time position snapshot after a trade fill.
+        Bypasses the 60s account cache — data is read directly from exchanges.
+        """
+        message = {
+            "type": "position_snapshot",
+            "data": {
+                "bybit_long_lots": bybit_long_lots,
+                "bybit_short_lots": bybit_short_lots,
+                "binance_long_xau": binance_long_xau,
+                "binance_short_xau": binance_short_xau,
+            },
+        }
+        await self.broadcast(message)
+
     async def broadcast_account_balance(self, balance_data: dict):
         """Broadcast account balance to all connections"""
         message = {

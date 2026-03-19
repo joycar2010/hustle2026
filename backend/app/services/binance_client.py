@@ -207,6 +207,12 @@ class BinanceFuturesClient:
             "GET", "/fapi/v1/fundingRate", params={"symbol": symbol, "limit": limit}
         )
 
+    async def get_premium_index(self, symbol: str) -> dict:
+        """Get real-time mark price and funding rate (premiumIndex)"""
+        return await self._request(
+            "GET", "/fapi/v1/premiumIndex", params={"symbol": symbol}
+        )
+
     # Private endpoints (authentication required)
 
     async def get_account(self) -> Dict[str, Any]:

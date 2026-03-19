@@ -590,3 +590,553 @@ Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'b
 Executor is_running: False
 Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x000002B13FA1BAC0>
 
+
+================================================================================
+[2026-03-18 08:22:38.832413] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 2.5, 'closing_spread': -1.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 2}]}
+================================================================================
+[2026-03-18 08:22:38.848055] Task created: e264bc9b-aa1b-424d-99cb-f37eb8ddc32a
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x000001B96048D040>
+
+
+================================================================================
+[2026-03-18 08:24:03.998217] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 2.5, 'closing_spread': -1.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 2}]}
+================================================================================
+[2026-03-18 08:24:04.013897] Task created: bfc0b7b7-cd3d-434f-a487-bcf3ced7287e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x000001B96028A740>
+
+[2026-03-18 11:14:57.425822] Task created: 1e95acc7-b554-44b6-a76d-5d8c4502eb9e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000020244B42840>
+
+[2026-03-18 11:15:25.153778] Task created: 7a0973eb-e7fd-42cf-98d6-311c11faf72d
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000020244B427C0>
+
+
+================================================================================
+[2026-03-18 11:18:11.909865] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -2.5, 'closing_spread': 0.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 11:18:11.909865] Task created: 772af032-511d-4d83-a3fa-fab1b50ad563
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x00000202448333C0>
+
+[2026-03-18 11:25:02.323240] Task created: 79cad7ee-b091-4ee7-89d4-bd67a1d2f19c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244391A40>
+
+
+================================================================================
+[2026-03-18 11:25:25.579931] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -2.0, 'closing_spread': 0.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 11:25:25.579931] Task created: 5fef26bb-b609-401e-9e5a-897893aaba7d
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244ED6DC0>
+
+
+================================================================================
+[2026-03-18 11:32:49.243462] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -2.0, 'closing_spread': 0.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 11:32:49.259111] Task created: 28a041b8-536b-4a66-9711-8007f86bd822
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x00000202448DBDC0>
+
+
+================================================================================
+[2026-03-18 11:33:09.123144] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -2.2, 'closing_spread': 0.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 11:33:09.138789] Task created: cba4d6af-0b3f-4d9b-86fd-bfeb234b62a4
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244B603C0>
+
+
+================================================================================
+[2026-03-18 11:50:29.210753] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -2.2, 'closing_spread': 0.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 11:50:29.226416] Task created: 712d321c-16bb-4ad8-bbe4-2d451cf6e79e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244DADA40>
+
+[2026-03-18 12:52:50.933120] Task created: 37b9ab67-c4e0-4117-89f9-ad819bf2d1ce
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000202448C1DC0>
+
+
+================================================================================
+[2026-03-18 14:05:54.162464] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -2.2, 'closing_spread': -6.0, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 14:05:54.176013] Task created: 02f2ae93-917c-498e-ace9-276ec713d079
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244EC1E40>
+
+
+================================================================================
+[2026-03-18 14:19:45.316661] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -3.0, 'closing_spread': -6.0, 'total_qty': 6.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 14:19:45.332388] Task created: 0abb51d7-4528-4eb9-9790-4041ee429f6c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244EB0A40>
+
+
+================================================================================
+[2026-03-18 14:25:41.465751] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -3.0, 'closing_spread': -6.0, 'total_qty': 6.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 14:25:41.481473] Task created: 4110ab6c-93d9-4f07-8bdf-812a774f9022
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244933340>
+
+
+================================================================================
+[2026-03-18 14:27:14.107654] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -3.0, 'closing_spread': -6.0, 'total_qty': 6.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 14:27:14.120695] Task created: 8a686f16-e7be-4f2a-a339-2b615a3dc4fc
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x000002024499A340>
+
+
+================================================================================
+[2026-03-18 14:28:35.676054] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -3.0, 'closing_spread': -6.0, 'total_qty': 6.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 14:28:35.682101] Task created: 64767922-2a38-4745-814a-a2798628bb87
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244752740>
+
+[2026-03-18 15:50:52.594524] Task created: fe87300c-499e-480c-a68e-11a43329033a
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244DA86C0>
+
+
+================================================================================
+[2026-03-18 16:23:25.522750] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -3.0, 'closing_spread': -4.3, 'total_qty': 6.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 16:23:25.538484] Task created: 2c63d7d7-bb89-466d-b8b2-d1a411ec719e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244A29440>
+
+[2026-03-18 17:17:11.330787] Task created: 7b112399-b72d-468e-874c-9085e7d2da67
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000202444079C0>
+
+[2026-03-18 17:29:47.884422] Task created: f8e746a8-ea20-4ad6-98f0-19c84a745639
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244D7CDC0>
+
+[2026-03-18 17:39:54.767009] Task created: 0f5005f0-a337-43a1-a8ba-e5106c0b1873
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244DADF40>
+
+[2026-03-18 17:43:06.171394] Task created: 31759e62-5b57-4b4e-9fcc-33f3b04dbb3b
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000202447529C0>
+
+[2026-03-18 18:23:57.179960] Task created: d03cde8e-78f8-4dd0-b268-9369ccec2cf5
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x000002024499AAC0>
+
+[2026-03-18 18:31:18.189983] Task created: a33900b8-8bf9-4baa-9ffd-2968818fab41
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244933140>
+
+[2026-03-18 18:43:18.703087] Task created: bb71b3ae-410c-457b-9d65-9bb7327f5295
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000202443DAB40>
+
+[2026-03-18 18:45:59.362226] Task created: 940f33d5-3dfb-4662-bd46-75dbee2232f2
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000202448BE0C0>
+
+[2026-03-18 18:46:37.873530] Task created: 9b32dab2-5343-4866-b575-bdc6a6a44b46
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244EC2440>
+
+
+================================================================================
+[2026-03-18 19:04:25.947803] API CALLED: /execute/forward/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': -3.0, 'closing_spread': -3.0, 'total_qty': 3.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 19:04:25.947803] Task created: 9f4bb454-644a-451e-9282-69b0bdebeca2
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x0000020244A292C0>
+
+[2026-03-18 19:04:31.846258] Task created: 874b7e24-5330-432f-9f22-4f3796704634
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244D22140>
+
+[2026-03-18 19:04:41.546433] Task created: 023fd605-61d2-429a-bee4-a22f0dd3069c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244D22340>
+
+[2026-03-18 19:08:32.801060] Task created: 9d4743a8-69d4-4c70-9008-00d4e6484d78
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x00000202448DB5C0>
+
+[2026-03-18 19:08:45.726146] Task created: e67cae4f-c1dd-4e32-8b34-96142cd7a0db
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244B604C0>
+
+[2026-03-18 19:18:02.395245] Task created: 1bd1b70f-3ea1-4a73-a876-e48710aaa79b
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000020244D222C0>
+
+
+================================================================================
+[2026-03-18 23:45:55.469060] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 2.5, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:45:55.469060] Task created: 5863ce90-361f-4521-bec0-7863b593810e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244EEDF40>
+
+
+================================================================================
+[2026-03-18 23:47:45.816348] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:47:45.832022] Task created: 5492a6a6-a970-4c4d-80b0-c4b478cdaad2
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244D600C0>
+
+
+================================================================================
+[2026-03-18 23:50:20.780499] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:50:20.796148] Task created: e2e9d299-af68-4a6e-a2d8-3a03b6205b11
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x00000202449F8340>
+
+
+================================================================================
+[2026-03-18 23:51:13.062677] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:51:13.078342] Task created: 591b05e2-7a86-43bc-8ad3-7098f6f8af09
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244B47540>
+
+
+================================================================================
+[2026-03-18 23:51:36.116331] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:51:36.132002] Task created: 36fc97bc-a0d1-4c86-bbe2-6ebf5b50ce34
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244DAD9C0>
+
+
+================================================================================
+[2026-03-18 23:52:16.394655] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:52:16.410322] Task created: 5c3664f1-4adc-46a4-9d24-c475dadcf0d5
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244B60DC0>
+
+
+================================================================================
+[2026-03-18 23:53:40.437033] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:53:40.437033] Task created: ab957532-d2a5-4279-9702-c9ce3a9be894
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x00000202448C1040>
+
+
+================================================================================
+[2026-03-18 23:54:36.594954] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:54:36.594954] Task created: 5b385312-a226-43a4-a603-deb5c37fb63c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244848A40>
+
+
+================================================================================
+[2026-03-18 23:55:11.762442] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 2.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:55:11.762442] Task created: 21cf1250-cf1b-4839-9ba4-b871333de34c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244EEDA40>
+
+
+================================================================================
+[2026-03-18 23:55:45.024416] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-18 23:55:45.040084] Task created: 599ba52d-1900-4c38-8377-785603009814
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244EC1CC0>
+
+
+================================================================================
+[2026-03-19 00:36:51.136655] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 00:36:51.136655] Task created: 2092e614-9b79-4606-91a4-cb94e8404515
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244D77540>
+
+
+================================================================================
+[2026-03-19 00:43:57.538381] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 1.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 00:43:57.538381] Task created: b59b262f-763c-438a-b5fb-17ad8ea1f6a7
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000020244EC2C40>
+
+[2026-03-19 05:05:37.628634] Task created: 1539e85c-ec45-4cc8-93cb-aae5454ba76c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x00000202448BFDC0>
+
+
+================================================================================
+[2026-03-19 07:41:13.053103] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 2.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 0.6, 'total_qty': 4.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 07:41:13.632072] Task created: a2a65676-8823-4ff8-be3e-647a611f619c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000021A7DC5F140>
+
+
+================================================================================
+[2026-03-19 07:42:57.564474] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 2.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.3, 'closing_spread': 0.6, 'total_qty': 3.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 07:42:57.573504] Task created: 16826e91-5e3b-4d7b-a15c-107eeaf23a55
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000021A7ECED7C0>
+
+
+================================================================================
+[2026-03-19 08:52:19.831042] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 2.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.5, 'closing_spread': 0.6, 'total_qty': 3.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 08:52:19.869603] Task created: 7b4d8f24-46f4-44a1-9188-f51329e7affb
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000022FC1CD4BC0>
+
+
+================================================================================
+[2026-03-19 09:26:49.881182] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.3, 'closing_spread': 0.6, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:26:49.907907] Task created: 7fc8a303-6e10-455f-8590-4dfd33400558
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B0B494E40>
+
+
+================================================================================
+[2026-03-19 09:28:42.441841] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 3.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.3, 'closing_spread': 0.6, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:28:42.457565] Task created: fa24d671-73c7-44ae-8651-d8ae771d4bff
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B09B5BB40>
+
+[2026-03-19 09:33:35.826720] Task created: 426106f1-5305-4468-a32d-1fca6fd8b728
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000019B0A365DC0>
+
+
+================================================================================
+[2026-03-19 09:37:58.527671] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:37:58.536687] Task created: a704a321-2f18-431f-b854-addc306e53f0
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B09FEF1C0>
+
+
+================================================================================
+[2026-03-19 09:41:04.280199] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:41:04.280199] Task created: a6115f61-8481-4215-8e29-e59f709c9fee
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B0A365640>
+
+
+================================================================================
+[2026-03-19 09:42:33.400429] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:42:33.400429] Task created: 7bedeea6-e10d-4e4c-9310-2bd981adbce1
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B0A1C16C0>
+
+
+================================================================================
+[2026-03-19 09:45:47.782957] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 4.3, 'closing_spread': 2.5, 'total_qty': 10.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:45:47.791957] Task created: 6a5fd6d5-272e-432a-a317-caa9151e2e34
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B0B534840>
+
+
+================================================================================
+[2026-03-19 09:51:58.619054] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 5.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 5.0, 'closing_spread': 2.5, 'total_qty': 5.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:51:58.634070] Task created: f7b5adbd-ebc1-4907-a348-a0694a12415c
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B0B3E5F40>
+
+
+================================================================================
+[2026-03-19 09:57:53.400263] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 1.0, 'closing_m_coin': 3.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 1.0, 'closing_spread': 2.5, 'total_qty': 5.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 09:57:53.410308] Task created: c3bd31d5-a7fd-48fe-87c6-a33ce090076a
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B0A2A2A40>
+
+
+================================================================================
+[2026-03-19 10:18:23.634952] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 2.0, 'closing_m_coin': 5.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 5.0, 'closing_spread': 2.5, 'total_qty': 4.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 10:18:23.644000] Task created: 9acf52d5-781d-4629-a8bc-af28bcc6ca94
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B09B8DEC0>
+
+
+================================================================================
+[2026-03-19 10:19:49.243434] API CALLED: /execute/reverse/continuous
+User ID: 0bc9c5f7-dc77-4f7d-bfbf-4b347a934b24
+Request: {'binance_account_id': UUID('c3b7d20d-787a-4bdd-9f92-d73716630bcf'), 'bybit_account_id': UUID('1ce0146d-b2cb-467d-8b34-ff951e696563'), 'opening_m_coin': 2.0, 'closing_m_coin': 5.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 5.0, 'closing_spread': 2.5, 'total_qty': 4.0, 'opening_trigger_count': 3, 'closing_trigger_count': 3}]}
+================================================================================
+[2026-03-19 10:19:49.259086] Task created: 193b0e2a-e8f9-48a4-907b-dfb1b8d0c476
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000019B09DD2E40>
+
+[2026-03-19 10:22:24.633087] Task created: 127b9526-8cb1-4ee0-b1bf-35c595ddfebb
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000019B09DC5E40>
+
+[2026-03-19 10:23:46.160985] Task created: 5d27beec-1537-4412-b576-65f656e5d027
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000019B0B696340>
+
+
+================================================================================
+[2026-03-19 12:04:36.198029] API CALLED: /execute/reverse/continuous
+User ID: 66764cd6-d1c9-4468-a478-85b526a16927
+Request: {'binance_account_id': UUID('cc49ea65-9fd3-4c82-882b-413c379f5ded'), 'bybit_account_id': UUID('1f99fd4d-d40d-4a5a-909d-7f91931472f9'), 'opening_m_coin': 4.0, 'closing_m_coin': 2.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 3.0, 'closing_spread': 2.0, 'total_qty': 6.0, 'opening_trigger_count': 1, 'closing_trigger_count': 1}]}
+================================================================================
+[2026-03-19 12:04:36.235104] Task created: 53e2b226-60ea-44fc-a62c-22115feb654e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000023822500040>
+
+
+================================================================================
+[2026-03-19 12:05:59.239563] API CALLED: /execute/reverse/continuous
+User ID: 66764cd6-d1c9-4468-a478-85b526a16927
+Request: {'binance_account_id': UUID('cc49ea65-9fd3-4c82-882b-413c379f5ded'), 'bybit_account_id': UUID('1f99fd4d-d40d-4a5a-909d-7f91931472f9'), 'opening_m_coin': 5.0, 'closing_m_coin': 2.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 6.0, 'closing_spread': 2.0, 'total_qty': 10.0, 'opening_trigger_count': 1, 'closing_trigger_count': 1}]}
+================================================================================
+[2026-03-19 12:05:59.255283] Task created: b709c30a-5932-40e4-a09c-8e98efee816e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000023822432840>
+
+
+================================================================================
+[2026-03-19 12:08:12.454913] API CALLED: /execute/reverse/continuous
+User ID: 66764cd6-d1c9-4468-a478-85b526a16927
+Request: {'binance_account_id': UUID('cc49ea65-9fd3-4c82-882b-413c379f5ded'), 'bybit_account_id': UUID('1f99fd4d-d40d-4a5a-909d-7f91931472f9'), 'opening_m_coin': 5.0, 'closing_m_coin': 2.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 6.0, 'closing_spread': 2.0, 'total_qty': 10.0, 'opening_trigger_count': 1, 'closing_trigger_count': 1}]}
+================================================================================
+[2026-03-19 12:08:12.486194] Task created: 6ba59ac1-594a-477d-a8a4-ba56597c57c9
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x000002382242B7C0>
+
+[2026-03-19 14:00:25.751492] Task created: 7543ec31-dd4a-4fd1-b753-1845366a000e
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000029C609B85C0>
+
+[2026-03-19 14:02:32.234345] Task created: 9a9f6d94-4967-4e5b-895f-7163138a1b4d
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000029C60A7C140>
+
+[2026-03-19 14:04:10.891861] Task created: a563b1a6-abd6-45d6-b3e0-cd189b77ccae
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000029C6055F3C0>
+
+[2026-03-19 14:11:15.364615] Task created: dd54c715-9064-453d-a03b-aecb9fb42b38
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000029C60A7CC40>
+
+[2026-03-19 14:12:17.588385] Task created: e1c34751-a411-471d-8620-6a36f9c2b6a7
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_closing_continuous at 0x0000029C60A7C8C0>
+
+
+================================================================================
+[2026-03-19 14:19:47.001888] API CALLED: /execute/reverse/continuous
+User ID: 66764cd6-d1c9-4468-a478-85b526a16927
+Request: {'binance_account_id': UUID('cc49ea65-9fd3-4c82-882b-413c379f5ded'), 'bybit_account_id': UUID('1f99fd4d-d40d-4a5a-909d-7f91931472f9'), 'opening_m_coin': 5.0, 'closing_m_coin': 5.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 6.0, 'closing_spread': 2.0, 'total_qty': 10.0, 'opening_trigger_count': 2, 'closing_trigger_count': 2}]}
+================================================================================
+[2026-03-19 14:19:47.006905] Task created: ce58b2a1-7c7e-4a35-9cef-016b129b09c9
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000029C61D39740>
+
+[2026-03-19 14:24:29.670375] Task created: 087c5ac6-8bea-487c-83bd-ae536e5fe959
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000029C60AAA4C0>
+
+[2026-03-19 14:24:56.965988] Task created: c6ed166e-ed67-41bd-b535-f0d4151ae697
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000029C60B01740>
+

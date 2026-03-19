@@ -4,6 +4,10 @@ from app.websocket.manager import manager
 from app.core.security import decode_access_token
 from pydantic import BaseModel, Field
 import asyncio
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -56,7 +60,16 @@ async def websocket_endpoint(
             # Receive message from client
             data = await websocket.receive_text()
 
-            # Echo back (can be extended for client commands)
+            # Handle client commands
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "request_snapshot":
+                    asyncio.create_task(_push_initial_snapshot(websocket))
+                    continue
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+            # Echo back unknown messages
             await manager.send_personal_message(
                 {"type": "echo", "message": data},
                 websocket,
@@ -66,6 +79,71 @@ async def websocket_endpoint(
         manager.disconnect(websocket, user_id)
     except Exception as e:
         manager.disconnect(websocket, user_id)
+
+
+async def _push_initial_snapshot(websocket: WebSocket):
+    """Read current MT5 + Binance positions and push position_snapshot to this client."""
+    try:
+        from app.models.account import Account
+        from app.services.mt5_client import MT5Client
+        from app.services.binance_client import BinanceFuturesClient
+        from app.core.database import get_db_context
+        from sqlalchemy import select
+
+        long_lots = 0.0
+        short_lots = 0.0
+        binance_long_xau = 0.0
+        binance_short_xau = 0.0
+
+        async with get_db_context() as db:
+            result = await db.execute(select(Account).where(Account.is_active == True))
+            accounts = result.scalars().all()
+
+        for acc in accounts:
+            if acc.platform_id == 2 and acc.is_mt5_account and acc.mt5_id and acc.mt5_primary_pwd and acc.mt5_server:
+                # Bybit MT5 — use shared client from realtime_market_service to avoid connection conflicts
+                try:
+                    from app.services.realtime_market_service import market_data_service
+                    mt5 = market_data_service.mt5_client
+                    if mt5 and mt5.connected:
+                        positions = mt5.get_positions("XAUUSD+")
+                    else:
+                        mt5 = MT5Client(int(acc.mt5_id), acc.mt5_primary_pwd, acc.mt5_server)
+                        positions = mt5.get_positions("XAUUSD+")
+                    long_lots = round(sum(p['volume'] for p in positions if p.get('type') == 0), 2)
+                    short_lots = round(sum(p['volume'] for p in positions if p.get('type') == 1), 2)
+                except Exception as e:
+                    logger.warning(f"[SNAPSHOT] MT5 read failed: {e}")
+            elif acc.platform_id == 1 and acc.api_key and acc.api_secret:
+                # Binance
+                try:
+                    client = BinanceFuturesClient(acc.api_key, acc.api_secret)
+                    pos_data = await client.get_position_risk("XAUUSDT")
+                    await client.close()
+                    for pos in pos_data:
+                        amt = float(pos.get("positionAmt", 0))
+                        if amt > 0:
+                            binance_long_xau = round(amt, 3)
+                        elif amt < 0:
+                            binance_short_xau = round(abs(amt), 3)
+                except Exception as e:
+                    logger.warning(f"[SNAPSHOT] Binance read failed: {e}")
+
+        await manager.send_personal_message(
+            {
+                "type": "position_snapshot",
+                "data": {
+                    "bybit_long_lots": long_lots,
+                    "bybit_short_lots": short_lots,
+                    "binance_long_xau": binance_long_xau,
+                    "binance_short_xau": binance_short_xau,
+                }
+            },
+            websocket,
+        )
+        logger.info(f"[SNAPSHOT] Initial push: bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
+    except Exception as e:
+        logger.warning(f"[SNAPSHOT] Initial push failed: {e}")
 
 
 @router.get("/ws/stats")

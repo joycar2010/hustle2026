@@ -58,6 +58,7 @@ class AccountBalanceStreamer:
         self.broadcast_count = 0
         self.last_broadcast_time = None
         self.error_count = 0
+        self._immediate_refresh = asyncio.Event()  # Set to trigger an out-of-cycle broadcast
 
     def update_interval(self, new_interval: int):
         """Update streaming interval (5s - 60s)"""
@@ -86,13 +87,27 @@ class AccountBalanceStreamer:
                 pass
         logger.info("Account balance streamer stopped")
 
+    async def _wait_for_event(self):
+        """Wait until immediate refresh is signalled."""
+        await self._immediate_refresh.wait()
+
     async def _stream_loop(self):
         """Main streaming loop with connection pool optimization"""
         while self.running:
             try:
+                # Wait for either the normal interval OR an immediate-refresh signal
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(self._wait_for_event()),
+                        timeout=self.interval
+                    )
+                except asyncio.TimeoutError:
+                    pass  # Normal interval elapsed
+
+                self._immediate_refresh.clear()
+
                 # Only broadcast if there are active connections
                 if manager.get_connection_count() == 0:
-                    await asyncio.sleep(self.interval)
                     continue
 
                 # Fetch all active accounts from database with timeout control
@@ -108,7 +123,6 @@ class AccountBalanceStreamer:
                 # Session is now closed, safe to make external API calls
 
                 if not active_accounts:
-                    await asyncio.sleep(self.interval)
                     continue
 
                 # Fetch aggregated account data (makes external API calls, no DB connection held)
@@ -123,9 +137,6 @@ class AccountBalanceStreamer:
 
                 # Check spread alerts every 20 seconds
                 await self._check_spread_alerts(active_accounts)
-
-                # Wait for next interval
-                await asyncio.sleep(self.interval)
 
             except asyncio.TimeoutError:
                 logger.error(f"Account balance stream timeout, extending retry interval")

@@ -344,8 +344,13 @@ const bybitShortTotal = computed(() => {
 // Fee data
 const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
-const binanceLongFundingRate = ref(0)
-const binanceShortFundingRate = ref(0)
+let bybitSwapRateTimer = null
+// Binance real-time funding rate (per lot = 100 XAU)
+const binanceLongFundingRate = ref(0)   // long_cost_per_lot: >0 long pays, <0 long receives
+const binanceShortFundingRate = ref(0)  // short_cost_per_lot: opposite sign
+const binanceFundingRatePct = ref(0)    // raw rate percentage for display
+const binanceNextFundingTime = ref(0)   // next settlement timestamp ms
+let fundingRateTimer = null
 
 // USD/USDT exchange rate
 const usdToUsdtRate = ref(1.0)
@@ -499,17 +504,34 @@ watch(() => marketStore.connected, (val) => {
 // Watch for account balance updates via WebSocket
 // Optimized: Only trigger when message type is account_balance
 watch(() => marketStore.lastMessage, (message) => {
-  if (message && message.type === 'account_balance') {
+  if (!message) return
+  if (message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
-  }
-}, { deep: false })
-
-// Watch for Redis status updates via WebSocket
-watch(() => marketStore.lastMessage, (message) => {
-  if (message && message.type === 'redis_status') {
+  } else if (message.type === 'position_snapshot') {
+    handlePositionSnapshot(message.data)
+  } else if (message.type === 'mt5_position_update') {
+    handleMt5PositionUpdate(message.data)
+  } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
   }
 }, { deep: false })
+
+// position_snapshot: real-time data pushed immediately after a trade fill.
+// Atomically replaces both Bybit and Binance positions — no intermediate zero state, no flash.
+function handlePositionSnapshot(data) {
+  if (!data) return
+  const longLots = data.bybit_long_lots ?? 0
+  const shortLots = data.bybit_short_lots ?? 0
+  const binanceLong = data.binance_long_xau ?? 0
+  const binanceShort = data.binance_short_xau ?? 0
+  // Atomic swap: replace all arrays in one tick
+  bybitLongPositions.value = longLots > 0 ? [{ size: longLots }] : []
+  bybitShortPositions.value = shortLots > 0 ? [{ size: shortLots }] : []
+  if (binanceLong > 0 || binanceShort > 0) {
+    binanceLongPositions.value = binanceLong > 0 ? [{ size: binanceLong }] : []
+    binanceShortPositions.value = binanceShort > 0 ? [{ size: binanceShort }] : []
+  }
+}
 
 function handleAccountBalanceUpdate(data) {
   console.log('[handleAccountBalanceUpdate] Received data:', {
@@ -520,11 +542,8 @@ function handleAccountBalanceUpdate(data) {
 
   // Extract fee data from accounts
   if (data.accounts && data.accounts.length > 0) {
-    // Reset fee values
-    bybitLongSwapFee.value = 0
-    bybitShortSwapFee.value = 0
-    binanceLongFundingRate.value = 0
-    binanceShortFundingRate.value = 0
+    // Note: bybitLongSwapFee / bybitShortSwapFee are now fetched in real-time
+    // via fetchBybitSwapRate() polling — do NOT overwrite them here.
 
     // Reset position values
     forwardActualPosition.value = 0
@@ -545,72 +564,44 @@ function handleAccountBalanceUpdate(data) {
     // Aggregate fees from all accounts
     data.accounts.forEach(account => {
       if (account.platform_id === 2) {
-        // Bybit accounts
-        bybitLongSwapFee.value += account.balance?.long_swap_fee || 0
-        bybitShortSwapFee.value += account.balance?.short_swap_fee || 0
-      } else if (account.platform_id === 1) {
-        // Binance accounts
-        binanceLongFundingRate.value += account.balance?.long_funding_rate || 0
-        binanceShortFundingRate.value += account.balance?.short_funding_rate || 0
+        // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
+        // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
       }
     })
   }
 
   // Extract actual positions from positions array for spread calculation
   if (data.positions && data.positions.length > 0) {
-    console.log('[handleAccountBalanceUpdate] Before reset:', {
-      binanceLong: binanceLongPositions.value.length,
-      binanceShort: binanceShortPositions.value.length,
-      bybitLong: bybitLongPositions.value.length,
-      bybitShort: bybitShortPositions.value.length
-    })
+    // Build new arrays first, then atomically swap — prevents flash-to-zero
+    const newBinanceLong = []
+    const newBinanceShort = []
+    const newBybitLong = []
+    const newBybitShort = []
 
-    // Reset position arrays
-    binanceShortPositions.value = []
-    binanceLongPositions.value = []
-    bybitShortPositions.value = []
-    bybitLongPositions.value = []
-
-    // Aggregate positions by platform and side
     data.positions.forEach(position => {
-      // Find the account for this position to get platform_id
       const account = data.accounts?.find(acc => acc.account_id === position.account_id)
       if (!account) return
 
-      const posSize = Math.abs(position.size || 0)
       const posData = {
-        size: posSize,
+        size: Math.abs(position.size || 0),
         entry_price: position.entry_price || 0,
         current_price: position.current_price || 0
       }
 
       if (account.platform_id === 2) {
-        // Bybit MT5 positions
-        if (position.side === 'Buy') {
-          bybitLongPositions.value.push(posData)
-        } else if (position.side === 'Sell') {
-          bybitShortPositions.value.push(posData)
-        }
+        if (position.side === 'Buy') newBybitLong.push(posData)
+        else if (position.side === 'Sell') newBybitShort.push(posData)
       } else if (account.platform_id === 1) {
-        // Binance positions
-        if (position.side === 'Buy') {
-          binanceLongPositions.value.push(posData)
-        } else if (position.side === 'Sell') {
-          binanceShortPositions.value.push(posData)
-        }
+        if (position.side === 'Buy') newBinanceLong.push(posData)
+        else if (position.side === 'Sell') newBinanceShort.push(posData)
       }
     })
 
-    console.log('[handleAccountBalanceUpdate] After processing:', {
-      binanceLong: binanceLongPositions.value,
-      binanceShort: binanceShortPositions.value,
-      bybitLong: bybitLongPositions.value,
-      bybitShort: bybitShortPositions.value,
-      binanceLongTotal: binanceLongTotal.value,
-      binanceShortTotal: binanceShortTotal.value,
-      bybitLongTotal: bybitLongTotal.value,
-      bybitShortTotal: bybitShortTotal.value
-    })
+    // Atomic swap — all four refs update in the same microtask, no intermediate empty state
+    binanceLongPositions.value = newBinanceLong
+    binanceShortPositions.value = newBinanceShort
+    bybitLongPositions.value = newBybitLong
+    bybitShortPositions.value = newBybitShort
   }
   // Note: If positions is empty or undefined, keep existing position arrays unchanged
 }
@@ -626,14 +617,16 @@ onMounted(() => {
 
   // No longer need lagTimer as we use sliding window
 
-  // Initial fetch (账户数据改为WebSocket推送，只保留初始加载)
+  // Fetch initial position data immediately on page load (prevents 0.00 display until WebSocket update)
   fetchAccountData()
+  // Position data is then kept up-to-date via WebSocket (account_balance / position_snapshot)
   fetchPendingOrderCounts()
   fetchOrderBook()
   fetchRedisStatus()
   fetchSSLCertStatus()
   fetchProxyHealthStatus()
   fetchExchangeRate()
+  fetchBinanceFundingRate()
 
   // Fetch pending order counts every 3 seconds
   orderFetchTimer = setInterval(() => {
@@ -650,6 +643,17 @@ onMounted(() => {
     fetchExchangeRate()
   }, 600000)
 
+  // Fetch Binance funding rate every 30 seconds
+  fundingRateTimer = setInterval(() => {
+    fetchBinanceFundingRate()
+  }, 30000)
+
+  // Fetch Bybit swap rate every 60 seconds (changes infrequently)
+  fetchBybitSwapRate()
+  bybitSwapRateTimer = setInterval(() => {
+    fetchBybitSwapRate()
+  }, 60000)
+
   // 初始化系统状态并开始轮询
   updateSystemStatus()
   const statusInterval = setInterval(updateSystemStatus, 10000)
@@ -665,6 +669,8 @@ onUnmounted(() => {
   if (orderFetchTimer) clearInterval(orderFetchTimer)
   if (orderBookFetchTimer) clearInterval(orderBookFetchTimer)
   if (exchangeRateTimer) clearInterval(exchangeRateTimer)
+  if (fundingRateTimer) clearInterval(fundingRateTimer)
+  if (bybitSwapRateTimer) clearInterval(bybitSwapRateTimer)
 })
 
 function formatPrice(price) {
@@ -700,11 +706,8 @@ async function fetchAccountData() {
 
     // Extract fee data and positions from accounts
     if (data.accounts && data.accounts.length > 0) {
-      // Reset fee values
-      bybitLongSwapFee.value = 0
-      bybitShortSwapFee.value = 0
-      binanceLongFundingRate.value = 0
-      binanceShortFundingRate.value = 0
+      // Note: bybitLongSwapFee / bybitShortSwapFee are now fetched in real-time
+      // via fetchBybitSwapRate() polling — do NOT overwrite them here.
 
       // Reset position values
       forwardActualPosition.value = 0
@@ -725,13 +728,8 @@ async function fetchAccountData() {
       // Aggregate fees from all accounts
       data.accounts.forEach(account => {
         if (account.platform_id === 2) {
-          // Bybit accounts
-          bybitLongSwapFee.value += account.balance?.long_swap_fee || 0
-          bybitShortSwapFee.value += account.balance?.short_swap_fee || 0
-        } else if (account.platform_id === 1) {
-          // Binance accounts
-          binanceLongFundingRate.value += account.balance?.long_funding_rate || 0
-          binanceShortFundingRate.value += account.balance?.short_funding_rate || 0
+          // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
+          // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
         }
       })
     }
@@ -739,10 +737,11 @@ async function fetchAccountData() {
     // Extract actual positions from positions array for spread calculation
     if (data.positions && data.positions.length > 0) {
       // Reset position arrays
-      binanceShortPositions.value = []
-      binanceLongPositions.value = []
-      bybitShortPositions.value = []
-      bybitLongPositions.value = []
+      // Build new arrays atomically — prevents flash-to-zero during reset
+      const newBinanceLong = []
+      const newBinanceShort = []
+      const newBybitLong = []
+      const newBybitShort = []
 
       // Aggregate positions by platform and side
       data.positions.forEach(position => {
@@ -750,29 +749,26 @@ async function fetchAccountData() {
         const account = data.accounts?.find(acc => acc.account_id === position.account_id)
         if (!account) return
 
-        const posSize = Math.abs(position.size || 0)
         const posData = {
-          size: posSize,
+          size: Math.abs(position.size || 0),
           entry_price: position.entry_price || 0,
           current_price: position.current_price || 0
         }
 
         if (account.platform_id === 2) {
-          // Bybit MT5 positions
-          if (position.side === 'Buy') {
-            bybitLongPositions.value.push(posData)
-          } else if (position.side === 'Sell') {
-            bybitShortPositions.value.push(posData)
-          }
+          if (position.side === 'Buy') newBybitLong.push(posData)
+          else if (position.side === 'Sell') newBybitShort.push(posData)
         } else if (account.platform_id === 1) {
-          // Binance positions
-          if (position.side === 'Buy') {
-            binanceLongPositions.value.push(posData)
-          } else if (position.side === 'Sell') {
-            binanceShortPositions.value.push(posData)
-          }
+          if (position.side === 'Buy') newBinanceLong.push(posData)
+          else if (position.side === 'Sell') newBinanceShort.push(posData)
         }
       })
+
+      // Atomic swap
+      binanceLongPositions.value = newBinanceLong
+      binanceShortPositions.value = newBinanceShort
+      bybitLongPositions.value = newBybitLong
+      bybitShortPositions.value = newBybitShort
     }
     // Note: If positions is empty or undefined, keep existing position arrays unchanged
   } catch (error) {
@@ -785,9 +781,16 @@ async function fetchPendingOrderCounts() {
     const response = await api.get('/api/v1/trading/orders/realtime')
     const orders = response.data || []
 
+    console.log('[fetchPendingOrderCounts] Fetched orders:', orders.length, orders)
+
     // Count ASK and BID orders (backend returns lowercase 'buy' and 'sell')
-    askOrderCount.value = orders.filter(order => order.side === 'sell').length
-    bidOrderCount.value = orders.filter(order => order.side === 'buy').length
+    const askCount = orders.filter(order => order.side === 'sell').length
+    const bidCount = orders.filter(order => order.side === 'buy').length
+
+    askOrderCount.value = askCount
+    bidOrderCount.value = bidCount
+
+    console.log('[fetchPendingOrderCounts] ASK count:', askCount, 'BID count:', bidCount)
   } catch (error) {
     console.error('Failed to fetch pending orders:', error)
   }
@@ -1041,6 +1044,34 @@ async function fetchExchangeRate() {
   }
 }
 
+async function fetchBybitSwapRate() {
+  try {
+    const response = await api.get('/api/v1/market/bybit-swap-rate')
+    const data = response.data
+    // long_swap_per_lot: <0 long pays, >0 long receives
+    // short_swap_per_lot: >0 short receives, <0 short pays
+    bybitLongSwapFee.value = data.long_swap_per_lot ?? 0
+    bybitShortSwapFee.value = data.short_swap_per_lot ?? 0
+  } catch (error) {
+    console.error('Failed to fetch Bybit swap rate:', error)
+  }
+}
+
+async function fetchBinanceFundingRate() {
+  try {
+    const response = await api.get('/api/v1/market/funding-rate')
+    const data = response.data
+    // long_cost_per_lot: >0 means long pays, <0 means long receives
+    // short_cost_per_lot: opposite sign
+    binanceLongFundingRate.value = data.long_cost_per_lot ?? 0
+    binanceShortFundingRate.value = data.short_cost_per_lot ?? 0
+    binanceFundingRatePct.value = data.funding_rate_pct ?? 0
+    binanceNextFundingTime.value = data.next_funding_time ?? 0
+  } catch (error) {
+    console.error('Failed to fetch Binance funding rate:', error)
+  }
+}
+
 // Export data for StrategyPanel to use
 defineExpose({
   reverseActualPosition,
@@ -1051,6 +1082,8 @@ defineExpose({
   bybitShortSwapFee,
   binanceLongFundingRate,
   binanceShortFundingRate,
+  binanceFundingRatePct,
+  binanceNextFundingTime,
   binanceLongTotal,
   binanceShortTotal,
   bybitLongTotal,
