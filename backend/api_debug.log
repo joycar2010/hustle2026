@@ -1140,3 +1140,13 @@ Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_
 Executor is_running: False
 Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x0000029C60B01740>
 
+
+================================================================================
+[2026-03-19 14:28:49.343883] API CALLED: /execute/reverse/continuous
+User ID: 66764cd6-d1c9-4468-a478-85b526a16927
+Request: {'binance_account_id': UUID('cc49ea65-9fd3-4c82-882b-413c379f5ded'), 'bybit_account_id': UUID('1f99fd4d-d40d-4a5a-909d-7f91931472f9'), 'opening_m_coin': 5.0, 'closing_m_coin': 5.0, 'trigger_check_interval': 0.2, 'ladders': [{'enabled': True, 'opening_spread': 6.0, 'closing_spread': 2.0, 'total_qty': 10.0, 'opening_trigger_count': 2, 'closing_trigger_count': 2}]}
+================================================================================
+[2026-03-19 14:28:49.424893] Task created: c220d34f-0d0f-41ec-9b05-e101a8615a4d
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_reverse_opening_continuous at 0x0000029C61CD3DC0>
+
