@@ -380,10 +380,19 @@ class MT5Client:
                        f"volume_min={volume_min}, volume_max={volume_max}, volume_step={volume_step}")
 
             # ========== Step 2: Normalize volume ==========
-            # Align to volume_step and enforce min/max constraints
+            # Align to volume_step and enforce min constraint
             normalized_volume = round(volume / volume_step) * volume_step
             normalized_volume = max(normalized_volume, volume_min)
-            normalized_volume = min(normalized_volume, volume_max)
+
+            # volume_max: 不再静默截断，调用方（order_executor）已按持仓量拆单
+            # 若仍超出则报警并截断，防止 MT5 retcode 10014，同时让上层感知
+            if normalized_volume > volume_max:
+                logger.error(
+                    f"[MT5_ORDER] volume {normalized_volume} exceeds volume_max {volume_max} "
+                    f"for {symbol}. Capping to volume_max. "
+                    f"Caller should have split the order — check place_bybit_order logic."
+                )
+                normalized_volume = volume_max
 
             if abs(volume - normalized_volume) > volume_step * 0.01:
                 logger.warning(f"Volume normalized: {volume} -> {normalized_volume}")

@@ -67,37 +67,13 @@ export const useMarketStore = defineStore('market', () => {
         lastMessage.value = msg
 
         if (msg.type === 'position_snapshot' && msg.data) {
-          // Update positionSnapshot ref directly — StrategyPanel watches this for real-time position display
+          // positionSnapshot 只由 position_snapshot 消息驱动，与 account_balance 完全隔离
+          // 避免 account_balance 的 60s 缓存数据覆盖实时持仓快照
           positionSnapshot.value = {
             bybit_long_lots: msg.data.bybit_long_lots ?? 0,
             bybit_short_lots: msg.data.bybit_short_lots ?? 0,
             binance_long_xau: msg.data.binance_long_xau ?? 0,
             binance_short_xau: msg.data.binance_short_xau ?? 0,
-          }
-        } else if (msg.type === 'account_balance' && msg.data) {
-          // Also sync positionSnapshot from account_balance if positions are present
-          const positions = msg.data.positions || []
-          const accounts = msg.data.accounts || []
-          if (positions.length > 0) {
-            let bybitLong = 0, bybitShort = 0, binanceLong = 0, binanceShort = 0
-            positions.forEach(pos => {
-              const acc = accounts.find(a => a.account_id === pos.account_id)
-              if (!acc) return
-              const size = Math.abs(pos.size || 0)
-              if (acc.platform_id === 2) {
-                if (pos.side === 'Buy') bybitLong += size
-                else if (pos.side === 'Sell') bybitShort += size
-              } else if (acc.platform_id === 1) {
-                if (pos.side === 'Buy') binanceLong += size
-                else if (pos.side === 'Sell') binanceShort += size
-              }
-            })
-            positionSnapshot.value = {
-              bybit_long_lots: bybitLong,
-              bybit_short_lots: bybitShort,
-              binance_long_xau: binanceLong,
-              binance_short_xau: binanceShort,
-            }
           }
         }
 

@@ -34,10 +34,10 @@
       <!-- 实仓和点差信息 -->
       <div class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
-          B多仓: {{ (localBybitLong * 100).toFixed(0) }} A空仓: {{ localBinanceShort.toFixed(2) }}
+          T多仓: {{ (localBybitLong * 100).toFixed(0) }} A空仓: {{ localBinanceShort.toFixed(2) }}
         </span>
         <span v-else>
-          A多仓: {{ localBinanceLong.toFixed(2) }} B空仓: {{ (localBybitShort * 100).toFixed(0) }}
+          A多仓: {{ localBinanceLong.toFixed(2) }} T空仓: {{ (localBybitShort * 100).toFixed(0) }}
         </span>
       </div>
     </div>

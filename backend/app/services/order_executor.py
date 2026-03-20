@@ -127,32 +127,93 @@ class OrderExecutor:
                 )
                 logger.info(f"Current positions for {symbol}: {all_positions}")
 
-                pos_info = await loop.run_in_executor(
-                    None,
-                    lambda: mt5_client.find_position_to_close(symbol, side, required_volume=qty_val)
-                )
-                if pos_info:
-                    position_ticket = pos_info["ticket"]
-                    pos_volume = pos_info["volume"]
-                    # Cap close volume to actual position size to prevent retcode 10014
-                    if qty_val > pos_volume:
-                        logger.warning(
-                            f"[BYBIT_CLOSE] Requested volume {qty_val} > position volume {pos_volume}. "
-                            f"Capping to {pos_volume} to avoid MT5 retcode 10014."
-                        )
-                        qty_val = round(pos_volume, 2)
-                    logger.info(f"Found position to close: ticket={position_ticket}, pos_volume={pos_volume}, close_volume={qty_val}")
-                else:
-                    # This should not happen if pre-check in order_executor_v2 works correctly
+                # ── 多仓循环平仓 ──────────────────────────────────────────────
+                # 场景：委托量 > 单张持仓量 or > volume_max 时，逐仓拆单直到全部成交
+                # 旧逻辑：find_position_to_close 只选1个 ticket，超出部分静默丢弃
+                # 新逻辑：取所有同方向持仓，按"最大优先"排序，循环下单直到 remaining=0
+                target_type = 1 if side.lower() == 'buy' else 0  # BUY closes SHORT(1), SELL closes LONG(0)
+                matching = [p for p in all_positions if p.get('type') == target_type]
+
+                if not matching:
                     logger.error(f"CRITICAL: No position found to close for {symbol} {side}. "
-                               f"Pre-check should have prevented this! "
-                               f"Current positions: {all_positions}")
-                    # Return error to prevent opening new position
+                                 f"Pre-check should have prevented this! "
+                                 f"Current positions: {all_positions}")
                     return {
                         "success": False,
                         "platform": "bybit",
-                        "error": f"No {['LONG', 'SHORT'][1 if side.lower() == 'buy' else 0]} position found to close for {symbol}",
+                        "error": f"No {'SHORT' if side.lower()=='buy' else 'LONG'} position found to close for {symbol}",
                     }
+
+                # Sort: largest volume first to minimise number of sub-orders
+                matching.sort(key=lambda p: p.get('volume', 0), reverse=True)
+
+                remaining_qty = qty_val
+                last_result = None
+                total_filled_volume = 0.0
+
+                for pos in matching:
+                    if remaining_qty <= 0:
+                        break
+
+                    pos_ticket  = pos.get('ticket')
+                    pos_volume  = round(float(pos.get('volume', 0)), 2)
+                    close_vol   = round(min(remaining_qty, pos_volume), 2)
+
+                    logger.info(f"[BYBIT_CLOSE] Sub-order: ticket={pos_ticket}, "
+                                f"pos_volume={pos_volume}, close_vol={close_vol}, "
+                                f"remaining_before={remaining_qty}")
+
+                    sub_result = await loop.run_in_executor(
+                        None,
+                        lambda t=pos_ticket, v=close_vol: mt5_client.send_order(
+                            symbol=symbol,
+                            order_type=mt5_order_type,
+                            volume=v,
+                            price=price_val,
+                            position_ticket=t,
+                        )
+                    )
+
+                    if sub_result is None:
+                        logger.error(f"[BYBIT_CLOSE] Sub-order ticket={pos_ticket} returned None")
+                        break
+
+                    if sub_result.get('retcode') != mt5.TRADE_RETCODE_DONE:
+                        logger.error(f"[BYBIT_CLOSE] Sub-order ticket={pos_ticket} failed: "
+                                     f"retcode={sub_result.get('retcode')}, "
+                                     f"comment={sub_result.get('comment')}")
+                        break
+
+                    filled = round(float(sub_result.get('volume', close_vol)), 2)
+                    total_filled_volume += filled
+                    remaining_qty = round(remaining_qty - filled, 2)
+                    last_result = sub_result
+
+                    logger.info(f"[BYBIT_CLOSE] Sub-order ticket={pos_ticket} filled={filled}, "
+                                f"remaining_after={remaining_qty}")
+
+                if remaining_qty > 0.001:
+                    logger.warning(f"[BYBIT_CLOSE] Partial close: requested={qty_val}, "
+                                   f"filled={total_filled_volume}, unfilled={remaining_qty}")
+
+                if last_result is None:
+                    return {
+                        "success": False,
+                        "platform": "bybit",
+                        "error": "All sub-orders failed during multi-position close",
+                    }
+
+                # Return using last sub-order's ticket as order_id reference
+                return {
+                    "success": True,
+                    "platform": "bybit",
+                    "order_id": str(last_result.get('order', '')),
+                    "filled_volume": total_filled_volume,
+                    "unfilled_volume": remaining_qty,
+                    "price": last_result.get('price'),
+                    "comment": last_result.get('comment'),
+                }
+                # ── 多仓循环平仓结束 ──────────────────────────────────────────
 
             # 添加详细日志
             logger.info(f"Bybit order params BEFORE MT5: symbol={symbol}, side={side}, type={order_type}, "

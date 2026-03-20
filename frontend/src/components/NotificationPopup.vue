@@ -1,8 +1,8 @@
 <template>
-  <Transition :name="isMobile ? 'slide-down' : 'slide-down'">
+  <Transition :name="isMobile ? 'slide-down' : 'slide-right'">
     <div
       v-if="shouldShowPopup"
-      class="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[45vw] max-w-[160px] md:w-96 md:max-w-none bg-[#1e2329] border border-[#2b3139] rounded-lg shadow-2xl overflow-hidden"
+      class="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[45vw] max-w-[160px] md:w-96 md:max-w-none md:left-auto md:right-4 md:translate-x-0 bg-[#1e2329] border border-[#2b3139] rounded-lg shadow-2xl overflow-hidden"
     >
       <!-- Header -->
       <div class="flex items-center justify-between px-2 md:px-4 py-1.5 md:py-3 border-b border-[#2b3139]">
@@ -172,6 +172,22 @@ function formatTime(timestamp) {
 
 .slide-down-leave-to {
   transform: translateY(-100%);
+  opacity: 0;
+}
+
+/* PC端：从右侧滑入 */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-right-enter-from {
+  transform: translateX(110%);
+  opacity: 0;
+}
+
+.slide-right-leave-to {
+  transform: translateX(110%);
   opacity: 0;
 }
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.account import Account
+from app.models.mt5_client import MT5Client
 from app.schemas.account import AccountCreate, AccountUpdate, AccountResponse
 from app.services.account_service import account_data_service
 
@@ -215,6 +216,14 @@ async def delete_account(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found",
         )
+
+    # 先删除关联的 mt5_clients 记录（ORM 没有 cascade delete-orphan，直接删子行避免 NOT NULL 违约）
+    mt5_result = await db.execute(
+        select(MT5Client).where(MT5Client.account_id == account_id)
+    )
+    mt5_clients = mt5_result.scalars().all()
+    for mt5_client in mt5_clients:
+        await db.delete(mt5_client)
 
     await db.delete(account)
     await db.commit()
