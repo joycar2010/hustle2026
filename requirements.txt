@@ -1,0 +1,6 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+MetaTrader5==5.0.45
+numpy>=1.20,<2.0
+pydantic==2.10.6
+python-dotenv==1.0.1
