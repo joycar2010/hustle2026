@@ -818,3 +818,157 @@ risk_metrics_streamer = RiskMetricsStreamer()
 mt5_connection_streamer = MT5ConnectionStreamer()
 pending_orders_streamer = PendingOrdersStreamer()
 redis_status_streamer = RedisStatusStreamer()
+
+
+class PositionStreamer:
+    """
+    实时持仓广播器 — 每1秒向所有已连接客户端广播 position_snapshot。
+
+    数据源：
+    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 < 1ms
+    - Binance  ：5秒缓存（binance REST API 速率限制），过期后异步刷新
+
+    设计原则（量化工程）：
+    - 不依赖 account_service 缓存（60s TTL），完全绕过
+    - 只在有 WebSocket 连接时广播，空载时跳过
+    - MT5 读取在 executor 线程池中执行，不阻塞事件循环
+    """
+
+    BINANCE_CACHE_TTL = 5.0   # Binance 持仓缓存5秒
+    BROADCAST_INTERVAL = 1.0  # 每秒广播一次
+
+    def __init__(self):
+        self.running = False
+        self.task = None
+        # Binance 缓存
+        self._binance_long_xau: float = 0.0
+        self._binance_short_xau: float = 0.0
+        self._binance_cache_ts: float = 0.0   # epoch seconds
+        self._binance_refresh_lock = asyncio.Lock()
+
+    async def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.task = asyncio.create_task(self._loop())
+        logger.info("PositionStreamer started (interval=1s, binance_cache=5s)")
+
+    async def stop(self):
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("PositionStreamer stopped")
+
+    # ------------------------------------------------------------------
+    # 主循环
+    # ------------------------------------------------------------------
+    async def _loop(self):
+        import asyncio as _aio
+        loop = _aio.get_event_loop()
+
+        while self.running:
+            try:
+                await asyncio.sleep(self.BROADCAST_INTERVAL)
+
+                # 无连接时跳过广播，节省资源
+                if manager.get_connection_count() == 0:
+                    continue
+
+                # 1. 读 MT5 持仓（线程池，非阻塞）
+                long_lots, short_lots = await self._read_mt5_positions(loop)
+
+                # 2. 读 Binance 持仓（带缓存）
+                binance_long, binance_short = await self._read_binance_positions()
+
+                # 3. 广播
+                await manager.broadcast({
+                    "type": "position_snapshot",
+                    "data": {
+                        "bybit_long_lots":  long_lots,
+                        "bybit_short_lots": short_lots,
+                        "binance_long_xau": binance_long,
+                        "binance_short_xau": binance_short,
+                    }
+                })
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[PositionStreamer] loop error: {e}", exc_info=True)
+                await asyncio.sleep(2)
+
+    # ------------------------------------------------------------------
+    # MT5 持仓读取（共享客户端，无 API 调用）
+    # ------------------------------------------------------------------
+    async def _read_mt5_positions(self, loop) -> tuple:
+        try:
+            mt5_client = market_data_service.mt5_client
+            if mt5_client is None or not mt5_client.connected:
+                return 0.0, 0.0
+
+            def _get():
+                positions = mt5_client.get_positions("XAUUSD+")
+                long_l  = round(sum(p['volume'] for p in positions if p.get('type') == 0), 2)
+                short_l = round(sum(p['volume'] for p in positions if p.get('type') == 1), 2)
+                return long_l, short_l
+
+            return await loop.run_in_executor(None, _get)
+        except Exception as e:
+            logger.debug(f"[PositionStreamer] MT5 read error: {e}")
+            return 0.0, 0.0
+
+    # ------------------------------------------------------------------
+    # Binance 持仓读取（5秒缓存）
+    # ------------------------------------------------------------------
+    async def _read_binance_positions(self) -> tuple:
+        import time
+        now = time.monotonic()
+
+        # 缓存未过期直接返回
+        if now - self._binance_cache_ts < self.BINANCE_CACHE_TTL:
+            return self._binance_long_xau, self._binance_short_xau
+
+        # 加锁防止并发重复刷新
+        if self._binance_refresh_lock.locked():
+            return self._binance_long_xau, self._binance_short_xau
+
+        async with self._binance_refresh_lock:
+            # double-check after lock
+            if time.monotonic() - self._binance_cache_ts < self.BINANCE_CACHE_TTL:
+                return self._binance_long_xau, self._binance_short_xau
+            try:
+                async with get_db_session(timeout=3.0) as db:
+                    result = await db.execute(
+                        select(Account).where(
+                            Account.platform_id == 1,
+                            Account.is_active == True,
+                        )
+                    )
+                    acc = result.scalars().first()
+
+                if acc and acc.api_key and acc.api_secret:
+                    from app.services.binance_client import BinanceFuturesClient
+                    client = BinanceFuturesClient(acc.api_key, acc.api_secret)
+                    pos_data = await client.get_position_risk("XAUUSDT")
+                    await client.close()
+                    long_xau = short_xau = 0.0
+                    for pos in pos_data:
+                        amt = float(pos.get("positionAmt", 0))
+                        if amt > 0:
+                            long_xau = round(amt, 3)
+                        elif amt < 0:
+                            short_xau = round(abs(amt), 3)
+                    self._binance_long_xau  = long_xau
+                    self._binance_short_xau = short_xau
+                    self._binance_cache_ts  = time.monotonic()
+            except Exception as e:
+                logger.debug(f"[PositionStreamer] Binance refresh error: {e}")
+
+        return self._binance_long_xau, self._binance_short_xau
+
+
+position_streamer = PositionStreamer()
