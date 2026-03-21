@@ -1,0 +1,4 @@
+hustle-go
+*.exe
+*.log
+.env

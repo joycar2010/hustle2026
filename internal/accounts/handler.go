@@ -1,0 +1,292 @@
+package accounts
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"hustle-go/internal/db"
+)
+
+const pythonBase = "http://127.0.0.1:8000"
+
+type accountRow struct {
+	AccountID     string    `json:"account_id"`
+	UserID        string    `json:"user_id"`
+	PlatformID    int       `json:"platform_id"`
+	AccountName   string    `json:"account_name"`
+	APIKey        string    `json:"api_key"`
+	APISecret     string    `json:"api_secret"`
+	Passphrase    *string   `json:"passphrase"`
+	MT5ID         *string   `json:"mt5_id"`
+	MT5Server     *string   `json:"mt5_server"`
+	MT5PrimaryPwd *string   `json:"mt5_primary_pwd"`
+	IsMT5Account  bool      `json:"is_mt5_account"`
+	IsDefault     bool      `json:"is_default"`
+	IsActive      bool      `json:"is_active"`
+	Leverage      *int      `json:"leverage"`
+	CreateTime    time.Time `json:"create_time"`
+	UpdateTime    time.Time `json:"update_time"`
+}
+
+const selectAccount = `SELECT account_id::text, user_id::text, platform_id, account_name,
+	api_key, api_secret, passphrase, mt5_id, mt5_server, mt5_primary_pwd,
+	is_mt5_account, is_default, is_active, leverage, create_time, update_time
+	FROM accounts`
+
+func scanAccount(row interface{ Scan(...any) error }) (*accountRow, error) {
+	a := &accountRow{}
+	return a, row.Scan(
+		&a.AccountID, &a.UserID, &a.PlatformID, &a.AccountName,
+		&a.APIKey, &a.APISecret, &a.Passphrase, &a.MT5ID, &a.MT5Server, &a.MT5PrimaryPwd,
+		&a.IsMT5Account, &a.IsDefault, &a.IsActive, &a.Leverage, &a.CreateTime, &a.UpdateTime,
+	)
+}
+
+// ListAccounts GET /api/v1/accounts
+func ListAccounts(c *gin.Context) {
+	userID := c.GetString("user_id")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := db.Pool().Query(ctx, selectAccount+` WHERE user_id=$1::uuid ORDER BY create_time`, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+	defer rows.Close()
+	var accounts []*accountRow
+	for rows.Next() {
+		a, err := scanAccount(rows)
+		if err == nil {
+			accounts = append(accounts, a)
+		}
+	}
+	if accounts == nil {
+		accounts = []*accountRow{}
+	}
+	c.JSON(http.StatusOK, accounts)
+}
+
+// CreateAccount POST /api/v1/accounts
+func CreateAccount(c *gin.Context) {
+	userID := c.GetString("user_id")
+	var body struct {
+		PlatformID    int     `json:"platform_id" binding:"required"`
+		AccountName   string  `json:"account_name" binding:"required"`
+		APIKey        string  `json:"api_key" binding:"required"`
+		APISecret     string  `json:"api_secret" binding:"required"`
+		Passphrase    *string `json:"passphrase"`
+		MT5ID         *string `json:"mt5_id"`
+		MT5Server     *string `json:"mt5_server"`
+		MT5PrimaryPwd *string `json:"mt5_primary_pwd"`
+		IsMT5Account  bool    `json:"is_mt5_account"`
+		IsDefault     bool    `json:"is_default"`
+		Leverage      *int    `json:"leverage"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Unset other defaults for same platform if needed
+	if body.IsDefault {
+		db.Pool().Exec(ctx,
+			`UPDATE accounts SET is_default=false WHERE user_id=$1::uuid AND platform_id=$2 AND is_mt5_account=$3 AND is_default=true`,
+			userID, body.PlatformID, body.IsMT5Account)
+	}
+
+	leverage := body.Leverage
+	if leverage == nil {
+		if body.PlatformID == 1 {
+			v := 20
+			leverage = &v
+		} else {
+			v := 100
+			leverage = &v
+		}
+	}
+
+	a, err := scanAccount(db.Pool().QueryRow(ctx,
+		`INSERT INTO accounts (user_id, platform_id, account_name, api_key, api_secret, passphrase,
+		  mt5_id, mt5_server, mt5_primary_pwd, is_mt5_account, is_default, is_active, leverage)
+		 VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12)
+		 RETURNING account_id::text, user_id::text, platform_id, account_name,
+		   api_key, api_secret, passphrase, mt5_id, mt5_server, mt5_primary_pwd,
+		   is_mt5_account, is_default, is_active, leverage, create_time, update_time`,
+		userID, body.PlatformID, body.AccountName, body.APIKey, body.APISecret,
+		body.Passphrase, body.MT5ID, body.MT5Server, body.MT5PrimaryPwd,
+		body.IsMT5Account, body.IsDefault, leverage,
+	))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, a)
+}
+
+// GetAccount GET /api/v1/accounts/:account_id
+func GetAccount(c *gin.Context) {
+	userID := c.GetString("user_id")
+	accountID := c.Param("account_id")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, err := scanAccount(db.Pool().QueryRow(ctx,
+		selectAccount+` WHERE account_id=$1::uuid AND user_id=$2::uuid`, accountID, userID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Account not found"})
+		return
+	}
+	c.JSON(http.StatusOK, a)
+}
+
+// GetAccountSecret GET /api/v1/accounts/:account_id/secret
+func GetAccountSecret(c *gin.Context) {
+	userID := c.GetString("user_id")
+	accountID := c.Param("account_id")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var apiSecret string
+	var mt5Pwd *string
+	err := db.Pool().QueryRow(ctx,
+		`SELECT api_secret, mt5_primary_pwd FROM accounts WHERE account_id=$1::uuid AND user_id=$2::uuid`,
+		accountID, userID).Scan(&apiSecret, &mt5Pwd)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Account not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"api_secret": apiSecret, "mt5_primary_pwd": mt5Pwd})
+}
+
+// UpdateAccount PUT /api/v1/accounts/:account_id
+func UpdateAccount(c *gin.Context) {
+	userID := c.GetString("user_id")
+	accountID := c.Param("account_id")
+	var body struct {
+		AccountName *string `json:"account_name"`
+		APIKey      *string `json:"api_key"`
+		APISecret   *string `json:"api_secret"`
+		Passphrase  *string `json:"passphrase"`
+		IsDefault   *bool   `json:"is_default"`
+		IsActive    *bool   `json:"is_active"`
+		Leverage    *int    `json:"leverage"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"detail": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Verify ownership
+	var platformID int
+	var isMT5 bool
+	err := db.Pool().QueryRow(ctx,
+		`SELECT platform_id, is_mt5_account FROM accounts WHERE account_id=$1::uuid AND user_id=$2::uuid`,
+		accountID, userID).Scan(&platformID, &isMT5)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Account not found"})
+		return
+	}
+
+	if body.AccountName != nil {
+		db.Pool().Exec(ctx, `UPDATE accounts SET account_name=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.AccountName, accountID)
+	}
+	if body.APIKey != nil {
+		db.Pool().Exec(ctx, `UPDATE accounts SET api_key=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.APIKey, accountID)
+	}
+	if body.APISecret != nil {
+		db.Pool().Exec(ctx, `UPDATE accounts SET api_secret=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.APISecret, accountID)
+	}
+	if body.Passphrase != nil {
+		db.Pool().Exec(ctx, `UPDATE accounts SET passphrase=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.Passphrase, accountID)
+	}
+	if body.IsDefault != nil {
+		if *body.IsDefault {
+			db.Pool().Exec(ctx,
+				`UPDATE accounts SET is_default=false WHERE user_id=$1::uuid AND platform_id=$2 AND is_mt5_account=$3 AND account_id!=$4::uuid`,
+				userID, platformID, isMT5, accountID)
+		}
+		db.Pool().Exec(ctx, `UPDATE accounts SET is_default=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.IsDefault, accountID)
+	}
+	if body.IsActive != nil {
+		db.Pool().Exec(ctx, `UPDATE accounts SET is_active=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.IsActive, accountID)
+	}
+	if body.Leverage != nil {
+		db.Pool().Exec(ctx, `UPDATE accounts SET leverage=$1, update_time=NOW() WHERE account_id=$2::uuid`, *body.Leverage, accountID)
+	}
+
+	a, err := scanAccount(db.Pool().QueryRow(ctx,
+		selectAccount+` WHERE account_id=$1::uuid`, accountID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, a)
+}
+
+// DeleteAccount DELETE /api/v1/accounts/:account_id
+func DeleteAccount(c *gin.Context) {
+	userID := c.GetString("user_id")
+	accountID := c.Param("account_id")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tag, err := db.Pool().Exec(ctx,
+		`DELETE FROM accounts WHERE account_id=$1::uuid AND user_id=$2::uuid`, accountID, userID)
+	if err != nil || tag.RowsAffected() == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Account not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// proxyToPython forwards requests that require exchange API calls to Python
+func proxyToPython(c *gin.Context, path string) {
+	url := fmt.Sprintf("%s%s", pythonBase, path)
+	req, err := http.NewRequest(c.Request.Method, url, c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": err.Error()})
+		return
+	}
+	req.Header = c.Request.Header.Clone()
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"detail": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
+}
+
+// GetBalance GET /api/v1/accounts/:account_id/balance — proxy to Python
+func GetBalance(c *gin.Context) {
+	proxyToPython(c, "/api/v1/accounts/"+c.Param("account_id")+"/balance")
+}
+
+// GetPositions GET /api/v1/accounts/:account_id/positions — proxy to Python
+func GetPositions(c *gin.Context) {
+	proxyToPython(c, "/api/v1/accounts/"+c.Param("account_id")+"/positions")
+}
+
+// GetPnL GET /api/v1/accounts/:account_id/pnl — proxy to Python
+func GetPnL(c *gin.Context) {
+	proxyToPython(c, "/api/v1/accounts/"+c.Param("account_id")+"/pnl")
+}
+
+// GetDashboard GET /api/v1/accounts/:account_id/dashboard — proxy to Python
+func GetDashboard(c *gin.Context) {
+	proxyToPython(c, "/api/v1/accounts/"+c.Param("account_id")+"/dashboard")
+}
+
+// GetAggregatedDashboard GET /api/v1/accounts/dashboard/aggregated — proxy to Python
+func GetAggregatedDashboard(c *gin.Context) {
+	proxyToPython(c, "/api/v1/accounts/dashboard/aggregated")
+}

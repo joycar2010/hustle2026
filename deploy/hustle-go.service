@@ -1,0 +1,25 @@
+[Unit]
+Description=Hustle2026 Go Market Service
+After=network.target redis-server.service postgresql@16-main.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/hustle-go
+ExecStart=/home/ubuntu/hustle-go/hustle-go
+Restart=always
+RestartSec=3
+Environment=SERVER_PORT=8080
+Environment=SERVER_MODE=release
+Environment=REDIS_URL=redis://127.0.0.1:6379/0
+Environment=DATABASE_URL=postgres://postgres:Lk106504@127.0.0.1:5432/postgres?sslmode=disable
+Environment=SECRET_KEY=hustle2026-secret-key-prod
+Environment=MT5_SERVICE_URL=http://54.249.66.53:8001
+Environment=BINANCE_WS_URL=wss://fstream.binance.com/ws/xauusdt@bookTicker
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hustle-go
+
+[Install]
+WantedBy=multi-user.target
