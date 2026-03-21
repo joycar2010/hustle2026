@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.account import Account
 from app.models.mt5_client import MT5Client
+from app.models.user import User
 from app.schemas.account import AccountCreate, AccountUpdate, AccountResponse
 from app.services.account_service import account_data_service
 
@@ -25,12 +26,19 @@ async def list_accounts(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all accounts for current user (regardless of status)"""
-    result = await db.execute(
-        select(Account).where(Account.user_id == UUID(user_id))
-    )
-    accounts = result.scalars().all()
+    """List accounts.  Admin roles return all users' accounts; others see only their own."""
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    is_admin = caller is not None and caller.role in ADMIN_ROLES
 
+    if is_admin:
+        result = await db.execute(select(Account))
+    else:
+        result = await db.execute(
+            select(Account).where(Account.user_id == UUID(user_id))
+        )
+    accounts = result.scalars().all()
     return accounts
 
 
@@ -202,13 +210,28 @@ async def delete_account(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete account"""
-    result = await db.execute(
-        select(Account).where(
-            Account.account_id == account_id,
-            Account.user_id == UUID(user_id),
+    """Delete account.
+    Admin roles (超级管理员/系统管理员/安全管理员/管理员) can delete any account;
+    regular users can only delete their own.
+    """
+    # Determine whether the caller is an admin
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    is_admin = caller is not None and caller.role in ADMIN_ROLES
+
+    if is_admin:
+        # Admin: fetch account by id only (no owner restriction)
+        result = await db.execute(
+            select(Account).where(Account.account_id == account_id)
         )
-    )
+    else:
+        result = await db.execute(
+            select(Account).where(
+                Account.account_id == account_id,
+                Account.user_id == UUID(user_id),
+            )
+        )
     account = result.scalar_one_or_none()
 
     if not account:
