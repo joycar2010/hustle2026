@@ -347,10 +347,10 @@ async function saveAlertSettings() {
     }
 
     await api.post('/api/v1/risk/alert-settings', settingsToSave)
-    alert('警报设置保存成功！\n提示：空值字段将不会触发提醒。')
+    notificationStore.showStrategyNotification('风险设置保存成功', 'success')
   } catch (error) {
     console.error('Failed to save alert settings:', error)
-    alert('警报设置保存失败: ' + (error.response?.data?.detail || error.message))
+    notificationStore.showStrategyNotification('保存失败: ' + (error.response?.data?.detail || error.message), 'error')
   }
 }
 

@@ -1061,7 +1061,17 @@ function handleAccountBalanceUpdate(data) {
 
     // Use first account's available balance instead of summing all accounts
     binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
-    bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
+
+    // MT5 accounts always report available_balance=0 from the aggregated API/WS broadcast.
+    // Only update bybitAssets from WS if it's a non-MT5 account with real data.
+    const bybitAcc = bybitAccounts[0]
+    if (bybitAcc) {
+      const wsBal = bybitAcc.balance?.available_balance || 0
+      if (!bybitAcc.is_mt5_account || wsBal > 0) {
+        bybitAssets.value = wsBal
+      }
+      // For MT5: keep the value set by fetchAccountData (from bridge) — don't overwrite with 0
+    }
   }
 
   // 从 account_balance 持仓列表提取 Binance 多空仓（30s 兜底，优先级低于 position_snapshot 的实时推送）
@@ -1097,6 +1107,18 @@ async function fetchAccountData() {
     // Use first account's available balance instead of summing all accounts
     binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
     bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
+
+    // Enrich MT5 Bybit accounts with live bridge data (aggregated API always returns 0 for MT5 balance)
+    const mt5Accounts = bybitAccounts.filter(a => a.is_mt5_account)
+    if (mt5Accounts.length > 0) {
+      try {
+        const infoR = await api.get('/api/v1/mt5/account/info')
+        const info = infoR.data || {}
+        bybitAssets.value = info.margin_free ?? info.free_margin ?? 0
+      } catch (e) {
+        console.error('MT5 bridge info failed:', e)
+      }
+    }
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }

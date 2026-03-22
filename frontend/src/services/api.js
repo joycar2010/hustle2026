@@ -20,23 +20,22 @@ api.interceptors.request.use(
   }
 )
 
-// Response interceptor
+// Response interceptor - only force logout on core auth endpoints to avoid
+// data API failures (redis/status, system/status, etc.) kicking users out
+const AUTH_ENDPOINTS = ['/api/v1/users/me', '/api/v1/auth/']
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Only redirect if not already on login page to prevent redirect loop
-      if (window.location.pathname !== '/login') {
-        // Clear token from localStorage and authStore
-        localStorage.removeItem('token')
-        // Import authStore dynamically to avoid circular dependency
-        import('@/stores/auth').then(({ useAuthStore }) => {
-          const authStore = useAuthStore()
-          authStore.logout()
-          // Use Vue Router to redirect
-          router.push('/login')
-        })
-      }
+    const url = error.config?.url || ''
+    const isAuthEndpoint = AUTH_ENDPOINTS.some(e => url.includes(e))
+    if (error.response?.status === 401 && isAuthEndpoint && window.location.pathname !== '/login') {
+      localStorage.removeItem('token')
+      import('@/stores/auth').then(({ useAuthStore }) => {
+        const authStore = useAuthStore()
+        authStore.logout()
+        router.push('/login')
+      })
     }
     return Promise.reject(error)
   }
