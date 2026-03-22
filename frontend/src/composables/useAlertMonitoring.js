@@ -45,7 +45,7 @@ export function useAlertMonitoring() {
   // Monitor MT5 connection status
   async function checkMT5Status() {
     try {
-      const response = await api.get('/api/v1/market/connection/status')
+      const response = await api.get('/api/v1/mt5/connection/status')
       if (response.data && response.data.mt5) {
         // Check if connection is unhealthy or has failures
         if (!response.data.mt5.healthy || response.data.mt5.connection_failures > 0) {

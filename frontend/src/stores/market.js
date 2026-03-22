@@ -90,6 +90,19 @@ export const useMarketStore = defineStore('market', () => {
             timestamp: d.timestamp,
           }
         }
+        // Go native pusher sends type:"spread" with both Binance+Bybit prices every 500ms
+        else if (msg.type === 'spread' && msg.data) {
+          const d = msg.data
+          marketData.value = {
+            binance_bid: d.binance_bid ?? 0,
+            binance_ask: d.binance_ask ?? 0,
+            binance_mid: d.binance_bid != null ? (d.binance_bid + d.binance_ask) / 2 : 0,
+            bybit_bid:   d.bybit_bid   ?? 0,
+            bybit_ask:   d.bybit_ask   ?? 0,
+            bybit_mid:   d.bybit_bid   != null ? (d.bybit_bid + d.bybit_ask) / 2 : 0,
+            timestamp:   d.timestamp,
+          }
+        }
         // Handle account balance updates
         else if (msg.type === 'account_balance' && msg.data) {
           accountBalanceData.value = msg.data

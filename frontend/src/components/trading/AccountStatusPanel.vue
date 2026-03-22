@@ -277,19 +277,37 @@ async function fetchAccountData() {
           is_mt5_account: failedAcc.is_mt5_account || false,
           is_active: failedAcc.is_active !== undefined ? failedAcc.is_active : true,
           balance: {
-            total_assets: 0,
-            available_balance: 0,
-            net_assets: 0,
-            margin_balance: 0,
-            frozen_assets: 0,
-            total_positions: 0,
-            daily_pnl: 0,
-            funding_fee: 0,
-            risk_ratio: 0
+            total_assets: 0, available_balance: 0, net_assets: 0,
+            margin_balance: 0, frozen_assets: 0, total_positions: 0,
+            daily_pnl: 0, funding_fee: 0, risk_ratio: 0
           },
           error: failedAcc.error
         })
       }
+    }
+
+    // For MT5 accounts: enrich balance from the MT5 bridge directly
+    for (const acc of allAccounts) {
+      if (!acc.is_mt5_account) continue
+      try {
+        const infoR = await api.get('/api/v1/mt5/account/info')
+        const info = infoR.data || {}
+        // map MT5 bridge fields → our balance schema
+        acc.balance = {
+          total_assets:      info.equity   ?? info.balance ?? 0,
+          available_balance: info.margin_free ?? 0,
+          net_assets:        info.equity   ?? 0,
+          margin_balance:    info.margin   ?? 0,
+          frozen_assets:     info.margin   ?? 0,
+          total_positions:   0,
+          daily_pnl:         info.profit   ?? 0,
+          funding_fee:       info.swap     ?? 0,
+          risk_ratio:        info.margin_level ?? 0,
+        }
+        acc.mt5_login  = info.login
+        acc.mt5_server = info.server
+        delete acc.error  // clear error if bridge data fetched successfully
+      } catch { /* keep zero balance + error as-is */ }
     }
 
     // Always update all accounts with fresh data
@@ -301,6 +319,22 @@ async function fetchAccountData() {
     await fetchProxyStatus()
   } catch (error) {
     console.error('Failed to fetch account data:', error)
+    // aggregated 接口失败时降级：用基础账户列表填充（不含实时余额）
+    try {
+      const r2 = await api.get('/api/v1/accounts')
+      const list = Array.isArray(r2.data) ? r2.data : (r2.data?.accounts ?? [])
+      activeAccounts.value = list.map(acc => ({
+        ...acc,
+        balance: {
+          total_assets: 0, available_balance: 0, net_assets: 0,
+          margin_balance: 0, frozen_assets: 0, total_positions: 0,
+          daily_pnl: 0, funding_fee: 0, risk_ratio: 0
+        },
+        error: '实时余额获取失败，请检查API密钥或网络'
+      }))
+    } catch (e2) {
+      console.error('Fallback accounts fetch failed:', e2)
+    }
   }
 }
 

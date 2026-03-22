@@ -1,23 +1,10 @@
 <template>
   <div class="p-2 border-t border-[#2b3139]">
-    <!-- System Status Marquee -->
-    <button
-      @click="showSystemStatusModal = true"
-      :class="[
-        'w-full marquee-container flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
-        systemHealthy ? 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30' : 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-      ]"
-      :title="'点击查看详细系统状态'"
-    >
-      <div class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-        {{ systemStatusText }}
-      </div>
-    </button>
-
-    <!-- System Status Modal -->
-    <SystemStatusModal :isOpen="showSystemStatusModal" @close="showSystemStatusModal = false" />
   </div>
 </template>
+
+<script setup>
+</script>
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'

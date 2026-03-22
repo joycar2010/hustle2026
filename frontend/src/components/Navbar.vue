@@ -305,11 +305,6 @@ const initPageVisibility = () => {
     '/': true,
     '/trading': true,
     '/pending-orders': true,
-    '/strategies': true,
-    '/positions': true,
-    '/accounts': true,
-    '/risk': !isSmallScreen, // 小屏幕下默认隐藏
-    '/system': true,
   }
 
   // 保存默认状态
@@ -319,7 +314,7 @@ const initPageVisibility = () => {
 
 const pageVisibility = ref(initPageVisibility())
 
-// 所有可用的导航项
+// 所有可用的导航项（仅保留交易操作面板功能，管理功能已迁移至 admin.hustle2026.xyz）
 const allNavItems = [
   {
     path: '/',
@@ -335,26 +330,6 @@ const allNavItems = [
     path: '/pending-orders',
     label: '挂单查询',
     icon: 'PendingOrdersIcon',
-  },
-  {
-    path: '/strategies',
-    label: '策略配置',
-    icon: 'StrategiesIcon',
-  },
-  {
-    path: '/positions',
-    label: '点差记录分析',
-    icon: 'PositionsIcon',
-  },
-  {
-    path: '/accounts',
-    label: '账户管理',
-    icon: 'AccountsIcon',
-  },
-  {
-    path: '/system',
-    label: '系统管理',
-    icon: 'SystemIcon',
   },
 ]
 

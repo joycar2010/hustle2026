@@ -267,6 +267,9 @@ function initializeDateRange() {
 const stats = ref({
   totalVolume: 0,
   totalAmount: 0,
+  takerAmount: 0,
+  makerAmount: 0,
+  bnbFees: 0,
   buySellAmount: 0,
   taskAmount: 0,
   totalFees: 0,
@@ -274,6 +277,8 @@ const stats = ref({
   overnightFees: 0,
   marketFundingRate: 0,
   mt5OvernightFee: 0,
+  mt5Volume: 0,
+  mt5Amount: 0,
   marketFee: 0,
   mt5Fee: 0,
   mt5RealizedPnL: 0,
@@ -377,7 +382,7 @@ async function showRecentDays(days) {
 
 function updateData(data) {
   if (data.stats) {
-    stats.value = data.stats
+    stats.value = { ...stats.value, ...data.stats }
   }
   if (data.accountTrades) {
     // Sort by timestamp descending (newest first)
@@ -401,6 +406,9 @@ function clearData() {
   stats.value = {
     totalVolume: 0,
     totalAmount: 0,
+    takerAmount: 0,
+    makerAmount: 0,
+    bnbFees: 0,
     buySellAmount: 0,
     taskAmount: 0,
     totalFees: 0,
@@ -408,6 +416,8 @@ function clearData() {
     overnightFees: 0,
     marketFundingRate: 0,
     mt5OvernightFee: 0,
+    mt5Volume: 0,
+    mt5Amount: 0,
     marketFee: 0,
     mt5Fee: 0,
     mt5RealizedPnL: 0,

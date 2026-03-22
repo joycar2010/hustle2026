@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+const ADMIN_URL = 'https://admin.hustle2026.xyz'
+
 const routes = [
   {
     path: '/login',
@@ -33,34 +35,27 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/strategies',
-    name: 'Strategies',
-    component: () => import('@/views/StrategiesWorkflow.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/positions',
-    name: 'Positions',
-    component: () => import('@/views/Positions.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/accounts',
-    name: 'Accounts',
-    component: () => import('@/views/Accounts.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
     path: '/risk',
     name: 'Risk',
     component: () => import('@/views/Risk.vue'),
     meta: { requiresAuth: true }
   },
+  // 以下路由已迁移至 admin.hustle2026.xyz，访问时直接跳转
+  {
+    path: '/strategies',
+    beforeEnter: () => { window.location.href = ADMIN_URL + '/strategies' }
+  },
+  {
+    path: '/positions',
+    beforeEnter: () => { window.location.href = ADMIN_URL + '/spread' }
+  },
+  {
+    path: '/accounts',
+    beforeEnter: () => { window.location.href = ADMIN_URL + '/users' }
+  },
   {
     path: '/system',
-    name: 'System',
-    component: () => import('@/views/System.vue'),
-    meta: { requiresAuth: true }
+    beforeEnter: () => { window.location.href = ADMIN_URL + '/system' }
   }
 ]
 
@@ -72,7 +67,9 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
 
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+  if (to.meta.requiresAuth === false) {
+    next()
+  } else if (!authStore.isAuthenticated) {
     next('/login')
   } else if (to.path === '/login' && authStore.isAuthenticated) {
     next('/')
