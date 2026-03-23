@@ -1071,6 +1071,25 @@ function handleAccountBalanceUpdate(data) {
       // For MT5: keep the value set by fetchAccountData (from bridge) — don't overwrite with 0
     }
   }
+
+  // 从 account_balance 持仓列表提取 Binance 多空仓（30s 兜底，优先级低于 position_snapshot 的实时推送）
+  // position_snapshot 由 BinancePositionPusher ACCOUNT_UPDATE 事件驱动，延迟 <100ms
+  // account_balance 每 30s 广播一次，作为冷启动 / 断流恢复时的保底数据源
+  if (data.positions && data.positions.length > 0) {
+    let binanceLong = 0, binanceShort = 0
+    data.positions.forEach(pos => {
+      if (pos.is_mt5_account || pos.platform_id !== 1) return  // 跳过 MT5/Bybit
+      const side = (pos.side || '').toLowerCase()
+      const size = Math.abs(pos.size || 0)
+      if (side === 'buy')  binanceLong  += size
+      else if (side === 'sell') binanceShort += size
+    })
+    // 仅在 BinancePositionPusher 尚未推送真实数据时覆盖（避免 30s 旧数据盖掉实时数据）
+    if (localBinanceLong.value === 0 && localBinanceShort.value === 0) {
+      localBinanceLong.value  = Math.round(binanceLong  * 1000) / 1000
+      localBinanceShort.value = Math.round(binanceShort * 1000) / 1000
+    }
+  }
 }
 
 async function fetchAccountData() {
@@ -1363,17 +1382,6 @@ const toggleClosingExecution = debounce(async function() {
     if (!positionCheck.valid) {
       validationErrors.value = [positionCheck.message]
       return
-    }
-
-    // Check spread condition for closing: current spread must be <= closing threshold
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    if (enabledLadders.length > 0) {
-      const firstLadder = enabledLadders[0]
-      const threshold = firstLadder.threshold || 0
-      if (closingSpread.value > threshold) {
-        validationErrors.value = [`当前点差 ${closingSpread.value.toFixed(1)} 大于反平差值 ${threshold.toFixed(1)}，不满足平仓条件`]
-        return
-      }
     }
 
     // Start continuous execution
