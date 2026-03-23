@@ -8,6 +8,47 @@ from typing import Dict, Any, Optional
 import aiohttp
 from app.core.config import settings
 
+# 不可重试的终止性错误代码（继续重试只会浪费权重）
+TERMINAL_ERROR_CODES = {
+    -1111,   # Precision is over the maximum defined for this asset
+    -5022,   # Post-only order rejected
+    -1100,   # Illegal characters in parameter
+    -1102,   # Mandatory parameter missing
+    -1106,   # Parameter too many values
+    -2011,   # Unknown order sent (cancel)
+    -2013,   # Order does not exist
+}
+
+
+class BinanceIPBanError(Exception):
+    """Raised when Binance bans the server IP due to rate limit abuse.
+
+    Attributes:
+        ip: Banned IP address
+        ban_until_ms: Unix timestamp (ms) when ban expires
+        message: Human-readable formatted message
+    """
+
+    def __init__(self, ip: str, ban_until_ms: int, message: str):
+        super().__init__(message)
+        self.ip = ip
+        self.ban_until_ms = ban_until_ms
+        self.message = message
+
+
+class BinanceTerminalError(Exception):
+    """Raised on non-retryable Binance API errors (e.g. -1111 precision).
+
+    Attributes:
+        code: Binance error code (negative integer)
+        message: Human-readable error message
+    """
+
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
 
 def format_binance_error(error_data: Dict[str, Any]) -> str:
     """
@@ -108,6 +149,29 @@ class BinanceFuturesClient:
         if self.session and not self.session.closed:
             await self.session.close()
 
+    def _raise_typed_error(self, data: Dict[str, Any]) -> None:
+        """Parse Binance error response and raise the appropriate typed exception."""
+        code = data.get('code', 0) if isinstance(data, dict) else 0
+        msg = data.get('msg', '') if isinstance(data, dict) else str(data)
+
+        # IP封禁 — 最优先处理，触发告警流程
+        if code == -1003 and 'banned until' in str(msg):
+            ip_match = re.search(r'IP\(([^)]+)\)', msg)
+            timestamp_match = re.search(r'banned until (\d+)', msg)
+            if ip_match and timestamp_match:
+                ip = ip_match.group(1)
+                ban_until_ms = int(timestamp_match.group(1))
+                friendly = format_binance_error(data)
+                raise BinanceIPBanError(ip=ip, ban_until_ms=ban_until_ms, message=friendly)
+
+        # 终止性错误码 — 不可重试
+        if code in TERMINAL_ERROR_CODES:
+            friendly = format_binance_error(data)
+            raise BinanceTerminalError(code=code, message=f"Binance API 错误: {friendly}")
+
+        # 普通错误
+        raise Exception(f"Binance API 错误: {format_binance_error(data)}")
+
     def _sign(self, query_string: str) -> str:
         """Generate HMAC SHA256 signature for a query string"""
         return hmac.new(
@@ -144,8 +208,7 @@ class BinanceFuturesClient:
                 async with session.request(method, full_url, headers=headers, proxy=proxy, **kwargs) as resp:
                     data = await resp.json()
                     if resp.status != 200:
-                        error_msg = format_binance_error(data)
-                        raise Exception(f"Binance API 错误: {error_msg}")
+                        self._raise_typed_error(data)
                     return data
             except aiohttp.ClientError as e:
                 raise Exception(f"网络错误: {str(e)}")
@@ -159,8 +222,7 @@ class BinanceFuturesClient:
                 data = await resp.json()
 
                 if resp.status != 200:
-                    error_msg = format_binance_error(data)
-                    raise Exception(f"Binance API 错误: {error_msg}")
+                    self._raise_typed_error(data)
 
                 return data
         except aiohttp.ClientError as e:
