@@ -335,6 +335,15 @@ class BinanceFuturesClient:
         """Get user commission rate for a symbol (maker/taker fee tier)"""
         return await self._request("GET", "/fapi/v1/commissionRate", signed=True, params={"symbol": symbol})
 
+    async def create_futures_listen_key(self) -> str:
+        """创建 Futures User Data Stream listenKey（有效期60min）"""
+        result = await self._request("POST", "/fapi/v1/listenKey", signed=False)
+        return result.get("listenKey", "")
+
+    async def keepalive_futures_listen_key(self, listen_key: str) -> None:
+        """续期 listenKey，每25min调用一次防止过期"""
+        await self._request("PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=False)
+
     async def place_order(
         self,
         symbol: str,

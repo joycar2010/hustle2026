@@ -321,6 +321,12 @@ let orderBookFetchTimer = null
 const forwardActualPosition = ref(0)
 const reverseActualPosition = ref(0)
 
+// ---- 后端驱动的精确盈利（account_balance WS 推送） ----
+// Binance: balance.daily_pnl = realized_income + unrealized_pnl + funding_fee + commission (all-in-one)
+// MT5: unrealized_pnl + realized(daily_pnl) + funding_fee(swap) - commission_fee
+const _binanceBackendPnL = ref(0)  // Binance 平台总盈亏（含浮盈+已实现+资金费-手续费）
+const _mt5BackendPnL    = ref(0)  // MT5/Bybit 平台总盈亏
+
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
 const binanceLongPositions = ref([]) // Binance LONG positions
@@ -446,8 +452,14 @@ const bybitFloatingProfit = computed(() => {
   return profitUSD * usdToUsdtRate.value
 })
 
-// Calculate total dual-side floating profit (USDT)
+// 套利总盈利 = Binance端 + MT5端
+// Binance: daily_pnl 已含 浮盈 + 已实现 + 资金费率 + 手续费（全部由后端 income API 聚合）
+// MT5: unrealized_pnl(浮盈) + daily_pnl(已实现) + funding_fee(过夜费, 有符号) - commission_fee(手续费成本)
+// 后端未推送时（首屏）fallback 到前端实时价格计算的浮动盈亏
 const totalProfit = computed(() => {
+  const backendTotal = _binanceBackendPnL.value + _mt5BackendPnL.value
+  if (backendTotal !== 0) return backendTotal
+  // fallback: 前端浮动盈亏（仅有持仓均价时有效）
   return binanceFloatingProfit.value + bybitFloatingProfit.value
 })
 
@@ -568,6 +580,33 @@ function handleAccountBalanceUpdate(data) {
         // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
       }
     })
+
+    // ---- 精确总盈利计算（按用户规范） ----
+    // 公式: Total PnL = 浮动盈亏 + 已实现盈亏 + 资金费率(净) - 手续费
+    // Binance : balance.daily_pnl 已聚合 unrealized + realized_income + funding_fee + commission
+    // MT5/Bybit: unrealized_pnl(浮动) + daily_pnl(已实现) + funding_fee(过夜费,有符号) - commission_fee(手续费)
+    let newBinancePnL = 0
+    let newMt5PnL = 0
+    data.accounts.forEach(acc => {
+      const b = acc.balance ?? {}
+      if (acc.platform_id === 1) {
+        // Binance: daily_pnl = Σ(income_history all types) + futures_unrealized_pnl
+        // 一个字段已涵盖全部损益，直接使用
+        newBinancePnL += (b.daily_pnl ?? 0)
+      } else {
+        // MT5/Bybit: 分量累加
+        // unrealized_pnl : equity - balance（浮动盈亏）
+        // daily_pnl      : account.profit（已平仓累计盈亏，不含手续费/过夜费）
+        // funding_fee    : account_total_swap（过夜费，有符号：负=成本）
+        // commission_fee : sum(|deal.commission|)（手续费成本，正数，取减）
+        newMt5PnL += (b.unrealized_pnl   ?? 0)
+        newMt5PnL += (b.daily_pnl        ?? 0)
+        newMt5PnL += (b.funding_fee      ?? 0)
+        newMt5PnL -= (b.commission_fee   ?? 0)
+      }
+    })
+    _binanceBackendPnL.value = newBinancePnL
+    _mt5BackendPnL.value    = newMt5PnL
   }
 
   // Extract actual positions from positions array for spread calculation
