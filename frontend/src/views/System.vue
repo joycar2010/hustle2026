@@ -460,12 +460,6 @@
                 </svg>
                 添加本地代理
               </button>
-              <button @click="showFetchQingguoModal = true" class="btn-primary">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                从青果获取
-              </button>
               <button @click="loadProxies" class="btn-secondary">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -475,15 +469,7 @@
             </div>
           </div>
 
-          <!-- 青果余额显示 -->
-          <div v-if="qingguoBalance" class="bg-dark-200 rounded p-4 mb-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <h3 class="font-bold mb-1">青果网络余额</h3>
-                <div class="text-2xl font-mono text-primary">¥{{ qingguoBalance.balance }}</div>
-              </div>
-              <button @click="loadQingguoBalance" class="btn-secondary text-sm">
-                刷新余额
+          <!-- 代理列表 -->                刷新余额
               </button>
             </div>
           </div>
@@ -520,10 +506,9 @@
                   <td class="py-3 px-4">
                     <span class="px-2 py-1 rounded text-xs" :class="{
                       'bg-gray-500/20 text-gray-400': proxy.provider === 'local',
-                      'bg-yellow-500/20 text-yellow-400': proxy.provider === 'qingguo',
-                      'bg-cyan-500/20 text-cyan-400': proxy.provider === 'custom'
+                      'bg-cyan-500/20 text-cyan-400': proxy.provider !== 'local'
                     }">
-                      {{ proxy.provider === 'local' ? '本地' : proxy.provider === 'qingguo' ? '青果' : '自定义' }}
+                      {{ proxy.provider === 'local' ? '本地' : proxy.provider }}
                     </span>
                   </td>
                   <td class="py-3 px-4">
@@ -1081,99 +1066,121 @@
 
       <!-- SSL Certificate Management Tab -->
       <div v-if="activeTab === 'ssl'" class="space-y-6">
-        <!-- 当前使用的证书 -->
-        <div class="card">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold">当前SSL证书</h2>
-            <button @click="refreshCurrentCert" class="btn-secondary">
-              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              刷新
-            </button>
+        <!-- 头部 -->
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-xl font-bold">SSL 证书管理</h2>
+            <p class="text-sm text-text-tertiary mt-0.5">Let's Encrypt 自动证书 · {{ currentCerts.length }} 个域名</p>
           </div>
-
-          <div v-if="currentCert && currentCert.exists" class="space-y-4">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="bg-dark-200 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">证书状态</div>
-                <div class="flex items-center space-x-2">
-                  <span class="badge" :class="getCertStatusClass(currentCert.status)">
-                    {{ getCertStatusText(currentCert.status) }}
-                  </span>
-                  <span v-if="currentCert.is_valid" class="text-success text-sm">✓ 有效</span>
-                  <span v-else class="text-danger text-sm">✗ 已过期</span>
-                </div>
-              </div>
-
-              <div class="bg-dark-200 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">剩余天数</div>
-                <div class="text-2xl font-mono" :class="getDaysRemainingClass(currentCert.days_remaining)">
-                  {{ currentCert.days_remaining }} 天
-                </div>
-              </div>
-
-              <div class="bg-dark-200 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">域名</div>
-                <div class="text-sm">
-                  <div v-for="domain in currentCert.domain_names" :key="domain" class="text-primary">
-                    {{ domain }}
-                  </div>
-                </div>
-              </div>
-
-              <div class="bg-dark-200 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">颁发者</div>
-                <div class="text-sm break-all">{{ currentCert.issuer }}</div>
-              </div>
-
-              <div class="bg-dark-200 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">颁发时间</div>
-                <div class="text-sm">{{ formatDate(currentCert.issued_at) }}</div>
-              </div>
-
-              <div class="bg-dark-200 rounded p-4">
-                <div class="text-sm text-text-secondary mb-1">过期时间</div>
-                <div class="text-sm" :class="currentCert.days_remaining <= 30 ? 'text-warning' : ''">
-                  {{ formatDate(currentCert.expires_at) }}
-                </div>
-              </div>
-            </div>
-
-            <div class="bg-dark-200 rounded p-4">
-              <div class="text-sm text-text-secondary mb-2">证书文件路径</div>
-              <div class="space-y-1 text-sm font-mono">
-                <div><span class="text-text-secondary">证书:</span> {{ currentCert.cert_path }}</div>
-                <div><span class="text-text-secondary">私钥:</span> {{ currentCert.key_path }}</div>
-              </div>
-            </div>
-
-            <div v-if="currentCert.days_remaining <= 30" class="bg-warning/10 border border-warning rounded p-4">
-              <div class="flex items-start space-x-2">
-                <svg class="w-5 h-5 text-warning flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <div>
-                  <div class="font-medium text-warning">证书即将过期</div>
-                  <div class="text-sm text-text-secondary mt-1">
-                    证书将在 {{ currentCert.days_remaining }} 天后过期，请及时续期。
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-else-if="currentCert && !currentCert.exists" class="text-center py-8">
-            <svg class="w-16 h-16 mx-auto text-text-tertiary mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          <button @click="refreshCurrentCert" class="btn-secondary flex items-center">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            <div class="text-text-secondary">未找到SSL证书文件</div>
-            <div class="text-sm text-text-tertiary mt-2">{{ currentCert.error }}</div>
-          </div>
+            刷新
+          </button>
+        </div>
 
-          <div v-else class="text-center py-8 text-text-secondary">
-            加载中...
+        <!-- 证书卡片网格 -->
+        <div v-if="currentCerts.length" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div v-for="cert in currentCerts" :key="cert.cert_path || cert.domain"
+            class="card space-y-4 border"
+            :class="!cert.exists || cert.status === 'error' ? 'border-danger/40'
+              : cert.days_remaining <= 7 ? 'border-danger/40'
+              : cert.days_remaining <= 30 ? 'border-warning/40'
+              : 'border-success/30'">
+
+            <!-- 域名 + 状态徽章 -->
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div v-for="d in (cert.domain_names || [])" :key="d"
+                  class="font-mono text-sm text-primary truncate">{{ d }}</div>
+                <div v-if="!cert.domain_names?.length" class="font-mono text-sm text-text-tertiary">
+                  {{ cert.cert_path?.split('/').slice(-2,-1)[0] }}
+                </div>
+              </div>
+              <span class="badge flex-shrink-0" :class="getCertStatusClass(cert.status)">
+                {{ getCertStatusText(cert.status) }}
+              </span>
+            </div>
+
+            <!-- 剩余天数进度条 -->
+            <div v-if="cert.exists && cert.days_remaining != null">
+              <div class="flex justify-between text-xs text-text-tertiary mb-1.5">
+                <span>剩余有效期</span>
+                <span :class="getDaysRemainingClass(cert.days_remaining)" class="font-mono font-bold text-sm">
+                  {{ cert.days_remaining }} 天
+                </span>
+              </div>
+              <div class="h-2 bg-dark-200 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500"
+                  :class="cert.days_remaining <= 7 ? 'bg-danger' : cert.days_remaining <= 30 ? 'bg-warning' : 'bg-success'"
+                  :style="{ width: Math.min(100, Math.round(cert.days_remaining / 90 * 100)) + '%' }"/>
+              </div>
+            </div>
+
+            <!-- 详细字段 -->
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">证书有效</span>
+                <span v-if="cert.is_valid !== false" class="text-success text-xs font-medium">✓ 有效</span>
+                <span v-else class="text-danger text-xs font-medium">✗ 已失效</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">颁发机构</span>
+                <span class="text-text-primary font-mono text-xs">
+                  {{ cert.issuer ? 'Let\'s Encrypt / ' + cert.issuer : 'Let\'s Encrypt' }}
+                </span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">颁发时间</span>
+                <span class="text-text-secondary font-mono text-xs">{{ fmtCertDate(cert.issued_at) }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">到期时间</span>
+                <span :class="cert.days_remaining <= 30 ? 'text-warning' : 'text-text-secondary'"
+                  class="font-mono text-xs">{{ fmtCertDate(cert.expires_at) }}</span>
+              </div>
+            </div>
+
+            <!-- 文件路径 -->
+            <div class="bg-dark-200 rounded-lg p-3 text-xs font-mono space-y-1.5">
+              <div class="flex gap-2 min-w-0">
+                <span class="text-text-tertiary flex-shrink-0">证书:</span>
+                <span class="text-text-secondary truncate">{{ cert.cert_path }}</span>
+              </div>
+              <div class="flex gap-2 min-w-0">
+                <span class="text-text-tertiary flex-shrink-0">私钥:</span>
+                <span class="text-text-secondary truncate">{{ cert.cert_path?.replace('fullchain.pem', 'privkey.pem') }}</span>
+              </div>
+              <div class="flex gap-2 min-w-0">
+                <span class="text-text-tertiary flex-shrink-0">链路:</span>
+                <span class="text-text-secondary truncate">{{ cert.cert_path?.replace('fullchain.pem', 'chain.pem') }}</span>
+              </div>
+            </div>
+
+            <!-- 到期预警 -->
+            <div v-if="cert.exists && cert.days_remaining != null && cert.days_remaining <= 30"
+              class="bg-warning/10 border border-warning/30 rounded-lg p-3 text-xs">
+              <div class="text-warning font-medium mb-1">⚠ 证书将在 {{ cert.days_remaining }} 天后过期</div>
+              <code class="text-text-secondary">sudo certbot renew --force-renewal</code>
+            </div>
+
+            <!-- 错误提示 -->
+            <div v-if="cert.error"
+              class="bg-danger/10 border border-danger/30 rounded-lg p-3 text-xs text-danger">
+              {{ cert.error }}
+            </div>
           </div>
+        </div>
+
+        <!-- 空/加载状态 -->
+        <div v-else class="card text-center py-16 text-text-tertiary">
+          <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+          <div class="font-medium">加载证书信息中...</div>
+          <div class="text-xs mt-1">正在读取 Let's Encrypt 证书</div>
         </div>
       </div>
     </div>
@@ -1903,46 +1910,6 @@
       </div>
     </div>
 
-    <!-- Fetch from Qingguo Modal -->
-    <div v-if="showFetchQingguoModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-dark-100 rounded-lg p-6 w-full max-w-md">
-        <h3 class="text-xl font-bold mb-4">从青果网络获取代理</h3>
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium mb-2">数量</label>
-            <input v-model.number="qingguoForm.num" type="number" min="1" max="100" placeholder="1-100" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-2">地区</label>
-            <select v-model="qingguoForm.region" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
-              <option value="">不限</option>
-              <option value="CN">中国</option>
-              <option value="US">美国</option>
-              <option value="HK">香港</option>
-              <option value="SG">新加坡</option>
-              <option value="JP">日本</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-2">协议类型</label>
-            <select v-model="qingguoForm.protocol" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary">
-              <option value="http">HTTP</option>
-              <option value="https">HTTPS</option>
-              <option value="socks5">SOCKS5</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-2">有效期（分钟）</label>
-            <input v-model.number="qingguoForm.expire_time" type="number" min="1" placeholder="例如: 60" class="w-full px-3 py-2 bg-dark-300 border border-border-primary rounded focus:outline-none focus:border-primary" />
-          </div>
-        </div>
-        <div class="flex justify-end space-x-3 mt-6">
-          <button @click="showFetchQingguoModal = false" class="btn-secondary">取消</button>
-          <button @click="fetchFromQingguo" class="btn-primary">获取</button>
-        </div>
-      </div>
-    </div>
-
 </template>
 
 <script setup>
@@ -1995,8 +1962,6 @@ const mt5ClientForm = ref({
 
 // Proxy Management state
 const showAddLocalProxyModal = ref(false)
-const showFetchQingguoModal = ref(false)
-const qingguoBalance = ref(null)
 const localProxyForm = ref({
   proxy_type: 'http',
   host: '',
@@ -2004,12 +1969,6 @@ const localProxyForm = ref({
   username: '',
   password: '',
   remark: ''
-})
-const qingguoForm = ref({
-  num: 1,
-  region: '',
-  protocol: 'http',
-  expire_time: 60
 })
 
 // RBAC state
@@ -2025,8 +1984,8 @@ const isEditingRole = ref(false)
 const editingRoleId = ref(null)
 
 // SSL Certificate state
+const currentCerts = ref([])
 const certificates = ref([])
-const currentCert = ref(null)
 const showCertModal = ref(false)
 
 const certForm = ref({
@@ -2293,18 +2252,22 @@ async function deleteRole(roleId) {
 async function loadCurrentCert() {
   try {
     const response = await api.get('/api/v1/monitor/ssl/current')
-    currentCert.value = response.data
+    currentCerts.value = Array.isArray(response.data) ? response.data : [response.data]
   } catch (error) {
     console.error('Failed to load current certificate:', error)
-    currentCert.value = {
-      exists: false,
-      error: error.response?.data?.detail || error.message
-    }
+    currentCerts.value = []
   }
 }
 
 async function refreshCurrentCert() {
   await loadCurrentCert()
+}
+
+function fmtCertDate(dateStr) {
+  if (!dateStr) return 'N/A'
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
 function getCertStatusClass(status) {
@@ -3133,16 +3096,6 @@ async function loadProxies() {
   }
 }
 
-async function loadQingguoBalance() {
-  try {
-    const balance = await proxyStore.fetchQingguoBalance()
-    qingguoBalance.value = balance
-  } catch (error) {
-    console.error('Failed to load Qingguo balance:', error)
-    notificationStore.addNotification('error', '获取青果余额失败')
-  }
-}
-
 async function addLocalProxy() {
   try {
     if (!localProxyForm.value.host || !localProxyForm.value.port) {
@@ -3166,26 +3119,6 @@ async function addLocalProxy() {
   }
 }
 
-async function fetchFromQingguo() {
-  try {
-    if (!qingguoForm.value.num || qingguoForm.value.num < 1) {
-      notificationStore.addNotification('error', '请输入有效的数量')
-      return
-    }
-    await proxyStore.fetchFromQingguo(qingguoForm.value)
-    notificationStore.addNotification('success', `成功从青果获取${qingguoForm.value.num}个代理`)
-    showFetchQingguoModal.value = false
-    qingguoForm.value = {
-      num: 1,
-      region: '',
-      protocol: 'http',
-      expire_time: 60
-    }
-  } catch (error) {
-    console.error('Failed to fetch from Qingguo:', error)
-    notificationStore.addNotification('error', '从青果获取代理失败')
-  }
-}
 
 async function checkProxyHealth(proxyId) {
   try {
@@ -3374,7 +3307,6 @@ onMounted(async () => {
   loadSystemLogs()
   loadCurrentIntervals()  // Load current push frequencies
   loadProxies()  // Load proxy list
-  loadQingguoBalance()  // Load Qingguo balance
   loadMT5Accounts()  // Load MT5 accounts
 
   // Ensure WebSocket connection

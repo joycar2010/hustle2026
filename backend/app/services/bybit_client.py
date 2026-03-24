@@ -115,7 +115,23 @@ class BybitV5Client:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            if self.proxy_url and self.proxy_url != 'direct' and \
+                    self.proxy_url.startswith(('socks5://', 'socks4://', 'socks://')):
+                try:
+                    from aiohttp_socks import ProxyConnector
+                    connector = ProxyConnector.from_url(self.proxy_url)
+                    self.session = aiohttp.ClientSession(connector=connector)
+                    self._proxy_via_connector = True
+                except ImportError:
+                    logger.warning(
+                        "aiohttp-socks not installed; SOCKS5 proxy disabled. "
+                        "Run: pip install aiohttp-socks"
+                    )
+                    self.session = aiohttp.ClientSession()
+                    self._proxy_via_connector = False
+            else:
+                self.session = aiohttp.ClientSession()
+                self._proxy_via_connector = False
         return self.session
 
     async def close(self):
@@ -172,8 +188,11 @@ class BybitV5Client:
 
         session = await self._get_session()
 
-        # 使用实例级代理（优先）或全局代理
-        proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else (settings.HTTPS_PROXY or settings.HTTP_PROXY or None)
+        # SOCKS5 代理由 ProxyConnector 处理；HTTP/HTTPS 代理用 proxy= 参数
+        if getattr(self, '_proxy_via_connector', False):
+            proxy = None
+        else:
+            proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else (settings.HTTPS_PROXY or settings.HTTP_PROXY or None)
 
         try:
             async with session.request(method, url, headers=headers, proxy=proxy, **kwargs) as resp:

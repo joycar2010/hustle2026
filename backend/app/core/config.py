@@ -60,9 +60,6 @@ class Settings(BaseSettings):
     HTTP_PROXY: str = ""
     HTTPS_PROXY: str = ""
 
-    # Qingguo Proxy Service (青果网络代理服务)
-    QINGGUO_API_KEY: str = ""  # 青果网络API密钥
-
     # Bybit MT5
     BYBIT_MT5_ID: str = ""
     BYBIT_MT5_SERVER: str = ""

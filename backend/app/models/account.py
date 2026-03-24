@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, TIMESTAMP, SmallInteger, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -27,6 +27,9 @@ class Account(Base):
 
     # Leverage settings
     leverage = Column(Integer, nullable=True)  # Leverage multiplier (e.g., 20, 100)
+
+    # IPIPGO / static IP proxy configuration (JSONB)
+    proxy_config = Column(JSONB, nullable=True, comment='IPIPGO静态IP代理配置')
 
     # Account status
     is_default = Column(Boolean, default=False, nullable=False)

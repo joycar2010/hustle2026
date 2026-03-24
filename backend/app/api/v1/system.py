@@ -30,6 +30,7 @@ class UpdateRecordRequest(BaseModel):
 class RollbackRequest(BaseModel):
     hash: str = None
     version: str = None  # For backward compatibility
+    branch: Optional[str] = None
 
 class DeleteRecordRequest(BaseModel):
     where: Dict[str, Any]
@@ -339,11 +340,26 @@ async def get_system_info(
         # Get current versions from version service
         versions = version_service.get_versions()
 
+        # Get Go version
+        go_version = "unknown"
+        try:
+            go_result = subprocess.run(
+                ["/usr/local/go/bin/go", "version"],
+                capture_output=True, text=True, timeout=3
+            )
+            if go_result.returncode == 0:
+                parts = go_result.stdout.split()
+                if len(parts) >= 3:
+                    go_version = parts[2].lstrip("go")
+        except Exception:
+            pass
+
         return {
             "frontend_version": versions["frontend_version"],
             "frontend_build_time": versions.get("last_backup_time", "2026-02-19 12:00:00"),
             "backend_version": versions["backend_version"],
             "python_version": "3.9+",
+            "go_version": go_version,
             "db_version": pg_version_number,
             "uptime": "Running",
             "start_time": datetime.utcnow().isoformat() + "Z"
@@ -530,20 +546,20 @@ async def get_version_history(
     try:
         import subprocess
 
-        # Fetch latest commits from remote main branch
+        # Fetch latest commits from remote GO branch
         fetch_result = subprocess.run(
-            ["git", "fetch", "origin", "main"],
+            ["git", "fetch", "origin", "GO"],
             capture_output=True,
             text=True,
             cwd=".."
         )
 
         if fetch_result.returncode != 0:
-            raise Exception(f"Failed to fetch from GitHub: {fetch_result.stderr}")
+            raise Exception(f"Failed to fetch from GitHub GO branch: {fetch_result.stderr}")
 
-        # Get last 20 commits from origin/main (GitHub main branch)
+        # Get last 20 commits from origin/GO (GitHub GO branch)
         result = subprocess.run(
-            ["git", "log", "origin/main", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
+            ["git", "log", "origin/GO", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
             capture_output=True,
             text=True,
             encoding='utf-8',
@@ -579,6 +595,7 @@ async def get_version_history(
 @router.post("/github/push")
 async def push_to_github(
     remark: Optional[str] = Body(None, embed=True),
+    branch: Optional[str] = Body(None, embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, str]:
     """Push current version to GitHub"""
@@ -711,10 +728,11 @@ async def push_to_github(
                 error_msg = commit_result.stderr or commit_result.stdout or "Unknown error"
                 raise Exception(f"Git commit failed: {error_msg}")
 
-        # Push to remote with current branch
-        # Use force push for backup branches to overwrite remote if needed
+        # Push to remote — GO branch uses force-push to HEAD:GO refspec
         push_args = ["git", "push"]
-        if current_branch.startswith("backup-"):
+        if branch == "GO":
+            push_args.extend(["--force", "origin", "HEAD:GO"])
+        elif current_branch.startswith("backup-"):
             push_args.extend(["--force", "origin", current_branch])
         else:
             push_args.extend(["origin", current_branch])
@@ -729,9 +747,10 @@ async def push_to_github(
         if push_result.returncode != 0:
             raise Exception(f"Git push failed: {push_result.stderr}")
 
+        target_branch = branch if branch else current_branch
         response_data = {
-            "message": f"Successfully pushed to GitHub branch: {current_branch}",
-            "branch": current_branch,
+            "message": f"Successfully pushed to GitHub branch: {target_branch}",
+            "branch": target_branch,
             "output": push_result.stdout
         }
 
@@ -762,6 +781,13 @@ async def rollback_version(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Either hash or version must be provided"
+            )
+
+        # If rolling back from GO branch, fetch it first so the hash is accessible locally
+        if request.branch == "GO":
+            subprocess.run(
+                ["git", "fetch", "origin", "GO"],
+                capture_output=True, text=True, cwd=".."
             )
 
         # Get commit message to extract version numbers
@@ -845,7 +871,11 @@ async def delete_github_backup(
         version_match = re.search(version_pattern, commit_message)
 
         if not version_match:
-            raise Exception("Version numbers not found in commit message")
+            # GO branch backups don't follow the Version X.Y.Z/A.B.C pattern — acknowledge gracefully
+            return {
+                "message": f"Backup record {version_hash[:7]} acknowledged (no version tag to delete)",
+                "note": "Commit history is preserved for audit purposes"
+            }
 
         frontend_version = version_match.group(1)
         backend_version = version_match.group(2)

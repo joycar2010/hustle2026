@@ -1,6 +1,6 @@
 """
 代理管理服务
-支持青果网络代理和本地服务器IP代理
+支持手动代理和本地服务器IP代理
 """
 import asyncio
 import logging
@@ -12,7 +12,6 @@ from sqlalchemy import select, and_, or_, update
 from sqlalchemy.orm import selectinload
 
 from app.models.proxy import ProxyPool, AccountProxyBinding, ProxyHealthLog
-from app.services.qingguo_proxy_service import qingguo_proxy_service
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -409,52 +408,6 @@ class ProxyManager:
 
         await db.commit()
 
-    async def fetch_proxies_from_qingguo(
-        self,
-        db: AsyncSession,
-        num: int = 1,
-        region: Optional[str] = None,
-        protocol: str = "http",
-        expire_time: int = 3600,
-        created_by: Optional[str] = None
-    ) -> List[ProxyPool]:
-        """
-        从青果网络获取代理并保存到数据库
-
-        Args:
-            db: 数据库会话
-            num: 获取数量
-            region: 地区
-            protocol: 协议类型
-            expire_time: 有效期(秒)
-            created_by: 创建人ID
-
-        Returns:
-            创建的代理列表
-        """
-        try:
-            # 从青果网络获取代理
-            proxies_data = await qingguo_proxy_service.get_proxies(
-                num=num,
-                region=region,
-                protocol=protocol,
-                expire_time=expire_time
-            )
-
-            # 保存到数据库
-            proxies = []
-            for proxy_data in proxies_data:
-                proxy_data['proxy_type'] = proxy_data.pop('protocol', 'http')
-                proxy = await self.create_proxy(db, proxy_data, created_by)
-                proxies.append(proxy)
-
-            logger.info(f"从青果网络获取并保存 {len(proxies)} 个代理")
-            return proxies
-
-        except Exception as e:
-            logger.error(f"从青果网络获取代理失败: {str(e)}")
-            raise
-
     async def auto_assign_proxy(
         self,
         db: AsyncSession,
@@ -463,8 +416,7 @@ class ProxyManager:
         created_by: Optional[str] = None
     ) -> ProxyPool:
         """
-        自动为账户分配代理
-        优先使用现有可用代理，如果没有则从青果网络获取
+        自动为账户分配健康分数最高的可用代理
 
         Args:
             db: 数据库会话
@@ -475,14 +427,12 @@ class ProxyManager:
         Returns:
             分配的代理对象
         """
-        # 1. 查找可用的代理（健康分数>60，状态为active）
         available_proxies = await self.get_proxies(
             db,
             status='active',
             min_health_score=60
         )
 
-        # 过滤掉已经被其他账户绑定的代理
         result = await db.execute(
             select(AccountProxyBinding.proxy_id)
             .where(
@@ -496,23 +446,11 @@ class ProxyManager:
 
         available_proxies = [p for p in available_proxies if p.id not in bound_proxy_ids]
 
-        # 2. 如果有可用代理，选择健康分数最高的
-        if available_proxies:
-            proxy = available_proxies[0]
-            logger.info(f"使用现有代理: {proxy.id}")
-        else:
-            # 3. 没有可用代理，从青果网络获取
-            logger.info("没有可用代理，从青果网络获取新代理")
-            proxies = await self.fetch_proxies_from_qingguo(
-                db,
-                num=1,
-                created_by=created_by
-            )
-            proxy = proxies[0]
+        if not available_proxies:
+            raise ValueError("没有可用的代理，请先手动添加代理")
 
-        # 4. 绑定代理到账户
+        proxy = available_proxies[0]
         await self.bind_proxy_to_account(db, account_id, proxy.id, platform_id)
-
         return proxy
 
 

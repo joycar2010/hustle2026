@@ -4,7 +4,6 @@ import axios from 'axios'
 export const useProxyStore = defineStore('proxy', {
   state: () => ({
     proxies: [],
-    qingguoBalance: null,
     loading: false,
     error: null
   }),
@@ -12,7 +11,6 @@ export const useProxyStore = defineStore('proxy', {
   getters: {
     activeProxies: (state) => state.proxies.filter(p => p.status === 'active'),
     localProxies: (state) => state.proxies.filter(p => p.provider === 'local'),
-    qingguoProxies: (state) => state.proxies.filter(p => p.provider === 'qingguo'),
     proxyById: (state) => (id) => state.proxies.find(p => p.id === id)
   },
 
@@ -31,17 +29,6 @@ export const useProxyStore = defineStore('proxy', {
       }
     },
 
-    async fetchQingguoBalance() {
-      try {
-        const response = await axios.get('/api/v1/proxies/qingguo/balance')
-        this.qingguoBalance = response.data
-        return response.data
-      } catch (error) {
-        console.error('获取青果余额失败:', error)
-        throw error
-      }
-    },
-
     async createLocalProxy(data) {
       this.loading = true
       this.error = null
@@ -51,21 +38,6 @@ export const useProxyStore = defineStore('proxy', {
         return response.data
       } catch (error) {
         this.error = error.response?.data?.detail || '创建本地代理失败'
-        throw error
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async fetchFromQingguo(params) {
-      this.loading = true
-      this.error = null
-      try {
-        const response = await axios.post('/api/v1/proxies/fetch-from-qingguo', params)
-        await this.fetchProxies()
-        return response.data
-      } catch (error) {
-        this.error = error.response?.data?.detail || '从青果获取代理失败'
         throw error
       } finally {
         this.loading = false

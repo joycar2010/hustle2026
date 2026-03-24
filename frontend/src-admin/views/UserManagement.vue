@@ -198,6 +198,38 @@
             </div>
           </div>
 
+          <!-- IPIPGO 静态IP代理配置 -->
+          <div class="bg-dark-200 rounded-lg p-2.5 text-xs">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-text-tertiary font-medium">IPIPGO 静态IP</span>
+              <button @click="openProxyConfig(acc)"
+                class="px-1.5 py-0.5 bg-dark-50 hover:bg-dark-100 border border-border-primary rounded text-text-secondary transition-colors">
+                {{ acc.proxy_config ? '编辑' : '配置' }}
+              </button>
+            </div>
+            <div v-if="acc.proxy_config" class="space-y-1">
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">IP地址:</span>
+                <span class="font-mono text-text-secondary">{{ acc.proxy_config.host || '--' }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">端口:</span>
+                <span class="font-mono text-text-secondary">{{ acc.proxy_config.port || '--' }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">类型:</span>
+                <span class="font-mono text-text-secondary uppercase">{{ acc.proxy_config.proxy_type || 'socks5' }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">认证:</span>
+                <span :class="acc.proxy_config.username ? 'text-green-400' : 'text-text-tertiary'">
+                  {{ acc.proxy_config.username ? '已配置' : '无' }}
+                </span>
+              </div>
+            </div>
+            <div v-else class="text-center text-text-tertiary py-1">未配置代理 — 使用服务器直连</div>
+          </div>
+
           <!-- 操作按钮 -->
           <div class="flex gap-2">
             <button @click="openEditAccount(acc)"
@@ -645,6 +677,80 @@
       </div>
     </div>
 
+    <!-- Modal: IPIPGO 静态IP代理配置 -->
+    <div v-if="showProxyModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      @click.self="showProxyModal = false">
+      <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
+        <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+          <div>
+            <h3 class="font-bold">IPIPGO 静态IP代理</h3>
+            <p class="text-xs text-text-tertiary mt-0.5">{{ proxyTargetAcc?.account_name }}</p>
+          </div>
+          <button @click="showProxyModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
+        </div>
+        <form @submit.prevent="saveProxyConfig" class="p-6 space-y-4">
+          <p class="text-xs text-text-tertiary bg-dark-200 rounded-lg p-3">
+            配置 IPIPGO 独享静态IP，用于 Binance/Bybit API 请求防封。留空所有字段可清除代理配置（使用服务器直连）。
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="col-span-2">
+              <label class="block text-xs text-text-tertiary mb-1">代理类型</label>
+              <select v-model="proxyForm.proxy_type"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary">
+                <option value="socks5">SOCKS5</option>
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">主机地址 (Host)</label>
+              <input v-model="proxyForm.host"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="例: 1.2.3.4 或 proxy.ipipgo.com" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">端口 (Port)</label>
+              <input v-model.number="proxyForm.port" type="number" min="1" max="65535"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="例: 1080" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">用户名</label>
+              <input v-model="proxyForm.username"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="IPIPGO 用户名" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">密码</label>
+              <input v-model="proxyForm.password" type="password"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="IPIPGO 密码" />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-xs text-text-tertiary mb-1">地区备注（可选）</label>
+              <input v-model="proxyForm.region"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+                placeholder="例: 日本-东京, 新加坡" />
+            </div>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit"
+              class="flex-1 py-2 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-sm transition-colors">
+              保存配置
+            </button>
+            <button type="button" @click="clearProxyConfig"
+              class="py-2 px-4 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded-lg text-sm border border-[#f6465d]/20 transition-colors">
+              清除
+            </button>
+            <button type="button" @click="showProxyModal = false"
+              class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
+              取消
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Toast 提示 -->
     <div class="fixed bottom-6 right-6 z-50 space-y-2 pointer-events-none">
       <transition-group name="toast">
@@ -901,6 +1007,55 @@ async function openEditAccount(acc) {
     accountForm.value.api_secret  = r.data.api_secret  || ''
     accountForm.value.passphrase  = r.data.passphrase  || ''
   } catch { /* admin may not have bypass yet — user can re-enter manually */ }
+}
+
+// IPIPGO proxy config
+const showProxyModal  = ref(false)
+const proxyTargetAcc  = ref(null)
+const proxyForm = ref({ proxy_type: 'socks5', host: '', port: null, username: '', password: '', region: '' })
+
+function openProxyConfig(acc) {
+  proxyTargetAcc.value = acc
+  const cfg = acc.proxy_config || {}
+  proxyForm.value = {
+    proxy_type: cfg.proxy_type || 'socks5',
+    host:       cfg.host       || '',
+    port:       cfg.port       || null,
+    username:   cfg.username   || '',
+    password:   cfg.password   || '',
+    region:     cfg.region     || '',
+  }
+  showProxyModal.value = true
+}
+
+async function saveProxyConfig() {
+  const acc = proxyTargetAcc.value
+  if (!acc) return
+  const cfg = proxyForm.value.host ? {
+    proxy_type: proxyForm.value.proxy_type,
+    host:       proxyForm.value.host,
+    port:       proxyForm.value.port,
+    username:   proxyForm.value.username || null,
+    password:   proxyForm.value.password || null,
+    region:     proxyForm.value.region   || null,
+  } : null
+  try {
+    await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: cfg })
+    toast('代理配置已保存')
+    showProxyModal.value = false
+    await loadUserAccounts()
+  } catch (e) { apiErr('保存代理配置失败', e) }
+}
+
+async function clearProxyConfig() {
+  const acc = proxyTargetAcc.value
+  if (!acc) return
+  try {
+    await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: null })
+    toast('代理配置已清除')
+    showProxyModal.value = false
+    await loadUserAccounts()
+  } catch (e) { apiErr('清除代理配置失败', e) }
 }
 
 async function saveAccount() {

@@ -1,6 +1,11 @@
 """Order executor service for placing and managing orders"""
 import asyncio
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None  # type: ignore
+    MT5_AVAILABLE = False
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -8,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.services.binance_client import BinanceFuturesClient
 from app.models.account import Account
+from app.core.proxy_utils import build_proxy_url
 from app.models.order import OrderRecord
 from app.websocket.manager import manager
 from app.utils.trading_time import is_bybit_trading_hours
@@ -29,9 +35,14 @@ class OrderExecutor:
     ) -> Dict[str, Any]:
         """Place order on Binance"""
         import logging
+        from app.services.binance_client import BinanceIPBanError, BinanceTerminalError
         logger = logging.getLogger(__name__)
 
-        client = BinanceFuturesClient(account.api_key, account.api_secret)
+        # 强制精度：Binance XAUUSDT 最小步长 0.001，浮点尾数截断防 -1111
+        quantity = round(quantity, 3)
+
+        client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                       proxy_url=build_proxy_url(account.proxy_config))
 
         try:
             # Log order parameters
@@ -56,6 +67,25 @@ class OrderExecutor:
                 "client_order_id": result.get("clientOrderId"),
                 "status": result.get("status"),
                 "data": result,
+            }
+        except BinanceIPBanError as e:
+            logger.error(f"Binance IP封禁 - {e.message}")
+            asyncio.create_task(_trigger_ip_ban_alert(e))
+            return {
+                "success": False,
+                "platform": "binance",
+                "error": e.message,
+                "terminal_error": True,
+                "error_type": "ip_ban",
+            }
+        except BinanceTerminalError as e:
+            logger.error(f"Binance终止性错误(不重试) code={e.code}: {e.message}")
+            return {
+                "success": False,
+                "platform": "binance",
+                "error": e.message,
+                "terminal_error": True,
+                "error_code": e.code,
             }
         except Exception as e:
             logger.error(f"Binance下单失败 - symbol: {symbol}, side: {side}, qty: {quantity}, price: {price}, error: {str(e)}")
@@ -266,7 +296,8 @@ class OrderExecutor:
         order_id: int,
     ) -> Dict[str, Any]:
         """Check Binance order status"""
-        client = BinanceFuturesClient(account.api_key, account.api_secret)
+        client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                       proxy_url=build_proxy_url(account.proxy_config))
 
         try:
             result = await client.get_order(symbol, order_id)
@@ -387,7 +418,8 @@ class OrderExecutor:
         order_id: int,
     ) -> Dict[str, Any]:
         """Cancel Binance order"""
-        client = BinanceFuturesClient(account.api_key, account.api_secret)
+        client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                       proxy_url=build_proxy_url(account.proxy_config))
 
         try:
             result = await client.cancel_order(symbol, order_id)
@@ -715,6 +747,30 @@ class OrderExecutor:
         db.add(binance_order)
         db.add(bybit_order)
         await db.commit()
+
+
+async def _trigger_ip_ban_alert(e) -> None:
+    """异步触发Binance IP封禁飞书+弹窗告警，不阻塞主流程"""
+    try:
+        from app.services.risk_alert_service import risk_alert_service
+        from app.database import get_db_session
+        from sqlalchemy import select
+        from app.models.user import User
+
+        async with get_db_session(timeout=5.0) as db:
+            result = await db.execute(select(User).where(User.is_active == True))
+            users = result.scalars().all()
+
+        for user in users:
+            await risk_alert_service.check_binance_ip_ban(
+                user_id=str(user.user_id),
+                ip=e.ip,
+                ban_until_ms=e.ban_until_ms,
+                message=e.message,
+            )
+    except Exception as ex:
+        import logging
+        logging.getLogger(__name__).error(f"[IP封禁告警] 触发失败: {ex}")
 
 
 # Global instance

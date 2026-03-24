@@ -33,6 +33,7 @@ class AccountUpdate(BaseModel):
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
     leverage: Optional[int] = Field(None, ge=1, le=500)  # Leverage multiplier
+    proxy_config: Optional[dict] = None  # IPIPGO static IP proxy config
 
 
 class AccountResponse(BaseModel):
@@ -52,6 +53,7 @@ class AccountResponse(BaseModel):
     is_default: bool
     is_active: bool
     leverage: Optional[int] = None  # Leverage multiplier
+    proxy_config: Optional[dict] = None  # IPIPGO static IP proxy config
     create_time: datetime
     update_time: datetime
 

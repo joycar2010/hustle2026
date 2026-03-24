@@ -13,7 +13,7 @@ class ProxyPoolBase(BaseModel):
     port: int = Field(..., ge=1, le=65535, description="代理端口")
     username: Optional[str] = Field(None, description="代理用户名")
     password: Optional[str] = Field(None, description="代理密码")
-    provider: str = Field(default="qingguo", description="代理提供商")
+    provider: str = Field(default="custom", description="代理提供商")
     region: Optional[str] = Field(None, description="代理地区")
     ip_address: Optional[str] = Field(None, description="代理IP地址")
     expire_time: Optional[datetime] = Field(None, description="过期时间")
@@ -127,18 +127,8 @@ class ProxyHealthCheckRequest(BaseModel):
     check_type: str = Field(default="manual", description="检查类型: auto, manual")
 
 
-class QingguoProxyRequest(BaseModel):
-    """青果网络代理请求"""
-    num: int = Field(default=1, ge=1, le=100, description="提取数量")
-    region: Optional[str] = Field(None, description="地区")
-    protocol: str = Field(default="http", description="协议类型: http, https, socks5")
-    format: str = Field(default="json", description="返回格式: json, txt")
-    expire_time: int = Field(default=3600, description="有效期(秒)")
-
-
 class AccountProxyConfigRequest(BaseModel):
     """账户代理配置请求"""
     account_id: str = Field(..., description="账户ID")
     platform_id: int = Field(..., ge=1, le=2, description="平台ID: 1=Binance, 2=Bybit")
     proxy_id: Optional[int] = Field(None, description="代理ID，为空则解绑")
-    auto_create: bool = Field(default=False, description="如果没有可用代理，是否自动从青果网络获取")

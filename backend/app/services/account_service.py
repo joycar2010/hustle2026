@@ -1,6 +1,8 @@
 """Account data service for fetching account information from exchanges"""
 import asyncio
 import logging
+import re
+import time as _time_module
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +15,9 @@ from app.models.account import Account
 from app.schemas.account import AccountBalance, AccountPosition
 
 logger = logging.getLogger(__name__)
+
+# commission_rate 本地内存缓存（24小时有效，weight=20权重只在冷启动时消耗一次）
+_commission_rate_cache: Dict[str, Dict] = {}  # api_key[:16] -> {"data": ..., "ts": float}
 
 
 class AccountDataService:
@@ -61,6 +66,18 @@ class AccountDataService:
                         assets_to_price.append(asset)
 
             # Fetch all account data concurrently
+            # commission_rate (weight=20) 使用24小时内存缓存，避免频繁消耗权重
+            async def _cached_commission_rate(data):
+                return data
+
+            _cr_cache_key = api_key[:16] if api_key else "unknown"
+            _cr_cached = _commission_rate_cache.get(_cr_cache_key)
+            _commission_rate_task = (
+                _cached_commission_rate(_cr_cached["data"])
+                if _cr_cached and (_time_module.monotonic() - _cr_cached["ts"]) < 86400
+                else client.get_commission_rate("XAUUSDT")
+            )
+
             fetch_tasks = [
                 client.get_account(),           # USDT-M Futures  [0]
                 client.get_position_risk(),     # Futures positions [1]
@@ -68,7 +85,7 @@ class AccountDataService:
                 client.get_income(income_type="FUNDING_FEE", start_time=start_time, limit=1000),   # [3]
                 client.get_income(income_type="COMMISSION", start_time=start_time, limit=1000),    # [4]
                 client.get_margin_account(),    # Cross Margin     [5]
-                client.get_commission_rate("XAUUSDT"),  # Maker/taker fee rate [6]
+                _commission_rate_task,          # Maker/taker fee rate [6] (24h cached)
                 client.get_spot_price("BNBUSDT"),       # BNB/USDT price for fee conversion [7]
                 client.get_balance(),           # Futures wallet balances (includes BNB) [8]
             ]
@@ -89,6 +106,13 @@ class AccountDataService:
             commission_rate_data = results[6]
             bnb_price_data = results[7]
             futures_balance_data = results[8]
+
+            # commission_rate 成功返回时写入本地缓存（24h有效，weight=20每天只消耗一次）
+            if not isinstance(commission_rate_data, Exception) and commission_rate_data:
+                _commission_rate_cache[_cr_cache_key] = {
+                    "data": commission_rate_data,
+                    "ts": _time_module.monotonic(),
+                }
 
             # BNB/USDT price for commission conversion (when BNB fee discount is enabled)
             bnb_usdt_price = 1.0
@@ -358,21 +382,21 @@ class AccountDataService:
                 short_liquidation_price=short_liquidation_price,
             )
         except Exception as e:
+            from app.services.binance_client import BinanceIPBanError
+            import re as _re
+            if isinstance(e, BinanceIPBanError):
+                logger.error(f"[Binance IP封禁] {e.message}")
+                # 异步触发飞书+弹窗告警（asyncio已在模块顶部导入，不在此重复import）
+                asyncio.create_task(_trigger_binance_ban_alert_all_users(e))
+                raise Exception(f"RATE_LIMIT_BAN:{e.ban_until_ms}")
+
             error_msg = str(e)
-            # Check if it's a rate limit error and extract ban timestamp
-            if "banned" in error_msg.lower() or "rate limit" in error_msg.lower() or "-1003" in error_msg:
+            # 兼容旧版异常格式
+            if "banned until" in error_msg and ("banned" in error_msg or "rate limit" in error_msg.lower()):
                 logger.warning(f"Binance rate limit exceeded: {error_msg}")
-
-                # Try to extract ban timestamp from error message
-                import re
-                ban_until_match = re.search(r'banned until (\d+)', error_msg)
-                ban_until_ms = None
-                if ban_until_match:
-                    ban_until_ms = int(ban_until_match.group(1))
-                    logger.info(f"IP banned until timestamp: {ban_until_ms} ({ban_until_ms/1000})")
-
-                # Raise a custom exception with ban info
-                raise Exception(f"RATE_LIMIT:{ban_until_ms if ban_until_ms else 0}")
+                ban_until_match = _re.search(r'banned until (\d+)', error_msg)
+                ban_until_ms = int(ban_until_match.group(1)) if ban_until_match else 0
+                raise Exception(f"RATE_LIMIT_BAN:{ban_until_ms}")
 
             logger.error(f"Error fetching Binance balance: {error_msg}", exc_info=True)
             raise
@@ -1033,6 +1057,7 @@ class AccountDataService:
                 "is_mt5_account": account.is_mt5_account,
                 "mt5_id": account.mt5_id,  # Used for MT5 position deduplication across duplicate DB accounts
                 "is_active": account.is_active,
+                "proxy_config": account.proxy_config,
                 "balance": balance.model_dump(),
                 "positions": [pos.model_dump() for pos in positions],
                 "daily_pnl": daily_pnl,
@@ -1103,6 +1128,7 @@ class AccountDataService:
                     "platform_id": unique_accounts[i].platform_id,
                     "is_mt5_account": unique_accounts[i].is_mt5_account,
                     "is_active": unique_accounts[i].is_active,  # Include is_active status
+                    "proxy_config": unique_accounts[i].proxy_config,
                     "error": error_msg,
                 })
             else:
@@ -1184,3 +1210,29 @@ class AccountDataService:
 
 # Global instance
 account_data_service = AccountDataService()
+
+
+async def _trigger_binance_ban_alert_all_users(e) -> None:
+    """Binance IP封禁时向所有活跃用户推送飞书+弹窗告警"""
+    try:
+        from app.services.risk_alert_service import risk_alert_service
+        from app.database import get_db_session
+        from sqlalchemy import select
+        from app.models.user import User
+
+        async with get_db_session(timeout=5.0) as db:
+            result = await db.execute(select(User).where(User.is_active == True))
+            users = result.scalars().all()
+
+        for user in users:
+            try:
+                await risk_alert_service.check_binance_ip_ban(
+                    user_id=str(user.user_id),
+                    ip=e.ip,
+                    ban_until_ms=e.ban_until_ms,
+                    message=e.message,
+                )
+            except Exception as _ue:
+                logger.debug(f"[IP封禁告警] user {user.user_id} 推送失败: {_ue}")
+    except Exception as ex:
+        logger.error(f"[IP封禁告警] 全局推送失败: {ex}")

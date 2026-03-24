@@ -13,6 +13,17 @@ from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.mt5_client import MT5Client
 from app.models.account import Account
+from app.models.user import User
+
+ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+
+async def _is_admin(user_id: str, db: AsyncSession) -> bool:
+    try:
+        r = await db.execute(select(User).where(User.user_id == uuid.UUID(user_id)))
+        u = r.scalar_one_or_none()
+        return u is not None and u.role in ADMIN_ROLES
+    except Exception:
+        return False
 from app.schemas.mt5_client import (
     MT5ClientCreate,
     MT5ClientUpdate,
@@ -35,15 +46,13 @@ async def get_mt5_clients(
     try:
         logger.info(f"Getting MT5 clients for account {account_id}")
 
-        # 验证账户是否存在且属于当前用户
-        result = await db.execute(
-            select(Account).where(
-                and_(
-                    Account.account_id == account_id,
-                    Account.user_id == uuid.UUID(user_id)
-                )
-            )
+        # 验证账户是否存在且属于当前用户（管理员可访问所有账户）
+        is_admin = await _is_admin(user_id, db)
+        where_clause = (Account.account_id == account_id) if is_admin else and_(
+            Account.account_id == account_id,
+            Account.user_id == uuid.UUID(user_id)
         )
+        result = await db.execute(select(Account).where(where_clause))
         account = result.scalar_one_or_none()
         if not account:
             logger.warning(f"Account {account_id} not found for user {user_id}")
@@ -81,15 +90,13 @@ async def create_mt5_client(
     try:
         logger.info(f"Creating MT5 client for account {account_id}")
 
-        # 验证账户
-        result = await db.execute(
-            select(Account).where(
-                and_(
-                    Account.account_id == account_id,
-                    Account.user_id == uuid.UUID(user_id)
-                )
-            )
+        # 验证账户（管理员可访问所有账户）
+        is_admin = await _is_admin(user_id, db)
+        where_clause = (Account.account_id == account_id) if is_admin else and_(
+            Account.account_id == account_id,
+            Account.user_id == uuid.UUID(user_id)
         )
+        result = await db.execute(select(Account).where(where_clause))
         account = result.scalar_one_or_none()
 
         if not account:
@@ -134,6 +141,23 @@ async def create_mt5_client(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+async def _get_client_for_user(client_id: int, user_id: str, db: AsyncSession) -> MT5Client:
+    """按 client_id 查客户端，管理员不受 user_id 限制。"""
+    is_admin = await _is_admin(user_id, db)
+    if is_admin:
+        result = await db.execute(select(MT5Client).where(MT5Client.client_id == client_id))
+    else:
+        result = await db.execute(
+            select(MT5Client).join(Account).where(
+                and_(MT5Client.client_id == client_id, Account.user_id == uuid.UUID(user_id))
+            )
+        )
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="MT5 client not found")
+    return client
+
+
 @router.get("/mt5-clients/{client_id}", response_model=MT5ClientResponse)
 async def get_mt5_client(
     client_id: int,
@@ -141,21 +165,7 @@ async def get_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """获取单个MT5客户端详情"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
-            )
-        )
-    )
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="MT5 client not found")
-
-    return client
+    return await _get_client_for_user(client_id, user_id, db)
 
 
 @router.put("/mt5-clients/{client_id}", response_model=MT5ClientResponse)
@@ -166,19 +176,7 @@ async def update_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """更新MT5客户端配置"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
-            )
-        )
-    )
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="MT5 client not found")
+    client = await _get_client_for_user(client_id, user_id, db)
 
     # 更新字段
     update_data = client_data.dict(exclude_unset=True)
@@ -198,16 +196,7 @@ async def delete_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """删除MT5客户端"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
-            )
-        )
-    )
+    client = await _get_client_for_user(client_id, user_id, db)
     client = result.scalar_one_or_none()
     if not client:
         raise HTTPException(status_code=404, detail="MT5 client not found")
@@ -229,19 +218,7 @@ async def connect_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """连接MT5客户端"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
-            )
-        )
-    )
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="MT5 client not found")
+    client = await _get_client_for_user(client_id, user_id, db)
 
     if not client.is_active:
         raise HTTPException(status_code=400, detail="客户端未激活")
@@ -292,20 +269,7 @@ async def disconnect_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """断开MT5客户端"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
-            )
-        )
-    )
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="MT5 client not found")
-
+    await _get_client_for_user(client_id, user_id, db)
     # TODO: 实际的MT5断开逻辑
 
     return {"message": "MT5 client disconnected", "client_id": client_id}
@@ -318,21 +282,7 @@ async def get_mt5_client_status(
     db: AsyncSession = Depends(get_db)
 ):
     """获取MT5客户端连接状态"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
-            )
-        )
-    )
-    client = result.scalar_one_or_none()
-    if not client:
-        raise HTTPException(status_code=404, detail="MT5 client not found")
-
-    return client
+    return await _get_client_for_user(client_id, user_id, db)
 
 
 @router.get("/mt5-clients/{client_id}/password")

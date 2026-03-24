@@ -1,5 +1,8 @@
 """MetaTrader5 client for Bybit MT5 integration"""
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    mt5 = None
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging

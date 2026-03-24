@@ -95,7 +95,8 @@ class RiskAlertService:
                 'forward_open_spread_alert',
                 'forward_close_spread_alert',
                 'reverse_open_spread_alert',
-                'reverse_close_spread_alert'
+                'reverse_close_spread_alert',
+                'binance_ip_ban_alert',  # IP封禁无论用户在不在线都必须通知
             }
 
             # 需要用户在线才触发的提醒类型（爆仓价、MT5卡顿、单腿）
@@ -220,7 +221,8 @@ class RiskAlertService:
                 'total_net_asset_alert': 'total_asset',
                 'binance_liquidation_alert': 'binance_liquidation',
                 'bybit_liquidation_alert': 'bybit_liquidation',
-                'single_leg_alert': 'single_leg_alert'
+                'single_leg_alert': 'single_leg_alert',
+                'binance_ip_ban_alert': 'binance_ip_ban',
             }
 
             alert_type = alert_type_map.get(template_key, template_key)
@@ -299,6 +301,42 @@ class RiskAlertService:
             variables={
                 "failure_count": failure_count,
                 "last_response_time": f"{status_prefix} | {last_response_time}",
+            },
+        )
+
+    # ========================================================================
+    # Binance IP封禁告警
+    # ========================================================================
+
+    async def check_binance_ip_ban(
+        self,
+        user_id: str,
+        ip: str,
+        ban_until_ms: int,
+        message: str,
+    ) -> bool:
+        """
+        Binance IP被封禁时立即触发飞书消息+弹窗通知
+
+        冷却时间：10分钟（同一IP封禁不重复轰炸）
+        """
+        from datetime import datetime
+        ban_until_dt = datetime.fromtimestamp(ban_until_ms / 1000)
+        beijing_time = ban_until_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        now_ms = int(__import__('time').time() * 1000)
+        remaining_ms = max(0, ban_until_ms - now_ms)
+        remaining_minutes = remaining_ms // 60000
+        remaining_seconds = (remaining_ms % 60000) // 1000
+        remaining_str = f"{remaining_minutes}分钟{remaining_seconds}秒" if remaining_minutes > 0 else f"{remaining_seconds}秒"
+
+        return await self._send_alert(
+            user_id=user_id,
+            template_key="binance_ip_ban_alert",
+            variables={
+                "ip": ip,
+                "ban_until_time": beijing_time,
+                "remaining_time": remaining_str,
             },
         )
 

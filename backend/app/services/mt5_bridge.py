@@ -3,7 +3,10 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    mt5 = None
 from app.websocket.manager import manager
 from app.core.database import get_db_context
 from app.models.account import Account

@@ -11,15 +11,11 @@ api.interceptors.request.use(config => {
   return config
 })
 
-// Only logout on 401 for core auth endpoints, not for every data API call
-const AUTH_ENDPOINTS = ['/api/v1/users/me', '/api/v1/auth/']
-
+// Any 401 means token is invalid/expired — clear and redirect to login
 api.interceptors.response.use(
   res => res,
   error => {
-    const url = error.config?.url || ''
-    const isAuthEndpoint = AUTH_ENDPOINTS.some(e => url.includes(e))
-    if (error.response?.status === 401 && isAuthEndpoint && window.location.pathname !== '/login') {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
       localStorage.removeItem('admin_token')
       localStorage.removeItem('admin_role')
       import('@/stores/auth.js').then(({ useAuthStore }) => {

@@ -19,7 +19,7 @@ class ProxyPool(Base):
     port = Column(Integer, nullable=False, comment='代理端口')
     username = Column(String(255), nullable=True, comment='代理用户名')
     password = Column(String(255), nullable=True, comment='代理密码')
-    provider = Column(String(50), nullable=False, default='qingguo', comment='代理提供商')
+    provider = Column(String(50), nullable=False, default='custom', comment='代理提供商')
     region = Column(String(50), nullable=True, comment='代理地区')
     ip_address = Column(String(50), nullable=True, comment='代理IP地址')
     expire_time = Column(TIMESTAMP, nullable=True, comment='过期时间')

@@ -30,6 +30,8 @@ class MT5ClientBase(BaseModel):
     @validator('mt5_path')
     def validate_mt5_path(cls, v):
         """验证MT5路径格式"""
+        if v is None:
+            return v
         if not v.endswith('.exe') and not v.endswith('terminal64'):
             raise ValueError('MT5 path must point to an executable file')
         return v
@@ -64,6 +66,7 @@ class MT5ClientResponse(MT5ClientBase):
     """MT5客户端响应"""
     client_id: int
     account_id: UUID
+    mt5_path: Optional[str] = None  # Override base: DB may have NULL
     connection_status: str
     last_connected_at: Optional[datetime] = None
     last_disconnected_at: Optional[datetime] = None

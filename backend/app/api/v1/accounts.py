@@ -198,6 +198,9 @@ async def update_account(
     if account_update.leverage is not None:
         account.leverage = account_update.leverage
 
+    if account_update.proxy_config is not None:
+        account.proxy_config = account_update.proxy_config
+
     await db.commit()
     await db.refresh(account)
 
@@ -488,6 +491,7 @@ async def get_aggregated_dashboard(
                 "platform_id": inactive_acc.platform_id,
                 "is_mt5_account": inactive_acc.is_mt5_account,
                 "is_active": False,
+                "proxy_config": inactive_acc.proxy_config,
                 "error": "账户未激活"
             })
 

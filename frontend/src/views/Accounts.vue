@@ -290,7 +290,7 @@
                       class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
                 <option :value="null">直连（不使用代理）</option>
                 <option v-for="proxy in proxyStore.activeProxies" :key="proxy.id" :value="proxy.id">
-                  {{ proxy.provider === 'local' ? '本地' : proxy.provider === 'qingguo' ? '青果' : '自定义' }} -
+                  {{ proxy.provider === 'local' ? '本地' : proxy.provider }} -
                   {{ proxy.host }}:{{ proxy.port }}
                   (健康度: {{ proxy.health_score }})
                 </option>

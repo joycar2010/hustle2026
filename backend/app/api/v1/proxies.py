@@ -13,12 +13,10 @@ from app.schemas.proxy import (
     ProxyPoolResponse,
     AccountProxyBindingResponse,
     ProxyHealthCheckRequest,
-    QingguoProxyRequest,
     AccountProxyConfigRequest,
     ProxyHealthLogResponse
 )
 from app.services.proxy_manager import proxy_manager
-from app.services.qingguo_proxy_service import qingguo_proxy_service
 
 router = APIRouter()
 
@@ -26,7 +24,7 @@ router = APIRouter()
 @router.get("/proxies", response_model=List[ProxyPoolResponse])
 async def get_proxies(
     status: Optional[str] = Query(None, description="状态过滤: active, inactive, expired, failed"),
-    provider: Optional[str] = Query(None, description="提供商过滤: qingguo, local, custom"),
+    provider: Optional[str] = Query(None, description="提供商过滤: local, custom, ipipgo"),
     min_health_score: int = Query(0, ge=0, le=100, description="最低健康分数"),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
@@ -121,29 +119,6 @@ async def delete_proxy(
     return {"message": "删除成功"}
 
 
-@router.post("/proxies/fetch-from-qingguo", response_model=List[ProxyPoolResponse])
-async def fetch_proxies_from_qingguo(
-    request: QingguoProxyRequest,
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    从青果网络获取代理
-    """
-    try:
-        proxies = await proxy_manager.fetch_proxies_from_qingguo(
-            db,
-            num=request.num,
-            region=request.region,
-            protocol=request.protocol,
-            expire_time=request.expire_time,
-            created_by=user_id
-        )
-        return proxies
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取代理失败: {str(e)}")
-
-
 @router.post("/proxies/health-check")
 async def check_proxy_health(
     request: ProxyHealthCheckRequest,
@@ -205,20 +180,6 @@ async def configure_account_proxy(
             raise HTTPException(status_code=404, detail="没有找到绑定的代理")
         return {"message": "解绑成功", "proxy_id": None}
 
-    elif request.proxy_id == 0 and request.auto_create:
-        # 自动分配代理
-        proxy = await proxy_manager.auto_assign_proxy(
-            db,
-            request.account_id,
-            request.platform_id,
-            created_by=user_id
-        )
-        return {
-            "message": "自动分配代理成功",
-            "proxy_id": proxy.id,
-            "proxy": ProxyPoolResponse.from_orm(proxy)
-        }
-
     else:
         # 绑定指定代理
         proxy = await proxy_manager.get_proxy_by_id(db, request.proxy_id)
@@ -251,20 +212,6 @@ async def get_account_proxy(
     """
     proxy = await proxy_manager.get_account_proxy(db, account_id, platform_id)
     return proxy
-
-
-@router.get("/qingguo/balance")
-async def get_qingguo_balance(
-    user_id: str = Depends(get_current_user_id)
-):
-    """
-    查询青果网络账户余额
-    """
-    try:
-        balance = await qingguo_proxy_service.check_balance()
-        return balance
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查询余额失败: {str(e)}")
 
 
 @router.get("/proxies/{proxy_id}/health-logs", response_model=List[ProxyHealthLogResponse])

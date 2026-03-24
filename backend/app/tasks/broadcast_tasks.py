@@ -137,6 +137,29 @@ class AccountBalanceStreamer:
                     list(active_accounts)
                 )
 
+                # 将 Binance 持仓同步到 PositionStreamer（替代其 REST 轮询，零额外API调用）
+                try:
+                    binance_long_xau = 0.0
+                    binance_short_xau = 0.0
+                    for pos in aggregated_data.get("positions", []):
+                        if pos.get("is_mt5_account"):
+                            continue
+                        if pos.get("platform_id") != 1:  # 1 = Binance
+                            continue
+                        side = pos.get("side", "").upper()
+                        size = round(float(pos.get("size", 0)), 3)
+                        # AccountPosition.side = "Buy"/"Sell" (Binance REST) 或 "LONG"/"SHORT"
+                        if side in ("LONG", "BUY"):
+                            binance_long_xau += size
+                        elif side in ("SHORT", "SELL"):
+                            binance_short_xau += size
+                    position_streamer.set_binance_positions(
+                        round(binance_long_xau, 3),
+                        round(binance_short_xau, 3),
+                    )
+                except Exception as _pe:
+                    logger.debug(f"[AccountBalanceStreamer] PositionStreamer sync error: {_pe}")
+
                 # Broadcast to all connected clients
                 await manager.broadcast_account_balance(aggregated_data)
                 self.broadcast_count += 1
@@ -826,25 +849,27 @@ class PositionStreamer:
 
     数据源：
     - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 < 1ms
-    - Binance  ：5秒缓存（binance REST API 速率限制），过期后异步刷新
+    - Binance  ：完全依赖 AccountBalanceStreamer 推送（每30s由账户刷新驱动），零API开销
 
     设计原则（量化工程）：
-    - 不依赖 account_service 缓存（60s TTL），完全绕过
+    - 不对 Binance 发起任何 REST 请求，彻底消除频率超限风险
     - 只在有 WebSocket 连接时广播，空载时跳过
     - MT5 读取在 executor 线程池中执行，不阻塞事件循环
     """
 
-    BINANCE_CACHE_TTL = 5.0   # Binance 持仓缓存5秒
     BROADCAST_INTERVAL = 1.0  # 每秒广播一次
 
     def __init__(self):
         self.running = False
         self.task = None
-        # Binance 缓存
+        # Binance 持仓（由 AccountBalanceStreamer 主动推送，PositionStreamer 只读缓存）
         self._binance_long_xau: float = 0.0
         self._binance_short_xau: float = 0.0
-        self._binance_cache_ts: float = 0.0   # epoch seconds
-        self._binance_refresh_lock = asyncio.Lock()
+
+    def set_binance_positions(self, long_xau: float, short_xau: float) -> None:
+        """由 AccountBalanceStreamer 调用，更新 Binance 持仓缓存（无锁，主事件循环内安全）"""
+        self._binance_long_xau = long_xau
+        self._binance_short_xau = short_xau
 
     async def start(self):
         if self.running:
@@ -881,8 +906,9 @@ class PositionStreamer:
                 # 1. 读 MT5 持仓（线程池，非阻塞）
                 long_lots, short_lots = await self._read_mt5_positions(loop)
 
-                # 2. 读 Binance 持仓（带缓存）
-                binance_long, binance_short = await self._read_binance_positions()
+                # 2. Binance 持仓直接使用缓存值（由 AccountBalanceStreamer 推送，无REST调用）
+                binance_long = self._binance_long_xau
+                binance_short = self._binance_short_xau
 
                 # 3. 广播
                 await manager.broadcast({
@@ -922,53 +948,208 @@ class PositionStreamer:
             return 0.0, 0.0
 
     # ------------------------------------------------------------------
-    # Binance 持仓读取（5秒缓存）
+    # Binance 持仓读取（已废弃REST轮询，改为被动接收AccountBalanceStreamer推送）
     # ------------------------------------------------------------------
-    async def _read_binance_positions(self) -> tuple:
-        import time
-        now = time.monotonic()
-
-        # 缓存未过期直接返回
-        if now - self._binance_cache_ts < self.BINANCE_CACHE_TTL:
-            return self._binance_long_xau, self._binance_short_xau
-
-        # 加锁防止并发重复刷新
-        if self._binance_refresh_lock.locked():
-            return self._binance_long_xau, self._binance_short_xau
-
-        async with self._binance_refresh_lock:
-            # double-check after lock
-            if time.monotonic() - self._binance_cache_ts < self.BINANCE_CACHE_TTL:
-                return self._binance_long_xau, self._binance_short_xau
-            try:
-                async with get_db_session(timeout=3.0) as db:
-                    result = await db.execute(
-                        select(Account).where(
-                            Account.platform_id == 1,
-                            Account.is_active == True,
-                        )
-                    )
-                    acc = result.scalars().first()
-
-                if acc and acc.api_key and acc.api_secret:
-                    from app.services.binance_client import BinanceFuturesClient
-                    client = BinanceFuturesClient(acc.api_key, acc.api_secret)
-                    pos_data = await client.get_position_risk("XAUUSDT")
-                    await client.close()
-                    long_xau = short_xau = 0.0
-                    for pos in pos_data:
-                        amt = float(pos.get("positionAmt", 0))
-                        if amt > 0:
-                            long_xau = round(amt, 3)
-                        elif amt < 0:
-                            short_xau = round(abs(amt), 3)
-                    self._binance_long_xau  = long_xau
-                    self._binance_short_xau = short_xau
-                    self._binance_cache_ts  = time.monotonic()
-            except Exception as e:
-                logger.debug(f"[PositionStreamer] Binance refresh error: {e}")
-
-        return self._binance_long_xau, self._binance_short_xau
 
 
 position_streamer = PositionStreamer()
+
+
+class BinancePositionPusher:
+    """
+    实时 Binance 持仓推送器 — 订阅 Binance Futures User Data Stream。
+
+    当 ACCOUNT_UPDATE 事件到达（成交触发），立即更新 PositionStreamer 缓存，
+    取代 AccountBalanceStreamer 30s REST 轮询驱动，实现 <100ms 持仓更新。
+
+    协议：wss://fstream.binance.com/ws/{listenKey}
+    listenKey 有效期 60min，每 25min 续期一次。
+    """
+
+    SYMBOL           = "XAUUSDT"
+    KEEPALIVE_SEC    = 25 * 60   # 25min 续期，确保 listenKey 不过期
+    RECONNECT_DELAY  = 5         # 断线后等待秒数
+
+    def __init__(self):
+        self.running = False
+        self.task    = None
+
+    async def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.task = asyncio.create_task(self._manager_loop())
+        logger.info("[BinancePositionPusher] Started")
+
+    async def stop(self):
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("[BinancePositionPusher] Stopped")
+
+    # ------------------------------------------------------------------
+    # 外层：加载账户并为每个账户启动独立 stream
+    # ------------------------------------------------------------------
+    async def _manager_loop(self):
+        while self.running:
+            try:
+                accounts = await self._load_binance_accounts()
+                if not accounts:
+                    logger.warning("[BinancePositionPusher] 无活跃 Binance 账户，60s 后重试")
+                    await asyncio.sleep(60)
+                    continue
+
+                tasks = [
+                    asyncio.create_task(self._account_stream_loop(api_key, api_secret))
+                    for api_key, api_secret in accounts
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[BinancePositionPusher] Manager loop error: {e}")
+                await asyncio.sleep(self.RECONNECT_DELAY)
+
+    async def _load_binance_accounts(self) -> list:
+        """从 DB 加载所有活跃 Binance REST 账户（去重 api_key）"""
+        from app.core.database import get_db_session
+        try:
+            async with get_db_session(timeout=10.0) as db:
+                result = await db.execute(
+                    select(Account).where(
+                        Account.is_active    == True,
+                        Account.platform_id  == 1,
+                        Account.api_key      != None,
+                        Account.api_secret   != None,
+                    )
+                )
+                rows = result.scalars().all()
+
+            seen, out = set(), []
+            for acc in rows:
+                if acc.api_key and acc.api_key not in seen:
+                    seen.add(acc.api_key)
+                    out.append((acc.api_key, acc.api_secret))
+
+            logger.info(f"[BinancePositionPusher] 加载 {len(out)} 个 Binance 账户")
+            return out
+        except Exception as e:
+            logger.error(f"[BinancePositionPusher] 加载账户失败: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # 单账户：创建 listenKey → 连 WS → 处理消息 → 断线重连
+    # ------------------------------------------------------------------
+    async def _account_stream_loop(self, api_key: str, api_secret: str):
+        from app.services.binance_client import BinanceFuturesClient
+        ws_base = "wss://fstream.binance.com/ws"
+
+        while self.running:
+            client  = BinanceFuturesClient(api_key, api_secret)
+            session = None
+            try:
+                listen_key = await client.create_futures_listen_key()
+                if not listen_key:
+                    logger.error(f"[BinancePositionPusher] listenKey 获取失败: {api_key[:8]}…")
+                    await asyncio.sleep(self.RECONNECT_DELAY)
+                    continue
+
+                logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
+                session = aiohttp.ClientSession()
+
+                async with session.ws_connect(
+                    f"{ws_base}/{listen_key}", heartbeat=30
+                ) as ws:
+                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
+
+                    keepalive_task = asyncio.create_task(
+                        self._keepalive_loop(client, listen_key)
+                    )
+                    try:
+                        async for msg in ws:
+                            if not self.running:
+                                break
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await self._handle_message(msg.json())
+                            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                break
+                    finally:
+                        keepalive_task.cancel()
+                        try:
+                            await keepalive_task
+                        except asyncio.CancelledError:
+                            pass
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[BinancePositionPusher] Stream 错误 ({api_key[:8]}…): {e}")
+            finally:
+                if session and not session.closed:
+                    await session.close()
+                await client.close()
+
+            if self.running:
+                logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
+                await asyncio.sleep(self.RECONNECT_DELAY)
+
+    async def _keepalive_loop(self, client, listen_key: str):
+        """每 25min 续期 listenKey"""
+        while True:
+            await asyncio.sleep(self.KEEPALIVE_SEC)
+            try:
+                await client.keepalive_futures_listen_key(listen_key)
+                logger.debug("[BinancePositionPusher] listenKey 续期成功")
+            except Exception as e:
+                logger.warning(f"[BinancePositionPusher] listenKey 续期失败: {e}")
+
+    # ------------------------------------------------------------------
+    # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer
+    # ------------------------------------------------------------------
+    async def _handle_message(self, data: dict):
+        if data.get("e") != "ACCOUNT_UPDATE":
+            return
+
+        # ACCOUNT_UPDATE.a.P 是仓位数组
+        positions = data.get("a", {}).get("P", [])
+
+        # 以当前缓存值为基准，只覆盖 XAUUSDT 相关字段
+        long_xau  = position_streamer._binance_long_xau
+        short_xau = position_streamer._binance_short_xau
+        updated   = False
+
+        for pos in positions:
+            if pos.get("s") != self.SYMBOL:
+                continue
+
+            updated  = True
+            ps       = pos.get("ps", "BOTH")    # positionSide: LONG / SHORT / BOTH
+            pa       = float(pos.get("pa", 0))  # positionAmt（有符号）
+
+            if ps == "LONG":
+                long_xau  = round(max(0.0, pa), 3)
+            elif ps == "SHORT":
+                # SHORT side: pa 为负值，取绝对值
+                short_xau = round(max(0.0, abs(pa)), 3)
+            else:  # BOTH（单向持仓模式）
+                if pa > 0:
+                    long_xau, short_xau = round(pa, 3), 0.0
+                elif pa < 0:
+                    long_xau, short_xau = 0.0, round(abs(pa), 3)
+                else:
+                    long_xau, short_xau = 0.0, 0.0
+
+        if updated:
+            position_streamer.set_binance_positions(long_xau, short_xau)
+            logger.info(
+                f"[BinancePositionPusher] ACCOUNT_UPDATE → "
+                f"long={long_xau} short={short_xau}"
+            )
+
+
+binance_position_pusher = BinancePositionPusher()

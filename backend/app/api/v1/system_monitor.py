@@ -1,12 +1,10 @@
 """系统监控API路由"""
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime
-from pathlib import Path
 import subprocess
-import redis
-import requests
+import redis as redis_lib
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
@@ -15,102 +13,122 @@ from app.core.security import get_current_user_id_optional
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 配置路径
-NGINX_SSL_CERT_PATH = Path("C:/nginx/ssl/fullchain.pem")
-NGINX_SSL_KEY_PATH = Path("C:/nginx/ssl/privkey.pem")
+SSL_DOMAINS = [
+    "go.hustle2026.xyz",
+    "admin.hustle2026.xyz",
+    "www.hustle2026.xyz",
+]
 
 
 def check_redis_status() -> Dict[str, Any]:
-    """检查Redis连接状态"""
     try:
-        # 尝试连接Redis
-        r = redis.Redis(host='localhost', port=6379, db=0, socket_connect_timeout=2)
+        r = redis_lib.Redis(host='localhost', port=6379, db=0, socket_connect_timeout=2)
         r.ping()
         info = r.info()
-
         return {
-            "status": "healthy",
-            "connected": True,
+            "status": "healthy", "connected": True,
             "version": info.get('redis_version', 'unknown'),
             "uptime_seconds": info.get('uptime_in_seconds', 0),
             "connected_clients": info.get('connected_clients', 0),
             "used_memory_human": info.get('used_memory_human', '0'),
             "error": None
         }
-    except redis.ConnectionError as e:
-        return {
-            "status": "error",
-            "connected": False,
-            "error": f"无法连接到Redis: {str(e)}"
-        }
+    except redis_lib.ConnectionError as e:
+        return {"status": "error", "connected": False, "error": f"无法连接到Redis: {str(e)}"}
     except Exception as e:
-        return {
-            "status": "error",
-            "connected": False,
-            "error": str(e)
-        }
+        return {"status": "error", "connected": False, "error": str(e)}
 
 
 def check_feishu_status() -> Dict[str, Any]:
-    """检查飞书通知服务状态"""
     try:
-        from app.services.feishu_service import get_feishu_service
-
-        feishu = get_feishu_service()
-        if not feishu:
-            return {
-                "status": "not_configured",
-                "configured": False,
-                "error": "飞书服务未初始化"
-            }
-
-        # 检查是否有app_id和app_secret
-        if not feishu.app_id or not feishu.app_secret:
-            return {
-                "status": "not_configured",
-                "configured": False,
-                "error": "飞书服务未配置"
-            }
-
-        # 服务已配置
-        return {
-            "status": "healthy",
-            "configured": True,
-            "error": None
-        }
-
+        import psycopg2
+        conn = psycopg2.connect(
+            host="127.0.0.1", port=5432, dbname="postgres",
+            user="postgres", password="Lk106504"
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT is_enabled, config_data FROM notification_configs WHERE service_type='feishu' LIMIT 1")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return {"status": "not_configured", "configured": False, "error": "飞书未配置"}
+        is_enabled, config_data = row
+        if not is_enabled:
+            return {"status": "disabled", "configured": True, "error": None}
+        app_id = (config_data or {}).get('app_id', '')
+        if not app_id:
+            return {"status": "not_configured", "configured": False, "error": "app_id 未设置"}
+        return {"status": "healthy", "configured": True, "error": None}
     except Exception as e:
-        logger.error(f"检查飞书服务状态失败: {e}")
-        return {
-            "status": "error",
-            "configured": False,
-            "error": str(e)
-        }
+        logger.error(f"检查飞书状态失败: {e}")
+        return {"status": "error", "configured": False, "error": str(e)}
 
 
-def check_nginx_ssl_certificate() -> Dict[str, Any]:
-    """检查Nginx SSL证书状态"""
+def check_mt5_clients() -> List[Dict[str, Any]]:
     try:
-        if not NGINX_SSL_CERT_PATH.exists():
-            return {
-                "status": "error",
-                "exists": False,
-                "error": "证书文件不存在"
+        import psycopg2
+        conn = psycopg2.connect(
+            host="127.0.0.1", port=5432, dbname="postgres",
+            user="postgres", password="Lk106504"
+        )
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT mc.client_name, mc.mt5_login, mc.connection_status, mc.is_active,
+                   u.username
+            FROM mt5_clients mc
+            LEFT JOIN accounts a ON mc.account_id = a.account_id
+            LEFT JOIN users u ON a.user_id = u.user_id
+            ORDER BY mc.client_name
+        """)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return [
+            {
+                "client_name": r[0], "mt5_login": r[1],
+                "connection_status": r[2], "is_active": r[3],
+                "username": r[4] or '--',
+                "online": r[2] == 'connected'
             }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"查询MT5客户端失败: {e}")
+        return []
 
-        # 读取并解析证书
-        cert_content = NGINX_SSL_CERT_PATH.read_bytes()
-        cert = x509.load_pem_x509_certificate(cert_content, default_backend())
 
-        # 获取证书信息
-        not_before = cert.not_valid_before
+def read_cert_bytes(domain: str) -> Optional[bytes]:
+    cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+    try:
+        result = subprocess.run(
+            ["sudo", "cat", cert_path],
+            capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout
+    except Exception:
+        pass
+    # fallback: direct read
+    try:
+        from pathlib import Path
+        return Path(cert_path).read_bytes()
+    except Exception:
+        return None
+
+
+def check_ssl_cert(domain: str) -> Dict[str, Any]:
+    cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+    cert_bytes = read_cert_bytes(domain)
+    if not cert_bytes:
+        return {
+            "domain": domain, "cert_path": cert_path, "exists": False,
+            "status": "error", "days_remaining": None,
+            "domain_names": [domain], "error": "未找到证书文件"
+        }
+    try:
+        cert = x509.load_pem_x509_certificate(cert_bytes, default_backend())
         not_after = cert.not_valid_after
         now = datetime.utcnow()
-
-        # 计算剩余天数
         days_remaining = (not_after - now).days
-
-        # 确定状态
         if now > not_after:
             status = "expired"
         elif days_remaining <= 7:
@@ -119,37 +137,22 @@ def check_nginx_ssl_certificate() -> Dict[str, Any]:
             status = "warning"
         else:
             status = "healthy"
-
-        # 获取域名
         try:
-            san_extension = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
-            domains = [name.value for name in san_extension.value]
-        except:
-            domains = []
-
-        # 获取颁发者
-        issuer = cert.issuer.rfc4514_string()
-
+            san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            domains = [name.value for name in san.value]
+        except Exception:
+            domains = [domain]
         return {
-            "status": status,
-            "exists": True,
+            "domain": domain, "cert_path": cert_path, "exists": True,
+            "status": status, "days_remaining": days_remaining,
             "domain_names": domains,
-            "issuer": issuer,
-            "issued_at": not_before.isoformat(),
-            "expires_at": not_after.isoformat(),
-            "days_remaining": days_remaining,
-            "is_valid": now < not_after,
-            "cert_path": str(NGINX_SSL_CERT_PATH),
-            "key_path": str(NGINX_SSL_KEY_PATH),
-            "error": None
+            "expires_at": not_after.isoformat(), "error": None
         }
-
     except Exception as e:
-        logger.error(f"检查SSL证书失败: {e}")
         return {
-            "status": "error",
-            "exists": NGINX_SSL_CERT_PATH.exists(),
-            "error": str(e)
+            "domain": domain, "cert_path": cert_path, "exists": True,
+            "status": "error", "days_remaining": None,
+            "domain_names": [domain], "error": str(e)
         }
 
 
@@ -157,13 +160,13 @@ def check_nginx_ssl_certificate() -> Dict[str, Any]:
 async def get_system_status(
     current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
-    """获取系统各组件状态"""
     try:
         return {
             "timestamp": datetime.utcnow().isoformat(),
             "redis": check_redis_status(),
             "feishu": check_feishu_status(),
-            "ssl_certificate": check_nginx_ssl_certificate()
+            "ssl_certificate": [check_ssl_cert(d) for d in SSL_DOMAINS],
+            "mt5_clients": check_mt5_clients(),
         }
     except Exception as e:
         logger.error(f"获取系统状态失败: {e}")
@@ -174,10 +177,4 @@ async def get_system_status(
 async def get_current_ssl_certificate(
     current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
-    """获取当前使用的SSL证书信息"""
-    try:
-        cert_info = check_nginx_ssl_certificate()
-        return cert_info
-    except Exception as e:
-        logger.error(f"获取SSL证书信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取SSL证书信息失败: {str(e)}")
+    return [check_ssl_cert(d) for d in SSL_DOMAINS]

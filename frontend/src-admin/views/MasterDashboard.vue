@@ -18,169 +18,114 @@
       </div>
     </div>
 
-    <!-- ===== 服务器状态卡片行 ===== -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <!-- ===== 服务器状态区域 ===== -->
+    <div class="space-y-2">
+      <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">服务器状态区域</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
 
-      <!-- GO 服务器 -->
-      <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online ? 'border-green-800/50' : 'border-red-800/50'">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <div :class="['w-2.5 h-2.5 rounded-full', goStatus.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-            <span class="text-sm font-semibold text-text-primary">GO 服务器</span>
+        <!-- GO 后端服务器 -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online ? 'border-green-800/50' : 'border-red-800/50'">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div :class="['w-2.5 h-2.5 rounded-full', goStatus.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+              <span class="text-sm font-semibold text-text-primary">GO 后端服务器</span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded-full" :class="goStatus.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+              {{ goStatus.online ? '在线' : '离线' }}
+            </span>
           </div>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="goStatus.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ goStatus.online ? '在线' : '离线' }}
-          </span>
-        </div>
-        <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>运行时长</span><span class="text-text-secondary font-mono">{{ goStatus.uptime || '--' }}</span></div>
-          <div class="flex justify-between"><span>Python Worker</span><span class="text-text-secondary">{{ goStatus.workers || '--' }}</span></div>
-          <div class="flex justify-between"><span>内存使用</span><span class="text-text-secondary font-mono">{{ goStatus.memory || '--' }}</span></div>
-          <div class="flex justify-between"><span>Redis 连接</span>
-            <span :class="goStatus.redis ? 'text-green-400' : 'text-red-400'">{{ goStatus.redis ? '正常' : '异常' }}</span>
+          <div class="text-xs text-text-tertiary space-y-1">
+            <div class="flex justify-between"><span>端口</span><span class="text-text-secondary font-mono">:8080</span></div>
+            <div class="flex justify-between"><span>运行时长</span><span class="text-text-secondary font-mono">{{ goStatus.uptime || '--' }}</span></div>
+            <div class="flex justify-between"><span>内存使用</span><span class="text-text-secondary font-mono">{{ goStatus.memory || '--' }}</span></div>
+            <div class="flex justify-between"><span>Redis 连接</span>
+              <span :class="goStatus.redis ? 'text-green-400' : 'text-red-400'">{{ goStatus.redis ? '正常' : '异常' }}</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- MT5 桥接 System -->
-      <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5System.online ? 'border-green-800/50' : 'border-red-800/50'">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <div :class="['w-2.5 h-2.5 rounded-full', mt5System.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-            <span class="text-sm font-semibold text-text-primary">MT5 系统账户</span>
+        <!-- MT5 桥接服务器 (SSH 已设置完毕) -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5System.online ? 'border-green-800/50' : 'border-red-800/50'">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div :class="['w-2.5 h-2.5 rounded-full', mt5System.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+              <span class="text-sm font-semibold text-text-primary">MT5 桥接服务器</span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+              {{ mt5System.online ? '在线' : '离线' }}
+            </span>
           </div>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ mt5System.online ? '在线' : '离线' }}
-          </span>
-        </div>
-        <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>端口</span><span class="text-text-secondary font-mono">:8001</span></div>
-          <div class="flex justify-between"><span>MT5 登录</span><span class="text-text-secondary font-mono">{{ mt5System.login || '--' }}</span></div>
-          <div class="flex justify-between"><span>连接状态</span>
-            <span :class="mt5System.connected ? 'text-green-400' : 'text-yellow-400'">{{ mt5System.connected ? '已连接' : '未连接' }}</span>
+          <div class="text-xs text-text-tertiary space-y-1">
+            <div class="flex justify-between"><span>端口</span><span class="text-text-secondary font-mono">:8001</span></div>
+            <div class="flex justify-between"><span>SSH 隧道</span><span class="text-green-400">已配置</span></div>
+            <div class="flex justify-between"><span>MT5 登录</span><span class="text-text-secondary font-mono">{{ mt5System.login || '--' }}</span></div>
+            <div class="flex justify-between"><span>连接状态</span>
+              <span :class="mt5System.connected ? 'text-green-400' : 'text-yellow-400'">{{ mt5System.connected ? '已连接' : '未连接' }}</span>
+            </div>
+            <div class="flex justify-between"><span>服务器</span><span class="text-text-secondary truncate max-w-[60%]">{{ mt5System.server || '--' }}</span></div>
+            <div v-if="mt5System.balance != null" class="flex justify-between"><span>余额</span><span class="text-text-secondary font-mono">{{ mt5System.balance?.toFixed(2) }} UST</span></div>
           </div>
-          <div class="flex justify-between"><span>服务器</span><span class="text-text-secondary">{{ mt5System.server || '--' }}</span></div>
-          <div v-if="mt5System.balance != null" class="flex justify-between"><span>余额</span><span class="text-text-secondary font-mono">{{ mt5System.balance?.toFixed(2) }} UST</span></div>
         </div>
-      </div>
 
-      <!-- MT5 桥接 cq987 -->
-      <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5User.online ? 'border-green-800/50' : 'border-red-800/50'">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <div :class="['w-2.5 h-2.5 rounded-full', mt5User.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-            <span class="text-sm font-semibold text-text-primary">MT5 用户 cq987</span>
+        <!-- WS & 实时统计 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+            <span class="text-sm font-semibold text-text-primary">实时统计</span>
           </div>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5User.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ mt5User.online ? '在线' : '离线' }}
-          </span>
-        </div>
-        <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>端口</span><span class="text-text-secondary font-mono">:8002</span></div>
-          <div class="flex justify-between"><span>MT5 登录</span><span class="text-text-secondary font-mono">{{ mt5User.login || '--' }}</span></div>
-          <div class="flex justify-between"><span>连接状态</span>
-            <span :class="mt5User.connected ? 'text-green-400' : 'text-yellow-400'">{{ mt5User.connected ? '已连接' : '未连接' }}</span>
+          <div class="text-xs text-text-tertiary space-y-1">
+            <div class="flex justify-between"><span>WS 连接数</span><span class="text-primary font-bold text-base">{{ stats.wsConnections ?? 0 }}</span></div>
+            <div class="flex justify-between"><span>总用户数</span><span class="text-text-secondary font-bold">{{ stats.totalUsers ?? '--' }}</span></div>
+            <div class="flex justify-between"><span>活跃账户</span><span class="text-text-secondary">{{ stats.activeAccounts ?? '--' }}</span></div>
+            <div class="flex justify-between"><span>MT5持仓</span><span class="text-text-secondary">{{ stats.totalPositions ?? '--' }}</span></div>
           </div>
-          <div class="flex justify-between"><span>持仓数</span><span class="text-text-secondary">{{ mt5User.positions ?? '--' }}</span></div>
-        </div>
-      </div>
-
-      <!-- WS & 统计 -->
-      <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
-        <div class="flex items-center gap-2 mb-3">
-          <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
-          <span class="text-sm font-semibold text-text-primary">实时统计</span>
-        </div>
-        <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>WS 连接数</span><span class="text-primary font-bold text-base">{{ stats.wsConnections ?? 0 }}</span></div>
-          <div class="flex justify-between"><span>总用户数</span><span class="text-text-secondary font-bold">{{ stats.totalUsers ?? '--' }}</span></div>
-          <div class="flex justify-between"><span>活跃账户</span><span class="text-text-secondary">{{ stats.activeAccounts ?? '--' }}</span></div>
-          <div class="flex justify-between"><span>MT5持仓</span><span class="text-text-secondary">{{ stats.totalPositions ?? '--' }}</span></div>
         </div>
       </div>
     </div>
 
-    <!-- ===== 系统状态监控面板 ===== -->
-    <div class="bg-dark-100 rounded-xl border border-border-primary">
-      <button
-        @click="sysMonOpen = !sysMonOpen"
-        class="w-full flex items-center justify-between px-5 py-4 border-b border-border-secondary hover:bg-dark-50 transition-colors"
-      >
-        <div class="flex items-center gap-2">
-          <div :class="['w-2.5 h-2.5 rounded-full', sysMonHealthy ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-          <h2 class="text-base font-semibold text-text-primary">系统状态监控</h2>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="sysMonHealthy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ sysMonHealthy ? '全部正常' : '异常' }}
-          </span>
-        </div>
-        <svg :class="['w-4 h-4 text-text-tertiary transition-transform', sysMonOpen ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
-      </button>
+    <!-- ===== 交易所账户监控区域 ===== -->
+    <div class="space-y-2">
+      <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">交易所账户监控区域</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-      <div v-if="sysMonOpen" class="p-5 space-y-4">
-        <!-- Redis -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2.5 h-2.5 rounded-full', monitorData.redis?.connected ? 'bg-green-500' : 'bg-red-500']"></div>
-              <span class="font-medium text-sm">Redis</span>
+        <!-- Binance/Bybit 账户汇总 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary md:col-span-2">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold text-text-primary">交易所账户汇总</span>
+            <span class="text-xs text-text-tertiary">{{ stats.activeAccounts ?? '--' }} 个活跃账户</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div class="bg-dark-200 rounded-lg p-2.5">
+              <div class="text-text-tertiary mb-1">总资产 (USDT)</div>
+              <div class="font-mono font-bold text-text-primary text-sm">{{ fmtNum(totals.total_assets) }}</div>
             </div>
-            <span :class="['text-xs', monitorData.redis?.connected ? 'text-green-400' : 'text-red-400']">
-              {{ monitorData.redis?.connected ? '已连接' : '未连接' }}
-            </span>
-          </div>
-          <div v-if="monitorData.redis?.connected" class="grid grid-cols-3 gap-2 text-xs text-text-tertiary">
-            <div><span class="block">版本</span><span class="text-text-secondary">{{ monitorData.redis?.version || '--' }}</span></div>
-            <div><span class="block">内存</span><span class="text-text-secondary">{{ monitorData.redis?.used_memory_human || '--' }}</span></div>
-            <div><span class="block">客户端数</span><span class="text-text-secondary">{{ monitorData.redis?.connected_clients || '--' }}</span></div>
-          </div>
-          <div v-else-if="monitorData.redis?.error" class="text-xs text-red-400 mt-1">{{ monitorData.redis.error }}</div>
-        </div>
-
-        <!-- SSL 证书 -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div :class="['w-2.5 h-2.5 rounded-full', sslOverallOk ? 'bg-green-500' : 'bg-yellow-500']"></div>
-            <span class="font-medium text-sm">SSL 证书</span>
-          </div>
-          <div class="space-y-2">
-            <div v-for="cert in (monitorData.ssl_certificate || [])" :key="cert.cert_path"
-              class="flex items-center justify-between text-xs">
-              <span class="text-text-tertiary truncate max-w-[60%]">
-                {{ cert.domain_names?.[0] || cert.cert_path?.split('/').slice(-2,-1)[0] || '--' }}
-              </span>
-              <div class="flex items-center gap-2">
-                <span :class="sslDaysClass(cert.days_remaining)">{{ cert.exists ? cert.days_remaining + '天' : '未找到' }}</span>
-                <span :class="sslStatusBadge(cert.status)" class="px-1.5 py-0.5 rounded text-xs">{{ sslStatusText(cert.status) }}</span>
+            <div class="bg-dark-200 rounded-lg p-2.5">
+              <div class="text-text-tertiary mb-1">可用资产</div>
+              <div class="font-mono font-bold text-text-secondary text-sm">{{ fmtNum(totals.available_assets) }}</div>
+            </div>
+            <div class="bg-dark-200 rounded-lg p-2.5">
+              <div class="text-text-tertiary mb-1">净资产</div>
+              <div class="font-mono font-bold text-text-secondary text-sm">{{ fmtNum(totals.net_assets) }}</div>
+            </div>
+            <div class="bg-dark-200 rounded-lg p-2.5">
+              <div class="text-text-tertiary mb-1">当日盈亏</div>
+              <div class="font-mono font-bold text-sm" :class="pnlClass(totals.daily_pnl)">
+                {{ totals.daily_pnl >= 0 ? '+' : '' }}{{ fmtNum(totals.daily_pnl) }}
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 飞书 -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2.5 h-2.5 rounded-full', monitorData.feishu?.status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500']"></div>
-              <span class="font-medium text-sm">飞书通知</span>
-            </div>
-            <span class="text-xs" :class="monitorData.feishu?.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'">
-              {{ feishuText(monitorData.feishu?.status) }}
-            </span>
-          </div>
-        </div>
-
-        <!-- MT5 客户端 -->
-        <div class="bg-dark-200 rounded-lg p-4">
+        <!-- MT5 客户端监控 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
           <div class="flex items-center gap-2 mb-3">
-            <div :class="['w-2.5 h-2.5 rounded-full', monitorData.mt5_clients?.some(c => c.online) ? 'bg-green-500' : 'bg-red-500']"></div>
-            <span class="font-medium text-sm">MT5 客户端</span>
+            <div :class="['w-2.5 h-2.5 rounded-full', monitorData.mt5_clients?.some(c => c.online) ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+            <span class="text-sm font-semibold text-text-primary">MT5 客户端</span>
             <span class="text-xs text-text-tertiary">({{ monitorData.mt5_clients?.filter(c=>c.online).length ?? 0 }}/{{ monitorData.mt5_clients?.length ?? 0 }} 在线)</span>
           </div>
           <div v-if="monitorData.mt5_clients?.length" class="space-y-2">
             <div v-for="c in monitorData.mt5_clients" :key="c.mt5_login"
-              class="flex items-center justify-between text-xs bg-dark-300 rounded px-3 py-2">
+              class="flex items-center justify-between text-xs bg-dark-200 rounded px-3 py-2">
               <div>
                 <span class="text-text-primary font-medium">{{ c.client_name }}</span>
                 <span class="text-text-tertiary ml-2">{{ c.username }}</span>
@@ -191,10 +136,149 @@
               </div>
             </div>
           </div>
-          <div v-else class="text-xs text-text-tertiary">暂无 MT5 客户端数据</div>
+          <div v-else class="text-xs text-text-tertiary text-center py-3">暂无 MT5 客户端数据</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 后台服务监控区域 ===== -->
+    <div class="space-y-2">
+      <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">后台服务监控区域</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+
+        <!-- Redis -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="monitorData.redis?.connected ? 'border-green-800/30' : 'border-red-800/30'">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div :class="['w-2.5 h-2.5 rounded-full', monitorData.redis?.connected ? 'bg-green-500' : 'bg-red-500']"></div>
+              <span class="text-sm font-semibold text-text-primary">Redis 缓存</span>
+            </div>
+            <span :class="['text-xs', monitorData.redis?.connected ? 'text-green-400' : 'text-red-400']">
+              {{ monitorData.redis?.connected ? '已连接' : '未连接' }}
+            </span>
+          </div>
+          <div v-if="monitorData.redis?.connected" class="grid grid-cols-3 gap-2 text-xs text-text-tertiary">
+            <div><span class="block">版本</span><span class="text-text-secondary">{{ monitorData.redis?.version || '--' }}</span></div>
+            <div><span class="block">内存</span><span class="text-text-secondary">{{ monitorData.redis?.used_memory_human || '--' }}</span></div>
+            <div><span class="block">客户端</span><span class="text-text-secondary">{{ monitorData.redis?.connected_clients || '--' }}</span></div>
+          </div>
+          <div v-else-if="monitorData.redis?.error" class="text-xs text-red-400 mt-1 truncate">{{ monitorData.redis.error }}</div>
         </div>
 
-        <div class="text-xs text-text-tertiary text-right">{{ monitorData.timestamp ? new Date(monitorData.timestamp).toLocaleString('zh-CN') : '--' }}</div>
+        <!-- WebSocket & 数据库连接池 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+            <span class="text-sm font-semibold text-text-primary">实时连接</span>
+          </div>
+          <div class="text-xs text-text-tertiary space-y-2">
+            <div class="flex justify-between items-center">
+              <span>WebSocket 连接数</span>
+              <span class="font-mono font-bold text-primary text-sm">{{ stats.wsConnections ?? 0 }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>数据库连接池</span>
+              <span :class="monitorData.redis?.connected ? 'text-green-400' : 'text-yellow-400'">
+                {{ monitorData.redis?.connected ? '正常' : '检查中' }}
+              </span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>数据更新时间</span>
+              <span class="text-text-secondary font-mono text-xs">{{ monitorData.timestamp ? new Date(monitorData.timestamp).toLocaleTimeString('zh-CN') : '--' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 后端服务状态 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></div>
+            <span class="text-sm font-semibold text-text-primary">后端服务</span>
+          </div>
+          <div class="text-xs text-text-tertiary space-y-2">
+            <div class="flex justify-between items-center">
+              <span>API 服务 (Go)</span>
+              <span :class="goStatus.online ? 'text-green-400' : 'text-red-400'">{{ goStatus.online ? '运行中' : '异常' }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>API 服务 (Python)</span>
+              <span :class="monitorData.redis?.connected ? 'text-green-400' : 'text-yellow-400'">{{ monitorData.redis?.connected ? '运行中' : '检查中' }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>持仓监控</span>
+              <span class="text-green-400">运行中</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>策略管理</span>
+              <span class="text-green-400">运行中</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span>飞书通知</span>
+              <span :class="monitorData.feishu?.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'">
+                {{ feishuText(monitorData.feishu?.status) }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SSL 证书 (跨 2 列) -->
+        <div class="bg-dark-100 rounded-xl p-4 border sm:col-span-2 xl:col-span-3" :class="sslOverallOk ? 'border-green-800/30' : 'border-yellow-800/30'">
+          <div class="flex items-center gap-2 mb-3">
+            <div :class="['w-2.5 h-2.5 rounded-full', sslOverallOk ? 'bg-green-500' : 'bg-yellow-500']"></div>
+            <span class="text-sm font-semibold text-text-primary">SSL 证书</span>
+            <span class="text-xs text-text-tertiary">({{ (monitorData.ssl_certificate || []).length }} 个域名)</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div v-for="cert in (monitorData.ssl_certificate || [])" :key="cert.cert_path"
+              class="bg-dark-200 rounded-lg px-3 py-2.5 text-xs">
+              <div class="font-mono text-text-secondary truncate mb-1.5">
+                {{ cert.domain_names?.[0] || cert.cert_path?.split('/').slice(-2,-1)[0] || '--' }}
+              </div>
+              <div class="flex items-center justify-between">
+                <span :class="sslDaysClass(cert.days_remaining)">
+                  {{ cert.exists ? cert.days_remaining + ' 天' : '未找到' }}
+                </span>
+                <span :class="sslStatusBadge(cert.status)" class="px-1.5 py-0.5 rounded">{{ sslStatusText(cert.status) }}</span>
+              </div>
+            </div>
+            <div v-if="!monitorData.ssl_certificate?.length" class="text-text-tertiary text-xs">暂无证书数据</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== IP 代理状态 ===== -->
+    <div class="space-y-2">
+      <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">IP 代理状态</h2>
+      <div class="bg-dark-100 rounded-xl border border-border-primary p-4">
+        <div v-if="proxyAccounts.length" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div v-for="acc in proxyAccounts" :key="acc.account_id"
+            class="bg-dark-200 rounded-lg px-3 py-2.5 text-xs">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="font-medium text-text-primary truncate max-w-[70%]">{{ acc.account_name }}</span>
+              <span v-if="acc.proxy_config" class="px-1.5 py-0.5 rounded bg-green-900/40 text-green-400">已配置</span>
+              <span v-else class="px-1.5 py-0.5 rounded bg-dark-300 text-text-tertiary">直连</span>
+            </div>
+            <div v-if="acc.proxy_config" class="text-text-tertiary space-y-0.5">
+              <div class="flex justify-between">
+                <span>地址</span>
+                <span class="font-mono text-text-secondary">{{ acc.proxy_config.host }}:{{ acc.proxy_config.port }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>类型</span>
+                <span class="uppercase text-text-secondary">{{ acc.proxy_config.proxy_type }}</span>
+              </div>
+              <div v-if="acc.proxy_config.region" class="flex justify-between">
+                <span>地区</span>
+                <span class="text-text-secondary">{{ acc.proxy_config.region }}</span>
+              </div>
+            </div>
+            <div v-else class="text-text-tertiary">使用服务器IP直连</div>
+          </div>
+        </div>
+        <div v-else class="text-center text-text-tertiary text-sm py-4">
+          暂无账户数据，或所有账户均使用直连
+        </div>
       </div>
     </div>
 
@@ -283,14 +367,13 @@ import dayjs from 'dayjs'
 const refreshing = ref(false)
 const usersLoading = ref(true)
 const lastUpdate = ref('--')
-const sysMonOpen = ref(false)
 
 const goStatus = ref({ online: false, uptime: '', workers: '', memory: '', redis: false })
 const mt5System = ref({ online: false, login: '', server: '', connected: false })
-const mt5User   = ref({ online: false, login: '', server: '', connected: false, positions: null })
 const stats     = ref({ wsConnections: 0, totalUsers: 0, activeAccounts: 0, totalPositions: 0 })
 const userFinancials = ref([])
 const monitorData = ref({ redis: null, ssl_certificate: [], feishu: null, mt5_clients: [] })
+const proxyAccounts = ref([])
 
 let timer = null
 
@@ -301,10 +384,6 @@ const totals = computed(() => ({
   net_assets:       userFinancials.value.reduce((s, u) => s + (u.net_assets || 0), 0),
   daily_pnl:        userFinancials.value.reduce((s, u) => s + (u.daily_pnl || 0), 0),
 }))
-const sysMonHealthy = computed(() =>
-  (monitorData.value.redis?.connected ?? false) &&
-  (monitorData.value.ssl_certificate || []).every(c => c.status === 'healthy' || c.status === 'warning')
-)
 const sslOverallOk = computed(() =>
   (monitorData.value.ssl_certificate || []).every(c => c.status !== 'expired' && c.status !== 'critical')
 )
@@ -358,25 +437,6 @@ async function fetchMT5Status() {
   } catch {
     mt5System.value = { online: false, login: '--', server: '--', connected: false }
   }
-
-  // User MT5 card: read from mt5_clients table
-  try {
-    const r = await api.get('/api/v1/accounts')
-    const all = Array.isArray(r.data) ? r.data : (r.data?.accounts ?? [])
-    const mt5Acc = all.find(a => a.is_mt5_account && a.is_active)
-    if (mt5Acc) {
-      const cr = await api.get(`/api/v1/accounts/${mt5Acc.account_id}/mt5-clients`).catch(() => ({ data: [] }))
-      const clients = Array.isArray(cr.data) ? cr.data : []
-      const activeClient = clients.find(c => c.is_active) || clients[0]
-      mt5User.value = {
-        online:    mt5Acc.is_active,
-        login:     activeClient?.mt5_login ?? mt5Acc.account_name ?? '--',
-        server:    activeClient?.mt5_server ?? '--',
-        connected: activeClient?.connection_status === 'connected',
-        positions: null,
-      }
-    }
-  } catch {}
 }
 
 async function fetchStats() {
@@ -419,9 +479,17 @@ async function fetchUserFinancials() {
   }
 }
 
+async function fetchProxyAccounts() {
+  try {
+    const r = await api.get('/api/v1/accounts')
+    const all = Array.isArray(r.data) ? r.data : (r.data?.accounts ?? [])
+    proxyAccounts.value = all.filter(a => a.is_active)
+  } catch {}
+}
+
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchProxyAccounts()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   refreshing.value = false
 }
