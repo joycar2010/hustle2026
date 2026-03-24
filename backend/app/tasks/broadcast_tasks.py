@@ -1,5 +1,6 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
+import time as _broadcast_time
 from typing import Dict
 from datetime import datetime
 from uuid import UUID
@@ -848,12 +849,14 @@ class PositionStreamer:
     """
     实时持仓广播器 — 每1秒向所有已连接客户端广播 position_snapshot。
 
-    数据源：
-    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 < 1ms
-    - Binance  ：完全依赖 AccountBalanceStreamer 推送（每30s由账户刷新驱动），零API开销
+    数据源（优先级顺序）：
+    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 <1ms
+    - Binance（WS）：BinancePositionPusher ACCOUNT_UPDATE → set_binance_positions_ws()，延迟 <100ms，最高优先级
+    - Binance（REST）：AccountBalanceStreamer 每30s → set_binance_positions()，仅WS断流>60s时生效，兜底用
 
     设计原则（量化工程）：
-    - 不对 Binance 发起任何 REST 请求，彻底消除频率超限风险
+    - WS数据在60s内有效期间，REST写入被屏蔽，根除"REST旧数据覆盖WS实时数据"闪零问题
+    - 不对 Binance 发起任何额外 REST 请求，彻底消除频率超限风险
     - 只在有 WebSocket 连接时广播，空载时跳过
     - MT5 读取在 executor 线程池中执行，不阻塞事件循环
     """
@@ -863,14 +866,42 @@ class PositionStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        # Binance 持仓（由 AccountBalanceStreamer 主动推送，PositionStreamer 只读缓存）
+        # Binance 持仓缓存（双写源：WS优先，REST兜底）
         self._binance_long_xau: float = 0.0
         self._binance_short_xau: float = 0.0
+        # WS最后更新时间戳（monotonic），用于判断REST写入是否应该被屏蔽
+        self._ws_position_ts: float = 0.0
 
-    def set_binance_positions(self, long_xau: float, short_xau: float) -> None:
-        """由 AccountBalanceStreamer 调用，更新 Binance 持仓缓存（无锁，主事件循环内安全）"""
+    def set_binance_positions_ws(self, long_xau: float, short_xau: float) -> None:
+        """
+        由 BinancePositionPusher ACCOUNT_UPDATE 事件调用 — 最高优先级实时数据源。
+        更新时间戳，用于保护数据不被 REST 旧数据覆盖。
+        """
         self._binance_long_xau = long_xau
         self._binance_short_xau = short_xau
+        self._ws_position_ts = _broadcast_time.monotonic()
+
+    def set_binance_positions(self, long_xau: float, short_xau: float) -> None:
+        """
+        由 AccountBalanceStreamer REST 轮询调用 — 兜底数据源（30s一次）。
+        若 WS 数据在60秒内有效，则跳过写入，避免覆盖实时WS持仓。
+        60秒后认为WS数据过期（连接中断），允许REST接管。
+        """
+        ws_age = _broadcast_time.monotonic() - self._ws_position_ts
+        if ws_age <= 60.0:
+            # WS数据新鲜，REST不得覆盖，防止30s旧数据擦除<100ms实时数据
+            logger.debug(
+                f"[PositionStreamer] REST写入跳过：WS数据 {ws_age:.1f}s前刚更新 "
+                f"(long={self._binance_long_xau}, short={self._binance_short_xau})"
+            )
+            return
+        # WS数据超过60s未更新（断流），允许REST回退
+        self._binance_long_xau = long_xau
+        self._binance_short_xau = short_xau
+        logger.debug(
+            f"[PositionStreamer] REST持仓回退生效（WS已断流 {ws_age:.0f}s）: "
+            f"long={long_xau}, short={short_xau}"
+        )
 
     async def start(self):
         if self.running:
@@ -1193,7 +1224,7 @@ class BinancePositionPusher:
                     long_xau, short_xau = 0.0, 0.0
 
         if updated:
-            position_streamer.set_binance_positions(long_xau, short_xau)
+            position_streamer.set_binance_positions_ws(long_xau, short_xau)
             logger.info(
                 f"[BinancePositionPusher] ACCOUNT_UPDATE → "
                 f"long={long_xau} short={short_xau}"
