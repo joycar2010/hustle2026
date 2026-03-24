@@ -1,5 +1,6 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
+from typing import Dict
 from datetime import datetime
 from uuid import UUID
 from contextlib import asynccontextmanager
@@ -955,12 +956,37 @@ class PositionStreamer:
 position_streamer = PositionStreamer()
 
 
+# ---------------------------------------------------------------------------
+# 全局订单成交事件注册表 — 供 _monitor_binance_order() 使用
+# key: binance order_id (int)
+# value: {"event": asyncio.Event, "filled_qty": float, "status": str}
+# ---------------------------------------------------------------------------
+_order_fill_registry: Dict[int, dict] = {}
+
+
+def register_order_watch(order_id: int) -> asyncio.Event:
+    """注册一个订单监听。返回 asyncio.Event，成交/取消时会被 set()。"""
+    ev = asyncio.Event()
+    _order_fill_registry[order_id] = {"event": ev, "filled_qty": 0.0, "status": "NEW"}
+    logger.debug(f"[OrderWatch] Registered order {order_id}")
+    return ev
+
+
+def unregister_order_watch(order_id: int):
+    """注销订单监听，释放内存。"""
+    _order_fill_registry.pop(order_id, None)
+    logger.debug(f"[OrderWatch] Unregistered order {order_id}")
+
+
 class BinancePositionPusher:
     """
     实时 Binance 持仓推送器 — 订阅 Binance Futures User Data Stream。
 
     当 ACCOUNT_UPDATE 事件到达（成交触发），立即更新 PositionStreamer 缓存，
     取代 AccountBalanceStreamer 30s REST 轮询驱动，实现 <100ms 持仓更新。
+
+    同时处理 ORDER_TRADE_UPDATE 事件，通过 _order_fill_registry 通知
+    _monitor_binance_order() 协程，彻底消除 REST 轮询。
 
     协议：wss://fstream.binance.com/ws/{listenKey}
     listenKey 有效期 60min，每 25min 续期一次。
@@ -1017,7 +1043,6 @@ class BinancePositionPusher:
 
     async def _load_binance_accounts(self) -> list:
         """从 DB 加载所有活跃 Binance REST 账户（去重 api_key）"""
-        from app.core.database import get_db_session
         try:
             async with get_db_session(timeout=10.0) as db:
                 result = await db.execute(
@@ -1112,7 +1137,30 @@ class BinancePositionPusher:
     # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer
     # ------------------------------------------------------------------
     async def _handle_message(self, data: dict):
-        if data.get("e") != "ACCOUNT_UPDATE":
+        event_type = data.get("e")
+
+        # ------------------------------------------------------------------
+        # ORDER_TRADE_UPDATE → 通知 _monitor_binance_order() 协程
+        # ------------------------------------------------------------------
+        if event_type == "ORDER_TRADE_UPDATE":
+            order = data.get("o", {})
+            oid = order.get("i")          # orderId (int)
+            status = order.get("X", "")  # FILLED / PARTIALLY_FILLED / CANCELED / EXPIRED / REJECTED
+            cum_qty = float(order.get("z", 0))  # cumulativeFilledQty
+
+            record = _order_fill_registry.get(oid)
+            if record is not None:
+                record["filled_qty"] = cum_qty
+                record["status"] = status
+                if status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                    record["event"].set()
+                    logger.info(
+                        f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} "
+                        f"status={status} filled={cum_qty}"
+                    )
+            return
+
+        if event_type != "ACCOUNT_UPDATE":
             return
 
         # ACCOUNT_UPDATE.a.P 是仓位数组

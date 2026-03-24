@@ -41,7 +41,7 @@ class OrderExecutorV2:
         self.binance_timeout = 5.0
         self.bybit_timeout = 0.1
         self.max_retries = 1
-        self.order_check_interval = 0.2
+        self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
         self.spread_check_interval = 2.0
         self.mt5_deal_sync_wait = 3.0
         self.api_retry_delay = 0.5
@@ -120,10 +120,7 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -292,10 +289,7 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -420,10 +414,7 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -592,11 +583,8 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            logger.info(f"[FORWARD_CLOSING] Binance not filled, cancelling order {binance_order_id}")
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
+            logger.info(f"[FORWARD_CLOSING] Binance not filled, order already cancelled by monitor {binance_order_id}")
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -674,68 +662,48 @@ class OrderExecutorV2:
         strategy_type: str = None
     ) -> dict:
         """
-        Monitor Binance order with timeout and real-time spread checking.
+        Monitor Binance order via User Data Stream (ORDER_TRADE_UPDATE) — zero REST polling.
+
+        Registers the order_id in the shared _order_fill_registry so that
+        BinancePositionPusher._handle_message() can set the event on fill/cancel.
+        Falls back to a single REST status check only on timeout.
 
         Args:
             spread_threshold: Spread threshold for real-time checking
-            compare_op: Comparison operator ('>' or '<=')
+            compare_op: Comparison operator ('>=' or '<=' etc.)
             strategy_type: Strategy type for spread calculation
 
         Returns:
-            dict with 'filled_qty' and 'spread_cancelled' flag
+            dict with 'filled_qty', 'spread_cancelled', and 'api_error' keys
         """
-        start_time = time.time()
-        check_interval = self.order_check_interval
-        last_spread_check = 0
-        api_error_count = 0
-        MAX_API_ERRORS = 3  # Consecutive API failures before treating as exchange outage
+        from app.tasks.broadcast_tasks import (
+            register_order_watch, unregister_order_watch, _order_fill_registry
+        )
 
-        while time.time() - start_time < timeout:
-            # Check order status
-            status = await self.base_executor.check_binance_order_status(
-                account, symbol, order_id
-            )
+        fill_event = register_order_watch(order_id)
+        spread_check_task = None
 
-            if status.get("success") and status.get("filled"):
-                return {
-                    "filled_qty": status.get("filled_qty", 0),
-                    "spread_cancelled": False,
-                    "api_error": False
-                }
+        try:
+            # --- Spread check coroutine (runs concurrently, cancels order on breach) ---
+            spread_cancelled = False
+            spread_cancel_qty = 0.0
 
-            if not status.get("success"):
-                api_error_count += 1
-                logger.error(f"[BINANCE_MONITOR] API error #{api_error_count} for order {order_id}: {status.get('error')}")
-                if api_error_count >= MAX_API_ERRORS:
-                    # Binance API is down — do NOT cancel the order (cancel may also fail)
-                    # Return with api_error flag so caller can trigger emergency alert
-                    logger.error(f"[BINANCE_MONITOR] CRITICAL: Binance API consecutive failures={api_error_count}, treating as exchange outage for order {order_id}")
-                    return {
-                        "filled_qty": 0,
-                        "spread_cancelled": False,
-                        "api_error": True,
-                        "api_error_count": api_error_count,
-                        "order_id": order_id
-                    }
-            else:
-                api_error_count = 0  # Reset on successful API call
-
-            # Real-time spread checking (every 2 seconds to avoid excessive API calls)
-            current_time = time.time()
-            if spread_threshold is not None and compare_op is not None and strategy_type is not None:
-                if current_time - last_spread_check >= self.spread_check_interval:
-                    last_spread_check = current_time
-
+            async def _watch_spread():
+                nonlocal spread_cancelled, spread_cancel_qty
+                if spread_threshold is None or compare_op is None or strategy_type is None:
+                    return
+                from app.services.market_service import market_data_service
+                tolerance = 0.5
+                while not fill_event.is_set():
+                    await asyncio.sleep(self.spread_check_interval)
+                    if fill_event.is_set():
+                        break
                     try:
-                        # Get current spread
-                        from app.services.market_service import market_data_service
                         market_data = await market_data_service.get_current_spread()
                         spreads = market_data_service.calculate_spread(
                             market_data.binance_quote,
                             market_data.bybit_quote
                         )
-
-                        # Get spread based on strategy type
                         if strategy_type == 'reverse_closing':
                             current_spread = spreads.reverse_exit_spread
                         elif strategy_type == 'reverse_opening':
@@ -745,55 +713,74 @@ class OrderExecutorV2:
                         elif strategy_type == 'forward_opening':
                             current_spread = spreads.forward_entry_spread
                         else:
-                            current_spread = None
+                            continue
 
-                        # Check if spread condition is still met (with 0.5 USD tolerance)
-                        if current_spread is not None:
-                            spread_met = False
-                            tolerance = 0.5  # 0.5 USD tolerance to avoid cancelling due to minor fluctuations
-                            if compare_op == '>=':
-                                # Opening: allow 0.5 USD below threshold
-                                spread_met = current_spread >= (spread_threshold - tolerance)
-                            elif compare_op == '>':
-                                spread_met = current_spread > (spread_threshold - tolerance)
-                            elif compare_op == '<=':
-                                # Closing: allow 0.5 USD above threshold
-                                spread_met = current_spread <= (spread_threshold + tolerance)
+                        spread_met = False
+                        if compare_op == '>=':
+                            spread_met = current_spread >= (spread_threshold - tolerance)
+                        elif compare_op == '>':
+                            spread_met = current_spread > (spread_threshold - tolerance)
+                        elif compare_op == '<=':
+                            spread_met = current_spread <= (spread_threshold + tolerance)
 
-                            # If spread no longer meets condition (with tolerance), cancel order immediately
-                            if not spread_met:
-                                logger.info(f"Spread condition no longer met (tolerance={tolerance}): {current_spread} {compare_op} {spread_threshold}, cancelling order")
-                                await self.base_executor.cancel_binance_order(account, symbol, order_id)
-
-                                # Check final status after cancellation
-                                final_status = await self.base_executor.check_binance_order_status(
-                                    account, symbol, order_id
-                                )
-
-                                return {
-                                    "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-                                    "spread_cancelled": True,
-                                    "api_error": False
-                                }
+                        if not spread_met:
+                            logger.info(
+                                f"Spread condition no longer met (tolerance={tolerance}): "
+                                f"{current_spread} {compare_op} {spread_threshold}, cancelling order {order_id}"
+                            )
+                            await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                            # Wait briefly for ORDER_TRADE_UPDATE to arrive via WS
+                            try:
+                                await asyncio.wait_for(fill_event.wait(), timeout=2.0)
+                            except asyncio.TimeoutError:
+                                pass
+                            record = _order_fill_registry.get(order_id, {})
+                            spread_cancel_qty = record.get("filled_qty", 0.0)
+                            spread_cancelled = True
+                            fill_event.set()  # wake main wait
+                            return
                     except Exception as e:
                         logger.error(f"Error checking spread during order monitoring: {e}")
-                        # Continue monitoring even if spread check fails
 
-            await asyncio.sleep(check_interval)
+            if spread_threshold is not None:
+                spread_check_task = asyncio.create_task(_watch_spread())
 
-        # Timeout reached, cancel order and return filled quantity
-        await self.base_executor.cancel_binance_order(account, symbol, order_id)
+            # --- Main wait: block until WS event fires or timeout ---
+            try:
+                await asyncio.wait_for(fill_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                # Timeout: cancel and do single REST status check as fallback
+                logger.warning(f"[BINANCE_MONITOR] Timeout waiting for order {order_id} ({timeout}s), cancelling")
+                await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                final_status = await self.base_executor.check_binance_order_status(
+                    account, symbol, order_id
+                )
+                return {
+                    "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
+                    "spread_cancelled": False,
+                    "api_error": not final_status.get("success", False)
+                }
 
-        # Check final status after cancellation
-        final_status = await self.base_executor.check_binance_order_status(
-            account, symbol, order_id
-        )
+            # Event was set — read result from registry
+            record = _order_fill_registry.get(order_id, {})
 
-        return {
-            "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-            "spread_cancelled": False,
-            "api_error": False
-        }
+            if spread_cancelled:
+                return {
+                    "filled_qty": spread_cancel_qty,
+                    "spread_cancelled": True,
+                    "api_error": False
+                }
+
+            return {
+                "filled_qty": record.get("filled_qty", 0.0),
+                "spread_cancelled": False,
+                "api_error": False
+            }
+
+        finally:
+            if spread_check_task and not spread_check_task.done():
+                spread_check_task.cancel()
+            unregister_order_watch(order_id)
 
     async def _execute_bybit_market_buy(
         self,

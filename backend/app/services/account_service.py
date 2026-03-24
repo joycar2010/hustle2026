@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # commission_rate 本地内存缓存（24小时有效，weight=20权重只在冷启动时消耗一次）
 _commission_rate_cache: Dict[str, Dict] = {}  # api_key[:16] -> {"data": ..., "ts": float}
 
+# get_income() 本地内存缓存（5分钟有效，weight=30×3=90，降低IP封禁风险）
+_income_cache: Dict[str, Dict] = {}  # "{api_key_prefix}:{income_type}" -> {"data": ..., "ts": float}
+_INCOME_CACHE_TTL = 300  # 5 minutes
+
 
 class AccountDataService:
     """Service for fetching account data from exchanges"""
@@ -78,12 +82,23 @@ class AccountDataService:
                 else client.get_commission_rate("XAUUSDT")
             )
 
+            # get_income() (weight=30×3=90) 使用5分钟缓存，防止频繁调用导致IP封禁
+            async def _cached_income(data):
+                return data
+
+            def _get_income_task(income_type):
+                ck = f"{_cr_cache_key}:{income_type}"
+                cached = _income_cache.get(ck)
+                if cached and (_time_module.monotonic() - cached["ts"]) < _INCOME_CACHE_TTL:
+                    return _cached_income(cached["data"])
+                return client.get_income(income_type=income_type, start_time=start_time, limit=1000)
+
             fetch_tasks = [
                 client.get_account(),           # USDT-M Futures  [0]
                 client.get_position_risk(),     # Futures positions [1]
-                client.get_income(income_type="REALIZED_PNL", start_time=start_time, limit=1000),  # [2]
-                client.get_income(income_type="FUNDING_FEE", start_time=start_time, limit=1000),   # [3]
-                client.get_income(income_type="COMMISSION", start_time=start_time, limit=1000),    # [4]
+                _get_income_task("REALIZED_PNL"),   # [2] 5min cached, weight=30
+                _get_income_task("FUNDING_FEE"),    # [3] 5min cached, weight=30
+                _get_income_task("COMMISSION"),     # [4] 5min cached, weight=30
                 client.get_margin_account(),    # Cross Margin     [5]
                 _commission_rate_task,          # Maker/taker fee rate [6] (24h cached)
                 client.get_spot_price("BNBUSDT"),       # BNB/USDT price for fee conversion [7]
@@ -113,6 +128,18 @@ class AccountDataService:
                     "data": commission_rate_data,
                     "ts": _time_module.monotonic(),
                 }
+
+            # get_income() 成功返回时写入5分钟缓存（weight=30×3=90，防止IP封禁）
+            for _inc_type, _inc_data in (
+                ("REALIZED_PNL", daily_pnl_data),
+                ("FUNDING_FEE", funding_fee_data),
+                ("COMMISSION", commission_fee_data),
+            ):
+                if not isinstance(_inc_data, Exception) and _inc_data is not None:
+                    _income_cache[f"{_cr_cache_key}:{_inc_type}"] = {
+                        "data": _inc_data,
+                        "ts": _time_module.monotonic(),
+                    }
 
             # BNB/USDT price for commission conversion (when BNB fee discount is enabled)
             bnb_usdt_price = 1.0
