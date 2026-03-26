@@ -138,10 +138,14 @@ class BinanceFuturesClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.proxy_url = proxy_url  # 代理URL，格式: http://user:pass@host:port
 
+    # 移动网络保护：强制请求超时，防止TCP挂起导致请求堆积→rate limit→封IP
+    # connect=5s: 建连超时；total=12s: 全程超时（含下单/撤单/查询等）
+    _DEFAULT_TIMEOUT = aiohttp.ClientTimeout(connect=5.0, total=12.0)
+
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session"""
+        """Get or create aiohttp session with explicit timeout to protect against mobile network hangs."""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            self.session = aiohttp.ClientSession(timeout=self._DEFAULT_TIMEOUT)
         return self.session
 
     async def close(self):

@@ -1026,6 +1026,7 @@ class BinancePositionPusher:
     SYMBOL           = "XAUUSDT"
     KEEPALIVE_SEC    = 25 * 60   # 25min 续期，确保 listenKey 不过期
     RECONNECT_DELAY  = 5         # 断线后等待秒数
+    WS_HEARTBEAT_SEC = 10        # 移动网保护：10s心跳，比默认30s更快检测断线
 
     def __init__(self):
         self.running = False
@@ -1119,7 +1120,7 @@ class BinancePositionPusher:
                 session = aiohttp.ClientSession()
 
                 async with session.ws_connect(
-                    f"{ws_base}/{listen_key}", heartbeat=30
+                    f"{ws_base}/{listen_key}", heartbeat=self.WS_HEARTBEAT_SEC
                 ) as ws:
                     logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
 

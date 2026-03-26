@@ -1092,6 +1092,14 @@ async def execute_continuous_opening(
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_opening_continuous"
+        # Stop any existing running task for this strategy to prevent duplicate orders
+        existing_task_id = execution_task_manager.get_running_task_id_for_strategy(strategy_id)
+        if existing_task_id:
+            logger.warning(
+                f"[DUPLICATE GUARD] strategy_id={strategy_id} already has running task "
+                f"{existing_task_id} — stopping before starting new one"
+            )
+            await execution_task_manager.stop_task(existing_task_id)
         # Reset position tracker for this strategy before each new execution
         from app.services.position_manager import position_manager
         position_manager.reset_strategy(strategy_id)
@@ -1230,6 +1238,14 @@ async def execute_continuous_closing(
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_closing_continuous"
+        # Stop any existing running task for this strategy to prevent duplicate orders
+        existing_task_id = execution_task_manager.get_running_task_id_for_strategy(strategy_id)
+        if existing_task_id:
+            logger.warning(
+                f"[DUPLICATE GUARD] strategy_id={strategy_id} already has running task "
+                f"{existing_task_id} — stopping before starting new one"
+            )
+            await execution_task_manager.stop_task(existing_task_id)
         # Reset position tracker for this strategy before each new execution
         from app.services.position_manager import position_manager
         position_manager.reset_strategy(strategy_id)

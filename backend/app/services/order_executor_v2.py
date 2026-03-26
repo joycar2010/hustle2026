@@ -751,7 +751,12 @@ class OrderExecutorV2:
             except asyncio.TimeoutError:
                 # Timeout: cancel and do single REST status check as fallback
                 logger.warning(f"[BINANCE_MONITOR] Timeout waiting for order {order_id} ({timeout}s), cancelling")
-                await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                try:
+                    await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                except Exception as cancel_err:
+                    # -2011 (already filled/expired) or network error — safe to ignore here.
+                    # Still query actual fill status below so we don't wrongly return 0.
+                    logger.warning(f"[BINANCE_MONITOR] cancel error (order may be filled/expired): {cancel_err}")
                 final_status = await self.base_executor.check_binance_order_status(
                     account, symbol, order_id
                 )
@@ -967,29 +972,39 @@ class OrderExecutorV2:
         expected_volume: float
     ) -> Dict[str, Any]:
         """
-        Check MT5 order actual filled volume and compare with expected
-
-        Args:
-            account: Bybit account with MT5 credentials
-            ticket: MT5 order ticket number
-            expected_volume: Expected fill volume
-
-        Returns:
-            Dict with actual_filled, expected, is_partial_fill, fill_ratio
+        Check MT5 order actual filled volume and compare with expected.
+        Retries up to 3 times (1s interval) if no deals found yet —
+        MT5 deal propagation can lag 1-3s after a market order is placed.
         """
+        MAX_DEAL_RETRIES = 3
+        DEAL_RETRY_INTERVAL = 1.0  # seconds
+
         try:
             mt5_client = _get_mt5_client_for_account(account)
 
-            # Get deals for this ticket
-            deals = mt5_client.get_deals_by_ticket(ticket)
+            deals = None
+            for attempt in range(MAX_DEAL_RETRIES):
+                deals = mt5_client.get_deals_by_ticket(ticket)
+                if deals:
+                    break
+                if attempt < MAX_DEAL_RETRIES - 1:
+                    logger.warning(
+                        f"[MT5_DEAL_CHECK] ticket={ticket} no deals found "
+                        f"(attempt {attempt+1}/{MAX_DEAL_RETRIES}), retrying in {DEAL_RETRY_INTERVAL}s"
+                    )
+                    await asyncio.sleep(DEAL_RETRY_INTERVAL)
 
             if not deals:
+                logger.error(
+                    f"[MT5_DEAL_CHECK] ticket={ticket} no deals after {MAX_DEAL_RETRIES} attempts — "
+                    f"treating as 0 fill (possible MT5 sync issue)"
+                )
                 return {
                     "actual_filled": 0.0,
                     "expected": expected_volume,
                     "is_partial_fill": True,
                     "fill_ratio": 0.0,
-                    "error": "No deals found for ticket"
+                    "error": "No deals found for ticket after retries"
                 }
 
             # Sum up all deal volumes

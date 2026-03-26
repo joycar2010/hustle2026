@@ -18,6 +18,27 @@ class ExecutionTaskManager:
         self.tasks: Dict[str, asyncio.Task] = {}
         self.executors: Dict[str, ContinuousStrategyExecutor] = {}
         self.task_info: Dict[str, Dict] = {}
+        # Maps strategy_id -> task_id for active (running) tasks
+        self._strategy_to_task: Dict[str, str] = {}
+
+    def get_running_task_id_for_strategy(self, strategy_id: str) -> Optional[str]:
+        """Return the task_id of the currently running task for this strategy_id, or None."""
+        task_id = self._strategy_to_task.get(strategy_id)
+        if task_id is None:
+            return None
+        task = self.tasks.get(task_id)
+        if task is None or task.done():
+            # Task already finished — clean up stale mapping
+            self._strategy_to_task.pop(strategy_id, None)
+            return None
+        return task_id
+
+    def _stop_executor_sync(self, task_id: str) -> None:
+        """Signal executor to stop and cancel the asyncio task (non-awaited)."""
+        if task_id in self.executors:
+            self.executors[task_id].stop()
+        if task_id in self.tasks:
+            self.tasks[task_id].cancel()
 
     def start_task(
         self,
@@ -27,6 +48,9 @@ class ExecutionTaskManager:
     ) -> str:
         """
         Start background execution task.
+
+        If a task for the same strategy_id is already running it is stopped
+        first to prevent duplicate orders.
 
         Args:
             executor: Continuous strategy executor instance
@@ -38,6 +62,20 @@ class ExecutionTaskManager:
         """
         if task_id is None:
             task_id = str(uuid4())
+
+        # ── Duplicate-prevention: stop any existing running task for this strategy ──
+        existing_task_id = self.get_running_task_id_for_strategy(executor.strategy_id)
+        if existing_task_id is not None:
+            logger.error(
+                f"TASK MANAGER: strategy_id={executor.strategy_id} already has running task "
+                f"{existing_task_id} — stopping it before starting new task {task_id}"
+            )
+            self._stop_executor_sync(existing_task_id)
+            # Mark as cancelled in task_info so frontend polling sees it
+            if existing_task_id in self.task_info:
+                self.task_info[existing_task_id]['status'] = 'cancelled'
+                self.task_info[existing_task_id]['completed_at'] = datetime.utcnow().isoformat()
+            self._strategy_to_task.pop(executor.strategy_id, None)
 
         logger.error("=" * 80)
         logger.error(f"TASK MANAGER: Creating task {task_id}")
@@ -55,6 +93,7 @@ class ExecutionTaskManager:
             'started_at': datetime.utcnow().isoformat(),
             'status': 'running'
         }
+        self._strategy_to_task[executor.strategy_id] = task_id
 
         # Add callback to update status when task completes
         task.add_done_callback(lambda t: self._on_task_complete(task_id, t))
@@ -84,6 +123,11 @@ class ExecutionTaskManager:
             else:
                 self.task_info[task_id]['status'] = 'completed'
                 logger.info(f"Task {task_id} completed successfully")
+
+        # Remove from active strategy map when task ends
+        strategy_id = self.task_info.get(task_id, {}).get('strategy_id')
+        if strategy_id and self._strategy_to_task.get(strategy_id) == task_id:
+            self._strategy_to_task.pop(strategy_id, None)
 
     async def stop_task(self, task_id: str) -> bool:
         """
