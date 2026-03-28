@@ -1,0 +1,1702 @@
+INFO:     Started server process [10044]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     ('61.8.214.45', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2OTg5NjN9.JPYHvHBeFKt-uGQY7pY1eKHS99QKrj79HoiL2icU8mg" [accepted]
+INFO:     connection open
+Waiting 5.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Redis monitor started successfully
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51819 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51820 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51849 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51848 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 30.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51870 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51869 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to connect temporary MT5 client
+Failed to fetch MT5 balance: Failed to connect to MT5
+Error fetching Bybit balance: Failed to connect to MT5
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 452, in get_bybit_balance
+    return await self._get_bybit_mt5_balance_direct(mt5_id, mt5_password, mt5_server)
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 531, in _get_bybit_mt5_balance_direct
+    raise Exception("Failed to connect to MT5")
+Exception: Failed to connect to MT5
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 30.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 32.4s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 33.4s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51909 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 34.5s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51910 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 35.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 36.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 37.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 10.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 38.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 39.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 40.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 41.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 42.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 43.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 44.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 45.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 46.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 47.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 48.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 49.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 50.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 51.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 52.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 53.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 54.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 connection appears stale (no activity for 56.7s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to connect temporary MT5 client
+Failed to fetch MT5 balance: Failed to connect to MT5
+Error fetching Bybit balance: Failed to connect to MT5
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 452, in get_bybit_balance
+    return await self._get_bybit_mt5_balance_direct(mt5_id, mt5_password, mt5_server)
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 531, in _get_bybit_mt5_balance_direct
+    raise Exception("Failed to connect to MT5")
+Exception: Failed to connect to MT5
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 20.0s before next reconnection attempt
+Database session error: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Error in _check_spread_alerts: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 58.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to connect temporary MT5 client
+Failed to fetch MT5 balance: Failed to connect to MT5
+Error fetching Bybit balance: Failed to connect to MT5
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 452, in get_bybit_balance
+    return await self._get_bybit_mt5_balance_direct(mt5_id, mt5_password, mt5_server)
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 531, in _get_bybit_mt5_balance_direct
+    raise Exception("Failed to connect to MT5")
+Exception: Failed to connect to MT5
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Waiting 20.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 59.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 20.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 60.4s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 61.4s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 62.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 63.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 connection appears stale (no activity for 64.8s)
+Waiting 40.0s before next reconnection attempt
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 65.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51941 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51942 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 66.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 67.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 68.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 69.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 connection appears stale (no activity for 70.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 72.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 73.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 74.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 75.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 76.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 77.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 78.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 79.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 80.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 connection appears stale (no activity for 81.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 82.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+MT5 connection appears stale (no activity for 83.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 84.9s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 86.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to connect temporary MT5 client
+Failed to fetch MT5 balance: Failed to connect to MT5
+Error fetching Bybit balance: Failed to connect to MT5
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 452, in get_bybit_balance
+    return await self._get_bybit_mt5_balance_direct(mt5_id, mt5_password, mt5_server)
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 531, in _get_bybit_mt5_balance_direct
+    raise Exception("Failed to connect to MT5")
+Exception: Failed to connect to MT5
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Waiting 40.0s before next reconnection attempt
+Database session error: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Error in _check_spread_alerts: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 87.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 88.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to connect temporary MT5 client
+Failed to fetch MT5 balance: Failed to connect to MT5
+Error fetching Bybit balance: Failed to connect to MT5
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 452, in get_bybit_balance
+    return await self._get_bybit_mt5_balance_direct(mt5_id, mt5_password, mt5_server)
+  File "C:\app\hustle2026\backend\app\services\account_service.py", line 531, in _get_bybit_mt5_balance_direct
+    raise Exception("Failed to connect to MT5")
+Exception: Failed to connect to MT5
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Waiting 40.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 89.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 90.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 91.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 connection appears stale (no activity for 92.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 93.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+MT5 connection appears stale (no activity for 94.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 95.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 96.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 97.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51977 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51978 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 98.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 40.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 99.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 100.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 60.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 102.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+MT5 connection appears stale (no activity for 103.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 60.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 60.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 104.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9
+Waiting 60.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 105.5s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+Failed to reconnect MT5 account 1f99fd4d-d40d-4a5a-909d-7f91931472f9

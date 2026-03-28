@@ -529,13 +529,29 @@ async def get_version_history(
     """Get Git commit history from GitHub main branch"""
     try:
         import subprocess
+        import os
+
+        # Get the project root directory
+        # __file__ is at: backend/app/api/v1/system.py
+        # We need to go up 4 levels to reach project root
+        current_file = os.path.abspath(__file__)
+        # backend/app/api/v1/system.py -> backend/app/api/v1
+        api_v1_dir = os.path.dirname(current_file)
+        # backend/app/api/v1 -> backend/app/api
+        api_dir = os.path.dirname(api_v1_dir)
+        # backend/app/api -> backend/app
+        app_dir = os.path.dirname(api_dir)
+        # backend/app -> backend
+        backend_dir = os.path.dirname(app_dir)
+        # backend -> project root
+        project_root = os.path.dirname(backend_dir)
 
         # Fetch latest commits from remote main branch
         fetch_result = subprocess.run(
             ["git", "fetch", "origin", "main"],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=project_root
         )
 
         if fetch_result.returncode != 0:
@@ -548,7 +564,7 @@ async def get_version_history(
             text=True,
             encoding='utf-8',
             errors='replace',
-            cwd=".."
+            cwd=project_root
         )
 
         if result.returncode != 0:

@@ -1025,8 +1025,10 @@ class BinancePositionPusher:
 
     SYMBOL           = "XAUUSDT"
     KEEPALIVE_SEC    = 25 * 60   # 25min 续期，确保 listenKey 不过期
-    RECONNECT_DELAY  = 5         # 断线后等待秒数
+    RECONNECT_DELAY  = 5         # 正常断线后等待秒数
+    RECONNECT_DELAY_ON_ERROR = 300  # API错误/封禁后等待5分钟，避免快速失败循环
     WS_HEARTBEAT_SEC = 10        # 移动网保护：10s心跳，比默认30s更快检测断线
+    MAX_CONSECUTIVE_ERRORS = 3   # 连续失败3次后进入长时间退避
 
     def __init__(self):
         self.running = False
@@ -1105,6 +1107,7 @@ class BinancePositionPusher:
     async def _account_stream_loop(self, api_key: str, api_secret: str):
         from app.services.binance_client import BinanceFuturesClient
         ws_base = "wss://fstream.binance.com/ws"
+        consecutive_errors = 0  # 连续错误计数器
 
         while self.running:
             client  = BinanceFuturesClient(api_key, api_secret)
@@ -1112,10 +1115,26 @@ class BinancePositionPusher:
             try:
                 listen_key = await client.create_futures_listen_key()
                 if not listen_key:
-                    logger.error(f"[BinancePositionPusher] listenKey 获取失败: {api_key[:8]}…")
-                    await asyncio.sleep(self.RECONNECT_DELAY)
+                    consecutive_errors += 1
+                    logger.error(
+                        f"[BinancePositionPusher] listenKey 获取失败 "
+                        f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}): {api_key[:8]}…"
+                    )
+
+                    # 指数退避：连续失败3次后进入长时间等待
+                    if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                        logger.warning(
+                            f"[BinancePositionPusher] 连续失败{consecutive_errors}次，"
+                            f"进入{self.RECONNECT_DELAY_ON_ERROR}秒退避期，避免触发封禁"
+                        )
+                        await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
+                        consecutive_errors = 0  # 重置计数器
+                    else:
+                        await asyncio.sleep(self.RECONNECT_DELAY)
                     continue
 
+                # 成功获取 listenKey，重置错误计数器
+                consecutive_errors = 0
                 logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
                 session = aiohttp.ClientSession()
 
@@ -1145,13 +1164,39 @@ class BinancePositionPusher:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[BinancePositionPusher] Stream 错误 ({api_key[:8]}…): {e}")
+                consecutive_errors += 1
+                error_msg = str(e)
+                logger.error(
+                    f"[BinancePositionPusher] Stream 错误 "
+                    f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}) "
+                    f"({api_key[:8]}…): {error_msg}"
+                )
+
+                # 检测是否为API错误或封禁，使用长时间退避
+                if any(keyword in error_msg.lower() for keyword in [
+                    'api-key', 'invalid', 'banned', '封禁', '频率', 'rate limit'
+                ]):
+                    logger.warning(
+                        f"[BinancePositionPusher] 检测到API错误/封禁，"
+                        f"等待{self.RECONNECT_DELAY_ON_ERROR}秒后重试"
+                    )
+                    await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
+                    consecutive_errors = 0  # API错误后重置计数器
+                elif consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                    logger.warning(
+                        f"[BinancePositionPusher] 连续失败{consecutive_errors}次，"
+                        f"进入{self.RECONNECT_DELAY_ON_ERROR}秒退避期"
+                    )
+                    await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
+                    consecutive_errors = 0
+                else:
+                    await asyncio.sleep(self.RECONNECT_DELAY)
             finally:
                 if session and not session.closed:
                     await session.close()
                 await client.close()
 
-            if self.running:
+            if self.running and consecutive_errors == 0:
                 logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
                 await asyncio.sleep(self.RECONNECT_DELAY)
 

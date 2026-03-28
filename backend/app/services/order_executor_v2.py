@@ -12,6 +12,16 @@ from app.utils.quantity_converter import quantity_converter
 logger = logging.getLogger(__name__)
 
 
+def _trigger_position_refresh():
+    """触发持仓立即刷新，避免等待30秒周期"""
+    try:
+        from app.tasks.broadcast_tasks import account_balance_streamer
+        account_balance_streamer.trigger_immediate_refresh()
+        logger.info("[ORDER_EXECUTOR] Triggered immediate position refresh")
+    except Exception as e:
+        logger.warning(f"[ORDER_EXECUTOR] Failed to trigger position refresh: {e}")
+
+
 def _get_mt5_client_for_account(account: Account):
     """Get account-specific MT5 client, falling back to shared client if credentials missing."""
     from app.services.market_service import market_data_service
@@ -39,17 +49,20 @@ class OrderExecutorV2:
 
     def __init__(self):
         self.binance_timeout = 5.0
-        self.bybit_timeout = 0.1
-        self.max_retries = 1
+        self.bybit_timeout = 0.3  # 0.1→0.3: Bybit订单有更多时间进入市场，同时保持快速执行
+        self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
         self.spread_check_interval = 2.0
-        self.mt5_deal_sync_wait = 3.0
+        self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
+        self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
+        self.mt5_deal_recheck_wait = 1.0  # 2.0→1.0: 二次确认等待时间缩短
         self.api_retry_delay = 0.5
         self.max_binance_limit_retries = 25
         self.open_wait_after_cancel_no_trade = 3.0
         self.open_wait_after_cancel_part = 2.0
         self.close_wait_after_cancel_no_trade = 3.0
         self.close_wait_after_cancel_part = 2.0
+        self.partial_fill_threshold = 0.95  # 95%以上算完全成交
         self.base_executor = base_executor
 
     async def execute_reverse_opening(
@@ -175,6 +188,9 @@ class OrderExecutorV2:
             f"Threshold=80%, "
             f"is_single_leg={is_single_leg}"
         )
+
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
 
         return {
             "success": True,
@@ -332,6 +348,9 @@ class OrderExecutorV2:
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
 
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
+
         return {
             "success": True,
             "binance_filled_qty": binance_filled_qty,
@@ -456,6 +475,9 @@ class OrderExecutorV2:
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
+
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
 
         return {
             "success": True,
@@ -636,6 +658,9 @@ class OrderExecutorV2:
             logger.warning(f"[FORWARD_CLOSING] PARTIAL SINGLE LEG: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU ({bybit_filled_qty} Lot)")
         else:
             logger.info(f"[FORWARD_CLOSING] Execution completed successfully: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU")
+
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
 
         return {
             "success": True,
@@ -828,21 +853,71 @@ class OrderExecutorV2:
             ticket = int(order_id)
             logger.info(f"[BYBIT_BUY] Order placed: ticket={ticket}")
 
-            # Wait for Bybit timeout
+            # Wait for Bybit timeout (initial delay for order to enter market)
             await asyncio.sleep(self.bybit_timeout)
 
-            # Wait for MT5 to process deals (configurable via mt5_deal_sync_wait)
-            await asyncio.sleep(self.mt5_deal_sync_wait)
+            # 轮询检查机制：每0.5秒检查一次，最多等待5秒
+            # 一旦检测到完全成交（≥90%），立即返回，不再等待
+            max_wait = self.mt5_deal_sync_wait
+            elapsed = 0
+            actual_filled = 0
+            is_partial = False
+            check_count = 0
 
-            # Check actual filled volume from MT5 deals
-            volume_check = await self._check_mt5_filled_volume(
-                account, ticket, remaining
-            )
+            logger.info(f"[BYBIT_BUY] Starting polling check (max {max_wait}s, interval {self.mt5_poll_interval}s)")
 
-            actual_filled = volume_check["actual_filled"]
-            is_partial = volume_check["is_partial_fill"]
+            while elapsed < max_wait:
+                await asyncio.sleep(self.mt5_poll_interval)
+                elapsed += self.mt5_poll_interval
+                check_count += 1
 
-            logger.info(f"[BYBIT_BUY] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
+                # Check actual filled volume from MT5 deals
+                volume_check = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                actual_filled = volume_check["actual_filled"]
+                is_partial = volume_check["is_partial_fill"]
+
+                logger.info(
+                    f"[BYBIT_BUY] Poll #{check_count} ({elapsed:.1f}s): "
+                    f"filled={actual_filled}/{remaining} Lot ({actual_filled/remaining*100:.1f}%)"
+                )
+
+                # 提前退出条件：完全成交（≥90%）
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    logger.info(
+                        f"[BYBIT_BUY] Order fully filled, early exit after {elapsed:.1f}s "
+                        f"(saved {max_wait - elapsed:.1f}s)"
+                    )
+                    break
+
+                # 如果有部分成交且超过50%，继续等待但缩短间隔
+                if actual_filled > 0 and actual_filled >= remaining * 0.5:
+                    logger.info(f"[BYBIT_BUY] Partial fill >50%, continuing to poll...")
+
+            # 如果轮询结束后仍未成交或成交不足50%，进行二次确认
+            if actual_filled == 0 or (is_partial and actual_filled < remaining * 0.5):
+                logger.warning(
+                    f"[BYBIT_BUY] After {elapsed:.1f}s polling: {actual_filled}/{remaining} Lot, "
+                    f"waiting {self.mt5_deal_recheck_wait}s for recheck..."
+                )
+                await asyncio.sleep(self.mt5_deal_recheck_wait)
+
+                # 二次确认
+                volume_recheck = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                if volume_recheck["actual_filled"] > actual_filled:
+                    logger.info(
+                        f"[BYBIT_BUY] Recheck found more fills: "
+                        f"{actual_filled} → {volume_recheck['actual_filled']} Lot"
+                    )
+                    actual_filled = volume_recheck["actual_filled"]
+                    is_partial = volume_recheck["is_partial_fill"]
+
+            logger.info(f"[BYBIT_BUY] Ticket {ticket} final result: {actual_filled} Lot (partial={is_partial})")
 
             if actual_filled > 0:
                 total_filled += actual_filled
@@ -858,8 +933,13 @@ class OrderExecutorV2:
                     )
                     print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
 
-                if actual_filled >= remaining * 0.95:
-                    # Consider 95%+ as fully filled
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    # Consider 90%+ as fully filled (降低从95%)
+                    logger.info(
+                        f"[BYBIT_BUY] Order considered fully filled: "
+                        f"{actual_filled}/{remaining} = {actual_filled/remaining*100:.1f}% "
+                        f"(threshold: {self.partial_fill_threshold*100:.0f}%)"
+                    )
                     break
 
                 # Partially filled, update remaining
@@ -920,16 +1000,66 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # Wait for MT5 to process deals (configurable via mt5_deal_sync_wait)
-            await asyncio.sleep(self.mt5_deal_sync_wait)
+            # Polling mechanism: check every 0.5s, max 5s
+            max_wait = self.mt5_deal_sync_wait
+            elapsed = 0
+            actual_filled = 0
+            is_partial = False
 
-            # Check actual filled volume from MT5 deals
-            volume_check = await self._check_mt5_filled_volume(
-                account, ticket, remaining
-            )
+            logger.info(f"[BYBIT_SELL] Starting polling check (max {max_wait}s, interval {self.mt5_poll_interval}s)")
 
-            actual_filled = volume_check["actual_filled"]
-            is_partial = volume_check["is_partial_fill"]
+            while elapsed < max_wait:
+                await asyncio.sleep(self.mt5_poll_interval)
+                elapsed += self.mt5_poll_interval
+
+                volume_check = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                actual_filled = volume_check["actual_filled"]
+                is_partial = volume_check["is_partial_fill"]
+
+                logger.info(
+                    f"[BYBIT_SELL] Poll at {elapsed:.1f}s: "
+                    f"filled={actual_filled}/{remaining} Lot ({actual_filled/remaining*100:.1f}%), "
+                    f"partial={is_partial}"
+                )
+
+                # Early exit if fully filled (≥90%)
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    logger.info(
+                        f"[BYBIT_SELL] Order fully filled, early exit after {elapsed:.1f}s "
+                        f"(saved {max_wait - elapsed:.1f}s)"
+                    )
+                    break
+
+            if elapsed >= max_wait and actual_filled < remaining * self.partial_fill_threshold:
+                logger.warning(
+                    f"[BYBIT_SELL] Polling timeout after {max_wait}s, "
+                    f"filled={actual_filled}/{remaining} Lot"
+                )
+
+            # 如果第一次检查显示未成交或部分成交，等待后再次确认
+            # 避免因MT5同步延迟导致的误判
+            if actual_filled == 0 or (is_partial and actual_filled < remaining * 0.5):
+                logger.warning(
+                    f"[BYBIT_SELL] First check: {actual_filled}/{remaining} Lot, "
+                    f"waiting {self.mt5_deal_recheck_wait}s for recheck..."
+                )
+                await asyncio.sleep(self.mt5_deal_recheck_wait)
+
+                # 二次确认
+                volume_recheck = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                if volume_recheck["actual_filled"] > actual_filled:
+                    logger.info(
+                        f"[BYBIT_SELL] Recheck found more fills: "
+                        f"{actual_filled} → {volume_recheck['actual_filled']} Lot"
+                    )
+                    actual_filled = volume_recheck["actual_filled"]
+                    is_partial = volume_recheck["is_partial_fill"]
 
             logger.info(f"[BYBIT_SELL] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
 
@@ -947,8 +1077,13 @@ class OrderExecutorV2:
                     )
                     print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
 
-                if actual_filled >= remaining * 0.95:
-                    # Consider 95%+ as fully filled
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    # Consider 90%+ as fully filled (降低从95%)
+                    logger.info(
+                        f"[BYBIT_SELL] Order considered fully filled: "
+                        f"{actual_filled}/{remaining} = {actual_filled/remaining*100:.1f}% "
+                        f"(threshold: {self.partial_fill_threshold*100:.0f}%)"
+                    )
                     break
 
                 # Partially filled, update remaining

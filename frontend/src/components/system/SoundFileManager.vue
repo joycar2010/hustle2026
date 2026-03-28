@@ -252,7 +252,7 @@ function playSound(filename) {
     currentAudio.value = null
   }
 
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://13.115.21.77:8000'
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
   const soundUrl = `${apiBaseUrl}/sounds/${filename}`
 
   currentAudio.value = new Audio(soundUrl)

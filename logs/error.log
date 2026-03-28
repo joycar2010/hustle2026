@@ -5,3 +5,5 @@
 2026/03/17 16:59:15 [error] 3776#7656: invalid PID number "" in "C:\app\hustle2026/logs/nginx.pid"
 2026/03/18 05:58:57 [emerg] 2784#6816: CreateFile() "C:\app\hustle2026/conf/nginx.conf" failed (3: The system cannot find the path specified)
 2026/03/19 11:29:22 [emerg] 7308#956: CreateFile() "C:\app\hustle2026/conf/nginx.conf" failed (3: The system cannot find the path specified)
+2026/03/26 16:33:52 [emerg] 6312#7960: CreateFile() "C:\app\hustle2026/conf/nginx.conf" failed (3: The system cannot find the path specified)
+2026/03/26 16:43:30 [emerg] 1096#5248: CreateFile() "C:\app\hustle2026/conf/nginx.conf" failed (3: The system cannot find the path specified)

@@ -1,0 +1,255 @@
+INFO:     Started server process [10256]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     ('61.8.214.46', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2OTg5NjN9.JPYHvHBeFKt-uGQY7pY1eKHS99QKrj79HoiL2icU8mg" [accepted]
+INFO:     connection open
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     connection closed
+Redis monitor started successfully
+[REQUEST] GET /api/v1/risk/alert-settings
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/users/me
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/me - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/users/me HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/ws/stats
+[RESPONSE] GET /api/v1/ws/stats - Status: 404
+INFO:     61.8.214.34:0 - "GET /api/v1/ws/stats HTTP/1.1" 404 Not Found
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/proxies - Status: 403
+INFO:     61.8.214.34:0 - "GET /api/v1/proxies HTTP/1.1" 403 Forbidden
+C:\app\hustle2026\backend\app\api\v1\system_monitor.py:106: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_before_utc.
+  not_before = cert.not_valid_before
+C:\app\hustle2026\backend\app\api\v1\system_monitor.py:107: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_after_utc.
+  not_after = cert.not_valid_after
+[REQUEST] GET /api/v1/proxies/qingguo/balance
+[REQUEST] GET /api/v1/rbac/roles
+[REQUEST] GET /api/v1/ssl/certificates
+[REQUEST] GET /api/v1/monitor/ssl/current
+[REQUEST] GET /api/v1/rbac/permissions
+[REQUEST] GET /api/v1/security/components
+[REQUEST] GET /api/v1/users/
+[REQUEST] GET /api/v1/system/logs
+[RESPONSE] GET /api/v1/proxies/qingguo/balance - Status: 404
+[RESPONSE] GET /api/v1/monitor/ssl/current - Status: 200
+[REQUEST] GET /api/v1/accounts
+INFO:     61.8.214.34:0 - "GET /api/v1/proxies/qingguo/balance HTTP/1.1" 404 Not Found
+INFO:     61.8.214.34:0 - "GET /api/v1/monitor/ssl/current HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/info
+[RESPONSE] GET /api/v1/rbac/roles - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/rbac/roles HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/rbac/permissions - Status: 200
+[RESPONSE] GET /api/v1/ssl/certificates - Status: 200
+[RESPONSE] GET /api/v1/security/components - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/rbac/permissions HTTP/1.1" 200 OK
+INFO:     61.8.214.34:0 - "GET /api/v1/ssl/certificates HTTP/1.1" 200 OK
+INFO:     61.8.214.34:0 - "GET /api/v1/security/components HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/logs - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/system/logs?limit=100 HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/ - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/users/ HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/info - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/system/info HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+INFO:     ('61.8.214.28', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2OTg5NjN9.JPYHvHBeFKt-uGQY7pY1eKHS99QKrj79HoiL2icU8mg" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/system/database/stats
+[RESPONSE] GET /api/v1/system/database/stats - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/system/database/stats HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 500
+INFO:     61.8.214.34:0 - "GET /api/v1/system/github/versions HTTP/1.1" 500 Internal Server Error
+[REQUEST] GET /api/v1/risk/alert-settings
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 500
+INFO:     61.8.214.34:0 - "GET /api/v1/system/github/versions HTTP/1.1" 500 Internal Server Error
+INFO:     connection closed
+[REQUEST] GET /api/v1/risk/alert-settings
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/users/me
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/me - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/users/me HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/ws/stats
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/proxies/qingguo/balance
+[REQUEST] GET /api/v1/rbac/roles
+[REQUEST] GET /api/v1/ssl/certificates
+[REQUEST] GET /api/v1/monitor/ssl/current
+[REQUEST] GET /api/v1/system/logs
+[REQUEST] GET /api/v1/rbac/permissions
+[REQUEST] GET /api/v1/security/components
+[REQUEST] GET /api/v1/users/
+[REQUEST] GET /api/v1/accounts
+[REQUEST] GET /api/v1/system/info
+[RESPONSE] GET /api/v1/ws/stats - Status: 404
+[RESPONSE] GET /api/v1/proxies - Status: 403
+[RESPONSE] GET /api/v1/proxies/qingguo/balance - Status: 404
+[RESPONSE] GET /api/v1/monitor/ssl/current - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/ws/stats HTTP/1.1" 404 Not Found
+INFO:     61.8.214.34:0 - "GET /api/v1/proxies HTTP/1.1" 403 Forbidden
+INFO:     61.8.214.34:0 - "GET /api/v1/proxies/qingguo/balance HTTP/1.1" 404 Not Found
+INFO:     61.8.214.34:0 - "GET /api/v1/monitor/ssl/current HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/rbac/roles - Status: 200
+[RESPONSE] GET /api/v1/ssl/certificates - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/rbac/roles HTTP/1.1" 200 OK
+INFO:     61.8.214.34:0 - "GET /api/v1/ssl/certificates HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/info - Status: 200
+[RESPONSE] GET /api/v1/accounts - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/system/info HTTP/1.1" 200 OK
+INFO:     61.8.214.34:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/rbac/permissions - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/rbac/permissions HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/security/components - Status: 200
+[RESPONSE] GET /api/v1/system/logs - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/security/components HTTP/1.1" 200 OK
+INFO:     61.8.214.34:0 - "GET /api/v1/system/logs?limit=100 HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/ - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/users/ HTTP/1.1" 200 OK
+INFO:     ('61.8.214.50', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2OTg5NjN9.JPYHvHBeFKt-uGQY7pY1eKHS99QKrj79HoiL2icU8mg" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/system/database/stats
+[RESPONSE] GET /api/v1/system/database/stats - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/system/database/stats HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 500
+INFO:     61.8.214.34:0 - "GET /api/v1/system/github/versions HTTP/1.1" 500 Internal Server Error
+[REQUEST] GET /api/v1/risk/alert-settings
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.34:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 500
+INFO:     61.8.214.34:0 - "GET /api/v1/system/github/versions HTTP/1.1" 500 Internal Server Error
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51650 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51649 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.4s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51677 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51678 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51699 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51698 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+MT5 connection appears stale (no activity for 30.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51734 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51735 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...

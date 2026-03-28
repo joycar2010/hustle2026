@@ -1,0 +1,118 @@
+INFO:     Started server process [2556]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[BinancePositionPusher] Stream \u9519\u8bef (1/3) (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] \u68c0\u6d4b\u5230API\u9519\u8bef/\u5c01\u7981\uff0c\u7b49\u5f85300\u79d2\u540e\u91cd\u8bd5
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
