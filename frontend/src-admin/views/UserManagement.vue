@@ -198,6 +198,38 @@
             </div>
           </div>
 
+          <!-- IPIPGO 静态IP代理配置 -->
+          <div class="bg-dark-200 rounded-lg p-2.5 text-xs">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-text-tertiary font-medium">IPIPGO 静态IP</span>
+              <button @click="openProxyConfig(acc)"
+                class="px-1.5 py-0.5 bg-dark-50 hover:bg-dark-100 border border-border-primary rounded text-text-secondary transition-colors">
+                {{ acc.proxy_config ? '编辑' : '配置' }}
+              </button>
+            </div>
+            <div v-if="acc.proxy_config" class="space-y-1">
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">IP地址:</span>
+                <span class="font-mono text-text-secondary">{{ acc.proxy_config.host || '--' }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">端口:</span>
+                <span class="font-mono text-text-secondary">{{ acc.proxy_config.port || '--' }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">类型:</span>
+                <span class="font-mono text-text-secondary uppercase">{{ acc.proxy_config.proxy_type || 'socks5' }}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">认证:</span>
+                <span :class="acc.proxy_config.username ? 'text-green-400' : 'text-text-tertiary'">
+                  {{ acc.proxy_config.username ? '已配置' : '无' }}
+                </span>
+              </div>
+            </div>
+            <div v-else class="text-center text-text-tertiary py-1">未配置代理 — 使用服务器直连</div>
+          </div>
+
           <!-- 操作按钮 -->
           <div class="flex gap-2">
             <button @click="openEditAccount(acc)"
@@ -214,35 +246,50 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
-         Tab 3: MT5客户端
+         Tab 3: MT5客户端 & 实例管理
     ═══════════════════════════════════════════ -->
     <div v-if="activeTab === 'mt5'" class="space-y-4">
-      <!-- 选择器工具栏 -->
-      <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center gap-3 flex-wrap">
-        <span class="text-sm text-text-tertiary whitespace-nowrap">选择用户：</span>
-        <select v-model="mt5SelectedUserId" @change="onMt5UserChange"
-          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[160px]">
-          <option value="">-- 选择用户 --</option>
-          <option v-for="u in users" :key="u.user_id" :value="u.user_id">{{ u.username }}</option>
-        </select>
-        <span class="text-sm text-text-tertiary whitespace-nowrap">选择账户：</span>
-        <select v-model="mt5SelectedAccountId" @change="loadMT5Clients"
-          :disabled="!mt5SelectedUserId"
-          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[200px] disabled:opacity-40">
-          <option value="">-- 选择MT5账户 --</option>
-          <option v-for="acc in mt5Accounts" :key="acc.account_id" :value="acc.account_id">
-            {{ acc.account_name }} (ID: {{ acc.account_id }})
-          </option>
-        </select>
-        <button @click="loadMT5Clients" :disabled="!mt5SelectedAccountId"
-          class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors disabled:opacity-40">
-          刷新
+      <!-- 子导航：客户端连接 vs 服务实例 -->
+      <div class="flex gap-2 bg-dark-100 rounded-xl border border-border-primary p-1">
+        <button @click="mt5SubTab = 'clients'"
+          :class="['flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors',
+            mt5SubTab === 'clients' ? 'bg-primary text-dark-300' : 'text-text-secondary hover:text-text-primary']">
+          客户端连接
         </button>
-        <button @click="openAddMT5" :disabled="!mt5SelectedAccountId"
-          class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-xs transition-colors disabled:opacity-40">
-          + 新增客户端
+        <button @click="mt5SubTab = 'instances'"
+          :class="['flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors',
+            mt5SubTab === 'instances' ? 'bg-primary text-dark-300' : 'text-text-secondary hover:text-text-primary']">
+          服务实例
         </button>
       </div>
+      <!-- ═══ 客户端连接子页面 ═══ -->
+      <div v-if="mt5SubTab === 'clients'" class="space-y-4">
+        <!-- 选择器工具栏 -->
+        <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center gap-3 flex-wrap">
+          <span class="text-sm text-text-tertiary whitespace-nowrap">选择用户：</span>
+          <select v-model="mt5SelectedUserId" @change="onMt5UserChange"
+            class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[160px]">
+            <option value="">-- 选择用户 --</option>
+            <option v-for="u in users" :key="u.user_id" :value="u.user_id">{{ u.username }}</option>
+          </select>
+          <span class="text-sm text-text-tertiary whitespace-nowrap">选择账户：</span>
+          <select v-model="mt5SelectedAccountId" @change="loadMT5Clients"
+            :disabled="!mt5SelectedUserId"
+            class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[200px] disabled:opacity-40">
+            <option value="">-- 选择MT5账户 --</option>
+            <option v-for="acc in mt5Accounts" :key="acc.account_id" :value="acc.account_id">
+              {{ acc.account_name }} (ID: {{ acc.account_id }})
+            </option>
+          </select>
+          <button @click="loadMT5Clients" :disabled="!mt5SelectedAccountId"
+            class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors disabled:opacity-40">
+            刷新
+          </button>
+          <button @click="openAddMT5" :disabled="!mt5SelectedAccountId"
+            class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-xs transition-colors disabled:opacity-40">
+            + 新增客户端
+          </button>
+        </div>
 
       <!-- 提示状态 -->
       <div v-if="!mt5SelectedAccountId" class="text-center py-12 text-text-tertiary text-sm">
@@ -253,8 +300,8 @@
         该账户暂无MT5客户端，点击「+ 新增客户端」添加
       </div>
 
-      <!-- 客户端卡片 -->
-      <div v-else class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+        <!-- 客户端卡片 -->
+        <div v-else class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         <div v-for="client in mt5Clients" :key="client.client_id"
           class="bg-dark-100 rounded-2xl border p-4 space-y-3 transition-all"
           :class="getMT5BorderColor(client)">
@@ -341,6 +388,93 @@
               class="flex-1 py-1.5 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded-lg text-xs border border-[#f6465d]/20 transition-colors">
               删除
             </button>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <!-- ═══ 服务实例子页面 ═══ -->
+      <div v-if="mt5SubTab === 'instances'" class="space-y-4">
+        <!-- 工具栏 -->
+        <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+          <span class="text-sm text-text-secondary">管理 Windows Server 上的 MT5 服务实例</span>
+          <div class="flex gap-2">
+            <button @click="loadMT5Instances"
+              class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors">
+              刷新
+            </button>
+            <button @click="openDeployInstance"
+              class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-xs transition-colors">
+              + 部署新实例
+            </button>
+          </div>
+        </div>
+
+        <!-- 实例列表 -->
+        <div v-if="instancesLoading" class="text-center py-12 text-text-tertiary text-sm">加载中...</div>
+        <div v-else-if="!mt5Instances.length" class="text-center py-12 text-text-tertiary text-sm">暂无实例，点击「部署新实例」开始</div>
+        <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div v-for="inst in mt5Instances" :key="inst.instance_id"
+            class="bg-dark-100 rounded-2xl border p-4 space-y-3"
+            :class="getInstanceBorderColor(inst.status)">
+
+            <!-- 实例头 -->
+            <div class="flex items-start justify-between">
+              <div class="flex-1 min-w-0">
+                <div class="font-bold text-sm">{{ inst.instance_name }}</div>
+                <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <span class="px-1.5 py-0.5 rounded text-xs" :class="getInstanceStatusClass(inst.status)">
+                    {{ getInstanceStatusText(inst.status) }}
+                  </span>
+                  <span class="text-xs text-text-tertiary font-mono">{{ inst.server_ip }}:{{ inst.service_port }}</span>
+                  <span v-if="inst.auto_start" class="px-1.5 py-0.5 rounded text-xs bg-[#0ecb81]/10 text-[#0ecb81]">自启</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 实例详情 -->
+            <div class="bg-dark-200 rounded-lg p-2.5 text-xs space-y-1.5">
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">MT5路径:</span>
+                <span class="font-mono text-xs truncate max-w-[200px]" :title="inst.mt5_path">{{ inst.mt5_path }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">部署路径:</span>
+                <span class="font-mono text-xs truncate max-w-[200px]" :title="inst.deploy_path">{{ inst.deploy_path }}</span>
+              </div>
+              <div v-if="inst.mt5_data_path" class="flex justify-between">
+                <span class="text-text-tertiary">数据目录:</span>
+                <span class="font-mono text-xs truncate max-w-[200px]" :title="inst.mt5_data_path">{{ inst.mt5_data_path }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">便携版:</span>
+                <span>{{ inst.is_portable ? '是' : '否' }}</span>
+              </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex gap-2">
+              <button @click="controlInstance(inst, 'start')" :disabled="inst.status === 'running'"
+                class="flex-1 py-1.5 bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] rounded-lg text-xs border border-[#0ecb81]/20 transition-colors disabled:opacity-40">
+                启动
+              </button>
+              <button @click="controlInstance(inst, 'stop')" :disabled="inst.status === 'stopped'"
+                class="flex-1 py-1.5 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded-lg text-xs border border-[#f0b90b]/20 transition-colors disabled:opacity-40">
+                停止
+              </button>
+              <button @click="controlInstance(inst, 'restart')"
+                class="flex-1 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs border border-primary/20 transition-colors">
+                重启
+              </button>
+              <button @click="refreshInstanceStatus(inst)"
+                class="py-1.5 px-3 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors">
+                刷新
+              </button>
+              <button @click="deleteInstance(inst)"
+                class="py-1.5 px-3 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded-lg text-xs border border-[#f6465d]/20 transition-colors">
+                删除
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -645,6 +779,157 @@
       </div>
     </div>
 
+    <!-- Modal: 部署MT5实例 -->
+    <div v-if="showDeployModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      @click.self="showDeployModal = false">
+      <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+          <h3 class="font-bold">部署新 MT5 实例</h3>
+          <button @click="showDeployModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
+        </div>
+        <form @submit.prevent="deployInstance" class="p-6 space-y-4">
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">实例名称 *</label>
+            <input v-model="deployForm.instance_name" required
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+              placeholder="例如: MT5-8003" />
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">服务器IP *</label>
+            <input v-model="deployForm.server_ip" required
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+              placeholder="例如: 54.249.66.53" />
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">服务端口 *</label>
+            <input v-model.number="deployForm.service_port" type="number" required min="1024" max="65535"
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+              placeholder="例如: 8003" />
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">MT5路径 *</label>
+            <input v-model="deployForm.mt5_path" required
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+              placeholder="例如: D:\MetaTrader 5-03\terminal64.exe" />
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">MT5数据目录</label>
+            <input v-model="deployForm.mt5_data_path"
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+              placeholder="可选，例如: D:\MetaTrader 5-03" />
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">部署路径 *</label>
+            <input v-model="deployForm.deploy_path" required
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+              placeholder="例如: D:\hustle-mt5-8003" />
+          </div>
+          <div class="flex items-center gap-3">
+            <div @click="deployForm.is_portable = !deployForm.is_portable"
+              :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors',
+                deployForm.is_portable ? 'bg-primary' : 'bg-gray-600']">
+              <span :class="['absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                deployForm.is_portable ? 'translate-x-4' : 'translate-x-0.5']"/>
+            </div>
+            <span class="text-sm text-text-secondary">便携版</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div @click="deployForm.auto_start = !deployForm.auto_start"
+              :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors',
+                deployForm.auto_start ? 'bg-[#0ecb81]' : 'bg-gray-600']">
+              <span :class="['absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                deployForm.auto_start ? 'translate-x-4' : 'translate-x-0.5']"/>
+            </div>
+            <span class="text-sm text-text-secondary">开机自启</span>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" :disabled="deploying"
+              class="flex-1 py-2 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-sm transition-colors disabled:opacity-50">
+              {{ deploying ? '部署中...' : '部署' }}
+            </button>
+            <button type="button" @click="showDeployModal = false"
+              class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
+              取消
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal: IPIPGO 静态IP代理配置 -->
+    <div v-if="showProxyModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      @click.self="showProxyModal = false">
+      <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
+        <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+          <div>
+            <h3 class="font-bold">IPIPGO 静态IP代理</h3>
+            <p class="text-xs text-text-tertiary mt-0.5">{{ proxyTargetAcc?.account_name }}</p>
+          </div>
+          <button @click="showProxyModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
+        </div>
+        <form @submit.prevent="saveProxyConfig" class="p-6 space-y-4">
+          <p class="text-xs text-text-tertiary bg-dark-200 rounded-lg p-3">
+            配置 IPIPGO 独享静态IP，用于 Binance/Bybit API 请求防封。留空所有字段可清除代理配置（使用服务器直连）。
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="col-span-2">
+              <label class="block text-xs text-text-tertiary mb-1">代理类型</label>
+              <select v-model="proxyForm.proxy_type"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary">
+                <option value="socks5">SOCKS5</option>
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">主机地址 (Host)</label>
+              <input v-model="proxyForm.host"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="例: 1.2.3.4 或 proxy.ipipgo.com" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">端口 (Port)</label>
+              <input v-model.number="proxyForm.port" type="number" min="1" max="65535"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="例: 1080" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">用户名</label>
+              <input v-model="proxyForm.username"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="IPIPGO 用户名" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">密码</label>
+              <input v-model="proxyForm.password" type="password"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                placeholder="IPIPGO 密码" />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-xs text-text-tertiary mb-1">地区备注（可选）</label>
+              <input v-model="proxyForm.region"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+                placeholder="例: 日本-东京, 新加坡" />
+            </div>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit"
+              class="flex-1 py-2 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-sm transition-colors">
+              保存配置
+            </button>
+            <button type="button" @click="clearProxyConfig"
+              class="py-2 px-4 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded-lg text-sm border border-[#f6465d]/20 transition-colors">
+              清除
+            </button>
+            <button type="button" @click="showProxyModal = false"
+              class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
+              取消
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Toast 提示 -->
     <div class="fixed bottom-6 right-6 z-50 space-y-2 pointer-events-none">
       <transition-group name="toast">
@@ -668,9 +953,10 @@ import dayjs from 'dayjs'
 const tabs = [
   { id: 'users',    label: '用户账号' },
   { id: 'accounts', label: '绑定账户' },
-  { id: 'mt5',      label: 'MT5客户端' },
+  { id: 'mt5',      label: 'MT5管理' },
 ]
 const activeTab = ref('users')
+const mt5SubTab = ref('clients') // 'clients' or 'instances'
 
 // 切换 tab 时自动加载数据
 watch(activeTab, (tab) => {
@@ -903,6 +1189,55 @@ async function openEditAccount(acc) {
   } catch { /* admin may not have bypass yet — user can re-enter manually */ }
 }
 
+// IPIPGO proxy config
+const showProxyModal  = ref(false)
+const proxyTargetAcc  = ref(null)
+const proxyForm = ref({ proxy_type: 'socks5', host: '', port: null, username: '', password: '', region: '' })
+
+function openProxyConfig(acc) {
+  proxyTargetAcc.value = acc
+  const cfg = acc.proxy_config || {}
+  proxyForm.value = {
+    proxy_type: cfg.proxy_type || 'socks5',
+    host:       cfg.host       || '',
+    port:       cfg.port       || null,
+    username:   cfg.username   || '',
+    password:   cfg.password   || '',
+    region:     cfg.region     || '',
+  }
+  showProxyModal.value = true
+}
+
+async function saveProxyConfig() {
+  const acc = proxyTargetAcc.value
+  if (!acc) return
+  const cfg = proxyForm.value.host ? {
+    proxy_type: proxyForm.value.proxy_type,
+    host:       proxyForm.value.host,
+    port:       proxyForm.value.port,
+    username:   proxyForm.value.username || null,
+    password:   proxyForm.value.password || null,
+    region:     proxyForm.value.region   || null,
+  } : null
+  try {
+    await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: cfg })
+    toast('代理配置已保存')
+    showProxyModal.value = false
+    await loadUserAccounts()
+  } catch (e) { apiErr('保存代理配置失败', e) }
+}
+
+async function clearProxyConfig() {
+  const acc = proxyTargetAcc.value
+  if (!acc) return
+  try {
+    await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: null })
+    toast('代理配置已清除')
+    showProxyModal.value = false
+    await loadUserAccounts()
+  } catch (e) { apiErr('清除代理配置失败', e) }
+}
+
 async function saveAccount() {
   try {
     if (isEditAccount.value) {
@@ -1097,10 +1432,111 @@ async function deleteMT5(client) {
   } catch (e) { apiErr('删除失败', e) }
 }
 
+// ══════════════════════════════════════════
+// MT5 实例管理
+// ══════════════════════════════════════════
+const mt5Instances = ref([])
+const instancesLoading = ref(false)
+const showDeployModal = ref(false)
+const deploying = ref(false)
+const deployForm = ref({
+  instance_name: '',
+  server_ip: '54.249.66.53',
+  service_port: 8003,
+  mt5_path: '',
+  mt5_data_path: '',
+  deploy_path: '',
+  is_portable: false,
+  auto_start: true
+})
+
+async function loadMT5Instances() {
+  instancesLoading.value = true
+  try {
+    const r = await api.get('/api/v1/mt5/instances')
+    mt5Instances.value = r.data || []
+  } catch (e) { apiErr('加载实例失败', e) }
+  finally { instancesLoading.value = false }
+}
+
+function openDeployInstance() {
+  deployForm.value = {
+    instance_name: '',
+    server_ip: '54.249.66.53',
+    service_port: 8003,
+    mt5_path: '',
+    mt5_data_path: '',
+    deploy_path: '',
+    is_portable: false,
+    auto_start: true
+  }
+  showDeployModal.value = true
+}
+
+async function deployInstance() {
+  deploying.value = true
+  try {
+    await api.post('/api/v1/mt5/instances', deployForm.value)
+    toast('实例部署成功')
+    showDeployModal.value = false
+    await loadMT5Instances()
+  } catch (e) { apiErr('部署失败', e) }
+  finally { deploying.value = false }
+}
+
+async function controlInstance(inst, action) {
+  try {
+    await api.post(`/api/v1/mt5/instances/${inst.instance_id}/control`, { action })
+    toast(`${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`)
+    await loadMT5Instances()
+  } catch (e) { apiErr('操作失败', e) }
+}
+
+async function refreshInstanceStatus(inst) {
+  try {
+    await api.get(`/api/v1/mt5/instances/${inst.instance_id}/status`)
+    toast('状态已刷新')
+    await loadMT5Instances()
+  } catch (e) { apiErr('刷新失败', e) }
+}
+
+async function deleteInstance(inst) {
+  if (!confirm(`确定要删除实例「${inst.instance_name}」吗？`)) return
+  try {
+    await api.delete(`/api/v1/mt5/instances/${inst.instance_id}`)
+    toast('实例已删除')
+    await loadMT5Instances()
+  } catch (e) { apiErr('删除失败', e) }
+}
+
+function getInstanceBorderColor(status) {
+  if (status === 'running') return 'border-[#0ecb81]/40'
+  if (status === 'stopped') return 'border-border-primary'
+  if (status === 'error') return 'border-[#f6465d]/40'
+  return 'border-[#f0b90b]/40'
+}
+
+function getInstanceStatusClass(status) {
+  return ({
+    running: 'bg-[#0ecb81]/10 text-[#0ecb81]',
+    stopped: 'bg-dark-200 text-text-tertiary',
+    error: 'bg-[#f6465d]/10 text-[#f6465d]',
+  })[status] || 'bg-[#f0b90b]/10 text-[#f0b90b]'
+}
+
+function getInstanceStatusText(status) {
+  return ({ running: '运行中', stopped: '已停止', error: '错误' })[status] || '未知'
+}
+
 // ── 初始化 ────────────────────────────────────────────────────
 onMounted(async () => {
   await loadUsers()
   // 账户 tab 初始不加载（等用户切换到该 tab 再触发）
+})
+
+// 切换到 MT5 实例子页面时自动加载
+watch(mt5SubTab, (tab) => {
+  if (tab === 'instances' && !mt5Instances.value.length) loadMT5Instances()
 })
 </script>
 
