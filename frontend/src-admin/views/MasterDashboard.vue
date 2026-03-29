@@ -42,6 +42,25 @@
         </div>
       </div>
 
+      <!-- MT5 服务器 -->
+      <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5Server.online ? 'border-green-800/50' : 'border-red-800/50'">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div :class="['w-2.5 h-2.5 rounded-full', mt5Server.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+            <span class="text-sm font-semibold text-text-primary">MT5 服务器</span>
+          </div>
+          <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5Server.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+            {{ mt5Server.online ? '在线' : '离线' }}
+          </span>
+        </div>
+        <div class="text-xs text-text-tertiary space-y-1">
+          <div class="flex justify-between"><span>运行时长</span><span class="text-text-secondary font-mono">{{ mt5Server.uptime || '--' }}</span></div>
+          <div class="flex justify-between"><span>内存使用</span><span class="text-text-secondary font-mono">{{ mt5Server.memory || '--' }}</span></div>
+          <div class="flex justify-between"><span>CPU 使用</span><span class="text-text-secondary font-mono">{{ mt5Server.cpu || '--' }}</span></div>
+          <div class="flex justify-between"><span>运行实例</span><span class="text-text-secondary">{{ mt5Server.instances ?? '--' }}</span></div>
+        </div>
+      </div>
+
       <!-- MT5 桥接 System -->
       <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5System.online ? 'border-green-800/50' : 'border-red-800/50'">
         <div class="flex items-center justify-between mb-3">
@@ -61,25 +80,6 @@
           </div>
           <div class="flex justify-between"><span>服务器</span><span class="text-text-secondary">{{ mt5System.server || '--' }}</span></div>
           <div v-if="mt5System.balance != null" class="flex justify-between"><span>余额</span><span class="text-text-secondary font-mono">{{ mt5System.balance?.toFixed(2) }} UST</span></div>
-        </div>
-      </div>
-
-      <!-- MT5 服务器 -->
-      <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5Server.online ? 'border-green-800/50' : 'border-red-800/50'">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <div :class="['w-2.5 h-2.5 rounded-full', mt5Server.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-            <span class="text-sm font-semibold text-text-primary">MT5 服务器</span>
-          </div>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5Server.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ mt5Server.online ? '在线' : '离线' }}
-          </span>
-        </div>
-        <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>运行时长</span><span class="text-text-secondary font-mono">{{ mt5Server.uptime || '--' }}</span></div>
-          <div class="flex justify-between"><span>内存使用</span><span class="text-text-secondary font-mono">{{ mt5Server.memory || '--' }}</span></div>
-          <div class="flex justify-between"><span>CPU 使用</span><span class="text-text-secondary font-mono">{{ mt5Server.cpu || '--' }}</span></div>
-          <div class="flex justify-between"><span>运行实例</span><span class="text-text-secondary">{{ mt5Server.instances ?? '--' }}</span></div>
         </div>
       </div>
     </div>
@@ -407,24 +407,27 @@ async function fetchMonitorStatus() {
 }
 
 async function fetchMT5Status() {
-  // System MT5 bridge: /mt5/connection/status + /mt5/account/info (Go → 54.249.66.53:8001)
+  // System MT5 account: 从系统服务账户获取状态
   try {
-    const [statusR, infoR] = await Promise.all([
-      api.get('/api/v1/mt5/connection/status'),
-      api.get('/api/v1/mt5/account/info').catch(() => ({ data: {} })),
-    ])
-    const s = statusR.data || {}
-    const info = infoR.data || {}
+    const response = await api.get('/api/v1/mt5-clients/system-service/status')
     mt5System.value = {
-      online:    true,
-      login:     String(s.account ?? info.login ?? '--'),
-      server:    s.server ?? info.server ?? '--',
-      connected: s.connected ?? false,
-      balance:   info.balance ?? s.balance ?? null,
-      equity:    info.equity  ?? s.equity  ?? null,
+      online: response.data.connected,
+      login: response.data.mt5_login || '--',
+      server: response.data.mt5_server || '--',
+      connected: response.data.connected,
+      balance: response.data.balance,
+      equity: response.data.equity,
     }
-  } catch {
-    mt5System.value = { online: false, login: '--', server: '--', connected: false }
+  } catch (e) {
+    console.error('Failed to fetch MT5 system status:', e)
+    mt5System.value = {
+      online: false,
+      login: '--',
+      server: '--',
+      connected: false,
+      balance: null,
+      equity: null,
+    }
   }
 
   // MT5 Server status via Windows Agent
