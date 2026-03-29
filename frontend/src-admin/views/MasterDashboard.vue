@@ -64,38 +64,22 @@
         </div>
       </div>
 
-      <!-- MT5 桥接 cq987 -->
-      <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5User.online ? 'border-green-800/50' : 'border-red-800/50'">
+      <!-- MT5 服务器 -->
+      <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5Server.online ? 'border-green-800/50' : 'border-red-800/50'">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">
-            <div :class="['w-2.5 h-2.5 rounded-full', mt5User.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-            <span class="text-sm font-semibold text-text-primary">MT5 用户 cq987</span>
+            <div :class="['w-2.5 h-2.5 rounded-full', mt5Server.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+            <span class="text-sm font-semibold text-text-primary">MT5 服务器</span>
           </div>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5User.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ mt5User.online ? '在线' : '离线' }}
+          <span class="text-xs px-2 py-0.5 rounded-full" :class="mt5Server.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+            {{ mt5Server.online ? '在线' : '离线' }}
           </span>
         </div>
         <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>端口</span><span class="text-text-secondary font-mono">:8002</span></div>
-          <div class="flex justify-between"><span>MT5 登录</span><span class="text-text-secondary font-mono">{{ mt5User.login || '--' }}</span></div>
-          <div class="flex justify-between"><span>连接状态</span>
-            <span :class="mt5User.connected ? 'text-green-400' : 'text-yellow-400'">{{ mt5User.connected ? '已连接' : '未连接' }}</span>
-          </div>
-          <div class="flex justify-between"><span>持仓数</span><span class="text-text-secondary">{{ mt5User.positions ?? '--' }}</span></div>
-        </div>
-      </div>
-
-      <!-- WS & 统计 -->
-      <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
-        <div class="flex items-center gap-2 mb-3">
-          <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
-          <span class="text-sm font-semibold text-text-primary">实时统计</span>
-        </div>
-        <div class="text-xs text-text-tertiary space-y-1">
-          <div class="flex justify-between"><span>WS 连接数</span><span class="text-primary font-bold text-base">{{ stats.wsConnections ?? 0 }}</span></div>
-          <div class="flex justify-between"><span>总用户数</span><span class="text-text-secondary font-bold">{{ stats.totalUsers ?? '--' }}</span></div>
-          <div class="flex justify-between"><span>活跃账户</span><span class="text-text-secondary">{{ stats.activeAccounts ?? '--' }}</span></div>
-          <div class="flex justify-between"><span>MT5持仓</span><span class="text-text-secondary">{{ stats.totalPositions ?? '--' }}</span></div>
+          <div class="flex justify-between"><span>运行时长</span><span class="text-text-secondary font-mono">{{ mt5Server.uptime || '--' }}</span></div>
+          <div class="flex justify-between"><span>内存使用</span><span class="text-text-secondary font-mono">{{ mt5Server.memory || '--' }}</span></div>
+          <div class="flex justify-between"><span>CPU 使用</span><span class="text-text-secondary font-mono">{{ mt5Server.cpu || '--' }}</span></div>
+          <div class="flex justify-between"><span>运行实例</span><span class="text-text-secondary">{{ mt5Server.instances ?? '--' }}</span></div>
         </div>
       </div>
     </div>
@@ -198,6 +182,88 @@
       </div>
     </div>
 
+    <!-- ===== 性能监控面板 ===== -->
+    <div class="bg-dark-100 rounded-xl border border-border-primary">
+      <button
+        @click="perfMonOpen = !perfMonOpen"
+        class="w-full flex items-center justify-between px-5 py-4 border-b border-border-secondary hover:bg-dark-50 transition-colors"
+      >
+        <div class="flex items-center gap-2">
+          <div class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+          <h2 class="text-base font-semibold text-text-primary">性能监控</h2>
+        </div>
+        <svg :class="['w-4 h-4 text-text-tertiary transition-transform', perfMonOpen ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+
+      <div v-if="perfMonOpen" class="p-5 space-y-4">
+        <!-- 系统资源 -->
+        <div class="bg-dark-200 rounded-lg p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="font-medium text-sm">系统资源</span>
+          </div>
+          <div class="grid grid-cols-2 gap-4 text-xs">
+            <div>
+              <div class="text-text-tertiary mb-1">CPU 使用率</div>
+              <div class="text-text-primary text-lg font-mono">{{ perfData.system?.cpu_percent?.toFixed(1) ?? '--' }}%</div>
+            </div>
+            <div>
+              <div class="text-text-tertiary mb-1">内存使用率</div>
+              <div class="text-text-primary text-lg font-mono">{{ perfData.system?.memory_percent?.toFixed(1) ?? '--' }}%</div>
+            </div>
+            <div>
+              <div class="text-text-tertiary mb-1">可用内存</div>
+              <div class="text-text-secondary font-mono">{{ perfData.system?.memory_available_mb?.toFixed(0) ?? '--' }} MB</div>
+            </div>
+            <div>
+              <div class="text-text-tertiary mb-1">磁盘使用率</div>
+              <div class="text-text-secondary font-mono">{{ perfData.system?.disk_percent?.toFixed(1) ?? '--' }}%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据库性能 -->
+        <div class="bg-dark-200 rounded-lg p-4">
+          <div class="flex items-center justify-between mb-3">
+            <span class="font-medium text-sm">数据库</span>
+            <span :class="['text-xs', perfData.database?.status === 'healthy' ? 'text-green-400' : 'text-red-400']">
+              {{ perfData.database?.status === 'healthy' ? '正常' : '异常' }}
+            </span>
+          </div>
+          <div class="text-xs">
+            <div class="text-text-tertiary mb-1">查询延迟</div>
+            <div class="text-text-primary text-lg font-mono">{{ perfData.database?.latency_ms?.toFixed(2) ?? '--' }} ms</div>
+          </div>
+        </div>
+
+        <!-- MT5 桥接性能 -->
+        <div class="bg-dark-200 rounded-lg p-4">
+          <div class="flex items-center justify-between mb-3">
+            <span class="font-medium text-sm">MT5 桥接服务</span>
+            <span :class="['text-xs', perfData.mt5_bridge?.status === 'healthy' ? 'text-green-400' : 'text-red-400']">
+              {{ perfData.mt5_bridge?.status === 'healthy' ? '正常' : '异常' }}
+            </span>
+          </div>
+          <div class="grid grid-cols-2 gap-4 text-xs">
+            <div>
+              <div class="text-text-tertiary mb-1">服务延迟</div>
+              <div class="text-text-primary text-lg font-mono">{{ perfData.mt5_bridge?.latency_ms?.toFixed(2) ?? '--' }} ms</div>
+            </div>
+            <div v-if="perfData.mt5_bridge?.connection_pool">
+              <div class="text-text-tertiary mb-1">连接池</div>
+              <div class="text-text-secondary">
+                活跃: {{ perfData.mt5_bridge.connection_pool.active ?? 0 }} /
+                空闲: {{ perfData.mt5_bridge.connection_pool.idle ?? 0 }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-xs text-text-tertiary text-right">{{ perfData.timestamp ? new Date(perfData.timestamp).toLocaleString('zh-CN') : '--' }}</div>
+      </div>
+    </div>
+
     <!-- ===== 用户资金汇总表 ===== -->
     <div class="bg-dark-100 rounded-xl border border-border-primary">
       <div class="flex items-center justify-between px-5 py-4 border-b border-border-secondary">
@@ -284,13 +350,15 @@ const refreshing = ref(false)
 const usersLoading = ref(true)
 const lastUpdate = ref('--')
 const sysMonOpen = ref(false)
+const perfMonOpen = ref(false)
 
 const goStatus = ref({ online: false, uptime: '', workers: '', memory: '', redis: false })
 const mt5System = ref({ online: false, login: '', server: '', connected: false })
-const mt5User   = ref({ online: false, login: '', server: '', connected: false, positions: null })
+const mt5Server = ref({ online: false, uptime: '', memory: '', cpu: '', instances: 0 })
 const stats     = ref({ wsConnections: 0, totalUsers: 0, activeAccounts: 0, totalPositions: 0 })
 const userFinancials = ref([])
 const monitorData = ref({ redis: null, ssl_certificate: [], feishu: null, mt5_clients: [] })
+const perfData = ref({ system: {}, database: {}, mt5_bridge: {}, timestamp: null })
 
 let timer = null
 
@@ -359,24 +427,13 @@ async function fetchMT5Status() {
     mt5System.value = { online: false, login: '--', server: '--', connected: false }
   }
 
-  // User MT5 card: read from mt5_clients table
+  // MT5 Server status via Windows Agent
   try {
-    const r = await api.get('/api/v1/accounts')
-    const all = Array.isArray(r.data) ? r.data : (r.data?.accounts ?? [])
-    const mt5Acc = all.find(a => a.is_mt5_account && a.is_active)
-    if (mt5Acc) {
-      const cr = await api.get(`/api/v1/accounts/${mt5Acc.account_id}/mt5-clients`).catch(() => ({ data: [] }))
-      const clients = Array.isArray(cr.data) ? cr.data : []
-      const activeClient = clients.find(c => c.is_active) || clients[0]
-      mt5User.value = {
-        online:    mt5Acc.is_active,
-        login:     activeClient?.mt5_login ?? mt5Acc.account_name ?? '--',
-        server:    activeClient?.mt5_server ?? '--',
-        connected: activeClient?.connection_status === 'connected',
-        positions: null,
-      }
-    }
-  } catch {}
+    const r = await api.get('/api/v1/mt5-server/status')
+    mt5Server.value = r.data
+  } catch {
+    mt5Server.value = { online: false, uptime: '--', memory: '--', cpu: '--', instances: 0 }
+  }
 }
 
 async function fetchStats() {
@@ -419,9 +476,18 @@ async function fetchUserFinancials() {
   }
 }
 
+async function fetchPerformance() {
+  try {
+    const r = await api.get('/api/v1/performance/system')
+    perfData.value = r.data
+  } catch (e) {
+    console.error('fetchPerformance error:', e)
+  }
+}
+
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchPerformance()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   refreshing.value = false
 }
