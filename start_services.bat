@@ -32,22 +32,38 @@ if %ERRORLEVEL%==0 (
     echo     Done.
 )
 
-echo [3/3] Backend (port 8000)...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
-    echo     Killing stale PID %%a...
-    taskkill /PID %%a /F >nul 2>&1
-)
-taskkill /FI "WINDOWTITLE eq Hustle2026-Backend" /F >nul 2>&1
-timeout /t 2 /nobreak >nul
-
-netstat -ano | findstr ":8000" | findstr "LISTENING" >NUL
+echo [3/3] Backend (NSSM service)...
+sc query HustleBackend >nul 2>&1
 if %ERRORLEVEL%==0 (
-    echo     WARNING: Port 8000 still in use!
+    :: NSSM service exists — use sc to check and start
+    for /f "tokens=4 delims= " %%s in ('sc query HustleBackend ^| findstr /i "STATE"') do set SVC_STATE=%%s
+    if /i "%SVC_STATE%"=="RUNNING" (
+        echo     Already running ^(NSSM service^).
+    ) else (
+        echo     Starting HustleBackend service...
+        sc start HustleBackend >nul 2>&1
+        timeout /t 8 /nobreak >nul
+        echo     Done.
+    )
 ) else (
-    echo     Starting backend...
-    start "Hustle2026-Backend" C:\app\hustle2026\backend_runner.bat
-    timeout /t 8 /nobreak >nul
-    echo     Done.
+    :: Fallback: NSSM service not installed — use legacy bat
+    echo     WARNING: HustleBackend service not found. Using legacy start.
+    echo     Run install_backend_service.ps1 as Administrator to fix auto-start.
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
+        echo     Killing stale PID %%a...
+        taskkill /PID %%a /F >nul 2>&1
+    )
+    taskkill /FI "WINDOWTITLE eq Hustle2026-Backend" /F >nul 2>&1
+    timeout /t 2 /nobreak >nul
+    netstat -ano | findstr ":8000" | findstr "LISTENING" >NUL
+    if %ERRORLEVEL%==0 (
+        echo     WARNING: Port 8000 still in use!
+    ) else (
+        echo     Starting backend...
+        start "Hustle2026-Backend" C:\app\hustle2026\backend_runner.bat
+        timeout /t 8 /nobreak >nul
+        echo     Done.
+    )
 )
 
 echo.

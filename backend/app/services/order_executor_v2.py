@@ -12,6 +12,16 @@ from app.utils.quantity_converter import quantity_converter
 logger = logging.getLogger(__name__)
 
 
+def _trigger_position_refresh():
+    """触发持仓立即刷新，避免等待30秒周期"""
+    try:
+        from app.tasks.broadcast_tasks import account_balance_streamer
+        account_balance_streamer.trigger_immediate_refresh()
+        logger.info("[ORDER_EXECUTOR] Triggered immediate position refresh")
+    except Exception as e:
+        logger.warning(f"[ORDER_EXECUTOR] Failed to trigger position refresh: {e}")
+
+
 def _get_mt5_client_for_account(account: Account):
     """Get account-specific MT5 client, falling back to shared client if credentials missing."""
     from app.services.market_service import market_data_service
@@ -39,17 +49,20 @@ class OrderExecutorV2:
 
     def __init__(self):
         self.binance_timeout = 5.0
-        self.bybit_timeout = 0.1
-        self.max_retries = 1
-        self.order_check_interval = 0.2
+        self.bybit_timeout = 0.3  # 0.1→0.3: Bybit订单有更多时间进入市场，同时保持快速执行
+        self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
+        self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
         self.spread_check_interval = 2.0
-        self.mt5_deal_sync_wait = 3.0
+        self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
+        self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
+        self.mt5_deal_recheck_wait = 1.0  # 2.0→1.0: 二次确认等待时间缩短
         self.api_retry_delay = 0.5
         self.max_binance_limit_retries = 25
         self.open_wait_after_cancel_no_trade = 3.0
         self.open_wait_after_cancel_part = 2.0
         self.close_wait_after_cancel_no_trade = 3.0
         self.close_wait_after_cancel_part = 2.0
+        self.partial_fill_threshold = 0.95  # 95%以上算完全成交
         self.base_executor = base_executor
 
     async def execute_reverse_opening(
@@ -120,10 +133,7 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -178,6 +188,9 @@ class OrderExecutorV2:
             f"Threshold=80%, "
             f"is_single_leg={is_single_leg}"
         )
+
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
 
         return {
             "success": True,
@@ -292,10 +305,7 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -337,6 +347,9 @@ class OrderExecutorV2:
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
+
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
 
         return {
             "success": True,
@@ -420,10 +433,7 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -465,6 +475,9 @@ class OrderExecutorV2:
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
+
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
 
         return {
             "success": True,
@@ -592,11 +605,8 @@ class OrderExecutorV2:
                     "binance_api_error": True,
                     "message": "Binance交易系统异常，无法查询订单状态，请立即人工检查！"
                 }
-            # Binance order not filled at all, cancel and return success (will retry next time)
-            logger.info(f"[FORWARD_CLOSING] Binance not filled, cancelling order {binance_order_id}")
-            await self.base_executor.cancel_binance_order(
-                binance_account, "XAUUSDT", binance_order_id
-            )
+            # Order already cancelled by _monitor_binance_order (timeout or spread breach)
+            logger.info(f"[FORWARD_CLOSING] Binance not filled, order already cancelled by monitor {binance_order_id}")
             message = "点差不满足条件，订单已撤销" if spread_cancelled else "Binance未匹配到订单，取消策略执行，下次再试!"
             return {
                 "success": True,
@@ -649,6 +659,9 @@ class OrderExecutorV2:
         else:
             logger.info(f"[FORWARD_CLOSING] Execution completed successfully: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU")
 
+        # Trigger immediate position refresh after successful execution
+        _trigger_position_refresh()
+
         return {
             "success": True,
             "binance_filled_qty": binance_filled_qty,
@@ -674,68 +687,48 @@ class OrderExecutorV2:
         strategy_type: str = None
     ) -> dict:
         """
-        Monitor Binance order with timeout and real-time spread checking.
+        Monitor Binance order via User Data Stream (ORDER_TRADE_UPDATE) — zero REST polling.
+
+        Registers the order_id in the shared _order_fill_registry so that
+        BinancePositionPusher._handle_message() can set the event on fill/cancel.
+        Falls back to a single REST status check only on timeout.
 
         Args:
             spread_threshold: Spread threshold for real-time checking
-            compare_op: Comparison operator ('>' or '<=')
+            compare_op: Comparison operator ('>=' or '<=' etc.)
             strategy_type: Strategy type for spread calculation
 
         Returns:
-            dict with 'filled_qty' and 'spread_cancelled' flag
+            dict with 'filled_qty', 'spread_cancelled', and 'api_error' keys
         """
-        start_time = time.time()
-        check_interval = self.order_check_interval
-        last_spread_check = 0
-        api_error_count = 0
-        MAX_API_ERRORS = 3  # Consecutive API failures before treating as exchange outage
+        from app.tasks.broadcast_tasks import (
+            register_order_watch, unregister_order_watch, _order_fill_registry
+        )
 
-        while time.time() - start_time < timeout:
-            # Check order status
-            status = await self.base_executor.check_binance_order_status(
-                account, symbol, order_id
-            )
+        fill_event = register_order_watch(order_id)
+        spread_check_task = None
 
-            if status.get("success") and status.get("filled"):
-                return {
-                    "filled_qty": status.get("filled_qty", 0),
-                    "spread_cancelled": False,
-                    "api_error": False
-                }
+        try:
+            # --- Spread check coroutine (runs concurrently, cancels order on breach) ---
+            spread_cancelled = False
+            spread_cancel_qty = 0.0
 
-            if not status.get("success"):
-                api_error_count += 1
-                logger.error(f"[BINANCE_MONITOR] API error #{api_error_count} for order {order_id}: {status.get('error')}")
-                if api_error_count >= MAX_API_ERRORS:
-                    # Binance API is down — do NOT cancel the order (cancel may also fail)
-                    # Return with api_error flag so caller can trigger emergency alert
-                    logger.error(f"[BINANCE_MONITOR] CRITICAL: Binance API consecutive failures={api_error_count}, treating as exchange outage for order {order_id}")
-                    return {
-                        "filled_qty": 0,
-                        "spread_cancelled": False,
-                        "api_error": True,
-                        "api_error_count": api_error_count,
-                        "order_id": order_id
-                    }
-            else:
-                api_error_count = 0  # Reset on successful API call
-
-            # Real-time spread checking (every 2 seconds to avoid excessive API calls)
-            current_time = time.time()
-            if spread_threshold is not None and compare_op is not None and strategy_type is not None:
-                if current_time - last_spread_check >= self.spread_check_interval:
-                    last_spread_check = current_time
-
+            async def _watch_spread():
+                nonlocal spread_cancelled, spread_cancel_qty
+                if spread_threshold is None or compare_op is None or strategy_type is None:
+                    return
+                from app.services.market_service import market_data_service
+                tolerance = 0.5
+                while not fill_event.is_set():
+                    await asyncio.sleep(self.spread_check_interval)
+                    if fill_event.is_set():
+                        break
                     try:
-                        # Get current spread
-                        from app.services.market_service import market_data_service
                         market_data = await market_data_service.get_current_spread()
                         spreads = market_data_service.calculate_spread(
                             market_data.binance_quote,
                             market_data.bybit_quote
                         )
-
-                        # Get spread based on strategy type
                         if strategy_type == 'reverse_closing':
                             current_spread = spreads.reverse_exit_spread
                         elif strategy_type == 'reverse_opening':
@@ -745,55 +738,79 @@ class OrderExecutorV2:
                         elif strategy_type == 'forward_opening':
                             current_spread = spreads.forward_entry_spread
                         else:
-                            current_spread = None
+                            continue
 
-                        # Check if spread condition is still met (with 0.5 USD tolerance)
-                        if current_spread is not None:
-                            spread_met = False
-                            tolerance = 0.5  # 0.5 USD tolerance to avoid cancelling due to minor fluctuations
-                            if compare_op == '>=':
-                                # Opening: allow 0.5 USD below threshold
-                                spread_met = current_spread >= (spread_threshold - tolerance)
-                            elif compare_op == '>':
-                                spread_met = current_spread > (spread_threshold - tolerance)
-                            elif compare_op == '<=':
-                                # Closing: allow 0.5 USD above threshold
-                                spread_met = current_spread <= (spread_threshold + tolerance)
+                        spread_met = False
+                        if compare_op == '>=':
+                            spread_met = current_spread >= (spread_threshold - tolerance)
+                        elif compare_op == '>':
+                            spread_met = current_spread > (spread_threshold - tolerance)
+                        elif compare_op == '<=':
+                            spread_met = current_spread <= (spread_threshold + tolerance)
 
-                            # If spread no longer meets condition (with tolerance), cancel order immediately
-                            if not spread_met:
-                                logger.info(f"Spread condition no longer met (tolerance={tolerance}): {current_spread} {compare_op} {spread_threshold}, cancelling order")
-                                await self.base_executor.cancel_binance_order(account, symbol, order_id)
-
-                                # Check final status after cancellation
-                                final_status = await self.base_executor.check_binance_order_status(
-                                    account, symbol, order_id
-                                )
-
-                                return {
-                                    "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-                                    "spread_cancelled": True,
-                                    "api_error": False
-                                }
+                        if not spread_met:
+                            logger.info(
+                                f"Spread condition no longer met (tolerance={tolerance}): "
+                                f"{current_spread} {compare_op} {spread_threshold}, cancelling order {order_id}"
+                            )
+                            await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                            # Wait briefly for ORDER_TRADE_UPDATE to arrive via WS
+                            try:
+                                await asyncio.wait_for(fill_event.wait(), timeout=2.0)
+                            except asyncio.TimeoutError:
+                                pass
+                            record = _order_fill_registry.get(order_id, {})
+                            spread_cancel_qty = record.get("filled_qty", 0.0)
+                            spread_cancelled = True
+                            fill_event.set()  # wake main wait
+                            return
                     except Exception as e:
                         logger.error(f"Error checking spread during order monitoring: {e}")
-                        # Continue monitoring even if spread check fails
 
-            await asyncio.sleep(check_interval)
+            if spread_threshold is not None:
+                spread_check_task = asyncio.create_task(_watch_spread())
 
-        # Timeout reached, cancel order and return filled quantity
-        await self.base_executor.cancel_binance_order(account, symbol, order_id)
+            # --- Main wait: block until WS event fires or timeout ---
+            try:
+                await asyncio.wait_for(fill_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                # Timeout: cancel and do single REST status check as fallback
+                logger.warning(f"[BINANCE_MONITOR] Timeout waiting for order {order_id} ({timeout}s), cancelling")
+                try:
+                    await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                except Exception as cancel_err:
+                    # -2011 (already filled/expired) or network error — safe to ignore here.
+                    # Still query actual fill status below so we don't wrongly return 0.
+                    logger.warning(f"[BINANCE_MONITOR] cancel error (order may be filled/expired): {cancel_err}")
+                final_status = await self.base_executor.check_binance_order_status(
+                    account, symbol, order_id
+                )
+                return {
+                    "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
+                    "spread_cancelled": False,
+                    "api_error": not final_status.get("success", False)
+                }
 
-        # Check final status after cancellation
-        final_status = await self.base_executor.check_binance_order_status(
-            account, symbol, order_id
-        )
+            # Event was set — read result from registry
+            record = _order_fill_registry.get(order_id, {})
 
-        return {
-            "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-            "spread_cancelled": False,
-            "api_error": False
-        }
+            if spread_cancelled:
+                return {
+                    "filled_qty": spread_cancel_qty,
+                    "spread_cancelled": True,
+                    "api_error": False
+                }
+
+            return {
+                "filled_qty": record.get("filled_qty", 0.0),
+                "spread_cancelled": False,
+                "api_error": False
+            }
+
+        finally:
+            if spread_check_task and not spread_check_task.done():
+                spread_check_task.cancel()
+            unregister_order_watch(order_id)
 
     async def _execute_bybit_market_buy(
         self,
@@ -836,21 +853,71 @@ class OrderExecutorV2:
             ticket = int(order_id)
             logger.info(f"[BYBIT_BUY] Order placed: ticket={ticket}")
 
-            # Wait for Bybit timeout
+            # Wait for Bybit timeout (initial delay for order to enter market)
             await asyncio.sleep(self.bybit_timeout)
 
-            # Wait for MT5 to process deals (configurable via mt5_deal_sync_wait)
-            await asyncio.sleep(self.mt5_deal_sync_wait)
+            # 轮询检查机制：每0.5秒检查一次，最多等待5秒
+            # 一旦检测到完全成交（≥90%），立即返回，不再等待
+            max_wait = self.mt5_deal_sync_wait
+            elapsed = 0
+            actual_filled = 0
+            is_partial = False
+            check_count = 0
 
-            # Check actual filled volume from MT5 deals
-            volume_check = await self._check_mt5_filled_volume(
-                account, ticket, remaining
-            )
+            logger.info(f"[BYBIT_BUY] Starting polling check (max {max_wait}s, interval {self.mt5_poll_interval}s)")
 
-            actual_filled = volume_check["actual_filled"]
-            is_partial = volume_check["is_partial_fill"]
+            while elapsed < max_wait:
+                await asyncio.sleep(self.mt5_poll_interval)
+                elapsed += self.mt5_poll_interval
+                check_count += 1
 
-            logger.info(f"[BYBIT_BUY] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
+                # Check actual filled volume from MT5 deals
+                volume_check = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                actual_filled = volume_check["actual_filled"]
+                is_partial = volume_check["is_partial_fill"]
+
+                logger.info(
+                    f"[BYBIT_BUY] Poll #{check_count} ({elapsed:.1f}s): "
+                    f"filled={actual_filled}/{remaining} Lot ({actual_filled/remaining*100:.1f}%)"
+                )
+
+                # 提前退出条件：完全成交（≥90%）
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    logger.info(
+                        f"[BYBIT_BUY] Order fully filled, early exit after {elapsed:.1f}s "
+                        f"(saved {max_wait - elapsed:.1f}s)"
+                    )
+                    break
+
+                # 如果有部分成交且超过50%，继续等待但缩短间隔
+                if actual_filled > 0 and actual_filled >= remaining * 0.5:
+                    logger.info(f"[BYBIT_BUY] Partial fill >50%, continuing to poll...")
+
+            # 如果轮询结束后仍未成交或成交不足50%，进行二次确认
+            if actual_filled == 0 or (is_partial and actual_filled < remaining * 0.5):
+                logger.warning(
+                    f"[BYBIT_BUY] After {elapsed:.1f}s polling: {actual_filled}/{remaining} Lot, "
+                    f"waiting {self.mt5_deal_recheck_wait}s for recheck..."
+                )
+                await asyncio.sleep(self.mt5_deal_recheck_wait)
+
+                # 二次确认
+                volume_recheck = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                if volume_recheck["actual_filled"] > actual_filled:
+                    logger.info(
+                        f"[BYBIT_BUY] Recheck found more fills: "
+                        f"{actual_filled} → {volume_recheck['actual_filled']} Lot"
+                    )
+                    actual_filled = volume_recheck["actual_filled"]
+                    is_partial = volume_recheck["is_partial_fill"]
+
+            logger.info(f"[BYBIT_BUY] Ticket {ticket} final result: {actual_filled} Lot (partial={is_partial})")
 
             if actual_filled > 0:
                 total_filled += actual_filled
@@ -866,8 +933,13 @@ class OrderExecutorV2:
                     )
                     print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
 
-                if actual_filled >= remaining * 0.95:
-                    # Consider 95%+ as fully filled
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    # Consider 90%+ as fully filled (降低从95%)
+                    logger.info(
+                        f"[BYBIT_BUY] Order considered fully filled: "
+                        f"{actual_filled}/{remaining} = {actual_filled/remaining*100:.1f}% "
+                        f"(threshold: {self.partial_fill_threshold*100:.0f}%)"
+                    )
                     break
 
                 # Partially filled, update remaining
@@ -928,16 +1000,66 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # Wait for MT5 to process deals (configurable via mt5_deal_sync_wait)
-            await asyncio.sleep(self.mt5_deal_sync_wait)
+            # Polling mechanism: check every 0.5s, max 5s
+            max_wait = self.mt5_deal_sync_wait
+            elapsed = 0
+            actual_filled = 0
+            is_partial = False
 
-            # Check actual filled volume from MT5 deals
-            volume_check = await self._check_mt5_filled_volume(
-                account, ticket, remaining
-            )
+            logger.info(f"[BYBIT_SELL] Starting polling check (max {max_wait}s, interval {self.mt5_poll_interval}s)")
 
-            actual_filled = volume_check["actual_filled"]
-            is_partial = volume_check["is_partial_fill"]
+            while elapsed < max_wait:
+                await asyncio.sleep(self.mt5_poll_interval)
+                elapsed += self.mt5_poll_interval
+
+                volume_check = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                actual_filled = volume_check["actual_filled"]
+                is_partial = volume_check["is_partial_fill"]
+
+                logger.info(
+                    f"[BYBIT_SELL] Poll at {elapsed:.1f}s: "
+                    f"filled={actual_filled}/{remaining} Lot ({actual_filled/remaining*100:.1f}%), "
+                    f"partial={is_partial}"
+                )
+
+                # Early exit if fully filled (≥90%)
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    logger.info(
+                        f"[BYBIT_SELL] Order fully filled, early exit after {elapsed:.1f}s "
+                        f"(saved {max_wait - elapsed:.1f}s)"
+                    )
+                    break
+
+            if elapsed >= max_wait and actual_filled < remaining * self.partial_fill_threshold:
+                logger.warning(
+                    f"[BYBIT_SELL] Polling timeout after {max_wait}s, "
+                    f"filled={actual_filled}/{remaining} Lot"
+                )
+
+            # 如果第一次检查显示未成交或部分成交，等待后再次确认
+            # 避免因MT5同步延迟导致的误判
+            if actual_filled == 0 or (is_partial and actual_filled < remaining * 0.5):
+                logger.warning(
+                    f"[BYBIT_SELL] First check: {actual_filled}/{remaining} Lot, "
+                    f"waiting {self.mt5_deal_recheck_wait}s for recheck..."
+                )
+                await asyncio.sleep(self.mt5_deal_recheck_wait)
+
+                # 二次确认
+                volume_recheck = await self._check_mt5_filled_volume(
+                    account, ticket, remaining
+                )
+
+                if volume_recheck["actual_filled"] > actual_filled:
+                    logger.info(
+                        f"[BYBIT_SELL] Recheck found more fills: "
+                        f"{actual_filled} → {volume_recheck['actual_filled']} Lot"
+                    )
+                    actual_filled = volume_recheck["actual_filled"]
+                    is_partial = volume_recheck["is_partial_fill"]
 
             logger.info(f"[BYBIT_SELL] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
 
@@ -955,8 +1077,13 @@ class OrderExecutorV2:
                     )
                     print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
 
-                if actual_filled >= remaining * 0.95:
-                    # Consider 95%+ as fully filled
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    # Consider 90%+ as fully filled (降低从95%)
+                    logger.info(
+                        f"[BYBIT_SELL] Order considered fully filled: "
+                        f"{actual_filled}/{remaining} = {actual_filled/remaining*100:.1f}% "
+                        f"(threshold: {self.partial_fill_threshold*100:.0f}%)"
+                    )
                     break
 
                 # Partially filled, update remaining
@@ -980,29 +1107,39 @@ class OrderExecutorV2:
         expected_volume: float
     ) -> Dict[str, Any]:
         """
-        Check MT5 order actual filled volume and compare with expected
-
-        Args:
-            account: Bybit account with MT5 credentials
-            ticket: MT5 order ticket number
-            expected_volume: Expected fill volume
-
-        Returns:
-            Dict with actual_filled, expected, is_partial_fill, fill_ratio
+        Check MT5 order actual filled volume and compare with expected.
+        Retries up to 3 times (1s interval) if no deals found yet —
+        MT5 deal propagation can lag 1-3s after a market order is placed.
         """
+        MAX_DEAL_RETRIES = 3
+        DEAL_RETRY_INTERVAL = 1.0  # seconds
+
         try:
             mt5_client = _get_mt5_client_for_account(account)
 
-            # Get deals for this ticket
-            deals = mt5_client.get_deals_by_ticket(ticket)
+            deals = None
+            for attempt in range(MAX_DEAL_RETRIES):
+                deals = mt5_client.get_deals_by_ticket(ticket)
+                if deals:
+                    break
+                if attempt < MAX_DEAL_RETRIES - 1:
+                    logger.warning(
+                        f"[MT5_DEAL_CHECK] ticket={ticket} no deals found "
+                        f"(attempt {attempt+1}/{MAX_DEAL_RETRIES}), retrying in {DEAL_RETRY_INTERVAL}s"
+                    )
+                    await asyncio.sleep(DEAL_RETRY_INTERVAL)
 
             if not deals:
+                logger.error(
+                    f"[MT5_DEAL_CHECK] ticket={ticket} no deals after {MAX_DEAL_RETRIES} attempts — "
+                    f"treating as 0 fill (possible MT5 sync issue)"
+                )
                 return {
                     "actual_filled": 0.0,
                     "expected": expected_volume,
                     "is_partial_fill": True,
                     "fill_ratio": 0.0,
-                    "error": "No deals found for ticket"
+                    "error": "No deals found for ticket after retries"
                 }
 
             # Sum up all deal volumes

@@ -1,4 +1,13 @@
 """Main FastAPI application entry point"""
+import sys
+import asyncio
+
+# Fix Windows asyncio ProactorEventLoop WinError 10054 bug:
+# ConnectionResetError in _call_connection_lost corrupts the event loop over time.
+# SelectorEventLoop does not have this issue and is stable on Windows with uvicorn.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,7 +17,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import gc
-import asyncio
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor

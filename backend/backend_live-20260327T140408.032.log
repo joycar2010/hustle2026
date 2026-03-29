@@ -1,0 +1,455 @@
+INFO:     Started server process [3516]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+[BinancePositionPusher] Stream \u9519\u8bef (1/3) (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] \u68c0\u6d4b\u5230API\u9519\u8bef/\u5c01\u7981\uff0c\u7b49\u5f85300\u79d2\u540e\u91cd\u8bd5
+Redis monitor started successfully
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+INFO:     ('203.168.2.216', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgzMzh9.GJe4B273eUKRGz_QbcOpt7diR3eP8RI_gsOInFK06hE" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+INFO:     ('35.213.245.213', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2NDgyMTd9.f-wO2Jh-QC7kSl0l7foqSmet2GRS9N2YbksCpX0AJkM" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1
+[RESPONSE] GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1 - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1 HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/accounts/1f99fd4d-d40d-4a5a-909d-7f91931472f9/proxy/2
+[RESPONSE] GET /api/v1/accounts/1f99fd4d-d40d-4a5a-909d-7f91931472f9/proxy/2 - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/accounts/1f99fd4d-d40d-4a5a-909d-7f91931472f9/proxy/2 HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:62324 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:62323 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1
+[RESPONSE] GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1 - Status: 200
+INFO:     35.213.245.213:0 - "GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1 HTTP/1.1" 200 OK
+INFO:     connection closed
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:62438 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:62437 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:62459 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62458 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:62487 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62486 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:62509 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:62508 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:62537 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62536 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:62557 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:62558 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:62585 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:62584 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:62610 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62609 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (1/3) (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] \u68c0\u6d4b\u5230API\u9519\u8bef/\u5c01\u7981\uff0c\u7b49\u5f85300\u79d2\u540e\u91cd\u8bd5
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:62635 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:62636 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     connection closed
+INFO:     Waiting for application shutdown.

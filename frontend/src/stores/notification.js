@@ -380,7 +380,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
       // Construct full URL for uploaded sound files
       // Use environment variable for API base URL
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://13.115.21.77:8000'
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
       const soundUrl = soundFile.startsWith('/uploads/')
         ? `${apiBaseUrl}${soundFile}`
         : soundFile

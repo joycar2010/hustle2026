@@ -1,5 +1,7 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
+import time as _broadcast_time
+from typing import Dict
 from datetime import datetime
 from uuid import UUID
 from contextlib import asynccontextmanager
@@ -847,12 +849,14 @@ class PositionStreamer:
     """
     实时持仓广播器 — 每1秒向所有已连接客户端广播 position_snapshot。
 
-    数据源：
-    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 < 1ms
-    - Binance  ：完全依赖 AccountBalanceStreamer 推送（每30s由账户刷新驱动），零API开销
+    数据源（优先级顺序）：
+    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 <1ms
+    - Binance（WS）：BinancePositionPusher ACCOUNT_UPDATE → set_binance_positions_ws()，延迟 <100ms，最高优先级
+    - Binance（REST）：AccountBalanceStreamer 每30s → set_binance_positions()，仅WS断流>60s时生效，兜底用
 
     设计原则（量化工程）：
-    - 不对 Binance 发起任何 REST 请求，彻底消除频率超限风险
+    - WS数据在60s内有效期间，REST写入被屏蔽，根除"REST旧数据覆盖WS实时数据"闪零问题
+    - 不对 Binance 发起任何额外 REST 请求，彻底消除频率超限风险
     - 只在有 WebSocket 连接时广播，空载时跳过
     - MT5 读取在 executor 线程池中执行，不阻塞事件循环
     """
@@ -862,14 +866,42 @@ class PositionStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        # Binance 持仓（由 AccountBalanceStreamer 主动推送，PositionStreamer 只读缓存）
+        # Binance 持仓缓存（双写源：WS优先，REST兜底）
         self._binance_long_xau: float = 0.0
         self._binance_short_xau: float = 0.0
+        # WS最后更新时间戳（monotonic），用于判断REST写入是否应该被屏蔽
+        self._ws_position_ts: float = 0.0
 
-    def set_binance_positions(self, long_xau: float, short_xau: float) -> None:
-        """由 AccountBalanceStreamer 调用，更新 Binance 持仓缓存（无锁，主事件循环内安全）"""
+    def set_binance_positions_ws(self, long_xau: float, short_xau: float) -> None:
+        """
+        由 BinancePositionPusher ACCOUNT_UPDATE 事件调用 — 最高优先级实时数据源。
+        更新时间戳，用于保护数据不被 REST 旧数据覆盖。
+        """
         self._binance_long_xau = long_xau
         self._binance_short_xau = short_xau
+        self._ws_position_ts = _broadcast_time.monotonic()
+
+    def set_binance_positions(self, long_xau: float, short_xau: float) -> None:
+        """
+        由 AccountBalanceStreamer REST 轮询调用 — 兜底数据源（30s一次）。
+        若 WS 数据在60秒内有效，则跳过写入，避免覆盖实时WS持仓。
+        60秒后认为WS数据过期（连接中断），允许REST接管。
+        """
+        ws_age = _broadcast_time.monotonic() - self._ws_position_ts
+        if ws_age <= 60.0:
+            # WS数据新鲜，REST不得覆盖，防止30s旧数据擦除<100ms实时数据
+            logger.debug(
+                f"[PositionStreamer] REST写入跳过：WS数据 {ws_age:.1f}s前刚更新 "
+                f"(long={self._binance_long_xau}, short={self._binance_short_xau})"
+            )
+            return
+        # WS数据超过60s未更新（断流），允许REST回退
+        self._binance_long_xau = long_xau
+        self._binance_short_xau = short_xau
+        logger.debug(
+            f"[PositionStreamer] REST持仓回退生效（WS已断流 {ws_age:.0f}s）: "
+            f"long={long_xau}, short={short_xau}"
+        )
 
     async def start(self):
         if self.running:
@@ -955,6 +987,28 @@ class PositionStreamer:
 position_streamer = PositionStreamer()
 
 
+# ---------------------------------------------------------------------------
+# 全局订单成交事件注册表 — 供 _monitor_binance_order() 使用
+# key: binance order_id (int)
+# value: {"event": asyncio.Event, "filled_qty": float, "status": str}
+# ---------------------------------------------------------------------------
+_order_fill_registry: Dict[int, dict] = {}
+
+
+def register_order_watch(order_id: int) -> asyncio.Event:
+    """注册一个订单监听。返回 asyncio.Event，成交/取消时会被 set()。"""
+    ev = asyncio.Event()
+    _order_fill_registry[order_id] = {"event": ev, "filled_qty": 0.0, "status": "NEW"}
+    logger.debug(f"[OrderWatch] Registered order {order_id}")
+    return ev
+
+
+def unregister_order_watch(order_id: int):
+    """注销订单监听，释放内存。"""
+    _order_fill_registry.pop(order_id, None)
+    logger.debug(f"[OrderWatch] Unregistered order {order_id}")
+
+
 class BinancePositionPusher:
     """
     实时 Binance 持仓推送器 — 订阅 Binance Futures User Data Stream。
@@ -962,13 +1016,19 @@ class BinancePositionPusher:
     当 ACCOUNT_UPDATE 事件到达（成交触发），立即更新 PositionStreamer 缓存，
     取代 AccountBalanceStreamer 30s REST 轮询驱动，实现 <100ms 持仓更新。
 
+    同时处理 ORDER_TRADE_UPDATE 事件，通过 _order_fill_registry 通知
+    _monitor_binance_order() 协程，彻底消除 REST 轮询。
+
     协议：wss://fstream.binance.com/ws/{listenKey}
     listenKey 有效期 60min，每 25min 续期一次。
     """
 
     SYMBOL           = "XAUUSDT"
     KEEPALIVE_SEC    = 25 * 60   # 25min 续期，确保 listenKey 不过期
-    RECONNECT_DELAY  = 5         # 断线后等待秒数
+    RECONNECT_DELAY  = 5         # 正常断线后等待秒数
+    RECONNECT_DELAY_ON_ERROR = 300  # API错误/封禁后等待5分钟，避免快速失败循环
+    WS_HEARTBEAT_SEC = 10        # 移动网保护：10s心跳，比默认30s更快检测断线
+    MAX_CONSECUTIVE_ERRORS = 3   # 连续失败3次后进入长时间退避
 
     def __init__(self):
         self.running = False
@@ -1017,7 +1077,6 @@ class BinancePositionPusher:
 
     async def _load_binance_accounts(self) -> list:
         """从 DB 加载所有活跃 Binance REST 账户（去重 api_key）"""
-        from app.core.database import get_db_session
         try:
             async with get_db_session(timeout=10.0) as db:
                 result = await db.execute(
@@ -1048,6 +1107,7 @@ class BinancePositionPusher:
     async def _account_stream_loop(self, api_key: str, api_secret: str):
         from app.services.binance_client import BinanceFuturesClient
         ws_base = "wss://fstream.binance.com/ws"
+        consecutive_errors = 0  # 连续错误计数器
 
         while self.running:
             client  = BinanceFuturesClient(api_key, api_secret)
@@ -1055,15 +1115,31 @@ class BinancePositionPusher:
             try:
                 listen_key = await client.create_futures_listen_key()
                 if not listen_key:
-                    logger.error(f"[BinancePositionPusher] listenKey 获取失败: {api_key[:8]}…")
-                    await asyncio.sleep(self.RECONNECT_DELAY)
+                    consecutive_errors += 1
+                    logger.error(
+                        f"[BinancePositionPusher] listenKey 获取失败 "
+                        f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}): {api_key[:8]}…"
+                    )
+
+                    # 指数退避：连续失败3次后进入长时间等待
+                    if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                        logger.warning(
+                            f"[BinancePositionPusher] 连续失败{consecutive_errors}次，"
+                            f"进入{self.RECONNECT_DELAY_ON_ERROR}秒退避期，避免触发封禁"
+                        )
+                        await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
+                        consecutive_errors = 0  # 重置计数器
+                    else:
+                        await asyncio.sleep(self.RECONNECT_DELAY)
                     continue
 
+                # 成功获取 listenKey，重置错误计数器
+                consecutive_errors = 0
                 logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
                 session = aiohttp.ClientSession()
 
                 async with session.ws_connect(
-                    f"{ws_base}/{listen_key}", heartbeat=30
+                    f"{ws_base}/{listen_key}", heartbeat=self.WS_HEARTBEAT_SEC
                 ) as ws:
                     logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
 
@@ -1088,13 +1164,39 @@ class BinancePositionPusher:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[BinancePositionPusher] Stream 错误 ({api_key[:8]}…): {e}")
+                consecutive_errors += 1
+                error_msg = str(e)
+                logger.error(
+                    f"[BinancePositionPusher] Stream 错误 "
+                    f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}) "
+                    f"({api_key[:8]}…): {error_msg}"
+                )
+
+                # 检测是否为API错误或封禁，使用长时间退避
+                if any(keyword in error_msg.lower() for keyword in [
+                    'api-key', 'invalid', 'banned', '封禁', '频率', 'rate limit'
+                ]):
+                    logger.warning(
+                        f"[BinancePositionPusher] 检测到API错误/封禁，"
+                        f"等待{self.RECONNECT_DELAY_ON_ERROR}秒后重试"
+                    )
+                    await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
+                    consecutive_errors = 0  # API错误后重置计数器
+                elif consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                    logger.warning(
+                        f"[BinancePositionPusher] 连续失败{consecutive_errors}次，"
+                        f"进入{self.RECONNECT_DELAY_ON_ERROR}秒退避期"
+                    )
+                    await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
+                    consecutive_errors = 0
+                else:
+                    await asyncio.sleep(self.RECONNECT_DELAY)
             finally:
                 if session and not session.closed:
                     await session.close()
                 await client.close()
 
-            if self.running:
+            if self.running and consecutive_errors == 0:
                 logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
                 await asyncio.sleep(self.RECONNECT_DELAY)
 
@@ -1112,7 +1214,30 @@ class BinancePositionPusher:
     # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer
     # ------------------------------------------------------------------
     async def _handle_message(self, data: dict):
-        if data.get("e") != "ACCOUNT_UPDATE":
+        event_type = data.get("e")
+
+        # ------------------------------------------------------------------
+        # ORDER_TRADE_UPDATE → 通知 _monitor_binance_order() 协程
+        # ------------------------------------------------------------------
+        if event_type == "ORDER_TRADE_UPDATE":
+            order = data.get("o", {})
+            oid = order.get("i")          # orderId (int)
+            status = order.get("X", "")  # FILLED / PARTIALLY_FILLED / CANCELED / EXPIRED / REJECTED
+            cum_qty = float(order.get("z", 0))  # cumulativeFilledQty
+
+            record = _order_fill_registry.get(oid)
+            if record is not None:
+                record["filled_qty"] = cum_qty
+                record["status"] = status
+                if status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                    record["event"].set()
+                    logger.info(
+                        f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} "
+                        f"status={status} filled={cum_qty}"
+                    )
+            return
+
+        if event_type != "ACCOUNT_UPDATE":
             return
 
         # ACCOUNT_UPDATE.a.P 是仓位数组
@@ -1145,7 +1270,7 @@ class BinancePositionPusher:
                     long_xau, short_xau = 0.0, 0.0
 
         if updated:
-            position_streamer.set_binance_positions(long_xau, short_xau)
+            position_streamer.set_binance_positions_ws(long_xau, short_xau)
             logger.info(
                 f"[BinancePositionPusher] ACCOUNT_UPDATE → "
                 f"long={long_xau} short={short_xau}"

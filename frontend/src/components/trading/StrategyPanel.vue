@@ -614,6 +614,8 @@ const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
 const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0 }, closing: { current: 0, required: 0 } })
+// Guard: prevents concurrent API calls to startContinuousExecution (debounce race protection)
+const _continuousExecutionStarting = ref({ opening: false, closing: false })
 const statusPollingInterval = ref({ opening: null, closing: null })
 
 const config = ref({
@@ -1475,7 +1477,11 @@ async function executeLadderOpening(ladderIndex, ladder) {
         }
 
         // 如果有成交，更新阶梯进度（使用实际成交数量）
-        const actualFilled = Math.min(binanceFilled, bybitFilled)
+        // 注意：binance_filled_qty 单位=XAU(oz)，bybit_filled_qty 单位=Lot(1Lot=100oz)
+        // 必须统一单位后再取 min，否则 Math.min(10, 0.1)=0.1，导致进度永远不推进
+        const BYBIT_LOT_TO_XAU = 100
+        const bybitFilledXau = bybitFilled * BYBIT_LOT_TO_XAU
+        const actualFilled = Math.min(binanceFilled, bybitFilledXau)
         ladderProgress.value.opening.completedQty += actualFilled
         saveLadderProgress()  // 持久化进度
 
@@ -1626,7 +1632,11 @@ async function executeLadderClosing(ladderIndex, ladder) {
         }
 
         // 如果有成交，更新阶梯进度（使用实际成交数量）
-        const actualFilled = Math.min(binanceFilled, bybitFilled)
+        // 注意：binance_filled_qty 单位=XAU(oz)，bybit_filled_qty 单位=Lot(1Lot=100oz)
+        // 必须统一单位后再取 min，否则 Math.min(10, 0.1)=0.1，导致进度永远不推进
+        const BYBIT_LOT_TO_XAU = 100
+        const bybitFilledXauC = bybitFilled * BYBIT_LOT_TO_XAU
+        const actualFilled = Math.min(binanceFilled, bybitFilledXauC)
         ladderProgress.value.closing.completedQty += actualFilled
         saveLadderProgress()  // 持久化进度
 
@@ -2000,6 +2010,12 @@ function formatNumber(num) {
 
 // Continuous execution methods
 async function startContinuousExecution(action) {
+  // Prevent concurrent API calls (debounce race: two rapid clicks can both pass button guards)
+  if (_continuousExecutionStarting.value[action]) {
+    console.warn('[GUARD] startContinuousExecution already in progress for action:', action)
+    return
+  }
+  _continuousExecutionStarting.value[action] = true
   try {
     console.log('[DEBUG] startContinuousExecution called, action:', action)
     console.log('[DEBUG] config.value:', config.value)
@@ -2094,6 +2110,8 @@ async function startContinuousExecution(action) {
     console.error('Failed to start continuous execution:', error)
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`启动连续执行失败: ${errorMsg}`, 'error')
+  } finally {
+    _continuousExecutionStarting.value[action] = false
   }
 }
 

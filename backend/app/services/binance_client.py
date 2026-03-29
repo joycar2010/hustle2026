@@ -138,10 +138,14 @@ class BinanceFuturesClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.proxy_url = proxy_url  # 代理URL，格式: http://user:pass@host:port
 
+    # 移动网络保护：强制请求超时，防止TCP挂起导致请求堆积→rate limit→封IP
+    # connect=5s: 建连超时；total=12s: 全程超时（含下单/撤单/查询等）
+    _DEFAULT_TIMEOUT = aiohttp.ClientTimeout(connect=5.0, total=12.0)
+
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session"""
+        """Get or create aiohttp session with explicit timeout to protect against mobile network hangs."""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            self.session = aiohttp.ClientSession(timeout=self._DEFAULT_TIMEOUT)
         return self.session
 
     async def close(self):
@@ -186,12 +190,27 @@ class BinanceFuturesClient:
         endpoint: str,
         signed: bool = False,
         use_spot_api: bool = False,
+        api_key_only: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Make HTTP request to Binance API"""
         base_url = self.spot_base_url if use_spot_api else self.base_url
         url = f"{base_url}{endpoint}"
         headers = {}
+
+        # API密钥认证（不需要签名）
+        if api_key_only:
+            headers["X-MBX-APIKEY"] = self.api_key
+            session = await self._get_session()
+            try:
+                proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None
+                async with session.request(method, url, headers=headers, proxy=proxy, **kwargs) as resp:
+                    data = await resp.json()
+                    if resp.status != 200:
+                        self._raise_typed_error(data)
+                    return data
+            except aiohttp.ClientError as e:
+                raise Exception(f"网络错误: {str(e)}")
 
         if signed:
             headers["X-MBX-APIKEY"] = self.api_key
@@ -337,12 +356,12 @@ class BinanceFuturesClient:
 
     async def create_futures_listen_key(self) -> str:
         """创建 Futures User Data Stream listenKey（有效期60min）"""
-        result = await self._request("POST", "/fapi/v1/listenKey", signed=False)
+        result = await self._request("POST", "/fapi/v1/listenKey", api_key_only=True)
         return result.get("listenKey", "")
 
     async def keepalive_futures_listen_key(self, listen_key: str) -> None:
         """续期 listenKey，每25min调用一次防止过期"""
-        await self._request("PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=False)
+        await self._request("PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, api_key_only=True)
 
     async def place_order(
         self,

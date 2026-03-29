@@ -19,6 +19,18 @@ from app.services.mt5_bridge import mt5_bridge
 router = APIRouter()
 
 
+# Helper function to get project root directory
+def get_project_root() -> str:
+    """Get the project root directory path"""
+    current_file = os.path.abspath(__file__)
+    api_v1_dir = os.path.dirname(current_file)
+    api_dir = os.path.dirname(api_v1_dir)
+    app_dir = os.path.dirname(api_dir)
+    backend_dir = os.path.dirname(app_dir)
+    project_root = os.path.dirname(backend_dir)
+    return project_root
+
+
 # Pydantic models for request bodies
 class RestoreDatabaseRequest(BaseModel):
     filename: str
@@ -529,13 +541,29 @@ async def get_version_history(
     """Get Git commit history from GitHub main branch"""
     try:
         import subprocess
+        import os
+
+        # Get the project root directory
+        # __file__ is at: backend/app/api/v1/system.py
+        # We need to go up 4 levels to reach project root
+        current_file = os.path.abspath(__file__)
+        # backend/app/api/v1/system.py -> backend/app/api/v1
+        api_v1_dir = os.path.dirname(current_file)
+        # backend/app/api/v1 -> backend/app/api
+        api_dir = os.path.dirname(api_v1_dir)
+        # backend/app/api -> backend/app
+        app_dir = os.path.dirname(api_dir)
+        # backend/app -> backend
+        backend_dir = os.path.dirname(app_dir)
+        # backend -> project root
+        project_root = os.path.dirname(backend_dir)
 
         # Fetch latest commits from remote main branch
         fetch_result = subprocess.run(
             ["git", "fetch", "origin", "main"],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=project_root
         )
 
         if fetch_result.returncode != 0:
@@ -548,7 +576,7 @@ async def get_version_history(
             text=True,
             encoding='utf-8',
             errors='replace',
-            cwd=".."
+            cwd=project_root
         )
 
         if result.returncode != 0:
@@ -590,7 +618,7 @@ async def push_to_github(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if branch_result.returncode != 0:
@@ -606,7 +634,7 @@ async def push_to_github(
             ["git", "status", "--porcelain"],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if status_result.stdout.strip():
@@ -668,7 +696,7 @@ async def push_to_github(
                                     ["git", "add", filename],
                                     capture_output=True,
                                     text=True,
-                                    cwd=".."
+                                    cwd=get_project_root()
                                 )
                                 if add_result.returncode != 0:
                                     raise Exception(f"Git add failed for {filename}: {add_result.stderr}")
@@ -678,7 +706,7 @@ async def push_to_github(
                                 ["git", "add", filename],
                                 capture_output=True,
                                 text=True,
-                                cwd=".."
+                                cwd=get_project_root()
                             )
                     except Exception as e:
                         # Skip files that cause errors
@@ -693,7 +721,7 @@ async def push_to_github(
                     ["git", "add", "."],
                     capture_output=True,
                     text=True,
-                    cwd=".."
+                    cwd=get_project_root()
                 )
 
                 if add_result.returncode != 0:
@@ -704,7 +732,7 @@ async def push_to_github(
                 ["git", "commit", "--no-verify", "-m", commit_message],
                 capture_output=True,
                 text=True,
-                cwd=".."
+                cwd=get_project_root()
             )
 
             if commit_result.returncode != 0:
@@ -723,7 +751,7 @@ async def push_to_github(
             push_args,
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if push_result.returncode != 0:
@@ -769,7 +797,7 @@ async def rollback_version(
             ["git", "log", "-1", "--format=%s", target],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if commit_msg_result.returncode != 0:
@@ -786,7 +814,7 @@ async def rollback_version(
             ["git", "reset", "--hard", target],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if reset_result.returncode != 0:
@@ -832,7 +860,7 @@ async def delete_github_backup(
             ["git", "log", "-1", "--format=%s", version_hash],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if commit_msg_result.returncode != 0:
@@ -856,7 +884,7 @@ async def delete_github_backup(
             ["git", "tag", "-d", tag_name],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         # Delete remote tag (ignore errors if tag doesn't exist on remote)
@@ -864,7 +892,7 @@ async def delete_github_backup(
             ["git", "push", "origin", f":refs/tags/{tag_name}"],
             capture_output=True,
             text=True,
-            cwd=".."
+            cwd=get_project_root()
         )
 
         if delete_local_result.returncode != 0 and delete_remote_result.returncode != 0:

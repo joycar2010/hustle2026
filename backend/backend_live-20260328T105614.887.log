@@ -1,0 +1,359 @@
+INFO:     Started server process [9880]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Waiting 5.0s before next reconnection attempt
+Error in market data stream: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 80, in get_bybit_quote
+    raise Exception(f"No ticker data for {mt5_symbol}")
+Exception: No ticker data for XAUUSD+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 91, in get_bybit_quote
+    raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+Exception: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Failed to get tick for XAUUSD+: (-10004, 'No IPC connection')
+Error checking spread alerts for user 66764cd6-d1c9-4468-a478-85b526a16927: Failed to fetch Bybit quote: No ticker data for XAUUSD+
+Redis monitor started successfully
+[REQUEST] GET /api/v1/risk/alert-settings
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/users/me
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/me - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/users/me HTTP/1.1" 200 OK
+C:\app\hustle2026\backend\app\api\v1\system_monitor.py:106: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_before_utc.
+  not_before = cert.not_valid_before
+C:\app\hustle2026\backend\app\api\v1\system_monitor.py:107: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_after_utc.
+  not_after = cert.not_valid_after
+[REQUEST] GET /api/v1/strategies/configs/by-type/reverse
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/monitor/ssl/current
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/market/funding-rate
+[RESPONSE] GET /api/v1/system/redis/status - Status: 200
+[RESPONSE] GET /api/v1/monitor/ssl/current - Status: 200
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+INFO:     61.8.214.50:0 - "GET /api/v1/system/redis/status HTTP/1.1" 200 OK
+INFO:     61.8.214.50:0 - "GET /api/v1/monitor/ssl/current HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/strategies/configs/by-type/forward
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/strategies/configs/by-type/reverse - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/strategies/configs/by-type/reverse HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+INFO:     61.8.214.50:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/strategies/configs/by-type/forward - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/strategies/configs/by-type/forward HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/trading/orders
+[REQUEST] GET /api/v1/timing-configs/effective/reverse_opening
+[REQUEST] GET /api/v1/timing-configs/effective/reverse_closing
+[REQUEST] GET /api/v1/timing-configs/effective/forward_opening
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/timing-configs/effective/forward_closing
+[REQUEST] GET /api/v1/risk/alert-settings
+[RESPONSE] GET /api/v1/trading/orders - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/trading/orders?limit=8&source=manual HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/reverse_opening - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/timing-configs/effective/reverse_opening HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1
+[REQUEST] GET /api/v1/trading/orders
+[RESPONSE] GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1 - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/cc49ea65-9fd3-4c82-882b-413c379f5ded/proxy/1 HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/trading/orders?limit=3&source=manual HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/1f99fd4d-d40d-4a5a-909d-7f91931472f9/proxy/2
+[RESPONSE] GET /api/v1/accounts/1f99fd4d-d40d-4a5a-909d-7f91931472f9/proxy/2 - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts/1f99fd4d-d40d-4a5a-909d-7f91931472f9/proxy/2 HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/forward_opening - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/timing-configs/effective/forward_opening HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/reverse_closing - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/timing-configs/effective/reverse_closing HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/forward_closing - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/timing-configs/effective/forward_closing HTTP/1.1" 200 OK
+INFO:     ('61.8.214.37', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ2OTg5NjN9.JPYHvHBeFKt-uGQY7pY1eKHS99QKrj79HoiL2icU8mg" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/ws/stats
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/proxies/qingguo/balance
+[REQUEST] GET /api/v1/rbac/roles
+[RESPONSE] GET /api/v1/ws/stats - Status: 404
+[RESPONSE] GET /api/v1/proxies - Status: 403
+[REQUEST] GET /api/v1/ssl/certificates
+INFO:     61.8.214.50:0 - "GET /api/v1/ws/stats HTTP/1.1" 404 Not Found
+INFO:     61.8.214.50:0 - "GET /api/v1/proxies HTTP/1.1" 403 Forbidden
+[RESPONSE] GET /api/v1/proxies/qingguo/balance - Status: 404
+[REQUEST] GET /api/v1/monitor/ssl/current
+INFO:     61.8.214.50:0 - "GET /api/v1/proxies/qingguo/balance HTTP/1.1" 404 Not Found
+[REQUEST] GET /api/v1/security/components
+[REQUEST] GET /api/v1/rbac/permissions
+[RESPONSE] GET /api/v1/monitor/ssl/current - Status: 200
+[REQUEST] GET /api/v1/users/
+INFO:     61.8.214.50:0 - "GET /api/v1/monitor/ssl/current HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/info
+[REQUEST] GET /api/v1/accounts
+[REQUEST] GET /api/v1/system/logs
+[RESPONSE] GET /api/v1/system/info - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/system/info HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/ssl/certificates - Status: 200
+[RESPONSE] GET /api/v1/security/components - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/ssl/certificates HTTP/1.1" 200 OK
+INFO:     61.8.214.50:0 - "GET /api/v1/security/components HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/rbac/roles - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/rbac/roles HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/rbac/permissions - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/rbac/permissions HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/ - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/users/ HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/accounts HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/logs - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/system/logs?limit=100 HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/database/stats
+[RESPONSE] GET /api/v1/system/database/stats - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/system/database/stats HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 500
+INFO:     61.8.214.50:0 - "GET /api/v1/system/github/versions HTTP/1.1" 500 Internal Server Error
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51301 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51302 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/risk/alert-settings
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     61.8.214.50:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 500
+INFO:     61.8.214.50:0 - "GET /api/v1/system/github/versions HTTP/1.1" 500 Internal Server Error
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 31.3s)
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51332 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51331 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 60.1s)
+MT5 connection appears stale (no activity for 60.1s)
+MT5 connection unhealthy, attempting reconnection
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51359 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51360 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 35.2s)
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51383 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51382 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.0s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 60.1s)
+MT5 connection appears stale (no activity for 60.1s)
+MT5 connection unhealthy, attempting reconnection
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51418 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51419 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 39.1s)
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51449 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51448 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 71.1s)
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51480 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51479 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 87.0s)
+MT5 connection appears stale (no activity for 87.0s)
+MT5 connection unhealthy, attempting reconnection
+MT5 connection appears stale (no activity for 30.7s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+Invalid credentials for username: admin
+[DB] \u6570\u636e\u5e93\u64cd\u4f5c\u5931\u8d25: 401: Incorrect username or password
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\core\database.py", line 70, in get_db
+    yield session
+  File "C:\Python39\lib\site-packages\fastapi\routing.py", line 299, in app
+    raise e
+  File "C:\Python39\lib\site-packages\fastapi\routing.py", line 294, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Python39\lib\site-packages\fastapi\routing.py", line 191, in run_endpoint_function
+    return await dependant.call(**values)
+  File "C:\app\hustle2026\backend\app\api\v1\auth.py", line 95, in login
+    raise HTTPException(
+fastapi.exceptions.HTTPException: 401: Incorrect username or password
+[REQUEST] POST /api/v1/auth/login
+[RESPONSE] POST /api/v1/auth/login - Status: 401
+INFO:     127.0.0.1:51496 - "POST /api/v1/auth/login HTTP/1.1" 401 Unauthorized
+[REQUEST] GET /api/v1/system/github/versions
+[RESPONSE] GET /api/v1/system/github/versions - Status: 403
+INFO:     127.0.0.1:51498 - "GET /api/v1/system/github/versions HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51505 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51504 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.7s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+MT5 connection appears stale (no activity for 48.8s)
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51534 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:51533 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 60.1s)
+MT5 connection appears stale (no activity for 60.1s)
+MT5 connection unhealthy, attempting reconnection
+MT5 connection appears stale (no activity for 30.5s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...

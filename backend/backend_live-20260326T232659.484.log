@@ -1,0 +1,1537 @@
+INFO:     Started server process [7444]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     ('35.213.216.186', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ1OTQyMTF9.O5vc4idKqmqe8CMTtGtPuNMr_DqEz6p9dZlzCUhOuyg" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+Redis monitor started successfully
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+Binance WebSocket not connected (connected=True, bid=0.0, ask=0.0)
+Error in market data stream: Binance WebSocket not available, please wait for connection
+Traceback (most recent call last):
+  File "C:\app\hustle2026\backend\app\tasks\market_data.py", line 117, in _stream_loop
+    spread_data = await market_data_service.get_current_spread(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 147, in get_current_spread
+    binance_quote, bybit_quote = await asyncio.gather(
+  File "C:\app\hustle2026\backend\app\services\market_service.py", line 60, in get_binance_quote
+    raise Exception(f"Binance WebSocket not available, please wait for connection")
+Exception: Binance WebSocket not available, please wait for connection
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:50465 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:50466 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:50511 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:50510 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+INFO:     connection closed
+[REQUEST] GET /api/v1/risk/alert-settings
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/users/me
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+INFO:     3.104.255.18:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/me - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/users/me HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+C:\app\hustle2026\backend\app\api\v1\system_monitor.py:106: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_before_utc.
+  not_before = cert.not_valid_before
+C:\app\hustle2026\backend\app\api\v1\system_monitor.py:107: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_after_utc.
+  not_after = cert.not_valid_after
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/strategies/configs/by-type/reverse
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/monitor/ssl/current
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/strategies/configs/by-type/forward
+[RESPONSE] GET /api/v1/system/redis/status - Status: 200
+[RESPONSE] GET /api/v1/monitor/ssl/current - Status: 200
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/redis/status HTTP/1.1" 200 OK
+INFO:     3.104.255.18:0 - "GET /api/v1/monitor/ssl/current HTTP/1.1" 200 OK
+INFO:     3.104.255.18:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/strategies/configs/by-type/reverse - Status: 200
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/strategies/configs/by-type/reverse HTTP/1.1" 200 OK
+INFO:     3.104.255.18:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+[RESPONSE] GET /api/v1/strategies/configs/by-type/forward - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+INFO:     3.104.255.18:0 - "GET /api/v1/strategies/configs/by-type/forward HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders
+[RESPONSE] GET /api/v1/trading/orders - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders?limit=8&source=manual HTTP/1.1" 200 OK
+INFO:     ('35.213.216.186', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ1OTQyMTF9.O5vc4idKqmqe8CMTtGtPuNMr_DqEz6p9dZlzCUhOuyg" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/timing-configs/effective/reverse_opening
+[REQUEST] GET /api/v1/timing-configs/effective/reverse_closing
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/timing-configs/effective/forward_opening
+[REQUEST] GET /api/v1/timing-configs/effective/forward_closing
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/timing-configs/effective/reverse_opening - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/timing-configs/effective/reverse_opening HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/timing-configs/effective/reverse_closing - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/timing-configs/effective/reverse_closing HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/forward_opening - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/timing-configs/effective/forward_opening HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/forward_closing - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/timing-configs/effective/forward_closing HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:50739 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50738 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:50893 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50892 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.8s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51002 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51003 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     3.104.255.18:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.6s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51037 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51038 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51081 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51082 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51118 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51119 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51146 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51147 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51191 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51192 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51219 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51220 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.3s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51267 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51268 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51294 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51295 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51339 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51340 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51366 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51367 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/market/funding-rate
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51413 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51414 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+MT5 connection appears stale (no activity for 30.5s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+[REQUEST] GET /api/v1/risk/alert-settings
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[REQUEST] GET /api/v1/market/connection/status
+[REQUEST] GET /api/v1/users/me
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/users/me - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/users/me HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/strategies/configs/by-type/reverse
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/redis/status
+[REQUEST] GET /api/v1/monitor/ssl/current
+[REQUEST] GET /api/v1/proxies
+[RESPONSE] GET /api/v1/system/redis/status - Status: 200
+[RESPONSE] GET /api/v1/monitor/ssl/current - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/redis/status HTTP/1.1" 200 OK
+INFO:     36.19.128.84:0 - "GET /api/v1/monitor/ssl/current HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/strategies/configs/by-type/forward
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/strategies/configs/by-type/reverse - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/strategies/configs/by-type/reverse HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/strategies/configs/by-type/forward - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/strategies/configs/by-type/forward HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders?limit=8&source=manual HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders
+[RESPONSE] GET /api/v1/trading/orders - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders?limit=3&source=manual HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/timing-configs/effective/reverse_opening
+[REQUEST] GET /api/v1/timing-configs/effective/reverse_closing
+[REQUEST] GET /api/v1/accounts/dashboard/aggregated
+[RESPONSE] GET /api/v1/timing-configs/effective/reverse_opening - Status: 200
+[RESPONSE] GET /api/v1/timing-configs/effective/reverse_closing - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/timing-configs/effective/reverse_opening HTTP/1.1" 200 OK
+INFO:     36.19.128.84:0 - "GET /api/v1/timing-configs/effective/reverse_closing HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/timing-configs/effective/forward_opening
+[REQUEST] GET /api/v1/timing-configs/effective/forward_closing
+[RESPONSE] GET /api/v1/timing-configs/effective/forward_opening - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/timing-configs/effective/forward_opening HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/timing-configs/effective/forward_closing - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/timing-configs/effective/forward_closing HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/accounts/dashboard/aggregated - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/accounts/dashboard/aggregated HTTP/1.1" 200 OK
+INFO:     ('36.19.128.84', 0) - "WebSocket /ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2Njc2NGNkNi1kMWM5LTQ0NjgtYTQ3OC04NWI1MjZhMTY5MjciLCJleHAiOjE3NzQ1Nzk0NjB9.R2qh3vHs03WeTxFA9Kvv1nihGqGis4zzpExyqGgOmBw" [accepted]
+INFO:     connection open
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/risk/alert-settings
+[RESPONSE] GET /api/v1/risk/alert-settings - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/risk/alert-settings HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders
+[RESPONSE] GET /api/v1/trading/orders - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders?limit=3&source=manual HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51639 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51643 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.2s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/system/status
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/market/orderbook
+[REQUEST] GET /api/v1/trading/orders/realtime
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     35.213.216.186:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+MT5 connection appears stale (no activity for 30.1s)
+MT5 connection unhealthy for account 1f99fd4d-d40d-4a5a-909d-7f91931472f9, reconnecting...
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/connection/status
+[RESPONSE] GET /api/v1/market/connection/status - Status: 200
+INFO:     127.0.0.1:51898 - "GET /api/v1/market/connection/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/system/redis/status
+[RESPONSE] GET /api/v1/system/redis/status - Status: 403
+INFO:     127.0.0.1:51899 - "GET /api/v1/system/redis/status HTTP/1.1" 403 Forbidden
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/bybit-swap-rate
+[REQUEST] GET /api/v1/market/funding-rate
+[REQUEST] GET /api/v1/proxies
+[REQUEST] GET /api/v1/system/status
+[RESPONSE] GET /api/v1/market/bybit-swap-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/bybit-swap-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/system/status - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/system/status HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/proxies - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/proxies HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/market/funding-rate - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/funding-rate HTTP/1.1" 200 OK
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/trading/orders/realtime
+[RESPONSE] GET /api/v1/trading/orders/realtime - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/trading/orders/realtime HTTP/1.1" 200 OK
+[BinancePositionPusher] Stream \u9519\u8bef (Ym1OIwyo…): Binance API \u9519\u8bef: API\u5bc6\u94a5\u65e0\u6548: API-key format invalid.
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+[REQUEST] GET /api/v1/market/orderbook
+[RESPONSE] GET /api/v1/market/orderbook - Status: 200
+INFO:     36.19.128.84:0 - "GET /api/v1/market/orderbook HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     connection closed
+INFO:     connection closed
+INFO:     Waiting for application shutdown.

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://13.115.21.77:8000') + '/ws'
+const WS_URL = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000') + '/ws'
 
 export const useMarketStore = defineStore('market', () => {
   const marketData = ref(null)
