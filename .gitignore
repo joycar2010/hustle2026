@@ -1,4 +1,1 @@
-hustle-go
-*.exe
-*.log
-.env
+node_modules

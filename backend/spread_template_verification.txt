@@ -1,0 +1,40 @@
+forward_close_spread_alert:
+  Content:
+    正向需清货，请清货00000
+    当前点差：{spread}
+    您的阈值：{threshold}
+  Popup Content:
+    正向需清货，请清货00000
+    当前点差：{spread}
+    您的阈值：{threshold}
+
+forward_open_spread_alert:
+  Content:
+    正向已到货，请查收11111
+    当前点差：{spread}
+    您的阈值：{threshold}
+  Popup Content:
+    正向已到货，请查收11111
+    当前点差：{spread}
+    您的阈值：{threshold}
+
+reverse_close_spread_alert:
+  Content:
+    反向需清货，请清货00000
+    当前点差：{spread}
+    您的阈值：{threshold}
+  Popup Content:
+    反向需清货，请清货00000
+    当前点差：{spread}
+    您的阈值：{threshold}
+
+reverse_open_spread_alert:
+  Content:
+    反向已到货，请查收11111
+    当前点差：{spread}
+    您的阈值：{threshold}
+  Popup Content:
+    反向已到货，请查收11111
+    当前点差：{spread}
+    您的阈值：{threshold}
+

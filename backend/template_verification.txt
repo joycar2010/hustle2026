@@ -1,0 +1,32 @@
+binance_net_asset_alert:
+  Title: A仓库需处理
+  Content: *****A仓库需处理*****
+
+bybit_net_asset_alert:
+  Title: B仓库需处理
+  Content: *****B仓库需处理*****
+
+forward_close_spread_alert:
+  Title: 正向需清货
+  Content: 正向需清货，请清货00000
+
+forward_open_spread_alert:
+  Title: 正向已到货
+  Content: 正向已到货，请查收11111
+
+reverse_close_spread_alert:
+  Title: 反向需清货
+  Content: 反向需清货，请清货00000
+
+reverse_open_spread_alert:
+  Title: 反向已到货
+  Content: 反向已到货，请查收11111
+
+single_leg_alert:
+  Title: B队员已瘸腿
+  Content: B队员已瘸腿B
+
+total_net_asset_alert:
+  Title: 紧急紧急货不足
+  Content: *****紧急紧急货不足*****
+

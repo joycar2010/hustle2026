@@ -1,0 +1,9 @@
+{
+  "client_name": "Test Client 3",
+  "mt5_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+  "mt5_login": "3971962",
+  "mt5_password": "Aq987456!",
+  "mt5_server": "Bybit-Live-2",
+  "password_type": "primary",
+  "priority": 3
+}

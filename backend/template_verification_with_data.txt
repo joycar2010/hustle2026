@@ -1,0 +1,61 @@
+binance_net_asset_alert:
+  Title: A仓库需处理
+  Content: *****A仓库需处理*****（当前：{current_asset}，阈值：{threshold}）
+  Popup Content:
+    *****A仓库需处理*****
+    当前资产：{current_asset}
+    预警阈值：{threshold}
+
+bybit_net_asset_alert:
+  Title: B仓库需处理
+  Content: *****B仓库需处理*****（当前：{current_asset}，阈值：{threshold}）
+  Popup Content:
+    *****B仓库需处理*****
+    当前资产：{current_asset}
+    预警阈值：{threshold}
+
+forward_close_spread_alert:
+  Title: 正向需清货
+  Content: 正向需清货，请清货00000（当前点差：{spread}）
+  Popup Content:
+    正向需清货，请清货00000
+    当前点差：{spread}
+
+forward_open_spread_alert:
+  Title: 正向已到货
+  Content: 正向已到货，请查收11111（当前点差：{spread}）
+  Popup Content:
+    正向已到货，请查收11111
+    当前点差：{spread}
+
+reverse_close_spread_alert:
+  Title: 反向需清货
+  Content: 反向需清货，请清货00000（当前点差：{spread}）
+  Popup Content:
+    反向需清货，请清货00000
+    当前点差：{spread}
+
+reverse_open_spread_alert:
+  Title: 反向已到货
+  Content: 反向已到货，请查收11111（当前点差：{spread}）
+  Popup Content:
+    反向已到货，请查收11111
+    当前点差：{spread}
+
+single_leg_alert:
+  Title: B队员已瘸腿
+  Content: B队员已瘸腿B（Binance：{binance_filled}，Bybit：{bybit_filled}）
+  Popup Content:
+    B队员已瘸腿B
+    Binance成交：{binance_filled}
+    Bybit成交：{bybit_filled}
+    未成交量：{unfilled_qty}
+
+total_net_asset_alert:
+  Title: 紧急紧急货不足
+  Content: *****紧急紧急货不足*****（当前：{current_asset}，阈值：{threshold}）
+  Popup Content:
+    *****紧急紧急货不足*****
+    当前总资产：{current_asset}
+    预警阈值：{threshold}
+
