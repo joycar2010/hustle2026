@@ -249,21 +249,8 @@
          Tab 3: MT5客户端 & 实例管理
     ═══════════════════════════════════════════ -->
     <div v-if="activeTab === 'mt5'" class="space-y-4">
-      <!-- 子导航：客户端连接 vs 服务实例 -->
-      <div class="flex gap-2 bg-dark-100 rounded-xl border border-border-primary p-1">
-        <button @click="mt5SubTab = 'clients'"
-          :class="['flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-            mt5SubTab === 'clients' ? 'bg-primary text-dark-300' : 'text-text-secondary hover:text-text-primary']">
-          客户端连接
-        </button>
-        <button @click="mt5SubTab = 'instances'"
-          :class="['flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-            mt5SubTab === 'instances' ? 'bg-primary text-dark-300' : 'text-text-secondary hover:text-text-primary']">
-          服务实例
-        </button>
-      </div>
-      <!-- ═══ 客户端连接子页面 ═══ -->
-      <div v-if="mt5SubTab === 'clients'" class="space-y-4">
+      <!-- ═══ MT5账户管理 ═══ -->
+      <div class="space-y-4">
         <!-- 选择器工具栏 -->
         <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center gap-3 flex-wrap">
           <span class="text-sm text-text-tertiary whitespace-nowrap">选择用户：</span>
@@ -287,7 +274,7 @@
           </button>
           <button @click="openAddMT5" :disabled="!mt5SelectedAccountId"
             class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-xs transition-colors disabled:opacity-40">
-            + 新增客户端
+            + 新增MT5账户
           </button>
         </div>
 
@@ -297,7 +284,7 @@
       </div>
       <div v-else-if="mt5Loading" class="text-center py-12 text-text-tertiary text-sm">加载中...</div>
       <div v-else-if="!mt5Clients.length" class="text-center py-12 text-text-tertiary text-sm">
-        该账户暂无MT5客户端，点击「+ 新增客户端」添加
+        该账户暂无MT5账户，点击「+ 新增MT5账户」添加
       </div>
 
         <!-- 客户端卡片 -->
@@ -389,94 +376,96 @@
               删除
             </button>
           </div>
-        </div>
-      </div>
-      </div>
 
-      <!-- ═══ 服务实例子页面 ═══ -->
-      <div v-if="mt5SubTab === 'instances'" class="space-y-4">
-        <!-- 工具栏 -->
-        <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-          <span class="text-sm text-text-secondary">管理 Windows Server 上的 MT5 服务实例</span>
-          <div class="flex gap-2">
-            <button @click="loadMT5Instances"
-              class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors">
-              刷新
-            </button>
-            <button @click="openDeployInstance"
-              class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-xs transition-colors">
-              + 部署新实例
-            </button>
-          </div>
-        </div>
+          <!-- 部署客户端按钮 -->
+          <button @click="openDeployForClient(client)"
+            class="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs border border-primary/20 transition-colors font-medium">
+            + 部署客户端
+          </button>
 
-        <!-- 实例列表 -->
-        <div v-if="instancesLoading" class="text-center py-12 text-text-tertiary text-sm">加载中...</div>
-        <div v-else-if="!mt5Instances.length" class="text-center py-12 text-text-tertiary text-sm">暂无实例，点击「部署新实例」开始</div>
-        <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div v-for="inst in mt5Instances" :key="inst.instance_id"
-            class="bg-dark-100 rounded-2xl border p-4 space-y-3"
-            :class="getInstanceBorderColor(inst.status)">
+          <!-- 该客户端的实例列表 -->
+          <div v-if="getClientInstances(client.client_id).length > 0" class="space-y-2 pt-2 border-t border-border-secondary">
+            <div class="text-xs text-text-tertiary font-medium mb-2">MT5客户端</div>
+            <div v-for="inst in getClientInstances(client.client_id)" :key="inst.instance_id"
+              class="bg-dark-200 rounded-lg border p-2 space-y-2"
+              :class="inst.is_active ? 'border-primary' : 'border-border-primary'">
 
-            <!-- 实例头 -->
-            <div class="flex items-start justify-between">
-              <div class="flex-1 min-w-0">
-                <div class="font-bold text-sm">{{ inst.instance_name }}</div>
-                <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                  <span class="px-1.5 py-0.5 rounded text-xs" :class="getInstanceStatusClass(inst.status)">
-                    {{ getInstanceStatusText(inst.status) }}
+              <!-- 实例头部 -->
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="px-1.5 py-0.5 rounded text-xs"
+                    :class="inst.instance_type === 'primary' ? 'bg-primary/10 text-primary' : 'bg-[#f0b90b]/10 text-[#f0b90b]'">
+                    {{ inst.instance_type === 'primary' ? '主跑' : '备用' }}
                   </span>
-                  <span class="text-xs text-text-tertiary font-mono">{{ inst.server_ip }}:{{ inst.service_port }}</span>
-                  <span v-if="inst.auto_start" class="px-1.5 py-0.5 rounded text-xs bg-[#0ecb81]/10 text-[#0ecb81]">自启</span>
+                  <span v-if="inst.is_active" class="px-1.5 py-0.5 rounded text-xs bg-[#0ecb81]/10 text-[#0ecb81]">
+                    活动
+                  </span>
+                  <span class="text-xs text-text-tertiary">{{ inst.instance_name }}</span>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-xs" :class="getInstanceStatusClass(inst.status)">
+                  {{ getInstanceStatusText(inst.status) }}
+                </span>
+              </div>
+
+              <!-- 实例详情 -->
+              <div class="text-xs space-y-1">
+                <div class="flex justify-between">
+                  <span class="text-text-tertiary">服务器:</span>
+                  <span class="font-mono">{{ inst.server_ip }}:{{ inst.service_port }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-text-tertiary">部署路径:</span>
+                  <span class="font-mono text-xs truncate max-w-[150px]" :title="inst.deploy_path">{{ inst.deploy_path }}</span>
                 </div>
               </div>
-            </div>
 
-            <!-- 实例详情 -->
-            <div class="bg-dark-200 rounded-lg p-2.5 text-xs space-y-1.5">
-              <div class="flex justify-between">
-                <span class="text-text-tertiary">MT5路径:</span>
-                <span class="font-mono text-xs truncate max-w-[200px]" :title="inst.mt5_path">{{ inst.mt5_path }}</span>
+              <!-- 操作进度条 -->
+              <div v-if="instanceOperations[inst.instance_id]" class="bg-dark-300 rounded-lg p-2 border border-primary/30">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-primary font-medium">
+                    {{ instanceOperations[inst.instance_id].actionText }}中...
+                  </span>
+                  <span class="text-xs text-text-tertiary">
+                    {{ instanceOperations[inst.instance_id].progress }}%
+                  </span>
+                </div>
+                <div class="w-full bg-dark-200 rounded-full h-1.5 overflow-hidden">
+                  <div class="bg-primary h-full transition-all duration-300 ease-out"
+                    :style="{ width: instanceOperations[inst.instance_id].progress + '%' }">
+                  </div>
+                </div>
+                <div class="text-xs text-text-tertiary mt-1">
+                  {{ instanceOperations[inst.instance_id].message }}
+                </div>
               </div>
-              <div class="flex justify-between">
-                <span class="text-text-tertiary">部署路径:</span>
-                <span class="font-mono text-xs truncate max-w-[200px]" :title="inst.deploy_path">{{ inst.deploy_path }}</span>
-              </div>
-              <div v-if="inst.mt5_data_path" class="flex justify-between">
-                <span class="text-text-tertiary">数据目录:</span>
-                <span class="font-mono text-xs truncate max-w-[200px]" :title="inst.mt5_data_path">{{ inst.mt5_data_path }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-text-tertiary">便携版:</span>
-                <span>{{ inst.is_portable ? '是' : '否' }}</span>
-              </div>
-            </div>
 
-            <!-- 操作按钮 -->
-            <div class="flex gap-2">
-              <button @click="controlInstance(inst, 'start')" :disabled="inst.status === 'running'"
-                class="flex-1 py-1.5 bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] rounded-lg text-xs border border-[#0ecb81]/20 transition-colors disabled:opacity-40">
-                启动
-              </button>
-              <button @click="controlInstance(inst, 'stop')" :disabled="inst.status === 'stopped'"
-                class="flex-1 py-1.5 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded-lg text-xs border border-[#f0b90b]/20 transition-colors disabled:opacity-40">
-                停止
-              </button>
-              <button @click="controlInstance(inst, 'restart')"
-                class="flex-1 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs border border-primary/20 transition-colors">
-                重启
-              </button>
-              <button @click="refreshInstanceStatus(inst)"
-                class="py-1.5 px-3 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors">
-                刷新
-              </button>
-              <button @click="deleteInstance(inst)"
-                class="py-1.5 px-3 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded-lg text-xs border border-[#f6465d]/20 transition-colors">
-                删除
-              </button>
+              <!-- 实例操作 -->
+              <div class="flex gap-1.5">
+                <button v-if="!inst.is_active" @click="switchToInstance(client.client_id, inst.instance_id)"
+                  class="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
+                  切换为活动
+                </button>
+                <button @click="controlInstance(inst, 'start')" v-if="inst.status !== 'running'"
+                  class="flex-1 py-1 bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] rounded text-xs border border-[#0ecb81]/20 transition-colors">
+                  启动
+                </button>
+                <button @click="controlInstance(inst, 'stop')" v-if="inst.status === 'running'"
+                  class="flex-1 py-1 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded text-xs border border-[#f0b90b]/20 transition-colors">
+                  停止
+                </button>
+                <button @click="controlInstance(inst, 'restart')"
+                  class="flex-1 py-1 bg-[#3dccc7]/10 hover:bg-[#3dccc7]/20 text-[#3dccc7] rounded text-xs border border-[#3dccc7]/20 transition-colors">
+                  重启
+                </button>
+                <button @click="deleteInstance(inst)"
+                  class="flex-1 py-1 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded text-xs border border-[#f6465d]/20 transition-colors">
+                  删除
+                </button>
+              </div>
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -499,7 +488,7 @@
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">邮箱</label>
-            <input v-model="userForm.email" type="email"
+            <input v-model="userForm.email" type="email" autocomplete="off"
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
               placeholder="输入邮箱（可选）" />
           </div>
@@ -507,9 +496,12 @@
             <label class="block text-xs text-text-tertiary mb-1">
               {{ isEditUser ? '密码（留空表示不修改）' : '密码 *' }}
             </label>
-            <input v-model="userForm.password" type="password" :required="!isEditUser"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
-              placeholder="至少8个字符" />
+            <PasswordInput
+              v-model="userForm.password"
+              :required="!isEditUser"
+              :placeholder="isEditUser ? '留空则不修改密码' : '至少8个字符'"
+              autocomplete="new-password"
+            />
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">角色</label>
@@ -657,15 +649,21 @@
             <label class="block text-xs text-text-tertiary mb-1">
               {{ isEditAccount ? 'API Secret（留空不修改）' : 'API Secret *' }}
             </label>
-            <input v-model="accountForm.api_secret" type="password" :required="!isEditAccount" autocomplete="new-password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="输入 API Secret" />
+            <PasswordInput
+              v-model="accountForm.api_secret"
+              :required="!isEditAccount"
+              :placeholder="isEditAccount ? '留空则不修改 API Secret' : '输入 API Secret'"
+              autocomplete="new-password"
+            />
           </div>
           <div v-if="accountForm.platform_id === 2">
             <label class="block text-xs text-text-tertiary mb-1">Passphrase（可选）</label>
-            <input v-model="accountForm.passphrase" type="password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="Bybit API Passphrase" />
+            <PasswordInput
+              v-model="accountForm.passphrase"
+              :required="false"
+              placeholder="Bybit API Passphrase"
+              autocomplete="new-password"
+            />
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">杠杆倍数</label>
@@ -701,7 +699,7 @@
       @click.self="showMT5Modal = false">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
-          <h3 class="font-bold">{{ isEditMT5 ? '编辑MT5客户端' : '新增MT5客户端' }}</h3>
+          <h3 class="font-bold">{{ isEditMT5 ? '编辑MT5客户端' : '新增MT5账户' }}</h3>
           <button @click="showMT5Modal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
         </div>
         <form @submit.prevent="saveMT5" class="p-6 space-y-4">
@@ -711,6 +709,18 @@
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
               placeholder="例如: 主客户端、备用客户端1" />
             <p class="text-xs text-text-tertiary mt-1">每个账户下的客户端名称必须唯一</p>
+          </div>
+          <div class="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+            <div class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div class="text-xs text-blue-300 leading-relaxed">
+                <strong class="block mb-1">关于 MT5 路径配置</strong>
+                <p>MT5 可执行文件路径、数据目录等信息由关联的「服务实例」提供。</p>
+                <p class="mt-1">创建账户后，请在下方「服务实例」标签页中部署 MT5 实例并关联到此账户。</p>
+              </div>
+            </div>
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">MT5 登录账号 *</label>
@@ -723,10 +733,12 @@
             <label class="block text-xs text-text-tertiary mb-1">
               MT5 密码{{ isEditMT5 ? '（留空不修改）' : ' *' }}
             </label>
-            <input v-model="mt5Form.mt5_password" type="password" :required="!isEditMT5"
+            <PasswordInput
+              v-model="mt5Form.mt5_password"
+              :required="!isEditMT5"
+              :placeholder="isEditMT5 ? '留空则不修改密码' : '输入MT5登录密码'"
               autocomplete="new-password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="输入MT5登录密码" />
+            />
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">密码类型 *</label>
@@ -749,12 +761,17 @@
               placeholder="1–100，数字越小优先级越高" />
             <p class="text-xs text-text-tertiary mt-1">用于多客户端故障转移排序</p>
           </div>
-          <div>
-            <label class="block text-xs text-text-tertiary mb-1">MT5桥接地址</label>
-            <input v-model="mt5Form.bridge_url"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="例如: http://54.249.66.53:8001" />
-            <p class="text-xs text-text-tertiary mt-1">MT5微服务桥接节点地址，留空使用系统默认</p>
+          <div class="bg-dark-200 rounded-lg p-3 border border-border-secondary">
+            <div class="text-xs text-text-tertiary mb-2">
+              <strong>服务实例配置</strong>
+            </div>
+            <p class="text-xs text-text-tertiary leading-relaxed">
+              MT5 桥接服务地址由关联的服务实例提供。请在下方「服务实例」标签页中部署和管理 MT5 实例，
+              系统将自动使用该客户端关联实例的服务器 IP 和端口。
+            </p>
+            <p class="text-xs text-primary mt-2">
+              💡 提示：每个客户端可以关联多个实例（主备模式），系统会根据优先级自动选择可用实例。
+            </p>
           </div>
           <div class="flex items-center gap-3">
             <div @click="mt5Form.is_active = !mt5Form.is_active"
@@ -784,7 +801,7 @@
       @click.self="showDeployModal = false">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
-          <h3 class="font-bold">部署新 MT5 实例</h3>
+          <h3 class="font-bold">部署新 MT5 客户端</h3>
           <button @click="showDeployModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
         </div>
         <form @submit.prevent="deployInstance" class="p-6 space-y-4">
@@ -824,6 +841,14 @@
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
               placeholder="例如: D:\hustle-mt5-8003" />
           </div>
+          <div v-if="deployingForClient">
+            <label class="block text-xs text-text-tertiary mb-1">实例类型 *</label>
+            <select v-model="deployForm.instance_type" required
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary">
+              <option value="primary">主跑实例</option>
+              <option value="backup">备用实例</option>
+            </select>
+          </div>
           <div class="flex items-center gap-3">
             <div @click="deployForm.is_portable = !deployForm.is_portable"
               :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors',
@@ -851,6 +876,17 @@
               class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
               取消
             </button>
+          </div>
+          <!-- 部署进度条 -->
+          <div v-if="deploying" class="mt-4 bg-dark-200 rounded-lg p-4 border border-border-secondary">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm text-text-secondary">{{ deployProgress.message || '正在部署...' }}</span>
+              <span class="text-sm text-primary font-mono">{{ deployProgress.progress }}%</span>
+            </div>
+            <div class="w-full bg-dark-300 rounded-full h-2 overflow-hidden">
+              <div class="bg-primary h-full transition-all duration-300 ease-out"
+                :style="{ width: deployProgress.progress + '%' }"></div>
+            </div>
           </div>
         </form>
       </div>
@@ -948,15 +984,15 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
+import PasswordInput from '@/components/PasswordInput.vue'
 
 // ── Tabs ──────────────────────────────────────────────────────
 const tabs = [
   { id: 'users',    label: '用户账号' },
   { id: 'accounts', label: '绑定账户' },
-  { id: 'mt5',      label: 'MT5管理' },
+  { id: 'mt5',      label: 'MT5账户管理' },
 ]
 const activeTab = ref('users')
-const mt5SubTab = ref('clients') // 'clients' or 'instances'
 
 // 切换 tab 时自动加载数据
 watch(activeTab, (tab) => {
@@ -972,8 +1008,21 @@ function toast(msg, type = 'success') {
   setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id) }, 3000)
 }
 function apiErr(label, e) {
-  const detail = e?.response?.data?.detail || e?.message || ''
+  let detail = ''
+  if (e?.response?.data?.detail) {
+    // 如果 detail 是对象，尝试提取有用信息
+    if (typeof e.response.data.detail === 'object') {
+      detail = JSON.stringify(e.response.data.detail)
+    } else {
+      detail = e.response.data.detail
+    }
+  } else if (e?.response?.data?.message) {
+    detail = e.response.data.message
+  } else if (e?.message) {
+    detail = e.message
+  }
   toast(detail ? `${label}: ${detail}` : label, 'error')
+  console.error(label, e)
 }
 
 // ── Formatters ────────────────────────────────────────────────
@@ -1004,6 +1053,7 @@ const showUserModal = ref(false)
 const isEditUser    = ref(false)
 const currentUser   = ref(null)
 const userForm = ref({ username: '', email: '', password: '', role: '交易员', is_active: true, feishu_open_id: '', feishu_mobile: '', feishu_union_id: '' })
+const originalUserPassword = ref('') // 跟踪原始密码，用于判断是否修改
 
 const adminCount = computed(() =>
   users.value.filter(u =>
@@ -1027,7 +1077,7 @@ function openAddUser() {
   showUserModal.value = true
 }
 
-function openEditUser(u) {
+async function openEditUser(u) {
   isEditUser.value = true
   currentUser.value = u
   userForm.value = {
@@ -1038,13 +1088,17 @@ function openEditUser(u) {
     feishu_union_id: u.feishu_union_id || '',
   }
   showUserModal.value = true
+  originalUserPassword.value = '' // 编辑模式下密码留空
 }
 
 async function saveUser() {
   try {
     if (isEditUser.value) {
       const data = { email: userForm.value.email || null, role: userForm.value.role, is_active: userForm.value.is_active }
-      if (userForm.value.password)        data.password        = userForm.value.password
+      // 只有当输入了新密码时才发送
+      if (userForm.value.password && userForm.value.password.trim() !== '') {
+        data.password = userForm.value.password
+      }
       if (userForm.value.feishu_open_id  !== '') data.feishu_open_id  = userForm.value.feishu_open_id  || null
       if (userForm.value.feishu_mobile   !== '') data.feishu_mobile   = userForm.value.feishu_mobile   || null
       if (userForm.value.feishu_union_id !== '') data.feishu_union_id = userForm.value.feishu_union_id || null
@@ -1133,6 +1187,7 @@ const accountForm = ref({
   api_key: '', api_secret: '', passphrase: '',
   is_mt5_account: false, is_default: false, is_active: true, leverage: 100
 })
+const originalAccountSecret = ref('') // 跟踪原始 API Secret
 
 async function loadUserAccounts() {
   accountsLoading.value = true
@@ -1181,12 +1236,15 @@ async function openEditAccount(acc) {
     is_active: acc.is_active, leverage: acc.leverage || (acc.platform_id === 1 ? 20 : 100)
   }
   showAccountModal.value = true
-  // Load actual API secret from backend (stored encrypted, shown on edit)
+
+  // 加载 API Secret（实际值，PasswordInput 组件会自动处理显示）
   try {
     const r = await api.get(`/api/v1/accounts/${acc.account_id}/secret`)
-    accountForm.value.api_secret  = r.data.api_secret  || ''
-    accountForm.value.passphrase  = r.data.passphrase  || ''
-  } catch { /* admin may not have bypass yet — user can re-enter manually */ }
+    accountForm.value.api_secret = r.data.api_secret || ''
+    originalAccountSecret.value = r.data.api_secret || '' // 保存原始 Secret
+  } catch (e) {
+    console.warn('无法加载 API Secret', e)
+  }
 }
 
 // IPIPGO proxy config
@@ -1248,9 +1306,14 @@ async function saveAccount() {
         is_mt5_account: accountForm.value.is_mt5_account,
         leverage:       accountForm.value.leverage,
       }
-      if (accountForm.value.api_key)    data.api_key    = accountForm.value.api_key
-      if (accountForm.value.api_secret) data.api_secret = accountForm.value.api_secret
-      if (accountForm.value.passphrase) data.passphrase = accountForm.value.passphrase
+      if (accountForm.value.api_key) data.api_key = accountForm.value.api_key
+      // 只有当 API Secret 被修改时才发送（与原始值不同）
+      if (accountForm.value.api_secret && accountForm.value.api_secret !== originalAccountSecret.value) {
+        data.api_secret = accountForm.value.api_secret
+      }
+      if (accountForm.value.passphrase) {
+        data.passphrase = accountForm.value.passphrase
+      }
       await api.put(`/api/v1/accounts/${currentAccount.value.account_id}`, data)
       toast('账户已更新')
     } else {
@@ -1295,10 +1358,11 @@ const showMT5Modal         = ref(false)
 const isEditMT5            = ref(false)
 const currentMT5           = ref(null)
 const mt5Form = ref({
-  client_name: '', mt5_login: '', mt5_password: '', password_type: 'primary',
-  mt5_server: '', bridge_url: '', proxy_id: null,
+  client_name: '', mt5_login: '', mt5_password: '',
+  password_type: 'primary', mt5_server: '', proxy_id: null,
   priority: 1, is_active: true
 })
+const originalMT5Password = ref('') // 跟踪原始 MT5 密码
 
 async function onMt5UserChange() {
   mt5SelectedAccountId.value = ''
@@ -1331,6 +1395,8 @@ async function loadMT5Clients() {
   try {
     const r = await api.get(`/api/v1/accounts/${mt5SelectedAccountId.value}/mt5-clients`)
     mt5Clients.value = Array.isArray(r.data) ? r.data : (r.data?.clients ?? [])
+    // 同时加载所有实例
+    await loadMT5Instances()
   } catch (e) { apiErr('加载MT5客户端失败', e) }
   finally { mt5Loading.value = false }
 }
@@ -1359,21 +1425,20 @@ function openAddMT5() {
   isEditMT5.value = false
   currentMT5.value = null
   mt5Form.value = {
-    client_name: '', mt5_login: '', mt5_password: '', password_type: 'primary',
-    mt5_server: '', bridge_url: '', proxy_id: null,
+    client_name: '', mt5_login: '', mt5_password: '',
+    password_type: 'primary', mt5_server: '', proxy_id: null,
     priority: 1, is_active: true
   }
   showMT5Modal.value = true
 }
 
-function openEditMT5(client) {
+async function openEditMT5(client) {
   isEditMT5.value = true
   currentMT5.value = client
   mt5Form.value = {
     client_name:   client.client_name,
     mt5_login:     client.mt5_login,
     mt5_password:  '',
-    bridge_url:    client.bridge_url || '',
     password_type: client.password_type || 'primary',
     mt5_server:    client.mt5_server,
     proxy_id:      client.proxy_id || null,
@@ -1381,13 +1446,25 @@ function openEditMT5(client) {
     is_active:     client.is_active,
   }
   showMT5Modal.value = true
+
+  // 加载 MT5 密码（实际值，PasswordInput 组件会自动处理显示）
+  try {
+    const r = await api.get(`/api/v1/mt5-clients/${client.client_id}/password`)
+    mt5Form.value.mt5_password = r.data.mt5_password || ''
+    originalMT5Password.value = r.data.mt5_password || '' // 保存原始密码
+  } catch (e) {
+    console.warn('无法加载 MT5 密码', e)
+  }
 }
 
 async function saveMT5() {
   try {
     if (isEditMT5.value) {
       const data = { ...mt5Form.value }
-      if (!data.mt5_password) delete data.mt5_password
+      // 只有当密码被修改时才发送（与原始值不同）
+      if (!data.mt5_password || data.mt5_password === originalMT5Password.value) {
+        delete data.mt5_password
+      }
       await api.put(`/api/v1/mt5-clients/${currentMT5.value.client_id}`, data)
       toast('MT5客户端已更新')
     } else {
@@ -1410,17 +1487,40 @@ async function toggleMT5Active(client) {
 async function connectMT5(client) {
   try {
     await api.post(`/api/v1/mt5-clients/${client.client_id}/connect`)
-    toast('连接指令已发送')
+    toast('连接指令已发送，请稍候...', 'success')
     setTimeout(loadMT5Clients, 2000)
-  } catch (e) { apiErr('连接失败', e) }
+  } catch (e) {
+    const status = e.response?.status
+    const detail = e.response?.data?.detail || e.response?.data?.message || e.message || '未知错误'
+
+    if (status === 400) {
+      // 检查是否是未部署客户端的情况
+      if (detail.includes('MT5安装路径未设置') || detail.includes('未找到可用的MT5实例')) {
+        toast('暂无部署的MT5客户端，无法连接。请先在「服务实例」标签页中部署MT5实例', 'error')
+      } else {
+        toast(`连接失败: ${detail}`, 'error')
+      }
+    } else if (status === 404) {
+      toast('MT5客户端不存在或已被删除', 'error')
+    } else if (status === 504) {
+      toast('连接超时，请检查 MT5 服务是否正常运行', 'error')
+    } else {
+      toast(`连接失败: ${detail}`, 'error')
+    }
+    console.error('MT5连接失败', e)
+  }
 }
 
 async function disconnectMT5(client) {
   try {
     await api.post(`/api/v1/mt5-clients/${client.client_id}/disconnect`)
-    toast('断开指令已发送')
+    toast('断开指令已发送', 'success')
     setTimeout(loadMT5Clients, 2000)
-  } catch (e) { apiErr('断开失败', e) }
+  } catch (e) {
+    const detail = e.response?.data?.detail || e.response?.data?.message || e.message || '未知错误'
+    toast(`断开失败: ${detail}`, 'error')
+    console.error('MT5断开失败', e)
+  }
 }
 
 async function deleteMT5(client) {
@@ -1437,11 +1537,14 @@ async function deleteMT5(client) {
 // ══════════════════════════════════════════
 const mt5Instances = ref([])
 const instancesLoading = ref(false)
+const instanceOperations = ref({}) // 跟踪每个实例的操作状态 { instance_id: { action: 'start', progress: 50 } }
 const showDeployModal = ref(false)
 const deploying = ref(false)
+const deployProgress = ref({ progress: 0, message: '' })
+const deployingForClient = ref(null)
 const deployForm = ref({
   instance_name: '',
-  server_ip: '54.249.66.53',
+  server_ip: '172.31.14.113',
   service_port: 8003,
   mt5_path: '',
   mt5_data_path: '',
@@ -1459,62 +1562,293 @@ async function loadMT5Instances() {
   finally { instancesLoading.value = false }
 }
 
-function openDeployInstance() {
+// 获取指定客户端的实例列表
+function getClientInstances(clientId) {
+  return mt5Instances.value.filter(inst => inst.client_id === clientId)
+}
+
+// 为客户端部署新实例
+function openDeployForClient(client) {
   deployForm.value = {
-    instance_name: '',
-    server_ip: '54.249.66.53',
+    instance_name: `${client.client_name}-实例`,
+    server_ip: '172.31.14.113',
     service_port: 8003,
-    mt5_path: '',
+    mt5_path: client.mt5_path,
     mt5_data_path: '',
     deploy_path: '',
     is_portable: false,
-    auto_start: true
+    auto_start: true,
+    client_id: client.client_id,
+    instance_type: getClientInstances(client.client_id).length === 0 ? 'primary' : 'backup'
   }
   showDeployModal.value = true
+  deployingForClient.value = client.client_id
+}
+
+// 切换活动实例（主备切换）
+async function switchToInstance(clientId, instanceId) {
+  if (!confirm('确定要切换到此实例吗？当前活动实例将被停止。')) return
+  try {
+    await api.post(`/api/v1/mt5/instances/client/${clientId}/switch`, null, {
+      params: { target_instance_id: instanceId }
+    })
+    toast('实例切换成功')
+    await loadMT5Instances()
+    await loadMT5Clients()
+  } catch (e) { apiErr('切换失败', e) }
 }
 
 async function deployInstance() {
   deploying.value = true
+  deployProgress.value = { progress: 0, message: '准备部署...' }
+
   try {
-    await api.post('/api/v1/mt5/instances', deployForm.value)
-    toast('实例部署成功')
-    showDeployModal.value = false
+    // 模拟进度更新
+    deployProgress.value = { progress: 10, message: '连接服务器...' }
+
+    // 如果是为客户端部署，使用客户端专用端点
+    const deployPromise = deployingForClient.value
+      ? api.post(`/api/v1/mt5/instances/client/${deployingForClient.value}/deploy`, deployForm.value, {
+          timeout: 120000 // 120秒超时，部署操作可能需要较长时间
+        })
+      : api.post('/api/v1/mt5/instances', deployForm.value, {
+          timeout: 120000
+        })
+
+    // 模拟进度更新
+    setTimeout(() => { deployProgress.value = { progress: 30, message: '创建实例配置...' } }, 500)
+    setTimeout(() => { deployProgress.value = { progress: 50, message: '部署MT5客户端...' } }, 2000)
+    setTimeout(() => { deployProgress.value = { progress: 70, message: '配置服务...' } }, 4000)
+    setTimeout(() => { deployProgress.value = { progress: 90, message: '启动服务...' } }, 6000)
+
+    await deployPromise
+
+    deployProgress.value = { progress: 100, message: '部署完成！' }
+    toast('实例部署成功', 'success')
+
+    // 等待一小段时间让用户看到100%进度，然后关闭模态框
+    setTimeout(() => {
+      showDeployModal.value = false
+      deployingForClient.value = null
+      deployProgress.value = { progress: 0, message: '' }
+    }, 800)
+
     await loadMT5Instances()
-  } catch (e) { apiErr('部署失败', e) }
+    if (mt5SelectedAccountId.value) {
+      await loadMT5Clients()
+    }
+  } catch (e) {
+    const status = e.response?.status
+    let detail = e.response?.data?.detail || e.response?.data?.message || e.message || '未知错误'
+
+    // 如果 detail 是数组（Pydantic 验证错误），提取有用信息
+    if (Array.isArray(detail)) {
+      const errors = detail.map(err => {
+        const field = err.loc ? err.loc.join('.') : 'unknown'
+        return `${field}: ${err.msg}`
+      }).join('; ')
+      detail = `参数验证失败: ${errors}`
+    }
+
+    if (status === 400) {
+      toast(`部署失败: ${detail}`, 'error')
+    } else if (status === 504 || e.code === 'ECONNABORTED') {
+      toast('部署操作超时，但可能仍在后台执行。请稍后刷新查看实例状态', 'warning')
+      setTimeout(loadMT5Instances, 5000)
+    } else {
+      toast(`部署失败: ${detail}`, 'error')
+    }
+    console.error('部署失败', e)
+    deployProgress.value = { progress: 0, message: '' }
+  }
   finally { deploying.value = false }
 }
 
 async function controlInstance(inst, action) {
-  try {
-    await api.post(`/api/v1/mt5/instances/${inst.instance_id}/control`, { action })
-    toast(`${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`)
-    await loadMT5Instances()
-  } catch (e) { apiErr('操作失败', e) }
-}
+  const actionText = action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'
+  const instanceId = inst.instance_id
 
-async function refreshInstanceStatus(inst) {
+  // 初始化进度
+  instanceOperations.value[instanceId] = {
+    action,
+    actionText,
+    progress: 0,
+    message: '正在连接远程服务器...'
+  }
+
+  // 模拟进度更新
+  const progressInterval = setInterval(() => {
+    if (instanceOperations.value[instanceId]) {
+      const current = instanceOperations.value[instanceId].progress
+      if (current < 90) {
+        instanceOperations.value[instanceId].progress = Math.min(current + 10, 90)
+
+        // 更新消息
+        if (current < 30) {
+          instanceOperations.value[instanceId].message = '正在连接远程服务器...'
+        } else if (current < 60) {
+          instanceOperations.value[instanceId].message = `正在执行${actionText}操作...`
+        } else {
+          instanceOperations.value[instanceId].message = '等待服务器响应...'
+        }
+      }
+    }
+  }, 1000)
+
   try {
-    await api.get(`/api/v1/mt5/instances/${inst.instance_id}/status`)
-    toast('状态已刷新')
-    await loadMT5Instances()
-  } catch (e) { apiErr('刷新失败', e) }
+    await api.post(`/api/v1/mt5/instances/${instanceId}/control`, { action }, {
+      timeout: 120000 // 120秒超时
+    })
+
+    // 操作成功
+    if (instanceOperations.value[instanceId]) {
+      instanceOperations.value[instanceId].progress = 100
+      instanceOperations.value[instanceId].message = `${actionText}成功`
+    }
+
+    toast(`${actionText}指令已发送`, 'success')
+
+    // 延迟清除进度并刷新
+    setTimeout(() => {
+      delete instanceOperations.value[instanceId]
+      loadMT5Instances()
+    }, 1500)
+
+  } catch (e) {
+    clearInterval(progressInterval)
+    const status = e.response?.status
+    const detail = e.response?.data?.detail || e.response?.data?.message || e.message || '未知错误'
+
+    // 检查是否是超时错误
+    const isTimeout = status === 504 ||
+                      e.code === 'ECONNABORTED' ||
+                      e.message?.includes('timeout') ||
+                      detail.includes('timeout')
+
+    if (isTimeout) {
+      if (instanceOperations.value[instanceId]) {
+        instanceOperations.value[instanceId].progress = 95
+        instanceOperations.value[instanceId].message = '操作超时，但可能仍在后台执行'
+      }
+      toast(`${actionText}操作超时。远程服务器可能无法访问，或操作仍在后台执行。请稍后刷新查看状态`, 'warning')
+
+      // 延迟清除进度并刷新
+      setTimeout(() => {
+        delete instanceOperations.value[instanceId]
+        loadMT5Instances()
+      }, 3000)
+    } else {
+      // 其他错误
+      if (instanceOperations.value[instanceId]) {
+        instanceOperations.value[instanceId].message = `${actionText}失败: ${detail}`
+      }
+      toast(`${actionText}失败: ${detail}`, 'error')
+
+      // 延迟清除进度
+      setTimeout(() => {
+        delete instanceOperations.value[instanceId]
+      }, 3000)
+    }
+    console.error(`实例${actionText}失败`, e)
+  } finally {
+    clearInterval(progressInterval)
+  }
 }
 
 async function deleteInstance(inst) {
-  if (!confirm(`确定要删除实例「${inst.instance_name}」吗？`)) return
+  if (!confirm(`确定要删除实例「${inst.instance_name}」吗？此操作不可恢复！`)) return
+
+  const instanceId = inst.instance_id
+
+  // 初始化进度
+  instanceOperations.value[instanceId] = {
+    action: 'delete',
+    actionText: '删除',
+    progress: 0,
+    message: '正在连接远程服务器...'
+  }
+
+  // 模拟进度更新
+  const progressInterval = setInterval(() => {
+    if (instanceOperations.value[instanceId]) {
+      const current = instanceOperations.value[instanceId].progress
+      if (current < 90) {
+        instanceOperations.value[instanceId].progress = Math.min(current + 15, 90)
+
+        // 更新消息
+        if (current < 30) {
+          instanceOperations.value[instanceId].message = '正在连接远程服务器...'
+        } else if (current < 60) {
+          instanceOperations.value[instanceId].message = '正在删除实例...'
+        } else {
+          instanceOperations.value[instanceId].message = '清理配置文件...'
+        }
+      }
+    }
+  }, 800)
+
   try {
-    await api.delete(`/api/v1/mt5/instances/${inst.instance_id}`)
-    toast('实例已删除')
-    await loadMT5Instances()
-  } catch (e) { apiErr('删除失败', e) }
+    await api.delete(`/api/v1/mt5/instances/${instanceId}`, {
+      timeout: 60000 // 60秒超时
+    })
+
+    clearInterval(progressInterval)
+
+    // 操作成功
+    if (instanceOperations.value[instanceId]) {
+      instanceOperations.value[instanceId].progress = 100
+      instanceOperations.value[instanceId].message = '删除成功'
+    }
+
+    toast('实例已删除', 'success')
+
+    // 延迟清除进度并刷新
+    setTimeout(() => {
+      delete instanceOperations.value[instanceId]
+      loadMT5Instances()
+    }, 1500)
+
+  } catch (e) {
+    clearInterval(progressInterval)
+    const status = e.response?.status
+    const detail = e.response?.data?.detail || e.response?.data?.message || e.message || '未知错误'
+
+    if (status === 504 || e.code === 'ECONNABORTED') {
+      if (instanceOperations.value[instanceId]) {
+        instanceOperations.value[instanceId].progress = 95
+        instanceOperations.value[instanceId].message = '操作超时，但可能仍在后台执行'
+      }
+      toast('删除操作超时，但指令可能已发送。请刷新页面查看状态', 'warning')
+
+      // 延迟清除进度并刷新
+      setTimeout(() => {
+        delete instanceOperations.value[instanceId]
+        loadMT5Instances()
+      }, 3000)
+    } else if (status === 404) {
+      if (instanceOperations.value[instanceId]) {
+        instanceOperations.value[instanceId].message = '实例不存在或已被删除'
+      }
+      toast('实例不存在或已被删除', 'error')
+
+      setTimeout(() => {
+        delete instanceOperations.value[instanceId]
+        loadMT5Instances()
+      }, 2000)
+    } else {
+      if (instanceOperations.value[instanceId]) {
+        instanceOperations.value[instanceId].message = `删除失败: ${detail}`
+      }
+      toast(`删除失败: ${detail}`, 'error')
+
+      setTimeout(() => {
+        delete instanceOperations.value[instanceId]
+      }, 3000)
+    }
+    console.error('删除实例失败', e)
+  }
 }
 
-function getInstanceBorderColor(status) {
-  if (status === 'running') return 'border-[#0ecb81]/40'
-  if (status === 'stopped') return 'border-border-primary'
-  if (status === 'error') return 'border-[#f6465d]/40'
-  return 'border-[#f0b90b]/40'
-}
 
 function getInstanceStatusClass(status) {
   return ({
@@ -1534,10 +1868,6 @@ onMounted(async () => {
   // 账户 tab 初始不加载（等用户切换到该 tab 再触发）
 })
 
-// 切换到 MT5 实例子页面时自动加载
-watch(mt5SubTab, (tab) => {
-  if (tab === 'instances' && !mt5Instances.value.length) loadMT5Instances()
-})
 </script>
 
 <style scoped>
