@@ -337,6 +337,15 @@
               <span class="text-text-tertiary">代理:</span>
               <span>{{ client.proxy_id ? `ID: ${client.proxy_id}` : '直连' }}</span>
             </div>
+            <div class="flex justify-between items-center">
+              <span class="text-text-tertiary">系统服务:</span>
+              <div @click="toggleSystemService(client)"
+                :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors flex-shrink-0',
+                  client.is_system_service ? 'bg-[#f0b90b]' : 'bg-gray-600']">
+                <span :class="['absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                  client.is_system_service ? 'translate-x-4' : 'translate-x-0.5']"/>
+              </div>
+            </div>
           </div>
 
           <!-- 连接统计 -->

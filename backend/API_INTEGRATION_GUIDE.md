@@ -74,7 +74,7 @@ curl -X POST "http://localhost:8000/api/v1/mt5/instances/client/1/deploy" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "instance_name": "Primary Instance",
-    "server_ip": "54.249.66.53",
+    "server_ip": "172.31.14.113",
     "service_port": 8003,
     "mt5_path": "C:/MT5/terminal.exe",
     "deploy_path": "C:/Services/MT5_Primary",

@@ -262,10 +262,13 @@ async function fetchAccountData() {
     const allAccounts = []
 
     if (data.accounts && data.accounts.length > 0) {
-      allAccounts.push(...data.accounts.map(acc => ({
-        ...acc,
-        is_active: acc.is_active !== undefined ? acc.is_active : true
-      })))
+      // 过滤系统服务账户（后端已过滤，前端双重保险）
+      allAccounts.push(...data.accounts
+        .filter(acc => !acc.is_system_service)
+        .map(acc => ({
+          ...acc,
+          is_active: acc.is_active !== undefined ? acc.is_active : true
+        })))
     }
 
     if (data.failed_accounts && data.failed_accounts.length > 0) {
