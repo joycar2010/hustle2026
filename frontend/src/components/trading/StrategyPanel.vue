@@ -843,7 +843,8 @@ watch(() => marketStore.lastMessage, (message) => {
     'strategy_execution_started',
     'strategy_execution_completed',
     'strategy_execution_error',
-    'strategy_order_executed'
+    'strategy_order_executed',
+    'strategy_orders_filled'
   ]
 
   if (!relevantTypes.includes(message.type)) return
@@ -878,6 +879,9 @@ watch(() => marketStore.lastMessage, (message) => {
       break
     case 'strategy_order_executed':
       handleOrderExecuted(message.data)
+      break
+    case 'strategy_orders_filled':
+      handleOrdersFilled(message.data)
       break
   }
 }, { deep: false }) // Shallow watch for better performance
@@ -1051,6 +1055,31 @@ function handleOrderExecuted(data) {
   refreshPositions()
 
   console.log(`[WebSocket] Order executed: Binance ${data.binance_filled}, Bybit ${data.bybit_filled}`)
+}
+
+function handleOrdersFilled(data) {
+  // Check if this message is for this strategy
+  if (data.strategy_id !== configId.value) return
+
+  console.log(`[WebSocket] Orders filled notification received: ${data.action}`)
+  console.log(`[WebSocket] Binance filled: ${data.binance_filled}, Bybit filled: ${data.bybit_filled}`)
+
+  // Immediately restore button state for better UX
+  // This allows the button to be re-enabled as soon as both sides complete trading,
+  // without waiting for the entire strategy execution flow to complete
+  if (data.action === 'opening') {
+    executingOpening.value = false
+    console.log('[WebSocket] Opening button restored')
+  } else if (data.action === 'closing') {
+    executingClosing.value = false
+    console.log('[WebSocket] Closing button restored')
+  }
+
+  // Also clear the global executing flag if no other strategy is running
+  if (!executingOpening.value && !executingClosing.value) {
+    executing.value = false
+    console.log('[WebSocket] All buttons restored')
+  }
 }
 
 function handleAccountBalanceUpdate(data) {

@@ -999,14 +999,21 @@ def register_order_watch(order_id: int) -> asyncio.Event:
     """注册一个订单监听。返回 asyncio.Event，成交/取消时会被 set()。"""
     ev = asyncio.Event()
     _order_fill_registry[order_id] = {"event": ev, "filled_qty": 0.0, "status": "NEW"}
-    logger.debug(f"[OrderWatch] Registered order {order_id}")
+    logger.info(f"[OrderWatch] ✓ 注册订单监听: order_id={order_id}, 等待 WebSocket 通知")
     return ev
 
 
 def unregister_order_watch(order_id: int):
     """注销订单监听，释放内存。"""
-    _order_fill_registry.pop(order_id, None)
-    logger.debug(f"[OrderWatch] Unregistered order {order_id}")
+    record = _order_fill_registry.pop(order_id, None)
+    if record:
+        logger.debug(
+            f"[OrderWatch] 注销订单监听: order_id={order_id}, "
+            f"final_status={record.get('status', 'UNKNOWN')}, "
+            f"filled_qty={record.get('filled_qty', 0)}"
+        )
+    else:
+        logger.debug(f"[OrderWatch] 注销订单监听: order_id={order_id} (未找到记录)")
 
 
 class BinancePositionPusher:
@@ -1135,13 +1142,19 @@ class BinancePositionPusher:
 
                 # 成功获取 listenKey，重置错误计数器
                 consecutive_errors = 0
-                logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
+                logger.info(
+                    f"[BinancePositionPusher] ✓ listenKey 创建成功: {api_key[:8]}…, "
+                    f"准备连接 WebSocket"
+                )
                 session = aiohttp.ClientSession()
 
                 async with session.ws_connect(
                     f"{ws_base}/{listen_key}", heartbeat=self.WS_HEARTBEAT_SEC
                 ) as ws:
-                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
+                    logger.info(
+                        f"[BinancePositionPusher] ✓ User Data Stream 已连接: {api_key[:8]}…, "
+                        f"开始接收订单和持仓更新"
+                    )
 
                     keepalive_task = asyncio.create_task(
                         self._keepalive_loop(client, listen_key)
@@ -1232,9 +1245,18 @@ class BinancePositionPusher:
                 if status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
                     record["event"].set()
                     logger.info(
-                        f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} "
-                        f"status={status} filled={cum_qty}"
+                        f"[OrderWatch] ✓ ORDER_TRADE_UPDATE order={oid} "
+                        f"status={status} filled={cum_qty} - WebSocket notification sent"
                     )
+                else:
+                    logger.debug(
+                        f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} "
+                        f"status={status} filled={cum_qty} - partial fill"
+                    )
+            else:
+                logger.debug(
+                    f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} not in registry, ignoring"
+                )
             return
 
         if event_type != "ACCOUNT_UPDATE":

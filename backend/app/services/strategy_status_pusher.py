@@ -339,6 +339,39 @@ class StrategyExecutionStatusPusher:
         }
         await self._push_queue.put(message)
 
+    async def push_orders_filled(
+        self,
+        strategy_id: int,
+        action: str,
+        binance_filled: float,
+        bybit_filled: float,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push orders filled event - sent immediately when both sides complete trading.
+        This allows the frontend to restore button state quickly without waiting for
+        the entire strategy execution flow to complete.
+
+        Args:
+            strategy_id: Strategy ID
+            action: Action type ('opening' or 'closing')
+            binance_filled: Binance filled quantity
+            bybit_filled: Bybit filled quantity
+            user_id: Optional user ID for targeted push
+        """
+        message = {
+            'type': 'strategy_orders_filled',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'binance_filled': binance_filled,
+                'bybit_filled': bybit_filled,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
     async def push_custom_event(
         self,
         strategy_id: int,
