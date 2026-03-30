@@ -94,7 +94,7 @@ class MT5AgentService:
         if server:
             data["server"] = server
 
-        return await self._http_request("/instances/deploy", method="POST", data=data)
+        return await self._http_request("/deploy", method="POST", data=data)
 
     async def start_instance(self, port: int) -> Dict[str, Any]:
         """启动 MT5 实例"""

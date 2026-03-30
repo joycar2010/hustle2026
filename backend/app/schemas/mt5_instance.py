@@ -51,6 +51,7 @@ class MT5InstanceResponse(MT5InstanceBase):
     instance_type: str
     status: str = Field(..., description="运行状态")
     is_active: bool
+    mt5_connected: Optional[bool] = Field(default=False, description="MT5客户端连接状态")
     created_at: datetime
     updated_at: datetime
     created_by: Optional[UUID] = None

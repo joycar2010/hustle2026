@@ -1,9 +1,9 @@
 """
 MT5客户端管理API
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update
 from typing import List, Optional
 import os
 import uuid
@@ -35,19 +35,26 @@ async def get_mt5_clients(
     try:
         logger.info(f"Getting MT5 clients for account {account_id}")
 
-        # 验证账户是否存在且属于当前用户
+        # 检查调用者是否是管理员
+        from app.models.user import User
+        ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+        user_result = await db.execute(select(User).where(User.user_id == user_id))
+        caller = user_result.scalar_one_or_none()
+        is_admin = caller is not None and caller.role in ADMIN_ROLES
+
+        # 验证账户是否存在
         result = await db.execute(
-            select(Account).where(
-                and_(
-                    Account.account_id == account_id,
-                    Account.user_id == uuid.UUID(user_id)
-                )
-            )
+            select(Account).where(Account.account_id == account_id)
         )
         account = result.scalar_one_or_none()
         if not account:
-            logger.warning(f"Account {account_id} not found for user {user_id}")
+            logger.warning(f"Account {account_id} not found")
             raise HTTPException(status_code=404, detail="Account not found")
+
+        # 非管理员只能访问自己的账户
+        if not is_admin and account.user_id != uuid.UUID(user_id):
+            logger.warning(f"User {user_id} attempted to access account {account_id} owned by {account.user_id}")
+            raise HTTPException(status_code=403, detail="Access denied")
 
         if not account.is_mt5_account:
             logger.warning(f"Account {account_id} is not an MT5 account")
@@ -406,3 +413,129 @@ async def get_all_mt5_clients(
     clients = result.scalars().all()
 
     return clients
+
+
+@router.patch("/mt5-clients/{client_id}/system-service")
+async def set_system_service(
+    client_id: int,
+    enabled: bool = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """设置MT5客户端为系统服务账户"""
+    # 获取客户端
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"MT5 client {client_id} not found"
+        )
+
+    # 如果设置为系统服务，先取消其他系统服务账户
+    if enabled:
+        await db.execute(
+            update(MT5Client)
+            .where(MT5Client.is_system_service == True)
+            .values(is_system_service=False)
+        )
+
+    # 更新目标客户端
+    client.is_system_service = enabled
+    await db.commit()
+    await db.refresh(client)
+
+    return {
+        "success": True,
+        "client_id": client_id,
+        "is_system_service": enabled
+    }
+
+
+@router.get("/mt5-clients/system-service/status")
+async def get_system_service_status(
+    db: AsyncSession = Depends(get_db)
+):
+    """获取系统服务MT5客户端状态"""
+    # 查询系统服务客户端
+    result = await db.execute(
+        select(MT5Client)
+        .where(MT5Client.is_system_service == True)
+        .where(MT5Client.is_active == True)
+        .limit(1)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        return {
+            "connected": False,
+            "mt5_login": "--",
+            "mt5_server": "--",
+            "balance": None,
+            "equity": None
+        }
+
+    # 获取关联的MT5实例
+    from app.models.mt5_instance import MT5Instance
+    instance_result = await db.execute(
+        select(MT5Instance)
+        .where(MT5Instance.client_id == client.client_id)
+        .where(MT5Instance.is_active == True)
+        .limit(1)
+    )
+    instance = instance_result.scalar_one_or_none()
+
+    if not instance:
+        return {
+            "connected": False,
+            "mt5_login": str(client.mt5_login),
+            "mt5_server": client.mt5_server,
+            "balance": None,
+            "equity": None
+        }
+
+    # 获取MT5桥接服务状态
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as http_client:
+            health_response = await http_client.get(
+                f"http://{instance.server_ip}:{instance.service_port}/health"
+            )
+            health_data = health_response.json()
+            mt5_connected = health_data.get("mt5", False)
+
+            # 如果MT5已连接，获取账户信息
+            balance = None
+            equity = None
+            if mt5_connected:
+                try:
+                    # 注意：这里需要API key，暂时跳过
+                    # account_response = await http_client.get(
+                    #     f"http://{instance.server_ip}:{instance.service_port}/mt5/account/info"
+                    # )
+                    # account_data = account_response.json()
+                    # balance = account_data.get("balance")
+                    # equity = account_data.get("equity")
+                    pass
+                except Exception:
+                    pass
+
+            return {
+                "connected": mt5_connected,
+                "mt5_login": str(client.mt5_login),
+                "mt5_server": client.mt5_server,
+                "balance": balance,
+                "equity": equity
+            }
+    except Exception as e:
+        logger.error(f"Failed to get system service status: {e}")
+        return {
+            "connected": False,
+            "mt5_login": str(client.mt5_login),
+            "mt5_server": client.mt5_server,
+            "balance": None,
+            "equity": None
+        }

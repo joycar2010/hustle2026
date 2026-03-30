@@ -19,7 +19,7 @@
     </div>
 
     <!-- ===== 服务器状态卡片行 ===== -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
 
       <!-- GO 服务器 -->
       <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online ? 'border-green-800/50' : 'border-red-800/50'">
@@ -61,7 +61,7 @@
         </div>
       </div>
 
-      <!-- MT5 桥接 System -->
+      <!-- MT5 系统账户 -->
       <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5System.online ? 'border-green-800/50' : 'border-red-800/50'">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">
@@ -82,19 +82,66 @@
           <div v-if="mt5System.balance != null" class="flex justify-between"><span>余额</span><span class="text-text-secondary font-mono">{{ mt5System.balance?.toFixed(2) }} UST</span></div>
         </div>
       </div>
+
+      <!-- Redis & WebSocket -->
+      <div class="bg-dark-100 rounded-xl p-4 border" :class="monitorData.redis?.connected ? 'border-green-800/50' : 'border-red-800/50'">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div :class="['w-2.5 h-2.5 rounded-full', monitorData.redis?.connected ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+            <span class="text-sm font-semibold text-text-primary">Redis</span>
+          </div>
+          <span class="text-xs px-2 py-0.5 rounded-full" :class="monitorData.redis?.connected ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+            {{ monitorData.redis?.connected ? '已连接' : '未连接' }}
+          </span>
+        </div>
+        <div class="text-xs text-text-tertiary space-y-1">
+          <div class="flex justify-between"><span>版本</span><span class="text-text-secondary">{{ monitorData.redis?.version || '--' }}</span></div>
+          <div class="flex justify-between"><span>内存</span><span class="text-text-secondary">{{ monitorData.redis?.used_memory_human || '--' }}</span></div>
+          <div class="flex justify-between"><span>客户端数</span><span class="text-text-secondary">{{ monitorData.redis?.connected_clients || '--' }}</span></div>
+          <div class="flex justify-between"><span>WebSocket</span>
+            <span class="text-green-400">正常</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SSL & 飞书 -->
+      <div class="bg-dark-100 rounded-xl p-4 border" :class="sslOverallOk ? 'border-green-800/50' : 'border-yellow-800/50'">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div :class="['w-2.5 h-2.5 rounded-full', sslOverallOk ? 'bg-green-500 animate-pulse' : 'bg-yellow-500']"></div>
+            <span class="text-sm font-semibold text-text-primary">SSL 证书</span>
+          </div>
+          <span class="text-xs px-2 py-0.5 rounded-full" :class="sslOverallOk ? 'bg-green-900/40 text-green-400' : 'bg-yellow-900/40 text-yellow-400'">
+            {{ sslOverallOk ? '正常' : '警告' }}
+          </span>
+        </div>
+        <div class="text-xs text-text-tertiary space-y-1">
+          <div v-if="monitorData.ssl_certificate?.length" class="space-y-0.5">
+            <div v-for="cert in monitorData.ssl_certificate.slice(0, 2)" :key="cert.cert_path" class="flex justify-between">
+              <span class="truncate max-w-[60%]">{{ cert.domain_names?.[0]?.split('.')[0] || '--' }}</span>
+              <span :class="sslDaysClass(cert.days_remaining)">{{ cert.exists ? cert.days_remaining + '天' : '--' }}</span>
+            </div>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-border-secondary"><span>飞书通知</span>
+            <span :class="monitorData.feishu?.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'">
+              {{ feishuText(monitorData.feishu?.status) }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- ===== 系统状态监控面板 ===== -->
+    <!-- ===== MT5 客户端状态面板 ===== -->
     <div class="bg-dark-100 rounded-xl border border-border-primary">
       <button
         @click="sysMonOpen = !sysMonOpen"
         class="w-full flex items-center justify-between px-5 py-4 border-b border-border-secondary hover:bg-dark-50 transition-colors"
       >
         <div class="flex items-center gap-2">
-          <div :class="['w-2.5 h-2.5 rounded-full', sysMonHealthy ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-          <h2 class="text-base font-semibold text-text-primary">系统状态监控</h2>
-          <span class="text-xs px-2 py-0.5 rounded-full" :class="sysMonHealthy ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-            {{ sysMonHealthy ? '全部正常' : '异常' }}
+          <div :class="['w-2.5 h-2.5 rounded-full', monitorData.mt5_clients?.some(c => c.online) ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+          <h2 class="text-base font-semibold text-text-primary">MT5 客户端状态</h2>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-dark-200 text-text-secondary">
+            {{ monitorData.mt5_clients?.filter(c=>c.online).length ?? 0 }}/{{ monitorData.mt5_clients?.length ?? 0 }} 在线
           </span>
         </div>
         <svg :class="['w-4 h-4 text-text-tertiary transition-transform', sysMonOpen ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -102,83 +149,60 @@
         </svg>
       </button>
 
-      <div v-if="sysMonOpen" class="p-5 space-y-4">
-        <!-- Redis -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2.5 h-2.5 rounded-full', monitorData.redis?.connected ? 'bg-green-500' : 'bg-red-500']"></div>
-              <span class="font-medium text-sm">Redis</span>
-            </div>
-            <span :class="['text-xs', monitorData.redis?.connected ? 'text-green-400' : 'text-red-400']">
-              {{ monitorData.redis?.connected ? '已连接' : '未连接' }}
-            </span>
-          </div>
-          <div v-if="monitorData.redis?.connected" class="grid grid-cols-3 gap-2 text-xs text-text-tertiary">
-            <div><span class="block">版本</span><span class="text-text-secondary">{{ monitorData.redis?.version || '--' }}</span></div>
-            <div><span class="block">内存</span><span class="text-text-secondary">{{ monitorData.redis?.used_memory_human || '--' }}</span></div>
-            <div><span class="block">客户端数</span><span class="text-text-secondary">{{ monitorData.redis?.connected_clients || '--' }}</span></div>
-          </div>
-          <div v-else-if="monitorData.redis?.error" class="text-xs text-red-400 mt-1">{{ monitorData.redis.error }}</div>
-        </div>
-
-        <!-- SSL 证书 -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div :class="['w-2.5 h-2.5 rounded-full', sslOverallOk ? 'bg-green-500' : 'bg-yellow-500']"></div>
-            <span class="font-medium text-sm">SSL 证书</span>
-          </div>
-          <div class="space-y-2">
-            <div v-for="cert in (monitorData.ssl_certificate || [])" :key="cert.cert_path"
-              class="flex items-center justify-between text-xs">
-              <span class="text-text-tertiary truncate max-w-[60%]">
-                {{ cert.domain_names?.[0] || cert.cert_path?.split('/').slice(-2,-1)[0] || '--' }}
+      <div v-if="sysMonOpen" class="p-5">
+        <div v-if="monitorData.mt5_clients?.length" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div v-for="c in monitorData.mt5_clients" :key="c.mt5_login"
+            class="bg-dark-200 rounded-lg p-4 border" :class="c.online ? 'border-green-800/30' : 'border-red-800/30'">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <div :class="['w-2.5 h-2.5 rounded-full', c.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
+                <span class="font-medium text-sm text-text-primary">{{ c.client_name }}</span>
+              </div>
+              <span class="text-xs px-2 py-0.5 rounded-full" :class="c.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+                {{ c.online ? '在线' : '离线' }}
               </span>
-              <div class="flex items-center gap-2">
-                <span :class="sslDaysClass(cert.days_remaining)">{{ cert.exists ? cert.days_remaining + '天' : '未找到' }}</span>
-                <span :class="sslStatusBadge(cert.status)" class="px-1.5 py-0.5 rounded text-xs">{{ sslStatusText(cert.status) }}</span>
+            </div>
+            <div class="text-xs text-text-tertiary space-y-1">
+              <div class="flex justify-between"><span>用户</span><span class="text-text-secondary">{{ c.username }}</span></div>
+              <div class="flex justify-between"><span>MT5 登录</span><span class="text-text-secondary font-mono">{{ c.mt5_login }}</span></div>
+              <div class="flex justify-between"><span>服务器</span><span class="text-text-secondary">{{ c.mt5_server || '--' }}</span></div>
+              <div v-if="c.connection_status" class="flex justify-between"><span>连接状态</span>
+                <span :class="c.connection_status === 'connected' ? 'text-green-400' : 'text-yellow-400'">
+                  {{ c.connection_status === 'connected' ? '已连接' : '未连接' }}
+                </span>
               </div>
+              <div class="flex justify-between"><span>进程状态</span>
+                <span :class="c.process_running ? 'text-green-400' : 'text-red-400'">
+                  {{ c.process_running ? '运行中' : '已停止' }}
+                </span>
+              </div>
+              <div v-if="c.last_connected_at" class="flex justify-between"><span>最后心跳</span>
+                <span class="text-text-secondary">{{ formatLastSeen(c.last_connected_at) }}</span>
+              </div>
+            </div>
+
+            <!-- 快速控制按钮 -->
+            <div class="flex gap-1.5 mt-2 pt-2 border-t border-border-secondary">
+              <button @click="restartMT5Instance(c)"
+                class="flex-1 py-1 bg-[#3dccc7]/10 hover:bg-[#3dccc7]/20 text-[#3dccc7] rounded text-xs border border-[#3dccc7]/20 transition-colors">
+                重启
+              </button>
+              <button @click="viewMT5Details(c)"
+                class="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
+                详情
+              </button>
             </div>
           </div>
         </div>
-
-        <!-- 飞书 -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2.5 h-2.5 rounded-full', monitorData.feishu?.status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500']"></div>
-              <span class="font-medium text-sm">飞书通知</span>
-            </div>
-            <span class="text-xs" :class="monitorData.feishu?.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'">
-              {{ feishuText(monitorData.feishu?.status) }}
-            </span>
-          </div>
+        <div v-else class="text-center text-text-tertiary py-8">
+          <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <p>暂无 MT5 客户端数据</p>
         </div>
-
-        <!-- MT5 客户端 -->
-        <div class="bg-dark-200 rounded-lg p-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div :class="['w-2.5 h-2.5 rounded-full', monitorData.mt5_clients?.some(c => c.online) ? 'bg-green-500' : 'bg-red-500']"></div>
-            <span class="font-medium text-sm">MT5 客户端</span>
-            <span class="text-xs text-text-tertiary">({{ monitorData.mt5_clients?.filter(c=>c.online).length ?? 0 }}/{{ monitorData.mt5_clients?.length ?? 0 }} 在线)</span>
-          </div>
-          <div v-if="monitorData.mt5_clients?.length" class="space-y-2">
-            <div v-for="c in monitorData.mt5_clients" :key="c.mt5_login"
-              class="flex items-center justify-between text-xs bg-dark-300 rounded px-3 py-2">
-              <div>
-                <span class="text-text-primary font-medium">{{ c.client_name }}</span>
-                <span class="text-text-tertiary ml-2">{{ c.username }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-text-tertiary font-mono">{{ c.mt5_login }}</span>
-                <span :class="c.online ? 'text-green-400' : 'text-red-400'">{{ c.online ? '在线' : '离线' }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-else class="text-xs text-text-tertiary">暂无 MT5 客户端数据</div>
+        <div class="text-xs text-text-tertiary text-right mt-4 pt-4 border-t border-border-secondary">
+          最后更新: {{ monitorData.timestamp ? new Date(monitorData.timestamp).toLocaleString('zh-CN') : '--' }}
         </div>
-
-        <div class="text-xs text-text-tertiary text-right">{{ monitorData.timestamp ? new Date(monitorData.timestamp).toLocaleString('zh-CN') : '--' }}</div>
       </div>
     </div>
 
@@ -361,6 +385,7 @@ const monitorData = ref({ redis: null, ssl_certificate: [], feishu: null, mt5_cl
 const perfData = ref({ system: {}, database: {}, mt5_bridge: {}, timestamp: null })
 
 let timer = null
+let mt5Timer = null  // MT5 客户端状态专用定时器
 
 // --- Computed ---
 const totals = computed(() => ({
@@ -527,9 +552,38 @@ function feishuText(s) {
   return { healthy: '正常', disabled: '已禁用', not_configured: '未配置' }[s] || s || '--'
 }
 
+function formatLastSeen(timestamp) {
+  if (!timestamp) return '--'
+  const now = new Date()
+  const then = new Date(timestamp)
+  const diffMs = now - then
+  const diffSec = Math.floor(diffMs / 1000)
+
+  if (diffSec < 60) return `${diffSec}秒前`
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}分钟前`
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}小时前`
+  return `${Math.floor(diffSec / 86400)}天前`
+}
+
+async function restartMT5Instance(client) {
+  // TODO: 实现重启功能
+  // 需要先获取实例信息，然后调用重启 API
+  console.log('Restart MT5 instance for client:', client.client_id)
+  alert('重启功能开发中，请前往用户管理页面操作')
+}
+
+function viewMT5Details(client) {
+  // 跳转到用户管理页面的 MT5 客户端 tab
+  window.location.href = '/users?tab=mt5&client=' + client.client_id
+}
+
 onMounted(() => {
   refreshAll()
-  timer = setInterval(refreshAll, 10000)
+  timer = setInterval(refreshAll, 10000)  // 10秒刷新全局状态
+  mt5Timer = setInterval(fetchMonitorStatus, 5000)  // 5秒刷新 MT5 客户端状态
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  clearInterval(mt5Timer)
+})
 </script>

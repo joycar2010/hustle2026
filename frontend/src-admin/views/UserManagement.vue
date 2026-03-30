@@ -368,14 +368,6 @@
 
           <!-- 操作 -->
           <div class="flex gap-2">
-            <button v-if="client.connection_status !== 'connected'" @click="connectMT5(client)"
-              class="flex-1 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs border border-primary/20 transition-colors">
-              连接
-            </button>
-            <button v-else @click="disconnectMT5(client)"
-              class="flex-1 py-1.5 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded-lg text-xs border border-[#f0b90b]/20 transition-colors">
-              断开
-            </button>
             <button @click="openEditMT5(client)"
               class="flex-1 py-1.5 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-xs border border-border-primary transition-colors">
               编辑
@@ -465,6 +457,10 @@
                 <button @click="controlInstance(inst, 'restart')"
                   class="flex-1 py-1 bg-[#3dccc7]/10 hover:bg-[#3dccc7]/20 text-[#3dccc7] rounded text-xs border border-[#3dccc7]/20 transition-colors">
                   重启
+                </button>
+                <button @click="editInstance(inst)"
+                  class="flex-1 py-1 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded text-xs border border-[#f0b90b]/20 transition-colors">
+                  编辑
                 </button>
                 <button @click="deleteInstance(inst)"
                   class="flex-1 py-1 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded text-xs border border-[#f6465d]/20 transition-colors">
@@ -810,7 +806,7 @@
       @click.self="showDeployModal = false">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
-          <h3 class="font-bold">部署新 MT5 客户端</h3>
+          <h3 class="font-bold">{{ deployForm.instance_id ? '编辑 MT5 实例' : '部署新 MT5 客户端' }}</h3>
           <button @click="showDeployModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
         </div>
         <form @submit.prevent="deployInstance" class="p-6 space-y-4">
@@ -1347,6 +1343,29 @@ async function toggleAccount(acc) {
 async function deleteAccount(acc) {
   if (acc.is_active) { toast('请先禁用账户再删除', 'error'); return }
   if (acc.is_default) { toast('请先取消默认设置再删除', 'error'); return }
+
+  // 检查是否有关联的MT5客户端
+  try {
+    const clientsResp = await api.get(`/api/v1/accounts/${acc.account_id}/mt5-clients`)
+    const clients = Array.isArray(clientsResp.data) ? clientsResp.data : (clientsResp.data?.clients ?? [])
+
+    if (clients.length > 0) {
+      // 检查是否有活跃或连接中的客户端
+      const activeClients = clients.filter(c => c.is_active || c.connection_status === 'connected')
+      if (activeClients.length > 0) {
+        toast(`无法删除：该账户有 ${activeClients.length} 个MT5客户端处于活跃或连接状态，请先停止并禁用这些客户端`, 'error')
+        return
+      }
+
+      // 有客户端但都已停止，需要确认
+      if (!confirm(`该账户有 ${clients.length} 个MT5客户端，删除账户将同时删除这些客户端。确定要继续吗？`)) {
+        return
+      }
+    }
+  } catch (e) {
+    console.error('检查MT5客户端失败', e)
+  }
+
   if (!confirm(`确定要删除账户「${acc.account_name}」吗？此操作不可恢复！`)) return
   try {
     await api.delete(`/api/v1/accounts/${acc.account_id}`)
@@ -1381,8 +1400,8 @@ async function onMt5UserChange() {
   try {
     const r = await api.get('/api/v1/accounts')
     const all = Array.isArray(r.data) ? r.data : (r.data?.accounts ?? [])
-    // 只显示 Bybit / MT5 账户
-    mt5Accounts.value = all.filter(a => a.platform_id === 2)
+    // 只显示当前用户的 Bybit / MT5 账户
+    mt5Accounts.value = all.filter(a => a.platform_id === 2 && a.user_id === mt5SelectedUserId.value)
   } catch (e) { apiErr('加载账户失败', e) }
 }
 
@@ -1493,6 +1512,40 @@ async function toggleMT5Active(client) {
   } catch (e) { apiErr('切换失败', e) }
 }
 
+async function toggleSystemService(client) {
+  try {
+    const newValue = !client.is_system_service
+
+    // 如果要开启系统服务，先确认
+    if (newValue) {
+      const confirmed = confirm(
+        '系统只允许一个平台账号开启一个账号作为系统服务使用。\n' +
+        '设置此账号为系统服务后，其他系统服务账号将自动取消。\n\n' +
+        '确定要继续吗？'
+      )
+      if (!confirmed) return
+    }
+
+    await api.patch(`/api/v1/mt5-clients/${client.client_id}/system-service`, {
+      enabled: newValue
+    })
+
+    toast(
+      newValue
+        ? '已设为系统服务账户（系统只允许一个平台账号开启一个账号作为系统服务使用）'
+        : '已恢复为普通账户',
+      'success'
+    )
+
+    // 重新加载数据以更新UI状态
+    await loadMT5Clients()
+  } catch (e) {
+    const detail = e.response?.data?.detail || e.response?.data?.message || e.message || '未知错误'
+    toast(`设置失败: ${detail}`, 'error')
+    console.error('系统服务设置失败', e)
+  }
+}
+
 async function connectMT5(client) {
   try {
     await api.post(`/api/v1/mt5-clients/${client.client_id}/connect`)
@@ -1547,6 +1600,8 @@ async function deleteMT5(client) {
 const mt5Instances = ref([])
 const instancesLoading = ref(false)
 const instanceOperations = ref({}) // 跟踪每个实例的操作状态 { instance_id: { action: 'start', progress: 50 } }
+let instancePollingTimer = null  // 实例状态轮询定时器
+let pollingActive = false  // 轮询是否激活
 const showDeployModal = ref(false)
 const deploying = ref(false)
 const deployProgress = ref({ progress: 0, message: '' })
@@ -1615,25 +1670,36 @@ async function deployInstance() {
     // 模拟进度更新
     deployProgress.value = { progress: 10, message: '连接服务器...' }
 
-    // 如果是为客户端部署，使用客户端专用端点
-    const deployPromise = deployingForClient.value
-      ? api.post(`/api/v1/mt5/instances/client/${deployingForClient.value}/deploy`, deployForm.value, {
-          timeout: 120000 // 120秒超时，部署操作可能需要较长时间
-        })
-      : api.post('/api/v1/mt5/instances', deployForm.value, {
-          timeout: 120000
-        })
+    // 判断是编辑还是新建
+    const isEdit = !!deployForm.value.instance_id
+    let deployPromise
+
+    if (isEdit) {
+      // 编辑模式：使用 PUT 更新实例
+      deployPromise = api.put(`/api/v1/mt5/instances/${deployForm.value.instance_id}`, deployForm.value, {
+        timeout: 120000
+      })
+    } else {
+      // 新建模式：如果是为客户端部署，使用客户端专用端点
+      deployPromise = deployingForClient.value
+        ? api.post(`/api/v1/mt5/instances/client/${deployingForClient.value}/deploy`, deployForm.value, {
+            timeout: 120000 // 120秒超时，部署操作可能需要较长时间
+          })
+        : api.post('/api/v1/mt5/instances', deployForm.value, {
+            timeout: 120000
+          })
+    }
 
     // 模拟进度更新
-    setTimeout(() => { deployProgress.value = { progress: 30, message: '创建实例配置...' } }, 500)
-    setTimeout(() => { deployProgress.value = { progress: 50, message: '部署MT5客户端...' } }, 2000)
+    setTimeout(() => { deployProgress.value = { progress: 30, message: isEdit ? '更新实例配置...' : '创建实例配置...' } }, 500)
+    setTimeout(() => { deployProgress.value = { progress: 50, message: isEdit ? '应用配置...' : '部署MT5客户端...' } }, 2000)
     setTimeout(() => { deployProgress.value = { progress: 70, message: '配置服务...' } }, 4000)
-    setTimeout(() => { deployProgress.value = { progress: 90, message: '启动服务...' } }, 6000)
+    setTimeout(() => { deployProgress.value = { progress: 90, message: isEdit ? '重启服务...' : '启动服务...' } }, 6000)
 
     await deployPromise
 
-    deployProgress.value = { progress: 100, message: '部署完成！' }
-    toast('实例部署成功', 'success')
+    deployProgress.value = { progress: 100, message: isEdit ? '更新完成！' : '部署完成！' }
+    toast(isEdit ? '实例更新成功' : '实例部署成功', 'success')
 
     // 等待一小段时间让用户看到100%进度，然后关闭模态框
     setTimeout(() => {
@@ -1676,6 +1742,9 @@ async function deployInstance() {
 async function controlInstance(inst, action) {
   const actionText = action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'
   const instanceId = inst.instance_id
+
+  // 启动快速轮询
+  startInstancePolling()
 
   // 初始化进度
   instanceOperations.value[instanceId] = {
@@ -1721,6 +1790,10 @@ async function controlInstance(inst, action) {
     setTimeout(() => {
       delete instanceOperations.value[instanceId]
       loadMT5Instances()
+      // 检查是否还有其他操作，如果没有则停止快速轮询
+      if (Object.keys(instanceOperations.value).length === 0) {
+        stopInstancePolling()
+      }
     }, 1500)
 
   } catch (e) {
@@ -1745,6 +1818,9 @@ async function controlInstance(inst, action) {
       setTimeout(() => {
         delete instanceOperations.value[instanceId]
         loadMT5Instances()
+        if (Object.keys(instanceOperations.value).length === 0) {
+          stopInstancePolling()
+        }
       }, 3000)
     } else {
       // 其他错误
@@ -1756,6 +1832,9 @@ async function controlInstance(inst, action) {
       // 延迟清除进度
       setTimeout(() => {
         delete instanceOperations.value[instanceId]
+        if (Object.keys(instanceOperations.value).length === 0) {
+          stopInstancePolling()
+        }
       }, 3000)
     }
     console.error(`实例${actionText}失败`, e)
@@ -1764,7 +1843,76 @@ async function controlInstance(inst, action) {
   }
 }
 
+function startInstancePolling() {
+  if (pollingActive) return
+
+  pollingActive = true
+  console.log('Started fast polling (3s interval)')
+
+  // 立即刷新一次
+  loadMT5Instances()
+
+  // 启动 3 秒轮询
+  instancePollingTimer = setInterval(() => {
+    if (mt5SelectedAccountId.value) {
+      loadMT5Instances()
+    }
+  }, 3000)
+
+  // 30 秒后自动停止快速轮询
+  setTimeout(() => {
+    if (pollingActive && Object.keys(instanceOperations.value).length === 0) {
+      stopInstancePolling()
+    }
+  }, 30000)
+}
+
+function stopInstancePolling() {
+  if (!pollingActive) return
+
+  pollingActive = false
+  if (instancePollingTimer) {
+    clearInterval(instancePollingTimer)
+    instancePollingTimer = null
+  }
+  console.log('Stopped fast polling')
+}
+
+function editInstance(inst) {
+  // 填充表单数据
+  deployForm.value = {
+    instance_name: inst.instance_name,
+    server_ip: inst.server_ip || '172.31.14.113',
+    service_port: inst.service_port || 8003,
+    mt5_path: inst.mt5_path || '',
+    mt5_data_path: inst.mt5_data_path || '',
+    deploy_path: inst.deploy_path || '',
+    is_portable: inst.is_portable || false,
+    auto_start: inst.auto_start !== false,
+    client_id: inst.client_id,
+    instance_type: inst.instance_type || 'primary',
+    instance_id: inst.instance_id // 用于标识是编辑模式
+  }
+  deployingForClient.value = mt5Clients.value.find(c => c.client_id === inst.client_id)
+  showDeployModal.value = true
+}
+
 async function deleteInstance(inst) {
+  // 检查实例状态，禁止删除运行中或重启中的实例
+  if (inst.status === 'running') {
+    toast('无法删除：实例正在运行中，请先停止实例', 'error')
+    return
+  }
+
+  // 检查是否有正在进行的操作
+  if (instanceOperations.value[inst.instance_id]) {
+    const operation = instanceOperations.value[inst.instance_id]
+    if (operation.action === 'restart' || operation.action === 'start') {
+      toast('无法删除：实例正在执行操作中，请等待操作完成', 'error')
+      return
+    }
+  }
+
   if (!confirm(`确定要删除实例「${inst.instance_name}」吗？此操作不可恢复！`)) return
 
   const instanceId = inst.instance_id

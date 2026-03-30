@@ -33,6 +33,7 @@ from app.services.strategy_status_pusher import status_pusher
 from app.services.mt5_bridge import mt5_bridge
 from app.services.order_recovery_service import order_recovery_service
 from app.services.feishu_service import init_feishu_service
+from app.services.mt5_sync_service import mt5_sync_service
 from app.models.notification_config import NotificationConfig
 from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
@@ -134,6 +135,7 @@ async def init_mt5_and_monitoring():
         await binance_position_pusher.start()  # Binance User Data Stream，<100ms 持仓更新
         await mt5_bridge.start()
         await position_monitor.start_monitoring()
+        await mt5_sync_service.start()  # 启动 MT5 状态同步服务
         app_state["mt5_services_ready"] = True
         logger.info("MT5 and monitoring services initialized successfully")
     except Exception as e:
@@ -217,6 +219,7 @@ async def lifespan(app: FastAPI):
         await position_monitor.stop_monitoring()
         await market_data_service.stop()
         await status_pusher.stop()
+        await mt5_sync_service.stop()  # 停止 MT5 状态同步服务
         await timing_config_subscriber.stop()
         await redis_monitor.stop()
         await redis_client.disconnect()

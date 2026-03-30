@@ -23,13 +23,59 @@ class MarketDataService:
             api_key=settings.BINANCE_API_KEY,
             api_secret=settings.BINANCE_API_SECRET
         )
-        self.mt5_client = MT5Client(
-            login=int(settings.BYBIT_MT5_ID) if settings.BYBIT_MT5_ID else 0,
-            password=settings.BYBIT_MT5_PASSWORD,
-            server=settings.BYBIT_MT5_SERVER
-        )
+        # MT5 client will be initialized lazily from database
+        self.mt5_client: Optional[MT5Client] = None
+        self._mt5_initialized = False
         self.redis_client: Optional[redis.Redis] = None
         self.cache_ttl = 1  # Cache TTL in seconds
+
+    async def _ensure_mt5_client(self):
+        """Ensure MT5 client is initialized from system service account"""
+        if self._mt5_initialized and self.mt5_client:
+            return
+
+        try:
+            # Import here to avoid circular dependency
+            from app.core.database import async_session_maker
+            from app.models.mt5_client import MT5Client as MT5ClientModel
+            from sqlalchemy import select
+
+            async with async_session_maker() as db:
+                # Get system service MT5 client
+                result = await db.execute(
+                    select(MT5ClientModel)
+                    .where(MT5ClientModel.is_system_service == True)
+                    .where(MT5ClientModel.is_active == True)
+                    .limit(1)
+                )
+                client = result.scalar_one_or_none()
+
+                if client:
+                    logger.info(f"Initializing MT5 client from system service account: {client.mt5_login}")
+                    self.mt5_client = MT5Client(
+                        login=int(client.mt5_login),
+                        password=client.mt5_password,
+                        server=client.mt5_server
+                    )
+                else:
+                    # Fallback to environment variables
+                    logger.warning("No system service account found, using environment variables")
+                    self.mt5_client = MT5Client(
+                        login=int(settings.BYBIT_MT5_ID) if settings.BYBIT_MT5_ID else 0,
+                        password=settings.BYBIT_MT5_PASSWORD,
+                        server=settings.BYBIT_MT5_SERVER
+                    )
+
+                self._mt5_initialized = True
+        except Exception as e:
+            logger.error(f"Failed to initialize MT5 client from database: {e}")
+            # Fallback to environment variables
+            self.mt5_client = MT5Client(
+                login=int(settings.BYBIT_MT5_ID) if settings.BYBIT_MT5_ID else 0,
+                password=settings.BYBIT_MT5_PASSWORD,
+                server=settings.BYBIT_MT5_SERVER
+            )
+            self._mt5_initialized = True
 
     async def _get_redis(self) -> redis.Redis:
         """Get or create Redis connection"""
@@ -40,7 +86,8 @@ class MarketDataService:
     async def close(self):
         """Close all connections"""
         await self.binance_client.close()
-        self.mt5_client.disconnect()
+        if self.mt5_client:
+            self.mt5_client.disconnect()
         if self.redis_client:
             await self.redis_client.close()
 

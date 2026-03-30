@@ -1,16 +1,24 @@
 """系统监控API路由"""
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime
 from pathlib import Path
 import subprocess
 import redis
 import requests
+import httpx
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user_id_optional
+from app.core.database import get_db
+from app.models.mt5_client import MT5Client
+from app.models.mt5_instance import MT5Instance
+from app.models.account import Account
+from app.models.user import User
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -153,17 +161,82 @@ def check_nginx_ssl_certificate() -> Dict[str, Any]:
         }
 
 
+async def check_mt5_clients_status(db: AsyncSession) -> List[Dict[str, Any]]:
+    """检查所有 MT5 客户端状态"""
+    try:
+        # 获取所有活跃的 MT5 客户端（排除系统服务账户）
+        result = await db.execute(
+            select(MT5Client, Account, User)
+            .join(Account, MT5Client.account_id == Account.account_id)
+            .join(User, Account.user_id == User.user_id)
+            .where(MT5Client.is_active == True)
+            .where(MT5Client.is_system_service == False)
+        )
+        clients_data = result.all()
+
+        client_statuses = []
+        for client, account, user in clients_data:
+            # 获取关联的实例
+            instance_result = await db.execute(
+                select(MT5Instance)
+                .where(MT5Instance.client_id == client.client_id)
+                .where(MT5Instance.is_active == True)
+                .limit(1)
+            )
+            instance = instance_result.scalar_one_or_none()
+
+            # 检查进程状态
+            process_running = False
+            mt5_connected = False
+            if instance:
+                try:
+                    # 调用 Windows Agent 检查进程健康
+                    async with httpx.AsyncClient(timeout=2.0) as http_client:
+                        health_resp = await http_client.get(
+                            f"http://{instance.server_ip}:9000/instances/{instance.service_port}/health"
+                        )
+                        if health_resp.status_code == 200:
+                            health_data = health_resp.json()
+                            process_running = health_data.get("running", False)
+                            mt5_connected = health_data.get("mt5_connected", False)
+                except Exception as e:
+                    logger.debug(f"Failed to check instance health for client {client.client_id}: {e}")
+
+            client_statuses.append({
+                "client_id": str(client.client_id),
+                "client_name": client.client_name,
+                "mt5_login": str(client.mt5_login),
+                "mt5_server": client.mt5_server,
+                "connection_status": client.connection_status,
+                "online": client.connection_status == "connected" and mt5_connected,
+                "process_running": process_running,
+                "last_connected_at": client.last_connected_at.isoformat() if client.last_connected_at else None,
+                "username": user.username if user else None,
+            })
+
+        return client_statuses
+
+    except Exception as e:
+        logger.error(f"检查 MT5 客户端状态失败: {e}")
+        return []
+
+
 @router.get("/status")
 async def get_system_status(
-    current_user_id: Optional[str] = Depends(get_current_user_id_optional)
+    current_user_id: Optional[str] = Depends(get_current_user_id_optional),
+    db: AsyncSession = Depends(get_db)
 ):
-    """获取系统各组件状态"""
+    """获取系统各组件状态（包含 MT5 客户端状态）"""
     try:
+        # 获取 MT5 客户端状态
+        mt5_clients = await check_mt5_clients_status(db)
+
         return {
             "timestamp": datetime.utcnow().isoformat(),
             "redis": check_redis_status(),
             "feishu": check_feishu_status(),
-            "ssl_certificate": check_nginx_ssl_certificate()
+            "ssl_certificate": [check_nginx_ssl_certificate()],  # 返回数组以保持兼容性
+            "mt5_clients": mt5_clients
         }
     except Exception as e:
         logger.error(f"获取系统状态失败: {e}")

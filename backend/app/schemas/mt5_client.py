@@ -11,7 +11,7 @@ import os
 class MT5ClientBase(BaseModel):
     """MT5客户端基础Schema"""
     client_name: str = Field(..., min_length=1, max_length=100, description="客户端名称")
-    mt5_path: str = Field(..., min_length=1, max_length=500, description="MT5可执行文件路径")
+    mt5_path: Optional[str] = Field(None, max_length=500, description="MT5可执行文件路径")
     mt5_data_path: Optional[str] = Field(None, max_length=500, description="MT5数据目录路径")
     mt5_login: str = Field(..., min_length=1, max_length=100, description="MT5账号")
     mt5_password: str = Field(..., min_length=1, max_length=256, description="MT5密码")
@@ -25,13 +25,6 @@ class MT5ClientBase(BaseModel):
     def validate_password_type(cls, v):
         if v not in ['primary', 'readonly']:
             raise ValueError('password_type must be primary or readonly')
-        return v
-
-    @validator('mt5_path')
-    def validate_mt5_path(cls, v):
-        """验证MT5路径格式"""
-        if not v.endswith('.exe') and not v.endswith('terminal64'):
-            raise ValueError('MT5 path must point to an executable file')
         return v
 
 
@@ -65,6 +58,7 @@ class MT5ClientResponse(MT5ClientBase):
     client_id: int
     account_id: UUID
     connection_status: str
+    is_system_service: bool = Field(default=False, description="是否为系统服务账户")
     last_connected_at: Optional[datetime] = None
     last_disconnected_at: Optional[datetime] = None
     total_connections: int = 0
