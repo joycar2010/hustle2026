@@ -332,7 +332,7 @@ app.include_router(timing_configs.router, prefix="/api/v1", tags=["时间配置�
 app.include_router(arbitrage_opportunities.router, prefix="/api/v1", tags=["套利机会"])
 app.include_router(proxies.router, prefix="/api/v1", tags=["代理管理"])
 app.include_router(mt5_clients.router, prefix="/api/v1", tags=["MT5客户端管理"])
-app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])
+# app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])  # Module not found
 app.include_router(mt5_server.router, prefix="/api/v1", tags=["MT5服务器状态"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
