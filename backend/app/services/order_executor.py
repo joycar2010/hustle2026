@@ -1,6 +1,11 @@
 """Order executor service for placing and managing orders"""
 import asyncio
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None
+    MT5_AVAILABLE = False
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 from uuid import UUID, uuid4

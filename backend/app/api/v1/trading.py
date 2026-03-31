@@ -14,7 +14,12 @@ from app.models.account import Account
 # from app.services.order_executor import order_executor
 from app.services.market_service import market_data_service
 import asyncio
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None
+    MT5_AVAILABLE = False
 import logging
 import uuid
 
