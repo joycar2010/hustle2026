@@ -214,9 +214,12 @@ const hasAlerts = computed(() => {
          healthStatus.value.memory_high
 })
 
-// 从 client_name 生成实例名称
+// 使用 agent_instance_name 字段，如果没有则从 client_name 生成
 const instanceName = computed(() => {
-  // 将中文和特殊字符转换为下划线
+  if (props.client.agent_instance_name) {
+    return props.client.agent_instance_name
+  }
+  // 回退：将中文和特殊字符转换为下划线
   return props.client.client_name
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '_')

@@ -1,0 +1,19 @@
+{
+  "agent": {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "api_key": "hustle2026_mt5_agent_secure_key_2024"
+  },
+  "backend": {
+    "url": "https://admin.hustle2026.xyz",
+    "username": "admin",
+    "password": "Hustle@2026"
+  },
+  "monitoring": {
+    "enabled": true,
+    "interval_seconds": 30,
+    "cpu_threshold": 95.0,
+    "memory_threshold": 90.0,
+    "freeze_check_count": 10
+  }
+}

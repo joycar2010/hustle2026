@@ -1,0 +1,9 @@
+{
+  "bybit_system_service": {
+    "path": "C:\\Program Files\\Bybit MT5\\terminal64.exe",
+    "account": "3971962",
+    "password": "Bybit@2024",
+    "server": "Bybit-Live-2",
+    "portable_mode": false
+  }
+}

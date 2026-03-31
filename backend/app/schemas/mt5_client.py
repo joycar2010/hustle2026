@@ -11,8 +11,6 @@ import os
 class MT5ClientBase(BaseModel):
     """MT5客户端基础Schema"""
     client_name: str = Field(..., min_length=1, max_length=100, description="客户端名称")
-    mt5_path: Optional[str] = Field(None, max_length=500, description="MT5可执行文件路径")
-    mt5_data_path: Optional[str] = Field(None, max_length=500, description="MT5数据目录路径")
     mt5_login: str = Field(..., min_length=1, max_length=100, description="MT5账号")
     mt5_password: str = Field(..., min_length=1, max_length=256, description="MT5密码")
     mt5_server: str = Field(..., min_length=1, max_length=100, description="MT5服务器地址")
@@ -20,6 +18,7 @@ class MT5ClientBase(BaseModel):
     proxy_id: Optional[int] = Field(None, description="绑定的代理ID")
     is_active: bool = Field(default=True, description="是否启用")
     priority: int = Field(default=0, ge=0, description="优先级（数字越小优先级越高）")
+    agent_instance_name: Optional[str] = Field(None, max_length=100, description="Windows Agent实例名称")
 
     @validator('password_type')
     def validate_password_type(cls, v):
@@ -36,8 +35,6 @@ class MT5ClientCreate(MT5ClientBase):
 class MT5ClientUpdate(BaseModel):
     """更新MT5客户端"""
     client_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    mt5_path: Optional[str] = Field(None, min_length=1, max_length=500)
-    mt5_data_path: Optional[str] = Field(None, max_length=500)
     mt5_login: Optional[str] = Field(None, min_length=1, max_length=100)
     mt5_password: Optional[str] = Field(None, min_length=1, max_length=256)
     mt5_server: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -45,6 +42,7 @@ class MT5ClientUpdate(BaseModel):
     proxy_id: Optional[int] = None
     is_active: Optional[bool] = None
     priority: Optional[int] = Field(None, ge=0)
+    agent_instance_name: Optional[str] = Field(None, max_length=100)
 
     @validator('password_type')
     def validate_password_type(cls, v):

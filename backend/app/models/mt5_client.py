@@ -17,15 +17,14 @@ class MT5Client(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey('accounts.account_id', ondelete='CASCADE'), nullable=False, comment='关联的MT5账户')
     client_name = Column(String(100), nullable=False, comment='客户端名称')
 
-    # MT5安装配置
-    mt5_path = Column(String(500), nullable=False, comment='MT5可执行文件路径')
-    mt5_data_path = Column(String(500), nullable=True, comment='MT5数据目录路径')
-
     # 登录凭证
     mt5_login = Column(String(100), nullable=False, comment='MT5账号')
     mt5_password = Column(String(256), nullable=False, comment='MT5密码（加密）')
     mt5_server = Column(String(100), nullable=False, comment='MT5服务器地址')
     password_type = Column(String(20), nullable=False, default='primary', comment='密码类型: primary/readonly')
+
+    # Windows Agent配置
+    agent_instance_name = Column(String(100), nullable=True, comment='Windows Agent实例名称')
 
     # 代理配置
     proxy_id = Column(Integer, ForeignKey('proxy_pool.id', ondelete='SET NULL'), nullable=True, comment='绑定的代理')
