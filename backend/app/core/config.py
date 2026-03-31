@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     MT5_DEFAULT_SYMBOL: str = "XAUUSD+"  # Default trading symbol for MT5
     MT5_DEFAULT_SYMBOLS: List[str] = ["XAUUSD+"]  # List of default symbols to monitor
 
+    # MT5 Windows Agent
+    MT5_AGENT_URL: str = "http://172.31.14.113:8765"
+    MT5_AGENT_API_KEY: str = ""
+
     # System
     APP_NAME: str = "Hustle2026"
     APP_VERSION: str = "1.0.0"
