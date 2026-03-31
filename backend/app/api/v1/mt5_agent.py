@@ -105,10 +105,10 @@ async def start_instance(
         操作结果
     """
     # 权限检查
-    if current_user["role"] not in ["超级管理员", "系统管理员", "管理员"]:
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
-    logger.info(f"User {current_user['username']} starting instance {instance_name}")
+    logger.info(f"User {current_user.username} starting instance {instance_name}")
 
     return await call_agent_api(
         "POST",
@@ -133,10 +133,10 @@ async def stop_instance(
         操作结果
     """
     # 权限检查
-    if current_user["role"] not in ["超级管理员", "系统管理员", "管理员"]:
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
-    logger.info(f"User {current_user['username']} stopping instance {instance_name}")
+    logger.info(f"User {current_user.username}} stopping instance {instance_name}")
 
     return await call_agent_api(
         "POST",
@@ -161,10 +161,10 @@ async def restart_instance(
         操作结果
     """
     # 权限检查
-    if current_user["role"] not in ["超级管理员", "系统管理员", "管理员"]:
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
-    logger.info(f"User {current_user['username']} restarting instance {instance_name}")
+    logger.info(f"User {current_user.username}} restarting instance {instance_name}")
 
     return await call_agent_api(
         "POST",
@@ -187,10 +187,10 @@ async def create_instance(
         操作结果
     """
     # 权限检查
-    if current_user["role"] not in ["超级管理员", "系统管理员"]:
+    if current_user.role not in ["超级管理员", "系统管理员"]:
         raise HTTPException(status_code=403, detail="需要系统管理员权限")
 
-    logger.info(f"User {current_user['username']} creating/updating instance")
+    logger.info(f"User {current_user.username}} creating/updating instance")
 
     return await call_agent_api(
         "POST",
@@ -213,10 +213,10 @@ async def delete_instance(
         操作结果
     """
     # 权限检查
-    if current_user["role"] not in ["超级管理员", "系统管理员"]:
+    if current_user.role not in ["超级管理员", "系统管理员"]:
         raise HTTPException(status_code=403, detail="需要系统管理员权限")
 
-    logger.info(f"User {current_user['username']} deleting instance {instance_name}")
+    logger.info(f"User {current_user.username}} deleting instance {instance_name}")
 
     return await call_agent_api(
         "DELETE",
