@@ -20,7 +20,7 @@ import gc
 from app.core.config import settings
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_server, mt5_instances
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_server, mt5_instances, mt5_agent
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher
 from app.tasks.redis_monitor import redis_monitor
@@ -335,6 +335,7 @@ app.include_router(mt5_clients.router, prefix="/api/v1", tags=["MT5客户端管�
 app.include_router(mt5_instances.router, prefix="/api/v1", tags=["MT5实例管理"])
 # app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])  # Module not found
 app.include_router(mt5_server.router, prefix="/api/v1", tags=["MT5服务器状态"])
+app.include_router(mt5_agent.router, prefix="/api/v1/mt5-agent", tags=["MT5 Agent控制"])
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds

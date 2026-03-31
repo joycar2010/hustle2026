@@ -384,6 +384,9 @@
             + 部署客户端
           </button>
 
+          <!-- MT5 客户端控制 -->
+          <MT5ControlCard :client="client" />
+
           <!-- 该客户端的实例列表 -->
           <div v-if="getClientInstances(client.client_id).length > 0" class="space-y-2 pt-2 border-t border-border-secondary">
             <div class="text-xs text-text-tertiary font-medium mb-2">MT5客户端</div>
@@ -990,6 +993,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
 import PasswordInput from '@/components/PasswordInput.vue'
+import MT5ControlCard from '@/components/MT5ControlCard.vue'
 
 // ── Tabs ──────────────────────────────────────────────────────
 const tabs = [

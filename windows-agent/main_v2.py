@@ -68,14 +68,155 @@ def get_process_by_port(port: int) -> Optional[psutil.Process]:
     return None
 
 
+def is_mt5_running_by_path(mt5_path: str) -> bool:
+    """
+    检查指定路径的 MT5 实例是否正在运行（精准判断，避免误判）
+
+    Args:
+        mt5_path: MT5 可执行文件的绝对路径
+
+    Returns:
+        True 如果该实例正在运行，否则 False
+    """
+    target_path = os.path.normpath(mt5_path).lower()
+    for proc in psutil.process_iter(['name', 'exe']):
+        try:
+            if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                proc_path = os.path.normpath(proc.info['exe']).lower()
+                if proc_path == target_path:
+                    return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    return False
+
+
+def start_mt5_in_user_session(mt5_path: str) -> Optional[psutil.Process]:
+    """
+    在用户会话中启动 MT5 客户端（显示 GUI）
+
+    使用 PowerShell Start-Process 方法，确保 MT5 在当前会话中启动并显示窗口
+
+    Args:
+        mt5_path: MT5 可执行文件的绝对路径
+
+    Returns:
+        psutil.Process 对象，如果启动失败则返回 None
+    """
+    try:
+        # 1. 检查是否已经在运行
+        if is_mt5_running_by_path(mt5_path):
+            print(f"MT5 already running: {mt5_path}")
+            # 返回已运行的进程
+            target_path = os.path.normpath(mt5_path).lower()
+            for proc in psutil.process_iter(['name', 'exe']):
+                try:
+                    if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                        proc_path = os.path.normpath(proc.info['exe']).lower()
+                        if proc_path == target_path:
+                            return proc
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return None
+
+        # 2. 检查路径是否存在
+        if not os.path.exists(mt5_path):
+            print(f"MT5 path not found: {mt5_path}")
+            return None
+
+        mt5_dir = str(Path(mt5_path).parent)
+
+        # 3. 使用 PowerShell Start-Process 启动（推荐方法）
+        # 这会在当前会话中启动进程，如果 Windows Agent 在用户会话中运行则有效
+        ps_cmd = f'Start-Process -FilePath "{mt5_path}" -ArgumentList "/portable" -WorkingDirectory "{mt5_dir}"'
+
+        subprocess.Popen(
+            ["powershell", "-Command", ps_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        print(f"MT5 start command sent: {mt5_path}")
+
+        # 4. 等待进程启动并验证
+        max_wait = 5
+        for i in range(max_wait):
+            time.sleep(1)
+            if is_mt5_running_by_path(mt5_path):
+                # 找到并返回进程对象
+                target_path = os.path.normpath(mt5_path).lower()
+                for proc in psutil.process_iter(['name', 'exe', 'create_time']):
+                    try:
+                        if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                            proc_path = os.path.normpath(proc.info['exe']).lower()
+                            if proc_path == target_path and time.time() - proc.info['create_time'] < 10:
+                                print(f"MT5 started successfully with PID {proc.pid}")
+                                return proc
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+
+        print(f"MT5 start verification failed: {mt5_path}")
+        return None
+
+    except Exception as e:
+        print(f"Failed to start MT5: {str(e)}")
+        return None
+
+
+def stop_mt5_client_by_path(mt5_path: str) -> bool:
+    """
+    停止指定路径的 MT5 客户端（精准匹配，避免误杀其他实例）
+
+    Args:
+        mt5_path: MT5 可执行文件的绝对路径
+
+    Returns:
+        True 如果成功停止，否则 False
+    """
+    if not is_mt5_running_by_path(mt5_path):
+        print(f"MT5 not running: {mt5_path}")
+        return True
+
+    target_path = os.path.normpath(mt5_path).lower()
+    stopped = False
+
+    try:
+        for proc in psutil.process_iter(['name', 'exe', 'pid']):
+            try:
+                if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                    proc_path = os.path.normpath(proc.info['exe']).lower()
+                    if proc_path == target_path:
+                        print(f"Stopping MT5 process PID {proc.info['pid']}: {mt5_path}")
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=2)
+                        stopped = True
+                        break
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+
+        if stopped:
+            print(f"MT5 stopped successfully: {mt5_path}")
+        else:
+            print(f"Failed to stop MT5: {mt5_path}")
+
+        return stopped
+
+    except Exception as e:
+        print(f"Error stopping MT5: {str(e)}")
+        return False
+
+
 def stop_mt5_client(deploy_path: str, account: str = None) -> bool:
     """
-    停止 MT5 客户端
+    停止 MT5 客户端（兼容旧接口，推荐使用 stop_mt5_client_by_path）
 
     策略：
-    1. 如果只有一个 terminal64 进程，直接停止
-    2. 如果有多个，尝试通过部署路径识别
-    3. 如果无法识别，停止所有（用户需要确保配置正确）
+    1. 尝试从 deploy_path 推断 MT5 路径
+    2. 如果只有一个 terminal64 进程，直接停止
+    3. 如果有多个，停止所有（确保当前实例被停止）
 
     Args:
         deploy_path: 部署目录路径
@@ -278,7 +419,7 @@ async def deploy_instance(req: InstanceDeployRequest):
 
 @app.post("/instances/{port}/start")
 async def start_instance(port: int):
-    """启动实例"""
+    """启动实例（只启动 Bridge 服务，MT5 客户端需要预先在 RDP 会话中启动）"""
     instances = load_instances()
     port_str = str(port)
 
@@ -289,10 +430,38 @@ async def start_instance(port: int):
         return {"message": "Instance is already running", "port": port}
 
     config = instances[port_str]
+    mt5_process = None
+    bridge_process = None
 
     try:
-        # 启动 MT5 桥接服务
-        process = start_mt5_bridge(
+        # 1. 检查 MT5 客户端是否已在运行
+        mt5_path = config["mt5_path"]
+        if os.path.exists(mt5_path):
+            # 使用精准的路径检查
+            if is_mt5_running_by_path(mt5_path):
+                print(f"MT5 already running: {mt5_path}")
+                # 获取已运行的进程
+                target_path = os.path.normpath(mt5_path).lower()
+                for proc in psutil.process_iter(['name', 'exe']):
+                    try:
+                        if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                            proc_path = os.path.normpath(proc.info['exe']).lower()
+                            if proc_path == target_path:
+                                mt5_process = proc
+                                print(f"Found MT5 process: PID {proc.pid}, SessionId {proc.info.get('sessionid', 'N/A')}")
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        continue
+            else:
+                # MT5 未运行，返回提示信息
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"MT5 client is not running. Please start MT5 manually in RDP session first. Path: {mt5_path}"
+                )
+
+        # 2. 启动 MT5 桥接服务
+        print(f"Starting MT5 Bridge service on port {port}...")
+        bridge_process = start_mt5_bridge(
             mt5_path=config["mt5_path"],
             deploy_path=config["deploy_path"],
             port=port
@@ -303,22 +472,30 @@ async def start_instance(port: int):
         for i in range(max_retries):
             time.sleep(0.5)
             if is_port_in_use(port):
+                print(f"Bridge service started successfully on port {port}")
                 break
         else:
             # 10次重试后仍未监听，但进程可能还在启动中
-            # 不抛出错误，让用户自行验证
+            print(f"Warning: Port {port} not listening after {max_retries * 0.5} seconds")
             pass
 
         return {
             "message": "Instance started successfully",
             "port": port,
-            "pid": process.pid
+            "bridge_pid": bridge_process.pid,
+            "mt5_pid": mt5_process.pid if mt5_process else None,
+            "note": "MT5 client was already running" if mt5_process else "MT5 client status unknown"
         }
 
+    except HTTPException:
+        # 重新抛出 HTTP 异常
+        raise
     except Exception as e:
+        error_msg = f"Failed to start instance: {str(e)}"
+        print(error_msg)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to start instance: {str(e)}"
+            detail=error_msg
         )
 
 
@@ -338,16 +515,42 @@ async def stop_instance(port: int):
     proc = get_process_by_port(port)
     if proc:
         try:
+            print(f"Stopping bridge service on port {port}, PID: {proc.pid}")
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=5)
+                print(f"Bridge service terminated gracefully")
+                stopped_services.append("MT5 Bridge Service")
+            except psutil.TimeoutExpired:
+                print(f"Bridge service did not terminate, force killing...")
+                proc.kill()
+                try:
+                    proc.wait(timeout=3)
+                    print(f"Bridge service killed")
+                    stopped_services.append("MT5 Bridge Service (forced)")
+                except psutil.TimeoutExpired:
+                    print(f"Warning: Failed to kill bridge service PID {proc.pid}")
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            print(f"Process already gone or access denied: {e}")
             stopped_services.append("MT5 Bridge Service")
-        except psutil.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
-            stopped_services.append("MT5 Bridge Service (forced)")
 
-    # 2. 停止 MT5 客户端
-    if stop_mt5_client(config["deploy_path"], config.get("account")):
+    # 2. 额外检查：确保端口已释放
+    time.sleep(1)
+    if is_port_in_use(port):
+        print(f"Warning: Port {port} still in use after stopping bridge service")
+        # 尝试再次查找并终止占用端口的进程
+        proc = get_process_by_port(port)
+        if proc:
+            print(f"Force killing remaining process on port {port}, PID: {proc.pid}")
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+            except Exception as e:
+                print(f"Failed to kill process: {e}")
+
+    # 3. 停止 MT5 客户端（使用精准路径匹配）
+    mt5_path = config.get("mt5_path")
+    if mt5_path and stop_mt5_client_by_path(mt5_path):
         stopped_services.append("MT5 Client")
 
     message = f"Stopped: {', '.join(stopped_services)}" if stopped_services else "Instance was not running"
@@ -357,22 +560,69 @@ async def stop_instance(port: int):
 @app.post("/instances/{port}/restart")
 async def restart_instance(port: int):
     """重启实例"""
-    # 先停止
-    stop_result = await stop_instance(port)
+    instances = load_instances()
+    port_str = str(port)
 
-    # 等待端口释放
-    for _ in range(10):
-        if not is_port_in_use(port):
-            break
-        time.sleep(0.5)
+    if port_str not in instances:
+        raise HTTPException(status_code=404, detail=f"Instance on port {port} not found")
 
-    # 再启动
-    start_result = await start_instance(port)
+    try:
+        # 1. 先停止实例
+        print(f"Restarting instance on port {port}: Step 1 - Stopping...")
+        stop_result = await stop_instance(port)
+        print(f"Stop result: {stop_result}")
 
-    return {
-        "message": "Instance restarted successfully",
-        "port": port
-    }
+        # 2. 等待端口释放
+        print(f"Restarting instance on port {port}: Step 2 - Waiting for port release...")
+        max_wait = 20  # 增加等待时间到 10 秒
+        for i in range(max_wait):
+            if not is_port_in_use(port):
+                print(f"Port {port} released after {i * 0.5} seconds")
+                break
+            time.sleep(0.5)
+        else:
+            # 端口仍然被占用
+            print(f"Warning: Port {port} still in use after {max_wait * 0.5} seconds")
+            # 尝试强制清理
+            proc = get_process_by_port(port)
+            if proc:
+                print(f"Force killing process on port {port}: PID {proc.pid}")
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"Failed to kill process: {e}")
+
+        # 3. 再次确认端口已释放
+        if is_port_in_use(port):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Port {port} is still in use after stopping. Cannot restart."
+            )
+
+        # 4. 启动实例
+        print(f"Restarting instance on port {port}: Step 3 - Starting...")
+        start_result = await start_instance(port)
+        print(f"Start result: {start_result}")
+
+        return {
+            "message": "Instance restarted successfully",
+            "port": port,
+            "details": {
+                "stopped": stop_result.get("stopped", []),
+                "started": True
+            }
+        }
+
+    except HTTPException:
+        # 重新抛出 HTTP 异常
+        raise
+    except Exception as e:
+        # 捕获其他异常并返回详细错误信息
+        error_msg = f"Failed to restart instance on port {port}: {str(e)}"
+        print(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.get("/instances/{port}/status")
@@ -406,6 +656,53 @@ async def delete_instance(port: int):
     save_instances(instances)
 
     return {"message": "Instance deleted successfully", "port": port}
+
+
+@app.get("/system/mt5-processes")
+async def get_mt5_processes():
+    """获取所有 MT5 terminal64.exe 进程的详细信息"""
+    processes = []
+
+    for proc in psutil.process_iter(['pid', 'name', 'create_time']):
+        try:
+            if proc.info['name'] and 'terminal64.exe' in proc.info['name'].lower():
+                # 获取进程详细信息
+                try:
+                    proc_info = {
+                        'pid': proc.info['pid'],
+                        'name': proc.info['name'],
+                        'create_time': proc.info['create_time'],
+                        'memory_mb': round(proc.memory_info().rss / 1024 / 1024, 2)
+                    }
+
+                    # 尝试获取可执行文件路径和工作目录
+                    try:
+                        proc_info['exe_path'] = proc.exe()
+                        proc_info['cwd'] = proc.cwd()
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    # 尝试获取命令行
+                    try:
+                        proc_info['cmdline'] = ' '.join(proc.cmdline())
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    processes.append(proc_info)
+                except Exception as e:
+                    processes.append({
+                        'pid': proc.info['pid'],
+                        'name': proc.info['name'],
+                        'error': str(e)
+                    })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return {
+        'count': len(processes),
+        'processes': processes,
+        'timestamp': time.time()
+    }
 
 
 if __name__ == "__main__":

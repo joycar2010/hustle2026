@@ -1,0 +1,22 @@
+{
+  "bybit_system_service": {
+    "name": "Bybit System Service",
+    "path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
+    "account": "3971962",
+    "password": "your_password",
+    "server": "Bybit-Live-2",
+    "is_investor": false,
+    "portable": true,
+    "create_no_window": false
+  },
+  "bybit_mt5_01": {
+    "name": "Bybit MT5-01",
+    "path": "D:\\MetaTrader 5-01\\terminal64.exe",
+    "account": "2325036",
+    "password": "your_password",
+    "server": "Bybit-Live-2",
+    "is_investor": false,
+    "portable": true,
+    "create_no_window": false
+  }
+}

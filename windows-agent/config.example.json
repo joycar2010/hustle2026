@@ -1,0 +1,23 @@
+{
+  "agent": {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "api_key": "HustleXAU_MT5_Agent_Key_2026",
+    "comment": "Agent API configuration"
+  },
+  "backend": {
+    "url": "https://admin.hustle2026.xyz",
+    "username": "monitor_user",
+    "password": "your_password_here",
+    "enabled": true,
+    "comment": "Backend API integration for alerts"
+  },
+  "monitoring": {
+    "enabled": true,
+    "check_interval": 30,
+    "freeze_threshold": 10,
+    "cpu_threshold": 95,
+    "memory_threshold": 90,
+    "comment": "Health monitoring configuration"
+  }
+}
