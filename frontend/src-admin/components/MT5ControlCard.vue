@@ -175,7 +175,7 @@ import {
   Cpu,
   Memo
 } from '@element-plus/icons-vue'
-import api from '@/utils/api'
+import api from '@/services/api.js'
 
 const props = defineProps({
   client: {
