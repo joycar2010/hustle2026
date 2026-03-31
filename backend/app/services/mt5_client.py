@@ -1,5 +1,12 @@
 """MetaTrader5 client for Bybit MT5 integration"""
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    # MetaTrader5 is Windows-only, on Linux we use bridge service
+    mt5 = None
+    MT5_AVAILABLE = False
+
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
