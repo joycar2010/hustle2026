@@ -504,18 +504,19 @@ async function fetchUserFinancials() {
   }
 }
 
-async function fetchPerformance() {
-  try {
-    const r = await api.get('/api/v1/performance/system')
-    perfData.value = r.data
-  } catch (e) {
-    console.error('fetchPerformance error:', e)
-  }
-}
+// Performance API endpoint removed - commented out
+// async function fetchPerformance() {
+//   try {
+//     const r = await api.get('/api/v1/performance/system')
+//     perfData.value = r.data
+//   } catch (e) {
+//     console.error('fetchPerformance error:', e)
+//   }
+// }
 
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchPerformance()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   refreshing.value = false
 }
