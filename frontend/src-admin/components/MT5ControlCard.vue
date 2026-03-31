@@ -230,8 +230,8 @@ const instanceName = computed(() => {
 async function fetchStatus() {
   try {
     const response = await api.get(`/api/v1/mt5-agent/instances/${instanceName.value}`)
-    isRunning.value = response.is_running
-    healthStatus.value = response.health_status
+    isRunning.value = response.data.is_running
+    healthStatus.value = response.data.health_status
     lastUpdateTime.value = new Date().toLocaleTimeString('zh-CN')
   } catch (error) {
     console.error('Failed to fetch status:', error)
@@ -263,7 +263,7 @@ async function handleStart() {
       { params: { wait_seconds: 5 } }
     )
 
-    if (response.success) {
+    if (response.data.success) {
       ElMessage.success({
         message: '启动成功',
         duration: 3000
@@ -271,7 +271,7 @@ async function handleStart() {
       // 等待 3 秒后刷新状态
       setTimeout(fetchStatus, 3000)
     } else {
-      ElMessage.error(`启动失败: ${response.message}`)
+      ElMessage.error(`启动失败: ${response.data.message}`)
     }
   } catch (error) {
     if (error !== 'cancel') {
@@ -302,14 +302,14 @@ async function handleStop() {
       { params: { force: true } }
     )
 
-    if (response.success) {
+    if (response.data.success) {
       ElMessage.success({
         message: '停止成功',
         duration: 3000
       })
       await fetchStatus()
     } else {
-      ElMessage.error(`停止失败: ${response.message}`)
+      ElMessage.error(`停止失败: ${response.data.message}`)
     }
   } catch (error) {
     if (error !== 'cancel') {
@@ -340,7 +340,7 @@ async function handleRestart() {
       { params: { wait_seconds: 5 } }
     )
 
-    if (response.success) {
+    if (response.data.success) {
       ElMessage.success({
         message: '重启成功',
         duration: 3000
@@ -348,7 +348,7 @@ async function handleRestart() {
       // 等待 5 秒后刷新状态
       setTimeout(fetchStatus, 5000)
     } else {
-      ElMessage.error(`重启失败: ${response.message}`)
+      ElMessage.error(`重启失败: ${response.data.message}`)
     }
   } catch (error) {
     if (error !== 'cancel') {
