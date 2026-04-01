@@ -372,3 +372,18 @@ async def restart_client(
         f"/instances/{client.agent_instance_name}/restart",
         params={"wait_seconds": wait_seconds}
     )
+
+
+@router.get("/debug/processes")
+async def debug_processes(current_user: dict = Depends(get_current_user)):
+    """
+    调试端点：列出所有MT5进程
+
+    Returns:
+        所有 terminal64.exe 进程的详细信息
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    return await call_agent_api("GET", "/debug/processes")
