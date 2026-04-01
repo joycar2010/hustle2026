@@ -1476,7 +1476,7 @@ async function agentControl(client, action) {
   try {
     agentLoading.value[client.agent_instance_name] = action
     const response = await api.post(
-      `/api/v1/mt5-agent/instances/${client.agent_instance_name}/${action}`,
+      `/api/v1/mt5-agent/clients/${client.client_id}/${action}`,
       null,
       { params: action === 'start' || action === 'restart' ? { wait_seconds: 5 } : { force: true } }
     )

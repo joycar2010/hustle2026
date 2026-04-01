@@ -1,6 +1,10 @@
 """MT5 Agent 代理 API - 提供前端访问 Windows Agent 的接口"""
 from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.security import get_current_user
+from app.core.database import get_db
+from app.models.mt5_client import MT5Client
 from typing import Optional
 import httpx
 import os
@@ -221,4 +225,150 @@ async def delete_instance(
     return await call_agent_api(
         "DELETE",
         f"/instances/{instance_name}"
+    )
+
+
+# ====================== 基于 Client ID 的控制端点 ======================
+
+@router.post("/clients/{client_id}/start")
+async def start_client(
+    client_id: int,
+    wait_seconds: int = 5,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    通过 client_id 启动 MT5 客户端
+
+    Args:
+        client_id: MT5客户端ID
+        wait_seconds: 启动后等待时间（秒）
+
+    Returns:
+        操作结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.agent_instance_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置远程控制实例"
+        )
+
+    logger.info(
+        f"User {current_user.username} starting MT5 client {client.client_name} "
+        f"(path: {client.mt5_path}, instance: {client.agent_instance_name})"
+    )
+
+    return await call_agent_api(
+        "POST",
+        f"/instances/{client.agent_instance_name}/start",
+        params={"wait_seconds": wait_seconds}
+    )
+
+
+@router.post("/clients/{client_id}/stop")
+async def stop_client(
+    client_id: int,
+    force: bool = True,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    通过 client_id 停止 MT5 客户端
+
+    Args:
+        client_id: MT5客户端ID
+        force: 是否强制停止
+
+    Returns:
+        操作结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.agent_instance_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置远程控制实例"
+        )
+
+    logger.info(
+        f"User {current_user.username} stopping MT5 client {client.client_name} "
+        f"(path: {client.mt5_path}, instance: {client.agent_instance_name})"
+    )
+
+    return await call_agent_api(
+        "POST",
+        f"/instances/{client.agent_instance_name}/stop",
+        params={"force": force}
+    )
+
+
+@router.post("/clients/{client_id}/restart")
+async def restart_client(
+    client_id: int,
+    wait_seconds: int = 5,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    通过 client_id 重启 MT5 客户端
+
+    Args:
+        client_id: MT5客户端ID
+        wait_seconds: 重启后等待时间（秒）
+
+    Returns:
+        操作结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.agent_instance_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置远程控制实例"
+        )
+
+    logger.info(
+        f"User {current_user.username} restarting MT5 client {client.client_name} "
+        f"(path: {client.mt5_path}, instance: {client.agent_instance_name})"
+    )
+
+    return await call_agent_api(
+        "POST",
+        f"/instances/{client.agent_instance_name}/restart",
+        params={"wait_seconds": wait_seconds}
     )
