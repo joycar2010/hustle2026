@@ -378,33 +378,81 @@
             </button>
           </div>
 
-          <!-- 部署客户端按钮 -->
-          <button @click="openDeployForClient(client)"
-            class="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs border border-primary/20 transition-colors font-medium">
-            + 部署客户端
-          </button>
+          <!-- Windows Agent 远程控制 -->
+          <div v-if="client.agent_instance_name" class="bg-dark-200 rounded-lg p-2.5 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-text-tertiary font-medium">远程控制</span>
+              <span class="px-1.5 py-0.5 rounded text-xs" :class="getAgentStatusClass(client)">
+                {{ getAgentStatusText(client) }}
+              </span>
+            </div>
 
-          <!-- MT5 客户端控制 -->
-          <MT5ControlCard :client="client" />
+            <!-- 健康状态 -->
+            <div v-if="agentStatus[client.agent_instance_name]?.is_running" class="text-xs space-y-1">
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">CPU:</span>
+                <span>{{ agentStatus[client.agent_instance_name]?.health_status?.details?.cpu_percent?.toFixed(1) || 0 }}%</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">内存:</span>
+                <span>{{ agentStatus[client.agent_instance_name]?.health_status?.details?.memory_mb?.toFixed(0) || 0 }} MB</span>
+              </div>
+            </div>
 
-          <!-- 该客户端的实例列表 -->
-          <div v-if="getClientInstances(client.client_id).length > 0" class="space-y-2 pt-2 border-t border-border-secondary">
-            <div class="text-xs text-text-tertiary font-medium mb-2">MT5客户端</div>
+            <!-- 控制按钮 -->
+            <div class="flex gap-1.5">
+              <button @click="agentControl(client, 'start')"
+                :disabled="agentStatus[client.agent_instance_name]?.is_running || agentLoading[client.agent_instance_name]"
+                class="flex-1 py-1 rounded text-xs border transition-colors"
+                :class="agentStatus[client.agent_instance_name]?.is_running || agentLoading[client.agent_instance_name] ?
+                  'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
+                  'bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] border-[#0ecb81]/20'">
+                {{ agentLoading[client.agent_instance_name] === 'start' ? '启动中...' : '启动' }}
+              </button>
+              <button @click="agentControl(client, 'stop')"
+                :disabled="!agentStatus[client.agent_instance_name]?.is_running || agentLoading[client.agent_instance_name]"
+                class="flex-1 py-1 rounded text-xs border transition-colors"
+                :class="!agentStatus[client.agent_instance_name]?.is_running || agentLoading[client.agent_instance_name] ?
+                  'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
+                  'bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] border-[#f6465d]/20'">
+                {{ agentLoading[client.agent_instance_name] === 'stop' ? '停止中...' : '停止' }}
+              </button>
+              <button @click="agentControl(client, 'restart')"
+                :disabled="!agentStatus[client.agent_instance_name]?.is_running || agentLoading[client.agent_instance_name]"
+                class="flex-1 py-1 rounded text-xs border transition-colors"
+                :class="!agentStatus[client.agent_instance_name]?.is_running || agentLoading[client.agent_instance_name] ?
+                  'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
+                  'bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] border-[#f0b90b]/20'">
+                {{ agentLoading[client.agent_instance_name] === 'restart' ? '重启中...' : '重启' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- MT5 Bridge 客户端实例 -->
+          <div v-if="getClientInstances(client.client_id).length > 0" class="bg-dark-200 rounded-lg p-2.5 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-text-tertiary font-medium">Bridge实例</span>
+              <button @click="openDeployForClient(client)"
+                class="px-2 py-0.5 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
+                + 部署
+              </button>
+            </div>
+
             <div v-for="inst in getClientInstances(client.client_id)" :key="inst.instance_id"
-              class="bg-dark-200 rounded-lg border p-2 space-y-2"
-              :class="inst.is_active ? 'border-primary' : 'border-border-primary'">
+              class="bg-dark-300 rounded-lg p-2 space-y-1.5"
+              :class="inst.is_active ? 'border border-primary' : ''">
 
               <!-- 实例头部 -->
               <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5">
                   <span class="px-1.5 py-0.5 rounded text-xs"
                     :class="inst.instance_type === 'primary' ? 'bg-primary/10 text-primary' : 'bg-[#f0b90b]/10 text-[#f0b90b]'">
-                    {{ inst.instance_type === 'primary' ? '主跑' : '备用' }}
+                    {{ inst.instance_type === 'primary' ? '主' : '备' }}
                   </span>
                   <span v-if="inst.is_active" class="px-1.5 py-0.5 rounded text-xs bg-[#0ecb81]/10 text-[#0ecb81]">
                     活动
                   </span>
-                  <span class="text-xs text-text-tertiary">{{ inst.instance_name }}</span>
+                  <span class="text-xs">{{ inst.instance_name }}</span>
                 </div>
                 <span class="px-1.5 py-0.5 rounded text-xs" :class="getInstanceStatusClass(inst.status)">
                   {{ getInstanceStatusText(inst.status) }}
@@ -412,57 +460,28 @@
               </div>
 
               <!-- 实例详情 -->
-              <div class="text-xs space-y-1">
+              <div class="text-xs space-y-0.5">
                 <div class="flex justify-between">
                   <span class="text-text-tertiary">服务器:</span>
                   <span class="font-mono">{{ inst.server_ip }}:{{ inst.service_port }}</span>
                 </div>
-                <div class="flex justify-between">
-                  <span class="text-text-tertiary">部署路径:</span>
-                  <span class="font-mono text-xs truncate max-w-[150px]" :title="inst.deploy_path">{{ inst.deploy_path }}</span>
-                </div>
               </div>
 
-              <!-- 操作进度条 -->
-              <div v-if="instanceOperations[inst.instance_id]" class="bg-dark-300 rounded-lg p-2 border border-primary/30">
-                <div class="flex items-center justify-between mb-1.5">
-                  <span class="text-xs text-primary font-medium">
-                    {{ instanceOperations[inst.instance_id].actionText }}中...
-                  </span>
-                  <span class="text-xs text-text-tertiary">
-                    {{ instanceOperations[inst.instance_id].progress }}%
-                  </span>
-                </div>
-                <div class="w-full bg-dark-200 rounded-full h-1.5 overflow-hidden">
-                  <div class="bg-primary h-full transition-all duration-300 ease-out"
-                    :style="{ width: instanceOperations[inst.instance_id].progress + '%' }">
-                  </div>
-                </div>
-                <div class="text-xs text-text-tertiary mt-1">
-                  {{ instanceOperations[inst.instance_id].message }}
-                </div>
-              </div>
-
-              <!-- 实例操作 -->
-              <div class="flex gap-1.5">
+              <!-- 操作按钮 -->
+              <div class="flex gap-1">
                 <button v-if="!inst.is_active" @click="switchToInstance(client.client_id, inst.instance_id)"
                   class="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
-                  切换为活动
+                  切换
                 </button>
-                <button @click="controlInstance(inst, 'start')" v-if="inst.status !== 'running'"
-                  class="flex-1 py-1 bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] rounded text-xs border border-[#0ecb81]/20 transition-colors">
-                  启动
-                </button>
-                <button @click="controlInstance(inst, 'stop')" v-if="inst.status === 'running'"
-                  class="flex-1 py-1 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded text-xs border border-[#f0b90b]/20 transition-colors">
-                  停止
-                </button>
-                <button @click="controlInstance(inst, 'restart')"
-                  class="flex-1 py-1 bg-[#3dccc7]/10 hover:bg-[#3dccc7]/20 text-[#3dccc7] rounded text-xs border border-[#3dccc7]/20 transition-colors">
-                  重启
+                <button @click="controlInstance(inst, inst.status === 'running' ? 'stop' : 'start')"
+                  class="flex-1 py-1 rounded text-xs border transition-colors"
+                  :class="inst.status === 'running' ?
+                    'bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] border-[#f0b90b]/20' :
+                    'bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] border-[#0ecb81]/20'">
+                  {{ inst.status === 'running' ? '停止' : '启动' }}
                 </button>
                 <button @click="editInstance(inst)"
-                  class="flex-1 py-1 bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] rounded text-xs border border-[#f0b90b]/20 transition-colors">
+                  class="flex-1 py-1 bg-dark-200 hover:bg-dark-100 text-text-secondary rounded text-xs border border-border-primary transition-colors">
                   编辑
                 </button>
                 <button @click="deleteInstance(inst)"
@@ -472,8 +491,13 @@
               </div>
             </div>
           </div>
+          <div v-else class="bg-dark-200 rounded-lg p-2.5">
+            <button @click="openDeployForClient(client)"
+              class="w-full py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs border border-primary/20 transition-colors">
+              + 部署Bridge客户端
+            </button>
+          </div>
         </div>
-      </div>
       </div>
     </div>
 
@@ -993,7 +1017,6 @@ import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
 import PasswordInput from '@/components/PasswordInput.vue'
-import MT5ControlCard from '@/components/MT5ControlCard.vue'
 
 // ── Tabs ──────────────────────────────────────────────────────
 const tabs = [
@@ -1396,6 +1419,75 @@ const mt5Form = ref({
 })
 const originalMT5Password = ref('') // 跟踪原始 MT5 密码
 
+// Windows Agent 控制
+const agentStatus = ref({})
+const agentLoading = ref({})
+let agentRefreshTimer = null
+
+function getAgentStatusClass(client) {
+  if (!client.agent_instance_name) return 'bg-dark-200 text-text-tertiary'
+  const status = agentStatus.value[client.agent_instance_name]
+  if (!status) return 'bg-dark-200 text-text-tertiary'
+  if (!status.is_running) return 'bg-dark-200 text-text-tertiary'
+  if (status.health_status?.is_frozen || status.health_status?.cpu_high || status.health_status?.memory_high) {
+    return 'bg-[#f6465d]/20 text-[#f6465d]'
+  }
+  return 'bg-[#0ecb81]/20 text-[#0ecb81]'
+}
+
+function getAgentStatusText(client) {
+  if (!client.agent_instance_name) return '未配置'
+  const status = agentStatus.value[client.agent_instance_name]
+  if (!status) return '未知'
+  return status.is_running ? '运行中' : '已停止'
+}
+
+async function loadAgentStatus() {
+  try {
+    const response = await api.get('/api/v1/mt5-agent/instances')
+    const instances = response.data || []
+    const statusMap = {}
+    instances.forEach(inst => {
+      statusMap[inst.instance_name] = inst
+    })
+    agentStatus.value = statusMap
+  } catch (error) {
+    console.error('Failed to load agent status:', error)
+  }
+}
+
+async function agentControl(client, action) {
+  if (!client.agent_instance_name) {
+    toast('该客户端未配置远程控制实例', 'error')
+    return
+  }
+
+  const actionText = { start: '启动', stop: '停止', restart: '重启' }[action]
+  const confirmed = confirm(`确定要${actionText} ${client.client_name} 吗？`)
+  if (!confirmed) return
+
+  try {
+    agentLoading.value[client.agent_instance_name] = action
+    const response = await api.post(
+      `/api/v1/mt5-agent/instances/${client.agent_instance_name}/${action}`,
+      null,
+      { params: action === 'start' || action === 'restart' ? { wait_seconds: 5 } : { force: true } }
+    )
+
+    if (response.data.success) {
+      toast(`${actionText}成功`, 'success')
+      setTimeout(loadAgentStatus, action === 'start' || action === 'restart' ? 3000 : 1000)
+    } else {
+      toast(`${actionText}失败: ${response.data.message}`, 'error')
+    }
+  } catch (error) {
+    toast(`${actionText}失败，请检查 MT5 Agent 服务`, 'error')
+    console.error(`Agent ${action} failed:`, error)
+  } finally {
+    agentLoading.value[client.agent_instance_name] = null
+  }
+}
+
 async function onMt5UserChange() {
   mt5SelectedAccountId.value = ''
   mt5Clients.value = []
@@ -1427,8 +1519,14 @@ async function loadMT5Clients() {
   try {
     const r = await api.get(`/api/v1/accounts/${mt5SelectedAccountId.value}/mt5-clients`)
     mt5Clients.value = Array.isArray(r.data) ? r.data : (r.data?.clients ?? [])
-    // 同时加载所有实例
-    await loadMT5Instances()
+    // 同时加载所有实例和Agent状态
+    await Promise.all([loadMT5Instances(), loadAgentStatus()])
+    // 启动定时刷新Agent状态
+    if (agentRefreshTimer) clearInterval(agentRefreshTimer)
+    agentRefreshTimer = setInterval(loadAgentStatus, 30000)
+  } catch (e) { apiErr('加载MT5客户端失败', e) }
+  finally { mt5Loading.value = false }
+}
   } catch (e) { apiErr('加载MT5客户端失败', e) }
   finally { mt5Loading.value = false }
 }
