@@ -552,6 +552,25 @@ def restart_instance(instance_name: str, wait_seconds: int = 5):
         message=f"Instance {cfg['name']} {'restarted successfully' if success else 'failed to restart'}"
     )
 
+@app.get("/logs", dependencies=[Depends(verify_api_key)])
+def get_logs(lines: int = 100):
+    """获取日志文件最后N行"""
+    try:
+        if not LOG_FILE.exists():
+            return {"logs": [], "message": "Log file not found"}
+
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            return {
+                "logs": [line.strip() for line in last_lines],
+                "total_lines": len(all_lines),
+                "returned_lines": len(last_lines)
+            }
+    except Exception as e:
+        logger.error(f"Failed to read logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read logs: {str(e)}")
+
 # ====================== 后台监控任务 ======================
 async def monitoring_task():
     """后台健康监控任务"""

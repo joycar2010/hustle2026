@@ -5,7 +5,7 @@
     "account": "3971962",
     "password": "Aq987456!",
     "server": "Bybit-Live-2",
-    "portable_mode": false
+    "portable": false
   },
   "mt5-01": {
     "name": "MT5-01 Trading",
@@ -13,6 +13,6 @@
     "account": "2325036",
     "password": "Bybit@2024",
     "server": "Bybit-Live-2",
-    "portable_mode": false
+    "portable": false
   }
 }
