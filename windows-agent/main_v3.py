@@ -22,6 +22,8 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 import uvicorn
 import httpx
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ====================== 配置加载 ======================
 CONFIG_FILE = Path("C:/MT5Agent/config.json")
@@ -56,6 +58,13 @@ DEFAULT_CONFIG = {
         "password": "",
         "enabled": False
     },
+    "database": {
+        "host": "172.31.2.22",
+        "port": 5432,
+        "database": "postgres",
+        "user": "postgres",
+        "password": "Lk106504"
+    },
     "monitoring": {
         "enabled": True,
         "check_interval": 30,
@@ -86,11 +95,84 @@ def save_config(config: Dict):
 config = load_config()
 agent_config = config["agent"]
 backend_config = config["backend"]
+database_config = config.get("database", {})
 monitoring_config = config["monitoring"]
 
-# ====================== 实例配置管理 ======================
-def load_instances() -> Dict:
-    """加载实例配置"""
+# ====================== 数据库连接 ======================
+def get_db_connection():
+    """获取数据库连接"""
+    try:
+        conn = psycopg2.connect(
+            host=database_config.get("host", "172.31.2.22"),
+            port=database_config.get("port", 5432),
+            database=database_config.get("database", "postgres"),
+            user=database_config.get("user", "postgres"),
+            password=database_config.get("password", "Lk106504")
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        return None
+
+def load_instances_from_db() -> Dict:
+    """从数据库加载MT5客户端配置"""
+    conn = get_db_connection()
+    if not conn:
+        logger.warning("Database connection failed, falling back to instances.json")
+        return load_instances_from_file()
+
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                agent_instance_name,
+                client_name,
+                mt5_login,
+                mt5_password,
+                mt5_server,
+                password_type
+            FROM mt5_clients
+            WHERE agent_instance_name IS NOT NULL
+            AND is_active = true
+        """)
+
+        rows = cursor.fetchall()
+        instances = {}
+
+        for row in rows:
+            instance_name = row['agent_instance_name']
+            # 根据agent_instance_name确定MT5路径
+            if instance_name == 'bybit_system_service':
+                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+            elif instance_name == 'mt5-01':
+                mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"
+            else:
+                # 默认路径
+                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+
+            instances[instance_name] = {
+                "name": row['client_name'],
+                "path": mt5_path,
+                "account": str(row['mt5_login']),
+                "password": row['mt5_password'],
+                "server": row['mt5_server'],
+                "portable": True
+            }
+
+        cursor.close()
+        conn.close()
+
+        logger.info(f"Loaded {len(instances)} instances from database")
+        return instances
+
+    except Exception as e:
+        logger.error(f"Failed to load instances from database: {e}")
+        if conn:
+            conn.close()
+        return load_instances_from_file()
+
+def load_instances_from_file() -> Dict:
+    """从文件加载实例配置（备用方案）"""
     if not INSTANCES_FILE.exists():
         return {}
     try:
@@ -99,10 +181,10 @@ def load_instances() -> Dict:
     except Exception:
         return {}
 
-def save_instances(instances: Dict):
-    """保存实例配置"""
-    with open(INSTANCES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(instances, f, indent=2, ensure_ascii=False)
+# ====================== 实例配置管理 ======================
+def load_instances() -> Dict:
+    """加载实例配置 - 优先从数据库加载"""
+    return load_instances_from_db()
 
 # ====================== MT5 控制器 ======================
 class MT5Controller:
@@ -513,27 +595,19 @@ def get_instance_status(instance_name: str):
 
 @app.post("/instances", dependencies=[Depends(verify_api_key)])
 def create_instance(instance: InstanceConfig):
-    """创建/更新实例配置"""
-    instances = load_instances()
-    instance_name = instance.name.lower().replace(" ", "_")
-    instances[instance_name] = instance.dict()
-    save_instances(instances)
-    logger.info(f"Instance {instance_name} created/updated")
-    return {"success": True, "instance_name": instance_name}
+    """创建/更新实例配置 - 已禁用，请在数据库中管理MT5客户端"""
+    raise HTTPException(
+        status_code=501,
+        detail="Instance management via API is disabled. Please manage MT5 clients in the database."
+    )
 
 @app.delete("/instances/{instance_name}", dependencies=[Depends(verify_api_key)])
 def delete_instance(instance_name: str):
-    """删除实例配置"""
-    instances = load_instances()
-    if instance_name not in instances:
-        raise HTTPException(status_code=404, detail="Instance not found")
-
-    # 先停止实例
-    controller.stop_instance(instances[instance_name])
-    del instances[instance_name]
-    save_instances(instances)
-    logger.info(f"Instance {instance_name} deleted")
-    return {"success": True}
+    """删除实例配置 - 已禁用，请在数据库中管理MT5客户端"""
+    raise HTTPException(
+        status_code=501,
+        detail="Instance management via API is disabled. Please manage MT5 clients in the database."
+    )
 
 @app.post("/instances/{instance_name}/start", response_model=OperationResponse, dependencies=[Depends(verify_api_key)])
 def start_instance(instance_name: str, wait_seconds: int = 5):
