@@ -163,46 +163,16 @@ async def control_instance(
     control: MT5InstanceControl,
     db: AsyncSession = Depends(get_db)
 ):
-    """控制MT5实例（启动/停止/重启）"""
-    result = await db.execute(
-        select(MT5Instance).where(MT5Instance.instance_id == instance_id)
+    """
+    控制MT5 Bridge实例（启动/停止/重启）
+
+    注意：此端点用于控制MT5 Bridge HTTP服务，不控制MT5客户端进程。
+    MT5客户端进程应通过 /api/v1/mt5-agent/clients/{client_id}/{action} 控制。
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Bridge实例控制功能正在重构中。请使用Windows Agent远程控制来管理MT5客户端进程。"
     )
-    instance = result.scalar_one_or_none()
-
-    if not instance:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Instance {instance_id} not found"
-        )
-
-    agent_service = MT5AgentService(instance.server_ip)
-
-    try:
-        if control.action == "start":
-            await agent_service.start_instance_by_name(instance.instance_name)
-            instance.status = "running"
-        elif control.action == "stop":
-            await agent_service.stop_instance_by_name(instance.instance_name)
-            instance.status = "stopped"
-        elif control.action == "restart":
-            await agent_service.restart_instance_by_name(instance.instance_name)
-            instance.status = "running"
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid action: {control.action}"
-            )
-
-        await db.commit()
-        await db.refresh(instance)
-
-        return {"status": "ok", "message": f"Instance {control.action}ed successfully"}
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to {control.action} instance: {str(e)}"
-        )
 
 
 @router.get("/{instance_id}/status")

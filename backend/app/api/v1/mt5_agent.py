@@ -268,7 +268,7 @@ async def start_client(
 
     logger.info(
         f"User {current_user.username} starting MT5 client {client.client_name} "
-        f"(path: {client.mt5_path}, instance: {client.agent_instance_name})"
+        f"(login: {client.mt5_login}, instance: {client.agent_instance_name})"
     )
 
     return await call_agent_api(
@@ -316,7 +316,7 @@ async def stop_client(
 
     logger.info(
         f"User {current_user.username} stopping MT5 client {client.client_name} "
-        f"(path: {client.mt5_path}, instance: {client.agent_instance_name})"
+        f"(login: {client.mt5_login}, instance: {client.agent_instance_name})"
     )
 
     return await call_agent_api(
@@ -364,7 +364,7 @@ async def restart_client(
 
     logger.info(
         f"User {current_user.username} restarting MT5 client {client.client_name} "
-        f"(path: {client.mt5_path}, instance: {client.agent_instance_name})"
+        f"(login: {client.mt5_login}, instance: {client.agent_instance_name})"
     )
 
     return await call_agent_api(
