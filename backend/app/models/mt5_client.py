@@ -25,6 +25,7 @@ class MT5Client(Base):
 
     # Windows Agent配置
     agent_instance_name = Column(String(100), nullable=True, comment='Windows Agent实例名称')
+    bridge_service_name = Column(String(100), nullable=True, comment='Bridge服务名称（nssm服务）')
 
     # 代理配置
     proxy_id = Column(Integer, ForeignKey('proxy_pool.id', ondelete='SET NULL'), nullable=True, comment='绑定的代理')

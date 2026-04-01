@@ -387,3 +387,173 @@ async def debug_processes(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
     return await call_agent_api("GET", "/debug/processes")
+
+
+# ====================== Bridge 实例控制 ======================
+@router.get("/bridge/{client_id}/status")
+async def get_bridge_status(
+    client_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取 Bridge 服务状态
+
+    Args:
+        client_id: MT5客户端ID
+
+    Returns:
+        Bridge 服务状态信息
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.bridge_service_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置 Bridge 服务"
+        )
+
+    logger.info(
+        f"User {current_user.username} checking bridge status for {client.client_name} "
+        f"(service: {client.bridge_service_name})"
+    )
+
+    return await call_agent_api("GET", f"/bridge/{client.bridge_service_name}/status")
+
+
+@router.post("/bridge/{client_id}/start")
+async def start_bridge(
+    client_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    启动 Bridge 服务
+
+    Args:
+        client_id: MT5客户端ID
+
+    Returns:
+        操作结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.bridge_service_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置 Bridge 服务"
+        )
+
+    logger.info(
+        f"User {current_user.username} starting bridge for {client.client_name} "
+        f"(service: {client.bridge_service_name})"
+    )
+
+    return await call_agent_api("POST", f"/bridge/{client.bridge_service_name}/start")
+
+
+@router.post("/bridge/{client_id}/stop")
+async def stop_bridge(
+    client_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    停止 Bridge 服务
+
+    Args:
+        client_id: MT5客户端ID
+
+    Returns:
+        操作结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.bridge_service_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置 Bridge 服务"
+        )
+
+    logger.info(
+        f"User {current_user.username} stopping bridge for {client.client_name} "
+        f"(service: {client.bridge_service_name})"
+    )
+
+    return await call_agent_api("POST", f"/bridge/{client.bridge_service_name}/stop")
+
+
+@router.post("/bridge/{client_id}/restart")
+async def restart_bridge(
+    client_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    重启 Bridge 服务
+
+    Args:
+        client_id: MT5客户端ID
+
+    Returns:
+        操作结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.bridge_service_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置 Bridge 服务"
+        )
+
+    logger.info(
+        f"User {current_user.username} restarting bridge for {client.client_name} "
+        f"(service: {client.bridge_service_name})"
+    )
+
+    return await call_agent_api("POST", f"/bridge/{client.bridge_service_name}/restart")
+
