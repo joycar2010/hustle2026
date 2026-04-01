@@ -615,11 +615,12 @@ async def deploy_bridge(
         }
     )
 
-    # 更新数据库中的 bridge_service_name
+    # 更新数据库中的 bridge_service_name 和 bridge_service_port
     if deploy_result.get("success"):
         client.bridge_service_name = service_name
+        client.bridge_service_port = service_port
         await db.commit()
-        logger.info(f"Updated bridge_service_name for client {client_id}: {service_name}")
+        logger.info(f"Updated bridge config for client {client_id}: {service_name}:{service_port}")
 
     return deploy_result
 
@@ -660,19 +661,21 @@ async def delete_bridge(
 
     logger.info(
         f"User {current_user.username} deleting bridge for {client.client_name} "
-        f"(service: {client.bridge_service_name})"
+        f"(service: {client.bridge_service_name}, port: {client.bridge_service_port})"
     )
 
-    # 调用 Windows Agent 删除
+    # 调用 Windows Agent 删除（传递端口号用于删除 MT5 客户端目录）
     delete_result = await call_agent_api(
         "DELETE",
-        f"/bridge/{client.bridge_service_name}"
+        f"/bridge/{client.bridge_service_name}",
+        params={"mt5_client_port": client.bridge_service_port} if client.bridge_service_port else {}
     )
 
-    # 更新数据库，清空 bridge_service_name
+    # 更新数据库，清空 bridge_service_name 和 bridge_service_port
     if delete_result.get("success"):
         client.bridge_service_name = None
+        client.bridge_service_port = None
         await db.commit()
-        logger.info(f"Cleared bridge_service_name for client {client_id}")
+        logger.info(f"Cleared bridge config for client {client_id}")
 
     return delete_result

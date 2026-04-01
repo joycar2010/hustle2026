@@ -834,52 +834,105 @@ def deploy_bridge(
     api_key: str = "OQ6bUimHZDmXEZzJKE"
 ):
     """
-    部署新的 Bridge 实例
+    部署新的 Bridge 实例和 MT5 客户端
 
     Args:
         service_name: 服务名称（如 hustle-mt5-xxx）
         mt5_login: MT5 登录账号
         mt5_password: MT5 密码
         mt5_server: MT5 服务器
-        mt5_path: MT5 客户端路径
+        mt5_path: MT5 源客户端路径（用于复制）
         service_port: Bridge 服务端口
-        api_key: API 密钥
 
     Returns:
         部署结果
     """
+    import shutil
+    import configparser
+
     try:
-        # 1. 创建部署目录
+        # ==================== 1. 部署 MT5 客户端 ====================
+        # 生成新的 MT5 客户端目录名
+        mt5_client_dir = Path(f"D:/MetaTrader 5-{service_port}")
+
+        if mt5_client_dir.exists():
+            raise HTTPException(status_code=400, detail=f"MT5客户端目录已存在: {mt5_client_dir}")
+
+        # 复制整个 MT5 客户端目录
+        source_mt5_dir = Path("D:/MetaTrader 5-01")  # 源模板目录
+        if not source_mt5_dir.exists():
+            raise HTTPException(status_code=404, detail=f"MT5源目录不存在: {source_mt5_dir}")
+
+        logger.info(f"Copying MT5 client from {source_mt5_dir} to {mt5_client_dir}")
+        shutil.copytree(source_mt5_dir, mt5_client_dir)
+        logger.info(f"MT5 client copied successfully")
+
+        # 修改 MT5 配置文件 - common.ini
+        common_ini_path = mt5_client_dir / "Config" / "common.ini"
+        if common_ini_path.exists():
+            # 读取配置
+            config = configparser.ConfigParser()
+            config.read(common_ini_path, encoding='utf-8')
+
+            # 修改登录信息
+            if 'Common' not in config:
+                config['Common'] = {}
+
+            config['Common']['Login'] = str(mt5_login)
+            config['Common']['Server'] = mt5_server
+            # 注意：密码通常不直接存储在配置文件中，MT5 会在首次登录时加密存储
+
+            # 保存配置
+            with open(common_ini_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+
+            logger.info(f"Updated MT5 configuration: Login={mt5_login}, Server={mt5_server}")
+
+        # 清理旧的账户数据（让 MT5 重新登录）
+        accounts_dat = mt5_client_dir / "Config" / "accounts.dat"
+        if accounts_dat.exists():
+            accounts_dat.unlink()
+            logger.info("Cleared old accounts.dat")
+
+        # 清理旧的服务器数据
+        servers_dat = mt5_client_dir / "Config" / "servers.dat"
+        if servers_dat.exists():
+            servers_dat.unlink()
+            logger.info("Cleared old servers.dat")
+
+        # 新的 MT5 客户端路径
+        new_mt5_path = str(mt5_client_dir / "terminal64.exe")
+
+        # ==================== 2. 部署 Bridge 服务 ====================
         deploy_dir = Path(f"D:/{service_name}")
         if deploy_dir.exists():
-            raise HTTPException(status_code=400, detail=f"部署目录已存在: {deploy_dir}")
+            raise HTTPException(status_code=400, detail=f"Bridge部署目录已存在: {deploy_dir}")
 
         deploy_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created deployment directory: {deploy_dir}")
+        logger.info(f"Created Bridge deployment directory: {deploy_dir}")
 
-        # 2. 创建子目录
+        # 创建子目录
         (deploy_dir / "app").mkdir(exist_ok=True)
         (deploy_dir / "logs").mkdir(exist_ok=True)
         (deploy_dir / "venv").mkdir(exist_ok=True)
 
-        # 3. 创建 .env 配置文件
+        # 创建 .env 配置文件（使用新的 MT5 路径）
         env_content = f"""# Bridge 实例配置
 API_KEY={api_key}
 MT5_LOGIN={mt5_login}
 MT5_PASSWORD={mt5_password}
 MT5_SERVER={mt5_server}
-MT5_PATH={mt5_path}
+MT5_PATH={new_mt5_path}
 SERVICE_PORT={service_port}
 INSTANCE_NAME={service_name}
 """
         with open(deploy_dir / ".env", "w", encoding="utf-8") as f:
             f.write(env_content)
-        logger.info(f"Created .env file")
+        logger.info(f"Created .env file with MT5 path: {new_mt5_path}")
 
-        # 4. 复制 Bridge 应用代码（从模板目录）
+        # 复制 Bridge 应用代码（从模板目录）
         template_dir = Path("D:/hustle-mt5-template")
         if template_dir.exists():
-            import shutil
             shutil.copytree(template_dir / "app", deploy_dir / "app", dirs_exist_ok=True)
             shutil.copytree(template_dir / "venv", deploy_dir / "venv", dirs_exist_ok=True)
             if (template_dir / "requirements.txt").exists():
@@ -888,7 +941,7 @@ INSTANCE_NAME={service_name}
         else:
             logger.warning(f"Template directory not found: {template_dir}")
 
-        # 5. 使用 nssm 创建 Windows 服务
+        # ==================== 3. 配置 Windows 服务 ====================
         uvicorn_path = str(deploy_dir / "venv" / "Scripts" / "uvicorn.exe")
         app_dir = str(deploy_dir / "app")
 
@@ -916,7 +969,7 @@ INSTANCE_NAME={service_name}
 
         logger.info(f"Bridge service {service_name} configured successfully")
 
-        # 6. 启动服务
+        # 启动服务
         result = subprocess.run(['nssm', 'start', service_name], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             logger.warning(f"Failed to start service: {result.stderr}")
@@ -925,35 +978,41 @@ INSTANCE_NAME={service_name}
             "success": True,
             "service_name": service_name,
             "deploy_dir": str(deploy_dir),
+            "mt5_client_dir": str(mt5_client_dir),
+            "mt5_path": new_mt5_path,
             "service_port": service_port,
-            "message": "Bridge 实例部署成功"
+            "message": "MT5客户端和Bridge实例部署成功"
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to deploy bridge: {e}")
+        logger.error(f"Failed to deploy: {e}")
         # 清理失败的部署
         try:
-            if deploy_dir.exists():
-                import shutil
+            if 'deploy_dir' in locals() and deploy_dir.exists():
                 shutil.rmtree(deploy_dir)
+            if 'mt5_client_dir' in locals() and mt5_client_dir.exists():
+                shutil.rmtree(mt5_client_dir)
         except:
             pass
         raise HTTPException(status_code=500, detail=f"部署失败: {str(e)}")
 
 
 @app.delete("/bridge/{service_name}", dependencies=[Depends(verify_api_key)])
-def delete_bridge(service_name: str):
+def delete_bridge(service_name: str, mt5_client_port: int = None):
     """
-    删除 Bridge 实例
+    删除 Bridge 实例和 MT5 客户端
 
     Args:
         service_name: 服务名称
+        mt5_client_port: MT5客户端端口号（用于定位客户端目录）
 
     Returns:
         删除结果
     """
+    import shutil
+
     try:
         deploy_dir = Path(f"D:/{service_name}")
 
@@ -975,20 +1034,39 @@ def delete_bridge(service_name: str):
         except Exception as e:
             logger.warning(f"Failed to remove service: {e}")
 
-        # 3. 删除部署目录
+        # 3. 删除 Bridge 部署目录
         if deploy_dir.exists():
-            import shutil
             shutil.rmtree(deploy_dir)
-            logger.info(f"Removed deployment directory: {deploy_dir}")
+            logger.info(f"Removed Bridge deployment directory: {deploy_dir}")
+
+        # 4. 删除 MT5 客户端目录（如果提供了端口号）
+        if mt5_client_port:
+            mt5_client_dir = Path(f"D:/MetaTrader 5-{mt5_client_port}")
+            if mt5_client_dir.exists():
+                # 先确保 MT5 进程已停止
+                mt5_exe = mt5_client_dir / "terminal64.exe"
+                if mt5_exe.exists():
+                    for proc in psutil.process_iter(['name', 'exe']):
+                        try:
+                            if proc.info['exe'] and Path(proc.info['exe']).resolve() == mt5_exe.resolve():
+                                proc.kill()
+                                logger.info(f"Killed MT5 process: PID={proc.pid}")
+                                time.sleep(2)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+
+                # 删除 MT5 客户端目录
+                shutil.rmtree(mt5_client_dir)
+                logger.info(f"Removed MT5 client directory: {mt5_client_dir}")
 
         return {
             "success": True,
             "service_name": service_name,
-            "message": "Bridge 实例删除成功"
+            "message": "Bridge实例和MT5客户端删除成功"
         }
 
     except Exception as e:
-        logger.error(f"Failed to delete bridge: {e}")
+        logger.error(f"Failed to delete: {e}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
