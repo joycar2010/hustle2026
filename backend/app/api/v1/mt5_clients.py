@@ -173,16 +173,29 @@ async def update_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """更新MT5客户端配置"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
+    # 检查调用者是否是管理员
+    from app.models.user import User
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    is_admin = caller is not None and caller.role in ADMIN_ROLES
+
+    # 管理员可以更新任何客户端，普通用户只能更新自己的
+    if is_admin:
+        result = await db.execute(
+            select(MT5Client).where(MT5Client.client_id == client_id)
+        )
+    else:
+        result = await db.execute(
+            select(MT5Client)
+            .join(Account)
+            .where(
+                and_(
+                    MT5Client.client_id == client_id,
+                    Account.user_id == uuid.UUID(user_id)
+                )
             )
         )
-    )
     client = result.scalar_one_or_none()
     if not client:
         raise HTTPException(status_code=404, detail="MT5 client not found")
@@ -205,16 +218,29 @@ async def delete_mt5_client(
     db: AsyncSession = Depends(get_db)
 ):
     """删除MT5客户端"""
-    result = await db.execute(
-        select(MT5Client)
-        .join(Account)
-        .where(
-            and_(
-                MT5Client.client_id == client_id,
-                Account.user_id == uuid.UUID(user_id)
+    # 检查调用者是否是管理员
+    from app.models.user import User
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    is_admin = caller is not None and caller.role in ADMIN_ROLES
+
+    # 管理员可以删除任何客户端，普通用户只能删除自己的
+    if is_admin:
+        result = await db.execute(
+            select(MT5Client).where(MT5Client.client_id == client_id)
+        )
+    else:
+        result = await db.execute(
+            select(MT5Client)
+            .join(Account)
+            .where(
+                and_(
+                    MT5Client.client_id == client_id,
+                    Account.user_id == uuid.UUID(user_id)
+                )
             )
         )
-    )
     client = result.scalar_one_or_none()
     if not client:
         raise HTTPException(status_code=404, detail="MT5 client not found")
