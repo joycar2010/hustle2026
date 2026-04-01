@@ -179,13 +179,13 @@ async def control_instance(
 
     try:
         if control.action == "start":
-            await agent_service.start_instance(instance.service_port)
+            await agent_service.start_instance_by_name(instance.instance_name)
             instance.status = "running"
         elif control.action == "stop":
-            await agent_service.stop_instance(instance.service_port)
+            await agent_service.stop_instance_by_name(instance.instance_name)
             instance.status = "stopped"
         elif control.action == "restart":
-            await agent_service.restart_instance(instance.service_port)
+            await agent_service.restart_instance_by_name(instance.instance_name)
             instance.status = "running"
         else:
             raise HTTPException(

@@ -97,16 +97,28 @@ class MT5AgentService:
         return await self._http_request("/deploy", method="POST", data=data)
 
     async def start_instance(self, port: int) -> Dict[str, Any]:
-        """启动 MT5 实例"""
+        """启动 MT5 实例（通过端口）"""
         return await self._http_request(f"/instances/{port}/start", method="POST")
 
+    async def start_instance_by_name(self, instance_name: str) -> Dict[str, Any]:
+        """启动 MT5 实例（通过实例名）"""
+        return await self._http_request(f"/instances/{instance_name}/start", method="POST")
+
     async def stop_instance(self, port: int) -> Dict[str, Any]:
-        """停止 MT5 实例"""
+        """停止 MT5 实例（通过端口）"""
         return await self._http_request(f"/instances/{port}/stop", method="POST")
 
+    async def stop_instance_by_name(self, instance_name: str) -> Dict[str, Any]:
+        """停止 MT5 实例（通过实例名）"""
+        return await self._http_request(f"/instances/{instance_name}/stop", method="POST")
+
     async def restart_instance(self, port: int) -> Dict[str, Any]:
-        """重启 MT5 实例"""
+        """重启 MT5 实例（通过端口）"""
         return await self._http_request(f"/instances/{port}/restart", method="POST")
+
+    async def restart_instance_by_name(self, instance_name: str) -> Dict[str, Any]:
+        """重启 MT5 实例（通过实例名）"""
+        return await self._http_request(f"/instances/{instance_name}/restart", method="POST")
 
     async def get_instance_status(self, port: int) -> Dict[str, Any]:
         """获取 MT5 实例状态"""
