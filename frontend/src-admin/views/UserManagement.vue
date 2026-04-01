@@ -392,14 +392,16 @@
             </div>
 
             <!-- 健康状态 -->
-            <div v-if="agentStatus[client.agent_instance_name]?.is_running" class="text-xs space-y-1">
+            <div v-if="agentStatus[client.agent_instance_name]?.is_running &&
+                       agentStatus[client.agent_instance_name]?.health_status?.details?.cpu_percent !== undefined"
+                 class="text-xs space-y-1">
               <div class="flex justify-between">
                 <span class="text-text-tertiary">CPU:</span>
-                <span>{{ agentStatus[client.agent_instance_name]?.health_status?.details?.cpu_percent?.toFixed(1) || 0 }}%</span>
+                <span>{{ agentStatus[client.agent_instance_name]?.health_status?.details?.cpu_percent?.toFixed(1) }}%</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-text-tertiary">内存:</span>
-                <span>{{ agentStatus[client.agent_instance_name]?.health_status?.details?.memory_mb?.toFixed(0) || 0 }} MB</span>
+                <span>{{ agentStatus[client.agent_instance_name]?.health_status?.details?.memory_mb?.toFixed(0) }} MB</span>
               </div>
             </div>
 
