@@ -265,22 +265,41 @@ class MT5Controller:
         if instance_config.get("is_investor", False):
             cmd.append("/investor")
 
-        # 设置创建标志
-        creation_flags = 0
-        if instance_config.get("create_no_window", False):
-            creation_flags = subprocess.CREATE_NO_WINDOW
-
         try:
-            subprocess.Popen(
-                cmd,
-                cwd=os.path.dirname(mt5_path),
-                creationflags=creation_flags,
-                shell=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            logger.info(f"Started instance {instance_config['name']}, waiting {wait_seconds}s...")
+            # 使用任务计划程序在用户会话中启动进程
+            # 这样可以确保 MT5 窗口显示在用户桌面上
+            task_name = f"MT5_Start_{instance_config['name']}_{int(time.time())}"
+            cmd_str = ' '.join([f'"{c}"' if ' ' in c else c for c in cmd])
+
+            # 创建临时任务
+            create_task_cmd = [
+                'schtasks', '/create',
+                '/tn', task_name,
+                '/tr', cmd_str,
+                '/sc', 'once',
+                '/st', '00:00',
+                '/rl', 'HIGHEST',
+                '/f'
+            ]
+
+            result = subprocess.run(create_task_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"Failed to create task: {result.stderr}")
+                return False
+
+            # 立即运行任务
+            run_task_cmd = ['schtasks', '/run', '/tn', task_name]
+            result = subprocess.run(run_task_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"Failed to run task: {result.stderr}")
+                subprocess.run(['schtasks', '/delete', '/tn', task_name, '/f'], capture_output=True)
+                return False
+
+            logger.info(f"Started instance {instance_config['name']} via task scheduler, waiting {wait_seconds}s...")
             time.sleep(wait_seconds)
+
+            # 删除临时任务
+            subprocess.run(['schtasks', '/delete', '/tn', task_name, '/f'], capture_output=True)
 
             if MT5Controller.is_instance_running(mt5_path, account):
                 logger.info(f"Instance {instance_config['name']} (account: {account}) started successfully")
