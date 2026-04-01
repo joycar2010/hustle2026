@@ -191,25 +191,37 @@ class MT5Controller:
     """MT5 实例控制器"""
 
     @staticmethod
+    @staticmethod
     def is_instance_running(mt5_path: str, account: str = None) -> bool:
         """检查指定路径和账户的 MT5 实例是否运行"""
         target_path = os.path.normpath(mt5_path).lower()
+        logger.debug(f"Checking if instance is running: path={target_path}, account={account}")
+
         for proc in psutil.process_iter(['name', 'exe', 'cmdline']):
             try:
                 if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
                     proc_path = os.path.normpath(proc.info['exe']).lower()
+                    logger.debug(f"Found terminal64.exe: {proc_path}")
+
                     if proc_path == target_path:
+                        logger.debug(f"Path matches! cmdline: {proc.info.get('cmdline', [])}")
+
                         # 如果指定了账户，需要匹配账户号
                         if account:
                             cmdline = proc.info.get('cmdline', [])
                             # 检查命令行参数中是否包含该账户
                             for arg in cmdline:
                                 if f'/login:{account}' in arg or f'login:{account}' in arg:
+                                    logger.info(f"Instance running: path={target_path}, account={account}")
                                     return True
+                            logger.debug(f"Account {account} not found in cmdline")
                         else:
+                            logger.info(f"Instance running: path={target_path} (no account check)")
                             return True
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
+
+        logger.info(f"Instance NOT running: path={target_path}, account={account}")
         return False
 
     @staticmethod
@@ -298,17 +310,23 @@ class MT5Controller:
         mt5_path = instance_config["path"]
         account = instance_config.get("account")
 
+        logger.info(f"Attempting to stop instance: {instance_config['name']}, path={mt5_path}, account={account}")
+
         if not MT5Controller.is_instance_running(mt5_path, account):
             logger.info(f"Instance {instance_config['name']} (account: {account}) is not running")
             return True
 
         target_path = os.path.normpath(mt5_path).lower()
+        stopped = False
+
         try:
             for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
                 try:
                     if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
                         proc_path = os.path.normpath(proc.info['exe']).lower()
                         if proc_path == target_path:
+                            logger.debug(f"Found matching process: PID={proc.info['pid']}, cmdline={proc.info.get('cmdline', [])}")
+
                             # 如果指定了账户，需要匹配账户号
                             if account:
                                 cmdline = proc.info.get('cmdline', [])
@@ -318,20 +336,29 @@ class MT5Controller:
                                         account_match = True
                                         break
                                 if not account_match:
+                                    logger.debug(f"Account {account} not found in cmdline, skipping PID {proc.info['pid']}")
                                     continue  # 账户不匹配，跳过此进程
 
                             # 停止进程
+                            logger.info(f"Stopping process: PID={proc.info['pid']}, force={force}")
                             if force:
                                 proc.kill()
                             else:
                                 proc.terminate()
                             logger.info(f"Stopped instance {instance_config['name']} (account: {account}, PID: {proc.info['pid']})")
+                            stopped = True
                             time.sleep(2)
+
                             if not MT5Controller.is_instance_running(mt5_path, account):
+                                logger.info(f"Verified: instance {instance_config['name']} is no longer running")
                                 return True
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
-            logger.error(f"Failed to stop instance {instance_config['name']} (account: {account})")
+
+            if not stopped:
+                logger.error(f"No matching process found to stop for {instance_config['name']} (account: {account})")
+            else:
+                logger.error(f"Process was stopped but still appears to be running: {instance_config['name']}")
             return False
         except Exception as e:
             logger.error(f"Error stopping instance {instance_config['name']} (account: {account}): {e}")
@@ -545,6 +572,23 @@ class InstanceStatus(BaseModel):
     health_status: Optional[Dict] = None
 
 # ====================== API 端点 ======================
+@app.get("/debug/processes", dependencies=[Depends(verify_api_key)])
+def debug_processes():
+    """调试端点：列出所有MT5进程"""
+    processes = []
+    for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+        try:
+            if proc.info['name'] == 'terminal64.exe':
+                processes.append({
+                    "pid": proc.info['pid'],
+                    "exe": proc.info.get('exe'),
+                    "cmdline": proc.info.get('cmdline', [])
+                })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    return {"processes": processes, "count": len(processes)}
+
+
 @app.get("/health")
 def health_check():
     """健康检查"""
