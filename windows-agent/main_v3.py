@@ -191,9 +191,13 @@ class MT5Controller:
     """MT5 实例控制器"""
 
     @staticmethod
-    @staticmethod
     def is_instance_running(mt5_path: str, account: str = None) -> bool:
-        """检查指定路径和账户的 MT5 实例是否运行"""
+        """
+        检查指定路径的 MT5 实例是否正在运行
+
+        注意：由于 MT5 进程启动后命令行参数可能不保留，
+        我们主要依赖路径匹配。账户参数仅用于日志记录。
+        """
         target_path = os.path.normpath(mt5_path).lower()
         logger.debug(f"Checking if instance is running: path={target_path}, account={account}")
 
@@ -201,23 +205,10 @@ class MT5Controller:
             try:
                 if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
                     proc_path = os.path.normpath(proc.info['exe']).lower()
-                    logger.debug(f"Found terminal64.exe: {proc_path}")
 
                     if proc_path == target_path:
-                        logger.debug(f"Path matches! cmdline: {proc.info.get('cmdline', [])}")
-
-                        # 如果指定了账户，需要匹配账户号
-                        if account:
-                            cmdline = proc.info.get('cmdline', [])
-                            # 检查命令行参数中是否包含该账户
-                            for arg in cmdline:
-                                if f'/login:{account}' in arg or f'login:{account}' in arg:
-                                    logger.info(f"Instance running: path={target_path}, account={account}")
-                                    return True
-                            logger.debug(f"Account {account} not found in cmdline")
-                        else:
-                            logger.info(f"Instance running: path={target_path} (no account check)")
-                            return True
+                        logger.info(f"Instance running: path={target_path}, account={account}, cmdline={proc.info.get('cmdline', [])}")
+                        return True
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
@@ -226,22 +217,19 @@ class MT5Controller:
 
     @staticmethod
     def get_instance_process(mt5_path: str, account: str = None) -> Optional[psutil.Process]:
-        """获取指定路径和账户的 MT5 进程对象"""
+        """
+        获取指定路径的 MT5 进程对象
+
+        注意：主要依赖路径匹配，账户参数仅用于日志记录
+        """
         target_path = os.path.normpath(mt5_path).lower()
         for proc in psutil.process_iter(['name', 'exe', 'pid', 'cmdline']):
             try:
                 if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
                     proc_path = os.path.normpath(proc.info['exe']).lower()
                     if proc_path == target_path:
-                        # 如果指定了账户，需要匹配账户号
-                        if account:
-                            cmdline = proc.info.get('cmdline', [])
-                            # 检查命令行参数中是否包含该账户
-                            for arg in cmdline:
-                                if f'/login:{account}' in arg or f'login:{account}' in arg:
-                                    return psutil.Process(proc.info['pid'])
-                        else:
-                            return psutil.Process(proc.info['pid'])
+                        logger.info(f"Found process: PID={proc.info['pid']}, path={target_path}, account={account}")
+                        return psutil.Process(proc.info['pid'])
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
         return None
@@ -306,7 +294,11 @@ class MT5Controller:
 
     @staticmethod
     def stop_instance(instance_config: Dict, force: bool = True) -> bool:
-        """停止 MT5 实例"""
+        """
+        停止 MT5 实例
+
+        注意：主要依赖路径匹配，不再检查账户参数
+        """
         mt5_path = instance_config["path"]
         account = instance_config.get("account")
 
@@ -325,19 +317,7 @@ class MT5Controller:
                     if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
                         proc_path = os.path.normpath(proc.info['exe']).lower()
                         if proc_path == target_path:
-                            logger.debug(f"Found matching process: PID={proc.info['pid']}, cmdline={proc.info.get('cmdline', [])}")
-
-                            # 如果指定了账户，需要匹配账户号
-                            if account:
-                                cmdline = proc.info.get('cmdline', [])
-                                account_match = False
-                                for arg in cmdline:
-                                    if f'/login:{account}' in arg or f'login:{account}' in arg:
-                                        account_match = True
-                                        break
-                                if not account_match:
-                                    logger.debug(f"Account {account} not found in cmdline, skipping PID {proc.info['pid']}")
-                                    continue  # 账户不匹配，跳过此进程
+                            logger.info(f"Found matching process: PID={proc.info['pid']}, cmdline={proc.info.get('cmdline', [])}")
 
                             # 停止进程
                             logger.info(f"Stopping process: PID={proc.info['pid']}, force={force}")
