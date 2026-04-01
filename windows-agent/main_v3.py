@@ -158,8 +158,8 @@ class MT5Controller:
         mt5_path = instance_config["path"]
         account = instance_config.get("account")
 
-        # 检查是否已运行（使用账户号精确匹配）
-        if MT5Controller.is_instance_running(mt5_path, account):
+        # 检查是否已运行（主要使用路径匹配）
+        if MT5Controller.is_instance_running(mt5_path):
             logger.info(f"Instance {instance_config['name']} (account: {account}) is already running")
             return True
 
@@ -200,7 +200,7 @@ class MT5Controller:
             logger.info(f"Started instance {instance_config['name']}, waiting {wait_seconds}s...")
             time.sleep(wait_seconds)
 
-            if MT5Controller.is_instance_running(mt5_path, account):
+            if MT5Controller.is_instance_running(mt5_path):
                 logger.info(f"Instance {instance_config['name']} (account: {account}) started successfully")
                 return True
             else:
@@ -216,28 +216,17 @@ class MT5Controller:
         mt5_path = instance_config["path"]
         account = instance_config.get("account")
 
-        if not MT5Controller.is_instance_running(mt5_path, account):
+        if not MT5Controller.is_instance_running(mt5_path):
             logger.info(f"Instance {instance_config['name']} (account: {account}) is not running")
             return True
 
         target_path = os.path.normpath(mt5_path).lower()
         try:
-            for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+            for proc in psutil.process_iter(['pid', 'name', 'exe']):
                 try:
                     if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
                         proc_path = os.path.normpath(proc.info['exe']).lower()
                         if proc_path == target_path:
-                            # 如果指定了账户，需要匹配账户号
-                            if account:
-                                cmdline = proc.info.get('cmdline', [])
-                                account_matched = False
-                                for arg in cmdline:
-                                    if f'/login:{account}' in arg or f'login:{account}' in arg:
-                                        account_matched = True
-                                        break
-                                if not account_matched:
-                                    continue
-
                             # 停止进程
                             if force:
                                 proc.kill()
@@ -245,7 +234,7 @@ class MT5Controller:
                                 proc.terminate()
                             logger.info(f"Stopped instance {instance_config['name']} (account: {account}, PID: {proc.info['pid']})")
                             time.sleep(2)
-                            if not MT5Controller.is_instance_running(mt5_path, account):
+                            if not MT5Controller.is_instance_running(mt5_path):
                                 return True
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
@@ -277,7 +266,7 @@ class MT5HealthMonitor:
         """检查实例健康状态"""
         mt5_path = instance_config["path"]
         account = instance_config.get("account")
-        proc = MT5Controller.get_instance_process(mt5_path, account)
+        proc = MT5Controller.get_instance_process(mt5_path)
 
         health_status = {
             "instance_name": instance_name,
