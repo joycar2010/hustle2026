@@ -1488,8 +1488,10 @@ async function agentControl(client, action) {
       toast(`${actionText}失败: ${response.data.message}`, 'error')
     }
   } catch (error) {
-    toast(`${actionText}失败，请检查 MT5 Agent 服务`, 'error')
+    const detail = error.response?.data?.detail || error.message || '未知错误'
+    toast(`${actionText}失败: ${detail}`, 'error')
     console.error(`Agent ${action} failed:`, error)
+    console.error('Error detail:', error.response?.data)
   } finally {
     agentLoading.value[client.agent_instance_name] = null
   }
