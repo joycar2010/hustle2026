@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20260402_bridge'
-down_revision = '20260401_1555_aa9e0c575650_add_system_service_flag_to_mt5_clients'
+down_revision = '20260401_1555_aa9e0c575650'
 branch_labels = None
 depends_on = None
 
