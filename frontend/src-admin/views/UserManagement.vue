@@ -499,6 +499,7 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- ══════════════════════════════════════
@@ -1524,9 +1525,6 @@ async function loadMT5Clients() {
     // 启动定时刷新Agent状态
     if (agentRefreshTimer) clearInterval(agentRefreshTimer)
     agentRefreshTimer = setInterval(loadAgentStatus, 30000)
-  } catch (e) { apiErr('加载MT5客户端失败', e) }
-  finally { mt5Loading.value = false }
-}
   } catch (e) { apiErr('加载MT5客户端失败', e) }
   finally { mt5Loading.value = false }
 }
