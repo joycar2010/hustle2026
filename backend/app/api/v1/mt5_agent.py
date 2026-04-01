@@ -557,3 +557,122 @@ async def restart_bridge(
 
     return await call_agent_api("POST", f"/bridge/{client.bridge_service_name}/restart")
 
+
+@router.post("/bridge/{client_id}/deploy")
+async def deploy_bridge(
+    client_id: int,
+    service_port: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    部署 Bridge 实例
+
+    Args:
+        client_id: MT5客户端ID
+        service_port: Bridge 服务端口
+
+    Returns:
+        部署结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    # 生成服务名称
+    service_name = f"hustle-mt5-{client.client_name.lower().replace(' ', '-')}"
+
+    # 获取 MT5 路径
+    mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"  # 默认路径
+    if client.agent_instance_name == "bybit_system_service":
+        mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+
+    logger.info(
+        f"User {current_user.username} deploying bridge for {client.client_name} "
+        f"(service: {service_name}, port: {service_port})"
+    )
+
+    # 调用 Windows Agent 部署
+    deploy_result = await call_agent_api(
+        "POST",
+        "/bridge/deploy",
+        params={
+            "service_name": service_name,
+            "mt5_login": str(client.mt5_login),
+            "mt5_password": client.mt5_password,
+            "mt5_server": client.mt5_server,
+            "mt5_path": mt5_path,
+            "service_port": service_port
+        }
+    )
+
+    # 更新数据库中的 bridge_service_name
+    if deploy_result.get("success"):
+        client.bridge_service_name = service_name
+        await db.commit()
+        logger.info(f"Updated bridge_service_name for client {client_id}: {service_name}")
+
+    return deploy_result
+
+
+@router.delete("/bridge/{client_id}")
+async def delete_bridge(
+    client_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    删除 Bridge 实例
+
+    Args:
+        client_id: MT5客户端ID
+
+    Returns:
+        删除结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    if not client.bridge_service_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MT5客户端 {client.client_name} 未配置 Bridge 服务"
+        )
+
+    logger.info(
+        f"User {current_user.username} deleting bridge for {client.client_name} "
+        f"(service: {client.bridge_service_name})"
+    )
+
+    # 调用 Windows Agent 删除
+    delete_result = await call_agent_api(
+        "DELETE",
+        f"/bridge/{client.bridge_service_name}"
+    )
+
+    # 更新数据库，清空 bridge_service_name
+    if delete_result.get("success"):
+        client.bridge_service_name = None
+        await db.commit()
+        logger.info(f"Cleared bridge_service_name for client {client_id}")
+
+    return delete_result
