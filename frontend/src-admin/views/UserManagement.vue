@@ -334,7 +334,7 @@
               <span>{{ client.password_type === 'primary' ? '主密码' : '只读密码' }}</span>
             </div>
             <div class="flex justify-between">
-              <span class="text-text-tertiary">路径:</span>
+              <span class="text-text-tertiary">客户端路径:</span>
               <span class="font-mono text-xs truncate max-w-[180px]" :title="client.mt5_path">{{ client.mt5_path }}</span>
             </div>
             <div class="flex justify-between">
