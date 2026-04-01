@@ -719,6 +719,109 @@ def get_logs(lines: int = 100):
         logger.error(f"Failed to read logs: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to read logs: {str(e)}")
 
+# ====================== Bridge 实例控制 ======================
+@app.get("/bridge/{service_name}/status", dependencies=[Depends(verify_api_key)])
+def get_bridge_status(service_name: str):
+    """获取 Bridge 服务状态"""
+    try:
+        result = subprocess.run(
+            ['nssm', 'status', service_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        status = result.stdout.strip()
+        is_running = status == "SERVICE_RUNNING"
+
+        return {
+            "service_name": service_name,
+            "status": status,
+            "is_running": is_running
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Command timeout")
+    except Exception as e:
+        logger.error(f"Failed to get bridge status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/bridge/{service_name}/start", dependencies=[Depends(verify_api_key)])
+def start_bridge(service_name: str):
+    """启动 Bridge 服务"""
+    try:
+        result = subprocess.run(
+            ['nssm', 'start', service_name],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        success = result.returncode == 0
+        message = result.stdout.strip() if success else result.stderr.strip()
+
+        logger.info(f"Bridge {service_name} start: {message}")
+        return {
+            "service_name": service_name,
+            "operation": "start",
+            "success": success,
+            "message": message
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Command timeout")
+    except Exception as e:
+        logger.error(f"Failed to start bridge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/bridge/{service_name}/stop", dependencies=[Depends(verify_api_key)])
+def stop_bridge(service_name: str):
+    """停止 Bridge 服务"""
+    try:
+        result = subprocess.run(
+            ['nssm', 'stop', service_name],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        success = result.returncode == 0
+        message = result.stdout.strip() if success else result.stderr.strip()
+
+        logger.info(f"Bridge {service_name} stop: {message}")
+        return {
+            "service_name": service_name,
+            "operation": "stop",
+            "success": success,
+            "message": message
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Command timeout")
+    except Exception as e:
+        logger.error(f"Failed to stop bridge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/bridge/{service_name}/restart", dependencies=[Depends(verify_api_key)])
+def restart_bridge(service_name: str):
+    """重启 Bridge 服务"""
+    try:
+        result = subprocess.run(
+            ['nssm', 'restart', service_name],
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        success = result.returncode == 0
+        message = result.stdout.strip() if success else result.stderr.strip()
+
+        logger.info(f"Bridge {service_name} restart: {message}")
+        return {
+            "service_name": service_name,
+            "operation": "restart",
+            "success": success,
+            "message": message
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Command timeout")
+    except Exception as e:
+        logger.error(f"Failed to restart bridge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ====================== 后台监控任务 ======================
 async def monitoring_task():
     """后台健康监控任务"""
