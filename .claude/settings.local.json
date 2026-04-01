@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python -c \"import psycopg2; conn = psycopg2.connect\\(''postgresql://postgres:Lk106504!@127.0.0.1:5432/postgres''\\); cur = conn.cursor\\(\\); cur.execute\\(\"\"ALTER USER postgres WITH PASSWORD ''postgres123''\"\"\\); conn.commit\\(\\); print\\(''Password changed to postgres123''\\); conn.close\\(\\)\")",
-      "Bash(ssh -i c:/Users/HUAWEI/.ssh/HustleNew.pem ubuntu@go.hustle2026.xyz \"sudo systemctl restart hustle-python && sleep 3 && sudo systemctl status hustle-python --no-pager | head -15\")"
+      "Bash(ssh -i c:/Users/HUAWEI/.ssh/HustleNew.pem ubuntu@go.hustle2026.xyz \"sudo systemctl restart hustle-python && sleep 3 && sudo systemctl status hustle-python --no-pager | head -15\")",
+      "Bash(npm run:*)"
     ]
   }
 }

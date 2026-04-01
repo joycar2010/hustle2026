@@ -382,6 +382,70 @@
             </button>
           </div>
 
+          <!-- Bridge 服务控制 -->
+          <div v-if="client.bridge_service_name" class="bg-dark-200 rounded-lg p-2.5 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-text-tertiary font-medium">Bridge服务</span>
+              <span class="px-1.5 py-0.5 rounded text-xs" :class="getBridgeStatusClass(client)">
+                {{ getBridgeStatusText(client) }}
+              </span>
+            </div>
+
+            <!-- 服务信息 -->
+            <div class="text-xs space-y-1">
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">服务名:</span>
+                <span class="font-mono text-xs">{{ client.bridge_service_name }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">端口:</span>
+                <span class="font-mono">{{ client.bridge_service_port }}</span>
+              </div>
+            </div>
+
+            <!-- 控制按钮 -->
+            <div class="flex gap-1.5">
+              <button @click="bridgeControl(client, 'start')"
+                :disabled="bridgeStatus[client.client_id]?.status === 'running' || bridgeLoading[client.client_id]"
+                class="flex-1 py-1 rounded text-xs border transition-colors"
+                :class="bridgeStatus[client.client_id]?.status === 'running' || bridgeLoading[client.client_id] ?
+                  'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
+                  'bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] border-[#0ecb81]/20'">
+                {{ bridgeLoading[client.client_id] === 'start' ? '启动中...' : '启动' }}
+              </button>
+              <button @click="bridgeControl(client, 'stop')"
+                :disabled="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id]"
+                class="flex-1 py-1 rounded text-xs border transition-colors"
+                :class="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id] ?
+                  'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
+                  'bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] border-[#f6465d]/20'">
+                {{ bridgeLoading[client.client_id] === 'stop' ? '停止中...' : '停止' }}
+              </button>
+              <button @click="bridgeControl(client, 'restart')"
+                :disabled="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id]"
+                class="flex-1 py-1 rounded text-xs border transition-colors"
+                :class="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id] ?
+                  'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
+                  'bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] border-[#f0b90b]/20'">
+                {{ bridgeLoading[client.client_id] === 'restart' ? '重启中...' : '重启' }}
+              </button>
+            </div>
+
+            <!-- 删除按钮 -->
+            <button @click="deleteBridge(client)"
+              class="w-full py-1 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded text-xs border border-[#f6465d]/20 transition-colors">
+              删除Bridge
+            </button>
+          </div>
+
+          <!-- 未部署Bridge时显示部署按钮 -->
+          <div v-else class="bg-dark-200 rounded-lg p-2.5">
+            <button @click="openBridgeDeploy(client)"
+              class="w-full py-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
+              + 部署Bridge服务
+            </button>
+          </div>
+
           <!-- Windows Agent 远程控制 -->
           <div v-if="client.agent_instance_name" class="bg-dark-200 rounded-lg p-2.5 space-y-2">
             <div class="flex items-center justify-between">
@@ -926,6 +990,53 @@
               <div class="bg-primary h-full transition-all duration-300 ease-out"
                 :style="{ width: deployProgress.progress + '%' }"></div>
             </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal: Bridge 部署对话框 -->
+    <div v-if="showBridgeDeployModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      @click.self="showBridgeDeployModal = false">
+      <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
+        <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+          <h3 class="font-bold">部署 Bridge 服务</h3>
+          <button @click="showBridgeDeployModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
+        </div>
+        <form @submit.prevent="deployBridge" class="p-6 space-y-4">
+          <div class="bg-dark-200 rounded-lg p-3 mb-4">
+            <div class="text-sm text-text-secondary mb-1">客户端</div>
+            <div class="font-medium">{{ bridgeDeployForm.client_name }}</div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">服务端口 *</label>
+            <input v-model.number="bridgeDeployForm.service_port" type="number" required
+              min="8000" max="9000"
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+              placeholder="输入端口号 (8000-9000)" />
+            <div class="text-xs text-text-tertiary mt-1">
+              端口范围: 8000-9000
+            </div>
+          </div>
+
+          <div class="bg-[#f0b90b]/10 border border-[#f0b90b]/20 rounded-lg p-3">
+            <div class="text-xs text-[#f0b90b] space-y-1">
+              <div>• 系统将自动复制 MT5 客户端到新目录</div>
+              <div>• 自动配置登录信息和服务器设置</div>
+              <div>• 创建并启动 Windows 服务</div>
+            </div>
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button type="submit"
+              class="flex-1 py-2 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-sm transition-colors">
+              开始部署
+            </button>
+            <button type="button" @click="showBridgeDeployModal = false"
+              class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
+              取消
+            </button>
           </div>
         </form>
       </div>
@@ -1506,6 +1617,160 @@ async function agentControl(client, action) {
   }
 }
 
+// ==================== Bridge 服务控制 ====================
+const bridgeStatus = ref({})
+const bridgeLoading = ref({})
+const showBridgeDeployModal = ref(false)
+const bridgeDeployForm = ref({ client_id: null, service_port: null })
+let bridgeRefreshTimer = null
+
+function getBridgeStatusClass(client) {
+  if (!client.bridge_service_name) return 'bg-dark-200 text-text-tertiary'
+  const status = bridgeStatus.value[client.client_id]
+  if (!status) return 'bg-dark-200 text-text-tertiary'
+  return status.is_running ? 'bg-[#0ecb81]/20 text-[#0ecb81]' : 'bg-dark-200 text-text-tertiary'
+}
+
+function getBridgeStatusText(client) {
+  if (!client.bridge_service_name) return '未部署'
+  const status = bridgeStatus.value[client.client_id]
+  if (!status) return '未知'
+  return status.is_running ? '运行中' : '已停止'
+}
+
+async function loadBridgeStatus() {
+  try {
+    for (const client of mt5Clients.value) {
+      if (client.bridge_service_name) {
+        try {
+          const response = await api.get(`/api/v1/mt5-agent/bridge/${client.client_id}/status`)
+          bridgeStatus.value[client.client_id] = response.data
+        } catch (error) {
+          console.error(`Failed to load bridge status for client ${client.client_id}:`, error)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load bridge status:', error)
+  }
+}
+
+async function bridgeControl(client, action) {
+  if (!client.bridge_service_name) {
+    toast('该客户端未部署 Bridge 服务', 'error')
+    return
+  }
+
+  const actionText = { start: '启动', stop: '停止', restart: '重启' }[action]
+  const confirmed = confirm(`确定要${actionText} ${client.client_name} 的 Bridge 服务吗？`)
+  if (!confirmed) return
+
+  try {
+    bridgeLoading.value[client.client_id] = action
+    console.log(`[Bridge Control] Starting ${action} for client ${client.client_id}`)
+
+    const response = await api.post(`/api/v1/mt5-agent/bridge/${client.client_id}/${action}`)
+    console.log(`[Bridge Control] Response:`, response.data)
+
+    if (response.data.success) {
+      toast(`Bridge ${actionText}成功！`, 'success')
+      console.log(`[Bridge Control] Success: ${response.data.message}`)
+      setTimeout(() => {
+        loadBridgeStatus()
+        console.log('[Bridge Control] Refreshing bridge status...')
+      }, action === 'start' || action === 'restart' ? 3000 : 1000)
+    } else {
+      toast(`${actionText}失败: ${response.data.message}`, 'error')
+      console.error(`[Bridge Control] Failed:`, response.data)
+    }
+  } catch (error) {
+    const detail = error.response?.data?.detail || error.message || '未知错误'
+    toast(`${actionText}失败: ${detail}`, 'error')
+    console.error(`[Bridge Control] Error:`, error)
+  } finally {
+    bridgeLoading.value[client.client_id] = null
+  }
+}
+
+function openBridgeDeploy(client) {
+  bridgeDeployForm.value = {
+    client_id: client.client_id,
+    client_name: client.client_name,
+    service_port: null
+  }
+  showBridgeDeployModal.value = true
+}
+
+async function deployBridge() {
+  if (!bridgeDeployForm.value.service_port) {
+    toast('请输入服务端口', 'error')
+    return
+  }
+
+  const port = parseInt(bridgeDeployForm.value.service_port)
+  if (port < 8000 || port > 9000) {
+    toast('端口号必须在 8000-9000 之间', 'error')
+    return
+  }
+
+  try {
+    console.log(`[Bridge Deploy] Deploying for client ${bridgeDeployForm.value.client_id}, port ${port}`)
+    const response = await api.post(
+      `/api/v1/mt5-agent/bridge/${bridgeDeployForm.value.client_id}/deploy`,
+      { service_port: port }
+    )
+
+    if (response.data.success) {
+      toast('Bridge 部署成功！', 'success')
+      console.log('[Bridge Deploy] Success:', response.data)
+      showBridgeDeployModal.value = false
+      await loadMT5Clients()
+      await loadBridgeStatus()
+    } else {
+      toast(`部署失败: ${response.data.message}`, 'error')
+    }
+  } catch (error) {
+    const detail = error.response?.data?.detail || error.message || '未知错误'
+    toast(`部署失败: ${detail}`, 'error')
+    console.error('[Bridge Deploy] Error:', error)
+  }
+}
+
+async function deleteBridge(client) {
+  if (!client.bridge_service_name) {
+    toast('该客户端未部署 Bridge 服务', 'error')
+    return
+  }
+
+  const confirmed = confirm(
+    `确定要删除 ${client.client_name} 的 Bridge 服务吗？\n\n` +
+    `这将删除以下内容：\n` +
+    `- Bridge 服务和配置\n` +
+    `- MT5 客户端目录 (MetaTrader 5-${client.bridge_service_port})\n` +
+    `- 所有相关数据\n\n` +
+    `此操作不可恢复！`
+  )
+  if (!confirmed) return
+
+  try {
+    console.log(`[Bridge Delete] Deleting for client ${client.client_id}`)
+    const response = await api.delete(`/api/v1/mt5-agent/bridge/${client.client_id}`)
+
+    if (response.data.success) {
+      toast('Bridge 删除成功！', 'success')
+      console.log('[Bridge Delete] Success:', response.data)
+      await loadMT5Clients()
+      await loadBridgeStatus()
+    } else {
+      toast(`删除失败: ${response.data.message}`, 'error')
+    }
+  } catch (error) {
+    const detail = error.response?.data?.detail || error.message || '未知错误'
+    toast(`删除失败: ${detail}`, 'error')
+    console.error('[Bridge Delete] Error:', error)
+  }
+}
+
 async function onMt5UserChange() {
   mt5SelectedAccountId.value = ''
   mt5Clients.value = []
@@ -1537,11 +1802,13 @@ async function loadMT5Clients() {
   try {
     const r = await api.get(`/api/v1/accounts/${mt5SelectedAccountId.value}/mt5-clients`)
     mt5Clients.value = Array.isArray(r.data) ? r.data : (r.data?.clients ?? [])
-    // 同时加载所有实例和Agent状态
-    await Promise.all([loadMT5Instances(), loadAgentStatus()])
-    // 启动定时刷新Agent状态
+    // 同时加载所有实例、Agent状态和Bridge状态
+    await Promise.all([loadMT5Instances(), loadAgentStatus(), loadBridgeStatus()])
+    // 启动定时刷新
     if (agentRefreshTimer) clearInterval(agentRefreshTimer)
+    if (bridgeRefreshTimer) clearInterval(bridgeRefreshTimer)
     agentRefreshTimer = setInterval(loadAgentStatus, 30000)
+    bridgeRefreshTimer = setInterval(loadBridgeStatus, 30000)
   } catch (e) { apiErr('加载MT5客户端失败', e) }
   finally { mt5Loading.value = false }
 }
