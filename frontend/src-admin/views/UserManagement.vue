@@ -298,7 +298,11 @@
             <div class="flex-1 min-w-0">
               <div class="font-bold text-sm">{{ client.client_name }}</div>
               <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                <span class="px-1.5 py-0.5 rounded text-xs" :class="getMT5StatusClass(client.connection_status)">
+                <span v-if="client.is_system_service"
+                  class="px-1.5 py-0.5 rounded text-xs bg-[#f0b90b]/20 text-[#f0b90b]">
+                  系统服务中
+                </span>
+                <span v-else class="px-1.5 py-0.5 rounded text-xs" :class="getMT5StatusClass(client.connection_status)">
                   {{ getMT5StatusText(client.connection_status) }}
                 </span>
                 <span v-if="!client.is_active"
