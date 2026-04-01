@@ -1475,23 +1475,32 @@ async function agentControl(client, action) {
 
   try {
     agentLoading.value[client.agent_instance_name] = action
+    console.log(`[Agent Control] Starting ${action} for client ${client.client_id}`)
+
     const response = await api.post(
       `/api/v1/mt5-agent/clients/${client.client_id}/${action}`,
       null,
       { params: action === 'start' || action === 'restart' ? { wait_seconds: 5 } : { force: true } }
     )
 
+    console.log(`[Agent Control] Response:`, response.data)
+
     if (response.data.success) {
-      toast(`${actionText}成功`, 'success')
-      setTimeout(loadAgentStatus, action === 'start' || action === 'restart' ? 3000 : 1000)
+      toast(`${client.client_name} ${actionText}成功！`, 'success')
+      console.log(`[Agent Control] Success: ${response.data.message}`)
+      setTimeout(() => {
+        loadAgentStatus()
+        console.log('[Agent Control] Refreshing agent status...')
+      }, action === 'start' || action === 'restart' ? 3000 : 1000)
     } else {
       toast(`${actionText}失败: ${response.data.message}`, 'error')
+      console.error(`[Agent Control] Failed:`, response.data)
     }
   } catch (error) {
     const detail = error.response?.data?.detail || error.message || '未知错误'
     toast(`${actionText}失败: ${detail}`, 'error')
-    console.error(`Agent ${action} failed:`, error)
-    console.error('Error detail:', error.response?.data)
+    console.error(`[Agent Control] Error:`, error)
+    console.error('[Agent Control] Error detail:', error.response?.data)
   } finally {
     agentLoading.value[client.agent_instance_name] = null
   }
