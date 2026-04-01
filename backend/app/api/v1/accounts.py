@@ -445,10 +445,25 @@ async def get_aggregated_dashboard(
     logger = logging.getLogger(__name__)
     logger.info(f"API: /dashboard/aggregated called for user {user_id}")
 
+    # Import MT5Client model for filtering
+    from app.models.mt5_client import MT5Client
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import and_, or_
+
+    # Query accounts and filter out system service accounts
     result = await db.execute(
-        select(Account).where(
-            Account.user_id == UUID(user_id),
+        select(Account)
+        .outerjoin(MT5Client, Account.account_id == MT5Client.account_id)
+        .where(
+            and_(
+                Account.user_id == UUID(user_id),
+                or_(
+                    MT5Client.is_system_service == False,
+                    MT5Client.is_system_service.is_(None)
+                )
+            )
         )
+        .distinct()
     )
     accounts = result.scalars().all()
 
