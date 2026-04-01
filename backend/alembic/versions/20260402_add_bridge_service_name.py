@@ -1,7 +1,7 @@
 """add bridge_service_name to mt5_clients
 
 Revision ID: 20260402_bridge
-Revises: 20260401_1555_aa9e0c575650
+Revises: aa9e0c575650
 Create Date: 2026-04-02
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20260402_bridge'
-down_revision = '20260401_1555_aa9e0c575650'
+down_revision = 'aa9e0c575650'
 branch_labels = None
 depends_on = None
 
