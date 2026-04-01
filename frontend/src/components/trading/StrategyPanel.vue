@@ -1058,8 +1058,34 @@ function handleOrderExecuted(data) {
 }
 
 function handleOrdersFilled(data) {
-  // Check if this message is for this strategy
-  if (data.strategy_id !== configId.value) return
+  console.log('[WebSocket] handleOrdersFilled called with data:', data)
+  console.log('[WebSocket] Current strategy type:', props.type)
+  console.log('[WebSocket] Message strategy_id:', data.strategy_id)
+
+  // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_{action}_continuous
+  // Example: "user123_forward_opening_continuous"
+  // We need to check if this message is for this strategy panel by checking the strategy_type
+  const isContinuousExecution = data.strategy_id && data.strategy_id.includes('_continuous')
+
+  if (isContinuousExecution) {
+    // Extract strategy_type from strategy_id (forward/reverse)
+    const isForward = data.strategy_id.includes('_forward_')
+    const isReverse = data.strategy_id.includes('_reverse_')
+
+    // Check if this message is for this strategy panel
+    const isForThisPanel = (props.type === 'forward' && isForward) || (props.type === 'reverse' && isReverse)
+
+    if (!isForThisPanel) {
+      console.log('[WebSocket] Message not for this panel, ignoring')
+      return
+    }
+  } else {
+    // For non-continuous execution, check config_id
+    if (data.strategy_id !== configId.value) {
+      console.log('[WebSocket] Config ID mismatch, ignoring')
+      return
+    }
+  }
 
   console.log(`[WebSocket] Orders filled notification received: ${data.action}`)
   console.log(`[WebSocket] Binance filled: ${data.binance_filled}, Bybit filled: ${data.bybit_filled}`)

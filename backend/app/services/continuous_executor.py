@@ -222,8 +222,11 @@ class ContinuousStrategyExecutor:
             )
             current_position = position_info['current_position']
 
-            # For closing strategies, also log actual exchange positions for monitoring
-            if not is_opening:
+            # For closing strategies, periodically log actual exchange positions for monitoring
+            # CRITICAL FIX: Only check every 100 iterations to prevent Binance API rate limiting
+            # Previous: checked every loop (0.1s) = 600 calls/min → caused IP ban
+            # Now: check every 100 loops (10s) = 6 calls/min → safe
+            if not is_opening and loop_count % 100 == 1:
                 try:
                     # Initialize clients if not already done
                     if not hasattr(binance_account, 'binance_client'):
@@ -265,11 +268,11 @@ class ContinuousStrategyExecutor:
                     actual_position = min(binance_qty, bybit_qty) if (binance_qty > 0 and bybit_qty > 0) else 0
 
                     with open("ladder_debug.log", "a", encoding="utf-8") as f:
-                        f.write(f"[DEBUG] Step 1 - Actual positions (monitoring): Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}\n")
+                        f.write(f"[DEBUG] Step 1 - Actual positions (monitoring, every 100 loops): Binance={binance_qty}, Bybit={bybit_qty}, Min={actual_position}\n")
                         f.write(f"[DEBUG] Step 1 - Memory position (already closed): {current_position}\n")
                         f.write(f"[DEBUG] Step 1 - Target total_qty: {ladder.total_qty}\n")
 
-                    logger.info(f"Step 1 - Actual positions (monitoring): Binance={binance_qty}, Bybit={bybit_qty}")
+                    logger.info(f"Step 1 - Actual positions (monitoring, every 100 loops): Binance={binance_qty}, Bybit={bybit_qty}")
                     logger.info(f"Step 1 - Memory position: {current_position}, Target: {ladder.total_qty}")
 
                 except Exception as e:
@@ -476,6 +479,29 @@ class ContinuousStrategyExecutor:
             with open("ladder_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] Step 8 result - Success: {exec_result.get('success')}, Binance filled: {exec_result.get('binance_filled_qty')}, Bybit filled: {exec_result.get('bybit_filled_qty')}\n")
                 f.flush()
+
+            # Step 8.3: Immediately notify frontend to restore button after order execution completes
+            # This provides instant UX feedback without waiting for position refresh or other post-processing
+            if exec_result.get('success') and exec_result.get('binance_filled_qty', 0) > 0:
+                try:
+                    from app.services.strategy_status_pusher import status_pusher
+                    action = 'opening' if 'opening' in strategy_type else 'closing'
+                    bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
+                    bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_lot)
+
+                    await status_pusher.push_orders_filled(
+                        strategy_id=self.strategy_id,
+                        action=action,
+                        binance_filled=exec_result.get('binance_filled_qty', 0),
+                        bybit_filled=bybit_filled_xau,
+                        user_id=self.user_id
+                    )
+                    logger.info(f"[BUTTON_RESTORE] ✓ Button restore notification sent: strategy_id={self.strategy_id}, action={action}")
+                    with open("ladder_debug.log", "a", encoding="utf-8") as f:
+                        f.write(f"[DEBUG] Step 8.3 - Button restore notification sent\n")
+                        f.flush()
+                except Exception as e:
+                    logger.warning(f"[BUTTON_RESTORE] Failed to send button restore notification: {e}")
 
             # Step 8.5: Schedule single-leg check if Binance had any fill
             # Non-blocking: uses asyncio.create_task so it never interrupts the main execution loop
