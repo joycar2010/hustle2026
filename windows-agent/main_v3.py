@@ -765,14 +765,14 @@ def start_bridge(service_name: str):
             timeout=10
         )
         success = result.returncode == 0
-        message = result.stdout.strip() if success else result.stderr.strip()
+        message = (result.stdout or "").strip() if success else (result.stderr or "").strip()
 
         logger.info(f"Bridge {service_name} start: {message}")
         return {
             "service_name": service_name,
             "operation": "start",
             "success": success,
-            "message": message
+            "message": message or "操作完成"
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -791,14 +791,14 @@ def stop_bridge(service_name: str):
             timeout=10
         )
         success = result.returncode == 0
-        message = result.stdout.strip() if success else result.stderr.strip()
+        message = (result.stdout or "").strip() if success else (result.stderr or "").strip()
 
         logger.info(f"Bridge {service_name} stop: {message}")
         return {
             "service_name": service_name,
             "operation": "stop",
             "success": success,
-            "message": message
+            "message": message or "操作完成"
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -817,14 +817,14 @@ def restart_bridge(service_name: str):
             timeout=15
         )
         success = result.returncode == 0
-        message = result.stdout.strip() if success else result.stderr.strip()
+        message = (result.stdout or "").strip() if success else (result.stderr or "").strip()
 
         logger.info(f"Bridge {service_name} restart: {message}")
         return {
             "service_name": service_name,
             "operation": "restart",
             "success": success,
-            "message": message
+            "message": message or "操作完成"
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
