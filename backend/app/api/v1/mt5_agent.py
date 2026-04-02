@@ -561,7 +561,7 @@ async def restart_bridge(
 @router.post("/bridge/{client_id}/deploy")
 async def deploy_bridge(
     client_id: int,
-    service_port: int,
+    request_body: dict,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -570,7 +570,7 @@ async def deploy_bridge(
 
     Args:
         client_id: MT5客户端ID
-        service_port: Bridge 服务端口
+        request_body: 包含 service_port 的请求体
 
     Returns:
         部署结果
@@ -578,6 +578,18 @@ async def deploy_bridge(
     # 权限检查
     if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
         raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 获取 service_port
+    service_port = request_body.get("service_port")
+    if not service_port:
+        raise HTTPException(status_code=422, detail="缺少 service_port 参数")
+
+    try:
+        service_port = int(service_port)
+        if service_port < 8000 or service_port > 9000:
+            raise HTTPException(status_code=422, detail="端口号必须在 8000-9000 之间")
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="service_port 必须是有效的整数")
 
     # 查询客户端信息
     result = await db.execute(
