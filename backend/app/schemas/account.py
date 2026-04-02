@@ -33,6 +33,7 @@ class AccountUpdate(BaseModel):
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
     leverage: Optional[int] = Field(None, ge=1, le=500)  # Leverage multiplier
+    proxy_config: Optional[dict] = None  # Proxy configuration
 
 
 class AccountResponse(BaseModel):

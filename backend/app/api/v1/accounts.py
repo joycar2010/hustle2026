@@ -146,12 +146,25 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Update account"""
-    result = await db.execute(
-        select(Account).where(
-            Account.account_id == account_id,
-            Account.user_id == UUID(user_id),
+    # 检查是否是管理员
+    from app.models.user import User
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    is_admin = caller is not None and caller.role in ADMIN_ROLES
+
+    # 管理员可以更新任何账户，普通用户只能更新自己的账户
+    if is_admin:
+        result = await db.execute(
+            select(Account).where(Account.account_id == account_id)
         )
-    )
+    else:
+        result = await db.execute(
+            select(Account).where(
+                Account.account_id == account_id,
+                Account.user_id == UUID(user_id),
+            )
+        )
     account = result.scalar_one_or_none()
 
     if not account:
@@ -197,6 +210,10 @@ async def update_account(
 
     if account_update.leverage is not None:
         account.leverage = account_update.leverage
+
+    # 添加 proxy_config 处理
+    if hasattr(account_update, 'proxy_config'):
+        account.proxy_config = account_update.proxy_config
 
     await db.commit()
     await db.refresh(account)
