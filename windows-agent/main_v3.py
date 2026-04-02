@@ -974,6 +974,32 @@ INSTANCE_NAME={service_name}
         if result.returncode != 0:
             logger.warning(f"Failed to start service: {result.stderr}")
 
+        # ==================== 4. 创建桌面快捷方式 ====================
+        try:
+            import win32com.client
+
+            desktop_path = Path("C:/Users/Administrator/Desktop")
+            if not desktop_path.exists():
+                logger.warning(f"Desktop path not found: {desktop_path}")
+            else:
+                # 快捷方式名称：MT5 登录账号+服务端口
+                shortcut_name = f"MT5 {mt5_login}+{service_port}.lnk"
+                shortcut_path = desktop_path / shortcut_name
+
+                # 创建快捷方式
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shortcut = shell.CreateShortCut(str(shortcut_path))
+                shortcut.TargetPath = new_mt5_path
+                shortcut.Arguments = "/portable"
+                shortcut.WorkingDirectory = str(mt5_client_dir)
+                shortcut.IconLocation = new_mt5_path
+                shortcut.Description = f"MT5 Client - {mt5_login} on port {service_port}"
+                shortcut.save()
+
+                logger.info(f"Created desktop shortcut: {shortcut_path}")
+        except Exception as e:
+            logger.warning(f"Failed to create desktop shortcut: {e}")
+
         return {
             "success": True,
             "service_name": service_name,
@@ -1000,13 +1026,14 @@ INSTANCE_NAME={service_name}
 
 
 @app.delete("/bridge/{service_name}", dependencies=[Depends(verify_api_key)])
-def delete_bridge(service_name: str, mt5_client_port: int = None):
+def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str = None):
     """
     删除 Bridge 实例和 MT5 客户端
 
     Args:
         service_name: 服务名称
         mt5_client_port: MT5客户端端口号（用于定位客户端目录）
+        mt5_login: MT5登录账号（用于删除桌面快捷方式）
 
     Returns:
         删除结果
@@ -1058,6 +1085,19 @@ def delete_bridge(service_name: str, mt5_client_port: int = None):
                 # 删除 MT5 客户端目录
                 shutil.rmtree(mt5_client_dir)
                 logger.info(f"Removed MT5 client directory: {mt5_client_dir}")
+
+        # 5. 删除桌面快捷方式（如果提供了登录账号和端口号）
+        if mt5_login and mt5_client_port:
+            try:
+                desktop_path = Path("C:/Users/Administrator/Desktop")
+                shortcut_name = f"MT5 {mt5_login}+{mt5_client_port}.lnk"
+                shortcut_path = desktop_path / shortcut_name
+
+                if shortcut_path.exists():
+                    shortcut_path.unlink()
+                    logger.info(f"Removed desktop shortcut: {shortcut_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove desktop shortcut: {e}")
 
         return {
             "success": True,

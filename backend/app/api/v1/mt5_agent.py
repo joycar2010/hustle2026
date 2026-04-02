@@ -664,11 +664,17 @@ async def delete_bridge(
         f"(service: {client.bridge_service_name}, port: {client.bridge_service_port})"
     )
 
-    # 调用 Windows Agent 删除（传递端口号用于删除 MT5 客户端目录）
+    # 调用 Windows Agent 删除（传递端口号和登录账号用于删除 MT5 客户端目录和桌面快捷方式）
+    params = {}
+    if client.bridge_service_port:
+        params["mt5_client_port"] = client.bridge_service_port
+    if client.mt5_login:
+        params["mt5_login"] = str(client.mt5_login)
+
     delete_result = await call_agent_api(
         "DELETE",
         f"/bridge/{client.bridge_service_name}",
-        params={"mt5_client_port": client.bridge_service_port} if client.bridge_service_port else {}
+        params=params
     )
 
     # 更新数据库，清空 bridge_service_name 和 bridge_service_port
