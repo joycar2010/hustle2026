@@ -770,15 +770,20 @@ def start_bridge(service_name: str):
         message = stdout or stderr or "操作完成"
 
         # 检查是否已经在运行（这不是错误）
-        already_running = "已在运行" in message or "already running" in message.lower()
+        already_running = (
+            "已在运行" in message or
+            "已运行" in message or
+            "already running" in message.lower() or
+            "instance" in message.lower() and "running" in message.lower()
+        )
         success = result.returncode == 0 or already_running
 
-        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, message={message}")
+        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, message={message}, success={success}")
         return {
             "service_name": service_name,
             "operation": "start",
             "success": success,
-            "message": message
+            "message": "服务已在运行" if already_running and result.returncode != 0 else message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -802,15 +807,20 @@ def stop_bridge(service_name: str):
         message = stdout or stderr or "操作完成"
 
         # 检查是否已经停止（这不是错误）
-        already_stopped = "已停止" in message or "not running" in message.lower() or "not started" in message.lower()
+        already_stopped = (
+            "已停止" in message or
+            "not running" in message.lower() or
+            "not started" in message.lower() or
+            "stopped" in message.lower()
+        )
         success = result.returncode == 0 or already_stopped
 
-        logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, message={message}")
+        logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, message={message}, success={success}")
         return {
             "service_name": service_name,
             "operation": "stop",
             "success": success,
-            "message": message
+            "message": "服务已停止" if already_stopped and result.returncode != 0 else message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
