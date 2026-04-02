@@ -506,7 +506,7 @@ async def get_user_roles(
 
         return [
             {
-                "user_role_id": ur.UserRole.user_role_id,
+                "id": ur.UserRole.id,
                 "user_id": ur.UserRole.user_id,
                 "role_id": ur.UserRole.role_id,
                 "role": {
