@@ -502,10 +502,6 @@
           <div v-if="getClientInstances(client.client_id).length > 0" class="bg-dark-200 rounded-lg p-2.5 space-y-2">
             <div class="flex items-center justify-between">
               <span class="text-xs text-text-tertiary font-medium">Bridge实例</span>
-              <button @click="openDeployForClient(client)"
-                class="px-2 py-0.5 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
-                + 部署
-              </button>
             </div>
 
             <div v-for="inst in getClientInstances(client.client_id)" :key="inst.instance_id"
