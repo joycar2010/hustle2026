@@ -68,8 +68,29 @@ async def get_mt5_clients(
         )
         clients = result.scalars().all()
 
+        # 关联查询 MT5 实例信息
+        from app.models.mt5_instance import MT5Instance
+        client_list = []
+        for client in clients:
+            client_dict = {
+                **{k: v for k, v in client.__dict__.items() if not k.startswith('_')},
+                'mt5_path': None,
+                'deploy_path': None
+            }
+
+            # 查询关联的 MT5 实例
+            instance_result = await db.execute(
+                select(MT5Instance).where(MT5Instance.client_id == client.client_id)
+            )
+            instance = instance_result.scalar_one_or_none()
+            if instance:
+                client_dict['mt5_path'] = instance.mt5_path
+                client_dict['deploy_path'] = instance.deploy_path
+
+            client_list.append(client_dict)
+
         logger.info(f"Found {len(clients)} MT5 clients for account {account_id}")
-        return clients
+        return client_list
     except HTTPException:
         raise
     except Exception as e:

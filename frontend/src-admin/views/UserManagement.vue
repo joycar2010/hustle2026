@@ -431,11 +431,17 @@
               </button>
             </div>
 
-            <!-- 删除按钮 -->
-            <button @click="deleteBridge(client)"
-              class="w-full py-1 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded text-xs border border-[#f6465d]/20 transition-colors">
-              删除Bridge
-            </button>
+            <!-- 编辑和删除按钮 -->
+            <div class="flex gap-1.5">
+              <button @click="openBridgeEdit(client)"
+                class="flex-1 py-1 bg-primary/10 hover:bg-primary/20 text-primary rounded text-xs border border-primary/20 transition-colors">
+                编辑Bridge
+              </button>
+              <button @click="deleteBridge(client)"
+                class="flex-1 py-1 bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] rounded text-xs border border-[#f6465d]/20 transition-colors">
+                删除Bridge
+              </button>
+            </div>
           </div>
 
           <!-- 未部署Bridge时显示部署按钮 -->
@@ -965,6 +971,63 @@
               开始部署
             </button>
             <button type="button" @click="showBridgeDeployModal = false"
+              class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
+              取消
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal: Bridge 编辑对话框 -->
+    <div v-if="showBridgeEditModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      @click.self="showBridgeEditModal = false">
+      <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
+        <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+          <h3 class="font-bold">编辑 Bridge 配置</h3>
+          <button @click="showBridgeEditModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
+        </div>
+        <form @submit.prevent="saveBridgeEdit" class="p-6 space-y-4">
+          <div class="bg-dark-200 rounded-lg p-3 mb-4">
+            <div class="text-sm text-text-secondary mb-1">客户端</div>
+            <div class="font-medium">{{ bridgeEditForm.client_name }}</div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">服务名称 *</label>
+            <input v-model="bridgeEditForm.bridge_service_name" type="text" required
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+              placeholder="例如: hustle-mt5-cq987" />
+          </div>
+
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">服务端口 *</label>
+            <input v-model.number="bridgeEditForm.bridge_service_port" type="number" required
+              min="8000" max="9000"
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+              placeholder="输入端口号 (8000-9000)" />
+          </div>
+
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">MT5 客户端路径</label>
+            <input v-model="bridgeEditForm.mt5_path" type="text"
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary font-mono"
+              placeholder="例如: D:\MetaTrader 5-01\terminal64.exe" />
+          </div>
+
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">Bridge 部署路径</label>
+            <input v-model="bridgeEditForm.deploy_path" type="text"
+              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary font-mono"
+              placeholder="例如: D:\hustle-mt5-cq987" />
+          </div>
+
+          <div class="flex gap-3 pt-2">
+            <button type="submit"
+              class="flex-1 py-2 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-sm transition-colors">
+              保存
+            </button>
+            <button type="button" @click="showBridgeEditModal = false"
               class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
               取消
             </button>
@@ -1553,6 +1616,15 @@ const bridgeStatus = ref({})
 const bridgeLoading = ref({})
 const showBridgeDeployModal = ref(false)
 const bridgeDeployForm = ref({ client_id: null, service_port: null })
+const showBridgeEditModal = ref(false)
+const bridgeEditForm = ref({
+  client_id: null,
+  client_name: '',
+  bridge_service_name: '',
+  bridge_service_port: null,
+  mt5_path: '',
+  deploy_path: ''
+})
 let bridgeRefreshTimer = null
 
 function getBridgeStatusClass(client) {
@@ -1630,6 +1702,48 @@ function openBridgeDeploy(client) {
     service_port: null
   }
   showBridgeDeployModal.value = true
+}
+
+function openBridgeEdit(client) {
+  bridgeEditForm.value = {
+    client_id: client.client_id,
+    client_name: client.client_name,
+    bridge_service_name: client.bridge_service_name || '',
+    bridge_service_port: client.bridge_service_port || null,
+    mt5_path: client.mt5_path || '',
+    deploy_path: client.deploy_path || ''
+  }
+  showBridgeEditModal.value = true
+}
+
+async function saveBridgeEdit() {
+  if (!bridgeEditForm.value.bridge_service_port) {
+    toast('请输入服务端口', 'error')
+    return
+  }
+
+  const port = parseInt(bridgeEditForm.value.bridge_service_port)
+  if (port < 8000 || port > 9000) {
+    toast('端口号必须在 8000-9000 之间', 'error')
+    return
+  }
+
+  try {
+    await api.put(`/api/v1/mt5-agent/bridge/${bridgeEditForm.value.client_id}`, {
+      bridge_service_name: bridgeEditForm.value.bridge_service_name,
+      bridge_service_port: port,
+      mt5_path: bridgeEditForm.value.mt5_path,
+      deploy_path: bridgeEditForm.value.deploy_path
+    })
+
+    toast('Bridge 配置已更新', 'success')
+    showBridgeEditModal.value = false
+    await loadMT5Clients()
+    await loadBridgeStatus()
+  } catch (error) {
+    const detail = error.response?.data?.detail || error.message || '未知错误'
+    toast(`更新失败: ${detail}`, 'error')
+  }
 }
 
 async function deployBridge() {

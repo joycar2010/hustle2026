@@ -637,6 +637,77 @@ async def deploy_bridge(
     return deploy_result
 
 
+@router.put("/bridge/{client_id}")
+async def update_bridge(
+    client_id: int,
+    bridge_service_name: str = None,
+    bridge_service_port: int = None,
+    mt5_path: str = None,
+    deploy_path: str = None,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新 Bridge 配置
+
+    Args:
+        client_id: MT5客户端ID
+        bridge_service_name: Bridge服务名称
+        bridge_service_port: Bridge服务端口
+        mt5_path: MT5客户端路径
+        deploy_path: Bridge部署路径
+
+    Returns:
+        更新结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    # 更新 MT5Client 表
+    if bridge_service_name is not None:
+        client.bridge_service_name = bridge_service_name
+    if bridge_service_port is not None:
+        client.bridge_service_port = bridge_service_port
+
+    # 更新 MT5Instance 表
+    from app.models.mt5_instance import MT5Instance
+    instance_result = await db.execute(
+        select(MT5Instance).where(MT5Instance.client_id == client_id)
+    )
+    instance = instance_result.scalar_one_or_none()
+
+    if instance:
+        if mt5_path is not None:
+            instance.mt5_path = mt5_path
+        if deploy_path is not None:
+            instance.deploy_path = deploy_path
+    elif mt5_path or deploy_path:
+        # 如果没有实例但提供了路径，创建新实例
+        logger.warning(f"No MT5Instance found for client {client_id}, skipping path update")
+
+    await db.commit()
+
+    logger.info(
+        f"User {current_user.username} updated bridge config for {client.client_name}"
+    )
+
+    return {
+        "success": True,
+        "message": "Bridge 配置已更新",
+        "client_id": client_id
+    }
+
+
 @router.delete("/bridge/{client_id}")
 async def delete_bridge(
     client_id: int,
