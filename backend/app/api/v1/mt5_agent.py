@@ -708,6 +708,67 @@ async def update_bridge(
     }
 
 
+@router.put("/bridge/{client_id}")
+async def update_bridge(
+    client_id: int,
+    request_body: dict,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新 Bridge 配置
+
+    Args:
+        client_id: MT5客户端ID
+        request_body: 包含配置信息的请求体
+
+    Returns:
+        更新结果
+    """
+    # 权限检查
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    # 查询客户端信息
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+
+    # 更新 MT5Client 表
+    if "bridge_service_name" in request_body:
+        client.bridge_service_name = request_body["bridge_service_name"]
+    if "bridge_service_port" in request_body:
+        client.bridge_service_port = request_body["bridge_service_port"]
+
+    # 更新 MT5Instance 表
+    from app.models.mt5_instance import MT5Instance
+    instance_result = await db.execute(
+        select(MT5Instance).where(MT5Instance.client_id == client_id)
+    )
+    instance = instance_result.scalar_one_or_none()
+
+    if instance:
+        if "mt5_path" in request_body and request_body["mt5_path"]:
+            instance.mt5_path = request_body["mt5_path"]
+        if "deploy_path" in request_body and request_body["deploy_path"]:
+            instance.deploy_path = request_body["deploy_path"]
+
+    await db.commit()
+
+    logger.info(
+        f"User {current_user.username} updated bridge config for {client.client_name}"
+    )
+
+    return {
+        "success": True,
+        "message": "Bridge 配置已更新"
+    }
+
+
 @router.delete("/bridge/{client_id}")
 async def delete_bridge(
     client_id: int,
