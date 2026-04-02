@@ -406,25 +406,25 @@
             <!-- 控制按钮 -->
             <div class="flex gap-1.5">
               <button @click="bridgeControl(client, 'start')"
-                :disabled="bridgeStatus[client.client_id]?.status === 'running' || bridgeLoading[client.client_id]"
+                :disabled="bridgeStatus[client.client_id]?.is_running || bridgeLoading[client.client_id]"
                 class="flex-1 py-1 rounded text-xs border transition-colors"
-                :class="bridgeStatus[client.client_id]?.status === 'running' || bridgeLoading[client.client_id] ?
+                :class="bridgeStatus[client.client_id]?.is_running || bridgeLoading[client.client_id] ?
                   'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
                   'bg-[#0ecb81]/10 hover:bg-[#0ecb81]/20 text-[#0ecb81] border-[#0ecb81]/20'">
                 {{ bridgeLoading[client.client_id] === 'start' ? '启动中...' : '启动' }}
               </button>
               <button @click="bridgeControl(client, 'stop')"
-                :disabled="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id]"
+                :disabled="!bridgeStatus[client.client_id]?.is_running || bridgeLoading[client.client_id]"
                 class="flex-1 py-1 rounded text-xs border transition-colors"
-                :class="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id] ?
+                :class="!bridgeStatus[client.client_id]?.is_running || bridgeLoading[client.client_id] ?
                   'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
                   'bg-[#f6465d]/10 hover:bg-[#f6465d]/20 text-[#f6465d] border-[#f6465d]/20'">
                 {{ bridgeLoading[client.client_id] === 'stop' ? '停止中...' : '停止' }}
               </button>
               <button @click="bridgeControl(client, 'restart')"
-                :disabled="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id]"
+                :disabled="!bridgeStatus[client.client_id]?.is_running || bridgeLoading[client.client_id]"
                 class="flex-1 py-1 rounded text-xs border transition-colors"
-                :class="bridgeStatus[client.client_id]?.status !== 'running' || bridgeLoading[client.client_id] ?
+                :class="!bridgeStatus[client.client_id]?.is_running || bridgeLoading[client.client_id] ?
                   'bg-dark-300 text-text-tertiary border-border-primary cursor-not-allowed' :
                   'bg-[#f0b90b]/10 hover:bg-[#f0b90b]/20 text-[#f0b90b] border-[#f0b90b]/20'">
                 {{ bridgeLoading[client.client_id] === 'restart' ? '重启中...' : '重启' }}
