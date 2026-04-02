@@ -762,8 +762,8 @@ def start_bridge(service_name: str):
         result = subprocess.run(
             ['nssm', 'start', service_name],
             capture_output=True,
-            encoding='gbk',  # Windows Chinese encoding
-            errors='replace',  # Replace invalid characters
+            encoding='utf-8',
+            errors='replace',
             timeout=10
         )
 
@@ -771,22 +771,14 @@ def start_bridge(service_name: str):
         stderr = (result.stderr or "").strip()
         message = stdout or stderr or "Operation completed"
 
-        # Check if already running (not an error)
+        # Check if already running
         # nssm returns exit code 1 when service is already running
-        # Message contains Chinese or English keywords
-        message_lower = message.lower()
-        already_running = (
-            result.returncode == 1 and (
-                "running" in message_lower or
-                "instance" in message_lower or
-                "\u5b9e\u4f8b" in message or  # 实例
-                "\u8fd0\u884c" in message      # 运行
-            )
-        )
+        # The message contains "START:" which indicates the command was processed
+        already_running = result.returncode == 1 and "START:" in message
+
         success = result.returncode == 0 or already_running
 
-        # Log without Chinese characters to avoid encoding issues
-        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}, already_running={already_running}")
+        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}")
         return {
             "service_name": service_name,
             "operation": "start",
@@ -806,7 +798,7 @@ def stop_bridge(service_name: str):
         result = subprocess.run(
             ['nssm', 'stop', service_name],
             capture_output=True,
-            encoding='gbk',
+            encoding='utf-8',
             errors='replace',
             timeout=10
         )
@@ -815,11 +807,9 @@ def stop_bridge(service_name: str):
         stderr = (result.stderr or "").strip()
         message = stdout or stderr or "Operation completed"
 
-        # Check if already stopped (not an error)
-        already_stopped = (
-            result.returncode != 0 and
-            ("stopped" in message.lower() or "not running" in message.lower())
-        )
+        # Check if already stopped
+        already_stopped = result.returncode != 0 and "STOP:" in message
+
         success = result.returncode == 0 or already_stopped
 
         logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, success={success}")
@@ -842,7 +832,7 @@ def restart_bridge(service_name: str):
         result = subprocess.run(
             ['nssm', 'restart', service_name],
             capture_output=True,
-            encoding='gbk',
+            encoding='utf-8',
             errors='replace',
             timeout=15
         )
