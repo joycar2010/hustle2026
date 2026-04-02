@@ -62,6 +62,8 @@ class MT5ClientResponse(MT5ClientBase):
     total_connections: int = 0
     failed_connections: int = 0
     avg_latency_ms: Optional[float] = None
+    bridge_service_name: Optional[str] = Field(None, description="Bridge服务名称")
+    bridge_service_port: Optional[int] = Field(None, description="Bridge服务端口")
     created_at: datetime
     updated_at: datetime
 
