@@ -768,23 +768,22 @@ def start_bridge(service_name: str):
 
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
-        message = stdout or stderr or "操作完成"
+        message = stdout or stderr or "Operation completed"
 
-        # 检查是否已经在运行（这不是错误）
+        # Check if already running (not an error)
+        # nssm returns exit code 1 with "running" message when service is already running
         already_running = (
-            "已在运行" in message or
-            "已运行" in message or
-            "already running" in message.lower() or
-            "instance" in message.lower() and "running" in message.lower()
+            result.returncode == 1 and
+            ("running" in message.lower() or "instance" in message.lower())
         )
         success = result.returncode == 0 or already_running
 
-        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, message={message}, success={success}")
+        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}")
         return {
             "service_name": service_name,
             "operation": "start",
             "success": success,
-            "message": "服务已在运行" if already_running and result.returncode != 0 else message
+            "message": "Service is already running" if already_running else message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -805,23 +804,21 @@ def stop_bridge(service_name: str):
 
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
-        message = stdout or stderr or "操作完成"
+        message = stdout or stderr or "Operation completed"
 
-        # 检查是否已经停止（这不是错误）
+        # Check if already stopped (not an error)
         already_stopped = (
-            "已停止" in message or
-            "not running" in message.lower() or
-            "not started" in message.lower() or
-            "stopped" in message.lower()
+            result.returncode != 0 and
+            ("stopped" in message.lower() or "not running" in message.lower())
         )
         success = result.returncode == 0 or already_stopped
 
-        logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, message={message}, success={success}")
+        logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, success={success}")
         return {
             "service_name": service_name,
             "operation": "stop",
             "success": success,
-            "message": "服务已停止" if already_stopped and result.returncode != 0 else message
+            "message": "Service is already stopped" if already_stopped else message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -842,12 +839,11 @@ def restart_bridge(service_name: str):
 
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
-        message = stdout or stderr or "操作完成"
+        message = stdout or stderr or "Operation completed"
 
-        # nssm restart 通常返回 0 表示成功
         success = result.returncode == 0
 
-        logger.info(f"Bridge {service_name} restart: returncode={result.returncode}, message={message}")
+        logger.info(f"Bridge {service_name} restart: returncode={result.returncode}, success={success}")
         return {
             "service_name": service_name,
             "operation": "restart",
