@@ -771,10 +771,16 @@ def start_bridge(service_name: str):
         message = stdout or stderr or "Operation completed"
 
         # Check if already running (not an error)
-        # nssm returns exit code 1 with "running" message when service is already running
+        # nssm returns exit code 1 when service is already running
+        # Message contains Chinese or English keywords
+        message_lower = message.lower()
         already_running = (
-            result.returncode == 1 and
-            ("running" in message.lower() or "instance" in message.lower())
+            result.returncode == 1 and (
+                "running" in message_lower or
+                "instance" in message_lower or
+                "\u5b9e\u4f8b" in message or  # 实例
+                "\u8fd0\u884c" in message      # 运行
+            )
         )
         success = result.returncode == 0 or already_running
 
