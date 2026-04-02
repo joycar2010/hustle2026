@@ -771,19 +771,29 @@ def start_bridge(service_name: str):
         stderr = (result.stderr or "").strip()
         message = stdout or stderr or "Operation completed"
 
-        # Check if already running
-        # nssm returns exit code 1 when service is already running
-        # The message contains "START:" which indicates the command was processed
-        already_running = result.returncode == 1 and "START:" in message
+        # Check if already running or if there's a startup issue
+        # returncode 1 with "START:" = already running (success)
+        # returncode 1 with "Unexpected status" = startup failed (failure)
+        already_running = result.returncode == 1 and "START:" in message and "Unexpected" not in message
+        startup_failed = "Unexpected status" in message or "SERVICE_STOPPED" in message
 
         success = result.returncode == 0 or already_running
 
-        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}")
+        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}, startup_failed={startup_failed}")
+
+        if startup_failed:
+            return {
+                "service_name": service_name,
+                "operation": "start",
+                "success": False,
+                "message": f"Service failed to start: {message}"
+            }
+
         return {
             "service_name": service_name,
             "operation": "start",
             "success": success,
-            "message": "Service is already running" if already_running else message
+            "message": "Service is already running" if already_running else ("Service started successfully" if success else message)
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")

@@ -88,19 +88,33 @@ async def create_mt5_client(
     try:
         logger.info(f"Creating MT5 client for account {account_id}")
 
+        # 检查调用者是否是管理员
+        from app.models.user import User
+        ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+        user_result = await db.execute(select(User).where(User.user_id == user_id))
+        caller = user_result.scalar_one_or_none()
+        is_admin = caller is not None and caller.role in ADMIN_ROLES
+
         # 验证账户
-        result = await db.execute(
-            select(Account).where(
-                and_(
-                    Account.account_id == account_id,
-                    Account.user_id == uuid.UUID(user_id)
+        if is_admin:
+            # 管理员可以访问任何账户
+            result = await db.execute(
+                select(Account).where(Account.account_id == account_id)
+            )
+        else:
+            # 非管理员只能访问自己的账户
+            result = await db.execute(
+                select(Account).where(
+                    and_(
+                        Account.account_id == account_id,
+                        Account.user_id == uuid.UUID(user_id)
+                    )
                 )
             )
-        )
         account = result.scalar_one_or_none()
 
         if not account:
-            logger.warning(f"Account {account_id} not found for user {user_id}")
+            logger.warning(f"Account {account_id} not found")
             raise HTTPException(status_code=404, detail="Account not found")
 
         if not account.is_mt5_account:
