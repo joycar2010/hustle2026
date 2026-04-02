@@ -762,7 +762,8 @@ def start_bridge(service_name: str):
         result = subprocess.run(
             ['nssm', 'start', service_name],
             capture_output=True,
-            text=True,
+            encoding='gbk',  # Windows Chinese encoding
+            errors='replace',  # Replace invalid characters
             timeout=10
         )
 
@@ -805,7 +806,8 @@ def stop_bridge(service_name: str):
         result = subprocess.run(
             ['nssm', 'stop', service_name],
             capture_output=True,
-            text=True,
+            encoding='gbk',
+            errors='replace',
             timeout=10
         )
 
@@ -840,7 +842,8 @@ def restart_bridge(service_name: str):
         result = subprocess.run(
             ['nssm', 'restart', service_name],
             capture_output=True,
-            text=True,
+            encoding='gbk',
+            errors='replace',
             timeout=15
         )
 
