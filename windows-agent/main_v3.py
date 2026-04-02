@@ -764,15 +764,21 @@ def start_bridge(service_name: str):
             text=True,
             timeout=10
         )
-        success = result.returncode == 0
-        message = (result.stdout or "").strip() if success else (result.stderr or "").strip()
 
-        logger.info(f"Bridge {service_name} start: {message}")
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        message = stdout or stderr or "操作完成"
+
+        # 检查是否已经在运行（这不是错误）
+        already_running = "已在运行" in message or "already running" in message.lower()
+        success = result.returncode == 0 or already_running
+
+        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, message={message}")
         return {
             "service_name": service_name,
             "operation": "start",
             "success": success,
-            "message": message or "操作完成"
+            "message": message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -790,15 +796,21 @@ def stop_bridge(service_name: str):
             text=True,
             timeout=10
         )
-        success = result.returncode == 0
-        message = (result.stdout or "").strip() if success else (result.stderr or "").strip()
 
-        logger.info(f"Bridge {service_name} stop: {message}")
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        message = stdout or stderr or "操作完成"
+
+        # 检查是否已经停止（这不是错误）
+        already_stopped = "已停止" in message or "not running" in message.lower() or "not started" in message.lower()
+        success = result.returncode == 0 or already_stopped
+
+        logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, message={message}")
         return {
             "service_name": service_name,
             "operation": "stop",
             "success": success,
-            "message": message or "操作完成"
+            "message": message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
@@ -816,15 +828,20 @@ def restart_bridge(service_name: str):
             text=True,
             timeout=15
         )
-        success = result.returncode == 0
-        message = (result.stdout or "").strip() if success else (result.stderr or "").strip()
 
-        logger.info(f"Bridge {service_name} restart: {message}")
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        message = stdout or stderr or "操作完成"
+
+        # nssm restart 通常返回 0 表示成功
+        success = result.returncode == 0
+
+        logger.info(f"Bridge {service_name} restart: returncode={result.returncode}, message={message}")
         return {
             "service_name": service_name,
             "operation": "restart",
             "success": success,
-            "message": message or "操作完成"
+            "message": message
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Command timeout")
