@@ -1419,7 +1419,11 @@ async function saveProxyConfig() {
     await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: cfg })
     toast('代理配置已保存')
     showProxyModal.value = false
-    await loadUserAccounts()
+    // 更新本地账户数据
+    const index = accounts.value.findIndex(a => a.account_id === acc.account_id)
+    if (index !== -1) {
+      accounts.value[index].proxy_config = cfg
+    }
   } catch (e) { apiErr('保存代理配置失败', e) }
 }
 
@@ -1430,7 +1434,11 @@ async function clearProxyConfig() {
     await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: null })
     toast('代理配置已清除')
     showProxyModal.value = false
-    await loadUserAccounts()
+    // 更新本地账户数据
+    const index = accounts.value.findIndex(a => a.account_id === acc.account_id)
+    if (index !== -1) {
+      accounts.value[index].proxy_config = null
+    }
   } catch (e) { apiErr('清除代理配置失败', e) }
 }
 
