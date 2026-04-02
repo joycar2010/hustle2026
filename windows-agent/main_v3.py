@@ -17,7 +17,7 @@ import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Body
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 import uvicorn
@@ -825,13 +825,13 @@ def restart_bridge(service_name: str):
 
 @app.post("/bridge/deploy", dependencies=[Depends(verify_api_key)])
 def deploy_bridge(
-    service_name: str,
-    mt5_login: str,
-    mt5_password: str,
-    mt5_server: str,
-    mt5_path: str,
-    service_port: int,
-    api_key: str = "OQ6bUimHZDmXEZzJKE"
+    service_name: str = Body(...),
+    mt5_login: str = Body(...),
+    mt5_password: str = Body(...),
+    mt5_server: str = Body(...),
+    mt5_path: str = Body(...),
+    service_port: int = Body(...),
+    api_key: str = Body(default="OQ6bUimHZDmXEZzJKE")
 ):
     """
     部署新的 Bridge 实例和 MT5 客户端

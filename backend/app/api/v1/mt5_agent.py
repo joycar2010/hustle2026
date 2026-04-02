@@ -617,7 +617,7 @@ async def deploy_bridge(
     deploy_result = await call_agent_api(
         "POST",
         "/bridge/deploy",
-        params={
+        json={
             "service_name": service_name,
             "mt5_login": str(client.mt5_login),
             "mt5_password": client.mt5_password,
