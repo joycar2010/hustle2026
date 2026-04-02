@@ -784,7 +784,8 @@ def start_bridge(service_name: str):
         )
         success = result.returncode == 0 or already_running
 
-        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}")
+        # Log without Chinese characters to avoid encoding issues
+        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}, already_running={already_running}")
         return {
             "service_name": service_name,
             "operation": "start",
