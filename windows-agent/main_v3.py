@@ -98,6 +98,16 @@ backend_config = config["backend"]
 database_config = config.get("database", {})
 monitoring_config = config["monitoring"]
 
+# ====================== Pydantic 模型 ======================
+class BridgeDeployRequest(BaseModel):
+    service_name: str
+    mt5_login: str
+    mt5_password: str
+    mt5_server: str
+    mt5_path: str
+    service_port: int
+    api_key: str = "OQ6bUimHZDmXEZzJKE"
+
 # ====================== 数据库连接 ======================
 def get_db_connection():
     """获取数据库连接"""
@@ -824,25 +834,12 @@ def restart_bridge(service_name: str):
 
 
 @app.post("/bridge/deploy", dependencies=[Depends(verify_api_key)])
-def deploy_bridge(
-    service_name: str = Body(...),
-    mt5_login: str = Body(...),
-    mt5_password: str = Body(...),
-    mt5_server: str = Body(...),
-    mt5_path: str = Body(...),
-    service_port: int = Body(...),
-    api_key: str = Body(default="OQ6bUimHZDmXEZzJKE")
-):
+def deploy_bridge(request: BridgeDeployRequest):
     """
     部署新的 Bridge 实例和 MT5 客户端
 
     Args:
-        service_name: 服务名称（如 hustle-mt5-xxx）
-        mt5_login: MT5 登录账号
-        mt5_password: MT5 密码
-        mt5_server: MT5 服务器
-        mt5_path: MT5 源客户端路径（用于复制）
-        service_port: Bridge 服务端口
+        request: 部署请求参数
 
     Returns:
         部署结果
@@ -853,7 +850,7 @@ def deploy_bridge(
     try:
         # ==================== 1. 部署 MT5 客户端 ====================
         # 生成新的 MT5 客户端目录名
-        mt5_client_dir = Path(f"D:/MetaTrader 5-{service_port}")
+        mt5_client_dir = Path(f"D:/MetaTrader 5-{request.service_port}")
 
         if mt5_client_dir.exists():
             raise HTTPException(status_code=400, detail=f"MT5客户端目录已存在: {mt5_client_dir}")
@@ -878,15 +875,15 @@ def deploy_bridge(
             if 'Common' not in config:
                 config['Common'] = {}
 
-            config['Common']['Login'] = str(mt5_login)
-            config['Common']['Server'] = mt5_server
+            config['Common']['Login'] = str(request.mt5_login)
+            config['Common']['Server'] = request.mt5_server
             # 注意：密码通常不直接存储在配置文件中，MT5 会在首次登录时加密存储
 
             # 保存配置
             with open(common_ini_path, 'w', encoding='utf-8') as f:
                 config.write(f)
 
-            logger.info(f"Updated MT5 configuration: Login={mt5_login}, Server={mt5_server}")
+            logger.info(f"Updated MT5 configuration: Login={request.mt5_login}, Server={request.mt5_server}")
 
         # 清理旧的账户数据（让 MT5 重新登录）
         accounts_dat = mt5_client_dir / "Config" / "accounts.dat"
@@ -904,7 +901,7 @@ def deploy_bridge(
         new_mt5_path = str(mt5_client_dir / "terminal64.exe")
 
         # ==================== 2. 部署 Bridge 服务 ====================
-        deploy_dir = Path(f"D:/{service_name}")
+        deploy_dir = Path(f"D:/{request.service_name}")
         if deploy_dir.exists():
             raise HTTPException(status_code=400, detail=f"Bridge部署目录已存在: {deploy_dir}")
 
@@ -918,13 +915,13 @@ def deploy_bridge(
 
         # 创建 .env 配置文件（使用新的 MT5 路径）
         env_content = f"""# Bridge 实例配置
-API_KEY={api_key}
-MT5_LOGIN={mt5_login}
-MT5_PASSWORD={mt5_password}
-MT5_SERVER={mt5_server}
+API_KEY={request.api_key}
+MT5_LOGIN={request.mt5_login}
+MT5_PASSWORD={request.mt5_password}
+MT5_SERVER={request.mt5_server}
 MT5_PATH={new_mt5_path}
-SERVICE_PORT={service_port}
-INSTANCE_NAME={service_name}
+SERVICE_PORT={request.service_port}
+INSTANCE_NAME={request.service_name}
 """
         with open(deploy_dir / ".env", "w", encoding="utf-8") as f:
             f.write(env_content)
@@ -946,19 +943,19 @@ INSTANCE_NAME={service_name}
         app_dir = str(deploy_dir / "app")
 
         nssm_commands = [
-            ['nssm', 'install', service_name, uvicorn_path],
-            ['nssm', 'set', service_name, 'AppParameters', f'main:app --host 0.0.0.0 --port {service_port}'],
-            ['nssm', 'set', service_name, 'AppDirectory', app_dir],
-            ['nssm', 'set', service_name, 'AppExit', 'Default', 'Restart'],
-            ['nssm', 'set', service_name, 'AppEnvironmentExtra', ':PYTHONUNBUFFERED=1'],
-            ['nssm', 'set', service_name, 'AppStdout', str(deploy_dir / 'logs' / 'stdout.log')],
-            ['nssm', 'set', service_name, 'AppStderr', str(deploy_dir / 'logs' / 'stderr.log')],
-            ['nssm', 'set', service_name, 'AppRotateFiles', '1'],
-            ['nssm', 'set', service_name, 'AppRotateOnline', '1'],
-            ['nssm', 'set', service_name, 'AppRotateSeconds', '86400'],
-            ['nssm', 'set', service_name, 'AppRotateBytes', '10485760'],
-            ['nssm', 'set', service_name, 'DisplayName', service_name],
-            ['nssm', 'set', service_name, 'Start', 'SERVICE_AUTO_START'],
+            ['nssm', 'install', request.service_name, uvicorn_path],
+            ['nssm', 'set', request.service_name, 'AppParameters', f'main:app --host 0.0.0.0 --port {request.service_port}'],
+            ['nssm', 'set', request.service_name, 'AppDirectory', app_dir],
+            ['nssm', 'set', request.service_name, 'AppExit', 'Default', 'Restart'],
+            ['nssm', 'set', request.service_name, 'AppEnvironmentExtra', ':PYTHONUNBUFFERED=1'],
+            ['nssm', 'set', request.service_name, 'AppStdout', str(deploy_dir / 'logs' / 'stdout.log')],
+            ['nssm', 'set', request.service_name, 'AppStderr', str(deploy_dir / 'logs' / 'stderr.log')],
+            ['nssm', 'set', request.service_name, 'AppRotateFiles', '1'],
+            ['nssm', 'set', request.service_name, 'AppRotateOnline', '1'],
+            ['nssm', 'set', request.service_name, 'AppRotateSeconds', '86400'],
+            ['nssm', 'set', request.service_name, 'AppRotateBytes', '10485760'],
+            ['nssm', 'set', request.service_name, 'DisplayName', request.service_name],
+            ['nssm', 'set', request.service_name, 'Start', 'SERVICE_AUTO_START'],
         ]
 
         for cmd in nssm_commands:
@@ -967,10 +964,10 @@ INSTANCE_NAME={service_name}
                 logger.error(f"NSSM command failed: {' '.join(cmd)}, error: {result.stderr}")
                 raise HTTPException(status_code=500, detail=f"服务配置失败: {result.stderr}")
 
-        logger.info(f"Bridge service {service_name} configured successfully")
+        logger.info(f"Bridge service {request.service_name} configured successfully")
 
         # 启动服务
-        result = subprocess.run(['nssm', 'start', service_name], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(['nssm', 'start', request.service_name], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             logger.warning(f"Failed to start service: {result.stderr}")
 
@@ -983,7 +980,7 @@ INSTANCE_NAME={service_name}
                 logger.warning(f"Desktop path not found: {desktop_path}")
             else:
                 # 快捷方式名称：MT5 登录账号+服务端口
-                shortcut_name = f"MT5 {mt5_login}+{service_port}.lnk"
+                shortcut_name = f"MT5 {request.mt5_login}+{request.service_port}.lnk"
                 shortcut_path = desktop_path / shortcut_name
 
                 # 创建快捷方式
@@ -993,7 +990,7 @@ INSTANCE_NAME={service_name}
                 shortcut.Arguments = "/portable"
                 shortcut.WorkingDirectory = str(mt5_client_dir)
                 shortcut.IconLocation = new_mt5_path
-                shortcut.Description = f"MT5 Client - {mt5_login} on port {service_port}"
+                shortcut.Description = f"MT5 Client - {request.mt5_login} on port {request.service_port}"
                 shortcut.save()
 
                 logger.info(f"Created desktop shortcut: {shortcut_path}")
@@ -1002,11 +999,11 @@ INSTANCE_NAME={service_name}
 
         return {
             "success": True,
-            "service_name": service_name,
+            "service_name": request.service_name,
             "deploy_dir": str(deploy_dir),
             "mt5_client_dir": str(mt5_client_dir),
             "mt5_path": new_mt5_path,
-            "service_port": service_port,
+            "service_port": request.service_port,
             "message": "MT5客户端和Bridge实例部署成功"
         }
 
