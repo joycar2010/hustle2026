@@ -490,6 +490,41 @@ async def assign_permissions_to_role(
 
 # ==================== 用户角色分配 ====================
 
+@router.get("/users/{user_id}/roles")
+async def get_user_roles(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取用户的角色列表"""
+    try:
+        result = await db.execute(
+            select(UserRole, Role)
+            .join(Role, UserRole.role_id == Role.role_id)
+            .where(UserRole.user_id == user_id)
+        )
+        user_roles = result.all()
+
+        return [
+            {
+                "user_role_id": ur.UserRole.user_role_id,
+                "user_id": ur.UserRole.user_id,
+                "role_id": ur.UserRole.role_id,
+                "role": {
+                    "role_id": ur.Role.role_id,
+                    "role_name": ur.Role.role_name,
+                    "role_code": ur.Role.role_code,
+                    "description": ur.Role.description
+                },
+                "assigned_at": ur.UserRole.assigned_at,
+                "expires_at": ur.UserRole.expires_at
+            }
+            for ur in user_roles
+        ]
+    except Exception as e:
+        logger.error(f"Error getting user roles: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/users/{user_id}/roles", status_code=status.HTTP_204_NO_CONTENT)
 async def assign_roles_to_user(
     user_id: UUID,

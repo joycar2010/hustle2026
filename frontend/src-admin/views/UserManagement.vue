@@ -512,8 +512,7 @@
     <!-- ══════════════════════════════════════
          Modal: 新增/编辑用户
     ════════════════════════════════════════ -->
-    <div v-if="showUserModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showUserModal = false">
+    <div v-if="showUserModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">{{ isEditUser ? '编辑用户' : '新增用户' }}</h3>
@@ -598,8 +597,7 @@
     </div>
 
     <!-- Modal: 分配RBAC角色 -->
-    <div v-if="showRoleModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showRoleModal = false">
+    <div v-if="showRoleModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">分配RBAC角色 — {{ assigningUser?.username }}</h3>
@@ -639,8 +637,7 @@
     </div>
 
     <!-- Modal: 新增/编辑账户 -->
-    <div v-if="showAccountModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showAccountModal = false">
+    <div v-if="showAccountModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">{{ isEditAccount ? '编辑账户' : '新增账户' }}</h3>
@@ -735,8 +732,7 @@
     </div>
 
     <!-- Modal: 新增/编辑MT5客户端 -->
-    <div v-if="showMT5Modal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showMT5Modal = false">
+    <div v-if="showMT5Modal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">{{ isEditMT5 ? '编辑MT5客户端' : '新增MT5账户' }}</h3>
@@ -837,8 +833,7 @@
     </div>
 
     <!-- Modal: 部署MT5实例 -->
-    <div v-if="showDeployModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showDeployModal = false">
+    <div v-if="showDeployModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">{{ deployForm.instance_id ? '编辑 MT5 实例' : '部署新 MT5 客户端' }}</h3>
@@ -933,8 +928,7 @@
     </div>
 
     <!-- Modal: Bridge 部署对话框 -->
-    <div v-if="showBridgeDeployModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showBridgeDeployModal = false">
+    <div v-if="showBridgeDeployModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">部署 Bridge 服务</h3>
@@ -980,8 +974,7 @@
     </div>
 
     <!-- Modal: Bridge 编辑对话框 -->
-    <div v-if="showBridgeEditModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showBridgeEditModal = false">
+    <div v-if="showBridgeEditModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <h3 class="font-bold">编辑 Bridge 配置</h3>
@@ -1037,8 +1030,7 @@
     </div>
 
     <!-- Modal: IPIPGO 静态IP代理配置 -->
-    <div v-if="showProxyModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
-      @click.self="showProxyModal = false">
+    <div v-if="showProxyModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-md">
         <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
           <div>
@@ -1076,12 +1068,14 @@
             <div>
               <label class="block text-xs text-text-tertiary mb-1">用户名</label>
               <input v-model="proxyForm.username"
+                autocomplete="off"
                 class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
                 placeholder="IPIPGO 用户名" />
             </div>
             <div>
               <label class="block text-xs text-text-tertiary mb-1">密码</label>
               <input v-model="proxyForm.password" type="password"
+                autocomplete="new-password"
                 class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
                 placeholder="IPIPGO 密码" />
             </div>
