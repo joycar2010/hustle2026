@@ -277,13 +277,15 @@ class MarketDataService:
                 for record in records
             ]
 
+    _pg_store_counter = 0
+
     async def store_spread_history(
         self,
         spread_data: SpreadData,
         binance_symbol: str = "XAUUSDT",
         bybit_symbol: str = "XAUUSDT",
     ):
-        """Store spread data in history (sorted set)"""
+        """Store spread data in Redis (real-time) and PostgreSQL (persistent history)"""
         redis_client = await self._get_redis()
         history_key = f"spread_history:{binance_symbol}:{bybit_symbol}"
 
@@ -298,6 +300,33 @@ class MarketDataService:
 
         # Set expiry on the key (24 hours)
         await redis_client.expire(history_key, 86400)
+
+        # Also persist to PostgreSQL every 5 ticks (~5s at 1 tick/s)
+        MarketDataService._pg_store_counter += 1
+        if MarketDataService._pg_store_counter % 5 == 0:
+            try:
+                from app.core.database import AsyncSessionLocal
+                from app.models.market_data import SpreadRecord
+                from datetime import datetime
+
+                ts = spread_data.timestamp
+                dt = datetime.utcfromtimestamp(ts / 1000 if ts > 1e12 else ts)
+
+                async with AsyncSessionLocal() as session:
+                    record = SpreadRecord(
+                        symbol=binance_symbol,
+                        binance_bid=spread_data.binance_quote.bid_price,
+                        binance_ask=spread_data.binance_quote.ask_price,
+                        bybit_bid=spread_data.bybit_quote.bid_price,
+                        bybit_ask=spread_data.bybit_quote.ask_price,
+                        forward_spread=spread_data.forward_entry_spread,
+                        reverse_spread=spread_data.reverse_entry_spread,
+                        timestamp=dt,
+                    )
+                    session.add(record)
+                    await session.commit()
+            except Exception as e:
+                logger.warning(f"Failed to persist spread to PostgreSQL: {e}")
 
     async def sync_server_time(self) -> Dict[str, int]:
         """Synchronize server time with Binance"""

@@ -23,7 +23,13 @@ from app.models.user import User
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 配置路径
+# 配置路径 — Let's Encrypt 证书 (Linux)
+SSL_CERT_CONFIGS = [
+    {"domain": "admin.hustle2026.xyz", "cert": Path("/etc/letsencrypt/live/admin.hustle2026.xyz/fullchain.pem"), "key": Path("/etc/letsencrypt/live/admin.hustle2026.xyz/privkey.pem")},
+    {"domain": "go.hustle2026.xyz",    "cert": Path("/etc/letsencrypt/live/go.hustle2026.xyz/fullchain.pem"),    "key": Path("/etc/letsencrypt/live/go.hustle2026.xyz/privkey.pem")},
+    {"domain": "www.hustle2026.xyz",   "cert": Path("/etc/letsencrypt/live/www.hustle2026.xyz/fullchain.pem"),   "key": Path("/etc/letsencrypt/live/www.hustle2026.xyz/privkey.pem")},
+]
+# Legacy fallback
 NGINX_SSL_CERT_PATH = Path("C:/nginx/ssl/fullchain.pem")
 NGINX_SSL_KEY_PATH = Path("C:/nginx/ssl/privkey.pem")
 
@@ -161,6 +167,60 @@ def check_nginx_ssl_certificate() -> Dict[str, Any]:
         }
 
 
+def check_ssl_certificate(cert_path: Path, key_path: Path) -> Dict[str, Any]:
+    """检查单个 SSL 证书状态"""
+    try:
+        if not cert_path.exists():
+            return {"status": "error", "exists": False, "error": "证书文件不存在"}
+
+        cert_content = cert_path.read_bytes()
+        cert = x509.load_pem_x509_certificate(cert_content, default_backend())
+        not_before = cert.not_valid_before
+        not_after = cert.not_valid_after
+        now = datetime.utcnow()
+        days_remaining = (not_after - now).days
+
+        if now > not_after:
+            status = "expired"
+        elif days_remaining <= 7:
+            status = "critical"
+        elif days_remaining <= 30:
+            status = "warning"
+        else:
+            status = "healthy"
+
+        try:
+            san_extension = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            domains = [name.value for name in san_extension.value]
+        except:
+            domains = []
+
+        return {
+            "status": status, "exists": True, "domain_names": domains,
+            "issuer": cert.issuer.rfc4514_string(),
+            "issued_at": not_before.isoformat(), "expires_at": not_after.isoformat(),
+            "days_remaining": days_remaining, "is_valid": now < not_after,
+            "cert_path": str(cert_path), "key_path": str(key_path), "error": None,
+        }
+    except Exception as e:
+        logger.error(f"检查SSL证书失败 {cert_path}: {e}")
+        return {"status": "error", "exists": cert_path.exists(), "error": str(e)}
+
+
+def check_all_ssl_certificates() -> List[Dict[str, Any]]:
+    """检查所有配置的 SSL 证书"""
+    results = []
+    for cfg in SSL_CERT_CONFIGS:
+        result = check_ssl_certificate(cfg["cert"], cfg["key"])
+        if not result.get("domain_names"):
+            result["domain_names"] = [cfg["domain"]]
+        results.append(result)
+    # 如果 Linux 证书都不存在，回退到旧的 Windows 路径
+    if all(not r["exists"] for r in results):
+        results = [check_nginx_ssl_certificate()]
+    return results
+
+
 async def check_mt5_clients_status(db: AsyncSession) -> List[Dict[str, Any]]:
     """检查所有 MT5 客户端状态"""
     try:
@@ -235,7 +295,7 @@ async def get_system_status(
             "timestamp": datetime.utcnow().isoformat(),
             "redis": check_redis_status(),
             "feishu": check_feishu_status(),
-            "ssl_certificate": [check_nginx_ssl_certificate()],  # 返回数组以保持兼容性
+            "ssl_certificate": check_all_ssl_certificates(),
             "mt5_clients": mt5_clients
         }
     except Exception as e:

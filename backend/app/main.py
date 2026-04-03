@@ -336,7 +336,7 @@ app.include_router(mt5_instances.router, prefix="/api/v1", tags=["MT5实例管�
 # app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])  # Module not found
 app.include_router(mt5_server.router, prefix="/api/v1", tags=["MT5服务器状态"])
 app.include_router(mt5_agent.router, prefix="/api/v1/mt5-agent", tags=["MT5 Agent控制"])
-app.include_router(websocket.router, tags=["WebSocket"])
+app.include_router(websocket.router, prefix="/api/v1", tags=["WebSocket"])
 
 # Mount static files for uploaded alert sounds
 uploads_dir = Path("uploads")

@@ -55,7 +55,7 @@ class TimingConfig(Base):
     # Metadata
     created_at = Column(TIMESTAMP, nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     updated_at = Column(TIMESTAMP, nullable=False, server_default=text('CURRENT_TIMESTAMP'))
-    created_by = Column(Integer, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey('users.user_id', ondelete='SET NULL'), nullable=True)
 
     # Relationships
     history = relationship("TimingConfigHistory", back_populates="config", cascade="all, delete-orphan")

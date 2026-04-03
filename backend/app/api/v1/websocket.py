@@ -243,7 +243,7 @@ async def update_streamer_config(config: StreamerConfigUpdate):
     return {
         "success": True,
         "streamer": config.streamer,
-        "interval": streamer.interval,
-        "interval_ms": streamer.interval * 1000,
-        "message": f"Updated {config.streamer} interval to {streamer.interval}s"
+        "interval": getattr(streamer, "interval", getattr(streamer, "base_interval", 0)),
+        "interval_ms": getattr(streamer, "interval", getattr(streamer, "base_interval", 0)) * 1000,
+        "message": f"Updated {config.streamer} interval to {getattr(streamer, 'interval', getattr(streamer, 'base_interval', 0))}s"
     }

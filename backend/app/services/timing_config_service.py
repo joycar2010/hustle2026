@@ -62,7 +62,7 @@ class TimingConfigService:
                 )
             )
         )
-        global_config = result.scalar_one_or_none()
+        global_config = result.scalars().first()
         if global_config:
             configs = TimingConfigService._model_to_dict(global_config)
 
@@ -77,7 +77,7 @@ class TimingConfigService:
                     )
                 )
             )
-            type_config = result.scalar_one_or_none()
+            type_config = result.scalars().first()
             if type_config:
                 configs.update(TimingConfigService._model_to_dict(type_config))
 
@@ -91,7 +91,7 @@ class TimingConfigService:
                     )
                 )
             )
-            instance_config = result.scalar_one_or_none()
+            instance_config = result.scalars().first()
             if instance_config:
                 configs.update(TimingConfigService._model_to_dict(instance_config))
 

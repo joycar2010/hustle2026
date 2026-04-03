@@ -106,9 +106,9 @@
           <div class="flex items-center gap-2 mb-2">
             <div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
             <span class="text-sm font-bold text-primary">当前有效配置</span>
-            <span class="text-xs text-text-tertiary">{{ effectiveConfig.config_name || effectiveConfig.name }}</span>
+            <span class="text-xs text-text-tertiary">{{ effectiveConfig.config_level }} · {{ effectiveConfig.strategy_type || '全局' }}</span>
           </div>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
             <div v-for="f in configFields" :key="f.key">
               <div class="text-text-tertiary mb-0.5">{{ f.label }}</div>
               <div class="font-mono font-semibold">{{ effectiveConfig[f.key] ?? '--' }}{{ f.unit ?? '' }}</div>
@@ -134,12 +134,11 @@
           <div v-for="cfg in typeConfigs" :key="cfg.id" class="config-row">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1 flex-wrap">
-                <span class="font-semibold text-sm">{{ cfg.config_name || cfg.name }}</span>
+                <span class="font-semibold text-sm">{{ cfg.strategy_type || '全局' }}</span>
                 <span class="badge-level">{{ cfg.config_level || cfg.level }}</span>
-                <span v-if="cfg.is_active || cfg.is_effective" class="badge-active">生效中</span>
-                <span v-if="cfg.enabled === false" class="badge-disabled">已禁用</span>
+                <span v-if="cfg.is_locked" class="badge-disabled">🔒 已锁定</span>
               </div>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-0.5 text-xs text-text-tertiary">
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-0.5 text-xs text-text-tertiary">
                 <div v-for="f in configFields" :key="f.key">
                   {{ f.label }}：<span class="font-mono text-text-secondary">{{ cfg[f.key] ?? '--' }}{{ f.unit ?? '' }}</span>
                 </div>
@@ -340,10 +339,6 @@
           <div class="p-6 space-y-4">
             <div class="grid grid-cols-2 gap-4">
               <div>
-                <label class="block text-xs text-text-tertiary mb-1.5">配置名称 *</label>
-                <input v-model="form.config_name" placeholder="如：激进模式" class="input-field w-full" />
-              </div>
-              <div>
                 <label class="block text-xs text-text-tertiary mb-1.5">配置层级</label>
                 <select v-model="form.config_level" class="input-field w-full">
                   <option value="global">全局 (global)</option>
@@ -357,28 +352,15 @@
                   <option v-for="t in strategyTypes" :key="t.type" :value="t.type">{{ t.label }}</option>
                 </select>
               </div>
-              <div class="flex items-end pb-0.5">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <div @click="form.enabled = !form.enabled"
-                    :class="['w-10 h-5 rounded-full transition-colors cursor-pointer relative', form.enabled ? 'bg-primary' : 'bg-gray-600']">
-                    <span :class="['absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform', form.enabled ? 'translate-x-5' : 'translate-x-0.5']" />
-                  </div>
-                  <span class="text-sm">{{ form.enabled ? '已启用' : '已禁用' }}</span>
-                </label>
-              </div>
             </div>
-            <div class="bg-dark-200 rounded-xl p-4 space-y-3">
-              <div class="text-xs font-bold text-text-secondary mb-2">核心参数</div>
+            <div v-for="grp in configGroups" :key="grp.key" class="bg-dark-200 rounded-xl p-4 space-y-3">
+              <div class="text-xs font-bold text-text-secondary mb-2">{{ grp.label }}</div>
               <div class="grid grid-cols-2 gap-4">
-                <div v-for="f in configFields" :key="f.key">
-                  <label class="block text-xs text-text-tertiary mb-1.5">{{ f.label }}{{ f.unit ? ` (${f.unit})` : '' }}</label>
+                <div v-for="f in configFields.filter(x => x.group === grp.key)" :key="f.key">
+                  <label class="block text-xs text-text-tertiary mb-1.5">{{ f.label }} ({{ f.unit }})</label>
                   <input v-model.number="form[f.key]" type="number" :step="f.step ?? 'any'" :placeholder="f.placeholder" class="input-field w-full" />
                 </div>
               </div>
-            </div>
-            <div>
-              <label class="block text-xs text-text-tertiary mb-1.5">备注说明</label>
-              <textarea v-model="form.description" rows="2" placeholder="可选备注..." class="input-field w-full resize-none"></textarea>
             </div>
           </div>
           <div class="px-6 py-4 border-t border-border-secondary flex items-center justify-end gap-3">
@@ -402,12 +384,12 @@
             <div v-if="!crudHistoryList.length" class="text-center py-8 text-text-tertiary text-sm">暂无历史记录</div>
             <div v-for="h in crudHistoryList" :key="h.id || h.created_at" class="bg-dark-200 rounded-xl p-3 text-xs space-y-1">
               <div class="flex items-center justify-between">
-                <span class="font-semibold">{{ h.config_name || h.name }}</span>
+                <span class="font-semibold">{{ h.strategy_type || '全局' }} · {{ h.config_level }}</span>
                 <span class="text-text-tertiary">{{ fmtTime(h.created_at) }}</span>
               </div>
               <div class="grid grid-cols-2 gap-x-4 text-text-tertiary">
                 <div v-for="f in configFields" :key="f.key">
-                  {{ f.label }}: <span class="font-mono text-text-secondary">{{ h[f.key] ?? '--' }}</span>
+                  {{ f.label }}: <span class="font-mono text-text-secondary">{{ (h.config_data && h.config_data[f.key]) ?? '--' }}{{ f.unit }}</span>
                 </div>
               </div>
             </div>
@@ -448,16 +430,43 @@ const strategyTypes = [
   { type: 'reverse_closing',  label: '反套平仓',  icon: '↖' },
 ]
 
-// CRUD 核心字段
+// CRUD 核心字段 — 对应 strategy_timing_configs 表
 const configFields = [
-  { key: 'open_threshold',    label: '开仓点差阈值', unit: 'USDT', step: '0.01', placeholder: '2.0' },
-  { key: 'close_threshold',   label: '平仓点差阈值', unit: 'USDT', step: '0.01', placeholder: '0.5' },
-  { key: 'quantity',          label: '开仓数量',     unit: '',     step: '0.001', placeholder: '0.1' },
-  { key: 'max_positions',     label: '最大持仓数',   unit: '',     step: '1',    placeholder: '5'   },
-  { key: 'slippage_tolerance',label: '滑点容忍',     unit: 'USDT', step: '0.01', placeholder: '0.5' },
-  { key: 'cooldown_seconds',  label: '冷却时间',     unit: 's',    step: '1',    placeholder: '30'  },
-  { key: 'stop_loss',         label: '止损阈值',     unit: 'USDT', step: '0.1',  placeholder: ''    },
-  { key: 'take_profit',       label: '止盈阈值',     unit: 'USDT', step: '0.1',  placeholder: ''    },
+  // 触发控制
+  { key: 'trigger_check_interval', label: '触发检查间隔', unit: 's', step: 0.1, placeholder: '0.5', group: 'trigger' },
+  { key: 'opening_trigger_count',  label: '开仓触发次数', unit: '次', step: 1,  placeholder: '3',   group: 'trigger' },
+  { key: 'closing_trigger_count',  label: '平仓触发次数', unit: '次', step: 1,  placeholder: '3',   group: 'trigger' },
+  // 订单执行
+  { key: 'binance_timeout',        label: 'Binance超时', unit: 's', step: 0.5, placeholder: '5.0', group: 'order' },
+  { key: 'bybit_timeout',          label: 'Bybit超时',   unit: 's', step: 0.01, placeholder: '0.1', group: 'order' },
+  { key: 'order_check_interval',   label: '订单检查间隔', unit: 's', step: 0.05, placeholder: '0.2', group: 'order' },
+  { key: 'spread_check_interval',  label: '点差监控间隔', unit: 's', step: 0.1, placeholder: '2.0', group: 'order' },
+  { key: 'mt5_deal_sync_wait',     label: 'MT5同步等待', unit: 's', step: 0.5, placeholder: '3.0', group: 'order' },
+  // 流程控制
+  { key: 'api_spam_prevention_delay',             label: 'API防频繁延迟',  unit: 's', step: 0.5, placeholder: '3.0', group: 'flow' },
+  { key: 'delayed_single_leg_check_delay',        label: '单腿检测延迟',   unit: 's', step: 1,   placeholder: '10.0', group: 'flow' },
+  { key: 'delayed_single_leg_second_check_delay', label: '单腿二次延迟',   unit: 's', step: 0.1, placeholder: '1.0',  group: 'flow' },
+  // 重试
+  { key: 'api_retry_times',          label: 'API重试次数',        unit: '次', step: 1,   placeholder: '3',   group: 'retry' },
+  { key: 'api_retry_delay',          label: 'API重试延迟',        unit: 's',  step: 0.1, placeholder: '0.5', group: 'retry' },
+  { key: 'max_binance_limit_retries',label: 'Binance最大轮询次数', unit: '次', step: 1,   placeholder: '25',  group: 'retry' },
+  // 等待延迟
+  { key: 'open_wait_after_cancel_no_trade',  label: '开仓撤单未成交等待', unit: 's', step: 0.5, placeholder: '3.0', group: 'wait' },
+  { key: 'open_wait_after_cancel_part',      label: '开仓撤单部分等待',   unit: 's', step: 0.5, placeholder: '2.0', group: 'wait' },
+  { key: 'close_wait_after_cancel_no_trade', label: '平仓撤单未成交等待', unit: 's', step: 0.5, placeholder: '3.0', group: 'wait' },
+  { key: 'close_wait_after_cancel_part',     label: '平仓撤单部分等待',   unit: 's', step: 0.5, placeholder: '2.0', group: 'wait' },
+  // 前端
+  { key: 'status_polling_interval', label: '状态轮询间隔', unit: 's', step: 1,   placeholder: '5.0', group: 'frontend' },
+  { key: 'debounce_delay',          label: '防抖延迟',     unit: 's', step: 0.1, placeholder: '0.5', group: 'frontend' },
+]
+
+const configGroups = [
+  { key: 'trigger',  label: '🎯 触发控制' },
+  { key: 'order',    label: '📝 订单执行' },
+  { key: 'flow',     label: '🔄 流程控制' },
+  { key: 'retry',    label: '⚡ 重试配置' },
+  { key: 'wait',     label: '⏳ 等待延迟' },
+  { key: 'frontend', label: '🖥️ 前端交互' },
 ]
 
 // ── 状态 ──────────────────────────────────────────────────────
@@ -497,11 +506,16 @@ const showCrudHistory = ref(false)
 const crudHistoryList = ref([])
 const toast = ref({ show: false, type: 'success', msg: '' })
 const defaultForm = () => ({
-  config_name: '', config_level: 'strategy_type', strategy_type: activeType.value,
-  enabled: true, description: '',
-  open_threshold: null, close_threshold: null, quantity: null,
-  max_positions: null, slippage_tolerance: null, cooldown_seconds: null,
-  stop_loss: null, take_profit: null,
+  config_level: 'strategy_type', strategy_type: activeType.value,
+  trigger_check_interval: 0.5, opening_trigger_count: 3, closing_trigger_count: 3,
+  binance_timeout: 5.0, bybit_timeout: 0.1, order_check_interval: 0.2,
+  spread_check_interval: 2.0, mt5_deal_sync_wait: 3.0,
+  api_spam_prevention_delay: 3.0, delayed_single_leg_check_delay: 10.0,
+  delayed_single_leg_second_check_delay: 1.0,
+  api_retry_times: 3, api_retry_delay: 0.5, max_binance_limit_retries: 25,
+  open_wait_after_cancel_no_trade: 3.0, open_wait_after_cancel_part: 2.0,
+  close_wait_after_cancel_no_trade: 3.0, close_wait_after_cancel_part: 2.0,
+  status_polling_interval: 5.0, debounce_delay: 0.5,
 })
 const form = ref(defaultForm())
 
@@ -977,7 +991,7 @@ function openEditModal(cfg) {
 }
 
 async function saveCrudConfig() {
-  if (!form.value.config_name.trim()) { showToast('error', '配置名称不能为空'); return }
+  if (!form.value.config_level) { showToast('error', '配置层级不能为空'); return }
   saving.value = true
   try {
     if (editingConfig.value) {
@@ -994,7 +1008,7 @@ async function saveCrudConfig() {
 }
 
 async function deleteConfig(cfg) {
-  if (!confirm(`确认删除配置「${cfg.config_name || cfg.name}」？`)) return
+  if (!confirm(`确认删除配置「${cfg.strategy_type || '全局'} (${cfg.config_level})」？`)) return
   try {
     await api.delete(`/api/v1/timing-configs/${cfg.id}`)
     showToast('success', '已删除')

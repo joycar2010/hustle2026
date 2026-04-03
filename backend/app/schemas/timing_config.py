@@ -124,7 +124,7 @@ class TimingConfigTemplateResponse(BaseModel):
     description: Optional[str]
     config_data: dict
     created_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[Union[UUID, str]]
     updated_at: datetime
 
     class Config:

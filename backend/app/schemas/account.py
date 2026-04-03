@@ -53,6 +53,7 @@ class AccountResponse(BaseModel):
     is_default: bool
     is_active: bool
     leverage: Optional[int] = None  # Leverage multiplier
+    proxy_config: Optional[dict] = None  # Proxy configuration
     create_time: datetime
     update_time: datetime
 

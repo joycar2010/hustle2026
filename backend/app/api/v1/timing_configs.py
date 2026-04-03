@@ -211,9 +211,14 @@ async def create_custom_template(
     user_id: str = Depends(get_current_user_id)
 ):
     """Create a custom template"""
-    template = await timing_config_service.create_custom_template(db, template_data, user_id)
-    logger.info(f"User {user_id} created custom template {template.id}")
-    return template
+    try:
+        logger.info(f"Creating template: user_id={user_id}, data={template_data.model_dump()}")
+        template = await timing_config_service.create_custom_template(db, template_data, user_id)
+        logger.info(f"User {user_id} created custom template {template.id}")
+        return template
+    except Exception as e:
+        logger.exception(f"Failed to create template: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/timing-configs/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)

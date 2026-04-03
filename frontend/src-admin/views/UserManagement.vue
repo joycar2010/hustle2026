@@ -1877,7 +1877,7 @@ function getMT5StatusClass(status) {
 }
 
 function getMT5StatusText(status) {
-  return ({ connected: '已连接', connecting: '连接中', disconnected: '未连接', error: '错误' })[status] || (status || '未知')
+  return ({ connected: '已连接', connecting: '连接中', disconnected: '未连接', error: '错误' })[status] || '未连接'
 }
 
 function openAddMT5() {
