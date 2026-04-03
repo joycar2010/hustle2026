@@ -28,3 +28,8 @@ Thumbs.db
 # Test files
 test_*.py
 *_test.py
+
+# Go binaries
+hustle-go-backup/hustle-go
+hustle-go-backup/hustle-go.bak*
+hustle-go-backup/hustle-go.prev

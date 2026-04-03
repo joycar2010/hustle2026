@@ -604,8 +604,13 @@ async def deploy_bridge(
     service_name = f"hustle-mt5-{client.client_name.lower().replace(' ', '-')}"
 
     # 获取 MT5 路径
+    # 根据服务器名称判断MT5路径
     mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"  # 默认路径
-    if client.agent_instance_name == "bybit_system_service":
+    if client.mt5_server and "Bybit" in client.mt5_server:
+        # Bybit服务器使用系统安装的MT5
+        mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+    elif client.is_system_service:
+        # 系统服务账户使用系统安装的MT5
         mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 
     logger.info(
@@ -627,13 +632,63 @@ async def deploy_bridge(
         }
     )
 
-    # 更新数据库中的 bridge_service_name 和 bridge_service_port
+    # 更新数据库中的 bridge_service_name、bridge_service_port 和 agent_instance_name
     if deploy_result.get("success"):
         client.bridge_service_name = service_name
         client.bridge_service_port = service_port
-        await db.commit()
-        logger.info(f"Updated bridge config for client {client_id}: {service_name}:{service_port}")
+        # 设置 agent_instance_name 以启用远程控制
+        # 格式: {client_name}-{port}，例如: mt5-02-8003
+        agent_instance_name = f"{client.client_name.lower().replace(' ', '-')}-{service_port}"
+        client.agent_instance_name = agent_instance_name
 
+        # 创建或更新 MT5Instance 记录
+        from app.models.mt5_instance import MT5Instance
+        instance_result = await db.execute(
+            select(MT5Instance).where(MT5Instance.client_id == client_id)
+        )
+        instance = instance_result.scalar_one_or_none()
+
+        mt5_client_path = deploy_result.get("mt5_path", f"D:\\MetaTrader 5-{service_port}\\terminal64.exe")
+        bridge_deploy_path = deploy_result.get("deploy_dir", f"D:\\{service_name}")
+
+        if instance:
+            # 更新现有实例
+            instance.instance_name = agent_instance_name
+            instance.mt5_path = mt5_client_path
+            instance.deploy_path = bridge_deploy_path
+            instance.service_port = service_port
+            logger.info(f"Updated MT5Instance for client {client_id}")
+        else:
+            # 创建新实例
+            new_instance = MT5Instance(
+                instance_name=agent_instance_name,
+                server_ip="172.31.14.113",  # Windows Agent IP
+                service_port=service_port,
+                mt5_path=mt5_client_path,
+                deploy_path=bridge_deploy_path,
+                is_portable=True,
+                auto_start=True,
+                status="running",
+                is_active=True,
+                instance_type="primary",
+                client_id=client_id
+            )
+            db.add(new_instance)
+            logger.info(f"Created MT5Instance for client {client_id}")
+
+        await db.commit()
+        await db.refresh(client)
+        logger.info(f"Updated bridge config for client {client_id}: {service_name}:{service_port}, agent_instance: {agent_instance_name}")
+
+    # 返回部署结果和更新后的客户端信息
+    deploy_result["client_data"] = {
+        "client_id": client.client_id,
+        "agent_instance_name": client.agent_instance_name,
+        "bridge_service_name": client.bridge_service_name,
+        "bridge_service_port": client.bridge_service_port,
+        "mt5_path": mt5_client_path,
+        "deploy_path": bridge_deploy_path
+    }
     return deploy_result
 
 
@@ -808,24 +863,70 @@ async def delete_bridge(
         f"(service: {client.bridge_service_name}, port: {client.bridge_service_port})"
     )
 
-    # 调用 Windows Agent 删除（传递端口号和登录账号用于删除 MT5 客户端目录和桌面快捷方式）
+    # 调用 Windows Agent 删除
     params = {}
     if client.bridge_service_port:
         params["mt5_client_port"] = client.bridge_service_port
     if client.mt5_login:
         params["mt5_login"] = str(client.mt5_login)
 
-    delete_result = await call_agent_api(
-        "DELETE",
-        f"/bridge/{client.bridge_service_name}",
-        params=params
+    agent_success = False
+    agent_error = None
+
+    try:
+        delete_result = await call_agent_api(
+            "DELETE",
+            f"/bridge/{client.bridge_service_name}",
+            params=params
+        )
+        agent_success = delete_result.get("success", False)
+
+        if not agent_success:
+            agent_error = delete_result.get("message", "Windows Agent 删除失败")
+            logger.warning(f"Windows Agent delete failed: {agent_error}")
+    except HTTPException as e:
+        # Windows Agent 不可用或返回错误
+        agent_error = str(e.detail)
+        logger.error(f"Failed to call Windows Agent: {agent_error}")
+    except Exception as e:
+        agent_error = str(e)
+        logger.error(f"Unexpected error calling Windows Agent: {agent_error}")
+
+    # 无论 Windows Agent 是否成功，都清理数据库记录
+    # 这样可以避免数据库和实际状态不一致
+    client.bridge_service_name = None
+    client.bridge_service_port = None
+    client.agent_instance_name = None
+
+    # 删除 MT5Instance 记录
+    from app.models.mt5_instance import MT5Instance
+    instance_result = await db.execute(
+        select(MT5Instance).where(MT5Instance.client_id == client_id)
     )
+    instance = instance_result.scalar_one_or_none()
+    if instance:
+        await db.delete(instance)
+        logger.info(f"Deleted MT5Instance for client {client_id}")
 
-    # 更新数据库，清空 bridge_service_name 和 bridge_service_port
-    if delete_result.get("success"):
-        client.bridge_service_name = None
-        client.bridge_service_port = None
-        await db.commit()
-        logger.info(f"Cleared bridge config for client {client_id}")
+    await db.commit()
+    logger.info(f"Cleared bridge config for client {client_id}")
 
-    return delete_result
+    # 返回结果
+    if agent_success:
+        return {
+            "success": True,
+            "message": "Bridge 删除成功"
+        }
+    else:
+        # Windows Agent 失败，但数据库已清理
+        return {
+            "success": True,
+            "message": "数据库记录已清理",
+            "warning": f"Windows Agent 清理失败: {agent_error}。请手动检查并清理 Windows 服务器上的残留文件。",
+            "manual_cleanup_required": True,
+            "cleanup_info": {
+                "bridge_directory": f"D:\\{client.bridge_service_name}" if client.bridge_service_name else None,
+                "mt5_directory": f"D:\\MetaTrader 5-{client.bridge_service_port}" if client.bridge_service_port else None,
+                "service_name": client.bridge_service_name
+            }
+        }
