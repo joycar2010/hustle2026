@@ -514,38 +514,15 @@ async function fetchPerformance() {
 async function fetchUserFinancials() {
   usersLoading.value = true
   try {
-    const usersRes = await api.get('/api/v1/users/')
-    const users = Array.isArray(usersRes.data) ? usersRes.data : usersRes.data?.users || []
-    const aggRes = await api.get('/api/v1/accounts/dashboard/aggregated')
-    const agg = aggRes.data || {}
-    const summary = agg.summary || {}
-    const accounts = agg.accounts || []
-    const userAccountMap = {}
-    for (const acc of accounts) {
-      const uid = acc.user_id || acc.owner_id || 'unknown'
-      if (!userAccountMap[uid]) userAccountMap[uid] = []
-      userAccountMap[uid].push(acc)
-    }
-    userFinancials.value = users.map(u => {
-      const uid = u.user_id || u.id
-      const ua = userAccountMap[uid] || []
-      return {
-        user_id: uid, username: u.username,
-        role: u.roles?.[0]?.role_name || u.role || '--',
-        account_count: ua.length,
-        total_assets: ua.reduce((s, a) => s + (a.total_assets || a.balance || 0), 0) || null,
-        available_assets: ua.reduce((s, a) => s + (a.available_balance || a.available || 0), 0) || null,
-        net_assets: ua.reduce((s, a) => s + (a.net_assets || a.equity || 0), 0) || null,
-        daily_pnl: ua.reduce((s, a) => s + (a.daily_pnl || a.unrealized_pnl || 0), 0) || null,
-        risk_rate: null,
-      }
-    })
-    if (userFinancials.value.every(u => u.account_count === 0) && summary.account_count > 0) {
-      const au = users.find(u => (u.user_id || u.id) === summary.user_id) || users[0]
-      userFinancials.value = [{ user_id: au?.user_id || au?.id, username: au?.username || 'admin', role: au?.roles?.[0]?.role_name || au?.role || '--', account_count: summary.account_count, total_assets: summary.total_assets, available_assets: summary.available_balance, net_assets: summary.net_assets, daily_pnl: summary.daily_pnl, risk_rate: summary.risk_ratio }]
-    }
-  } catch (e) { console.error('fetchUserFinancials error:', e) }
-  finally { usersLoading.value = false }
+    const r = await api.get('/api/v1/accounts/dashboard/admin-summary')
+    userFinancials.value = (r.data?.users || []).map(u => ({
+      ...u,
+      role: u.role || '--',
+    }))
+  } catch (e) {
+    console.error('fetchUserFinancials error:', e)
+    userFinancials.value = []
+  } finally { usersLoading.value = false }
 }
 
 // --- Bridge & Agent Control ---

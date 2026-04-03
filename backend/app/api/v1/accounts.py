@@ -529,3 +529,101 @@ async def get_aggregated_dashboard(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+@router.get("/dashboard/admin-summary")
+async def get_admin_dashboard_summary(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin-only: get per-user financial summary for all users (excludes system service accounts)"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Verify admin role
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    if not caller or caller.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    from app.models.mt5_client import MT5Client
+    from sqlalchemy import and_, or_
+
+    # Get all users
+    users_result = await db.execute(select(User))
+    all_users = users_result.scalars().all()
+
+    # Pre-fetch: account_ids that are ONLY linked to system-service MT5 clients
+    # (i.e., all their MT5 clients have is_system_service=True, and they have no non-system clients)
+    from sqlalchemy import func, case
+    sys_only_result = await db.execute(
+        select(MT5Client.account_id)
+        .group_by(MT5Client.account_id)
+        .having(
+            func.count(case((MT5Client.is_system_service == False, 1))) == 0
+        )
+    )
+    system_only_account_ids = {row[0] for row in sys_only_result.fetchall()}
+
+    user_summaries = []
+    for u in all_users:
+        # Get all active accounts for user, excluding system-only accounts
+        acc_result = await db.execute(
+            select(Account).where(
+                and_(
+                    Account.user_id == u.user_id,
+                    Account.is_active == True,
+                    Account.account_id.notin_(system_only_account_ids) if system_only_account_ids else True,
+                )
+            )
+        )
+        accounts = acc_result.scalars().all()
+
+        if not accounts:
+            user_summaries.append({
+                "user_id": str(u.user_id),
+                "username": u.username,
+                "role": u.role,
+                "account_count": 0,
+                "total_assets": None,
+                "available_assets": None,
+                "net_assets": None,
+                "daily_pnl": None,
+                "risk_rate": None,
+            })
+            continue
+
+        # Fetch aggregated data for this user's accounts
+        try:
+            agg = await account_data_service.get_aggregated_account_data(list(accounts))
+            summary = agg.get("summary", {})
+            failed = agg.get("failed_accounts", [])
+            user_summaries.append({
+                "user_id": str(u.user_id),
+                "username": u.username,
+                "role": u.role,
+                "account_count": len(accounts),
+                "total_assets": summary.get("total_assets"),
+                "available_assets": summary.get("available_balance"),
+                "net_assets": summary.get("net_assets"),
+                "daily_pnl": summary.get("daily_pnl"),
+                "risk_rate": summary.get("risk_ratio"),
+                "failed_accounts": [{"name": f.get("account_name"), "error": f.get("error", "")[:60]} for f in failed] if failed else None,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to get data for user {u.username}: {e}")
+            user_summaries.append({
+                "user_id": str(u.user_id),
+                "username": u.username,
+                "role": u.role,
+                "account_count": len(accounts),
+                "total_assets": None,
+                "available_assets": None,
+                "net_assets": None,
+                "daily_pnl": None,
+                "risk_rate": None,
+                "error": str(e),
+            })
+
+    return {"users": user_summaries}

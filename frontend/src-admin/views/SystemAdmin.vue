@@ -102,122 +102,85 @@
     <!-- ===== 实时推送管理 ===== -->
     <div v-if="activeTab==='push'" class="space-y-4">
       <div class="card">
-        <h2 class="text-lg font-bold mb-1">实时推送管理</h2>
-        <p class="text-xs text-text-tertiary mb-4">管理 WebSocket 实时推送设置，监控各消息类型的推送频率和状态</p>
-
-        <!-- WS 连接状态 -->
-        <div class="bg-dark-200 rounded-xl p-4 mb-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-semibold text-sm">连接状态</h3>
-            <div class="flex items-center gap-2">
-              <div :class="['w-2.5 h-2.5 rounded-full', pushWsConnected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
-              <span :class="['text-sm font-bold', pushWsConnected ? 'text-[#0ecb81]' : 'text-[#f6465d]']">
-                {{ pushWsConnected ? '已连接' : '未连接' }}
-              </span>
-            </div>
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-bold">实时推送管理</h2>
+            <p class="text-xs text-text-tertiary mt-0.5">监控 Python Streamer 推送状态，动态调整频率 · 数据源: /api/v1/ws/stats</p>
           </div>
-          <div class="grid grid-cols-3 gap-3">
-            <div class="bg-dark-100 rounded-lg p-3">
-              <div class="text-xs text-text-tertiary mb-1">连接时长</div>
-              <div class="text-base font-mono font-bold">{{ pushUptime }}</div>
-            </div>
-            <div class="bg-dark-100 rounded-lg p-3">
-              <div class="text-xs text-text-tertiary mb-1">消息总数</div>
-              <div class="text-base font-mono font-bold">{{ pushTotalMsgs }}</div>
-            </div>
-            <div class="bg-dark-100 rounded-lg p-3">
-              <div class="text-xs text-text-tertiary mb-1">消息速率</div>
-              <div class="text-base font-mono font-bold text-primary">{{ pushMsgRate }}/s</div>
-            </div>
-          </div>
+          <button @click="loadPushData" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm border border-border-primary transition-colors">刷新</button>
         </div>
 
-        <!-- 推送频率监控 -->
+        <!-- Streamer 状态面板 -->
         <div class="bg-dark-200 rounded-xl p-4 mb-4">
-          <h3 class="font-semibold text-sm mb-3">推送频率监控</h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-sm">推流服务状态</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-text-tertiary">连接数: {{ pushConnections }}</span>
+              <span class="text-xs text-text-tertiary">{{ pushServerTime }}</span>
+            </div>
+          </div>
           <div class="space-y-2">
-            <div v-for="s in pushStreams" :key="s.type" class="bg-dark-100 rounded-lg p-3">
-              <div class="flex items-center justify-between mb-1">
+            <div v-for="(s, name) in pushStreamers" :key="name" class="bg-dark-100 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-1.5">
                 <div class="flex items-center gap-2 text-sm">
-                  <div :class="['w-2 h-2 rounded-full', s.active ? 'bg-[#0ecb81]' : 'bg-gray-500']"></div>
-                  <span class="font-medium">{{ s.name }}</span>
-                  <span class="text-text-tertiary text-xs">({{ s.type }})</span>
+                  <div :class="['w-2 h-2 rounded-full', s.running ? (s.error_count > 100 ? 'bg-[#f0b90b]' : 'bg-[#0ecb81] animate-pulse') : 'bg-[#f6465d]']"></div>
+                  <span class="font-medium">{{ STREAMER_LABELS[name] || name }}</span>
+                  <span class="text-text-tertiary text-xs">({{ name }})</span>
                 </div>
                 <div class="flex items-center gap-3 text-xs">
-                  <span class="text-text-tertiary">预期: {{ s.expectedInterval }}ms</span>
-                  <span :class="['font-mono font-bold', s.actualInterval>0 ? 'text-[#0ecb81]' : 'text-text-tertiary']">
-                    实际: {{ s.actualInterval > 0 ? s.actualInterval+'ms' : '-' }}
-                  </span>
-                  <span :class="['px-1.5 py-0.5 rounded text-xs font-bold', getStreamStatusClass(s.status)]">
-                    {{ getStreamStatusText(s.status) }}
+                  <span class="font-mono text-text-secondary">{{ (s.interval_ms / 1000).toFixed(1) }}s</span>
+                  <span class="text-text-tertiary">推送 {{ s.broadcast_count }} 次</span>
+                  <span v-if="s.error_count > 0" class="text-[#f6465d] font-mono">错误 {{ s.error_count }}</span>
+                  <span :class="['px-1.5 py-0.5 rounded text-xs font-bold', s.running ? (s.error_count > 100 ? 'bg-[#f0b90b]/20 text-[#f0b90b]' : 'bg-[#0ecb81]/20 text-[#0ecb81]') : 'bg-[#f6465d]/20 text-[#f6465d]']">
+                    {{ s.running ? (s.error_count > 100 ? '警告' : '运行中') : '已停止' }}
                   </span>
                 </div>
               </div>
-              <div class="text-xs text-text-tertiary">{{ s.description }}</div>
-              <div class="mt-1 flex justify-between text-xs text-text-tertiary">
-                <span>消息计数: {{ s.count }}</span>
-                <span>最后接收: {{ s.lastReceived ? formatTimeAgo(s.lastReceived) : '未接收' }}</span>
+              <div class="text-xs text-text-tertiary">
+                最后推送: {{ s.last_broadcast ? new Date(s.last_broadcast).toLocaleString('zh-CN') : '未推送' }}
               </div>
             </div>
+            <div v-if="!Object.keys(pushStreamers).length" class="text-center text-text-tertiary text-xs py-4">加载中...</div>
           </div>
         </div>
 
         <!-- 推送频率调整 -->
         <div class="bg-dark-200 rounded-xl p-4 mb-4">
           <h3 class="font-semibold text-sm mb-1">推送频率调整</h3>
-          <p class="text-xs text-text-tertiary mb-4">动态调整各推送流的频率，立即生效无需重启服务</p>
+          <p class="text-xs text-text-tertiary mb-4">通过 POST /api/v1/ws/config 动态调整频率，立即生效</p>
           <div class="space-y-4">
-            <div v-for="s in adjustableStreams" :key="s.type" class="bg-dark-100 rounded-lg p-4">
+            <div v-for="cfg in STREAMER_ADJUST_CONFIGS" :key="cfg.name" class="bg-dark-100 rounded-lg p-4">
               <div class="flex items-center justify-between mb-2">
                 <div>
-                  <div class="font-medium text-sm">{{ s.name }}</div>
-                  <div class="text-xs text-text-tertiary">{{ s.description }}</div>
+                  <div class="font-medium text-sm">{{ cfg.label }}</div>
+                  <div class="text-xs text-text-tertiary">有效范围: {{ cfg.min }}s – {{ cfg.max }}s</div>
                 </div>
-                <div class="text-xs text-text-tertiary">当前: <span class="font-mono font-bold text-primary">{{ s.currentInterval }}s</span></div>
+                <div class="text-xs text-text-tertiary">当前: <span class="font-mono font-bold text-primary">{{ ((pushStreamers[cfg.name]?.interval_ms || 0) / 1000).toFixed(1) }}s</span></div>
               </div>
-              <div class="flex items-center gap-4">
-                <div class="flex-1">
-                  <input type="range" v-model.number="s.newInterval"
-                    :min="s.minInterval" :max="s.maxInterval" :step="s.step"
-                    class="w-full h-1.5 bg-dark-300 rounded appearance-none cursor-pointer accent-primary" />
-                  <div class="flex justify-between text-xs text-text-tertiary mt-1">
-                    <span>{{ s.minInterval }}s</span>
-                    <span class="font-mono font-bold text-primary">{{ s.newInterval }}s</span>
-                    <span>{{ s.maxInterval }}s</span>
-                  </div>
-                </div>
-                <button @click="applyFrequency(s)" :disabled="s.newInterval===s.currentInterval||s.updating"
-                  class="px-3 py-1.5 bg-primary hover:bg-primary-hover disabled:bg-dark-300 disabled:text-text-tertiary disabled:cursor-not-allowed rounded text-sm font-bold transition-colors whitespace-nowrap">
-                  {{ s.updating ? '应用中...' : '应用' }}
+              <div class="flex items-center gap-3">
+                <select v-model="pushNewIntervals[cfg.name]"
+                  class="flex-1 px-2 py-1.5 bg-dark-300 border border-border-secondary rounded text-sm focus:outline-none focus:border-primary">
+                  <option v-for="opt in cfg.options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+                <button @click="applyFrequency(cfg.name)" :disabled="pushApplying[cfg.name]"
+                  class="px-4 py-1.5 bg-primary hover:bg-primary-hover disabled:bg-dark-300 disabled:text-text-tertiary disabled:cursor-not-allowed rounded text-sm font-bold transition-colors whitespace-nowrap">
+                  {{ pushApplying[cfg.name] ? '应用中...' : '应用' }}
                 </button>
-              </div>
-              <div class="text-xs text-text-tertiary mt-1">
-                有效范围: {{ s.minInterval }}s – {{ s.maxInterval }}s
-                <span v-if="s.recommendation" class="ml-2 text-[#f0b90b]">💡 推荐: {{ s.recommendation }}</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 消息类型过滤 -->
+        <!-- Redis 推流通道 -->
         <div class="bg-dark-200 rounded-xl p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-semibold text-sm">消息类型过滤</h3>
-            <button @click="toggleAllMsgTypes" class="text-xs text-primary hover:text-primary-hover">
-              {{ allMsgTypesOn ? '全部禁用' : '全部启用' }}
-            </button>
-          </div>
+          <h3 class="font-semibold text-sm mb-3">Redis 推流桥接通道</h3>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <div v-for="mt in msgTypeFilters" :key="mt.type"
-              class="flex items-center justify-between p-3 bg-dark-100 rounded-lg">
-              <div class="flex-1">
-                <div class="font-medium text-sm">{{ mt.name }}</div>
-                <div class="text-xs text-text-tertiary">{{ mt.description }}</div>
+            <div v-for="ch in REDIS_CHANNELS" :key="ch.channel" class="flex items-center justify-between p-3 bg-dark-100 rounded-lg">
+              <div class="flex items-center gap-2">
+                <div class="w-1.5 h-1.5 rounded-full bg-[#0ecb81]"></div>
+                <span class="font-mono text-xs text-text-secondary">{{ ch.channel }}</span>
               </div>
-              <div @click="mt.enabled = !mt.enabled; saveMsgTypeFilters()"
-                :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors', mt.enabled ? 'bg-primary' : 'bg-gray-600']">
-                <span :class="['absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform', mt.enabled ? 'translate-x-4' : 'translate-x-0.5']"/>
-              </div>
+              <span class="text-xs text-text-tertiary">{{ ch.desc }}</span>
             </div>
           </div>
         </div>
@@ -1290,17 +1253,17 @@ async function openRolePermissions(role) {
   try {
     const [allR, roleR] = await Promise.all([
       api.get('/api/v1/rbac/permissions'),
-      api.get(`/api/v1/rbac/roles/${role.role_id || role.id}/permissions`),
+      api.get(`/api/v1/rbac/roles/${role.role_id || role.id}`),
     ])
     allPerms.value = allR.data || []
-    const assigned = roleR.data || []
+    const assigned = roleR.data?.permissions || []
     selectedPerms.value = assigned.map(p => p.permission_id || p)
   } catch { allPerms.value = []; selectedPerms.value = [] }
   showPermModal.value = true
 }
 async function savePermissions() {
   try {
-    await api.put(`/api/v1/rbac/roles/${permRole.value.role_id || permRole.value.id}/permissions`,
+    await api.post(`/api/v1/rbac/roles/${permRole.value.role_id || permRole.value.id}/permissions`,
       { permission_ids: selectedPerms.value })
     toast('权限保存成功')
     showPermModal.value = false
@@ -1309,65 +1272,57 @@ async function savePermissions() {
 }
 
 // ════════════════════════════════════════════
-// ② 实时推送管理
+// ② 实时推送管理 — 数据源: GET /api/v1/ws/stats + POST /api/v1/ws/config
 // ════════════════════════════════════════════
-const pushWsConnected = ref(false)
-const pushUptime = ref('0s')
-const pushTotalMsgs = ref(0)
-const pushMsgRate = ref(0)
+const STREAMER_LABELS = { market_data: '市场数据', account_balance: '账户余额', risk_metrics: '风险指标', mt5_connection: 'MT5连接状态' }
+const STREAMER_ADJUST_CONFIGS = [
+  { name: 'market_data', label: '市场数据推送', min: 0.1, max: 10, options: [
+    { value: 0.25, label: '0.25s (高频)' }, { value: 0.5, label: '0.5s' }, { value: 1, label: '1s (默认)' }, { value: 2, label: '2s' }, { value: 5, label: '5s (低频)' }] },
+  { name: 'account_balance', label: '账户余额推送', min: 5, max: 60, options: [
+    { value: 5, label: '5s' }, { value: 10, label: '10s' }, { value: 30, label: '30s (默认)' }, { value: 60, label: '60s' }] },
+  { name: 'risk_metrics', label: '风险指标推送', min: 10, max: 120, options: [
+    { value: 10, label: '10s' }, { value: 30, label: '30s (默认)' }, { value: 60, label: '60s' }, { value: 120, label: '120s' }] },
+  { name: 'mt5_connection', label: 'MT5连接状态', min: 10, max: 120, options: [
+    { value: 10, label: '10s' }, { value: 30, label: '30s (默认)' }, { value: 60, label: '60s' }, { value: 120, label: '120s' }] },
+]
+const REDIS_CHANNELS = [
+  { channel: 'ws:broadcast',       desc: '通用广播（策略/持仓）' },
+  { channel: 'ws:market_data',     desc: '市场行情数据' },
+  { channel: 'ws:account_balance', desc: '账户余额更新' },
+  { channel: 'ws:risk_metrics',    desc: '风险指标' },
+  { channel: 'ws:order_update',    desc: '订单成交事件' },
+  { channel: 'ws:position_update', desc: '持仓变化' },
+]
 
-const pushStreams = ref([
-  { type: 'market_data', name: '市场数据', description: '实时行情价格推送', expectedInterval: 250, actualInterval: 0, active: false, status: 'normal', count: 0, lastReceived: null },
-  { type: 'account_balance', name: '账户余额', description: '账户资金变动推送', expectedInterval: 1000, actualInterval: 0, active: false, status: 'normal', count: 0, lastReceived: null },
-  { type: 'position_update', name: '持仓更新', description: 'MT5持仓实时同步', expectedInterval: 1000, actualInterval: 0, active: false, status: 'normal', count: 0, lastReceived: null },
-  { type: 'risk_metrics', name: '风险指标', description: '风险管理指标推送', expectedInterval: 5000, actualInterval: 0, active: false, status: 'normal', count: 0, lastReceived: null },
-  { type: 'strategy_status', name: '策略状态', description: '策略运行状态推送', expectedInterval: 2000, actualInterval: 0, active: false, status: 'normal', count: 0, lastReceived: null },
-])
+const pushStreamers = ref({})
+const pushConnections = ref(0)
+const pushServerTime = ref('--')
+const pushNewIntervals = ref({ market_data: 1, account_balance: 30, risk_metrics: 30, mt5_connection: 30 })
+const pushApplying = ref({})
 
-const adjustableStreams = ref([
-  { type: 'market_data', name: '市场数据推送', description: '控制行情数据的推送频率', minInterval: 0.1, maxInterval: 5, step: 0.1, currentInterval: 0.25, newInterval: 0.25, updating: false },
-  { type: 'account_balance', name: '账户余额推送', description: '控制账户余额的推送频率', minInterval: 1, maxInterval: 60, step: 1, currentInterval: 1, newInterval: 1, updating: false, recommendation: '1-5s' },
-  { type: 'position_update', name: '持仓更新推送', description: 'MT5持仓同步频率', minInterval: 1, maxInterval: 30, step: 1, currentInterval: 1, newInterval: 1, updating: false },
-])
-
-const msgTypeFilters = ref([
-  { type: 'market_data', name: '市场数据', description: '实时行情推送', enabled: true },
-  { type: 'account_balance', name: '账户余额', description: '账户资金变动', enabled: true },
-  { type: 'position_update', name: '持仓更新', description: 'MT5持仓同步', enabled: true },
-  { type: 'risk_metrics', name: '风险指标', description: '风险管理指标', enabled: true },
-  { type: 'order_update', name: '订单更新', description: '订单状态变化', enabled: true },
-  { type: 'strategy_status', name: '策略状态', description: '策略运行状态', enabled: true },
-  { type: 'system_notification', name: '系统通知', description: '系统级别通知', enabled: true },
-  { type: 'risk_alert', name: '风险警报', description: '风险触发警报推送', enabled: true },
-])
-const allMsgTypesOn = computed(() => msgTypeFilters.value.every(m => m.enabled))
-
-function getStreamStatusClass(s) {
-  return { normal: 'bg-[#0ecb81]/20 text-[#0ecb81]', warning: 'bg-[#f0b90b]/20 text-[#f0b90b]', error: 'bg-[#f6465d]/20 text-[#f6465d]', inactive: 'bg-dark-200 text-text-tertiary' }[s] || 'bg-dark-200 text-text-tertiary'
-}
-function getStreamStatusText(s) {
-  return { normal: '正常', warning: '警告', error: '异常', inactive: '未活跃' }[s] || s
-}
-function toggleAllMsgTypes() {
-  const next = !allMsgTypesOn.value
-  msgTypeFilters.value.forEach(m => m.enabled = next)
-  saveMsgTypeFilters()
-}
-async function saveMsgTypeFilters() {
+async function loadPushData() {
   try {
-    const types = msgTypeFilters.value.filter(m => m.enabled).map(m => m.type)
-    await api.post('/api/v1/system/push/message-types', { enabled_types: types })
-    toast('消息类型配置已保存')
+    const r = await api.get('/api/v1/ws/stats')
+    const d = r.data
+    pushStreamers.value = d.streamers || {}
+    pushConnections.value = d.connections?.total ?? 0
+    pushServerTime.value = d.server_time ? new Date(d.server_time).toLocaleString('zh-CN') : '--'
+    // Sync dropdown values to current intervals
+    for (const name of Object.keys(pushNewIntervals.value)) {
+      const ms = d.streamers?.[name]?.interval_ms
+      if (ms) pushNewIntervals.value[name] = ms / 1000
+    }
   } catch {}
 }
-async function applyFrequency(stream) {
-  stream.updating = true
+
+async function applyFrequency(streamerName) {
+  pushApplying.value[streamerName] = true
   try {
-    await api.post('/api/v1/system/push/frequency', { type: stream.type, interval: stream.newInterval })
-    stream.currentInterval = stream.newInterval
-    toast(`${stream.name}频率已更新为 ${stream.newInterval}s`)
-  } catch (e) { toast('更新失败', 'error') }
-  finally { stream.updating = false }
+    await api.post('/api/v1/ws/config', { streamer: streamerName, interval: pushNewIntervals.value[streamerName] })
+    toast(`${STREAMER_LABELS[streamerName] || streamerName} 频率已更新`)
+    await loadPushData()
+  } catch (e) { toast('更新失败: ' + (e.response?.data?.detail || e.message), 'error') }
+  finally { pushApplying.value[streamerName] = false }
 }
 
 // ════════════════════════════════════════════
@@ -1828,6 +1783,7 @@ onMounted(() => {
 
 watch(activeTab, (tab) => {
   if (tab === 'notify') initNotifyTab()
+  if (tab === 'push') loadPushData()
 })
 </script>
 
