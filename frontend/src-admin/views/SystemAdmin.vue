@@ -663,59 +663,48 @@
           <button @click="loadCurrentCert" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">刷新</button>
         </div>
 
-        <div v-if="currentCert && currentCert.exists" class="space-y-4">
-          <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <div class="bg-dark-200 rounded-xl p-3">
-              <div class="text-xs text-text-tertiary mb-1">证书状态</div>
+        <!-- All certificates from live check -->
+        <div v-if="allCerts.length" class="space-y-3">
+          <div v-for="cert in allCerts" :key="cert.cert_path || cert.domain_names?.[0]"
+            class="bg-dark-200 rounded-xl p-4 border" :class="cert.status === 'healthy' ? 'border-green-800/30' : cert.status === 'warning' ? 'border-yellow-800/30' : 'border-red-800/30'">
+            <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-2">
-                <span :class="getCertStatusClass(currentCert.status)" class="px-2 py-0.5 rounded text-xs font-bold">
-                  {{ getCertStatusText(currentCert.status) }}
-                </span>
-                <span v-if="currentCert.is_valid" class="text-[#0ecb81] text-xs">✓ 有效</span>
-                <span v-else class="text-[#f6465d] text-xs">✗ 已过期</span>
+                <div :class="['w-2 h-2 rounded-full', cert.status === 'healthy' ? 'bg-[#0ecb81] animate-pulse' : cert.status === 'warning' ? 'bg-[#f0b90b]' : 'bg-[#f6465d]']"></div>
+                <span class="font-semibold text-sm">{{ cert.domain_names?.[0] || '--' }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span :class="getCertStatusClass(cert.status)" class="px-2 py-0.5 rounded text-xs font-bold">{{ getCertStatusText(cert.status) }}</span>
+                <span v-if="cert.is_valid" class="text-[#0ecb81] text-xs font-mono">{{ cert.days_remaining }}天</span>
               </div>
             </div>
-            <div class="bg-dark-200 rounded-xl p-3">
-              <div class="text-xs text-text-tertiary mb-1">剩余天数</div>
-              <div class="text-xl font-mono font-bold" :class="getDaysClass(currentCert.days_remaining)">
-                {{ currentCert.days_remaining }} 天
-              </div>
-            </div>
-            <div class="bg-dark-200 rounded-xl p-3">
-              <div class="text-xs text-text-tertiary mb-1">颁发者</div>
-              <div class="text-xs break-all text-text-secondary">{{ currentCert.issuer || 'Let\'s Encrypt' }}</div>
-            </div>
-            <div class="bg-dark-200 rounded-xl p-3">
-              <div class="text-xs text-text-tertiary mb-1">域名</div>
-              <div v-for="d in (currentCert.domain_names||[])" :key="d" class="text-xs text-primary">{{ d }}</div>
-            </div>
-            <div class="bg-dark-200 rounded-xl p-3">
-              <div class="text-xs text-text-tertiary mb-1">颁发时间</div>
-              <div class="text-xs text-text-secondary">{{ fmtDate(currentCert.issued_at) }}</div>
-            </div>
-            <div class="bg-dark-200 rounded-xl p-3">
-              <div class="text-xs text-text-tertiary mb-1">过期时间</div>
-              <div class="text-xs" :class="currentCert.days_remaining<=30 ? 'text-[#f0b90b]' : 'text-text-secondary'">
-                {{ fmtDate(currentCert.expires_at) }}
-              </div>
-            </div>
-          </div>
-          <div class="bg-dark-200 rounded-xl p-4">
-            <div class="text-xs text-text-tertiary mb-2">证书文件路径</div>
-            <div class="space-y-1 text-xs font-mono">
-              <div><span class="text-text-tertiary">证书: </span>{{ currentCert.cert_path }}</div>
-              <div><span class="text-text-tertiary">私钥: </span>{{ currentCert.key_path }}</div>
-            </div>
-          </div>
-          <div v-if="currentCert.days_remaining<=30" class="bg-[#f0b90b]/10 border border-[#f0b90b] rounded-xl p-4">
-            <div class="flex items-start gap-2">
-              <span class="text-[#f0b90b] text-lg">⚠</span>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               <div>
-                <div class="font-medium text-[#f0b90b] text-sm">证书即将过期</div>
-                <div class="text-xs text-text-secondary mt-1">证书将在 {{ currentCert.days_remaining }} 天后过期，请及时续期。</div>
+                <div class="text-text-tertiary mb-0.5">剩余天数</div>
+                <div class="font-mono font-bold" :class="getDaysClass(cert.days_remaining)">{{ cert.days_remaining }} 天</div>
+              </div>
+              <div>
+                <div class="text-text-tertiary mb-0.5">颁发者</div>
+                <div class="text-text-secondary truncate">{{ cert.issuer || "Let's Encrypt" }}</div>
+              </div>
+              <div>
+                <div class="text-text-tertiary mb-0.5">颁发时间</div>
+                <div class="text-text-secondary">{{ fmtDate(cert.issued_at) }}</div>
+              </div>
+              <div>
+                <div class="text-text-tertiary mb-0.5">过期时间</div>
+                <div :class="cert.days_remaining<=30 ? 'text-[#f0b90b]' : 'text-text-secondary'">{{ fmtDate(cert.expires_at) }}</div>
               </div>
             </div>
+            <div class="mt-2 text-xs font-mono text-text-tertiary">
+              证书: {{ cert.cert_path }} · 私钥: {{ cert.key_path }}
+            </div>
+            <div v-if="cert.days_remaining<=30" class="mt-2 px-3 py-2 bg-[#f0b90b]/10 border border-[#f0b90b]/30 rounded-lg text-xs text-[#f0b90b]">
+              ⚠ 证书将在 {{ cert.days_remaining }} 天后过期，请及时续期
+            </div>
           </div>
+        </div>
+        <div v-else-if="currentCert && !currentCert.exists" class="bg-dark-200 rounded-xl p-6 text-center text-text-tertiary text-sm">
+          {{ currentCert.error || '未检测到SSL证书' }}
         </div>
 
         <!-- DB list of SSL certs -->
@@ -723,7 +712,7 @@
           <h3 class="font-semibold text-sm mb-2">已注册证书</h3>
           <div v-for="cert in sslCerts" :key="cert.id" class="bg-dark-200 rounded-xl p-4 flex items-center justify-between">
             <div>
-              <div class="font-semibold font-mono text-sm">{{ cert.domain }}</div>
+              <div class="font-semibold font-mono text-sm">{{ cert.domain_name || cert.domain || '--' }}</div>
               <div class="text-xs text-text-tertiary mt-0.5">
                 颁发: {{ cert.issuer || 'Let\'s Encrypt' }} · 到期: {{ cert.expires_at || cert.expiry_date || '--' }}
               </div>
@@ -1470,7 +1459,20 @@ async function saveTemplate() {
 async function sendTestTemplate(tpl) {
   try {
     const recipient = testRecipient.value || testRecipientManual.value
-    await api.post('/api/v1/notifications/send', { template_id: tpl.template_id, recipient })
+    if (recipient) {
+      // Use the test/feishu endpoint for direct recipient
+      await api.post(`/api/v1/notifications/test/feishu?recipient=${encodeURIComponent(recipient)}`)
+    } else {
+      // Use send endpoint with correct schema
+      // Get current admin user_id from users list
+      const adminUser = notifyUsers.value.find(u => u.role === '管理员') || notifyUsers.value[0]
+      if (!adminUser) { toast('请先选择接收人', 'error'); return }
+      await api.post('/api/v1/notifications/send', {
+        template_key: tpl.template_key || tpl.template_code || tpl.template_name,
+        user_ids: [adminUser.user_id || adminUser.id],
+        variables: {}
+      })
+    }
     toast('测试通知已发送')
   } catch (e) { toast('发送失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
@@ -1598,7 +1600,7 @@ async function disableComponent(comp) {
 }
 function openCompConfig(comp) {
   currentComp.value = comp
-  compConfigJson.value = JSON.stringify(comp.config || {}, null, 2)
+  compConfigJson.value = JSON.stringify(comp.config_json || comp.config || {}, null, 2)
   showCompConfigModal.value = true
 }
 async function saveCompConfig() {
@@ -1620,6 +1622,7 @@ async function viewCompLogs(comp) {
 // ════════════════════════════════════════════
 // ⑤ SSL 证书
 // ════════════════════════════════════════════
+const allCerts = ref([])
 const currentCert = ref(null)
 const sslCerts = ref([])
 
@@ -1649,8 +1652,13 @@ function certStatusText(cert) {
   return `有效 ${days}天`
 }
 async function loadCurrentCert() {
-  try { const r = await api.get('/api/v1/monitor/ssl/current'); currentCert.value = r.data }
-  catch (e) { currentCert.value = { exists: false, error: e.response?.data?.detail || e.message } }
+  // Get live cert status from monitor/status (all 3 certs)
+  try {
+    const r = await api.get('/api/v1/monitor/status')
+    allCerts.value = r.data?.ssl_certificate || []
+    currentCert.value = allCerts.value.length ? allCerts.value[0] : { exists: false }
+  } catch (e) { allCerts.value = []; currentCert.value = { exists: false, error: e.message } }
+  // Get DB registered certs
   try { const r = await api.get('/api/v1/ssl/certificates'); sslCerts.value = r.data || [] } catch {}
 }
 
@@ -1748,10 +1756,18 @@ async function backupDatabase() {
   } catch (e) { toast('备份失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
 async function restoreDatabase() {
-  if (!confirm('确认从 GitHub GO 分支恢复数据库？当前数据将被覆盖！')) return
+  // Get latest backup filename
+  let filename = ''
   try {
-    await api.post('/api/v1/system/database/restore', { source: 'github', branch: 'GO', repo: 'https://github.com/joycar2010/hustle2026.git' })
-    toast('数据库恢复指令已发送，请等待完成')
+    const r = await api.get('/api/v1/system/database/stats')
+    // backups are listed in the response or we prompt user
+  } catch {}
+  filename = prompt('请输入要恢复的备份文件名（如 backup_20260403_223909_UTC.sql）：')
+  if (!filename || !filename.trim()) return
+  if (!confirm(`确认从备份文件「${filename}」恢复数据库？当前数据将被覆盖！`)) return
+  try {
+    await api.post('/api/v1/system/database/restore', { filename: filename.trim() })
+    toast('数据库恢复成功')
   } catch (e) { toast('恢复失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
 async function clearDbLogs() {
@@ -1764,9 +1780,9 @@ async function viewTable(name) {
 }
 async function backupTable(name) {
   try {
-    await api.post('/api/v1/system/database/backup-table', { table: name, branch: 'GO' })
-    toast(`表「${name}」已备份至 GO 分支`)
-  } catch { toast('备份失败', 'error') }
+    await api.post(`/api/v1/system/database/backup-table/${name}`)
+    toast(`表「${name}」已备份`)
+  } catch (e) { toast('备份失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
 
 // ── INIT ───────────────────────────────────────────────────

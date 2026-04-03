@@ -168,7 +168,7 @@ async def backup_database(
 ) -> Dict[str, str]:
     """Backup entire database to C:\\app\\hustle2026\\backend\\backups"""
     try:
-        backup_dir = Path(r"C:\app\hustle2026\backend\backups")
+        backup_dir = Path("/data/hustle2026/backend/backups")
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -255,7 +255,7 @@ async def restore_database(
 ) -> Dict[str, str]:
     """Restore database from backup"""
     try:
-        backup_dir = Path(r"C:\app\hustle2026\backend\backups")
+        backup_dir = Path("/data/hustle2026/backend/backups")
         file_path = backup_dir / request.filename
 
         if not file_path.exists():
@@ -273,7 +273,7 @@ async def restore_database(
         env = os.environ.copy()
         env["PGPASSWORD"] = db_password
 
-        psql = r"C:\Program Files\PostgreSQL\16\bin\psql.exe"
+        psql = "/usr/bin/psql"
         result = subprocess.run(
             [psql, "-h", db_host, "-p", str(db_port), "-U", db_user, "-d", db_name, "-f", str(file_path)],
             capture_output=True,
@@ -301,7 +301,7 @@ async def restore_database(
 async def clean_logs(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, str]:
+):
     """Clean old log entries"""
     try:
         # Clean old market data (keep last 7 days)
@@ -327,6 +327,8 @@ async def clean_logs(
         }
     except Exception as e:
         await db.rollback()
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to clean logs: {str(e)}"
@@ -373,7 +375,7 @@ async def get_backup_history(
 ) -> List[Dict[str, Any]]:
     """Get backup history"""
     try:
-        backup_dir = Path(r"C:\app\hustle2026\backend\backups")
+        backup_dir = Path("/data/hustle2026/backend/backups")
         backups = []
 
         if backup_dir.exists():

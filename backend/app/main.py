@@ -344,7 +344,7 @@ uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Mount sounds directory for audio files
-sounds_dir = Path("frontend/public/sounds")
+sounds_dir = Path("/data/hustle2026/frontend/public/sounds")
 sounds_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/sounds", StaticFiles(directory=str(sounds_dir)), name="sounds")
 

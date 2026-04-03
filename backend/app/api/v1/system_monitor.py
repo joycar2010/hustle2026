@@ -309,7 +309,9 @@ async def get_current_ssl_certificate(
 ):
     """获取当前使用的SSL证书信息"""
     try:
-        cert_info = check_nginx_ssl_certificate()
+        cert_info = check_all_ssl_certificates()
+        if cert_info and isinstance(cert_info, list) and len(cert_info) > 0:
+            return cert_info[0]  # Return first cert for backward compat
         return cert_info
     except Exception as e:
         logger.error(f"获取SSL证书信息失败: {e}")
