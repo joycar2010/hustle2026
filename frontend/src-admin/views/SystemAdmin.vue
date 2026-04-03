@@ -1586,15 +1586,15 @@ async function loadSecurityComponents() {
 }
 async function enableComponent(comp) {
   try {
-    await api.post(`/api/v1/security/components/${comp.component_id || comp.name}/enable`)
+    await api.post(`/api/v1/security/components/${comp.component_id || comp.name}/enable`, { force: false })
     comp.is_enabled = true; comp.enabled = true; toast('已启用')
-  } catch (e) { toast('操作失败', 'error') }
+  } catch (e) { toast('操作失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
 async function disableComponent(comp) {
   try {
-    await api.post(`/api/v1/security/components/${comp.component_id || comp.name}/disable`)
+    await api.post(`/api/v1/security/components/${comp.component_id || comp.name}/disable`, { force: false })
     comp.is_enabled = false; comp.enabled = false; toast('已禁用')
-  } catch (e) { toast('操作失败', 'error') }
+  } catch (e) { toast('操作失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
 function openCompConfig(comp) {
   currentComp.value = comp

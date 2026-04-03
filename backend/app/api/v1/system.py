@@ -185,7 +185,7 @@ async def backup_database(
         env = os.environ.copy()
         env["PGPASSWORD"] = db_password
 
-        pg_dump = r"C:\Program Files\PostgreSQL\16\bin\pg_dump.exe"
+        pg_dump = "/usr/bin/pg_dump"
         result = subprocess.run(
             [pg_dump, "-h", db_host, "-p", str(db_port), "-U", db_user, "-d", db_name, "-f", str(file_path)],
             capture_output=True,
@@ -1195,7 +1195,7 @@ async def clear_old_logs(
         # Delete old logs
         result = await db.execute(text("""
             DELETE FROM system_logs
-            WHERE timestamp < NOW() - INTERVAL ':days days'
+            WHERE timestamp < NOW() - INTERVAL '1 day' * :days
         """), {"days": days})
 
         deleted_count = result.rowcount
