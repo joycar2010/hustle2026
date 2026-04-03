@@ -1,0 +1,751 @@
+"""
+Windows Agent V3 - MT5 实例管理与健康监控服务
+功能：
+1. 远程控制 MT5 实例（启动/停止/重启）
+2. MT5 卡顿检测与告警
+3. 健康状态监控
+4. 与后端 API 集成
+"""
+import os
+import sys
+import json
+import time
+import logging
+import psutil
+import subprocess
+import asyncio
+from pathlib import Path
+from typing import Dict, List, Optional
+from datetime import datetime, timedelta
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field
+import uvicorn
+import httpx
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+# ====================== 配置加载 ======================
+CONFIG_FILE = Path("C:/MT5Agent/config.json")
+INSTANCES_FILE = Path("C:/MT5Agent/instances.json")
+LOG_FILE = Path("C:/MT5Agent/logs/agent.log")
+
+# 确保目录存在
+CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+# 日志配置
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# ====================== 配置管理 ======================
+DEFAULT_CONFIG = {
+    "agent": {
+        "host": "0.0.0.0",
+        "port": 8765,
+        "api_key": "HustleXAU_MT5_Agent_Key_2026"
+    },
+    "backend": {
+        "url": "https://admin.hustle2026.xyz",
+        "username": "",
+        "password": "",
+        "enabled": False
+    },
+    "database": {
+        "host": "172.31.2.22",
+        "port": 5432,
+        "database": "postgres",
+        "user": "postgres",
+        "password": "Lk106504"
+    },
+    "monitoring": {
+        "enabled": True,
+        "check_interval": 30,
+        "freeze_threshold": 10,
+        "cpu_threshold": 95,
+        "memory_threshold": 90
+    }
+}
+
+def load_config() -> Dict:
+    """加载配置文件"""
+    if not CONFIG_FILE.exists():
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2, ensure_ascii=False)
+        return DEFAULT_CONFIG
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load config: {e}")
+        return DEFAULT_CONFIG
+
+def save_config(config: Dict):
+    """保存配置文件"""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+config = load_config()
+agent_config = config["agent"]
+backend_config = config["backend"]
+database_config = config.get("database", {})
+monitoring_config = config["monitoring"]
+
+# ====================== 数据库连接 ======================
+def get_db_connection():
+    """获取数据库连接"""
+    try:
+        conn = psycopg2.connect(
+            host=database_config.get("host", "172.31.2.22"),
+            port=database_config.get("port", 5432),
+            database=database_config.get("database", "postgres"),
+            user=database_config.get("user", "postgres"),
+            password=database_config.get("password", "Lk106504")
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        return None
+
+def load_instances_from_db() -> Dict:
+    """从数据库加载MT5客户端配置"""
+    conn = get_db_connection()
+    if not conn:
+        logger.warning("Database connection failed, falling back to instances.json")
+        return load_instances_from_file()
+
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                agent_instance_name,
+                client_name,
+                mt5_login,
+                mt5_password,
+                mt5_server,
+                password_type
+            FROM mt5_clients
+            WHERE agent_instance_name IS NOT NULL
+            AND is_active = true
+        """)
+
+        rows = cursor.fetchall()
+        instances = {}
+
+        for row in rows:
+            instance_name = row['agent_instance_name']
+            # 根据agent_instance_name确定MT5路径
+            if instance_name == 'bybit_system_service':
+                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+            elif instance_name == 'mt5-01':
+                mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"
+            else:
+                # 默认路径
+                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+
+            instances[instance_name] = {
+                "name": row['client_name'],
+                "path": mt5_path,
+                "account": str(row['mt5_login']),
+                "password": row['mt5_password'],
+                "server": row['mt5_server'],
+                "portable": True
+            }
+
+        cursor.close()
+        conn.close()
+
+        logger.info(f"Loaded {len(instances)} instances from database")
+        return instances
+
+    except Exception as e:
+        logger.error(f"Failed to load instances from database: {e}")
+        if conn:
+            conn.close()
+        return load_instances_from_file()
+
+def load_instances_from_file() -> Dict:
+    """从文件加载实例配置（备用方案）"""
+    if not INSTANCES_FILE.exists():
+        return {}
+    try:
+        with open(INSTANCES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+# ====================== 实例配置管理 ======================
+def load_instances() -> Dict:
+    """加载实例配置 - 优先从数据库加载"""
+    return load_instances_from_db()
+
+# ====================== MT5 控制器 ======================
+class MT5Controller:
+    """MT5 实例控制器"""
+
+    @staticmethod
+    def is_instance_running(mt5_path: str, account: str = None) -> bool:
+        """检查指定路径和账户的 MT5 实例是否运行"""
+        target_path = os.path.normpath(mt5_path).lower()
+        for proc in psutil.process_iter(['name', 'exe', 'cmdline']):
+            try:
+                if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                    proc_path = os.path.normpath(proc.info['exe']).lower()
+                    if proc_path == target_path:
+                        # 如果指定了账户，需要匹配账户号
+                        if account:
+                            cmdline = proc.info.get('cmdline', [])
+                            # 检查命令行参数中是否包含该账户
+                            for arg in cmdline:
+                                if f'/login:{account}' in arg or f'login:{account}' in arg:
+                                    return True
+                        else:
+                            return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return False
+
+    @staticmethod
+    def get_instance_process(mt5_path: str, account: str = None) -> Optional[psutil.Process]:
+        """获取指定路径和账户的 MT5 进程对象"""
+        target_path = os.path.normpath(mt5_path).lower()
+        for proc in psutil.process_iter(['name', 'exe', 'pid', 'cmdline']):
+            try:
+                if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                    proc_path = os.path.normpath(proc.info['exe']).lower()
+                    if proc_path == target_path:
+                        # 如果指定了账户，需要匹配账户号
+                        if account:
+                            cmdline = proc.info.get('cmdline', [])
+                            # 检查命令行参数中是否包含该账户
+                            for arg in cmdline:
+                                if f'/login:{account}' in arg or f'login:{account}' in arg:
+                                    return psutil.Process(proc.info['pid'])
+                        else:
+                            return psutil.Process(proc.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return None
+
+    @staticmethod
+    def start_instance(instance_config: Dict, wait_seconds: int = 5) -> bool:
+        """启动 MT5 实例"""
+        mt5_path = instance_config["path"]
+        account = instance_config.get("account")
+
+        # 检查是否已运行（使用路径+账户匹配）
+        if MT5Controller.is_instance_running(mt5_path, account):
+            logger.info(f"Instance {instance_config['name']} (account: {account}) is already running")
+            return True
+
+        # 检查路径
+        if not os.path.exists(mt5_path):
+            logger.error(f"MT5 path not found: {mt5_path}")
+            return False
+
+        # 构造启动命令
+        cmd = [mt5_path]
+        if instance_config.get("portable", True):
+            cmd.append("/portable")
+
+        # 添加登录参数（如果配置了）
+        if instance_config.get("account"):
+            cmd.append(f"/login:{instance_config['account']}")
+        if instance_config.get("password"):
+            cmd.append(f"/password:{instance_config['password']}")
+        if instance_config.get("server"):
+            cmd.append(f"/server:{instance_config['server']}")
+        if instance_config.get("is_investor", False):
+            cmd.append("/investor")
+
+        # 设置创建标志
+        creation_flags = 0
+        if instance_config.get("create_no_window", False):
+            creation_flags = subprocess.CREATE_NO_WINDOW
+
+        try:
+            subprocess.Popen(
+                cmd,
+                cwd=os.path.dirname(mt5_path),
+                creationflags=creation_flags,
+                shell=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            logger.info(f"Started instance {instance_config['name']}, waiting {wait_seconds}s...")
+            time.sleep(wait_seconds)
+
+            if MT5Controller.is_instance_running(mt5_path, account):
+                logger.info(f"Instance {instance_config['name']} (account: {account}) started successfully")
+                return True
+            else:
+                logger.error(f"Instance {instance_config['name']} (account: {account}) failed to start")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to start instance {instance_config['name']}: {e}")
+            return False
+
+    @staticmethod
+    def stop_instance(instance_config: Dict, force: bool = True) -> bool:
+        """停止 MT5 实例"""
+        mt5_path = instance_config["path"]
+        account = instance_config.get("account")
+
+        if not MT5Controller.is_instance_running(mt5_path, account):
+            logger.info(f"Instance {instance_config['name']} (account: {account}) is not running")
+            return True
+
+        target_path = os.path.normpath(mt5_path).lower()
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+                try:
+                    if proc.info['name'] == 'terminal64.exe' and proc.info['exe']:
+                        proc_path = os.path.normpath(proc.info['exe']).lower()
+                        if proc_path == target_path:
+                            # 如果指定了账户，需要匹配账户号
+                            if account:
+                                cmdline = proc.info.get('cmdline', [])
+                                account_match = False
+                                for arg in cmdline:
+                                    if f'/login:{account}' in arg or f'login:{account}' in arg:
+                                        account_match = True
+                                        break
+                                if not account_match:
+                                    continue  # 账户不匹配，跳过此进程
+
+                            # 停止进程
+                            if force:
+                                proc.kill()
+                            else:
+                                proc.terminate()
+                            logger.info(f"Stopped instance {instance_config['name']} (account: {account}, PID: {proc.info['pid']})")
+                            time.sleep(2)
+                            if not MT5Controller.is_instance_running(mt5_path, account):
+                                return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            logger.error(f"Failed to stop instance {instance_config['name']} (account: {account})")
+            return False
+        except Exception as e:
+            logger.error(f"Error stopping instance {instance_config['name']} (account: {account}): {e}")
+            return False
+
+    @staticmethod
+    def restart_instance(instance_config: Dict, wait_seconds: int = 5) -> bool:
+        """重启 MT5 实例"""
+        logger.info(f"Restarting instance: {instance_config['name']}")
+        if not MT5Controller.stop_instance(instance_config):
+            return False
+        return MT5Controller.start_instance(instance_config, wait_seconds)
+
+# ====================== MT5 健康监控 ======================
+class MT5HealthMonitor:
+    """MT5 健康状态监控器"""
+
+    def __init__(self):
+        self.last_check_time = {}
+        self.freeze_count = {}
+        self.last_cpu_percent = {}
+        self.last_memory_percent = {}
+
+    def check_instance_health(self, instance_name: str, instance_config: Dict) -> Dict:
+        """检查实例健康状态"""
+        mt5_path = instance_config["path"]
+        account = instance_config.get("account")
+        proc = MT5Controller.get_instance_process(mt5_path, account)
+
+        health_status = {
+            "instance_name": instance_name,
+            "is_running": proc is not None,
+            "is_frozen": False,
+            "cpu_high": False,
+            "memory_high": False,
+            "details": {}
+        }
+
+        if not proc:
+            return health_status
+
+        try:
+            # CPU 使用率
+            cpu_percent = proc.cpu_percent(interval=1)
+            health_status["details"]["cpu_percent"] = cpu_percent
+            if cpu_percent > monitoring_config["cpu_threshold"]:
+                health_status["cpu_high"] = True
+
+            # 内存使用率
+            memory_info = proc.memory_info()
+            memory_percent = proc.memory_percent()
+            health_status["details"]["memory_mb"] = memory_info.rss / 1024 / 1024
+            health_status["details"]["memory_percent"] = memory_percent
+            if memory_percent > monitoring_config["memory_threshold"]:
+                health_status["memory_high"] = True
+
+            # 卡顿检测（通过 CPU 使用率变化判断）
+            if instance_name in self.last_cpu_percent:
+                cpu_change = abs(cpu_percent - self.last_cpu_percent[instance_name])
+                if cpu_change < 0.1 and cpu_percent > 80:
+                    # CPU 高但没有变化，可能卡顿
+                    self.freeze_count[instance_name] = self.freeze_count.get(instance_name, 0) + 1
+                    if self.freeze_count[instance_name] >= monitoring_config["freeze_threshold"]:
+                        health_status["is_frozen"] = True
+                else:
+                    self.freeze_count[instance_name] = 0
+
+            self.last_cpu_percent[instance_name] = cpu_percent
+            self.last_memory_percent[instance_name] = memory_percent
+            self.last_check_time[instance_name] = datetime.now()
+
+            # 进程信息
+            health_status["details"]["pid"] = proc.pid
+            health_status["details"]["status"] = proc.status()
+            health_status["details"]["num_threads"] = proc.num_threads()
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            logger.error(f"Error checking health for {instance_name}: {e}")
+
+        return health_status
+
+# ====================== 后端 API 集成 ======================
+class BackendAPIClient:
+    """后端 API 客户端"""
+
+    def __init__(self):
+        self.access_token = None
+        self.token_expiry = None
+
+    async def get_token(self) -> Optional[str]:
+        """获取访问令牌"""
+        if not backend_config["enabled"]:
+            return None
+
+        if self.access_token and self.token_expiry and datetime.now() < self.token_expiry:
+            return self.access_token
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{backend_config['url']}/api/v1/auth/login",
+                    json={
+                        "username": backend_config["username"],
+                        "password": backend_config["password"]
+                    },
+                    timeout=10.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    self.access_token = data["access_token"]
+                    self.token_expiry = datetime.now() + timedelta(hours=23)
+                    logger.info("Backend API token obtained")
+                    return self.access_token
+        except Exception as e:
+            logger.error(f"Failed to get backend token: {e}")
+        return None
+
+    async def send_alert(self, title: str, message: str, severity: str = "Warning"):
+        """发送告警到后端"""
+        if not backend_config["enabled"]:
+            return
+
+        token = await self.get_token()
+        if not token:
+            return
+
+        try:
+            async with httpx.AsyncClient() as client:
+                # 获取管理员用户列表
+                users_response = await client.get(
+                    f"{backend_config['url']}/api/v1/users",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0
+                )
+                if users_response.status_code != 200:
+                    return
+
+                users_data = users_response.json()
+                admin_user_ids = [
+                    user["user_id"] for user in users_data.get("users", [])
+                    if user.get("role") in ["admin", "super_admin"]
+                ]
+
+                if not admin_user_ids:
+                    return
+
+                # 发送通知
+                template_key = {
+                    "Error": "mt5_client_error",
+                    "Warning": "mt5_client_warning",
+                    "Info": "mt5_client_info"
+                }.get(severity, "mt5_client_warning")
+
+                notify_response = await client.post(
+                    f"{backend_config['url']}/api/v1/notifications/send",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "template_key": template_key,
+                        "user_ids": admin_user_ids,
+                        "variables": {
+                            "title": title,
+                            "content": message,
+                            "hostname": os.environ.get("COMPUTERNAME", "Unknown"),
+                            "severity": severity
+                        }
+                    },
+                    timeout=10.0
+                )
+                if notify_response.status_code == 200:
+                    logger.info(f"Alert sent to backend: {title}")
+        except Exception as e:
+            logger.error(f"Failed to send alert to backend: {e}")
+
+# ====================== 全局实例 ======================
+controller = MT5Controller()
+health_monitor = MT5HealthMonitor()
+backend_client = BackendAPIClient()
+
+# ====================== FastAPI 应用 ======================
+app = FastAPI(title="MT5 Windows Agent V3", version="3.0.0")
+
+# API 认证
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def verify_api_key(api_key: Optional[str] = Depends(API_KEY_HEADER)):
+    if api_key != agent_config["api_key"]:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return True
+
+# ====================== 数据模型 ======================
+class InstanceConfig(BaseModel):
+    name: str
+    path: str
+    account: Optional[str] = None
+    password: Optional[str] = None
+    server: Optional[str] = None
+    is_investor: bool = False
+    portable: bool = True
+    create_no_window: bool = False
+
+class OperationResponse(BaseModel):
+    instance_name: str
+    operation: str
+    success: bool
+    message: str
+
+class InstanceStatus(BaseModel):
+    instance_name: str
+    display_name: str
+    is_running: bool
+    health_status: Optional[Dict] = None
+
+# ====================== API 端点 ======================
+@app.get("/health")
+def health_check():
+    """健康检查"""
+    return {
+        "status": "ok",
+        "agent": "MT5 Windows Agent V3",
+        "version": "3.0.0",
+        "session": os.environ.get("SESSIONNAME", "Unknown")
+    }
+
+@app.get("/instances", response_model=List[InstanceStatus], dependencies=[Depends(verify_api_key)])
+def get_all_instances():
+    """获取所有实例状态"""
+    instances = load_instances()
+    status_list = []
+    for name, cfg in instances.items():
+        is_running = controller.is_instance_running(cfg["path"])
+        health_status = None
+        if is_running and monitoring_config["enabled"]:
+            health_status = health_monitor.check_instance_health(name, cfg)
+        status_list.append(InstanceStatus(
+            instance_name=name,
+            display_name=cfg["name"],
+            is_running=is_running,
+            health_status=health_status
+        ))
+    return status_list
+
+@app.get("/instances/{instance_name}", response_model=InstanceStatus, dependencies=[Depends(verify_api_key)])
+def get_instance_status(instance_name: str):
+    """获取单个实例状态"""
+    instances = load_instances()
+    if instance_name not in instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    cfg = instances[instance_name]
+    is_running = controller.is_instance_running(cfg["path"])
+    health_status = None
+    if is_running and monitoring_config["enabled"]:
+        health_status = health_monitor.check_instance_health(instance_name, cfg)
+
+    return InstanceStatus(
+        instance_name=instance_name,
+        display_name=cfg["name"],
+        is_running=is_running,
+        health_status=health_status
+    )
+
+@app.post("/instances", dependencies=[Depends(verify_api_key)])
+def create_instance(instance: InstanceConfig):
+    """创建/更新实例配置 - 已禁用，请在数据库中管理MT5客户端"""
+    raise HTTPException(
+        status_code=501,
+        detail="Instance management via API is disabled. Please manage MT5 clients in the database."
+    )
+
+@app.delete("/instances/{instance_name}", dependencies=[Depends(verify_api_key)])
+def delete_instance(instance_name: str):
+    """删除实例配置 - 已禁用，请在数据库中管理MT5客户端"""
+    raise HTTPException(
+        status_code=501,
+        detail="Instance management via API is disabled. Please manage MT5 clients in the database."
+    )
+
+@app.post("/instances/{instance_name}/start", response_model=OperationResponse, dependencies=[Depends(verify_api_key)])
+def start_instance(instance_name: str, wait_seconds: int = 5):
+    """启动实例"""
+    instances = load_instances()
+    if instance_name not in instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    cfg = instances[instance_name]
+    success = controller.start_instance(cfg, wait_seconds)
+    return OperationResponse(
+        instance_name=instance_name,
+        operation="start",
+        success=success,
+        message=f"Instance {cfg['name']} {'started successfully' if success else 'failed to start'}"
+    )
+
+@app.post("/instances/{instance_name}/stop", response_model=OperationResponse, dependencies=[Depends(verify_api_key)])
+def stop_instance(instance_name: str, force: bool = True):
+    """停止实例"""
+    instances = load_instances()
+    if instance_name not in instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    cfg = instances[instance_name]
+    success = controller.stop_instance(cfg, force)
+    return OperationResponse(
+        instance_name=instance_name,
+        operation="stop",
+        success=success,
+        message=f"Instance {cfg['name']} {'stopped successfully' if success else 'failed to stop'}"
+    )
+
+@app.post("/instances/{instance_name}/restart", response_model=OperationResponse, dependencies=[Depends(verify_api_key)])
+def restart_instance(instance_name: str, wait_seconds: int = 5):
+    """重启实例"""
+    instances = load_instances()
+    if instance_name not in instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    cfg = instances[instance_name]
+    success = controller.restart_instance(cfg, wait_seconds)
+    return OperationResponse(
+        instance_name=instance_name,
+        operation="restart",
+        success=success,
+        message=f"Instance {cfg['name']} {'restarted successfully' if success else 'failed to restart'}"
+    )
+
+@app.get("/logs", dependencies=[Depends(verify_api_key)])
+def get_logs(lines: int = 100):
+    """获取日志文件最后N行"""
+    try:
+        if not LOG_FILE.exists():
+            return {"logs": [], "message": "Log file not found"}
+
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            return {
+                "logs": [line.strip() for line in last_lines],
+                "total_lines": len(all_lines),
+                "returned_lines": len(last_lines)
+            }
+    except Exception as e:
+        logger.error(f"Failed to read logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read logs: {str(e)}")
+
+# ====================== 后台监控任务 ======================
+async def monitoring_task():
+    """后台健康监控任务"""
+    logger.info("Health monitoring task started")
+    while True:
+        try:
+            if not monitoring_config["enabled"]:
+                await asyncio.sleep(60)
+                continue
+
+            instances = load_instances()
+            for name, cfg in instances.items():
+                if not controller.is_instance_running(cfg["path"]):
+                    continue
+
+                health_status = health_monitor.check_instance_health(name, cfg)
+
+                # 检测卡顿
+                if health_status["is_frozen"]:
+                    logger.warning(f"Instance {name} is frozen!")
+                    await backend_client.send_alert(
+                        title=f"MT5 Instance Frozen: {cfg['name']}",
+                        message=f"Instance {cfg['name']} appears to be frozen.\n"
+                                f"CPU: {health_status['details'].get('cpu_percent', 0):.1f}%\n"
+                                f"Memory: {health_status['details'].get('memory_percent', 0):.1f}%",
+                        severity="Error"
+                    )
+
+                # 检测高 CPU
+                if health_status["cpu_high"]:
+                    logger.warning(f"Instance {name} has high CPU usage!")
+                    await backend_client.send_alert(
+                        title=f"MT5 High CPU: {cfg['name']}",
+                        message=f"Instance {cfg['name']} CPU usage is {health_status['details']['cpu_percent']:.1f}%",
+                        severity="Warning"
+                    )
+
+                # 检测高内存
+                if health_status["memory_high"]:
+                    logger.warning(f"Instance {name} has high memory usage!")
+                    await backend_client.send_alert(
+                        title=f"MT5 High Memory: {cfg['name']}",
+                        message=f"Instance {cfg['name']} memory usage is {health_status['details']['memory_percent']:.1f}%",
+                        severity="Warning"
+                    )
+
+            await asyncio.sleep(monitoring_config["check_interval"])
+        except Exception as e:
+            logger.error(f"Error in monitoring task: {e}")
+            await asyncio.sleep(60)
+
+@app.on_event("startup")
+async def startup_event():
+    """启动时执行"""
+    logger.info("=" * 60)
+    logger.info("MT5 Windows Agent V3 Starting...")
+    logger.info(f"Listen: http://{agent_config['host']}:{agent_config['port']}")
+    logger.info(f"API Docs: http://{agent_config['host']}:{agent_config['port']}/docs")
+    logger.info(f"Monitoring: {'Enabled' if monitoring_config['enabled'] else 'Disabled'}")
+    logger.info(f"Backend Integration: {'Enabled' if backend_config['enabled'] else 'Disabled'}")
+    logger.info("=" * 60)
+
+    # 启动后台监控任务
+    asyncio.create_task(monitoring_task())
+
+# ====================== 主程序入口 ======================
+if __name__ == "__main__":
+    uvicorn.run(
+        app,
+        host=agent_config["host"],
+        port=agent_config["port"],
+        log_level="info"
+    )
