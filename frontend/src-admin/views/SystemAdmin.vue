@@ -843,13 +843,12 @@
           <div class="bg-dark-200 rounded-xl p-4">
             <div class="text-xs text-text-tertiary mb-1">前端版本 (Admin)</div>
             <div class="text-2xl font-mono font-bold text-primary">v2.0.0</div>
-            <div class="text-xs text-text-tertiary mt-1">构建时间: {{ buildTime }}</div>
+            <div class="text-xs text-text-tertiary mt-1">构建: {{ sysInfo.frontend_build_time ? fmtDate(sysInfo.frontend_build_time) : '--' }}</div>
           </div>
           <div class="bg-dark-200 rounded-xl p-4">
             <div class="text-xs text-text-tertiary mb-1">后端版本</div>
             <div class="text-2xl font-mono font-bold text-primary">v2.0.0</div>
-            <div class="text-xs text-text-tertiary mt-1">Go: {{ sysInfo.go_version || '--' }}</div>
-            <div class="text-xs text-text-tertiary">Python: {{ sysInfo.python_version || '--' }}</div>
+            <div class="text-xs text-text-tertiary mt-1">Go + Python: {{ sysInfo.python_version || '--' }}</div>
           </div>
           <div class="bg-dark-200 rounded-xl p-4">
             <div class="text-xs text-text-tertiary mb-1">数据库</div>
