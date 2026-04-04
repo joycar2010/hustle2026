@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF导出测试</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>PDF导出功能测试</h1>
+
+    <div>
+        <h2>测试步骤：</h2>
+        <ol>
+            <li>点击下面的按钮测试PDF导出</li>
+            <li>如果成功，会下载一个test.pdf文件</li>
+            <li>如果失败，会显示错误信息</li>
+        </ol>
+    </div>
+
+    <button onclick="testPDFExport()">测试PDF导出</button>
+    <button onclick="checkLibraries()">检查库加载状态</button>
+
+    <div id="result" class="result"></div>
+
+    <script>
+        function showResult(message, isError = false) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = message;
+            resultDiv.className = 'result ' + (isError ? 'error' : 'success');
+        }
+
+        function checkLibraries() {
+            let message = '<h3>库加载状态：</h3>';
+
+            // Check jsPDF
+            if (typeof window.jspdf !== 'undefined') {
+                message += '<p class="success">✓ jsPDF 已加载 (window.jspdf)</p>';
+            } else {
+                message += '<p class="error">✗ jsPDF 未加载</p>';
+            }
+
+            // Check jsPDF.jsPDF
+            if (typeof window.jspdf?.jsPDF !== 'undefined') {
+                message += '<p class="success">✓ jsPDF.jsPDF 可用</p>';
+
+                // Test autoTable
+                try {
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+                    if (typeof doc.autoTable === 'function') {
+                        message += '<p class="success">✓ autoTable 插件已正确加载</p>';
+                    } else {
+                        message += '<p class="error">✗ autoTable 插件未加载</p>';
+                    }
+                } catch (e) {
+                    message += '<p class="error">✗ 创建jsPDF实例失败: ' + e.message + '</p>';
+                }
+            } else {
+                message += '<p class="error">✗ jsPDF.jsPDF 不可用</p>';
+            }
+
+            showResult(message);
+        }
+
+        function testPDFExport() {
+            try {
+                showResult('正在生成PDF...', false);
+
+                // Get jsPDF from window
+                const { jsPDF } = window.jspdf;
+
+                if (!jsPDF) {
+                    throw new Error('jsPDF 未加载');
+                }
+
+                // Create PDF document
+                const doc = new jsPDF();
+
+                // Check if autoTable is available
+                if (typeof doc.autoTable !== 'function') {
+                    throw new Error('autoTable 插件未加载');
+                }
+
+                // Add title
+                doc.setFontSize(16);
+                doc.text('Trading History Report', 14, 15);
+
+                // Add date
+                doc.setFontSize(10);
+                doc.text('Test Date: ' + new Date().toLocaleString(), 14, 25);
+
+                // Add statistics table
+                doc.setFontSize(12);
+                doc.text('Statistics', 14, 35);
+
+                doc.autoTable({
+                    startY: 40,
+                    head: [['Item', 'Value']],
+                    body: [
+                        ['Total Volume', '100.00'],
+                        ['Total Amount', '50000.00 USDT'],
+                        ['Total Fees', '25.00 USDT'],
+                        ['Realized PnL', '1250.00 USDT']
+                    ],
+                    styles: { fontSize: 9 },
+                    headStyles: { fillColor: [41, 128, 185] }
+                });
+
+                // Add trades table
+                const currentY = doc.lastAutoTable.finalY + 10;
+                doc.text('Trade History', 14, currentY);
+
+                doc.autoTable({
+                    startY: currentY + 5,
+                    head: [['Symbol', 'Side', 'Price', 'Quantity', 'Amount']],
+                    body: [
+                        ['XAUUSDT', 'Buy', '2650.00', '1.00', '2650.00'],
+                        ['XAUUSDT', 'Sell', '2655.00', '1.00', '2655.00'],
+                        ['XAUUSDT', 'Buy', '2648.00', '0.50', '1324.00']
+                    ],
+                    styles: { fontSize: 8 },
+                    headStyles: { fillColor: [231, 76, 60] }
+                });
+
+                // Save PDF
+                doc.save('test.pdf');
+
+                showResult('<h3 class="success">✓ PDF导出成功！</h3><p>文件已下载为 test.pdf</p>', false);
+            } catch (error) {
+                console.error('PDF export error:', error);
+                showResult('<h3 class="error">✗ PDF导出失败</h3><p>错误信息: ' + error.message + '</p><p>详细信息: ' + error.stack + '</p>', true);
+            }
+        }
+
+        // Auto-check libraries on load
+        window.addEventListener('load', function() {
+            setTimeout(checkLibraries, 500);
+        });
+    </script>
+</body>
+</html>

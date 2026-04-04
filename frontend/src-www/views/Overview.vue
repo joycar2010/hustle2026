@@ -144,7 +144,7 @@ const summaryCards = computed(() => {
 
 async function fetchData() {
   try {
-    const r = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const r = await api.get('/api/v1/accounts/summary')
     const d = r.data
     if (Array.isArray(d)) {
       accounts.value = d

@@ -47,9 +47,32 @@ class AccountDataService:
         """Store data in cache with timestamp"""
         self._cache[cache_key] = (data, datetime.utcnow())
 
-    async def get_binance_balance(self, api_key: str, api_secret: str) -> AccountBalance:
+
+    @staticmethod
+    def _build_proxy_url(proxy_config) -> str:
+        """Build proxy URL from account.proxy_config JSON field"""
+        if not proxy_config:
+            return None
+        if isinstance(proxy_config, str):
+            import json
+            try:
+                proxy_config = json.loads(proxy_config)
+            except:
+                return None
+        host = proxy_config.get("host")
+        port = proxy_config.get("port")
+        if not host or not port:
+            return None
+        username = proxy_config.get("username", "")
+        password = proxy_config.get("password", "")
+        proxy_type = proxy_config.get("proxy_type", "socks5")
+        if username and password:
+            return f"{proxy_type}://{username}:{password}@{host}:{port}"
+        return f"{proxy_type}://{host}:{port}"
+
+    async def get_binance_balance(self, api_key: str, api_secret: str, proxy_url: str = None) -> AccountBalance:
         """Fetch Binance account balance including spot, margin and futures data"""
-        client = BinanceFuturesClient(api_key, api_secret)
+        client = BinanceFuturesClient(api_key, api_secret, proxy_url=proxy_url)
 
         try:
             # Get today's start timestamp for daily calculations
@@ -475,21 +498,114 @@ class AccountDataService:
         finally:
             await client.close()
 
+
+    async def _get_mt5_balance_via_bridge(self, mt5_id: int):
+        """Get MT5 account balance via Bridge HTTP API (runs on Windows server)"""
+        import httpx
+        from app.core.database import AsyncSessionLocal
+        from app.models.mt5_client import MT5Client
+        from app.models.mt5_instance import MT5Instance
+        from sqlalchemy import select, and_
+        from app.core.config import settings
+
+        api_key = getattr(settings, 'MT5_BRIDGE_API_KEY', '') or getattr(settings, 'MT5_AGENT_API_KEY', '') or ''
+
+        async with AsyncSessionLocal() as db:
+            # Find Bridge for this MT5 login
+            result = await db.execute(
+                select(MT5Client).where(
+                    and_(
+                        MT5Client.mt5_login == str(mt5_id),
+                        MT5Client.is_active == True,
+                        MT5Client.bridge_service_port.isnot(None),
+                    )
+                )
+            )
+            client = result.scalars().first()
+            if not client or not client.bridge_service_port:
+                logger.debug(f"No Bridge configured for MT5 {mt5_id}")
+                return None
+
+            # Get server IP from MT5 instance
+            inst_result = await db.execute(
+                select(MT5Instance).where(
+                    and_(MT5Instance.client_id == client.client_id, MT5Instance.is_active == True)
+                )
+            )
+            instance = inst_result.scalars().first()
+            server_ip = instance.server_ip if instance else '172.31.14.113'
+            port = client.bridge_service_port
+
+        bridge_url = f"http://{server_ip}:{port}"
+        headers = {"X-Api-Key": api_key} if api_key else {}
+
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            resp = await http.get(f"{bridge_url}/mt5/account/info", headers=headers)
+            if resp.status_code != 200:
+                logger.warning(f"Bridge {bridge_url} returned {resp.status_code}")
+                return None
+
+            info = resp.json()
+            logger.info(f"Bridge balance for MT5 {mt5_id}: balance={info.get('balance')}, equity={info.get('equity')}")
+
+            balance = float(info.get("balance", 0))
+            equity = float(info.get("equity", 0))
+            margin = float(info.get("margin", 0))
+            margin_free = float(info.get("margin_free", 0))
+            profit = float(info.get("profit", 0))
+            margin_level = float(info.get("margin_level", 0))
+
+            return AccountBalance(
+                total_assets=equity,
+                available_balance=margin_free,
+                net_assets=equity,
+                frozen_assets=margin,
+                margin_balance=equity,
+                unrealized_pnl=profit,
+                risk_ratio=margin_level if margin > 0.01 else 0.0,
+                total_positions=0.0,
+                daily_pnl=profit,
+                funding_fee=0.0,
+                long_swap_fee=0.0,
+                short_swap_fee=0.0,
+                commission_fee=0.0,
+                long_funding_rate=None,
+                short_funding_rate=None,
+                bnb_balance=None,
+                maker_commission_rate=None,
+                taker_commission_rate=None,
+                entry_price=None,
+                leverage=int(info.get("leverage", 0)),
+                volume=None,
+                equity=equity,
+                long_liquidation_price=None,
+                short_liquidation_price=None,
+            )
+
     async def _get_bybit_mt5_balance_direct(
         self,
         mt5_id: int,
         mt5_password: str,
         mt5_server: str,
     ) -> AccountBalance:
-        """Fetch Bybit MT5 account balance using direct MT5 connection"""
+        """Fetch Bybit MT5 account balance via Bridge HTTP API, fallback to direct MT5 connection"""
         from datetime import datetime
 
+        # ── Priority 1: Try Bridge HTTP API ──
+        try:
+            bridge_result = await self._get_mt5_balance_via_bridge(mt5_id)
+            if bridge_result:
+                return bridge_result
+        except Exception as e:
+            logger.warning(f"Bridge HTTP failed for MT5 {mt5_id}: {e}")
+
+        # ── Priority 2: Direct MT5 connection (fallback) ──
         mt5_info = None
         mt5_positions = []
         mt5_deals = []
 
         try:
-            logger.info(f"Connecting to MT5 account {mt5_id}")
+            logger.info(f"Connecting to MT5 account {mt5_id} (direct fallback)")
             # Use shared MT5 client from realtime_market_service to avoid connection conflicts
             from app.services.realtime_market_service import market_data_service
             mt5 = market_data_service.mt5_client
@@ -822,6 +938,7 @@ class AccountDataService:
         self,
         api_key: str,
         api_secret: str,
+        proxy_url: str = None,
         symbol: Optional[str] = None,
     ) -> List[AccountPosition]:
         """Fetch Binance positions"""
@@ -959,9 +1076,10 @@ class AccountDataService:
         api_key: str,
         api_secret: str,
         symbol: Optional[str] = None,
+        proxy_url: str = None,
     ) -> float:
         """Calculate Binance daily P&L from income history"""
-        client = BinanceFuturesClient(api_key, api_secret)
+        client = BinanceFuturesClient(api_key, api_secret, proxy_url=proxy_url)
 
         try:
             # Get today's start timestamp
@@ -1036,33 +1154,73 @@ class AccountDataService:
 
         try:
             if platform_id == 1:  # Binance
+                # Build proxy URL from account.proxy_config
+                proxy_url = self._build_proxy_url(account.proxy_config)
                 balance, positions, daily_pnl = await asyncio.gather(
-                    self.get_binance_balance(account.api_key, account.api_secret),
-                    self.get_binance_positions(account.api_key, account.api_secret),
-                    self.get_binance_daily_pnl(account.api_key, account.api_secret),
+                    self.get_binance_balance(account.api_key, account.api_secret, proxy_url=proxy_url),
+                    self.get_binance_positions(account.api_key, account.api_secret, proxy_url=proxy_url),
+                    self.get_binance_daily_pnl(account.api_key, account.api_secret, proxy_url=proxy_url),
                 )
             elif platform_id == 2:  # Bybit
                 # Bybit V5 API only supports UNIFIED account type
                 account_type = "UNIFIED"
 
-                # For MT5 accounts, get positions from MT5 directly
-                if account.is_mt5_account and account.mt5_id and account.mt5_primary_pwd and account.mt5_server:
-                    balance, positions, daily_pnl = await asyncio.gather(
-                        self.get_bybit_balance(
-                            account.api_key,
-                            account.api_secret,
-                            account_type,
-                            mt5_id=account.mt5_id,
-                            mt5_password=account.mt5_primary_pwd,
-                            mt5_server=account.mt5_server,
-                        ),
-                        self.get_mt5_positions(
-                            mt5_id=account.mt5_id,
-                            mt5_password=account.mt5_primary_pwd,
-                            mt5_server=account.mt5_server,
-                        ),
-                        self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
-                    )
+                # For MT5 accounts: try Bridge first, then direct MT5, then Bybit API
+                if account.is_mt5_account:
+                    # Try to get balance via Bridge HTTP API (primary method)
+                    bridge_balance = None
+                    try:
+                        # Find MT5 clients linked to this account via new session
+                        from app.models.mt5_client import MT5Client as MC
+                        from app.core.database import AsyncSessionLocal
+                        from sqlalchemy import and_
+                        async with AsyncSessionLocal() as _db:
+                            mc_result = await _db.execute(
+                                select(MC).where(and_(
+                                    MC.account_id == account.account_id,
+                                    MC.is_active == True,
+                                    MC.is_system_service == False,
+                                    MC.bridge_service_port.isnot(None),
+                                ))
+                            )
+                            mt5_client_row = mc_result.scalars().first()
+
+                        if mt5_client_row:
+                            bridge_balance = await self._get_mt5_balance_via_bridge(
+                                int(mt5_client_row.mt5_login)
+                            )
+                    except Exception as bridge_err:
+                        logger.warning(f"Bridge balance fetch failed: {bridge_err}")
+
+                    if bridge_balance:
+                        balance = bridge_balance
+                        positions = []
+                        daily_pnl = bridge_balance.daily_pnl or 0.0
+                    elif account.mt5_id and account.mt5_primary_pwd and account.mt5_server:
+                        # Fallback: direct MT5 connection
+                        balance, positions, daily_pnl = await asyncio.gather(
+                            self.get_bybit_balance(
+                                account.api_key,
+                                account.api_secret,
+                                account_type,
+                                mt5_id=account.mt5_id,
+                                mt5_password=account.mt5_primary_pwd,
+                                mt5_server=account.mt5_server,
+                            ),
+                            self.get_mt5_positions(
+                                mt5_id=account.mt5_id,
+                                mt5_password=account.mt5_primary_pwd,
+                                mt5_server=account.mt5_server,
+                            ),
+                            self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                        )
+                    else:
+                        # No mt5_id and no Bridge, try Bybit API
+                        balance, positions, daily_pnl = await asyncio.gather(
+                            self.get_bybit_balance(account.api_key, account.api_secret, account_type),
+                            self.get_bybit_positions(account.api_key, account.api_secret),
+                            self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                        )
                 else:
                     # For regular Bybit accounts, use V5 API
                     balance, positions, daily_pnl = await asyncio.gather(

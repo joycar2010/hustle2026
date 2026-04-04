@@ -1,0 +1,37 @@
+{
+  "name": "策略监控面板",
+  "description": "实时显示策略运行状态和市场数据图表",
+  "version": "1.0.0",
+  "icon": "https://lf3-static.bytednsdoc.com/obj/eden-cn/ptlz_zlp/ljhwZthlaukjlkulzlp/root-web-sites/icon.png",
+  "i18n": {
+    "zh-CN": {
+      "name": "策略监控面板",
+      "description": "实时显示策略运行状态和市场数据图表"
+    },
+    "en-US": {
+      "name": "Strategy Monitor",
+      "description": "Real-time strategy status and market data charts"
+    }
+  },
+  "permissions": [
+    "base:read",
+    "base:write"
+  ],
+  "config": {
+    "apiBaseUrl": {
+      "type": "string",
+      "default": "http://13.115.21.77:8000",
+      "label": "API地址"
+    },
+    "wsUrl": {
+      "type": "string",
+      "default": "ws://13.115.21.77:8000/ws",
+      "label": "WebSocket地址"
+    },
+    "refreshInterval": {
+      "type": "number",
+      "default": 10000,
+      "label": "刷新间隔(毫秒)"
+    }
+  }
+}

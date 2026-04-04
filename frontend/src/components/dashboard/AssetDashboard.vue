@@ -247,7 +247,7 @@ function updateAccountData(data) {
 
 async function fetchDashboardData() {
   try {
-    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const response = await api.get('/api/v1/accounts/summary')
     const data = response.data
 
     if (data.summary) {

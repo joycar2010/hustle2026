@@ -19,10 +19,10 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'import.meta.env.VITE_API_BASE_URL': JSON.stringify(
-        env.VITE_API_BASE_URL || 'https://go.hustle2026.xyz'
+        env.VITE_API_BASE_URL || ''
       ),
       'import.meta.env.VITE_WS_URL': JSON.stringify(
-        env.VITE_WS_URL || 'wss://go.hustle2026.xyz'
+        env.VITE_WS_URL || 'wss://www.hustle2026.xyz'
       ),
     },
   }
