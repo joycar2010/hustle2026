@@ -514,6 +514,19 @@ async def execute_reverse_arbitrage(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
+            # Send immediate WebSocket notification for button restoration
+            try:
+                from app.services.strategy_status_pusher import status_pusher
+                await status_pusher.push_orders_filled(
+                    strategy_id=strategy_id,
+                    action='opening',
+                    binance_filled=result.get("binance_filled_qty", 0),
+                    bybit_filled=result.get("bybit_filled_qty", 0),
+                    user_id=user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to push orders filled notification: {e}")
+
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
             import datetime
@@ -597,6 +610,19 @@ async def execute_forward_arbitrage(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
+            # Send immediate WebSocket notification for button restoration
+            try:
+                from app.services.strategy_status_pusher import status_pusher
+                await status_pusher.push_orders_filled(
+                    strategy_id=strategy_id,
+                    action='opening',
+                    binance_filled=result.get("binance_filled_qty", 0),
+                    bybit_filled=result.get("bybit_filled_qty", 0),
+                    user_id=user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to push orders filled notification: {e}")
+
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
             import datetime
@@ -679,6 +705,19 @@ async def close_reverse_position(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
+            # Send immediate WebSocket notification for button restoration
+            try:
+                from app.services.strategy_status_pusher import status_pusher
+                await status_pusher.push_orders_filled(
+                    strategy_id=strategy_id,
+                    action='closing',
+                    binance_filled=result.get("binance_filled_qty", 0),
+                    bybit_filled=result.get("bybit_filled_qty", 0),
+                    user_id=user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to push orders filled notification: {e}")
+
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
             import datetime
@@ -760,6 +799,19 @@ async def close_forward_position(
                 strategy_type="forward",
                 quantity=result.get("binance_filled_qty", 0)
             )
+
+            # Send immediate WebSocket notification for button restoration
+            try:
+                from app.services.strategy_status_pusher import status_pusher
+                await status_pusher.push_orders_filled(
+                    strategy_id=strategy_id,
+                    action='closing',
+                    binance_filled=result.get("binance_filled_qty", 0),
+                    bybit_filled=result.get("bybit_filled_qty", 0),
+                    user_id=user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to push orders filled notification: {e}")
 
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):

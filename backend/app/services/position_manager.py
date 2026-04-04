@@ -14,12 +14,12 @@ class PositionTracker:
     Prevents over-trading by maintaining accurate position counts.
     """
 
-    def __init__(self, strategy_id: int, ladder_index: int, strategy_type: str):
+    def __init__(self, strategy_id, ladder_index: int, strategy_type: str):
         """
         Initialize position tracker.
 
         Args:
-            strategy_id: Strategy configuration ID
+            strategy_id: Strategy configuration ID (int or str)
             ladder_index: Ladder index (0-4)
             strategy_type: 'forward' or 'reverse'
         """
@@ -131,13 +131,13 @@ class PositionManager:
     def __init__(self):
         self._trackers: Dict[str, PositionTracker] = {}
 
-    def _get_key(self, strategy_id: int, ladder_index: int) -> str:
-        """Generate unique key for tracker"""
+    def _get_key(self, strategy_id, ladder_index: int) -> str:
+        """Generate unique key for tracker - accepts both int and str strategy_id"""
         return f"{strategy_id}:{ladder_index}"
 
     def get_tracker(
         self,
-        strategy_id: int,
+        strategy_id,  # Accept both int and str
         ladder_index: int,
         strategy_type: str
     ) -> PositionTracker:
@@ -145,7 +145,7 @@ class PositionManager:
         Get or create position tracker.
 
         Args:
-            strategy_id: Strategy configuration ID
+            strategy_id: Strategy configuration ID (int or str)
             ladder_index: Ladder index
             strategy_type: Strategy type
 
@@ -161,7 +161,7 @@ class PositionManager:
 
     def record_opening(
         self,
-        strategy_id: int,
+        strategy_id,  # Accept both int and str
         ladder_index: int,
         strategy_type: str,
         quantity: float
@@ -183,7 +183,7 @@ class PositionManager:
 
     def record_closing(
         self,
-        strategy_id: int,
+        strategy_id,  # Accept both int and str
         ladder_index: int,
         strategy_type: str,
         quantity: float
@@ -205,7 +205,7 @@ class PositionManager:
 
     def check_can_open(
         self,
-        strategy_id: int,
+        strategy_id,  # Accept both int and str
         ladder_index: int,
         strategy_type: str,
         quantity: float,
@@ -240,7 +240,7 @@ class PositionManager:
 
     def check_can_close(
         self,
-        strategy_id: int,
+        strategy_id,  # Accept both int and str
         ladder_index: int,
         strategy_type: str,
         quantity: float
@@ -270,7 +270,7 @@ class PositionManager:
 
     def get_position(
         self,
-        strategy_id: int,
+        strategy_id,  # Accept both int and str
         ladder_index: int,
         strategy_type: str
     ) -> Dict:
@@ -304,26 +304,26 @@ class PositionManager:
                 positions.append(tracker.to_dict())
         return positions
 
-    def reset_strategy(self, strategy_id: int):
+    def reset_strategy(self, strategy_id):
         """
         Reset all positions for a strategy.
 
         Args:
-            strategy_id: Strategy configuration ID
+            strategy_id: Strategy configuration ID (int or str)
         """
         keys_to_reset = [
             key for key, tracker in self._trackers.items()
-            if tracker.strategy_id == strategy_id
+            if str(tracker.strategy_id) == str(strategy_id)
         ]
         for key in keys_to_reset:
             self._trackers[key].reset()
 
-    def reset_ladder(self, strategy_id: int, ladder_index: int):
+    def reset_ladder(self, strategy_id, ladder_index: int):
         """
         Reset position for specific ladder.
 
         Args:
-            strategy_id: Strategy configuration ID
+            strategy_id: Strategy configuration ID (int or str)
             ladder_index: Ladder index
         """
         key = self._get_key(strategy_id, ladder_index)

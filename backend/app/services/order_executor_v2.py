@@ -189,6 +189,20 @@ class OrderExecutorV2:
             f"is_single_leg={is_single_leg}"
         )
 
+        # 双边成交完成，立即通知前端恢复按钮（不等待持仓刷新）
+        try:
+            from app.services.strategy_status_pusher import status_pusher
+            await status_pusher.push_orders_filled(
+                strategy_id=0,  # Will be set by caller if needed
+                action='opening',
+                binance_filled=binance_filled_qty,
+                bybit_filled=bybit_filled_xau,
+                user_id=None
+            )
+            logger.info(f"[REVERSE_OPENING] ✓ Button restore notification sent")
+        except Exception as e:
+            logger.warning(f"[REVERSE_OPENING] Failed to push orders filled notification: {e}")
+
         # Trigger immediate position refresh after successful execution
         _trigger_position_refresh()
 
@@ -348,6 +362,20 @@ class OrderExecutorV2:
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
 
+        # 双边成交完成，立即通知前端恢复按钮（不等待持仓刷新）
+        try:
+            from app.services.strategy_status_pusher import status_pusher
+            await status_pusher.push_orders_filled(
+                strategy_id=0,
+                action='closing',
+                binance_filled=binance_filled_qty,
+                bybit_filled=bybit_filled_xau,
+                user_id=None
+            )
+            logger.info(f"[REVERSE_CLOSING] ✓ Button restore notification sent")
+        except Exception as e:
+            logger.warning(f"[REVERSE_CLOSING] Failed to push orders filled notification: {e}")
+
         # Trigger immediate position refresh after successful execution
         _trigger_position_refresh()
 
@@ -475,6 +503,20 @@ class OrderExecutorV2:
         bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_qty)
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
+
+        # 双边成交完成，立即通知前端恢复按钮（不等待持仓刷新）
+        try:
+            from app.services.strategy_status_pusher import status_pusher
+            await status_pusher.push_orders_filled(
+                strategy_id=0,
+                action='opening',
+                binance_filled=binance_filled_qty,
+                bybit_filled=bybit_filled_xau,
+                user_id=None
+            )
+            logger.info(f"[FORWARD_OPENING] ✓ Button restore notification sent")
+        except Exception as e:
+            logger.warning(f"[FORWARD_OPENING] Failed to push orders filled notification: {e}")
 
         # Trigger immediate position refresh after successful execution
         _trigger_position_refresh()
@@ -659,6 +701,20 @@ class OrderExecutorV2:
         else:
             logger.info(f"[FORWARD_CLOSING] Execution completed successfully: Binance={binance_filled_qty} XAU, Bybit={bybit_filled_xau} XAU")
 
+        # 双边成交完成，立即通知前端恢复按钮（不等待持仓刷新）
+        try:
+            from app.services.strategy_status_pusher import status_pusher
+            await status_pusher.push_orders_filled(
+                strategy_id=0,
+                action='closing',
+                binance_filled=binance_filled_qty,
+                bybit_filled=bybit_filled_xau,
+                user_id=None
+            )
+            logger.info(f"[FORWARD_CLOSING] ✓ Button restore notification sent")
+        except Exception as e:
+            logger.warning(f"[FORWARD_CLOSING] Failed to push orders filled notification: {e}")
+
         # Trigger immediate position refresh after successful execution
         _trigger_position_refresh()
 
@@ -774,21 +830,49 @@ class OrderExecutorV2:
             try:
                 await asyncio.wait_for(fill_event.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                # Timeout: cancel and do single REST status check as fallback
+                # Timeout: cancel order and rely on WebSocket to report final status
                 logger.warning(f"[BINANCE_MONITOR] Timeout waiting for order {order_id} ({timeout}s), cancelling")
                 try:
                     await self.base_executor.cancel_binance_order(account, symbol, order_id)
+                    # Wait briefly for ORDER_TRADE_UPDATE to arrive via WebSocket
+                    logger.info(f"[BINANCE_MONITOR] Waiting for WebSocket cancel confirmation for order {order_id}")
+                    try:
+                        await asyncio.wait_for(fill_event.wait(), timeout=3.0)
+                        logger.info(f"[BINANCE_MONITOR] WebSocket cancel confirmation received for order {order_id}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[BINANCE_MONITOR] WebSocket cancel confirmation timeout for order {order_id}")
+                        pass
                 except Exception as cancel_err:
-                    # -2011 (already filled/expired) or network error — safe to ignore here.
-                    # Still query actual fill status below so we don't wrongly return 0.
+                    # -2011 (already filled/expired) or network error — safe to ignore here
                     logger.warning(f"[BINANCE_MONITOR] cancel error (order may be filled/expired): {cancel_err}")
-                final_status = await self.base_executor.check_binance_order_status(
-                    account, symbol, order_id
+
+                # Read final status from WebSocket registry (no REST query)
+                record = _order_fill_registry.get(order_id, {})
+                filled_qty = record.get("filled_qty", 0.0)
+
+                # Only fallback to REST if WebSocket completely failed to report
+                if filled_qty == 0 and not record:
+                    logger.error(
+                        f"[BINANCE_MONITOR] CRITICAL: WebSocket failed to report order {order_id} status, "
+                        f"falling back to single REST query"
+                    )
+                    final_status = await self.base_executor.check_binance_order_status(
+                        account, symbol, order_id
+                    )
+                    return {
+                        "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
+                        "spread_cancelled": False,
+                        "api_error": not final_status.get("success", False)
+                    }
+
+                logger.info(
+                    f"[BINANCE_MONITOR] Order {order_id} timeout handled via WebSocket: "
+                    f"filled_qty={filled_qty}, status={record.get('status', 'UNKNOWN')}"
                 )
                 return {
-                    "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
+                    "filled_qty": filled_qty,
                     "spread_cancelled": False,
-                    "api_error": not final_status.get("success", False)
+                    "api_error": False
                 }
 
             # Event was set — read result from registry

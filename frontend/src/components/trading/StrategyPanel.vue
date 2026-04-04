@@ -843,7 +843,8 @@ watch(() => marketStore.lastMessage, (message) => {
     'strategy_execution_started',
     'strategy_execution_completed',
     'strategy_execution_error',
-    'strategy_order_executed'
+    'strategy_order_executed',
+    'strategy_orders_filled'
   ]
 
   if (!relevantTypes.includes(message.type)) return
@@ -878,6 +879,9 @@ watch(() => marketStore.lastMessage, (message) => {
       break
     case 'strategy_order_executed':
       handleOrderExecuted(message.data)
+      break
+    case 'strategy_orders_filled':
+      handleOrdersFilled(message.data)
       break
   }
 }, { deep: false }) // Shallow watch for better performance
@@ -1051,6 +1055,57 @@ function handleOrderExecuted(data) {
   refreshPositions()
 
   console.log(`[WebSocket] Order executed: Binance ${data.binance_filled}, Bybit ${data.bybit_filled}`)
+}
+
+function handleOrdersFilled(data) {
+  console.log('[WebSocket] handleOrdersFilled called with data:', data)
+  console.log('[WebSocket] Current strategy type:', props.type)
+  console.log('[WebSocket] Message strategy_id:', data.strategy_id)
+
+  // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_{action}_continuous
+  // Example: "user123_forward_opening_continuous"
+  // We need to check if this message is for this strategy panel by checking the strategy_type
+  const isContinuousExecution = data.strategy_id && data.strategy_id.includes('_continuous')
+
+  if (isContinuousExecution) {
+    // Extract strategy_type from strategy_id (forward/reverse)
+    const isForward = data.strategy_id.includes('_forward_')
+    const isReverse = data.strategy_id.includes('_reverse_')
+
+    // Check if this message is for this strategy panel
+    const isForThisPanel = (props.type === 'forward' && isForward) || (props.type === 'reverse' && isReverse)
+
+    if (!isForThisPanel) {
+      console.log('[WebSocket] Message not for this panel, ignoring')
+      return
+    }
+  } else {
+    // For non-continuous execution, check config_id
+    if (data.strategy_id !== configId.value) {
+      console.log('[WebSocket] Config ID mismatch, ignoring')
+      return
+    }
+  }
+
+  console.log(`[WebSocket] Orders filled notification received: ${data.action}`)
+  console.log(`[WebSocket] Binance filled: ${data.binance_filled}, Bybit filled: ${data.bybit_filled}`)
+
+  // Immediately restore button state for better UX
+  // This allows the button to be re-enabled as soon as both sides complete trading,
+  // without waiting for the entire strategy execution flow to complete
+  if (data.action === 'opening') {
+    executingOpening.value = false
+    console.log('[WebSocket] Opening button restored')
+  } else if (data.action === 'closing') {
+    executingClosing.value = false
+    console.log('[WebSocket] Closing button restored')
+  }
+
+  // Also clear the global executing flag if no other strategy is running
+  if (!executingOpening.value && !executingClosing.value) {
+    executing.value = false
+    console.log('[WebSocket] All buttons restored')
+  }
 }
 
 function handleAccountBalanceUpdate(data) {
