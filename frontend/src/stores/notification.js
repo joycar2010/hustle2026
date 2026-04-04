@@ -116,7 +116,7 @@ export const useNotificationStore = defineStore('notification', () => {
         id: Date.now() + '_binance_asset',
         type: 'binance_asset',
         level: 'critical',
-        title: 'Binance净资产预警',
+        title: '主账号净资产预警',
         message: `当前净资产: ${accountData.binance_net_asset.toFixed(2)} USDT，低于阈值 ${alertSettings.value.binanceNetAsset} USDT`,
         timestamp: new Date().toISOString()
       })
@@ -129,7 +129,7 @@ export const useNotificationStore = defineStore('notification', () => {
         id: Date.now() + '_bybit_asset',
         type: 'bybit_asset',
         level: 'critical',
-        title: 'Bybit MT5净资产预警',
+        title: '对冲账户净资产预警',
         message: `当前净资产: ${accountData.bybit_mt5_net_asset.toFixed(2)} USDT，低于阈值 ${alertSettings.value.bybitMT5NetAsset} USDT`,
         timestamp: new Date().toISOString()
       })
@@ -186,7 +186,7 @@ export const useNotificationStore = defineStore('notification', () => {
             id: Date.now() + '_binance_liquidation_long',
             type: 'binance_liquidation',
             level: 'critical',
-            title: 'Binance多仓爆仓价预警',
+            title: '主账号多仓爆仓价预警',
             message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${longLiqPrice.toFixed(2)}，距离: ${longDistancePercent.toFixed(2)}%`,
             timestamp: new Date().toISOString()
           })
@@ -200,7 +200,7 @@ export const useNotificationStore = defineStore('notification', () => {
             id: Date.now() + '_binance_liquidation_short',
             type: 'binance_liquidation',
             level: 'critical',
-            title: 'Binance空仓爆仓价预警',
+            title: '主账号空仓爆仓价预警',
             message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${shortLiqPrice.toFixed(2)}，距离: ${shortDistancePercent.toFixed(2)}%`,
             timestamp: new Date().toISOString()
           })
@@ -238,7 +238,7 @@ export const useNotificationStore = defineStore('notification', () => {
                 id: Date.now() + '_bybit_liquidation_long',
                 type: 'bybit_liquidation',
                 level: 'critical',
-                title: 'Bybit多头爆仓价预警',
+                title: '对冲多头爆仓价预警',
                 message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${longLiqPrice.toFixed(2)}，距离: ${longDistancePercent.toFixed(2)}%`,
                 timestamp: new Date().toISOString()
               })
@@ -253,7 +253,7 @@ export const useNotificationStore = defineStore('notification', () => {
               id: Date.now() + '_bybit_liquidation_short',
               type: 'bybit_liquidation',
               level: 'critical',
-              title: 'Bybit空头爆仓价预警',
+              title: '对冲空头爆仓价预警',
               message: `当前价格: ${currentPrice.toFixed(2)}，爆仓价: ${shortLiqPrice.toFixed(2)}，距离: ${shortDistancePercent.toFixed(2)}%`,
               timestamp: new Date().toISOString()
             })
@@ -380,7 +380,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
       // Construct full URL for uploaded sound files
       // Use environment variable for API base URL
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://13.115.21.77:8000'
       const soundUrl = soundFile.startsWith('/uploads/')
         ? `${apiBaseUrl}${soundFile}`
         : soundFile

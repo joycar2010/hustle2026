@@ -5,10 +5,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 try:
     import MetaTrader5 as mt5
-    MT5_AVAILABLE = True
 except ImportError:
     mt5 = None
-    MT5_AVAILABLE = False
 from app.websocket.manager import manager
 from app.core.database import get_db_context
 from app.models.account import Account
@@ -63,6 +61,9 @@ class MT5Bridge:
 
     async def _bridge_loop(self):
         """主循环：轮询MT5数据并推送变化"""
+        # Give MT5 services time to initialize on startup
+        await asyncio.sleep(3)
+
         while self.running:
             try:
                 # 只在有WebSocket连接时才轮询
@@ -71,43 +72,50 @@ class MT5Bridge:
                     continue
 
                 # 获取所有活跃的MT5账户
-                async with get_db_context() as db:
-                    result = await db.execute(
-                        select(Account).where(
-                            Account.is_active == True,
-                            Account.is_mt5_account == True
+                try:
+                    async with get_db_context() as db:
+                        result = await db.execute(
+                            select(Account).where(
+                                Account.is_active == True,
+                                Account.is_mt5_account == True
+                            )
                         )
-                    )
-                    mt5_accounts = result.scalars().all()
+                        mt5_accounts = result.scalars().all()
+                except Exception as db_err:
+                    logger.error(f"MT5 Bridge DB error: {db_err}")
+                    await asyncio.sleep(self.interval * 2)
+                    continue
 
-                    if not mt5_accounts:
-                        await asyncio.sleep(self.interval)
-                        continue
+                if not mt5_accounts:
+                    await asyncio.sleep(self.interval)
+                    continue
 
-                    # 获取所有MT5账户的持仓数据
-                    all_positions = []
-                    for account in mt5_accounts:
-                        positions = await self._fetch_mt5_positions(account)
-                        if positions:
-                            all_positions.extend(positions)
+                # 获取所有MT5账户的持仓数据
+                all_positions = []
+                for account in mt5_accounts:
+                    positions = await self._fetch_mt5_positions(account)
+                    if positions:
+                        all_positions.extend(positions)
 
-                    # 检测变化并推送
-                    if self._has_positions_changed(all_positions):
-                        await self._broadcast_positions(all_positions)
-                        self.last_positions = self._build_position_cache(all_positions)
-                        self.broadcast_count += 1
-                        self.last_broadcast_time = datetime.now().isoformat()
+                # 检测变化并推送
+                if self._has_positions_changed(all_positions):
+                    await self._broadcast_positions(all_positions)
+                    self.last_positions = self._build_position_cache(all_positions)
+                    self.broadcast_count += 1
+                    self.last_broadcast_time = datetime.now().isoformat()
 
                 await asyncio.sleep(self.interval)
 
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                logger.error(f"MT5 Bridge error: {str(e)}", exc_info=True)
+                logger.error(f"MT5 Bridge error: {str(e)}")
                 self.error_count += 1
-                await asyncio.sleep(self.interval)
+                await asyncio.sleep(self.interval * 2)
 
     async def _fetch_mt5_positions(self, account: Account) -> List[Dict[str, Any]]:
         """
-        获取MT5账户的持仓数据
+        通过 MT5 HTTP Bridge 获取持仓数据
 
         Args:
             account: MT5账户对象
@@ -116,46 +124,13 @@ class MT5Bridge:
             持仓数据列表
         """
         try:
-            # 导入MT5Client
-            from app.services.mt5_client import MT5Client
+            from app.services.mt5_http_client import get_mt5_http_client
 
-            # 获取或创建MT5客户端
             account_id = str(account.account_id)
-            if account_id not in self.mt5_clients:
-                # 获取MT5密码（使用mt5_primary_pwd字段，如果为空则使用api_secret）
-                mt5_password = account.mt5_primary_pwd or account.api_secret
+            mt5_client = get_mt5_http_client()
 
-                # 获取MT5账户ID（使用mt5_id字段，如果为空则使用api_key）
-                mt5_login = account.mt5_id or account.api_key
-
-                # 获取MT5服务器
-                mt5_server = account.mt5_server or account.server or "Bybit-Live-2"
-
-                # 创建MT5客户端
-                mt5_client = MT5Client(
-                    login=int(mt5_login),
-                    password=mt5_password,
-                    server=mt5_server
-                )
-
-                # 连接MT5
-                if not mt5_client.connect():
-                    logger.error(f"Failed to connect MT5 account {account_id}")
-                    return []
-
-                self.mt5_clients[account_id] = mt5_client
-
-            mt5_client = self.mt5_clients[account_id]
-
-            # 检查连接健康状态
-            if not mt5_client.is_connection_healthy():
-                logger.warning(f"MT5 connection unhealthy for account {account_id}, reconnecting...")
-                if not mt5_client.connect():
-                    logger.error(f"Failed to reconnect MT5 account {account_id}")
-                    return []
-
-            # 获取持仓
-            positions = mt5_client.get_positions(symbol="XAUUSD+")
+            # 通过 HTTP Bridge 获取持仓
+            positions = await mt5_client.get_positions(symbol="XAUUSD+")
 
             if not positions:
                 return []

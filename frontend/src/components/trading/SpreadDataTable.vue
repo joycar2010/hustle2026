@@ -8,8 +8,8 @@
         <thead class="sticky top-0 bg-[#1e2329]">
           <tr class="text-left border-b border-[#2b3139]">
             <th class="p-0.5 md:p-1 w-20 md:w-24 text-sm text-[#f0b90b]">时间</th>
-            <th class="p-0.5 md:p-1 text-center text-sm text-[#f0b90b]">做多Bybit</th>
-            <th class="p-0.5 md:p-1 text-center text-sm text-[#f0b90b]">做多Binance</th>
+            <th class="p-0.5 md:p-1 text-center text-sm text-[#f0b90b]">做多对冲</th>
+            <th class="p-0.5 md:p-1 text-center text-sm text-[#f0b90b]">做多主账号</th>
           </tr>
         </thead>
         <tbody>

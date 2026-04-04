@@ -81,7 +81,7 @@
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Left Column Statistics -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2">Binance账户成交历史</h3>
+          <h3 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2">主账号成交历史</h3>
 
           <div class="grid grid-cols-2 gap-4">
             <div class="bg-gray-800 p-3 rounded">
@@ -119,7 +119,7 @@
 
         <!-- Right Column Statistics -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2">Bybit MT5成交历史</h3>
+          <h3 class="text-lg font-semibold mb-4 border-b border-gray-700 pb-2">对冲账户成交历史</h3>
 
           <div class="grid grid-cols-2 gap-4">
             <div class="bg-gray-800 p-3 rounded">
@@ -154,7 +154,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
       <!-- Account Trading History Table -->
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Binance账户成交历史</h3>
+        <h3 class="text-lg font-semibold mb-4">主账号成交历史</h3>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
@@ -198,7 +198,7 @@
 
       <!-- MT5 Trading History Table -->
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">Bybit MT5成交历史</h3>
+        <h3 class="text-lg font-semibold mb-4">对冲账户成交历史</h3>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
@@ -493,7 +493,7 @@ function exportToCSV(filename) {
     ['交易历史数据报告'],
     [`查询时间: ${startTime.value} 至 ${endTime.value}`],
     [],
-    ['=== Binance账户统计 ==='],
+    ['=== 主账号统计 ==='],
     ['成交量汇总', stats.value.totalVolume?.toFixed(2) || '0.00'],
     ['成交额汇总', (stats.value.totalAmount?.toFixed(2) || '0.00') + ' USDT'],
     ['成交额(吃单)', (stats.value.takerAmount?.toFixed(2) || '0.00') + ' USDT'],
@@ -502,18 +502,18 @@ function exportToCSV(filename) {
     ['手续费汇总(BNB)', (stats.value.bnbFees?.toFixed(4) || '0.0000') + ' BNB'],
     ['已实现盈亏', (stats.value.realizedPnL?.toFixed(2) || '0.00') + ' USDT'],
     [],
-    ['=== Bybit MT5统计 ==='],
+    ['=== 对冲账户统计 ==='],
     ['成交量汇总', stats.value.mt5Volume?.toFixed(2) || '0.00'],
     ['成交额汇总', (stats.value.mt5Amount?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5过夜费', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5手续费', (stats.value.mt5Fee?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5已实现盈亏', (stats.value.mt5RealizedPnL?.toFixed(2) || '0.00') + ' USDT'],
     [],
-    ['=== Binance账户成交历史 ==='],
+    ['=== 主账号成交历史 ==='],
     binanceHeaders,
     ...binanceRows,
     [],
-    ['=== Bybit MT5成交历史 ==='],
+    ['=== 对冲账户成交历史 ==='],
     mt5Headers,
     ...mt5Rows
   ].map(row => row.join(',')).join('\n')
@@ -533,7 +533,7 @@ function exportToExcel(filename) {
     ['交易历史数据报告'],
     [`查询时间: ${startTime.value} 至 ${endTime.value}`],
     [],
-    ['Binance账户统计', ''],
+    ['主账号统计', ''],
     ['成交量汇总', stats.value.totalVolume?.toFixed(2) || '0.00'],
     ['成交额汇总', (stats.value.totalAmount?.toFixed(2) || '0.00') + ' USDT'],
     ['成交额(吃单)', (stats.value.takerAmount?.toFixed(2) || '0.00') + ' USDT'],
@@ -542,7 +542,7 @@ function exportToExcel(filename) {
     ['手续费汇总(BNB)', (stats.value.bnbFees?.toFixed(4) || '0.0000') + ' BNB'],
     ['已实现盈亏', (stats.value.realizedPnL?.toFixed(2) || '0.00') + ' USDT'],
     [],
-    ['Bybit MT5统计', ''],
+    ['对冲账户统计', ''],
     ['成交量汇总', stats.value.mt5Volume?.toFixed(2) || '0.00'],
     ['成交额汇总', (stats.value.mt5Amount?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5过夜费', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
@@ -567,7 +567,7 @@ function exportToExcel(filename) {
     ])
   ]
   const binanceSheet = XLSX.utils.aoa_to_sheet(binanceData)
-  XLSX.utils.book_append_sheet(wb, binanceSheet, 'Binance成交历史')
+  XLSX.utils.book_append_sheet(wb, binanceSheet, '主账号成交历史')
 
   // MT5 sheet
   const mt5Data = [
@@ -604,7 +604,7 @@ function exportToPDF(filename) {
 
     // Binance Statistics
     doc.setFontSize(12)
-    doc.text('Binance Account Statistics', 14, 35)
+    doc.text('Main Account Statistics', 14, 35)
 
     autoTable(doc, {
       startY: 40,
@@ -624,7 +624,7 @@ function exportToPDF(filename) {
 
     // MT5 Statistics
     let currentY = doc.previousAutoTable.finalY + 10
-    doc.text('Bybit MT5 Statistics', 14, currentY)
+    doc.text('Hedge Account Statistics', 14, currentY)
 
     autoTable(doc, {
       startY: currentY + 5,
@@ -642,7 +642,7 @@ function exportToPDF(filename) {
 
     // Binance trades table
     currentY = doc.previousAutoTable.finalY + 10
-    doc.text('Binance Account Trade History', 14, currentY)
+    doc.text('Main Account Trade History', 14, currentY)
 
     autoTable(doc, {
       startY: currentY + 5,
@@ -670,7 +670,7 @@ function exportToPDF(filename) {
       currentY = 15
     }
 
-    doc.text('Bybit MT5 Trade History', 14, currentY)
+    doc.text('Hedge Account Trade History', 14, currentY)
 
     autoTable(doc, {
       startY: currentY + 5,

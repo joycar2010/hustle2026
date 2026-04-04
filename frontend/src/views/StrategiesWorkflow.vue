@@ -55,7 +55,7 @@ const strategyTypes = [
     type: 'reverse_opening',
     name: '反向开仓',
     icon: '🔴',
-    description: 'Binance做空 + Bybit做多'
+    description: '主账号做空 + 对冲做多'
   },
   {
     type: 'reverse_closing',
@@ -67,7 +67,7 @@ const strategyTypes = [
     type: 'forward_opening',
     name: '正向开仓',
     icon: '🔵',
-    description: 'Binance做多 + Bybit做空'
+    description: '主账号做多 + 对冲做空'
   },
   {
     type: 'forward_closing',

@@ -13,12 +13,13 @@ from app.models.account import Account
 # Order executor service removed - manual trading disabled
 # from app.services.order_executor import order_executor
 from app.services.market_service import market_data_service
+from app.core.proxy_utils import build_proxy_url
 import asyncio
 try:
     import MetaTrader5 as mt5
     MT5_AVAILABLE = True
 except ImportError:
-    mt5 = None
+    mt5 = None  # type: ignore
     MT5_AVAILABLE = False
 import logging
 import uuid
@@ -321,7 +322,7 @@ def _build_stats(orders, accounts_map, enable_logging=True):
             "fee": fee,
             "status": order.status,
             "account_name": acc.account_name,
-            "platform": "Bybit MT5" if is_mt5 else "Binance",
+            "platform": "对冲账户" if is_mt5 else "主账号",
         }
         if is_mt5:
             mt5_trades.append(trade)
@@ -548,9 +549,9 @@ async def get_recent_orders(
             platform_name = "Unknown"
             if acc:
                 if acc.platform_id == 1:
-                    platform_name = "Binance"
+                    platform_name = "主账号"
                 elif acc.platform_id == 2:
-                    platform_name = "Bybit MT5" if acc.is_mt5_account else "Bybit"
+                    platform_name = "对冲账户"
 
             result_list.append({
                 "id": str(order.order_id),
@@ -561,6 +562,7 @@ async def get_recent_orders(
                 "price": order.price,
                 "status": order.status,
                 "symbol": order.symbol,
+                "source": order.source,
             })
 
         return result_list
@@ -597,7 +599,8 @@ async def get_realtime_pending_orders(
             if account.platform_id == 1:  # Binance
                 try:
                     from app.services.binance_client import BinanceFuturesClient
-                    client = BinanceFuturesClient(account.api_key, account.api_secret)
+                    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                                   proxy_url=build_proxy_url(account.proxy_config))
                     try:
                         # 获取所有未成交订单
                         open_orders = await client.get_open_orders(symbol="XAUUSDT")
@@ -610,7 +613,7 @@ async def get_realtime_pending_orders(
                             pending_orders.append({
                                 "id": str(order.get("orderId")),
                                 "timestamp": beijing_time,
-                                "exchange": "Binance",
+                                "exchange": "主账号",
                                 "side": order.get("side", "").lower(),
                                 "quantity": float(order.get("origQty", 0)),
                                 "price": float(order.get("price", 0)),
@@ -773,7 +776,8 @@ async def close_all_positions(
             try:
                 # Get Binance positions
                 from app.services.binance_client import BinanceFuturesClient
-                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
+                                               proxy_url=build_proxy_url(binance_account.proxy_config))
                 try:
                     positions = await client.get_position_risk("XAUUSDT")
 
@@ -902,7 +906,8 @@ async def sync_trades_from_exchanges(
                 if account.platform_id == 1:
                     # Sync Binance trades
                     from app.services.binance_client import BinanceFuturesClient
-                    client = BinanceFuturesClient(account.api_key, account.api_secret)
+                    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                                   proxy_url=build_proxy_url(account.proxy_config))
                     try:
                         trades = await client.get_user_trades(
                             symbol="XAUUSDT",
@@ -1265,7 +1270,8 @@ async def cancel_all_orders(
         if binance_account:
             try:
                 from app.services.binance_client import BinanceFuturesClient
-                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
+                                               proxy_url=build_proxy_url(binance_account.proxy_config))
                 try:
                     # Get all open orders
                     open_orders = await client.get_open_orders("XAUUSDT")
@@ -1448,7 +1454,8 @@ async def get_realtime_trading_history(
 async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms):
     """获取Binance交易历史（使用userTrades API获取准确的手续费）"""
     from app.services.binance_client import BinanceFuturesClient
-    client = BinanceFuturesClient(account.api_key, account.api_secret)
+    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                   proxy_url=build_proxy_url(account.proxy_config))
     try:
         # 使用userTrades API获取交易历史（包含准确的手续费信息）
         trades = await client.get_user_trades(symbol="XAUUSDT", start_time=start_time_ms, end_time=end_time_ms, limit=1000)
@@ -1460,7 +1467,8 @@ async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms):
 async def _get_binance_realized_pnl(account, start_time_ms, end_time_ms):
     """获取Binance已实现盈亏（使用income API获取准确的平仓盈亏）"""
     from app.services.binance_client import BinanceFuturesClient
-    client = BinanceFuturesClient(account.api_key, account.api_secret)
+    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                   proxy_url=build_proxy_url(account.proxy_config))
     try:
         # 使用income API获取平仓盈亏（incomeType=REALIZED_PNL）
         income_data = await client.get_income(
@@ -1529,7 +1537,7 @@ def _format_binance_trades(trades):
 
         formatted.append({
             "timestamp": beijing_time,
-            "account_name": "Binance",
+            "account_name": "主账号",
             "symbol": "XAUUSDT",  # 交易对
             "product": "产品",  # 产品名称
             "side": side,
@@ -1554,7 +1562,7 @@ def _format_mt5_trades(deals):
         if isinstance(item, tuple):
             deal, account_name = item
         else:
-            deal, account_name = item, "Bybit MT5"
+            deal, account_name = item, "对冲账户"
 
         beijing_time = mt5_time_to_beijing(deal.time)
 

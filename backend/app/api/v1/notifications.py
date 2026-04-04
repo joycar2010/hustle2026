@@ -432,7 +432,11 @@ async def send_notification(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Send notification to users"""
+    """Send notification to users (admin only)"""
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    if current_user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
     # Get template
     result = await db.execute(
         select(NotificationTemplate).filter(

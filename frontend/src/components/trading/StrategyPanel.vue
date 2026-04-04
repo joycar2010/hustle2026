@@ -4,10 +4,10 @@
     <div class="p-1.5 border-b border-[#2b3139] flex-shrink-0">
       <!-- 标题和资产组件同一行居中 -->
       <div class="flex items-center justify-center gap-3 mb-1">
-        <!-- 反向套利：Bybit MT5资产 + 标题 -->
+        <!-- 反向套利：对冲账户资产 + 标题 -->
         <template v-if="type === 'reverse'">
           <div class="text-center">
-            <div class="text-xs text-gray-400 mb-0.5">Bybit MT5可用资产</div>
+            <div class="text-xs text-gray-400 mb-0.5">对冲账户可用资产</div>
             <div class="text-sm font-mono font-bold">
               {{ formatNumber(bybitAssets) }} USDT
             </div>
@@ -17,10 +17,10 @@
           </h3>
         </template>
 
-        <!-- 正向套利：Binance资产 + 标题 -->
+        <!-- 正向套利：主账号资产 + 标题 -->
         <template v-else>
           <div class="text-center">
-            <div class="text-xs text-gray-400 mb-0.5">Binance可用资产</div>
+            <div class="text-xs text-gray-400 mb-0.5">主账号可用资产</div>
             <div class="text-sm font-mono font-bold">
               {{ formatNumber(binanceAssets) }} USDT
             </div>
@@ -34,10 +34,10 @@
       <!-- 实仓和点差信息 -->
       <div class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
-          T多仓: {{ (localBybitLong * 100).toFixed(0) }} A空仓: {{ localBinanceShort.toFixed(2) }}
+          对冲多仓: {{ (localBybitLong * 100).toFixed(0) }} 主空仓: {{ localBinanceShort.toFixed(2) }}
         </span>
         <span v-else>
-          A多仓: {{ localBinanceLong.toFixed(2) }} T空仓: {{ (localBybitShort * 100).toFixed(0) }}
+          主多仓: {{ localBinanceLong.toFixed(2) }} 对冲空仓: {{ (localBybitShort * 100).toFixed(0) }}
         </span>
       </div>
     </div>
@@ -63,11 +63,11 @@
       <div class="bg-[#252930] rounded p-2">
         <!-- Spread and Fees (centered) -->
         <div class="flex items-center justify-center gap-4">
-          <!-- For Reverse Strategy: Bybit Fee + Spread -->
+          <!-- For Reverse Strategy: 对冲账户 Fee + Spread -->
           <template v-if="type === 'reverse'">
-            <!-- Bybit Swap Fee -->
+            <!-- 对冲账户 Swap Fee -->
             <div v-if="marketCardsRef" class="text-center">
-              <div class="text-xs text-gray-400 mb-0.5">Bybit 过夜费</div>
+              <div class="text-xs text-gray-400 mb-0.5">对冲 过夜费</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.bybitLongSwapFee <= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
                   多: {{ marketCardsRef.bybitLongSwapFee <= 0 ? '-' : '+' }}{{ Math.abs(marketCardsRef.bybitLongSwapFee ?? 0).toFixed(2) }}
@@ -80,26 +80,26 @@
 
             <!-- Spread -->
             <div class="text-center">
-              <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多Bybit点差</div>
+              <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多对冲点差</div>
               <div class="text-lg font-mono font-bold whitespace-nowrap text-[#0ecb81]">
                 {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
           </template>
 
-          <!-- For Forward Strategy: Spread + Binance Fee -->
+          <!-- For Forward Strategy: Spread + 主账号 Fee -->
           <template v-else>
             <!-- Spread -->
             <div class="text-center">
-              <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多Binance点差</div>
+              <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多主账号点差</div>
               <div class="text-lg font-mono font-bold whitespace-nowrap text-[#f6465d]">
                 {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
 
-            <!-- Binance Funding Rate -->
+            <!-- 主账号 Funding Rate -->
             <div v-if="marketCardsRef" class="text-center">
-              <div class="text-xs text-gray-400 mb-0.5">Binance 资金费/手</div>
+              <div class="text-xs text-gray-400 mb-0.5">主账号 资金费/手</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
                   多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs(marketCardsRef.binanceLongFundingRate ?? 0).toFixed(2) }}
@@ -614,8 +614,6 @@ const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
 const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0 }, closing: { current: 0, required: 0 } })
-// Guard: prevents concurrent API calls to startContinuousExecution (debounce race protection)
-const _continuousExecutionStarting = ref({ opening: false, closing: false })
 const statusPollingInterval = ref({ opening: null, closing: null })
 
 const config = ref({
@@ -843,8 +841,7 @@ watch(() => marketStore.lastMessage, (message) => {
     'strategy_execution_started',
     'strategy_execution_completed',
     'strategy_execution_error',
-    'strategy_order_executed',
-    'strategy_orders_filled'
+    'strategy_order_executed'
   ]
 
   if (!relevantTypes.includes(message.type)) return
@@ -879,9 +876,6 @@ watch(() => marketStore.lastMessage, (message) => {
       break
     case 'strategy_order_executed':
       handleOrderExecuted(message.data)
-      break
-    case 'strategy_orders_filled':
-      handleOrdersFilled(message.data)
       break
   }
 }, { deep: false }) // Shallow watch for better performance
@@ -1057,57 +1051,6 @@ function handleOrderExecuted(data) {
   console.log(`[WebSocket] Order executed: Binance ${data.binance_filled}, Bybit ${data.bybit_filled}`)
 }
 
-function handleOrdersFilled(data) {
-  console.log('[WebSocket] handleOrdersFilled called with data:', data)
-  console.log('[WebSocket] Current strategy type:', props.type)
-  console.log('[WebSocket] Message strategy_id:', data.strategy_id)
-
-  // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_{action}_continuous
-  // Example: "user123_forward_opening_continuous"
-  // We need to check if this message is for this strategy panel by checking the strategy_type
-  const isContinuousExecution = data.strategy_id && data.strategy_id.includes('_continuous')
-
-  if (isContinuousExecution) {
-    // Extract strategy_type from strategy_id (forward/reverse)
-    const isForward = data.strategy_id.includes('_forward_')
-    const isReverse = data.strategy_id.includes('_reverse_')
-
-    // Check if this message is for this strategy panel
-    const isForThisPanel = (props.type === 'forward' && isForward) || (props.type === 'reverse' && isReverse)
-
-    if (!isForThisPanel) {
-      console.log('[WebSocket] Message not for this panel, ignoring')
-      return
-    }
-  } else {
-    // For non-continuous execution, check config_id
-    if (data.strategy_id !== configId.value) {
-      console.log('[WebSocket] Config ID mismatch, ignoring')
-      return
-    }
-  }
-
-  console.log(`[WebSocket] Orders filled notification received: ${data.action}`)
-  console.log(`[WebSocket] Binance filled: ${data.binance_filled}, Bybit filled: ${data.bybit_filled}`)
-
-  // Immediately restore button state for better UX
-  // This allows the button to be re-enabled as soon as both sides complete trading,
-  // without waiting for the entire strategy execution flow to complete
-  if (data.action === 'opening') {
-    executingOpening.value = false
-    console.log('[WebSocket] Opening button restored')
-  } else if (data.action === 'closing') {
-    executingClosing.value = false
-    console.log('[WebSocket] Closing button restored')
-  }
-
-  // Also clear the global executing flag if no other strategy is running
-  if (!executingOpening.value && !executingClosing.value) {
-    executing.value = false
-    console.log('[WebSocket] All buttons restored')
-  }
-}
-
 function handleAccountBalanceUpdate(data) {
   // Update available assets from WebSocket data
   if (data.accounts && data.accounts.length > 0) {
@@ -1128,25 +1071,6 @@ function handleAccountBalanceUpdate(data) {
       // For MT5: keep the value set by fetchAccountData (from bridge) — don't overwrite with 0
     }
   }
-
-  // 从 account_balance 持仓列表提取 Binance 多空仓（30s 兜底，优先级低于 position_snapshot 的实时推送）
-  // position_snapshot 由 BinancePositionPusher ACCOUNT_UPDATE 事件驱动，延迟 <100ms
-  // account_balance 每 30s 广播一次，作为冷启动 / 断流恢复时的保底数据源
-  if (data.positions && data.positions.length > 0) {
-    let binanceLong = 0, binanceShort = 0
-    data.positions.forEach(pos => {
-      if (pos.is_mt5_account || pos.platform_id !== 1) return  // 跳过 MT5/Bybit
-      const side = (pos.side || '').toLowerCase()
-      const size = Math.abs(pos.size || 0)
-      if (side === 'buy')  binanceLong  += size
-      else if (side === 'sell') binanceShort += size
-    })
-    // 仅在 BinancePositionPusher 尚未推送真实数据时覆盖（避免 30s 旧数据盖掉实时数据）
-    if (localBinanceLong.value === 0 && localBinanceShort.value === 0) {
-      localBinanceLong.value  = Math.round(binanceLong  * 1000) / 1000
-      localBinanceShort.value = Math.round(binanceShort * 1000) / 1000
-    }
-  }
 }
 
 async function fetchAccountData() {
@@ -1159,21 +1083,9 @@ async function fetchAccountData() {
     const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
     const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
 
-    // Use first account's available balance instead of summing all accounts
+    // Use first account's available balance
     binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
     bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
-
-    // Enrich MT5 Bybit accounts with live bridge data (aggregated API always returns 0 for MT5 balance)
-    const mt5Accounts = bybitAccounts.filter(a => a.is_mt5_account)
-    if (mt5Accounts.length > 0) {
-      try {
-        const infoR = await api.get('/api/v1/mt5/account/info')
-        const info = infoR.data || {}
-        bybitAssets.value = info.margin_free ?? info.free_margin ?? 0
-      } catch (e) {
-        console.error('MT5 bridge info failed:', e)
-      }
-    }
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
@@ -1262,11 +1174,11 @@ function validateAccountsForExecution() {
 
   // Check if accounts exist
   if (!binanceAccount) {
-    return { valid: false, message: 'Binance账户不存在，请先添加账户' }
+    return { valid: false, message: '主账号不存在，请先添加账户' }
   }
 
   if (!bybitMT5Account) {
-    return { valid: false, message: 'Bybit MT5账户不存在，请先添加账户' }
+    return { valid: false, message: '对冲账户不存在，请先添加账户' }
   }
 
   // Check disconnected state from localStorage
@@ -1283,20 +1195,20 @@ function validateAccountsForExecution() {
 
   // Check if accounts are disconnected
   if (disconnectedAccounts.has(binanceAccount.account_id)) {
-    return { valid: false, message: 'Binance账户已断开连接，请先连接账户' }
+    return { valid: false, message: '主账号已断开连接，请先连接账户' }
   }
 
   if (disconnectedAccounts.has(bybitMT5Account.account_id)) {
-    return { valid: false, message: 'Bybit MT5账户已断开连接，请先连接账户' }
+    return { valid: false, message: '对冲账户已断开连接，请先连接账户' }
   }
 
   // Check if both accounts are active
   if (!binanceAccount.is_active) {
-    return { valid: false, message: 'Binance账户未激活，请先激活账户' }
+    return { valid: false, message: '主账号未激活，请先激活账户' }
   }
 
   if (!bybitMT5Account.is_active) {
-    return { valid: false, message: 'Bybit MT5账户未激活，请先激活账户' }
+    return { valid: false, message: '对冲账户未激活，请先激活账户' }
   }
 
   // Check if accounts have errors
@@ -1441,6 +1353,17 @@ const toggleClosingExecution = debounce(async function() {
       return
     }
 
+    // Check spread condition for closing: current spread must be <= closing threshold
+    const enabledLadders = config.value.ladders.filter(l => l.enabled)
+    if (enabledLadders.length > 0) {
+      const firstLadder = enabledLadders[0]
+      const threshold = firstLadder.threshold || 0
+      if (closingSpread.value > threshold) {
+        validationErrors.value = [`当前点差 ${closingSpread.value.toFixed(1)} 大于反平差值 ${threshold.toFixed(1)}，不满足平仓条件`]
+        return
+      }
+    }
+
     // Start continuous execution
     console.log('[toggleClosingExecution] All validations passed, starting continuous execution')
     await startContinuousExecution('closing')
@@ -1532,11 +1455,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
         }
 
         // 如果有成交，更新阶梯进度（使用实际成交数量）
-        // 注意：binance_filled_qty 单位=XAU(oz)，bybit_filled_qty 单位=Lot(1Lot=100oz)
-        // 必须统一单位后再取 min，否则 Math.min(10, 0.1)=0.1，导致进度永远不推进
-        const BYBIT_LOT_TO_XAU = 100
-        const bybitFilledXau = bybitFilled * BYBIT_LOT_TO_XAU
-        const actualFilled = Math.min(binanceFilled, bybitFilledXau)
+        const actualFilled = Math.min(binanceFilled, bybitFilled)
         ladderProgress.value.opening.completedQty += actualFilled
         saveLadderProgress()  // 持久化进度
 
@@ -1687,11 +1606,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
         }
 
         // 如果有成交，更新阶梯进度（使用实际成交数量）
-        // 注意：binance_filled_qty 单位=XAU(oz)，bybit_filled_qty 单位=Lot(1Lot=100oz)
-        // 必须统一单位后再取 min，否则 Math.min(10, 0.1)=0.1，导致进度永远不推进
-        const BYBIT_LOT_TO_XAU = 100
-        const bybitFilledXauC = bybitFilled * BYBIT_LOT_TO_XAU
-        const actualFilled = Math.min(binanceFilled, bybitFilledXauC)
+        const actualFilled = Math.min(binanceFilled, bybitFilled)
         ladderProgress.value.closing.completedQty += actualFilled
         saveLadderProgress()  // 持久化进度
 
@@ -2065,12 +1980,6 @@ function formatNumber(num) {
 
 // Continuous execution methods
 async function startContinuousExecution(action) {
-  // Prevent concurrent API calls (debounce race: two rapid clicks can both pass button guards)
-  if (_continuousExecutionStarting.value[action]) {
-    console.warn('[GUARD] startContinuousExecution already in progress for action:', action)
-    return
-  }
-  _continuousExecutionStarting.value[action] = true
   try {
     console.log('[DEBUG] startContinuousExecution called, action:', action)
     console.log('[DEBUG] config.value:', config.value)
@@ -2165,8 +2074,6 @@ async function startContinuousExecution(action) {
     console.error('Failed to start continuous execution:', error)
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`启动连续执行失败: ${errorMsg}`, 'error')
-  } finally {
-    _continuousExecutionStarting.value[action] = false
   }
 }
 

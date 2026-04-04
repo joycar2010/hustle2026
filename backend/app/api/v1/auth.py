@@ -107,13 +107,13 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
 
         # Create access token
         token_start = time.time()
-        access_token = create_access_token(data={"sub": str(user.user_id)})
+        access_token = create_access_token(data={"sub": str(user.user_id), "role": user.role or ""})
         logger.info(f"Token created in {time.time() - token_start:.2f}s")
 
         total_time = time.time() - start_time
         logger.info(f"Login successful for {credentials.username}, total time: {total_time:.2f}s")
 
-        return Token(
+        return Token(role=user.role,
             access_token=access_token,
             user_id=user.user_id,
             username=user.username,

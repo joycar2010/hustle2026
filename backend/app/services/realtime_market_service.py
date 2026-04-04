@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.binance_client import BinanceFuturesClient
 from app.services.binance_ws_client import binance_ws
-from app.services.mt5_client import MT5Client
+from app.services.mt5_http_client import get_mt5_http_client
 from app.models.market_data import MarketData, SpreadRecord
 from app.models.account import Account
 from app.models.platform import Platform
@@ -28,11 +28,7 @@ class RealTimeMarketDataService:
             api_key=settings.BINANCE_API_KEY,
             api_secret=settings.BINANCE_API_SECRET
         )
-        self.mt5_client = MT5Client(
-            login=int(settings.BYBIT_MT5_ID) if settings.BYBIT_MT5_ID else 0,
-            password=settings.BYBIT_MT5_PASSWORD,
-            server=settings.BYBIT_MT5_SERVER
-        )
+        self.mt5_client = get_mt5_http_client()
         self.running = False
         self.update_task: Optional[asyncio.Task] = None
 
@@ -111,7 +107,7 @@ class RealTimeMarketDataService:
                 pass
 
         await self.binance_client.close()
-        self.mt5_client.disconnect()
+        # mt5_http_client is a shared singleton, do not close here
         logger.info("Real-time market data service stopped")
 
     async def _update_loop(self):
@@ -150,8 +146,8 @@ class RealTimeMarketDataService:
         """Fetch ticker data from Bybit MT5 (using XAUUSD+ for gold)"""
         try:
             # MT5 operations are synchronous, run in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            tick = await loop.run_in_executor(None, self.mt5_client.get_tick, symbol)
+            # HTTP Bridge is async, no need for executor
+            tick = await self.mt5_client.get_tick(symbol)
 
             if tick:
                 return {

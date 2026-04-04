@@ -17,6 +17,7 @@ TERMINAL_ERROR_CODES = {
     -1106,   # Parameter too many values
     -2011,   # Unknown order sent (cancel)
     -2013,   # Order does not exist
+    -2015,   # Invalid API-key, IP, or permissions for action
 }
 
 
@@ -50,6 +51,23 @@ class BinanceTerminalError(Exception):
         self.message = message
 
 
+class BinanceIPWhitelistError(BinanceTerminalError):
+    """Raised when API key has IP whitelist restriction and current IP is not whitelisted.
+
+    This is error code -2015 with message containing 'IP' or 'whitelist'.
+    The server IP must be added to Binance API key's IP whitelist.
+
+    Attributes:
+        code: -2015
+        message: Human-readable error message with current server IP
+        server_ip: Current server's public IP address (if detectable)
+    """
+
+    def __init__(self, code: int, message: str, server_ip: str = ""):
+        super().__init__(code, message)
+        self.server_ip = server_ip
+
+
 def format_binance_error(error_data: Dict[str, Any]) -> str:
     """
     格式化Binance API错误信息为中文
@@ -74,7 +92,7 @@ def format_binance_error(error_data: Dict[str, Any]) -> str:
         -2011: "订单不存在",
         -2013: "订单不存在",
         -2014: "API密钥无效",
-        -2015: "API密钥格式无效",
+        -2015: "API密钥/IP权限无效",
         -1022: "签名验证失败",
         -4000: "参数无效",
     }
@@ -138,14 +156,27 @@ class BinanceFuturesClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.proxy_url = proxy_url  # 代理URL，格式: http://user:pass@host:port
 
-    # 移动网络保护：强制请求超时，防止TCP挂起导致请求堆积→rate limit→封IP
-    # connect=5s: 建连超时；total=12s: 全程超时（含下单/撤单/查询等）
-    _DEFAULT_TIMEOUT = aiohttp.ClientTimeout(connect=5.0, total=12.0)
-
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session with explicit timeout to protect against mobile network hangs."""
+        """Get or create aiohttp session"""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(timeout=self._DEFAULT_TIMEOUT)
+            if self.proxy_url and self.proxy_url != 'direct' and \
+                    self.proxy_url.startswith(('socks5://', 'socks4://', 'socks://')):
+                try:
+                    from aiohttp_socks import ProxyConnector
+                    connector = ProxyConnector.from_url(self.proxy_url)
+                    self.session = aiohttp.ClientSession(connector=connector)
+                    self._proxy_via_connector = True
+                except ImportError:
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "aiohttp-socks not installed; SOCKS5 proxy disabled. "
+                        "Run: pip install aiohttp-socks"
+                    )
+                    self.session = aiohttp.ClientSession()
+                    self._proxy_via_connector = False
+            else:
+                self.session = aiohttp.ClientSession()
+                self._proxy_via_connector = False
         return self.session
 
     async def close(self):
@@ -168,6 +199,21 @@ class BinanceFuturesClient:
                 friendly = format_binance_error(data)
                 raise BinanceIPBanError(ip=ip, ban_until_ms=ban_until_ms, message=friendly)
 
+        # IP白名单错误 — API Key绑定了IP白名单但当前IP不在列表中
+        if code == -2015:
+            import logging as _log
+            _logger = _log.getLogger(__name__)
+            friendly = format_binance_error(data)
+            # 尝试获取当前服务器IP
+            server_ip = self._detect_server_ip()
+            ip_hint = f" (当前服务器IP: {server_ip})" if server_ip else ""
+            error_msg = (
+                f"Binance API 错误: {friendly}{ip_hint}\n"
+                f"请检查: 1) API Key是否有效 2) 当前服务器IP是否已添加到Binance API Key的IP白名单中"
+            )
+            _logger.error(error_msg)
+            raise BinanceIPWhitelistError(code=code, message=error_msg, server_ip=server_ip)
+
         # 终止性错误码 — 不可重试
         if code in TERMINAL_ERROR_CODES:
             friendly = format_binance_error(data)
@@ -175,6 +221,18 @@ class BinanceFuturesClient:
 
         # 普通错误
         raise Exception(f"Binance API 错误: {format_binance_error(data)}")
+
+    @staticmethod
+    def _detect_server_ip() -> str:
+        """Detect current server's public IP for diagnostic purposes."""
+        import urllib.request
+        for url in ("https://checkip.amazonaws.com", "https://ifconfig.me"):
+            try:
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    return resp.read().decode().strip()
+            except Exception:
+                continue
+        return ""
 
     def _sign(self, query_string: str) -> str:
         """Generate HMAC SHA256 signature for a query string"""
@@ -190,27 +248,12 @@ class BinanceFuturesClient:
         endpoint: str,
         signed: bool = False,
         use_spot_api: bool = False,
-        api_key_only: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Make HTTP request to Binance API"""
         base_url = self.spot_base_url if use_spot_api else self.base_url
         url = f"{base_url}{endpoint}"
         headers = {}
-
-        # API密钥认证（不需要签名）
-        if api_key_only:
-            headers["X-MBX-APIKEY"] = self.api_key
-            session = await self._get_session()
-            try:
-                proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None
-                async with session.request(method, url, headers=headers, proxy=proxy, **kwargs) as resp:
-                    data = await resp.json()
-                    if resp.status != 200:
-                        self._raise_typed_error(data)
-                    return data
-            except aiohttp.ClientError as e:
-                raise Exception(f"网络错误: {str(e)}")
 
         if signed:
             headers["X-MBX-APIKEY"] = self.api_key
@@ -222,8 +265,9 @@ class BinanceFuturesClient:
             full_url = f"{url}?{query_string}&signature={signature}"
             session = await self._get_session()
             try:
-                # 使用代理（如果配置了）
-                proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None
+                # SOCKS5 代理由 ProxyConnector 处理；HTTP 代理用 proxy= 参数
+                proxy = None if getattr(self, '_proxy_via_connector', False) else \
+                    (self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None)
                 async with session.request(method, full_url, headers=headers, proxy=proxy, **kwargs) as resp:
                     data = await resp.json()
                     if resp.status != 200:
@@ -235,8 +279,9 @@ class BinanceFuturesClient:
         session = await self._get_session()
 
         try:
-            # 使用代理（如果配置了）
-            proxy = self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None
+            # SOCKS5 代理由 ProxyConnector 处理；HTTP 代理用 proxy= 参数
+            proxy = None if getattr(self, '_proxy_via_connector', False) else \
+                (self.proxy_url if self.proxy_url and self.proxy_url != 'direct' else None)
             async with session.request(method, url, headers=headers, proxy=proxy, **kwargs) as resp:
                 data = await resp.json()
 
@@ -356,12 +401,12 @@ class BinanceFuturesClient:
 
     async def create_futures_listen_key(self) -> str:
         """创建 Futures User Data Stream listenKey（有效期60min）"""
-        result = await self._request("POST", "/fapi/v1/listenKey", api_key_only=True)
+        result = await self._request("POST", "/fapi/v1/listenKey", signed=False)
         return result.get("listenKey", "")
 
     async def keepalive_futures_listen_key(self, listen_key: str) -> None:
         """续期 listenKey，每25min调用一次防止过期"""
-        await self._request("PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, api_key_only=True)
+        await self._request("PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=False)
 
     async def place_order(
         self,

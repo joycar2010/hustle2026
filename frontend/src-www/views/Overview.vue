@@ -62,9 +62,10 @@
                 <span class="px-1.5 py-0.5 rounded text-xs" :class="acc.is_mt5_account ? 'bg-purple-900/40 text-purple-300' : 'bg-blue-900/40 text-blue-300'">
                   {{ acc.is_mt5_account ? 'MT5' : 'Binance' }}
                 </span>
-                <span :class="acc.is_active !== false ? 'text-success' : 'text-text-tertiary'" class="text-xs">
+                <span v-if="!acc._error" :class="acc.is_active !== false ? 'text-success' : 'text-text-tertiary'" class="text-xs">
                   {{ acc.is_active !== false ? '● 正常' : '○ 未启用' }}
                 </span>
+                <span v-else class="text-xs text-red-400">● 连接异常</span>
               </div>
             </div>
             <!-- 当日盈亏大字 -->
@@ -74,6 +75,15 @@
                 {{ pnlStr(acc.unrealized_pnl ?? acc.daily_pnl) }}
               </div>
             </div>
+          </div>
+
+          <!-- IP白名单/API错误提示 -->
+          <div v-if="acc._error" class="mb-4 p-3 rounded-xl border" :class="acc._error.startsWith('IP_WHITELIST:') ? 'bg-red-950/40 border-red-800/50 text-red-300' : 'bg-yellow-950/40 border-yellow-800/50 text-yellow-300'">
+            <div class="flex items-center gap-1.5 font-semibold text-xs mb-1">
+              <svg class="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+              <span>{{ acc._error.startsWith('IP_WHITELIST:') ? 'IP白名单未配置' : '数据获取失败' }}</span>
+            </div>
+            <div class="text-xs leading-relaxed opacity-90">{{ acc._error.startsWith('IP_WHITELIST:') ? acc._error.substring(13) : acc._error }}</div>
           </div>
 
           <!-- 资金数据 -->
@@ -148,12 +158,24 @@ async function fetchData() {
     const d = r.data
     if (Array.isArray(d)) {
       accounts.value = d
-    } else if (d.accounts && d.accounts.length > 0) {
-      accounts.value = d.accounts
-    } else if (d.failed_accounts && d.failed_accounts.length > 0) {
-      accounts.value = d.failed_accounts.map(a => ({ ...a, _error: a.error }))
     } else {
-      throw new Error('no accounts in response')
+      // Merge successful + failed accounts so both are displayed
+      const all = []
+      if (d.accounts && d.accounts.length > 0) {
+        all.push(...d.accounts)
+      }
+      if (d.failed_accounts && d.failed_accounts.length > 0) {
+        all.push(...d.failed_accounts.map(a => ({
+          ...a,
+          _error: a.error,
+          balance: { total_assets: 0, available_balance: 0, net_assets: 0, margin_balance: 0, risk_ratio: null },
+        })))
+      }
+      if (all.length > 0) {
+        accounts.value = all
+      } else {
+        throw new Error('no accounts in response')
+      }
     }
 
     // Enrich MT5 accounts with live bridge data (Python returns balance=0 for MT5)

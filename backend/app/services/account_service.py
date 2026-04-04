@@ -10,7 +10,7 @@ from sqlalchemy import select
 from uuid import UUID
 from app.services.binance_client import BinanceFuturesClient
 from app.services.bybit_client import BybitV5Client
-from app.services.mt5_client import MT5Client
+from app.services.mt5_http_client import get_mt5_http_client
 from app.models.account import Account
 from app.schemas.account import AccountBalance, AccountPosition
 
@@ -50,25 +50,16 @@ class AccountDataService:
 
     @staticmethod
     def _build_proxy_url(proxy_config) -> str:
-        """Build proxy URL from account.proxy_config JSON field"""
-        if not proxy_config:
-            return None
+        """Build proxy URL from account.proxy_config JSON field.
+        Delegates to the global build_proxy_url which handles scheme correction."""
+        from app.core.proxy_utils import build_proxy_url
         if isinstance(proxy_config, str):
             import json
             try:
                 proxy_config = json.loads(proxy_config)
             except:
                 return None
-        host = proxy_config.get("host")
-        port = proxy_config.get("port")
-        if not host or not port:
-            return None
-        username = proxy_config.get("username", "")
-        password = proxy_config.get("password", "")
-        proxy_type = proxy_config.get("proxy_type", "socks5")
-        if username and password:
-            return f"{proxy_type}://{username}:{password}@{host}:{port}"
-        return f"{proxy_type}://{host}:{port}"
+        return build_proxy_url(proxy_config)
 
     async def get_binance_balance(self, api_key: str, api_secret: str, proxy_url: str = None) -> AccountBalance:
         """Fetch Binance account balance including spot, margin and futures data"""
@@ -432,15 +423,32 @@ class AccountDataService:
                 short_liquidation_price=short_liquidation_price,
             )
         except Exception as e:
-            from app.services.binance_client import BinanceIPBanError
+            from app.services.binance_client import BinanceIPBanError, BinanceIPWhitelistError
             import re as _re
+
+            # IP白名单错误 — API Key绑定的IP不包含当前服务器
+            if isinstance(e, BinanceIPWhitelistError):
+                server_ip = e.server_ip or "未知"
+                logger.error(f"[Binance IP白名单] 当前服务器IP {server_ip} 未在API Key白名单中")
+                raise Exception(
+                    f"IP_WHITELIST:Binance API密钥的IP白名单未包含当前服务器IP({server_ip})，"
+                    f"请在Binance控制台将此IP添加到API Key的IP访问限制中"
+                )
+
             if isinstance(e, BinanceIPBanError):
                 logger.error(f"[Binance IP封禁] {e.message}")
-                # 异步触发飞书+弹窗告警（asyncio已在模块顶部导入，不在此重复import）
                 asyncio.create_task(_trigger_binance_ban_alert_all_users(e))
                 raise Exception(f"RATE_LIMIT_BAN:{e.ban_until_ms}")
 
             error_msg = str(e)
+
+            # IP白名单错误（通过错误消息匹配）
+            if "-2015" in error_msg or "Invalid API-key, IP" in error_msg:
+                logger.error(f"[Binance IP白名单] {error_msg}")
+                raise Exception(
+                    f"IP_WHITELIST:Binance API密钥的IP白名单配置错误，请检查API Key设置"
+                )
+
             # 兼容旧版异常格式
             if "banned until" in error_msg and ("banned" in error_msg or "rate limit" in error_msg.lower()):
                 logger.warning(f"Binance rate limit exceeded: {error_msg}")
@@ -461,12 +469,13 @@ class AccountDataService:
         mt5_id: int = None,
         mt5_password: str = None,
         mt5_server: str = None,
+        proxy_url: str = None,
     ) -> AccountBalance:
         """Fetch Bybit account balance.
         - For MT5 accounts: Use direct MT5 connection (MT5Client)
         - For Unified accounts: Use V5 API (/v5/account/...)
         """
-        client = BybitV5Client(api_key, api_secret)
+        client = BybitV5Client(api_key, api_secret, proxy_url=proxy_url)
 
         try:
             # Check if this is an MT5 account
@@ -479,6 +488,14 @@ class AccountDataService:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error fetching Bybit balance: {error_msg}", exc_info=True)
+
+            # IP白名单错误
+            if "Unmatched IP" in error_msg or "10010" in error_msg or "IP" in error_msg and "whitelist" in error_msg.lower():
+                logger.error(f"[Bybit IP白名单] {error_msg}")
+                raise Exception(
+                    f"IP_WHITELIST:Bybit API密钥的IP白名单未包含当前服务器IP，"
+                    f"请在Bybit控制台将服务器IP添加到API Key的IP访问限制中"
+                )
 
             # Check for rate limit errors
             if "rate limit" in error_msg.lower() or "banned" in error_msg.lower() or "10006" in error_msg:
@@ -605,46 +622,17 @@ class AccountDataService:
         mt5_deals = []
 
         try:
-            logger.info(f"Connecting to MT5 account {mt5_id} (direct fallback)")
-            # Use shared MT5 client from realtime_market_service to avoid connection conflicts
-            from app.services.realtime_market_service import market_data_service
-            mt5 = market_data_service.mt5_client
-
-            if mt5 and mt5.connected:
-                logger.info("Using shared MT5 client")
-                mt5_info = mt5.get_account_info()
-                if mt5_info:
-                    mt5_positions = mt5.get_positions()
-                    # Get today's deals history for fees
-                    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-                    mt5_deals = mt5.get_deals_history(date_from=today_start)
-                    logger.info(f"Got {len(mt5_deals)} deals from MT5 history")
-                else:
-                    logger.warning("Shared MT5 client returned None for account info, trying temporary client")
-
-            # If shared client failed or not available, use temporary client
-            if not mt5_info:
-                logger.info("Creating temporary MT5 client")
-                temp_mt5 = MT5Client(
-                    login=int(mt5_id),
-                    password=mt5_password,
-                    server=mt5_server
-                )
-                if temp_mt5.connect():
-                    logger.info("Temporary MT5 client connected successfully")
-                    mt5_info = temp_mt5.get_account_info()
-                    if mt5_info:
-                        mt5_positions = temp_mt5.get_positions()
-                        # Get today's deals history for fees
-                        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-                        mt5_deals = temp_mt5.get_deals_history(date_from=today_start)
-                        logger.info(f"Got {len(mt5_deals)} deals from MT5 history")
-                    else:
-                        logger.error("Temporary MT5 client get_account_info() returned None")
-                    temp_mt5.disconnect()
-                else:
-                    logger.error("Failed to connect temporary MT5 client")
-                    raise Exception("Failed to connect to MT5")
+            logger.info(f"Fetching MT5 account {mt5_id} data via HTTP Bridge")
+            mt5_http = get_mt5_http_client()
+            mt5_info = await mt5_http.get_account_info()
+            if mt5_info:
+                positions_raw = await mt5_http.get_positions(symbol="XAUUSD+")
+                mt5_positions = positions_raw if positions_raw else []
+                mt5_deals = []  # deals history not yet available via HTTP bridge
+                logger.info(f"Got MT5 info and {len(mt5_positions)} positions via HTTP Bridge")
+            else:
+                logger.error("MT5 HTTP Bridge get_account_info returned None")
+                raise Exception("Failed to get MT5 account info via HTTP Bridge")
 
             if not mt5_info:
                 logger.error("Failed to get MT5 account info from both shared and temporary clients")
@@ -942,7 +930,7 @@ class AccountDataService:
         symbol: Optional[str] = None,
     ) -> List[AccountPosition]:
         """Fetch Binance positions"""
-        client = BinanceFuturesClient(api_key, api_secret)
+        client = BinanceFuturesClient(api_key, api_secret, proxy_url=proxy_url)
 
         try:
             positions_data = await client.get_position_risk(symbol)
@@ -978,9 +966,10 @@ class AccountDataService:
         category: str = "linear",
         symbol: Optional[str] = None,
         settle_coin: str = "USDT",
+        proxy_url: str = None,
     ) -> List[AccountPosition]:
         """Fetch Bybit positions"""
-        client = BybitV5Client(api_key, api_secret)
+        client = BybitV5Client(api_key, api_secret, proxy_url=proxy_url)
 
         try:
             positions_data = await client.get_positions(category, symbol, settle_coin)
@@ -1020,24 +1009,9 @@ class AccountDataService:
     ) -> List[AccountPosition]:
         """Fetch MT5 positions using MT5 client"""
         try:
-            logger.info(f"Fetching MT5 positions for account {mt5_id}")
-            # Use shared MT5 client from realtime_market_service to avoid connection conflicts
-            from app.services.realtime_market_service import market_data_service
-            mt5 = market_data_service.mt5_client
-
-            positions_data = []
-            if mt5 and mt5.connected:
-                positions_data = mt5.get_positions(symbol)
-            else:
-                # Fallback: create temporary client
-                temp_mt5 = MT5Client(
-                    login=int(mt5_id),
-                    password=mt5_password,
-                    server=mt5_server
-                )
-                if temp_mt5.connect():
-                    positions_data = temp_mt5.get_positions(symbol)
-                    temp_mt5.disconnect()
+            logger.info(f"Fetching MT5 positions for account {mt5_id} via HTTP Bridge")
+            mt5_http = get_mt5_http_client()
+            positions_data = await mt5_http.get_positions(symbol=symbol)
 
             positions = []
             for pos in positions_data:
@@ -1107,9 +1081,10 @@ class AccountDataService:
         api_secret: str,
         account_type: str = "UNIFIED",
         category: str = "linear",
+        proxy_url: str = None,
     ) -> float:
         """Calculate Bybit daily P&L from transaction log"""
-        client = BybitV5Client(api_key, api_secret)
+        client = BybitV5Client(api_key, api_secret, proxy_url=proxy_url)
 
         try:
             # Get today's start timestamp
@@ -1198,6 +1173,7 @@ class AccountDataService:
                         daily_pnl = bridge_balance.daily_pnl or 0.0
                     elif account.mt5_id and account.mt5_primary_pwd and account.mt5_server:
                         # Fallback: direct MT5 connection
+                        _bybit_proxy = self._build_proxy_url(account.proxy_config)
                         balance, positions, daily_pnl = await asyncio.gather(
                             self.get_bybit_balance(
                                 account.api_key,
@@ -1206,31 +1182,35 @@ class AccountDataService:
                                 mt5_id=account.mt5_id,
                                 mt5_password=account.mt5_primary_pwd,
                                 mt5_server=account.mt5_server,
+                                proxy_url=_bybit_proxy,
                             ),
                             self.get_mt5_positions(
                                 mt5_id=account.mt5_id,
                                 mt5_password=account.mt5_primary_pwd,
                                 mt5_server=account.mt5_server,
                             ),
-                            self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                            self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type, proxy_url=_bybit_proxy),
                         )
                     else:
                         # No mt5_id and no Bridge, try Bybit API
+                        _bybit_proxy = self._build_proxy_url(account.proxy_config)
                         balance, positions, daily_pnl = await asyncio.gather(
-                            self.get_bybit_balance(account.api_key, account.api_secret, account_type),
-                            self.get_bybit_positions(account.api_key, account.api_secret),
-                            self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                            self.get_bybit_balance(account.api_key, account.api_secret, account_type, proxy_url=_bybit_proxy),
+                            self.get_bybit_positions(account.api_key, account.api_secret, proxy_url=_bybit_proxy),
+                            self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type, proxy_url=_bybit_proxy),
                         )
                 else:
-                    # For regular Bybit accounts, use V5 API
+                    # For regular Bybit accounts, use V5 API (with proxy)
+                    bybit_proxy_url = self._build_proxy_url(account.proxy_config)
                     balance, positions, daily_pnl = await asyncio.gather(
                         self.get_bybit_balance(
                             account.api_key,
                             account.api_secret,
                             account_type,
+                            proxy_url=bybit_proxy_url,
                         ),
-                        self.get_bybit_positions(account.api_key, account.api_secret),
-                        self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type),
+                        self.get_bybit_positions(account.api_key, account.api_secret, proxy_url=bybit_proxy_url),
+                        self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type, proxy_url=bybit_proxy_url),
                     )
             else:
                 raise ValueError(f"Unknown platform_id: {platform_id}")
@@ -1254,7 +1234,18 @@ class AccountDataService:
             self._set_cached_data(cache_key, result)
             return result
         except Exception as e:
-            raise Exception(f"Failed to fetch account data: {str(e)}")
+            err = str(e)
+            # 保持 IP_WHITELIST / RATE_LIMIT 前缀透传，不再包装
+            if err.startswith('IP_WHITELIST:') or err.startswith('RATE_LIMIT'):
+                raise
+            # 检查包装后的消息中是否包含 IP 白名单关键词
+            if 'IP_WHITELIST:' in err:
+                # 提取原始 IP_WHITELIST 消息
+                idx = err.index('IP_WHITELIST:')
+                raise Exception(err[idx:])
+            if 'Invalid API-key, IP' in err or 'Unmatched IP' in err or '-2015' in err:
+                raise Exception(f"IP_WHITELIST:API密钥的IP白名单未包含当前服务器IP，请在交易所控制台添加服务器IP到API Key白名单")
+            raise Exception(f"Failed to fetch account data: {err}")
 
     async def get_aggregated_account_data(
         self,
@@ -1305,6 +1296,9 @@ class AccountDataService:
                 if error_msg.startswith("RATE_LIMIT_BAN:"):
                     ban_until_ms = error_msg.split(":")[1]
                     error_msg = f"RATE_LIMIT:{ban_until_ms}"
+                # IP whitelist error — pass through friendly message
+                elif error_msg.startswith("IP_WHITELIST:"):
+                    error_msg = error_msg  # Keep as-is for frontend
 
                 failed_accounts.append({
                     "account_id": str(unique_accounts[i].account_id),

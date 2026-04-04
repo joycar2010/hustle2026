@@ -13,8 +13,8 @@
       <div class="form-group">
         <label class="label">交易平台</label>
         <select v-model="exchange" class="select-input">
-          <option value="binance">Binance (XAUUSDT)</option>
-          <option value="bybit">Bybit MT5 (XAUUSD.s)</option>
+          <option value="binance">主账号 (XAUUSDT)</option>
+          <option value="bybit">对冲账户 (XAUUSD.s)</option>
         </select>
       </div>
 
@@ -30,7 +30,7 @@
           placeholder="1"
         />
         <div class="hint-text">
-          Bybit 实际下单量: {{ xauToLot(quantity).toFixed(2) }} Lot
+          对冲 实际下单量: {{ xauToLot(quantity).toFixed(2) }} Lot
         </div>
       </div>
 

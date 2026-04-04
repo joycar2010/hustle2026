@@ -22,7 +22,7 @@
                 {{ getPlatformName(account.platform_id, account.is_mt5_account) }}
               </span>
               <span v-if="account.is_default" class="px-2 py-1 bg-yellow-900 text-yellow-300 rounded text-xs">
-                {{ account.platform_id === 1 ? 'Binance默认' : 'Bybit MT5默认' }}
+                {{ account.platform_id === 1 ? '主账号默认' : '对冲账户默认' }}
               </span>
               <span v-if="!account.is_active" class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">
                 未启用
@@ -130,8 +130,8 @@
               <select v-model="accountForm.platform_id" required
                       @change="onPlatformChange"
                       class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
-                <option :value="1">Binance</option>
-                <option :value="2">Bybit</option>
+                <option :value="1">主账号</option>
+                <option :value="2">对冲账户</option>
               </select>
             </div>
 
@@ -155,7 +155,7 @@
             <!-- API Configuration Section -->
             <div class="border-t border-gray-700 pt-4">
               <h3 class="text-lg font-semibold mb-3">
-                {{ accountForm.platform_id === 1 ? 'Binance' : 'Bybit' }} API 配置
+                {{ accountForm.platform_id === 1 ? '主账号' : '对冲账户' }} API 配置
               </h3>
 
               <div class="space-y-3">
@@ -163,7 +163,7 @@
                   <label class="block text-sm text-gray-400 mb-2">API Key *</label>
                   <input type="text" v-model="accountForm.api_key" required
                          class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         :placeholder="`输入 ${accountForm.platform_id === 1 ? 'Binance' : 'Bybit'} API Key`" />
+                         :placeholder="`输入 ${accountForm.platform_id === 1 ? '主账号' : '对冲账户'} API Key`" />
                 </div>
 
                 <div>
@@ -173,7 +173,7 @@
                            v-model="accountForm.api_secret"
                            :required="!isEditMode"
                            class="flex-1 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                           :placeholder="isEditMode ? '留空表示不修改' : `输入 ${accountForm.platform_id === 1 ? 'Binance' : 'Bybit'} API Secret`" />
+                           :placeholder="isEditMode ? '留空表示不修改' : `输入 ${accountForm.platform_id === 1 ? '主账号' : '对冲账户'} API Secret`" />
                     <button v-if="isEditMode"
                             type="button"
                             @click="requestViewSecret"
@@ -187,7 +187,7 @@
                   <label class="block text-sm text-gray-400 mb-2">Passphrase (可选)</label>
                   <input type="password" v-model="accountForm.passphrase"
                          class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         placeholder="输入 Bybit API Passphrase (如果需要)" />
+                         placeholder="输入对冲账户 API Passphrase (如果需要)" />
                 </div>
               </div>
             </div>
@@ -199,7 +199,7 @@
                      class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
                      :placeholder="accountForm.platform_id === 1 ? '默认: 20x' : '默认: 100x'" />
               <div class="text-xs text-gray-500 mt-1">
-                {{ accountForm.platform_id === 1 ? 'Binance 推荐杠杆: 20x' : 'Bybit 推荐杠杆: 100x' }}
+                {{ accountForm.platform_id === 1 ? '主账号 推荐杠杆: 20x' : '对冲账户 推荐杠杆: 100x' }}
               </div>
             </div>
 
@@ -214,7 +214,7 @@
                             after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-600">
                 </div>
               </label>
-              <span class="text-sm text-gray-400">设为{{ accountForm.platform_id === 1 ? 'Binance' : 'Bybit MT5' }}默认账户</span>
+              <span class="text-sm text-gray-400">设为{{ accountForm.platform_id === 1 ? '主账号' : '对冲账户' }}默认账户</span>
             </div>
 
             <!-- Form Actions -->
@@ -278,8 +278,8 @@
               <label class="block text-sm text-gray-400 mb-2">平台</label>
               <select v-model="proxyConfigForm.platform_id"
                       class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
-                <option :value="1">Binance</option>
-                <option :value="2">Bybit</option>
+                <option :value="1">主账号</option>
+                <option :value="2">对冲账户</option>
               </select>
             </div>
 
@@ -290,7 +290,7 @@
                       class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary">
                 <option :value="null">直连（不使用代理）</option>
                 <option v-for="proxy in proxyStore.activeProxies" :key="proxy.id" :value="proxy.id">
-                  {{ proxy.provider === 'local' ? '本地' : proxy.provider === 'qingguo' ? '青果' : '自定义' }} -
+                  {{ proxy.provider === 'local' ? '本地' : proxy.provider }} -
                   {{ proxy.host }}:{{ proxy.port }}
                   (健康度: {{ proxy.health_score }})
                 </option>
@@ -387,9 +387,9 @@ async function fetchAccounts() {
 }
 
 function getPlatformName(platformId, isMt5Account) {
-  if (platformId === 1) return 'Binance'
+  if (platformId === 1) return '主账号'
   if (platformId === 2) {
-    return isMt5Account ? 'Bybit MT5' : 'Bybit'
+    return '对冲账户'
   }
   return 'Unknown'
 }

@@ -64,7 +64,7 @@ async def websocket_endpoint(
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "request_snapshot":
-                    asyncio.create_task(_push_initial_snapshot(websocket))
+                    asyncio.create_task(_push_initial_snapshot(websocket, user_id))
                     continue
             except (json.JSONDecodeError, AttributeError):
                 pass
@@ -81,14 +81,15 @@ async def websocket_endpoint(
         manager.disconnect(websocket, user_id)
 
 
-async def _push_initial_snapshot(websocket: WebSocket):
-    """Read current MT5 + Binance positions and push position_snapshot to this client."""
+async def _push_initial_snapshot(websocket: WebSocket, user_id: str = None):
+    """Read current MT5 + Binance positions and push position_snapshot to this client (user-scoped)."""
     try:
         from app.models.account import Account
         from app.services.mt5_client import MT5Client
         from app.services.binance_client import BinanceFuturesClient
         from app.core.database import get_db_context
         from sqlalchemy import select
+        from uuid import UUID as _UUID
 
         long_lots = 0.0
         short_lots = 0.0
@@ -96,7 +97,10 @@ async def _push_initial_snapshot(websocket: WebSocket):
         binance_short_xau = 0.0
 
         async with get_db_context() as db:
-            result = await db.execute(select(Account).where(Account.is_active == True))
+            query = select(Account).where(Account.is_active == True)
+            if user_id:
+                query = query.where(Account.user_id == _UUID(user_id))
+            result = await db.execute(query)
             accounts = result.scalars().all()
 
         for acc in accounts:
@@ -243,7 +247,7 @@ async def update_streamer_config(config: StreamerConfigUpdate):
     return {
         "success": True,
         "streamer": config.streamer,
-        "interval": getattr(streamer, "interval", getattr(streamer, "base_interval", 0)),
-        "interval_ms": getattr(streamer, "interval", getattr(streamer, "base_interval", 0)) * 1000,
-        "message": f"Updated {config.streamer} interval to {getattr(streamer, 'interval', getattr(streamer, 'base_interval', 0))}s"
+        "interval": streamer.interval,
+        "interval_ms": streamer.interval * 1000,
+        "message": f"Updated {config.streamer} interval to {streamer.interval}s"
     }

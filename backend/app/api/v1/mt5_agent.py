@@ -72,9 +72,15 @@ async def get_instances(current_user: dict = Depends(get_current_user)):
     获取所有 MT5 实例状态
 
     Returns:
-        实例列表，包含运行状态和健康信息
+        实例列表，包含运行状态和健康信息。Agent 不可用时返回空列表而非 503。
     """
-    return await call_agent_api("GET", "/instances")
+    try:
+        return await call_agent_api("GET", "/instances")
+    except HTTPException as e:
+        if e.status_code == 503:
+            logger.warning(f"MT5 Agent 不可用，返回空实例列表: {e.detail}")
+            return []
+        raise
 
 @router.get("/instances/{instance_name}")
 async def get_instance(
@@ -429,7 +435,17 @@ async def get_bridge_status(
         f"(service: {client.bridge_service_name})"
     )
 
-    return await call_agent_api("GET", f"/bridge/{client.bridge_service_name}/status")
+    try:
+        return await call_agent_api("GET", f"/bridge/{client.bridge_service_name}/status")
+    except HTTPException as e:
+        if e.status_code in (503, 502):
+            return {
+                "service_name": client.bridge_service_name,
+                "status": "UNAVAILABLE",
+                "is_running": False,
+                "error": f"Agent 服务不可用: {e.detail}"
+            }
+        raise
 
 
 @router.post("/bridge/{client_id}/start")

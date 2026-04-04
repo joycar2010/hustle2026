@@ -11,7 +11,7 @@
         <div>
           <h3 class="text-lg font-semibold text-yellow-500 mb-2">MT5市场休市提醒</h3>
           <p class="text-sm text-gray-300 mb-2">
-            当前为周末时间，MT5市场休市（周六、周日不交易）。由于套利机会数据需要同时获取Binance和Bybit MT5的价格，因此周末期间无法生成新的套利机会记录。
+            当前为周末时间，MT5市场休市（周六、周日不交易）。由于套利机会数据需要同时获取主账号和对冲账户的价格，因此周末期间无法生成新的套利机会记录。
           </p>
           <p class="text-sm text-gray-400">
             💡 您可以查询历史数据（选择"按日"或"自定义时间段"）来查看工作日的套利机会记录。
@@ -130,15 +130,15 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
       <!-- Forward Arbitrage Chart -->
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">正向套利分析 (Binance做多)</h3>
-        <div class="text-xs text-gray-400 mb-2">开仓点差 = Bybit卖价 - Binance买价</div>
+        <h3 class="text-lg font-semibold mb-4">正向套利分析 (主账号做多)</h3>
+        <div class="text-xs text-gray-400 mb-2">开仓点差 = 对冲卖价 - 主账号买价</div>
         <canvas ref="forwardChartRef"></canvas>
       </div>
 
       <!-- Reverse Arbitrage Chart -->
       <div class="card">
-        <h3 class="text-lg font-semibold mb-4">反向套利分析 (Bybit做多)</h3>
-        <div class="text-xs text-gray-400 mb-2">开仓点差 = Binance卖价 - Bybit卖价</div>
+        <h3 class="text-lg font-semibold mb-4">反向套利分析 (对冲做多)</h3>
+        <div class="text-xs text-gray-400 mb-2">开仓点差 = 主账号卖价 - 对冲卖价</div>
         <canvas ref="reverseChartRef"></canvas>
       </div>
     </div>
@@ -160,8 +160,8 @@
               <th class="pb-2">套利类型</th>
               <th class="pb-2">正向点差</th>
               <th class="pb-2">反向点差</th>
-              <th class="pb-2">Binance买/卖</th>
-              <th class="pb-2">Bybit买/卖</th>
+              <th class="pb-2">主账号买/卖</th>
+              <th class="pb-2">对冲买/卖</th>
               <th class="pb-2">目标点差</th>
             </tr>
           </thead>
@@ -457,7 +457,7 @@ function updateCharts() {
       data: {
         labels: labels,
         datasets: [{
-          label: '正向开仓点差 (Bybit卖-Binance买)',
+          label: '正向开仓点差 (对冲卖-主账号买)',
           data: forwardData,
           borderColor: 'rgb(34, 197, 94)',
           backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -501,7 +501,7 @@ function updateCharts() {
       data: {
         labels: labels,
         datasets: [{
-          label: '反向开仓点差 (Binance卖-Bybit卖)',
+          label: '反向开仓点差 (主账号卖-对冲卖)',
           data: reverseData,
           borderColor: 'rgb(239, 68, 68)',
           backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -540,7 +540,7 @@ function updateCharts() {
 
 function exportData() {
   const csv = [
-    ['时间', '套利类型', '正向点差', '反向点差', 'Binance买价', 'Binance卖价', 'Bybit买价', 'Bybit卖价', '目标点差'],
+    ['时间', '套利类型', '正向点差', '反向点差', '主账号买价', '主账号卖价', '对冲买价', '对冲卖价', '目标点差'],
     ...spreadRecords.value.map(r => [
       formatDateTimeBeijing(r.timestamp),
       r.opportunity_type === 'forward_open' ? '正向开仓' :

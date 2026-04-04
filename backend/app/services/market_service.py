@@ -8,7 +8,7 @@ import json
 from app.core.config import settings
 from app.services.binance_client import BinanceFuturesClient
 from app.services.binance_ws_client import binance_ws
-from app.services.mt5_client import MT5Client
+from app.services.mt5_http_client import get_mt5_http_client
 from app.schemas.market import MarketQuote, SpreadData
 
 logger = logging.getLogger(__name__)
@@ -23,59 +23,10 @@ class MarketDataService:
             api_key=settings.BINANCE_API_KEY,
             api_secret=settings.BINANCE_API_SECRET
         )
-        # MT5 client will be initialized lazily from database
-        self.mt5_client: Optional[MT5Client] = None
-        self._mt5_initialized = False
+        # MT5 通过 HTTP Bridge 获取行情（支持远程服务器，无需本地 MT5 终端）
+        self.mt5_client = get_mt5_http_client()
         self.redis_client: Optional[redis.Redis] = None
         self.cache_ttl = 1  # Cache TTL in seconds
-
-    async def _ensure_mt5_client(self):
-        """Ensure MT5 client is initialized from system service account"""
-        if self._mt5_initialized and self.mt5_client:
-            return
-
-        try:
-            # Import here to avoid circular dependency
-            from app.core.database import async_session_maker
-            from app.models.mt5_client import MT5Client as MT5ClientModel
-            from sqlalchemy import select
-
-            async with async_session_maker() as db:
-                # Get system service MT5 client
-                result = await db.execute(
-                    select(MT5ClientModel)
-                    .where(MT5ClientModel.is_system_service == True)
-                    .where(MT5ClientModel.is_active == True)
-                    .limit(1)
-                )
-                client = result.scalar_one_or_none()
-
-                if client:
-                    logger.info(f"Initializing MT5 client from system service account: {client.mt5_login}")
-                    self.mt5_client = MT5Client(
-                        login=int(client.mt5_login),
-                        password=client.mt5_password,
-                        server=client.mt5_server
-                    )
-                else:
-                    # Fallback to environment variables
-                    logger.warning("No system service account found, using environment variables")
-                    self.mt5_client = MT5Client(
-                        login=int(settings.BYBIT_MT5_ID) if settings.BYBIT_MT5_ID else 0,
-                        password=settings.BYBIT_MT5_PASSWORD,
-                        server=settings.BYBIT_MT5_SERVER
-                    )
-
-                self._mt5_initialized = True
-        except Exception as e:
-            logger.error(f"Failed to initialize MT5 client from database: {e}")
-            # Fallback to environment variables
-            self.mt5_client = MT5Client(
-                login=int(settings.BYBIT_MT5_ID) if settings.BYBIT_MT5_ID else 0,
-                password=settings.BYBIT_MT5_PASSWORD,
-                server=settings.BYBIT_MT5_SERVER
-            )
-            self._mt5_initialized = True
 
     async def _get_redis(self) -> redis.Redis:
         """Get or create Redis connection"""
@@ -86,8 +37,7 @@ class MarketDataService:
     async def close(self):
         """Close all connections"""
         await self.binance_client.close()
-        if self.mt5_client:
-            self.mt5_client.disconnect()
+        await self.mt5_client.close()
         if self.redis_client:
             await self.redis_client.close()
 
@@ -113,29 +63,40 @@ class MarketDataService:
     ) -> MarketQuote:
         """Get Bybit market quote via MT5
 
-        Note: Bybit MT5 uses XAUUSD+ for gold
+        Note: Bybit MT5 uses XAUUSD+ for gold.
+        Includes retry logic for when MT5 bridge is still initializing.
         """
-        try:
-            # Map symbols for Bybit MT5
-            mt5_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
+        mt5_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
 
-            # MT5 operations are synchronous, run in executor
-            loop = asyncio.get_event_loop()
-            tick = await loop.run_in_executor(None, self.mt5_client.get_tick, mt5_symbol)
+        last_error = None
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                # 通过 HTTP Bridge 获取 tick（异步，无需 run_in_executor）
+                tick = await self.mt5_client.get_tick(mt5_symbol)
 
-            if not tick:
-                raise Exception(f"No ticker data for {mt5_symbol}")
+                if tick and tick.get("bid", 0) > 0 and tick.get("ask", 0) > 0:
+                    return MarketQuote(
+                        symbol=symbol,
+                        bid_price=float(tick["bid"]),
+                        bid_qty=0,
+                        ask_price=float(tick["ask"]),
+                        ask_qty=0,
+                        timestamp=int(time.time() * 1000),
+                    )
 
-            return MarketQuote(
-                symbol=symbol,
-                bid_price=float(tick["bid"]),
-                bid_qty=0,  # MT5 doesn't provide quantity
-                ask_price=float(tick["ask"]),
-                ask_qty=0,
-                timestamp=int(time.time() * 1000),
-            )
-        except Exception as e:
-            raise Exception(f"Failed to fetch Bybit quote: {str(e)}")
+                last_error = f"No valid ticker data for {mt5_symbol} (tick={'None' if tick is None else tick})"
+            except Exception as e:
+                last_error = str(e)
+
+            if attempt < max_retries:
+                logger.warning(
+                    f"Bybit/MT5 quote attempt {attempt + 1}/{max_retries + 1} failed: {last_error}, "
+                    f"retrying in {0.5 * (attempt + 1)}s..."
+                )
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        raise Exception(f"Failed to fetch Bybit quote: {last_error}")
 
     def calculate_spread(
         self,
@@ -191,10 +152,23 @@ class MarketDataService:
                 return SpreadData(**data)
 
         # Fetch fresh data from both exchanges concurrently
-        binance_quote, bybit_quote = await asyncio.gather(
+        # Use return_exceptions=True so one failure doesn't cancel the other
+        results = await asyncio.gather(
             self.get_binance_quote(binance_symbol),
             self.get_bybit_quote(bybit_symbol, bybit_category),
+            return_exceptions=True,
         )
+
+        errors = []
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                source = "Binance" if i == 0 else "Bybit/MT5"
+                errors.append(f"{source}: {r}")
+
+        if errors:
+            raise Exception("; ".join(errors))
+
+        binance_quote, bybit_quote = results
 
         # Calculate spread
         spread_data = self.calculate_spread(binance_quote, bybit_quote)
@@ -277,15 +251,13 @@ class MarketDataService:
                 for record in records
             ]
 
-    _pg_store_counter = 0
-
     async def store_spread_history(
         self,
         spread_data: SpreadData,
         binance_symbol: str = "XAUUSDT",
         bybit_symbol: str = "XAUUSDT",
     ):
-        """Store spread data in Redis (real-time) and PostgreSQL (persistent history)"""
+        """Store spread data in history (sorted set)"""
         redis_client = await self._get_redis()
         history_key = f"spread_history:{binance_symbol}:{bybit_symbol}"
 
@@ -300,33 +272,6 @@ class MarketDataService:
 
         # Set expiry on the key (24 hours)
         await redis_client.expire(history_key, 86400)
-
-        # Also persist to PostgreSQL every 5 ticks (~5s at 1 tick/s)
-        MarketDataService._pg_store_counter += 1
-        if MarketDataService._pg_store_counter % 5 == 0:
-            try:
-                from app.core.database import AsyncSessionLocal
-                from app.models.market_data import SpreadRecord
-                from datetime import datetime
-
-                ts = spread_data.timestamp
-                dt = datetime.utcfromtimestamp(ts / 1000 if ts > 1e12 else ts)
-
-                async with AsyncSessionLocal() as session:
-                    record = SpreadRecord(
-                        symbol=binance_symbol,
-                        binance_bid=spread_data.binance_quote.bid_price,
-                        binance_ask=spread_data.binance_quote.ask_price,
-                        bybit_bid=spread_data.bybit_quote.bid_price,
-                        bybit_ask=spread_data.bybit_quote.ask_price,
-                        forward_spread=spread_data.forward_entry_spread,
-                        reverse_spread=spread_data.reverse_entry_spread,
-                        timestamp=dt,
-                    )
-                    session.add(record)
-                    await session.commit()
-            except Exception as e:
-                logger.warning(f"Failed to persist spread to PostgreSQL: {e}")
 
     async def sync_server_time(self) -> Dict[str, int]:
         """Synchronize server time with Binance"""

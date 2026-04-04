@@ -231,9 +231,12 @@ class ContinuousStrategyExecutor:
                     # Initialize clients if not already done
                     if not hasattr(binance_account, 'binance_client'):
                         from app.services.binance_client import BinanceFuturesClient
+                        from app.core.proxy_utils import build_proxy_url
+                        _proxy = build_proxy_url(getattr(binance_account, 'proxy_config', None))
                         binance_account.binance_client = BinanceFuturesClient(
                             api_key=binance_account.api_key,
-                            api_secret=binance_account.api_secret
+                            api_secret=binance_account.api_secret,
+                            proxy_url=_proxy
                         )
 
                     if not hasattr(bybit_account, 'mt5_client'):
@@ -867,7 +870,8 @@ class ContinuousStrategyExecutor:
             # Binance: read from REST API directly
             if binance_account and binance_account.api_key and binance_account.api_secret:
                 try:
-                    client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+                    _proxy = build_proxy_url(getattr(binance_account, 'proxy_config', None))
+                    client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret, proxy_url=_proxy)
                     pos_data = await client.get_position_risk("XAUUSDT")
                     await client.close()
                     for pos in pos_data:

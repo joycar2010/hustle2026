@@ -32,6 +32,7 @@ from app.services.binance_ws_client import binance_ws
 from app.services.strategy_status_pusher import status_pusher
 from app.services.mt5_bridge import mt5_bridge
 from app.services.order_recovery_service import order_recovery_service
+from app.tasks.proxy_expiry_checker import proxy_expiry_checker
 from app.services.feishu_service import init_feishu_service
 from app.services.mt5_sync_service import mt5_sync_service
 from app.models.notification_config import NotificationConfig
@@ -135,6 +136,7 @@ async def init_mt5_and_monitoring():
         await binance_position_pusher.start()  # Binance User Data Stream，<100ms 持仓更新
         await mt5_bridge.start()
         await position_monitor.start_monitoring()
+        await proxy_expiry_checker.start()
         await mt5_sync_service.start()  # 启动 MT5 状态同步服务
         app_state["mt5_services_ready"] = True
         logger.info("MT5 and monitoring services initialized successfully")
@@ -217,6 +219,7 @@ async def lifespan(app: FastAPI):
         await binance_position_pusher.stop()
         await mt5_bridge.stop()
         await position_monitor.stop_monitoring()
+        await proxy_expiry_checker.stop()
         await market_data_service.stop()
         await status_pusher.stop()
         await mt5_sync_service.stop()  # 停止 MT5 状态同步服务

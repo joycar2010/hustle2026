@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     MT5_AGENT_URL: str = "http://172.31.14.113:8765"
     MT5_AGENT_API_KEY: str = ""
     MT5_BRIDGE_API_KEY: str = ""
+    MT5_BRIDGE_URL: str = "http://172.31.14.113:8001"
 
     # System
     APP_NAME: str = "Hustle2026"

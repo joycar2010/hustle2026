@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.services.binance_client import BinanceFuturesClient
+from app.core.proxy_utils import build_proxy_url
 from app.models.account import Account
 from app.models.order import OrderRecord
 from app.websocket.manager import manager
@@ -40,7 +41,7 @@ class OrderExecutor:
         # 强制精度：Binance XAUUSDT 最小步长 0.001，浮点尾数截断防 -1111
         quantity = round(quantity, 3)
 
-        client = BinanceFuturesClient(account.api_key, account.api_secret)
+        client = BinanceFuturesClient(account.api_key, account.api_secret, proxy_url=build_proxy_url(getattr(account, 'proxy_config', None)))
 
         try:
             # Log order parameters
@@ -294,7 +295,7 @@ class OrderExecutor:
         order_id: int,
     ) -> Dict[str, Any]:
         """Check Binance order status"""
-        client = BinanceFuturesClient(account.api_key, account.api_secret)
+        client = BinanceFuturesClient(account.api_key, account.api_secret, proxy_url=build_proxy_url(getattr(account, 'proxy_config', None)))
 
         try:
             result = await client.get_order(symbol, order_id)
@@ -415,7 +416,7 @@ class OrderExecutor:
         order_id: int,
     ) -> Dict[str, Any]:
         """Cancel Binance order"""
-        client = BinanceFuturesClient(account.api_key, account.api_secret)
+        client = BinanceFuturesClient(account.api_key, account.api_secret, proxy_url=build_proxy_url(getattr(account, 'proxy_config', None)))
 
         try:
             result = await client.cancel_order(symbol, order_id)

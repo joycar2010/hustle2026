@@ -460,14 +460,14 @@ async def execute_reverse_arbitrage(
 ):
     """Execute reverse arbitrage strategy (Binance short, Bybit long)"""
     try:
-        # 1. Get accounts
+        # 1. Get accounts (with user ownership check)
         binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id)
+            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
         )
         binance_account = binance_result.scalar_one_or_none()
 
         bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id)
+            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
         )
         bybit_account = bybit_result.scalar_one_or_none()
 
@@ -514,19 +514,6 @@ async def execute_reverse_arbitrage(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Send immediate WebSocket notification for button restoration
-            try:
-                from app.services.strategy_status_pusher import status_pusher
-                await status_pusher.push_orders_filled(
-                    strategy_id=strategy_id,
-                    action='opening',
-                    binance_filled=result.get("binance_filled_qty", 0),
-                    bybit_filled=result.get("bybit_filled_qty", 0),
-                    user_id=user_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to push orders filled notification: {e}")
-
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
             import datetime
@@ -556,14 +543,14 @@ async def execute_forward_arbitrage(
 ):
     """Execute forward arbitrage strategy (Binance long, Bybit short)"""
     try:
-        # 1. Get accounts
+        # 1. Get accounts (with user ownership check)
         binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id)
+            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
         )
         binance_account = binance_result.scalar_one_or_none()
 
         bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id)
+            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
         )
         bybit_account = bybit_result.scalar_one_or_none()
 
@@ -610,19 +597,6 @@ async def execute_forward_arbitrage(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Send immediate WebSocket notification for button restoration
-            try:
-                from app.services.strategy_status_pusher import status_pusher
-                await status_pusher.push_orders_filled(
-                    strategy_id=strategy_id,
-                    action='opening',
-                    binance_filled=result.get("binance_filled_qty", 0),
-                    bybit_filled=result.get("bybit_filled_qty", 0),
-                    user_id=user_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to push orders filled notification: {e}")
-
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
             import datetime
@@ -652,14 +626,14 @@ async def close_reverse_position(
 ):
     """Close reverse arbitrage position (Binance buy to close short, Bybit sell to close long)"""
     try:
-        # 1. Get accounts
+        # 1. Get accounts (with user ownership check)
         binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id)
+            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
         )
         binance_account = binance_result.scalar_one_or_none()
 
         bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id)
+            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
         )
         bybit_account = bybit_result.scalar_one_or_none()
 
@@ -705,19 +679,6 @@ async def close_reverse_position(
                 quantity=result.get("binance_filled_qty", 0)
             )
 
-            # Send immediate WebSocket notification for button restoration
-            try:
-                from app.services.strategy_status_pusher import status_pusher
-                await status_pusher.push_orders_filled(
-                    strategy_id=strategy_id,
-                    action='closing',
-                    binance_filled=result.get("binance_filled_qty", 0),
-                    bybit_filled=result.get("bybit_filled_qty", 0),
-                    user_id=user_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to push orders filled notification: {e}")
-
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
             import datetime
@@ -747,14 +708,14 @@ async def close_forward_position(
 ):
     """Close forward arbitrage position (Binance sell to close long, Bybit buy to close short)"""
     try:
-        # 1. Get accounts
+        # 1. Get accounts (with user ownership check)
         binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id)
+            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
         )
         binance_account = binance_result.scalar_one_or_none()
 
         bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id)
+            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
         )
         bybit_account = bybit_result.scalar_one_or_none()
 
@@ -799,19 +760,6 @@ async def close_forward_position(
                 strategy_type="forward",
                 quantity=result.get("binance_filled_qty", 0)
             )
-
-            # Send immediate WebSocket notification for button restoration
-            try:
-                from app.services.strategy_status_pusher import status_pusher
-                await status_pusher.push_orders_filled(
-                    strategy_id=strategy_id,
-                    action='closing',
-                    binance_filled=result.get("binance_filled_qty", 0),
-                    bybit_filled=result.get("bybit_filled_qty", 0),
-                    user_id=user_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to push orders filled notification: {e}")
 
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
@@ -1079,14 +1027,14 @@ async def execute_continuous_opening(
         raise HTTPException(status_code=400, detail="Invalid strategy type. Must be 'forward' or 'reverse'")
 
     try:
-        # 1. Get accounts
+        # 1. Get accounts (with user ownership check)
         binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id)
+            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
         )
         binance_account = binance_result.scalar_one_or_none()
 
         bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id)
+            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
         )
         bybit_account = bybit_result.scalar_one_or_none()
 
@@ -1144,14 +1092,6 @@ async def execute_continuous_opening(
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_opening_continuous"
-        # Stop any existing running task for this strategy to prevent duplicate orders
-        existing_task_id = execution_task_manager.get_running_task_id_for_strategy(strategy_id)
-        if existing_task_id:
-            logger.warning(
-                f"[DUPLICATE GUARD] strategy_id={strategy_id} already has running task "
-                f"{existing_task_id} — stopping before starting new one"
-            )
-            await execution_task_manager.stop_task(existing_task_id)
         # Reset position tracker for this strategy before each new execution
         from app.services.position_manager import position_manager
         position_manager.reset_strategy(strategy_id)
@@ -1224,14 +1164,14 @@ async def execute_continuous_closing(
         raise HTTPException(status_code=400, detail="Invalid strategy type. Must be 'forward' or 'reverse'")
 
     try:
-        # 1. Get accounts
+        # 1. Get accounts (with user ownership check)
         binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id)
+            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
         )
         binance_account = binance_result.scalar_one_or_none()
 
         bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id)
+            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
         )
         bybit_account = bybit_result.scalar_one_or_none()
 
@@ -1290,14 +1230,6 @@ async def execute_continuous_closing(
 
         # 3. Create continuous executor
         strategy_id = f"{user_id}_{strategy_type}_closing_continuous"
-        # Stop any existing running task for this strategy to prevent duplicate orders
-        existing_task_id = execution_task_manager.get_running_task_id_for_strategy(strategy_id)
-        if existing_task_id:
-            logger.warning(
-                f"[DUPLICATE GUARD] strategy_id={strategy_id} already has running task "
-                f"{existing_task_id} — stopping before starting new one"
-            )
-            await execution_task_manager.stop_task(existing_task_id)
         # Reset position tracker for this strategy before each new execution
         from app.services.position_manager import position_manager
         position_manager.reset_strategy(strategy_id)

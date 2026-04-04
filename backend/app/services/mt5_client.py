@@ -1,12 +1,8 @@
 """MetaTrader5 client for Bybit MT5 integration"""
 try:
     import MetaTrader5 as mt5
-    MT5_AVAILABLE = True
 except ImportError:
-    # MetaTrader5 is Windows-only, on Linux we use bridge service
     mt5 = None
-    MT5_AVAILABLE = False
-
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
@@ -194,9 +190,41 @@ class MT5Client:
             self.connected = False
             logger.info("MT5 disconnected")
 
+    # Symbol variant mapping: common aliases -> canonical MT5 symbol
+    SYMBOL_VARIANTS = {
+        "XAUUSD": ["XAUUSD+", "XAUUSD.S", "XAUUSD.s"],
+        "XAUUSD.S": ["XAUUSD+", "XAUUSD.s", "XAUUSD"],
+        "XAUUSD.s": ["XAUUSD+", "XAUUSD.S", "XAUUSD"],
+        "XAUUSD+": ["XAUUSD.S", "XAUUSD.s", "XAUUSD"],
+    }
+
+    def _try_activate_symbol(self, symbol: str) -> bool:
+        """Try to activate a symbol in MT5. Returns True if symbol is available."""
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return False
+        if not info.visible:
+            mt5.symbol_select(symbol, True)
+            time.sleep(0.2)
+        return True
+
+    def _resolve_symbol(self, symbol: str) -> Optional[str]:
+        """Resolve a symbol name, trying variants if the primary doesn't work."""
+        if self._try_activate_symbol(symbol):
+            return symbol
+        # Try known variants
+        for variant in self.SYMBOL_VARIANTS.get(symbol, []):
+            if self._try_activate_symbol(variant):
+                logger.info(f"Symbol {symbol} not available, resolved to variant {variant}")
+                return variant
+        return None
+
     def get_tick(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
-        Get latest tick data for symbol with auto-reconnection
+        Get latest tick data for symbol with auto-reconnection and symbol resolution.
+
+        If the requested symbol is not available, tries common variants
+        (e.g. XAUUSD.s -> XAUUSD+ -> XAUUSD.S).
 
         Args:
             symbol: Trading symbol (e.g., "XAUUSD+")
@@ -209,13 +237,23 @@ class MT5Client:
 
         try:
             tick = mt5.symbol_info_tick(symbol)
-            if tick is None:
-                error = mt5.last_error()
-                logger.error(f"Failed to get tick for {symbol}: {error}")
 
-                # Mark connection as potentially unhealthy
-                self.connected = False
-                return None
+            # If tick is None, try symbol activation and variant resolution
+            if tick is None:
+                resolved = self._resolve_symbol(symbol)
+                if resolved is None:
+                    error = mt5.last_error()
+                    logger.error(f"Failed to get tick for {symbol} (no variants available): {error}")
+                    # Don't mark connection as dead for missing symbols —
+                    # this is a symbol issue, not a connection issue
+                    return None
+
+                tick = mt5.symbol_info_tick(resolved)
+                if tick is None:
+                    error = mt5.last_error()
+                    logger.error(f"Failed to get tick for resolved symbol {resolved}: {error}")
+                    return None
+                symbol = resolved
 
             # Update last successful request timestamp
             self.last_successful_request = datetime.utcnow()

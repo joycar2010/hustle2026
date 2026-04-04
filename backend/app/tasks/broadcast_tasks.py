@@ -1,7 +1,5 @@
 """Background tasks for account balance and risk metrics streaming"""
 import asyncio
-import time as _broadcast_time
-from typing import Dict
 from datetime import datetime
 from uuid import UUID
 from contextlib import asynccontextmanager
@@ -134,36 +132,51 @@ class AccountBalanceStreamer:
                 if not active_accounts:
                     continue
 
-                # Fetch aggregated account data (makes external API calls, no DB connection held)
-                aggregated_data = await account_data_service.get_aggregated_account_data(
-                    list(active_accounts)
-                )
+                # ── 按用户分组，为每个用户独立推送余额数据 ──
+                user_accounts_map = {}
+                for acc in active_accounts:
+                    uid = str(acc.user_id)
+                    if uid not in user_accounts_map:
+                        user_accounts_map[uid] = []
+                    user_accounts_map[uid].append(acc)
 
-                # 将 Binance 持仓同步到 PositionStreamer（替代其 REST 轮询，零额外API调用）
-                try:
-                    binance_long_xau = 0.0
-                    binance_short_xau = 0.0
-                    for pos in aggregated_data.get("positions", []):
-                        if pos.get("is_mt5_account"):
-                            continue
-                        if pos.get("platform_id") != 1:  # 1 = Binance
-                            continue
-                        side = pos.get("side", "").upper()
-                        size = round(float(pos.get("size", 0)), 3)
-                        # AccountPosition.side = "Buy"/"Sell" (Binance REST) 或 "LONG"/"SHORT"
-                        if side in ("LONG", "BUY"):
-                            binance_long_xau += size
-                        elif side in ("SHORT", "SELL"):
-                            binance_short_xau += size
-                    position_streamer.set_binance_positions(
-                        round(binance_long_xau, 3),
-                        round(binance_short_xau, 3),
-                    )
-                except Exception as _pe:
-                    logger.debug(f"[AccountBalanceStreamer] PositionStreamer sync error: {_pe}")
+                for uid, user_accs in user_accounts_map.items():
+                    try:
+                        aggregated_data = await account_data_service.get_aggregated_account_data(
+                            list(user_accs)
+                        )
 
-                # Broadcast to all connected clients
-                await manager.broadcast_account_balance(aggregated_data)
+                        # 将 Binance 持仓同步到 PositionStreamer（仅本用户的）
+                        try:
+                            binance_long_xau = 0.0
+                            binance_short_xau = 0.0
+                            for pos in aggregated_data.get("positions", []):
+                                if pos.get("is_mt5_account"):
+                                    continue
+                                if pos.get("platform_id") != 1:
+                                    continue
+                                side = pos.get("side", "").upper()
+                                size = round(float(pos.get("size", 0)), 3)
+                                if side in ("LONG", "BUY"):
+                                    binance_long_xau += size
+                                elif side in ("SHORT", "SELL"):
+                                    binance_short_xau += size
+                            position_streamer.set_binance_positions(
+                                round(binance_long_xau, 3),
+                                round(binance_short_xau, 3),
+                                user_id=uid,
+                            )
+                        except Exception as _pe:
+                            logger.debug(f"[AccountBalanceStreamer] PositionStreamer sync error: {_pe}")
+
+                        # 按用户推送，不再广播给所有人
+                        await manager.send_to_user({
+                            "type": "account_balance",
+                            "data": aggregated_data,
+                        }, uid)
+                    except Exception as e:
+                        logger.error(f"[AccountBalanceStreamer] user {uid} error: {e}")
+
                 self.broadcast_count += 1
                 self.last_broadcast_time = datetime.now().isoformat()
 
@@ -315,28 +328,37 @@ class RiskMetricsStreamer:
                     await asyncio.sleep(self.interval)
                     continue
 
-                # Fetch aggregated account data for risk calculation (makes external API calls, no DB connection held)
-                aggregated_data = await account_data_service.get_aggregated_account_data(
-                    list(active_accounts)
-                )
+                # ── 按用户分组，独立推送风险指标 ──
+                user_accounts_map = {}
+                for acc in active_accounts:
+                    uid = str(acc.user_id)
+                    if uid not in user_accounts_map:
+                        user_accounts_map[uid] = []
+                    user_accounts_map[uid].append(acc)
 
-                # Extract risk metrics from aggregated data
-                risk_data = {
-                    "summary": aggregated_data.get("summary", {}),
-                    "positions": aggregated_data.get("positions", []),
-                    "timestamp": aggregated_data.get("timestamp"),
-                }
+                for uid, user_accs in user_accounts_map.items():
+                    try:
+                        aggregated_data = await account_data_service.get_aggregated_account_data(
+                            list(user_accs)
+                        )
+                        risk_data = {
+                            "summary": aggregated_data.get("summary", {}),
+                            "positions": aggregated_data.get("positions", []),
+                            "timestamp": aggregated_data.get("timestamp"),
+                        }
+                        await manager.send_to_user({
+                            "type": "risk_metrics",
+                            "data": risk_data,
+                        }, uid)
+                    except Exception as e:
+                        logger.error(f"[RiskMetricsStreamer] user {uid} error: {e}")
 
-                # Broadcast to all connected clients (only if there are connections)
-                connection_count = manager.get_connection_count()
-                if connection_count > 0:
-                    await manager.broadcast_risk_metrics(risk_data)
-                    self.broadcast_count += 1
-                    self.last_broadcast_time = datetime.now().isoformat()
+                self.broadcast_count += 1
+                self.last_broadcast_time = datetime.now().isoformat()
 
                 # Always check risk alerts (opens a new DB session internally)
                 logger.info(f"[BROADCAST] Calling _check_risk_alerts, active_accounts={len(active_accounts)}")
-                await self._check_risk_alerts(active_accounts, aggregated_data)
+                await self._check_risk_alerts(active_accounts, user_accounts_map)
 
                 # Wait for next interval
                 await asyncio.sleep(self.interval)
@@ -350,7 +372,7 @@ class RiskMetricsStreamer:
                 self.error_count += 1
                 await asyncio.sleep(self.interval * 2)  # Extended retry on error
 
-    async def _check_risk_alerts(self, active_accounts, aggregated_data):
+    async def _check_risk_alerts(self, active_accounts, user_accounts_map):
         """Check risk alerts and send Feishu notifications with batch queries"""
         logger.info(f"[BROADCAST] _check_risk_alerts called, active_accounts数量={len(active_accounts)}")
         try:
@@ -381,12 +403,18 @@ class RiskMetricsStreamer:
                 # Create a mapping of user_id -> risk_settings for fast lookup
                 risk_settings_map = {str(rs.user_id): rs for rs in risk_settings_list}
 
-                # Check alerts for each user (now using pre-fetched data)
+                # Check alerts for each user using per-user aggregated data
                 for user_id, accounts in user_accounts.items():
                     try:
                         risk_settings = risk_settings_map.get(user_id)
                         if not risk_settings:
                             continue
+
+                        # Get per-user aggregated data
+                        user_accs = user_accounts_map.get(user_id, accounts)
+                        aggregated_data = await account_data_service.get_aggregated_account_data(
+                            list(user_accs)
+                        )
 
                         # Initialize risk alert service
                         risk_alert_service = RiskAlertService(db)
@@ -712,50 +740,53 @@ class PendingOrdersStreamer:
 
                     pending_orders = []
 
-                    # Get all Binance accounts from database
+                    # Get all Binance accounts from database, grouped by user
                     async with AsyncSessionLocal() as db:
                         result = await db.execute(
-                            select(Account).where(Account.platform_id == 1)  # Binance
+                            select(Account).where(Account.platform_id == 1, Account.is_active == True)
                         )
                         accounts = result.scalars().all()
 
-                        # Fetch open orders for each account
+                        # Group by user_id
+                        user_accounts = {}
                         for account in accounts:
-                            try:
-                                client = BinanceFuturesClient(account.api_key, account.api_secret)
+                            uid = str(account.user_id)
+                            if uid not in user_accounts:
+                                user_accounts[uid] = []
+                            user_accounts[uid].append(account)
+
+                        # Fetch and send per user
+                        for uid, user_accs in user_accounts.items():
+                            user_orders = []
+                            for account in user_accs:
                                 try:
-                                    # Get all open orders for XAUUSDT
-                                    open_orders = await client.get_open_orders(symbol="XAUUSDT")
+                                    client = BinanceFuturesClient(account.api_key, account.api_secret)
+                                    try:
+                                        open_orders = await client.get_open_orders(symbol="XAUUSDT")
+                                        for order in open_orders:
+                                            order_time = order.get("time", 0)
+                                            beijing_time = utc_ms_to_beijing(order_time)
+                                            user_orders.append({
+                                                "id": str(order.get("orderId")),
+                                                "timestamp": beijing_time,
+                                                "exchange": "主账号",
+                                                "side": order.get("side", "").lower(),
+                                                "quantity": float(order.get("origQty", 0)),
+                                                "price": float(order.get("price", 0)),
+                                                "status": order.get("status", "").lower(),
+                                                "symbol": order.get("symbol", ""),
+                                                "source": "strategy"
+                                            })
+                                    finally:
+                                        await client.close()
+                                except Exception as e:
+                                    logger.error(f"Failed to fetch orders for account {account.account_id}: {e}")
 
-                                    for order in open_orders:
-                                        # Convert time to Beijing time
-                                        order_time = order.get("time", 0)
-                                        beijing_time = utc_ms_to_beijing(order_time)
-
-                                        pending_orders.append({
-                                            "id": str(order.get("orderId")),
-                                            "timestamp": beijing_time,
-                                            "exchange": "Binance",
-                                            "side": order.get("side", "").lower(),
-                                            "quantity": float(order.get("origQty", 0)),
-                                            "price": float(order.get("price", 0)),
-                                            "status": order.get("status", "").lower(),
-                                            "symbol": order.get("symbol", ""),
-                                            "source": "strategy"  # Default to strategy
-                                        })
-                                finally:
-                                    await client.close()
-                            except Exception as e:
-                                logger.error(f"Failed to fetch orders for account {account.account_id}: {e}")
-
-                    # Sort by timestamp descending
-                    pending_orders.sort(key=lambda x: x["timestamp"], reverse=True)
-
-                    # Broadcast to all connected clients
-                    await manager.broadcast({
-                        "type": "pending_orders",
-                        "data": pending_orders[:8]  # Limit to 8 most recent orders
-                    })
+                            user_orders.sort(key=lambda x: x["timestamp"], reverse=True)
+                            await manager.send_to_user({
+                                "type": "pending_orders",
+                                "data": user_orders[:8]
+                            }, uid)
                     self.broadcast_count += 1
                     self.last_broadcast_time = datetime.now().isoformat()
 
@@ -849,14 +880,12 @@ class PositionStreamer:
     """
     实时持仓广播器 — 每1秒向所有已连接客户端广播 position_snapshot。
 
-    数据源（优先级顺序）：
-    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 <1ms
-    - Binance（WS）：BinancePositionPusher ACCOUNT_UPDATE → set_binance_positions_ws()，延迟 <100ms，最高优先级
-    - Binance（REST）：AccountBalanceStreamer 每30s → set_binance_positions()，仅WS断流>60s时生效，兜底用
+    数据源：
+    - Bybit/MT5：直接读共享 MT5 客户端内存中的持仓，无额外 API 开销，延迟 < 1ms
+    - Binance  ：完全依赖 AccountBalanceStreamer 推送（每30s由账户刷新驱动），零API开销
 
     设计原则（量化工程）：
-    - WS数据在60s内有效期间，REST写入被屏蔽，根除"REST旧数据覆盖WS实时数据"闪零问题
-    - 不对 Binance 发起任何额外 REST 请求，彻底消除频率超限风险
+    - 不对 Binance 发起任何 REST 请求，彻底消除频率超限风险
     - 只在有 WebSocket 连接时广播，空载时跳过
     - MT5 读取在 executor 线程池中执行，不阻塞事件循环
     """
@@ -866,42 +895,16 @@ class PositionStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        # Binance 持仓缓存（双写源：WS优先，REST兜底）
-        self._binance_long_xau: float = 0.0
-        self._binance_short_xau: float = 0.0
-        # WS最后更新时间戳（monotonic），用于判断REST写入是否应该被屏蔽
-        self._ws_position_ts: float = 0.0
+        # Binance 持仓缓存，按 user_id 隔离
+        self._binance_positions: dict = {}  # {user_id: (long_xau, short_xau)}
 
-    def set_binance_positions_ws(self, long_xau: float, short_xau: float) -> None:
-        """
-        由 BinancePositionPusher ACCOUNT_UPDATE 事件调用 — 最高优先级实时数据源。
-        更新时间戳，用于保护数据不被 REST 旧数据覆盖。
-        """
-        self._binance_long_xau = long_xau
-        self._binance_short_xau = short_xau
-        self._ws_position_ts = _broadcast_time.monotonic()
-
-    def set_binance_positions(self, long_xau: float, short_xau: float) -> None:
-        """
-        由 AccountBalanceStreamer REST 轮询调用 — 兜底数据源（30s一次）。
-        若 WS 数据在60秒内有效，则跳过写入，避免覆盖实时WS持仓。
-        60秒后认为WS数据过期（连接中断），允许REST接管。
-        """
-        ws_age = _broadcast_time.monotonic() - self._ws_position_ts
-        if ws_age <= 60.0:
-            # WS数据新鲜，REST不得覆盖，防止30s旧数据擦除<100ms实时数据
-            logger.debug(
-                f"[PositionStreamer] REST写入跳过：WS数据 {ws_age:.1f}s前刚更新 "
-                f"(long={self._binance_long_xau}, short={self._binance_short_xau})"
-            )
-            return
-        # WS数据超过60s未更新（断流），允许REST回退
-        self._binance_long_xau = long_xau
-        self._binance_short_xau = short_xau
-        logger.debug(
-            f"[PositionStreamer] REST持仓回退生效（WS已断流 {ws_age:.0f}s）: "
-            f"long={long_xau}, short={short_xau}"
-        )
+    def set_binance_positions(self, long_xau: float, short_xau: float, user_id: str = None) -> None:
+        """由 AccountBalanceStreamer 调用，更新指定用户的 Binance 持仓缓存"""
+        if user_id:
+            self._binance_positions[user_id] = (long_xau, short_xau)
+        else:
+            # 兼容旧调用方式：存为默认
+            self._binance_positions["_default"] = (long_xau, short_xau)
 
     async def start(self):
         if self.running:
@@ -938,20 +941,22 @@ class PositionStreamer:
                 # 1. 读 MT5 持仓（线程池，非阻塞）
                 long_lots, short_lots = await self._read_mt5_positions(loop)
 
-                # 2. Binance 持仓直接使用缓存值（由 AccountBalanceStreamer 推送，无REST调用）
-                binance_long = self._binance_long_xau
-                binance_short = self._binance_short_xau
+                # 2. 按用户推送持仓快照
+                active_user_ids = list(manager.active_connections.keys())
+                if not active_user_ids:
+                    continue
 
-                # 3. 广播
-                await manager.broadcast({
-                    "type": "position_snapshot",
-                    "data": {
-                        "bybit_long_lots":  long_lots,
-                        "bybit_short_lots": short_lots,
-                        "binance_long_xau": binance_long,
-                        "binance_short_xau": binance_short,
-                    }
-                })
+                for uid in active_user_ids:
+                    binance_long, binance_short = self._binance_positions.get(uid, (0.0, 0.0))
+                    await manager.send_to_user({
+                        "type": "position_snapshot",
+                        "data": {
+                            "bybit_long_lots":  long_lots,
+                            "bybit_short_lots": short_lots,
+                            "binance_long_xau": binance_long,
+                            "binance_short_xau": binance_short,
+                        }
+                    }, uid)
 
             except asyncio.CancelledError:
                 break
@@ -987,35 +992,6 @@ class PositionStreamer:
 position_streamer = PositionStreamer()
 
 
-# ---------------------------------------------------------------------------
-# 全局订单成交事件注册表 — 供 _monitor_binance_order() 使用
-# key: binance order_id (int)
-# value: {"event": asyncio.Event, "filled_qty": float, "status": str}
-# ---------------------------------------------------------------------------
-_order_fill_registry: Dict[int, dict] = {}
-
-
-def register_order_watch(order_id: int) -> asyncio.Event:
-    """注册一个订单监听。返回 asyncio.Event，成交/取消时会被 set()。"""
-    ev = asyncio.Event()
-    _order_fill_registry[order_id] = {"event": ev, "filled_qty": 0.0, "status": "NEW"}
-    logger.info(f"[OrderWatch] ✓ 注册订单监听: order_id={order_id}, 等待 WebSocket 通知")
-    return ev
-
-
-def unregister_order_watch(order_id: int):
-    """注销订单监听，释放内存。"""
-    record = _order_fill_registry.pop(order_id, None)
-    if record:
-        logger.debug(
-            f"[OrderWatch] 注销订单监听: order_id={order_id}, "
-            f"final_status={record.get('status', 'UNKNOWN')}, "
-            f"filled_qty={record.get('filled_qty', 0)}"
-        )
-    else:
-        logger.debug(f"[OrderWatch] 注销订单监听: order_id={order_id} (未找到记录)")
-
-
 class BinancePositionPusher:
     """
     实时 Binance 持仓推送器 — 订阅 Binance Futures User Data Stream。
@@ -1023,19 +999,13 @@ class BinancePositionPusher:
     当 ACCOUNT_UPDATE 事件到达（成交触发），立即更新 PositionStreamer 缓存，
     取代 AccountBalanceStreamer 30s REST 轮询驱动，实现 <100ms 持仓更新。
 
-    同时处理 ORDER_TRADE_UPDATE 事件，通过 _order_fill_registry 通知
-    _monitor_binance_order() 协程，彻底消除 REST 轮询。
-
     协议：wss://fstream.binance.com/ws/{listenKey}
     listenKey 有效期 60min，每 25min 续期一次。
     """
 
     SYMBOL           = "XAUUSDT"
     KEEPALIVE_SEC    = 25 * 60   # 25min 续期，确保 listenKey 不过期
-    RECONNECT_DELAY  = 5         # 正常断线后等待秒数
-    RECONNECT_DELAY_ON_ERROR = 300  # API错误/封禁后等待5分钟，避免快速失败循环
-    WS_HEARTBEAT_SEC = 10        # 移动网保护：10s心跳，比默认30s更快检测断线
-    MAX_CONSECUTIVE_ERRORS = 3   # 连续失败3次后进入长时间退避
+    RECONNECT_DELAY  = 5         # 断线后等待秒数
 
     def __init__(self):
         self.running = False
@@ -1114,7 +1084,6 @@ class BinancePositionPusher:
     async def _account_stream_loop(self, api_key: str, api_secret: str):
         from app.services.binance_client import BinanceFuturesClient
         ws_base = "wss://fstream.binance.com/ws"
-        consecutive_errors = 0  # 连续错误计数器
 
         while self.running:
             client  = BinanceFuturesClient(api_key, api_secret)
@@ -1122,39 +1091,17 @@ class BinancePositionPusher:
             try:
                 listen_key = await client.create_futures_listen_key()
                 if not listen_key:
-                    consecutive_errors += 1
-                    logger.error(
-                        f"[BinancePositionPusher] listenKey 获取失败 "
-                        f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}): {api_key[:8]}…"
-                    )
-
-                    # 指数退避：连续失败3次后进入长时间等待
-                    if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
-                        logger.warning(
-                            f"[BinancePositionPusher] 连续失败{consecutive_errors}次，"
-                            f"进入{self.RECONNECT_DELAY_ON_ERROR}秒退避期，避免触发封禁"
-                        )
-                        await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
-                        consecutive_errors = 0  # 重置计数器
-                    else:
-                        await asyncio.sleep(self.RECONNECT_DELAY)
+                    logger.error(f"[BinancePositionPusher] listenKey 获取失败: {api_key[:8]}…")
+                    await asyncio.sleep(self.RECONNECT_DELAY)
                     continue
 
-                # 成功获取 listenKey，重置错误计数器
-                consecutive_errors = 0
-                logger.info(
-                    f"[BinancePositionPusher] ✓ listenKey 创建成功: {api_key[:8]}…, "
-                    f"准备连接 WebSocket"
-                )
+                logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
                 session = aiohttp.ClientSession()
 
                 async with session.ws_connect(
-                    f"{ws_base}/{listen_key}", heartbeat=self.WS_HEARTBEAT_SEC
+                    f"{ws_base}/{listen_key}", heartbeat=30
                 ) as ws:
-                    logger.info(
-                        f"[BinancePositionPusher] ✓ User Data Stream 已连接: {api_key[:8]}…, "
-                        f"开始接收订单和持仓更新"
-                    )
+                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
 
                     keepalive_task = asyncio.create_task(
                         self._keepalive_loop(client, listen_key)
@@ -1177,39 +1124,13 @@ class BinancePositionPusher:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                consecutive_errors += 1
-                error_msg = str(e)
-                logger.error(
-                    f"[BinancePositionPusher] Stream 错误 "
-                    f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}) "
-                    f"({api_key[:8]}…): {error_msg}"
-                )
-
-                # 检测是否为API错误或封禁，使用长时间退避
-                if any(keyword in error_msg.lower() for keyword in [
-                    'api-key', 'invalid', 'banned', '封禁', '频率', 'rate limit'
-                ]):
-                    logger.warning(
-                        f"[BinancePositionPusher] 检测到API错误/封禁，"
-                        f"等待{self.RECONNECT_DELAY_ON_ERROR}秒后重试"
-                    )
-                    await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
-                    consecutive_errors = 0  # API错误后重置计数器
-                elif consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
-                    logger.warning(
-                        f"[BinancePositionPusher] 连续失败{consecutive_errors}次，"
-                        f"进入{self.RECONNECT_DELAY_ON_ERROR}秒退避期"
-                    )
-                    await asyncio.sleep(self.RECONNECT_DELAY_ON_ERROR)
-                    consecutive_errors = 0
-                else:
-                    await asyncio.sleep(self.RECONNECT_DELAY)
+                logger.error(f"[BinancePositionPusher] Stream 错误 ({api_key[:8]}…): {e}")
             finally:
                 if session and not session.closed:
                     await session.close()
                 await client.close()
 
-            if self.running and consecutive_errors == 0:
+            if self.running:
                 logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
                 await asyncio.sleep(self.RECONNECT_DELAY)
 
@@ -1227,39 +1148,7 @@ class BinancePositionPusher:
     # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer
     # ------------------------------------------------------------------
     async def _handle_message(self, data: dict):
-        event_type = data.get("e")
-
-        # ------------------------------------------------------------------
-        # ORDER_TRADE_UPDATE → 通知 _monitor_binance_order() 协程
-        # ------------------------------------------------------------------
-        if event_type == "ORDER_TRADE_UPDATE":
-            order = data.get("o", {})
-            oid = order.get("i")          # orderId (int)
-            status = order.get("X", "")  # FILLED / PARTIALLY_FILLED / CANCELED / EXPIRED / REJECTED
-            cum_qty = float(order.get("z", 0))  # cumulativeFilledQty
-
-            record = _order_fill_registry.get(oid)
-            if record is not None:
-                record["filled_qty"] = cum_qty
-                record["status"] = status
-                if status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
-                    record["event"].set()
-                    logger.info(
-                        f"[OrderWatch] ✓ ORDER_TRADE_UPDATE order={oid} "
-                        f"status={status} filled={cum_qty} - WebSocket notification sent"
-                    )
-                else:
-                    logger.debug(
-                        f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} "
-                        f"status={status} filled={cum_qty} - partial fill"
-                    )
-            else:
-                logger.debug(
-                    f"[OrderWatch] ORDER_TRADE_UPDATE order={oid} not in registry, ignoring"
-                )
-            return
-
-        if event_type != "ACCOUNT_UPDATE":
+        if data.get("e") != "ACCOUNT_UPDATE":
             return
 
         # ACCOUNT_UPDATE.a.P 是仓位数组
@@ -1292,7 +1181,7 @@ class BinancePositionPusher:
                     long_xau, short_xau = 0.0, 0.0
 
         if updated:
-            position_streamer.set_binance_positions_ws(long_xau, short_xau)
+            position_streamer.set_binance_positions(long_xau, short_xau)
             logger.info(
                 f"[BinancePositionPusher] ACCOUNT_UPDATE → "
                 f"long={long_xau} short={short_xau}"

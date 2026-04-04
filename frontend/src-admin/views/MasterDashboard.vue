@@ -172,7 +172,15 @@
               <div class="flex justify-between"><span class="text-text-tertiary">MT5 登录</span><span class="font-mono">{{ c.mt5_login }}</span></div>
               <div class="flex justify-between"><span class="text-text-tertiary">服务器</span><span class="font-mono">{{ c.mt5_server }}</span></div>
               <div class="flex justify-between"><span class="text-text-tertiary">密码类型</span><span>{{ c.password_type === 'primary' ? '主密码' : '只读密码' }}</span></div>
-              <div class="flex justify-between"><span class="text-text-tertiary">代理</span><span>{{ c.proxy_id ? 'ID: ' + c.proxy_id : '直连' }}</span></div>
+              <div class="flex justify-between"><span class="text-text-tertiary">代理</span>
+                <span v-if="c._proxy_config && c._proxy_config.host" class="font-mono text-xs">
+                  {{ c._proxy_config.host }}:{{ c._proxy_config.port }}
+                  <span v-if="c._proxy_config.expires_at" class="ml-1" :class="mdProxyDaysLeft(c._proxy_config.expires_at) <= 7 ? 'text-red-400' : 'text-text-tertiary'">
+                    ({{ c._proxy_config.expires_at }}<span v-if="mdProxyDaysLeft(c._proxy_config.expires_at) <= 7">, {{ mdProxyDaysLeft(c._proxy_config.expires_at) }}天</span>)
+                  </span>
+                </span>
+                <span v-else class="text-text-tertiary">直连</span>
+              </div>
               <div v-if="c.last_connected_at" class="flex justify-between"><span class="text-text-tertiary">最后心跳</span>
                 <span class="text-text-secondary">{{ formatLastSeen(c.last_connected_at) }}</span>
               </div>
@@ -435,9 +443,12 @@ async function enrichMT5Clients(monitorClients) {
     // Merge monitor data with DB data
     const dbMap = {}
     allDbClients.forEach(c => { dbMap[String(c.client_id)] = c })
+    const accMap = {}
+    accounts.forEach(a => { accMap[String(a.account_id)] = a })
 
     mt5ClientsList.value = monitorClients.map(mc => {
       const db = dbMap[String(mc.client_id)] || {}
+      const linkedAcc = accMap[String(db.account_id)] || null
       return {
         ...mc,
         bridge_service_name: db.bridge_service_name || null,
@@ -445,6 +456,7 @@ async function enrichMT5Clients(monitorClients) {
         agent_instance_name: db.agent_instance_name || null,
         password_type: db.password_type || 'primary',
         proxy_id: db.proxy_id || null,
+        _proxy_config: linkedAcc?.proxy_config || null,
         is_system_service: db.is_system_service || false,
         is_active: db.is_active ?? true,
       }
@@ -509,6 +521,14 @@ async function fetchPerformance() {
     perfData.value.database = { status: 'error', latency_ms: null }
   }
   perfData.value.timestamp = new Date().toISOString()
+}
+
+function mdProxyDaysLeft(dateStr) {
+  if (!dateStr) return 999
+  const exp = new Date(dateStr + 'T00:00:00')
+  const now = new Date()
+  now.setHours(0,0,0,0)
+  return Math.floor((exp - now) / 86400000)
 }
 
 async function fetchUserFinancials() {

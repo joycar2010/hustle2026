@@ -130,7 +130,7 @@
           <h3 class="text-[10px] lg:text-[9px] font-semibold mb-1 lg:mb-0.5 text-primary">净资产提醒</h3>
           <div class="grid grid-cols-3 gap-1 lg:gap-0.5">
             <div>
-              <label class="block text-[9px] lg:text-[8px] mb-0.5">Binance 净资</label>
+              <label class="block text-[9px] lg:text-[8px] mb-0.5">主账号 净资</label>
               <input
                 type="number"
                 v-model.number="alertSettings.binanceNetAsset"
@@ -140,7 +140,7 @@
               />
             </div>
             <div>
-              <label class="block text-[9px] lg:text-[8px] mb-0.5">Bybit 净资</label>
+              <label class="block text-[9px] lg:text-[8px] mb-0.5">对冲 净资</label>
               <input
                 type="number"
                 v-model.number="alertSettings.bybitMT5NetAsset"

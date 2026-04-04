@@ -29,4 +29,11 @@ def build_proxy_url(proxy_config: Optional[dict]) -> Optional[str]:
     else:
         auth = ""
 
-    return f"{proxy_type}://{auth}{host}:{port}"
+    # aiohttp forward proxy only supports http:// scheme (even for HTTPS targets)
+    # SOCKS5 proxies keep their scheme for aiohttp-socks ProxyConnector
+    if proxy_type in ("https", "http"):
+        scheme = "http"
+    else:
+        scheme = proxy_type  # socks5, socks4, etc.
+
+    return f"{scheme}://{auth}{host}:{port}"

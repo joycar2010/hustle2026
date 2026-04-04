@@ -88,180 +88,16 @@ async def create_account(
 
 
 @router.get("/summary")
-async def get_aggregated_dashboard(
+async def get_accounts_summary(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get aggregated dashboard data for all user accounts"""
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"API: /dashboard/aggregated called for user {user_id}")
-
-    # Import MT5Client model for filtering
-    from app.models.mt5_client import MT5Client
-    from sqlalchemy.orm import selectinload
-    from sqlalchemy import and_, or_
-
-    # Query accounts and filter out system service accounts
-    result = await db.execute(
-        select(Account)
-        .outerjoin(MT5Client, Account.account_id == MT5Client.account_id)
-        .where(
-            and_(
-                Account.user_id == UUID(user_id),
-                or_(
-                    MT5Client.is_system_service == False,
-                    MT5Client.is_system_service.is_(None)
-                )
-            )
-        )
-        .distinct()
-    )
-    accounts = result.scalars().all()
-
-    # Filter active accounts for data fetching
-    active_accounts = [acc for acc in accounts if acc.is_active]
-
-    logger.info(f"API: Found {len(active_accounts)} active accounts")
-
-    if not active_accounts:
-        return {
-            "summary": {
-                "total_assets": 0,
-                "available_balance": 0,
-                "net_assets": 0,
-                "frozen_assets": 0,
-                "margin_balance": 0,
-                "unrealized_pnl": 0,
-                "daily_pnl": 0,
-                "risk_ratio": None,
-                "account_count": 0,
-                "position_count": 0,
-            },
-            "accounts": [],
-            "positions": [],
-            "failed_accounts": [],
-        }
-
-    try:
-        aggregated_data = await account_data_service.get_aggregated_account_data(list(active_accounts))
-
-        # Add inactive accounts to the response
-        inactive_accounts = [acc for acc in accounts if not acc.is_active]
-        for inactive_acc in inactive_accounts:
-            aggregated_data.setdefault("failed_accounts", []).append({
-                "account_id": str(inactive_acc.account_id),
-                "account_name": inactive_acc.account_name,
-                "platform_id": inactive_acc.platform_id,
-                "is_mt5_account": inactive_acc.is_mt5_account,
-                "is_active": False,
-                "error": "账户未激活"
-            })
-
-        return aggregated_data
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
+    """Get account summary for www frontend.
+    Alias for /dashboard/aggregated — MUST be before /{account_id} route.
+    """
+    return await get_aggregated_dashboard(user_id=user_id, db=db)
 
 
-@router.get("/dashboard/admin-summary")
-async def get_admin_dashboard_summary(
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """Admin-only: get per-user financial summary for all users (excludes system service accounts)"""
-    import logging
-    logger = logging.getLogger(__name__)
-
-    # Verify admin role
-    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
-    user_result = await db.execute(select(User).where(User.user_id == user_id))
-    caller = user_result.scalar_one_or_none()
-    if not caller or caller.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admin access required")
-
-    from app.models.mt5_client import MT5Client
-    from sqlalchemy import and_, or_
-
-    # Get all users
-    users_result = await db.execute(select(User))
-    all_users = users_result.scalars().all()
-
-    # Pre-fetch: account_ids that are ONLY linked to system-service MT5 clients
-    # (i.e., all their MT5 clients have is_system_service=True, and they have no non-system clients)
-    from sqlalchemy import func, case
-    sys_only_result = await db.execute(
-        select(MT5Client.account_id)
-        .group_by(MT5Client.account_id)
-        .having(
-            func.count(case((MT5Client.is_system_service == False, 1))) == 0
-        )
-    )
-    system_only_account_ids = {row[0] for row in sys_only_result.fetchall()}
-
-    user_summaries = []
-    for u in all_users:
-        # Get all active accounts for user, excluding system-only accounts
-        acc_result = await db.execute(
-            select(Account).where(
-                and_(
-                    Account.user_id == u.user_id,
-                    Account.is_active == True,
-                    Account.account_id.notin_(system_only_account_ids) if system_only_account_ids else True,
-                )
-            )
-        )
-        accounts = acc_result.scalars().all()
-
-        if not accounts:
-            user_summaries.append({
-                "user_id": str(u.user_id),
-                "username": u.username,
-                "role": u.role,
-                "account_count": 0,
-                "total_assets": None,
-                "available_assets": None,
-                "net_assets": None,
-                "daily_pnl": None,
-                "risk_rate": None,
-            })
-            continue
-
-        # Fetch aggregated data for this user's accounts
-        try:
-            agg = await account_data_service.get_aggregated_account_data(list(accounts))
-            summary = agg.get("summary", {})
-            failed = agg.get("failed_accounts", [])
-            user_summaries.append({
-                "user_id": str(u.user_id),
-                "username": u.username,
-                "role": u.role,
-                "account_count": len(accounts),
-                "total_assets": summary.get("total_assets"),
-                "available_assets": summary.get("available_balance"),
-                "net_assets": summary.get("net_assets"),
-                "daily_pnl": summary.get("daily_pnl"),
-                "risk_rate": summary.get("risk_ratio"),
-                "failed_accounts": [{"name": f.get("account_name"), "error": f.get("error", "")[:60]} for f in failed] if failed else None,
-            })
-        except Exception as e:
-            logger.warning(f"Failed to get data for user {u.username}: {e}")
-            user_summaries.append({
-                "user_id": str(u.user_id),
-                "username": u.username,
-                "role": u.role,
-                "account_count": len(accounts),
-                "total_assets": None,
-                "available_assets": None,
-                "net_assets": None,
-                "daily_pnl": None,
-                "risk_rate": None,
-                "error": str(e),
-            })
-
-    return {"users": user_summaries}
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_account(
     account_id: UUID,
@@ -321,25 +157,12 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Update account"""
-    # 检查是否是管理员
-    from app.models.user import User
-    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
-    user_result = await db.execute(select(User).where(User.user_id == user_id))
-    caller = user_result.scalar_one_or_none()
-    is_admin = caller is not None and caller.role in ADMIN_ROLES
-
-    # 管理员可以更新任何账户，普通用户只能更新自己的账户
-    if is_admin:
-        result = await db.execute(
-            select(Account).where(Account.account_id == account_id)
+    result = await db.execute(
+        select(Account).where(
+            Account.account_id == account_id,
+            Account.user_id == UUID(user_id),
         )
-    else:
-        result = await db.execute(
-            select(Account).where(
-                Account.account_id == account_id,
-                Account.user_id == UUID(user_id),
-            )
-        )
+    )
     account = result.scalar_one_or_none()
 
     if not account:
@@ -386,8 +209,7 @@ async def update_account(
     if account_update.leverage is not None:
         account.leverage = account_update.leverage
 
-    # 添加 proxy_config 处理
-    if hasattr(account_update, 'proxy_config'):
+    if account_update.proxy_config is not None:
         account.proxy_config = account_update.proxy_config
 
     await db.commit()
@@ -446,7 +268,7 @@ async def delete_account(
     return None
 
 
-@router.get("/account/{account_id}/balance")
+@router.get("/{account_id}/balance")
 async def get_account_balance(
     account_id: UUID,
     user_id: str = Depends(get_current_user_id),
@@ -502,7 +324,7 @@ async def get_account_balance(
         )
 
 
-@router.get("/account/{account_id}/positions")
+@router.get("/{account_id}/positions")
 async def get_account_positions(
     account_id: UUID,
     user_id: str = Depends(get_current_user_id),
@@ -548,7 +370,7 @@ async def get_account_positions(
         )
 
 
-@router.get("/account/{account_id}/pnl")
+@router.get("/{account_id}/pnl")
 async def get_account_pnl(
     account_id: UUID,
     user_id: str = Depends(get_current_user_id),
@@ -596,7 +418,164 @@ async def get_account_pnl(
         )
 
 
-@router.get("/account/{account_id}/dashboard")
+@router.get("/dashboard/admin-summary")
+async def get_admin_summary(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin dashboard: per-user financial summary across all users.
+
+    Returns aggregated balance data grouped by user for the admin overview panel.
+    Requires admin role (enforced by frontend).
+    """
+    import asyncio
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Get all active users with their accounts
+        result = await db.execute(
+            select(User).where(User.is_active == True)
+        )
+        all_users = result.scalars().all()
+
+        if not all_users:
+            return {"users": []}
+
+        users_data = []
+        for user in all_users:
+            # Get user's active accounts
+            acc_result = await db.execute(
+                select(Account).where(
+                    Account.user_id == user.user_id,
+                    Account.is_active == True
+                )
+            )
+            user_accounts = acc_result.scalars().all()
+
+            user_entry = {
+                "user_id": str(user.user_id),
+                "username": user.username,
+                "role": user.role or "--",
+                "account_count": len(user_accounts),
+                "total_assets": 0,
+                "available_assets": 0,
+                "net_assets": 0,
+                "daily_pnl": 0,
+                "risk_rate": None,
+                "error": None,
+            }
+
+            if not user_accounts:
+                users_data.append(user_entry)
+                continue
+
+            # Fetch aggregated data for this user's accounts
+            try:
+                agg = await asyncio.wait_for(
+                    account_data_service.get_aggregated_account_data(list(user_accounts)),
+                    timeout=15.0,
+                )
+                summary = agg.get("summary", {})
+                user_entry["total_assets"] = summary.get("total_assets", 0)
+                user_entry["available_assets"] = summary.get("available_balance", 0)
+                user_entry["net_assets"] = summary.get("net_assets", 0)
+                user_entry["daily_pnl"] = summary.get("daily_pnl", 0)
+                user_entry["risk_rate"] = summary.get("risk_ratio")
+
+                # If all accounts failed, note the error
+                failed = agg.get("failed_accounts", [])
+                if failed and not agg.get("accounts"):
+                    user_entry["error"] = failed[0].get("error", "")
+            except asyncio.TimeoutError:
+                user_entry["error"] = "数据获取超时"
+                logger.warning(f"Admin summary timeout for user {user.username}")
+            except Exception as e:
+                user_entry["error"] = str(e)[:100]
+                logger.error(f"Admin summary error for user {user.username}: {e}")
+
+            users_data.append(user_entry)
+
+        return {"users": users_data}
+
+    except Exception as e:
+        logger.error(f"Admin summary failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch admin summary: {str(e)}",
+        )
+
+
+@router.get("/dashboard/aggregated")
+async def get_aggregated_dashboard(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get aggregated dashboard data for all user accounts.
+
+    IMPORTANT: This route MUST be defined BEFORE /{account_id}/dashboard
+    to prevent FastAPI from matching 'dashboard' as an account_id parameter.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"API: /dashboard/aggregated called for user {user_id}")
+
+    result = await db.execute(
+        select(Account).where(
+            Account.user_id == UUID(user_id),
+        )
+    )
+    accounts = result.scalars().all()
+
+    # Filter active accounts for data fetching
+    active_accounts = [acc for acc in accounts if acc.is_active]
+
+    logger.info(f"API: Found {len(active_accounts)} active accounts")
+
+    if not active_accounts:
+        return {
+            "summary": {
+                "total_assets": 0,
+                "available_balance": 0,
+                "net_assets": 0,
+                "frozen_assets": 0,
+                "margin_balance": 0,
+                "unrealized_pnl": 0,
+                "daily_pnl": 0,
+                "risk_ratio": None,
+                "account_count": 0,
+                "position_count": 0,
+            },
+            "accounts": [],
+            "positions": [],
+            "failed_accounts": [],
+        }
+
+    try:
+        aggregated_data = await account_data_service.get_aggregated_account_data(list(active_accounts))
+
+        # Add inactive accounts to the response
+        inactive_accounts = [acc for acc in accounts if not acc.is_active]
+        for inactive_acc in inactive_accounts:
+            aggregated_data.setdefault("failed_accounts", []).append({
+                "account_id": str(inactive_acc.account_id),
+                "account_name": inactive_acc.account_name,
+                "platform_id": inactive_acc.platform_id,
+                "is_mt5_account": inactive_acc.is_mt5_account,
+                "is_active": False,
+                "proxy_config": inactive_acc.proxy_config,
+                "error": "账户未激活"
+            })
+
+        return aggregated_data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.get("/{account_id}/dashboard")
 async def get_account_dashboard(
     account_id: UUID,
     user_id: str = Depends(get_current_user_id),
@@ -625,5 +604,3 @@ async def get_account_dashboard(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
-
-

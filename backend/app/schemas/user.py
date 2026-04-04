@@ -44,6 +44,7 @@ class UserLogin(BaseModel):
     """Schema for user login"""
 
     username: str = Field(..., max_length=50)
+    role: Optional[str] = None
     password: str = Field(..., max_length=128)
 
 
@@ -93,6 +94,7 @@ class UserResponse(BaseModel):
 
     user_id: UUID
     username: str
+    role: Optional[str] = None
     email: Optional[str]
     role: str
     feishu_open_id: Optional[str] = None
@@ -114,3 +116,4 @@ class Token(BaseModel):
     token_type: str = "bearer"
     user_id: UUID
     username: str
+    role: Optional[str] = None

@@ -46,10 +46,10 @@
 
         <!-- Real-Time Market Data and Spread (Single Row) -->
         <div class="grid grid-cols-3 gap-4">
-          <!-- Bybit MT5 Real-Time Market (Green) -->
+          <!-- 对冲账户 Real-Time Market (Green) -->
           <div class="card-elevated">
             <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-bold">Bybit MT5 实时行情</h3>
+              <h3 class="text-lg font-bold">对冲账户 实时行情</h3>
               <div class="flex items-center space-x-2">
                 <div class="w-2 h-2 rounded-full bg-success animate-pulse"></div>
                 <span class="text-xs text-text-tertiary">Live</span>
@@ -84,13 +84,13 @@
             <h3 class="text-lg font-bold mb-4">点差数据流</h3>
             <div class="space-y-3">
               <div class="bg-dark-300 rounded-lg p-3">
-                <div class="text-xs text-text-tertiary mb-1">正向套利点差 (做多Binance)</div>
+                <div class="text-xs text-text-tertiary mb-1">正向套利点差 (做多主账号)</div>
                 <div class="text-2xl font-mono font-bold text-danger">
                   {{ formatPrice(forwardSpread) }} USDT
                 </div>
               </div>
               <div class="bg-dark-300 rounded-lg p-3">
-                <div class="text-xs text-text-tertiary mb-1">反向套利点差 (做多Bybit)</div>
+                <div class="text-xs text-text-tertiary mb-1">反向套利点差 (做多对冲)</div>
                 <div class="text-2xl font-mono font-bold text-success">
                   {{ formatPrice(reverseSpread) }} USDT
                 </div>
@@ -98,10 +98,10 @@
             </div>
           </div>
 
-          <!-- Binance Real-Time Market (Red) -->
+          <!-- 主账号 Real-Time Market (Red) -->
           <div class="card-elevated">
             <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-bold">Binance 实时行情</h3>
+              <h3 class="text-lg font-bold">主账号 实时行情</h3>
               <div class="flex items-center space-x-2">
                 <div class="w-2 h-2 rounded-full bg-danger animate-pulse"></div>
                 <span class="text-xs text-text-tertiary">Live</span>

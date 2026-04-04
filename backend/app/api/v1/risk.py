@@ -276,9 +276,10 @@ async def get_active_alerts(
 
 @router.delete("/alerts/expired")
 async def clear_expired_alerts(
+    user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Clear expired risk alerts"""
+    """Clear expired risk alerts (requires authentication)"""
     try:
         await risk_monitor.clear_expired_alerts(db)
         return {"message": "Expired alerts cleared"}

@@ -221,6 +221,30 @@
                 <span class="font-mono text-text-secondary uppercase">{{ acc.proxy_config.proxy_type || 'socks5' }}</span>
               </div>
               <div class="flex justify-between items-center">
+                <span class="text-text-tertiary">IP状态:</span>
+                <span class="font-mono text-xs px-1.5 py-0.5 rounded" :class="{
+                  'bg-green-900/40 text-green-400': acc.proxy_config.ip_status === 'active',
+                  'bg-red-900/40 text-red-400': acc.proxy_config.ip_status === 'expired',
+                  'bg-gray-800 text-gray-400': !acc.proxy_config.ip_status || acc.proxy_config.ip_status === 'unknown'
+                }">{{ acc.proxy_config.ip_status === 'active' ? '在线' : acc.proxy_config.ip_status === 'expired' ? '已过期' : '未知' }}</span>
+              </div>
+              <div v-if="acc.proxy_config.allocated_at" class="flex justify-between items-center">
+                <span class="text-text-tertiary">分配时间:</span>
+                <span class="font-mono text-text-secondary">{{ acc.proxy_config.allocated_at }}</span>
+              </div>
+              <div v-if="acc.proxy_config.expires_at" class="flex justify-between items-center">
+                <span class="text-text-tertiary">过期时间:</span>
+                <span class="font-mono" :class="proxyDaysLeft(acc.proxy_config.expires_at) <= 7 ? 'text-red-400 font-semibold' : 'text-text-secondary'">
+                  {{ acc.proxy_config.expires_at }}
+                  <span v-if="proxyDaysLeft(acc.proxy_config.expires_at) <= 7 && proxyDaysLeft(acc.proxy_config.expires_at) >= 0" class="ml-1 text-red-400 animate-pulse">
+                    ({{ proxyDaysLeft(acc.proxy_config.expires_at) }}天后到期)
+                  </span>
+                  <span v-else-if="proxyDaysLeft(acc.proxy_config.expires_at) < 0" class="ml-1 text-red-500 font-bold">
+                    (已过期{{ Math.abs(proxyDaysLeft(acc.proxy_config.expires_at)) }}天)
+                  </span>
+                </span>
+              </div>
+              <div class="flex justify-between items-center">
                 <span class="text-text-tertiary">认证:</span>
                 <span :class="acc.proxy_config.username ? 'text-green-400' : 'text-text-tertiary'">
                   {{ acc.proxy_config.username ? '已配置' : '无' }}
@@ -1079,6 +1103,17 @@
                 class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
                 placeholder="IPIPGO 密码" />
             </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">分配日期</label>
+              <input v-model="proxyForm.allocated_at" type="date"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary" />
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">过期日期</label>
+              <input v-model="proxyForm.expires_at" type="date"
+                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                :class="proxyForm.expires_at && proxyDaysLeft(proxyForm.expires_at) <= 7 ? 'border-red-500 text-red-400' : ''" />
+            </div>
             <div class="col-span-2">
               <label class="block text-xs text-text-tertiary mb-1">地区备注（可选）</label>
               <input v-model="proxyForm.region"
@@ -1388,7 +1423,7 @@ async function openEditAccount(acc) {
 // IPIPGO proxy config
 const showProxyModal  = ref(false)
 const proxyTargetAcc  = ref(null)
-const proxyForm = ref({ proxy_type: 'socks5', host: '', port: null, username: '', password: '', region: '' })
+const proxyForm = ref({ proxy_type: 'socks5', host: '', port: null, username: '', password: '', region: '', allocated_at: '', expires_at: '' })
 
 function openProxyConfig(acc) {
   proxyTargetAcc.value = acc
@@ -1400,6 +1435,8 @@ function openProxyConfig(acc) {
     username:   cfg.username   || '',
     password:   cfg.password   || '',
     region:     cfg.region     || '',
+    allocated_at: cfg.allocated_at || '',
+    expires_at: cfg.expires_at || '',
   }
   showProxyModal.value = true
 }
@@ -1414,6 +1451,9 @@ async function saveProxyConfig() {
     username:   proxyForm.value.username || null,
     password:   proxyForm.value.password || null,
     region:     proxyForm.value.region   || null,
+    allocated_at: proxyForm.value.allocated_at || null,
+    expires_at: proxyForm.value.expires_at || null,
+    ip_status:  proxyForm.value.expires_at ? 'active' : null,
   } : null
   try {
     await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: cfg })
@@ -1425,6 +1465,14 @@ async function saveProxyConfig() {
       accounts.value[index].proxy_config = cfg
     }
   } catch (e) { apiErr('保存代理配置失败', e) }
+}
+
+function proxyDaysLeft(dateStr) {
+  if (!dateStr) return 999
+  const exp = new Date(dateStr + 'T00:00:00')
+  const now = new Date()
+  now.setHours(0,0,0,0)
+  return Math.floor((exp - now) / 86400000)
 }
 
 async function clearProxyConfig() {
