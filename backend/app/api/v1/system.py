@@ -562,7 +562,7 @@ async def get_version_history(
 
         # Fetch latest commits from remote main branch
         fetch_result = subprocess.run(
-            ["git", "fetch", "origin", "main"],
+            ["git", "fetch", "origin", "go"],
             capture_output=True,
             text=True,
             cwd=project_root
@@ -573,7 +573,7 @@ async def get_version_history(
 
         # Get last 20 commits from origin/main (GitHub main branch)
         result = subprocess.run(
-            ["git", "log", "origin/main", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
+            ["git", "log", "origin/go", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-20"],
             capture_output=True,
             text=True,
             encoding='utf-8',
