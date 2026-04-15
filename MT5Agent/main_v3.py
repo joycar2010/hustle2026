@@ -141,9 +141,7 @@ def load_instances_from_db() -> Dict:
                 mt5_login,
                 mt5_password,
                 mt5_server,
-                password_type,
-                mt5_path,
-                bridge_service_port
+                password_type
             FROM mt5_clients
             WHERE agent_instance_name IS NOT NULL
             AND is_active = true
@@ -154,19 +152,14 @@ def load_instances_from_db() -> Dict:
 
         for row in rows:
             instance_name = row['agent_instance_name']
-            # 优先使用 DB 中的 mt5_path
-            mt5_path = row.get('mt5_path')
-            if not mt5_path:
-                # 兜底：根据 instance_name 猜测路径
-                if instance_name == 'bybit_system_service':
-                    mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
-                elif instance_name == 'mt5-01':
-                    mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"
-                elif row.get('bridge_service_port'):
-                    # 新部署的实例路径格式
-                    mt5_path = f"D:\\MetaTrader 5-{row['bridge_service_port']}\\terminal64.exe"
-                else:
-                    mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+            # 根据agent_instance_name确定MT5路径
+            if instance_name == 'bybit_system_service':
+                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+            elif instance_name == 'mt5-01':
+                mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"
+            else:
+                # 默认路径
+                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 
             instances[instance_name] = {
                 "name": row['client_name'],
@@ -1088,28 +1081,6 @@ $Shortcut.Save()
                     logger.warning(f"Failed to create shortcut: {result.stderr}")
         except Exception as e:
             logger.warning(f"Failed to create desktop shortcut: {e}")
-
-        # ==================== 5. 添加 Windows 防火墙入站规则 ====================
-        try:
-            fw_rule_name = f"MT5Bridge-{request.service_port}"
-            # 先删除同名旧规则（避免重复）
-            subprocess.run(
-                ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={fw_rule_name}'],
-                capture_output=True, text=True, timeout=10
-            )
-            result = subprocess.run(
-                ['netsh', 'advfirewall', 'firewall', 'add', 'rule',
-                 f'name={fw_rule_name}', 'dir=in', 'action=allow', 'protocol=TCP',
-                 f'localport={request.service_port}'],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                logger.info(f"Firewall rule added: {fw_rule_name} (TCP {request.service_port} inbound)")
-            else:
-                logger.warning(f"Failed to add firewall rule: {result.stderr}")
-        except Exception as e:
-            logger.warning(f"Failed to add firewall rule: {e}")
-
         return {
             "success": True,
             "service_name": request.service_name,
@@ -1130,11 +1101,6 @@ $Shortcut.Save()
                 shutil.rmtree(deploy_dir)
             if 'mt5_client_dir' in locals() and mt5_client_dir.exists():
                 shutil.rmtree(mt5_client_dir)
-            # 清理防火墙规则
-            subprocess.run(
-                ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name=MT5Bridge-{request.service_port}'],
-                capture_output=True, text=True, timeout=10
-            )
         except:
             pass
         raise HTTPException(status_code=500, detail=f"部署失败: {str(e)}")
@@ -1158,43 +1124,12 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
     try:
         deploy_dir = Path(f"D:/{service_name}")
 
-        # 1. 停止 NSSM 服务
+        # 1. 停止服务
         try:
-            subprocess.run(['nssm', 'stop', service_name], capture_output=True, text=True, timeout=15)
+            subprocess.run(['nssm', 'stop', service_name], capture_output=True, text=True, timeout=10)
             logger.info(f"Stopped service: {service_name}")
-            time.sleep(2)
         except Exception as e:
             logger.warning(f"Failed to stop service: {e}")
-
-        # 1.5 强制杀掉所有使用该部署目录的进程（Python/uvicorn/nssm子进程）
-        try:
-            deploy_str = str(deploy_dir).replace('/', '\\')
-            # 方法1: 用 psutil 扫描所有进程
-            for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline', 'cwd']):
-                try:
-                    info = proc.info
-                    cmdline = ' '.join(info.get('cmdline') or [])
-                    exe = info.get('exe') or ''
-                    cwd = info.get('cwd') or ''
-                    if (service_name in cmdline or deploy_str.lower() in cmdline.lower()
-                        or deploy_str.lower() in exe.lower()
-                        or deploy_str.lower() in cwd.lower()):
-                        proc.kill()
-                        logger.info(f"Killed process: PID={proc.pid}, name={info.get('name')}")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            # 方法2: 用 taskkill 按服务端口号杀（bridge 服务的 uvicorn 进程）
-            if mt5_client_port:
-                try:
-                    subprocess.run(
-                        ['powershell', '-Command',
-                         f'$p = Get-NetTCPConnection -LocalPort {mt5_client_port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess; if ($p) {{ Stop-Process -Id $p -Force }}'],
-                        capture_output=True, text=True, timeout=10)
-                except Exception:
-                    pass
-            time.sleep(3)
-        except Exception as e:
-            logger.warning(f"Failed to kill processes: {e}")
 
         # 2. 删除服务
         try:
@@ -1207,55 +1142,29 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
         except Exception as e:
             logger.warning(f"Failed to remove service: {e}")
 
-        # 3. 删除 Bridge 部署目录（带重试 + 强制进程清理）
+        # 3. 删除 Bridge 部署目录
         if deploy_dir.exists():
-            for attempt in range(5):
-                try:
-                    shutil.rmtree(deploy_dir)
-                    logger.info(f"Removed Bridge deployment directory: {deploy_dir}")
-                    break
-                except Exception as e:
-                    logger.warning(f"rmtree attempt {attempt+1} failed: {e}")
-                    # 用 taskkill 强制杀掉所有可能锁文件的进程
-                    try:
-                        # 查找使用该目录的句柄
-                        handle_result = subprocess.run(
-                            ['powershell', '-Command',
-                             f'Get-Process python* | Where-Object {{ $_.Path -and $_.Path -like "*{service_name}*" }} | Stop-Process -Force'],
-                            capture_output=True, text=True, timeout=10)
-                        # 也杀 uvicorn
-                        subprocess.run(
-                            ['powershell', '-Command',
-                             f'Get-Process | Where-Object {{ $_.MainWindowTitle -match "{service_name}" -or ($_.Path -and $_.Path -like "*{service_name}*") }} | Stop-Process -Force'],
-                            capture_output=True, text=True, timeout=10)
-                    except Exception:
-                        pass
-                    time.sleep(3 + attempt * 2)  # 递增等待
+            shutil.rmtree(deploy_dir)
+            logger.info(f"Removed Bridge deployment directory: {deploy_dir}")
 
         # 4. 删除 MT5 客户端目录（如果提供了端口号）
         if mt5_client_port:
             mt5_client_dir = Path(f"D:/MetaTrader 5-{mt5_client_port}")
             if mt5_client_dir.exists():
-                # 先杀掉该目录下的所有进程（terminal64.exe + 子进程）
-                mt5_dir_str = str(mt5_client_dir).replace('/', '\\').lower()
-                for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
-                    try:
-                        exe = (proc.info.get('exe') or '').lower()
-                        cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
-                        if mt5_dir_str in exe or mt5_dir_str in cmdline:
-                            proc.kill()
-                            logger.info(f"Killed MT5 process: PID={proc.pid}, exe={exe}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-                time.sleep(3)  # 等进程完全退出
+                # 先确保 MT5 进程已停止
+                mt5_exe = mt5_client_dir / "terminal64.exe"
+                if mt5_exe.exists():
+                    for proc in psutil.process_iter(['name', 'exe']):
+                        try:
+                            if proc.info['exe'] and Path(proc.info['exe']).resolve() == mt5_exe.resolve():
+                                proc.kill()
+                                logger.info(f"Killed MT5 process: PID={proc.pid}")
+                                time.sleep(2)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
 
                 # 删除 MT5 客户端目录
-                import shutil as _shutil
-                _shutil.rmtree(mt5_client_dir, ignore_errors=True)
-                if mt5_client_dir.exists():
-                    # 二次尝试
-                    time.sleep(2)
-                    _shutil.rmtree(mt5_client_dir, ignore_errors=True)
+                shutil.rmtree(mt5_client_dir)
                 logger.info(f"Removed MT5 client directory: {mt5_client_dir}")
 
         # 5. 删除桌面快捷方式（如果提供了登录账号和端口号）
@@ -1270,21 +1179,6 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
                     logger.info(f"Removed desktop shortcut: {shortcut_path}")
             except Exception as e:
                 logger.warning(f"Failed to remove desktop shortcut: {e}")
-
-        # 6. 删除 Windows 防火墙入站规则
-        if mt5_client_port:
-            try:
-                fw_rule_name = f"MT5Bridge-{mt5_client_port}"
-                result = subprocess.run(
-                    ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={fw_rule_name}'],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0:
-                    logger.info(f"Firewall rule removed: {fw_rule_name}")
-                else:
-                    logger.warning(f"Failed to remove firewall rule: {result.stderr}")
-            except Exception as e:
-                logger.warning(f"Failed to remove firewall rule: {e}")
 
         return {
             "success": True,
