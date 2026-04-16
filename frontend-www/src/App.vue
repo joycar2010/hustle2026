@@ -1,10 +1,8 @@
 <template>
   <div class="min-h-screen bg-dark-200 text-text-primary">
     <router-view />
-    <!-- 底部导航（仅登录后显示） -->
     <MobileNavbar v-if="isAuthenticated && showNav" />
-    <!-- 底部安全区域占位 -->
-    <div v-if="isAuthenticated && showNav" class="h-16 md:h-0"></div>
+    <div v-if="isAuthenticated && showNav" class="h-16 md:h-12"></div>
   </div>
 </template>
 

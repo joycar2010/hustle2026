@@ -1,126 +1,98 @@
 <template>
   <div class="pb-20 md:pb-6">
-    <!-- PC 顶部导航 -->
+    <!-- Header -->
     <header class="hidden md:flex bg-dark-100 border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center">
-          <span class="text-dark-300 font-bold">H</span>
-        </div>
-        <span class="font-semibold">HustleXAU · 实时收益</span>
+        <div class="w-8 h-8 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center"><span class="text-dark-300 font-bold">H</span></div>
+        <span class="font-semibold">HustleXAU · 收益总览</span>
       </div>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">{{ auth.user?.username }}</span>
-        <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-red-500'" :title="wsConnected ? 'WebSocket 实时推送中' : '连接断开，使用HTTP回退'"></div>
+        <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-red-500'"></div>
         <span class="text-xs text-text-tertiary">{{ lastUpdate }}</span>
         <button @click="doLogout" class="text-sm text-text-tertiary hover:text-danger transition-colors">退出</button>
       </div>
     </header>
-
-    <!-- 移动端顶部 -->
     <div class="md:hidden bg-dark-100 border-b border-border-primary px-4 py-3 flex items-center justify-between">
-      <span class="font-semibold text-sm">实时收益</span>
+      <span class="font-semibold text-sm">收益总览</span>
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-red-500'"></div>
         <span class="text-xs text-text-tertiary">{{ lastUpdate }}</span>
       </div>
     </div>
 
-    <div class="px-4 py-4 md:px-6 md:py-6 max-w-6xl mx-auto">
+    <div class="px-4 py-4 md:px-6 md:py-6 max-w-5xl mx-auto space-y-5">
 
-      <!-- 合计汇总 -->
-      <div v-if="accounts.length" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <div v-for="s in summaryCards" :key="s.label" class="bg-dark-100 rounded-xl p-3.5 border border-border-primary">
-          <div class="text-xs text-text-tertiary mb-0.5">{{ s.label }}</div>
-          <div class="text-lg font-bold font-mono" :class="s.color">{{ s.value }}</div>
+      <!-- KPI Dashboard -->
+      <div class="grid grid-cols-3 md:grid-cols-6 gap-3">
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary mb-0.5">累计收益</div>
+          <div class="text-lg font-bold font-mono" :class="pnlColor(summary.cumulative_pnl)">{{ fmtPnl(summary.cumulative_pnl) }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary mb-0.5">今日收益</div>
+          <div class="text-lg font-bold font-mono" :class="pnlColor(todayPnl)">{{ fmtPnl(todayPnl) }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary mb-0.5">最大回撤</div>
+          <div class="text-lg font-bold font-mono text-[#f6465d]">{{ summary.max_drawdown_pct != null ? summary.max_drawdown_pct.toFixed(2) + '%' : '--' }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary mb-0.5">胜率</div>
+          <div class="text-lg font-bold font-mono text-text-primary">{{ summary.win_rate != null ? (summary.win_rate * 100).toFixed(1) + '%' : '--' }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary mb-0.5">盈亏比</div>
+          <div class="text-lg font-bold font-mono text-text-primary">{{ summary.profit_factor ?? '--' }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary mb-0.5">夏普比率</div>
+          <div class="text-lg font-bold font-mono text-primary">{{ summary.sharpe_ratio ?? '--' }}</div>
         </div>
       </div>
 
-      <!-- 账户卡片 -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        <div v-if="loading" class="col-span-full flex justify-center py-16">
-          <svg class="w-8 h-8 animate-spin text-primary" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-          </svg>
-        </div>
-
-        <div v-else-if="!accounts.length" class="col-span-full text-center py-16 text-text-tertiary">
-          <div class="text-4xl mb-3">📊</div>
-          <div>暂无关联账户</div>
-          <div class="text-xs mt-1">请联系管理员绑定交易账户</div>
-        </div>
-
-        <div v-for="acc in accounts" :key="acc.account_id"
-          class="bg-dark-100 rounded-2xl border border-border-primary p-5 hover:border-border-focus transition-all"
-          :class="{ 'opacity-60': acc._error }">
-
-          <div class="flex items-start justify-between mb-4">
-            <div>
-              <div class="font-semibold text-text-primary">{{ acc.account_name }}</div>
-              <div class="flex items-center gap-1.5 mt-1">
-                <span class="px-1.5 py-0.5 rounded text-xs" :class="acc.is_mt5_account ? 'bg-purple-900/40 text-purple-300' : 'bg-blue-900/40 text-blue-300'">
-                  {{ acc.is_mt5_account ? 'MT5' : platformName(acc.platform_id) }}
-                </span>
-                <span v-if="acc.account_role" class="px-1.5 py-0.5 rounded text-xs bg-yellow-900/40 text-yellow-300">
-                  {{ acc.account_role === 'primary' ? '主' : '对冲' }}
-                </span>
-                <span :class="!acc._error && acc.is_active !== false ? 'text-success' : 'text-text-tertiary'" class="text-xs">
-                  {{ acc._error ? '● 异常' : acc.is_active !== false ? '● 正常' : '○ 未启用' }}
-                </span>
-              </div>
-            </div>
-            <div class="text-right">
-              <div class="text-xs text-text-tertiary mb-0.5">当日盈亏</div>
-              <div class="text-xl font-bold font-mono" :class="pnlColor(getDailyPnl(acc))">
-                {{ pnlStr(getDailyPnl(acc)) }}
-              </div>
-            </div>
+      <!-- Cumulative PnL Curve -->
+      <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-bold">累计收益曲线</span>
+          <div class="flex gap-1">
+            <button v-for="r in ranges" :key="r.val" @click="setRange(r.val)"
+              :class="['px-2.5 py-1 rounded text-xs border transition-colors',
+                activeRange===r.val ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-200 text-text-secondary border-border-primary']">
+              {{ r.label }}
+            </button>
           </div>
-
-          <div v-if="acc._error" class="text-xs text-red-400 mb-2 truncate" :title="acc._error">{{ acc._error }}</div>
-
-          <div class="space-y-2.5">
-            <div class="flex justify-between items-center">
-              <span class="text-xs text-text-tertiary">总资产</span>
-              <span class="font-mono font-semibold text-text-primary">{{ fmtUSDT(getBal(acc, 'total_assets')) }}</span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span class="text-xs text-text-tertiary">可用资产</span>
-              <span class="font-mono text-text-secondary">{{ fmtUSDT(getBal(acc, 'available_balance')) }}</span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span class="text-xs text-text-tertiary">净资产</span>
-              <span class="font-mono text-text-secondary">{{ fmtUSDT(getBal(acc, 'net_assets')) }}</span>
-            </div>
-            <div v-if="getBal(acc, 'unrealized_pnl') != null" class="flex justify-between items-center">
-              <span class="text-xs text-text-tertiary">未实现盈亏</span>
-              <span class="font-mono text-sm" :class="pnlColor(getBal(acc, 'unrealized_pnl'))">{{ pnlStr(getBal(acc, 'unrealized_pnl')) }}</span>
-            </div>
-
-            <div v-if="getRisk(acc) > 0" class="pt-1">
-              <div class="flex justify-between items-center mb-1">
-                <span class="text-xs text-text-tertiary">风险率</span>
-                <span class="text-xs font-mono" :class="riskColor(getRisk(acc))">{{ getRisk(acc).toFixed(1) }}%</span>
-              </div>
-              <div class="h-1.5 bg-dark-300 rounded-full overflow-hidden">
-                <div class="h-full rounded-full transition-all duration-500"
-                  :class="riskBarColor(getRisk(acc))"
-                  :style="{ width: Math.min(getRisk(acc), 100) + '%' }"></div>
-              </div>
-            </div>
-
-            <div v-if="(acc.positions || []).length > 0" class="flex justify-between items-center pt-1 border-t border-border-secondary">
-              <span class="text-xs text-text-tertiary">当前持仓</span>
-              <span class="font-mono text-xs text-primary">{{ acc.positions.length }} 笔</span>
-            </div>
-          </div>
+        </div>
+        <div class="h-52 md:h-64">
+          <Line v-if="chartData.labels.length" :data="chartData" :options="chartOpts" :key="chartKey" />
+          <div v-else class="h-full flex items-center justify-center text-text-tertiary text-sm">{{ loading ? '加载中...' : '暂无数据' }}</div>
         </div>
       </div>
 
-      <div class="mt-6 text-center text-xs text-text-tertiary">
-        <template v-if="wsConnected">WebSocket 实时推送</template>
-        <template v-else>HTTP 回退轮询 (30s)</template>
-         · 最后更新: {{ lastUpdate }}
+      <!-- Fund Summary (merged, not per-account) -->
+      <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-bold">账户资金概览</span>
+          <span class="text-xs text-text-tertiary">{{ wsConnected ? 'WS实时' : '定时刷新' }}</span>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-dark-200 rounded-xl p-3">
+            <div class="text-xs text-text-tertiary mb-1">总资产</div>
+            <div class="font-mono font-bold text-text-primary">{{ fmtNum(fundTotals.total_assets) }} U</div>
+          </div>
+          <div class="bg-dark-200 rounded-xl p-3">
+            <div class="text-xs text-text-tertiary mb-1">可用资产</div>
+            <div class="font-mono font-bold text-text-secondary">{{ fmtNum(fundTotals.available) }} U</div>
+          </div>
+          <div class="bg-dark-200 rounded-xl p-3">
+            <div class="text-xs text-text-tertiary mb-1">净资产</div>
+            <div class="font-mono font-bold text-text-secondary">{{ fmtNum(fundTotals.net_assets) }} U</div>
+          </div>
+          <div class="bg-dark-200 rounded-xl p-3">
+            <div class="text-xs text-text-tertiary mb-1">浮动盈亏</div>
+            <div class="font-mono font-bold" :class="pnlColor(fundTotals.unrealized_pnl)">{{ fmtPnl(fundTotals.unrealized_pnl) }} U</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -129,133 +101,122 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { Line } from 'vue-chartjs'
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from 'chart.js'
 import { useAuthStore } from '@/stores/auth.js'
 import { useWebSocket } from '@/composables/useWebSocket.js'
+import { fetchDailyPnl, fmtPnl, fmtNum, pnlColor } from '@/utils/pnlUtils.js'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
 
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler)
+
 const router = useRouter()
 const auth = useAuthStore()
-const loading = ref(true)
-const accounts = ref([])
-const summary = ref(null)
-const lastUpdate = ref('--')
-let fallbackTimer = null
-
-// WebSocket connection
 const { connected: wsConnected, lastMessage, connect: wsConnect, disconnect: wsDisconnect } = useWebSocket()
 
-// Watch for WS messages — update data on account_balance push
+const loading = ref(true)
+const lastUpdate = ref('--')
+const dailyList = ref([])
+const summary = ref({})
+const fundTotals = ref({ total_assets: 0, available: 0, net_assets: 0, unrealized_pnl: 0 })
+const activeRange = ref('90d')
+const chartKey = ref(0)
+let fallbackTimer = null
+
+const ranges = [
+  { label: '30天', val: '30d' }, { label: '90天', val: '90d' },
+  { label: '半年', val: '180d' }, { label: '全部', val: '365d' },
+]
+
+const todayPnl = computed(() => {
+  const today = dayjs().format('YYYY-MM-DD')
+  const d = dailyList.value.find(x => x.date === today)
+  return d ? d.net_pnl : 0
+})
+
+// Chart
+const chartData = computed(() => {
+  const list = dailyList.value
+  if (!list.length) return { labels: [], datasets: [] }
+  let cum = 0
+  const cumArr = []
+  const ddArr = []
+  let peak = 0
+  for (const d of list) {
+    cum += d.net_pnl
+    cumArr.push(parseFloat(cum.toFixed(2)))
+    peak = Math.max(peak, cum)
+    ddArr.push(parseFloat((cum - peak).toFixed(2)))
+  }
+  return {
+    labels: list.map(d => d.date.substring(5)), // MM-DD
+    datasets: [
+      { label: '累计收益', data: cumArr, borderColor: '#0ecb81', backgroundColor: 'rgba(14,203,129,0.1)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+      { label: '回撤', data: ddArr, borderColor: '#f6465d', backgroundColor: 'rgba(246,70,93,0.08)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1, borderDash: [4, 4] },
+    ]
+  }
+})
+
+const chartOpts = {
+  responsive: true, maintainAspectRatio: false, animation: false,
+  plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(0,0,0,0.85)' } },
+  scales: {
+    x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', maxTicksLimit: 8, font: { size: 10 } } },
+    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 10 } } }
+  }
+}
+
+// WS for fund totals
 watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.type === 'account_balance' && msg.data) {
-    applyData(msg.data)
+    const s = msg.data.summary || {}
+    fundTotals.value = {
+      total_assets: s.total_assets || 0,
+      available: s.available_balance || 0,
+      net_assets: s.net_assets || 0,
+      unrealized_pnl: s.unrealized_pnl || 0,
+    }
+    lastUpdate.value = dayjs().format('HH:mm:ss')
   }
 })
 
-// When WS disconnects, start HTTP fallback polling (every 30s)
-// When WS connects, stop fallback polling
 watch(wsConnected, (val) => {
-  if (val) {
-    clearInterval(fallbackTimer)
-    fallbackTimer = null
-  } else if (!fallbackTimer) {
-    fallbackTimer = setInterval(fetchData, 30000)
-  }
+  if (val) { clearInterval(fallbackTimer); fallbackTimer = null }
+  else if (!fallbackTimer) { fallbackTimer = setInterval(fetchFund, 30000) }
 })
 
-function applyData(d) {
-  if (d.summary) summary.value = d.summary
-
-  const all = []
-  if (d.accounts && Array.isArray(d.accounts)) all.push(...d.accounts)
-  if (d.failed_accounts && Array.isArray(d.failed_accounts)) {
-    for (const fa of d.failed_accounts) all.push({ ...fa, _error: fa.error || '数据获取失败' })
-  }
-  // Legacy flat array
-  if (Array.isArray(d) && !d.summary) all.push(...d)
-
-  if (all.length > 0) accounts.value = all
-  lastUpdate.value = dayjs().format('HH:mm:ss')
-  loading.value = false
+async function setRange(val) {
+  activeRange.value = val
+  const days = parseInt(val)
+  const start = dayjs().subtract(days, 'day').format('YYYY-MM-DD')
+  const end = dayjs().format('YYYY-MM-DD')
+  loading.value = true
+  try {
+    const data = await fetchDailyPnl(start, end)
+    dailyList.value = data.daily_pnl || []
+    summary.value = data.summary || {}
+    chartKey.value++
+  } catch (e) { console.error('PnL fetch error:', e) }
+  finally { loading.value = false }
 }
 
-// Initial HTTP fetch + open WebSocket
-async function fetchData() {
+async function fetchFund() {
   try {
     const r = await api.get('/api/v1/accounts/dashboard/aggregated')
-    applyData(r.data)
-  } catch (e) {
-    console.error('fetchData error:', e)
-    if (e.response?.status === 401) { doLogout(); return }
-  } finally {
-    loading.value = false
-  }
+    const s = r.data?.summary || {}
+    fundTotals.value = { total_assets: s.total_assets || 0, available: s.available_balance || 0, net_assets: s.net_assets || 0, unrealized_pnl: s.unrealized_pnl || 0 }
+    lastUpdate.value = dayjs().format('HH:mm:ss')
+  } catch {}
 }
 
-function doLogout() {
-  wsDisconnect()
-  clearInterval(fallbackTimer)
-  auth.logout()
-  router.push('/login')
-}
-
-// Summary cards
-const summaryCards = computed(() => {
-  const s = summary.value
-  if (!s) {
-    const sum = (f) => accounts.value.reduce((t, a) => t + (parseFloat(a.balance?.[f] ?? a[f] ?? 0) || 0), 0)
-    const pnl = sum('daily_pnl')
-    return [
-      { label: '总资产合计', value: fmtUSDT(sum('total_assets')), color: 'text-text-primary' },
-      { label: '可用资产',   value: fmtUSDT(sum('available_balance')), color: 'text-text-secondary' },
-      { label: '净资产合计', value: fmtUSDT(sum('net_assets')), color: 'text-text-secondary' },
-      { label: '当日总盈亏', value: pnlStr(pnl), color: pnlColor(pnl) },
-    ]
-  }
-  return [
-    { label: '总资产合计', value: fmtUSDT(s.total_assets), color: 'text-text-primary' },
-    { label: '可用资产',   value: fmtUSDT(s.available_balance), color: 'text-text-secondary' },
-    { label: '净资产合计', value: fmtUSDT(s.net_assets), color: 'text-text-secondary' },
-    { label: '当日总盈亏', value: pnlStr(s.daily_pnl), color: pnlColor(s.daily_pnl) },
-  ]
-})
-
-function getBal(acc, field) {
-  if (acc.balance?.[field] != null) return parseFloat(acc.balance[field])
-  if (acc[field] != null) return parseFloat(acc[field])
-  return null
-}
-function getDailyPnl(acc) {
-  if (acc.daily_pnl != null && acc.daily_pnl !== 0) return parseFloat(acc.daily_pnl)
-  return getBal(acc, 'daily_pnl') ?? getBal(acc, 'unrealized_pnl')
-}
-function getRisk(acc) {
-  const v = getBal(acc, 'risk_ratio')
-  return (v != null && !isNaN(v)) ? v : 0
-}
-function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets' }[id] || 'Unknown' }
-function fmtUSDT(v) {
-  if (v == null || isNaN(v)) return '--'
-  return parseFloat(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' U'
-}
-function pnlStr(v) {
-  if (v == null || isNaN(v)) return '--'
-  const n = parseFloat(v)
-  return (n >= 0 ? '+' : '') + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' U'
-}
-function pnlColor(v) { return !v || isNaN(v) ? 'text-text-tertiary' : parseFloat(v) >= 0 ? 'text-success' : 'text-danger' }
-function riskColor(v) { return v < 50 ? 'text-success' : v < 80 ? 'text-warning' : 'text-danger' }
-function riskBarColor(v) { return v < 50 ? 'bg-success' : v < 80 ? 'bg-warning' : 'bg-danger' }
+function doLogout() { wsDisconnect(); clearInterval(fallbackTimer); auth.logout(); router.push('/login') }
 
 onMounted(async () => {
   await auth.fetchUser()
-  await fetchData()
+  await Promise.all([setRange('90d'), fetchFund()])
   wsConnect()
 })
-
-onUnmounted(() => {
-  wsDisconnect()
-  clearInterval(fallbackTimer)
-})
+onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer) })
 </script>
