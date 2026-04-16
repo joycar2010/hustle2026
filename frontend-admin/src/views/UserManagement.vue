@@ -2088,11 +2088,30 @@ async function saveDeploy() {
       stepRun(i); await new Promise(r => setTimeout(r, 400)); stepDone(i)
     }
 
-    progressDone('Bridge 实例部署成功')
+    progressDone('Bridge 实例部署成功，正在启动服务...')
     const r = await api.get(`/api/v1/mt5/instances/client/${deployClient.value.client_id}`)
     deployInstances.value = r.data || []
     resetDeployForm()
     await loadAllInstances()
+
+    // Auto-start Bridge service + MT5 terminal for the newly deployed instance
+    const newInst = deployInstances.value.find(i => i.service_port === f.service_port)
+    if (newInst) {
+      try {
+        // Start Bridge service
+        await api.post(`/api/v1/mt5/instances/${newInst.instance_id}/control`, { action: 'start' })
+        // Start MT5 terminal
+        const sn = f.deploy_path.replace(/[\/]/g, '/').split('/').pop()
+        await api.post(`/api/v1/mt5/instances/terminal/${sn}/control`, { action: 'start' }).catch(() => {})
+      } catch {}
+    }
+
+    // Auto-close modal after 2 seconds
+    setTimeout(() => {
+      showDeployModal.value = false
+      deployProgress.value.active = false
+      loadMT5Clients()
+    }, 2000)
   } catch (e) {
     const runningIdx = deployProgress.value.steps.findIndex(s => s.status === 'running')
     const detail = e?.response?.data?.detail || e?.message || ''

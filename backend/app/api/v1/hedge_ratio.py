@@ -25,14 +25,16 @@ class HedgeRatioToggle(BaseModel):
 @router.get("/hedge-ratio")
 async def get_hedge_ratio(
     pair_code: str = "XAU",
+    target_user_id: str = Query(None, alias="user_id"),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get current hedge multiplier and enabled status for current user"""
+    """Get current hedge multiplier and enabled status. Admin can query other users via ?user_id="""
+    lookup_uid = target_user_id or user_id
     # Check if user has hedge_ratio_enabled
     enabled_result = await db.execute(
         text("SELECT hedge_ratio_enabled FROM users WHERE user_id=:uid"),
-        {"uid": user_id}
+        {"uid": lookup_uid}
     )
     enabled_row = enabled_result.fetchone()
     enabled = bool(enabled_row[0]) if enabled_row and enabled_row[0] else False
@@ -40,7 +42,7 @@ async def get_hedge_ratio(
     # Get multiplier from strategy_configs
     result = await db.execute(
         text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
-        {"uid": user_id, "pc": pair_code}
+        {"uid": lookup_uid, "pc": pair_code}
     )
     row = result.fetchone()
     multiplier = float(row[0]) if row and row[0] else 1.0
