@@ -1,0 +1,442 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-300 text-text-primary font-sans;
+  }
+}
+
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply bg-primary text-dark-300 px-4 py-2 rounded font-medium hover:bg-primary-hover transition-all duration-200;
+  }
+
+  .btn-success {
+    @apply bg-success text-white px-4 py-2 rounded font-medium hover:bg-success-dark transition-all duration-200;
+  }
+
+  .btn-danger {
+    @apply bg-danger text-white px-4 py-2 rounded font-medium hover:bg-danger-dark transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply bg-dark-100 text-text-primary px-4 py-2 rounded font-medium hover:bg-dark-50 transition-all duration-200 border border-border-primary;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-dark-200 rounded-lg p-4 border border-border-secondary;
+  }
+
+  .card-elevated {
+    @apply bg-dark-100 rounded-lg p-4 border border-border-primary shadow-lg;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply bg-dark-200 border border-border-primary rounded px-3 py-2 w-full text-text-primary focus:border-primary focus:outline-none transition-colors;
+  }
+
+  /* Tables */
+  .table-header {
+    @apply text-text-tertiary text-sm font-medium uppercase tracking-wider;
+  }
+
+  .table-row {
+    @apply border-b border-border-secondary hover:bg-dark-50 transition-colors;
+  }
+
+  /* Price displays */
+  .price-up {
+    @apply text-success font-mono;
+  }
+
+  .price-down {
+    @apply text-danger font-mono;
+  }
+
+  .price-neutral {
+    @apply text-text-primary font-mono;
+  }
+
+  /* Status badges */
+  .badge {
+    @apply px-2 py-1 rounded text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/20 text-success;
+  }
+
+  .badge-danger {
+    @apply badge bg-danger/20 text-danger;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/20 text-warning;
+  }
+
+  .badge-info {
+    @apply badge bg-info/20 text-info;
+  }
+}
+
+/* ========== 移动端优化 (包括2K屏幕和iPhone) ========== */
+@media (orientation: portrait) and (max-width: 1500px), (max-width: 767px) {
+  /* 防止页面缩放 */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* 优化触摸滚动 */
+  body {
+    -webkit-overflow-scrolling: touch;
+    overflow-x: hidden;
+    font-size: 17px !important; /* 统一基础字体大小 */
+  }
+
+  /* 防止横向滚动 */
+  * {
+    max-width: 100vw;
+    box-sizing: border-box;
+  }
+
+  /* 统一字体大小 - 适用于所有移动设备（参考iPhone显示效果）*/
+  .text-xs {
+    font-size: 1rem !important; /* 从0.95rem增加到1rem */
+  }
+
+  .text-sm {
+    font-size: 1.125rem !important; /* 从1rem增加到1.125rem */
+  }
+
+  .text-base {
+    font-size: 1.25rem !important; /* 从1.125rem增加到1.25rem */
+  }
+
+  .text-lg {
+    font-size: 1.5rem !important; /* 从1.25rem增加到1.5rem */
+  }
+
+  .text-xl {
+    font-size: 1.75rem !important; /* 从1.5rem增加到1.75rem */
+  }
+
+  .text-2xl {
+    font-size: 2rem !important; /* 从1.75rem增加到2rem */
+  }
+
+  /* 优化输入框在移动端的表现（参考iPhone显示效果）*/
+  input,
+  textarea,
+  select {
+    font-size: 20px !important; /* 从18px增加到20px */
+    padding: 0.75rem 0.85rem !important; /* 从0.65rem 0.75rem增加 */
+    min-height: 50px !important; /* 从46px增加到50px */
+  }
+
+  /* 优化按钮点击区域 - 统一所有移动设备（参考iPhone显示效果）*/
+  button,
+  a {
+    min-height: 54px !important; /* 从50px增加到54px */
+    padding: 0.85rem 1.1rem !important; /* 从0.75rem 1rem增加 */
+    font-size: 1.125rem !important; /* 从1rem增加到1.125rem */
+  }
+
+  /* 小按钮也要足够大 */
+  button.text-xs,
+  button.text-sm,
+  .btn-sm {
+    min-height: 50px !important; /* 从46px增加到50px */
+    padding: 0.75rem 0.95rem !important; /* 从0.65rem 0.85rem增加 */
+    font-size: 1rem !important; /* 从0.95rem增加到1rem */
+  }
+
+  /* 禁用长按选择 */
+  * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* 允许输入框选择 */
+  input,
+  textarea {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* 优化表格在移动端的显示（参考iPhone显示效果）*/
+  table {
+    width: 100%;
+    table-layout: fixed;
+    font-size: 1.05rem !important; /* 从0.95rem增加到1.05rem */
+  }
+
+  th,
+  td {
+    padding: 0.5rem 0.55rem !important; /* 从0.45rem 0.5rem增加 */
+  }
+
+  /* 优化标题（参考iPhone显示效果）*/
+  h1 {
+    font-size: 2rem !important; /* 从1.75rem增加到2rem */
+  }
+
+  h2 {
+    font-size: 1.75rem !important; /* 从1.5rem增加到1.75rem */
+  }
+
+  h3 {
+    font-size: 1.5rem !important; /* 从1.25rem增加到1.5rem */
+  }
+
+  /* 优化间距 */
+  .p-1 {
+    padding: 0.4rem !important;
+  }
+
+  .p-1\.5 {
+    padding: 0.5rem !important;
+  }
+
+  .p-2 {
+    padding: 0.65rem !important;
+  }
+
+  .gap-1 {
+    gap: 0.4rem !important;
+  }
+
+  .gap-1\.5 {
+    gap: 0.45rem !important;
+  }
+
+  .gap-2 {
+    gap: 0.5rem !important;
+  }
+
+  .space-y-1 > * + * {
+    margin-top: 0.4rem !important;
+  }
+
+  .space-y-1\.5 > * + * {
+    margin-top: 0.45rem !important;
+  }
+
+  .space-y-2 > * + * {
+    margin-top: 0.5rem !important;
+  }
+
+  /* 完全禁用动画以提升性能 */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* 优化字体渲染 */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeSpeed;
+  }
+
+  /* 减少阴影和模糊效果 */
+  * {
+    box-shadow: none !important;
+    filter: none !important;
+  }
+
+  /* 优化行高 */
+  * {
+    line-height: 1.5 !important;
+  }
+
+  /* 限制容器最大宽度，防止内容被拉伸 */
+  .strategy-container,
+  .market-cards-container {
+    max-width: 100vw !important;
+  }
+
+  /* 优化网格布局，防止按钮被拉伸 */
+  .grid-cols-2 > * {
+    max-width: 100%;
+  }
+
+  .grid-cols-3 > * {
+    max-width: 100%;
+  }
+}
+
+/* ========== 小米15 Pro专属优化 (1400px-1500px宽度，按钮高度翻倍) ========== */
+@media (orientation: portrait) and (min-width: 1400px) and (max-width: 1500px) {
+  /* 基础字体翻倍 */
+  body {
+    font-size: 34px !important; /* 从17px翻倍到34px */
+  }
+
+  /* 按钮高度翻倍 - 仅针对小米15 Pro */
+  button,
+  a {
+    min-height: 108px !important; /* 从54px翻倍到108px */
+    padding: 1.5rem 1.5rem !important;
+    font-size: 2.25rem !important; /* 从1.125rem翻倍到2.25rem */
+    font-weight: 600 !important;
+  }
+
+  button.text-xs,
+  button.text-sm,
+  .btn-sm {
+    min-height: 90px !important; /* 从50px增加到90px */
+    padding: 1.25rem 1.35rem !important;
+    font-size: 2rem !important; /* 从1rem翻倍到2rem */
+    font-weight: 600 !important;
+  }
+
+  /* 输入框也相应增大 */
+  input,
+  textarea,
+  select {
+    font-size: 40px !important; /* 从20px翻倍到40px */
+    padding: 1rem 1.1rem !important;
+    min-height: 80px !important;
+  }
+
+  /* 字体大小翻倍 */
+  .text-xs {
+    font-size: 2rem !important; /* 从1rem翻倍到2rem */
+  }
+
+  .text-sm {
+    font-size: 2.25rem !important; /* 从1.125rem翻倍到2.25rem */
+  }
+
+  .text-base {
+    font-size: 2.5rem !important; /* 从1.25rem翻倍到2.5rem */
+  }
+
+  .text-lg {
+    font-size: 3rem !important; /* 从1.5rem翻倍到3rem */
+  }
+
+  .text-xl {
+    font-size: 3.5rem !important; /* 从1.75rem翻倍到3.5rem */
+  }
+
+  .text-2xl {
+    font-size: 4rem !important; /* 从2rem翻倍到4rem */
+  }
+
+  /* 标题翻倍 */
+  h1 {
+    font-size: 4rem !important; /* 从2rem翻倍到4rem */
+  }
+
+  h2 {
+    font-size: 3.5rem !important; /* 从1.75rem翻倍到3.5rem */
+  }
+
+  h3 {
+    font-size: 3rem !important; /* 从1.5rem翻倍到3rem */
+  }
+
+  /* 表格字体翻倍 */
+  table {
+    font-size: 2.1rem !important; /* 从1.05rem翻倍到2.1rem */
+  }
+
+  th,
+  td {
+    padding: 0.6rem 0.7rem !important;
+    font-size: 2.1rem !important;
+  }
+
+  /* 标签字体翻倍 */
+  label {
+    font-size: 2rem !important;
+  }
+
+  /* 间距也相应增大 */
+  .p-1 {
+    padding: 0.8rem !important;
+  }
+
+  .p-1\.5 {
+    padding: 1rem !important;
+  }
+
+  .p-2 {
+    padding: 1.3rem !important;
+  }
+
+  .gap-1 {
+    gap: 0.8rem !important;
+  }
+
+  .gap-1\.5 {
+    gap: 0.9rem !important;
+  }
+
+  .gap-2 {
+    gap: 1rem !important;
+  }
+
+  .space-y-1 > * + * {
+    margin-top: 0.8rem !important;
+  }
+
+  .space-y-1\.5 > * + * {
+    margin-top: 0.9rem !important;
+  }
+
+  .space-y-2 > * + * {
+    margin-top: 1rem !important;
+  }
+}
+
+/* ========== PC端优化 - 适合触摸屏操作 ========== */
+@media (min-width: 1024px) {
+  /* 优化按钮尺寸 - 适合PC触摸屏 */
+  button,
+  a.btn {
+    min-height: 42px !important;
+    padding: 0.6rem 1rem !important;
+    font-size: 0.95rem !important;
+  }
+
+  button.text-xs,
+  button.text-sm,
+  .btn-sm {
+    min-height: 38px !important;
+    padding: 0.5rem 0.85rem !important;
+    font-size: 0.875rem !important;
+  }
+
+  /* 优化输入框 */
+  input,
+  textarea,
+  select {
+    min-height: 40px !important;
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.95rem !important;
+  }
+
+  /* 优化表格 */
+  table {
+    font-size: 0.9rem !important;
+  }
+
+  th,
+  td {
+    padding: 0.5rem 0.6rem !important;
+  }
+}
+
+/* ========== 移除单独的2K屏幕媒体查询，统一使用上面的样式 ========== */

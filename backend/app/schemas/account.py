@@ -1,0 +1,118 @@
+from datetime import datetime
+from typing import Optional
+from pydantic import BaseModel, Field
+from uuid import UUID
+
+
+class AccountCreate(BaseModel):
+    """Schema for creating a new account"""
+
+    user_id: Optional[str] = None  # Admin can specify target user
+    platform_id: int = Field(..., ge=1)  # 1: Binance, 2: Bybit, 3: IC Markets, etc.
+    account_name: str = Field(..., min_length=1, max_length=50)
+    api_key: str = Field(default="", max_length=256)
+    api_secret: str = Field(default="", max_length=256)
+    passphrase: Optional[str] = Field(None, max_length=100)
+
+    # MT5-specific fields
+    mt5_id: Optional[str] = Field(None, max_length=100)
+    mt5_server: Optional[str] = Field(None, max_length=100)
+    mt5_primary_pwd: Optional[str] = Field(None, max_length=256)
+    is_mt5_account: bool = False
+
+    is_default: bool = False
+    account_role: Optional[str] = None  # 'primary' or 'hedge'
+    leverage: Optional[int] = Field(None, ge=1, le=1000)  # Leverage multiplier
+
+
+class AccountUpdate(BaseModel):
+    """Schema for updating account"""
+
+    user_id: Optional[str] = None  # Admin only: transfer account to another user
+    account_name: Optional[str] = Field(None, min_length=1, max_length=50)
+    platform_id: Optional[int] = Field(None, ge=1)  # Allow platform change (admin only)
+    is_mt5_account: Optional[bool] = None  # Allow toggling MT5 flag
+    api_key: Optional[str] = Field(None, max_length=256)
+    api_secret: Optional[str] = Field(None, max_length=256)
+    passphrase: Optional[str] = Field(None, max_length=100)
+    is_default: Optional[bool] = None
+    account_role: Optional[str] = None  # 'primary', 'hedge', or null to clear
+    is_active: Optional[bool] = None
+    leverage: Optional[int] = Field(None, ge=1, le=1000)  # Leverage multiplier
+    proxy_config: Optional[dict] = None  # IPIPGO static IP proxy config
+
+
+class AccountResponse(BaseModel):
+    """Schema for account response"""
+
+    account_id: UUID
+    user_id: UUID
+    platform_id: int
+    account_name: str
+    api_key: Optional[str] = None  # API Key (for editing)
+    api_secret: Optional[str] = None  # API Secret (for editing)
+    passphrase: Optional[str] = None  # Passphrase (for OKX)
+    mt5_id: Optional[str] = None  # MT5 account ID
+    mt5_server: Optional[str] = None  # MT5 server
+    mt5_primary_pwd: Optional[str] = None  # MT5 password
+    is_mt5_account: bool
+    is_default: bool
+    account_role: Optional[str] = None
+    is_active: bool
+    leverage: Optional[int] = None  # Leverage multiplier
+    proxy_config: Optional[dict] = None  # IPIPGO static IP proxy config
+    create_time: datetime
+    update_time: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AccountBalance(BaseModel):
+    """Schema for account balance data"""
+
+    total_assets: float  # 总资产 (equity for Bybit)
+    available_balance: float  # 可用资产 (availableToTrade)
+    net_assets: float  # 净资产 (equity for Bybit)
+    frozen_assets: float  # 冻结资产 (walletBalance - availableToTrade)
+    margin_balance: float  # 保证金余额 (marginBalance from account-info)
+    unrealized_pnl: float  # 未实现盈亏
+    risk_ratio: Optional[float] = None  # 风险率 (riskRatio from account-info)
+    total_positions: Optional[float] = None  # 总持仓 (sum from position/list)
+    daily_pnl: Optional[float] = None  # 当日盈亏 (from profit-loss)
+    funding_fee: Optional[float] = None  # 资金费 (from funding-fee)
+
+    # Bybit-specific fees
+    long_swap_fee: Optional[float] = None  # Bybit做多掉期费
+    short_swap_fee: Optional[float] = None  # Bybit做空掉期费
+    commission_fee: Optional[float] = None  # Bybit手续费(佣金)
+
+    # Binance-specific fees
+    long_funding_rate: Optional[float] = None  # Binance做多资金费
+    short_funding_rate: Optional[float] = None  # Binance做空资金费
+    bnb_balance: Optional[float] = None        # Binance BNB余额
+    maker_commission_rate: Optional[float] = None  # Binance maker手续费率
+    taker_commission_rate: Optional[float] = None  # Binance taker手续费率
+
+    # Position data for liquidation price calculation
+    entry_price: Optional[float] = None  # 开仓均价
+    leverage: Optional[int] = None  # 杠杆倍数
+    volume: Optional[float] = None  # MT5持仓手数
+    equity: Optional[float] = None  # MT5账户权益
+
+    # MT5 native liquidation prices (from Bybit MT5 API)
+    long_liquidation_price: Optional[float] = None  # 多头强平价
+    short_liquidation_price: Optional[float] = None  # 空头强平价
+
+
+class AccountPosition(BaseModel):
+    """Schema for account position data"""
+
+    symbol: str
+    side: str  # Buy/Sell
+    size: float
+    entry_price: float
+    mark_price: float
+    unrealized_pnl: float
+    leverage: int
+    ticket: Optional[int] = None  # MT5 position ticket (unique per position)

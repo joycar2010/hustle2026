@@ -1,0 +1,9 @@
+Backup: 20260416_050227
+Changes since last backup:
+- 3 frontends split into independent projects (frontend-go, frontend-admin, frontend-www)
+- Nginx split into 3 config files
+- MasterDashboard.vue rewritten: WebSocket + new layout
+- www Overview.vue: WebSocket real-time push
+- account_service.py: fix MT5-only accounts (api_key=None) Bybit API error
+- admin useWebSocket.js composable added
+- www useWebSocket.js composable added

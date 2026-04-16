@@ -1,0 +1,431 @@
+"""Strategy Execution Status Push Service for WebSocket"""
+import asyncio
+import logging
+from typing import Dict, Optional
+from datetime import datetime
+
+from app.websocket.manager import manager
+
+
+logger = logging.getLogger(__name__)
+
+
+class StrategyExecutionStatusPusher:
+    """
+    Pushes real-time strategy execution status via WebSocket.
+
+    Pushes:
+    - Execution state changes (started, stopped, completed)
+    - Trigger count progress
+    - Position changes
+    - Ladder progress
+    - Errors and warnings
+    """
+
+    def __init__(self, websocket_manager=None):
+        """
+        Initialize status pusher.
+
+        Args:
+            websocket_manager: WebSocket manager instance (uses global if not provided)
+        """
+        self.manager = websocket_manager or manager
+        self._push_queue = None  # Will be created in start()
+        self._is_running = False
+        self._push_task: Optional[asyncio.Task] = None
+
+    async def start(self):
+        """Start the status push service"""
+        if self._is_running:
+            logger.warning("Status pusher already running")
+            return
+
+        # Create queue in the current event loop
+        self._push_queue = asyncio.Queue()
+        self._is_running = True
+        self._push_task = asyncio.create_task(self._push_worker())
+        logger.info("Strategy execution status pusher started")
+
+    async def stop(self):
+        """Stop the status push service"""
+        if not self._is_running:
+            return
+
+        self._is_running = False
+        if self._push_task:
+            self._push_task.cancel()
+            try:
+                await self._push_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info("Strategy execution status pusher stopped")
+
+    async def _push_worker(self):
+        """Background worker to process push queue"""
+        while self._is_running:
+            try:
+                # Get message from queue with timeout
+                message = await asyncio.wait_for(
+                    self._push_queue.get(),
+                    timeout=1.0
+                )
+
+                # Send via WebSocket
+                await self._send_message(message)
+
+            except asyncio.TimeoutError:
+                # No message in queue, continue
+                continue
+            except Exception as e:
+                logger.exception(f"Error in push worker: {e}")
+
+    async def _send_message(self, message: Dict):
+        """Send message via WebSocket (through Go Redis bridge).
+
+        The frontend connects to Go /ws (Go WebSocket Hub), not to Python /api/v1/ws,
+        so Python ws_manager.active_connections is always empty. We must publish to
+        Redis channel ws:user_event (for per-user events like strategy_trigger_progress)
+        or ws:broadcast (for global events) so the Go redis_bridge forwards to clients.
+        """
+        try:
+            msg_type = message.get('type')
+            user_id = message.get('user_id')
+            # Strip the internal user_id key — the transport envelope carries it separately.
+            payload = {k: v for k, v in message.items() if k != 'user_id'}
+
+            from app.core.redis_client import redis_client as _rc
+            import json as _json
+
+            if user_id:
+                # Per-user event → Go redis_bridge ws:user_event handler → Hub.SendToUser
+                evt = {
+                    'user_id': user_id,
+                    'type': msg_type,
+                    'data': payload.get('data', payload),
+                }
+                await _rc.publish('ws:user_event', _json.dumps(evt, default=str))
+            else:
+                # Global broadcast → Go redis_bridge ws:broadcast handler → Hub.Broadcast
+                await _rc.publish('ws:broadcast', _json.dumps(payload, default=str))
+
+            # Legacy Python WS manager fallback — harmless no-op today (no Python /ws clients),
+            # retained so internal services that subscribe via Python manager still work
+            # if/when they exist.
+            try:
+                if user_id:
+                    await self.manager.send_to_user(message, user_id)
+                else:
+                    await self.manager.broadcast(message)
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.exception(f"Error sending WebSocket message: {e}")
+
+    async def push_execution_started(
+        self,
+        strategy_id: int,
+        action: str,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push execution started event.
+
+        Args:
+            strategy_id: Strategy ID
+            action: Action type (reverse_opening, reverse_closing, etc.)
+            user_id: Optional user ID for targeted push
+        """
+        message = {
+            'type': 'strategy_execution_started',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_execution_stopped(
+        self,
+        strategy_id: int,
+        action: str,
+        reason: Optional[str] = None,
+        user_id: Optional[str] = None
+    ):
+        """Push execution stopped event"""
+        message = {
+            'type': 'strategy_execution_stopped',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'reason': reason,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_execution_completed(
+        self,
+        strategy_id: int,
+        action: str,
+        result: Dict,
+        user_id: Optional[str] = None
+    ):
+        """Push execution completed event"""
+        message = {
+            'type': 'strategy_execution_completed',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'result': result,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_trigger_progress(
+        self,
+        strategy_id: int,
+        action: str,
+        ladder_index: int,
+        current_count: int,
+        required_count: int,
+        current_spread: float,
+        threshold: float,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push trigger count progress.
+
+        Args:
+            strategy_id: Strategy ID
+            action: Action type
+            ladder_index: Current ladder index
+            current_count: Current trigger count
+            required_count: Required trigger count
+            current_spread: Current spread value
+            threshold: Threshold spread value
+            user_id: Optional user ID
+        """
+        progress_percent = min(100, (current_count / required_count) * 100) if required_count > 0 else 0
+
+        message = {
+            'type': 'strategy_trigger_progress',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'ladder_index': ladder_index,
+                'current_count': current_count,
+                'required_count': required_count,
+                'progress_percent': progress_percent,
+                'current_spread': current_spread,
+                'threshold': threshold,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_position_change(
+        self,
+        strategy_id: int,
+        ladder_index: int,
+        change_type: str,  # 'opening' or 'closing'
+        quantity: float,
+        current_position: float,
+        total_opened: float,
+        total_closed: float,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push position change event.
+
+        Args:
+            strategy_id: Strategy ID
+            ladder_index: Ladder index
+            change_type: Type of change ('opening' or 'closing')
+            quantity: Quantity changed
+            current_position: Current position after change
+            total_opened: Total opened quantity
+            total_closed: Total closed quantity
+            user_id: Optional user ID
+        """
+        message = {
+            'type': 'strategy_position_change',
+            'data': {
+                'strategy_id': strategy_id,
+                'ladder_index': ladder_index,
+                'change_type': change_type,
+                'quantity': quantity,
+                'current_position': current_position,
+                'total_opened': total_opened,
+                'total_closed': total_closed,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_ladder_progress(
+        self,
+        strategy_id: int,
+        action: str,
+        ladder_index: int,
+        current_qty: float,
+        total_qty: float,
+        user_id: Optional[str] = None
+    ):
+        """Push ladder progress update"""
+        progress_percent = min(100, (current_qty / total_qty) * 100) if total_qty > 0 else 0
+
+        message = {
+            'type': 'strategy_ladder_progress',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'ladder_index': ladder_index,
+                'current_qty': current_qty,
+                'total_qty': total_qty,
+                'progress_percent': progress_percent,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_order_executed(
+        self,
+        strategy_id: int,
+        action: str,
+        ladder_index: int,
+        binance_filled: float,
+        bybit_filled: float,
+        spread_at_execution: float,
+        user_id: Optional[str] = None
+    ):
+        """Push order execution event"""
+        message = {
+            'type': 'strategy_order_executed',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'ladder_index': ladder_index,
+                'binance_filled': binance_filled,
+                'bybit_filled': bybit_filled,
+                'spread_at_execution': spread_at_execution,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_error(
+        self,
+        strategy_id: int,
+        action: str,
+        error_message: str,
+        error_details: Optional[Dict] = None,
+        user_id: Optional[str] = None
+    ):
+        """Push error event"""
+        message = {
+            'type': 'strategy_execution_error',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'error_message': error_message,
+                'error_details': error_details or {},
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_warning(
+        self,
+        strategy_id: int,
+        action: str,
+        warning_message: str,
+        user_id: Optional[str] = None
+    ):
+        """Push warning event"""
+        message = {
+            'type': 'strategy_execution_warning',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'warning_message': warning_message,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_orders_filled(
+        self,
+        strategy_id: int,
+        action: str,
+        binance_filled: float,
+        bybit_filled: float,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push orders filled event - sent immediately when both sides complete trading.
+        This allows the frontend to restore button state quickly without waiting for
+        the entire strategy execution flow to complete.
+
+        Args:
+            strategy_id: Strategy ID
+            action: Action type ('opening' or 'closing')
+            binance_filled: Binance filled quantity
+            bybit_filled: Bybit filled quantity
+            user_id: Optional user ID for targeted push
+        """
+        message = {
+            'type': 'strategy_orders_filled',
+            'data': {
+                'strategy_id': strategy_id,
+                'action': action,
+                'binance_filled': binance_filled,
+                'bybit_filled': bybit_filled,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+    async def push_custom_event(
+        self,
+        strategy_id: int,
+        event_type: str,
+        data: Dict,
+        user_id: Optional[str] = None
+    ):
+        """
+        Push custom event.
+
+        Args:
+            strategy_id: Strategy ID
+            event_type: Custom event type
+            data: Event data
+            user_id: Optional user ID
+        """
+        message = {
+            'type': f'strategy_{event_type}',
+            'data': {
+                'strategy_id': strategy_id,
+                **data,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            'user_id': user_id
+        }
+        await self._push_queue.put(message)
+
+
+# Global status pusher instance
+status_pusher = StrategyExecutionStatusPusher()
