@@ -236,7 +236,7 @@ onMounted(() => {
   // Refresh proxy status every 30 seconds
   proxyRefreshTimer = setInterval(() => {
     fetchProxyStatus()
-  }, 30000)
+  }, 120000) // proxy status every 2 min
 })
 
 onUnmounted(() => {

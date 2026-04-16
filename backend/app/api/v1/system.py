@@ -43,12 +43,18 @@ REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..",
 
 # Nginx deploy targets for admin and go (main) frontends. These paths are
 # symlinked into /home/ubuntu/hustle2026 but we target the canonical location.
-NGINX_ADMIN_DIST = os.path.join(REPO_ROOT, "frontend-admin", "dist")
-NGINX_GO_DIST = os.path.join(REPO_ROOT, "frontend", "dist")
+# Independent frontend project directories (split from monorepo 2026-04-16)
+FRONTEND_ADMIN_DIR = "/home/ubuntu/hustle2026/frontend-admin"
+FRONTEND_GO_DIR = "/home/ubuntu/hustle2026/frontend-go"
+FRONTEND_WWW_DIR = "/home/ubuntu/hustle2026/frontend-www"
 
-# Source-of-truth build output directories produced by vite
-BUILD_ADMIN_DIST = os.path.join(REPO_ROOT, "frontend", "dist-admin")
-BUILD_GO_DIST = os.path.join(REPO_ROOT, "frontend", "dist")
+# Nginx deploy targets = each project's own dist/
+NGINX_ADMIN_DIST = os.path.join(FRONTEND_ADMIN_DIR, "dist")
+NGINX_GO_DIST = os.path.join(FRONTEND_GO_DIR, "dist")
+
+# Build output = same as deploy (each project builds into its own dist/)
+BUILD_ADMIN_DIST = NGINX_ADMIN_DIST
+BUILD_GO_DIST = NGINX_GO_DIST
 
 
 def _run(cmd: List[str], cwd: Optional[str] = None, timeout: int = 600) -> subprocess.CompletedProcess:
@@ -74,33 +80,33 @@ def _run(cmd: List[str], cwd: Optional[str] = None, timeout: int = 600) -> subpr
 
 
 def _build_frontend() -> Dict[str, str]:
-    """Build admin and go frontends via vite.
+    """Build admin, go, and www frontends from independent project directories.
 
-    Returns a dict with build artifacts summary. Raises on build failure so the
-    caller can abort the push/rollback cleanly instead of publishing stale dist.
+    Each project has its own package.json, node_modules, vite.config.js.
+    Build output goes directly into each project's dist/ directory.
     """
-    frontend_dir = os.path.join(REPO_ROOT, "frontend")
-    if not os.path.isdir(frontend_dir):
-        raise RuntimeError(f"frontend directory not found at {frontend_dir}")
+    results = {}
 
-    # Build admin bundle (outputs to frontend/dist-admin)
-    _run(
-        ["npx", "vite", "build", "--config", "vite.config.admin.js"],
-        cwd=frontend_dir,
-        timeout=600,
-    )
+    # Build admin
+    if os.path.isdir(FRONTEND_ADMIN_DIR):
+        _run(["npx", "vite", "build"], cwd=FRONTEND_ADMIN_DIR, timeout=600)
+        results["admin_dist"] = NGINX_ADMIN_DIST
+    else:
+        raise RuntimeError(f"frontend-admin not found: {FRONTEND_ADMIN_DIR}")
 
-    # Build main/go bundle (outputs to frontend/dist)
-    _run(
-        ["npx", "vite", "build"],
-        cwd=frontend_dir,
-        timeout=600,
-    )
+    # Build go
+    if os.path.isdir(FRONTEND_GO_DIR):
+        _run(["npx", "vite", "build"], cwd=FRONTEND_GO_DIR, timeout=600)
+        results["go_dist"] = NGINX_GO_DIST
+    else:
+        raise RuntimeError(f"frontend-go not found: {FRONTEND_GO_DIR}")
 
-    return {
-        "admin_dist": BUILD_ADMIN_DIST,
-        "go_dist": BUILD_GO_DIST,
-    }
+    # Build www
+    if os.path.isdir(FRONTEND_WWW_DIR):
+        _run(["npx", "vite", "build"], cwd=FRONTEND_WWW_DIR, timeout=600)
+        results["www_dist"] = os.path.join(FRONTEND_WWW_DIR, "dist")
+
+    return results
 
 
 def _sync_dir(src: str, dst: str) -> None:
@@ -139,15 +145,12 @@ def _sync_dir(src: str, dst: str) -> None:
 
 
 def _deploy_frontend() -> Dict[str, str]:
-    """Sync built dist folders into the Nginx deployment directories."""
-    _sync_dir(BUILD_ADMIN_DIST, NGINX_ADMIN_DIST)
-    # BUILD_GO_DIST and NGINX_GO_DIST are the same path for the main site, but
-    # _sync_dir handles that case (no-op when src == dst).
-    if os.path.realpath(BUILD_GO_DIST) != os.path.realpath(NGINX_GO_DIST):
-        _sync_dir(BUILD_GO_DIST, NGINX_GO_DIST)
+    """No-op: each independent project builds directly into its own dist/.
+    Nginx points to these directories, so no sync is needed."""
     return {
         "admin": NGINX_ADMIN_DIST,
         "go": NGINX_GO_DIST,
+        "www": os.path.join(FRONTEND_WWW_DIR, "dist"),
     }
 
 

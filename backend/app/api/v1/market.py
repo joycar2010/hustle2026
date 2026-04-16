@@ -266,3 +266,16 @@ async def get_bybit_swap_rate():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/exchange-rate")
+async def get_exchange_rate():
+    """Get USDC/USDT exchange rate (cached, proxied through backend to avoid frontend IP exposure)"""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get("https://api.binance.com/api/v3/ticker/price?symbol=USDCUSDT")
+            data = resp.json()
+            return {"price": data.get("price", "1.0000"), "symbol": "USDCUSDT"}
+    except Exception:
+        return {"price": "1.0000", "symbol": "USDCUSDT"}

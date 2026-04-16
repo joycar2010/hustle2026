@@ -279,7 +279,7 @@ function fmtPrice(v) {
 
 onMounted(() => {
   fetchFees()
-  feeTimer = setInterval(fetchFees, 60000)
+  feeTimer = setInterval(fetchFees, 300000) // fees change infrequently; poll every 5 min
 })
 onUnmounted(() => clearInterval(feeTimer))
 </script>

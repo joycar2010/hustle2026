@@ -578,6 +578,11 @@ watch(() => marketStore.lastMessage, (message) => {
     handlePositionSnapshot(message.data)
   } else if (message.type === 'mt5_position_update') {
     handleMt5PositionUpdate(message.data)
+  } else if (message.type === 'pending_orders' && message.data) {
+    // Real-time pending orders from WS (pushed every 2s by PendingOrdersStreamer)
+    if (Array.isArray(message.data)) {
+      pendingOrderCount.value = message.data.length
+    }
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
   }
@@ -709,39 +714,34 @@ onMounted(() => {
   fetchBinanceFundingRate()
   checkMarketStatus()
 
-  // Fetch pending order counts every 3 seconds
-  orderFetchTimer = setInterval(() => {
-    fetchPendingOrderCounts()
-  }, 3000)
+  // Pending orders: WS pending_orders pushed every 2s from backend; no HTTP polling needed
 
-  // Fetch order book every 500ms
-  orderBookFetchTimer = setInterval(() => {
-    fetchOrderBook()
-  }, 500)
+  // Order book: removed 500ms polling (WS spread provides bid/ask in real-time)
+  // fetchOrderBook() called once on mount above
 
   // Fetch exchange rate every 10 minutes
   exchangeRateTimer = setInterval(() => {
     fetchExchangeRate()
   }, 600000)
 
-  // Fetch Binance funding rate every 30 seconds
+  // Funding rate changes every 8h; poll every 5 minutes as safety fallback
   fundingRateTimer = setInterval(() => {
     fetchBinanceFundingRate()
-  }, 30000)
+  }, 300000)
 
-  // Fetch Bybit swap rate every 60 seconds (changes infrequently)
+  // Swap rate changes daily; poll every 5 minutes
   fetchBybitSwapRate()
   bybitSwapRateTimer = setInterval(() => {
     fetchBybitSwapRate()
-  }, 60000)
+  }, 300000)
 
   // Check market status every 60 seconds
-  marketStatusTimer = setInterval(checkMarketStatus, 60000)
+  marketStatusTimer = setInterval(checkMarketStatus, 300000) // market open/close changes ~2x/day
 
   // 初始化系统状态并开始轮询
   updateSystemStatus()
-  const statusInterval = setInterval(updateSystemStatus, 10000)
-  const proxyHealthInterval = setInterval(fetchProxyHealthStatus, 30000) // 每30秒刷新代理健康状态
+  const statusInterval = setInterval(updateSystemStatus, 60000) // WS redis_status is real-time; HTTP as 60s fallback
+  const proxyHealthInterval = setInterval(fetchProxyHealthStatus, 120000) // proxy health every 2 min
   onUnmounted(() => {
     clearInterval(statusInterval)
     clearInterval(proxyHealthInterval)
@@ -750,8 +750,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (lagTimer) clearInterval(lagTimer)
-  if (orderFetchTimer) clearInterval(orderFetchTimer)
-  if (orderBookFetchTimer) clearInterval(orderBookFetchTimer)
+  // orderFetchTimer removed (WS pending_orders handles it)
+  // orderBookFetchTimer removed (polling eliminated)
   if (exchangeRateTimer) clearInterval(exchangeRateTimer)
   if (fundingRateTimer) clearInterval(fundingRateTimer)
   if (bybitSwapRateTimer) clearInterval(bybitSwapRateTimer)
@@ -1137,8 +1137,8 @@ async function fetchExchangeRate() {
   try {
     // Use Binance public API to get USDT price relative to USD
     // We use USDC/USDT as a proxy since USDC ≈ USD
-    const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDCUSDT')
-    const data = await response.json()
+    const response = await api.get('/api/v1/market/exchange-rate')
+    const data = response.data || {}
 
     if (data.price) {
       // USDC/USDT price represents how many USDT = 1 USDC (≈ 1 USD)
