@@ -69,8 +69,8 @@ router.beforeEach(async (to, from, next) => {
 
   if (!authStore.isAuthenticated) return next('/login')
 
-  // 确保角色已加载
-  if (!authStore.userRole) {
+  // 确保用户信息和角色已加载
+  if (!authStore.user || !authStore.userRole) {
     await authStore.fetchUser()
   }
 

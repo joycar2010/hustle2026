@@ -422,6 +422,10 @@ class BinanceFuturesClient:
         """Get cross margin account information - /sapi/v1/margin/account"""
         return await self._request("GET", "/sapi/v1/margin/account", signed=True, use_spot_api=True)
 
+    async def get_funding_asset(self) -> list:
+        """Get funding wallet balance - POST /sapi/v1/asset/get-funding-asset"""
+        return await self._request("POST", "/sapi/v1/asset/get-funding-asset", signed=True, use_spot_api=True)
+
     async def get_spot_prices(self) -> list:
         """Get all spot ticker prices"""
         return await self._request("GET", "/api/v3/ticker/price", use_spot_api=True)

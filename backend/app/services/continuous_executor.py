@@ -231,7 +231,12 @@ class ContinuousStrategyExecutor:
 
             if not trigger_ready:
                 # Accumulate triggers
-                current_spread = await self._get_current_spread(strategy_type)
+                try:
+                    current_spread = await self._get_current_spread(strategy_type)
+                except Exception as e:
+                    logger.warning(f"[ladder={ladder_idx}] Failed to get spread for trigger check: {e}")
+                    await asyncio.sleep(self.trigger_check_interval)
+                    continue
 
                 triggered = await self.trigger_mgr.check_and_increment(
                     current_spread,
@@ -254,7 +259,12 @@ class ContinuousStrategyExecutor:
 
             # Step 4: Re-check spread after trigger count is satisfied
             # If spread no longer meets threshold, reset triggers and wait again
-            current_spread = await self._get_current_spread(strategy_type)
+            try:
+                current_spread = await self._get_current_spread(strategy_type)
+            except Exception as e:
+                logger.warning(f"[ladder={ladder_idx}] Failed to get spread for re-check: {e}")
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
 
             spread_ok = (
                 (compare_op == CompareOperator.GREATER_EQUAL and current_spread >= spread_threshold) or

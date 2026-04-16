@@ -117,11 +117,14 @@ class AccountDataService:
                 client.get_spot_price("BNBUSDT"),       # BNB/USDT price for fee conversion [7]
                 client.get_balance(),           # Futures wallet balances (includes BNB) [8]
                 client.get_premium_index(_sym_a),    # Mark price + lastFundingRate [9]
+                client.get_funding_asset(),          # Funding wallet balances [10]
             ]
 
             # Only fetch prices for assets we actually hold
             for asset in assets_to_price[:10]:  # Limit to 10 assets to avoid rate limits
                 fetch_tasks.append(client.get_spot_price(f"{asset}USDT"))
+
+            # Dynamic price results start at index 11 (after funding_asset at [10])
 
             results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
@@ -136,6 +139,7 @@ class AccountDataService:
             bnb_price_data = results[7]
             futures_balance_data = results[8]
             premium_index_data = results[9]
+            funding_asset_data = results[10]
 
             # commission_rate 成功返回时写入本地缓存（24h有效，weight=20每天只消耗一次）
             if not isinstance(commission_rate_data, Exception) and commission_rate_data:
@@ -164,7 +168,7 @@ class AccountDataService:
             # Build price map from individual price queries (now offset by 10)
             price_map = {}
             for i, asset in enumerate(assets_to_price[:10]):
-                price_result = results[10 + i]
+                price_result = results[11 + i]
                 if not isinstance(price_result, Exception):
                     price_map[f"{asset}USDT"] = float(price_result.get("price", 0))
 
@@ -255,6 +259,26 @@ class AccountDataService:
                 logger.info(f"Margin account USDT: total={margin_total_usdt}, free={margin_free_usdt}")
             else:
                 logger.warning(f"Failed to fetch margin account data: {margin_account_data}")
+
+            # Process funding wallet data
+            funding_total_usdt = 0.0
+            if not isinstance(funding_asset_data, Exception):
+                funding_list = funding_asset_data if isinstance(funding_asset_data, list) else []
+                for item in funding_list:
+                    asset = item.get("asset", "")
+                    free = float(item.get("free", 0))
+                    locked = float(item.get("locked", 0))
+                    total = free + locked
+                    if total > 0:
+                        if asset == "USDT":
+                            funding_total_usdt += total
+                        elif asset == "BNB" and bnb_usdt_price > 0:
+                            funding_total_usdt += total * bnb_usdt_price
+                        elif f"{asset}USDT" in price_map:
+                            funding_total_usdt += total * price_map[f"{asset}USDT"]
+                logger.info(f"Funding wallet USDT equivalent: {funding_total_usdt:.2f}")
+            else:
+                logger.warning(f"Failed to fetch funding wallet data: {funding_asset_data}")
 
             # Calculate total positions from position risk (sum of position quantities)
             # Also get entry price, leverage, and liquidation prices
@@ -388,11 +412,11 @@ class AccountDataService:
                 logger.warning(f"Failed to fetch commission rate: {commission_rate_data}")
 
             # Calculate final metrics according to Binance API documentation
-            # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalMarginBalance (含未实现盈亏)
-            total_assets = spot_total_usdt + margin_total_usdt + futures_total_margin_balance
+            # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalMarginBalance (含未实现盈亏) + 资金账户
+            total_assets = spot_total_usdt + margin_total_usdt + futures_total_margin_balance + funding_total_usdt
 
-            # 可用总资产 = 现货free + 杠杆free + 合约availableBalance
-            available_balance = spot_free_usdt + margin_free_usdt + futures_available_balance
+            # 可用总资产 = 现货free + 杠杆free + 合约availableBalance + 资金账户
+            available_balance = spot_free_usdt + margin_free_usdt + futures_available_balance + funding_total_usdt
 
             # 净资产 = 合约totalWalletBalance (钱包余额，不含未实现盈亏)
             net_assets = futures_total_wallet_balance
