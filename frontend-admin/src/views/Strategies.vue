@@ -1,8 +1,68 @@
 <template>
   <div class="strategies-page">
 
-    <!-- 策略类型选择卡 -->
-    <div class="type-selector">
+    <!-- ===== 策略运行状态栏 ===== -->
+    <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <div class="w-2.5 h-2.5 rounded-full" :class="runningStrategies.length ? 'bg-green-500 animate-pulse' : 'bg-gray-500'"></div>
+          <span class="text-sm font-semibold">策略运行状态</span>
+          <span class="text-xs text-text-tertiary">({{ runningStrategies.length }} 个运行中)</span>
+        </div>
+        <button @click="fetchRunningStrategies" class="text-xs text-primary hover:text-primary-hover">刷新</button>
+      </div>
+      <div v-if="runningStrategies.length" class="flex flex-wrap gap-2">
+        <div v-for="rs in runningStrategies" :key="rs.strategy_id || rs.id"
+          class="flex items-center gap-2 bg-dark-200 rounded-lg px-3 py-1.5 text-xs">
+          <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+          <span class="font-medium text-text-primary">{{ rs.strategy_type || rs.name || rs.strategy_id }}</span>
+          <span v-if="rs.pair_code" class="text-primary font-bold">{{ rs.pair_code }}</span>
+          <span class="text-text-tertiary">{{ rs.status || '运行中' }}</span>
+          <button @click="stopStrategy(rs)" class="text-red-400 hover:text-red-300 font-bold ml-1">停止</button>
+        </div>
+      </div>
+      <div v-else class="text-xs text-text-tertiary">暂无运行中的策略</div>
+    </div>
+
+    <!-- ===== 视图切换 ===== -->
+    <div class="flex gap-2 mb-4">
+      <button @click="viewMode = 'workflow'" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'workflow' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">流程配置</button>
+      <button @click="viewMode = 'compare'; loadAllEffective()" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'compare' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">四策略对比</button>
+    </div>
+
+    <!-- ===== 四策略并排对比视图 ===== -->
+    <div v-if="viewMode === 'compare'" class="bg-dark-100 rounded-2xl border border-border-primary overflow-hidden mb-4">
+      <div class="px-4 py-3 border-b border-border-secondary">
+        <span class="font-semibold text-sm">四策略参数对比</span>
+        <span class="text-xs text-text-tertiary ml-2">差异项高亮显示</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead><tr class="border-b border-border-secondary text-text-tertiary">
+            <th class="text-left px-4 py-2.5 sticky left-0 bg-dark-100 min-w-[160px]">参数</th>
+            <th v-for="t in strategyTypes" :key="t.type" class="text-center px-3 py-2.5 min-w-[120px]">
+              <span class="font-bold" :class="t.type === activeType ? 'text-primary' : ''">{{ t.label }}</span>
+            </th>
+          </tr></thead>
+          <tbody>
+            <template v-for="grp in configGroups" :key="grp.key">
+              <tr class="bg-dark-50"><td :colspan="5" class="px-4 py-1.5 font-bold text-text-secondary text-[10px]">{{ grp.label }}</td></tr>
+              <tr v-for="f in configFields.filter(x => x.group === grp.key)" :key="f.key"
+                class="border-b border-border-secondary hover:bg-dark-50" :class="isFieldDifferent(f.key) ? 'bg-yellow-900/10' : ''">
+                <td class="px-4 py-2 text-text-secondary sticky left-0 bg-dark-100">{{ f.label }} <span class="text-text-tertiary">({{ f.unit }})</span></td>
+                <td v-for="t in strategyTypes" :key="t.type" class="text-center px-3 py-2 font-mono"
+                  :class="isFieldDifferent(f.key) && compareEffective[t.type]?.[f.key] !== compareMinVal(f.key) ? 'font-bold text-primary' : 'text-text-primary'">
+                  {{ compareEffective[t.type]?.[f.key] ?? '--' }}
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 策略类型选择卡 (only in workflow mode) -->
+    <div v-show="viewMode === 'workflow'" class="type-selector">
       <div
         v-for="t in strategyTypes" :key="t.type"
         @click="switchStrategy(t.type)"
@@ -14,7 +74,7 @@
     </div>
 
     <!-- ── VueFlow 工作流画布 ── -->
-    <div class="workflow-canvas">
+    <div v-show="viewMode === 'workflow'" class="workflow-canvas">
       <div class="canvas-header">
         <div class="header-left">
           <h2>{{ strategyName }} - 执行流程配置</h2>
@@ -95,7 +155,7 @@
     </div>
 
     <!-- ── 配置记录 CRUD（可折叠） ── -->
-    <div class="crud-section">
+    <div v-show="viewMode === 'workflow'" class="crud-section">
       <div class="crud-header" @click="crudOpen = !crudOpen">
         <span class="font-semibold text-sm">timing-configs 配置记录</span>
         <span class="text-xs text-text-tertiary">{{ crudOpen ? '▲ 收起' : '▼ 展开' }}</span>
@@ -1036,8 +1096,53 @@ function fmtTime(v) { return v ? dayjs(v).format('MM-DD HH:mm:ss') : '--' }
 watch(activeType, () => { fetchAllConfigs(); fetchEffective() })
 watch(compareSource, () => { if (compareSource.value && !compareSource.value.startsWith('history_')) generateCompareData(null) })
 
+// ── Running Strategies ──
+const runningStrategies = ref([])
+const viewMode = ref('workflow')
+const compareEffective = ref({})
+
+async function fetchRunningStrategies() {
+  try {
+    const r = await api.get('/api/v1/automation/strategies/running')
+    runningStrategies.value = Array.isArray(r.data) ? r.data : r.data?.strategies || []
+  } catch { runningStrategies.value = [] }
+}
+
+async function stopStrategy(rs) {
+  const id = rs.strategy_id || rs.id
+  if (!id || !confirm('\u786e\u5b9a\u8981\u505c\u6b62\u7b56\u7565 ' + (rs.strategy_type || id) + ' \u5417\uff1f')) return
+  try {
+    await api.post('/api/v1/automation/strategies/' + id + '/stop')
+    showToast('success', '\u7b56\u7565\u5df2\u505c\u6b62')
+    await fetchRunningStrategies()
+  } catch (e) { showToast('error', '\u505c\u6b62\u5931\u8d25: ' + (e.response?.data?.detail || e.message)) }
+}
+
+async function loadAllEffective() {
+  const results = {}
+  await Promise.all(strategyTypes.map(async t => {
+    try {
+      const r = await api.get('/api/v1/timing-configs/effective/' + t.type)
+      results[t.type] = r.data
+    } catch { results[t.type] = null }
+  }))
+  compareEffective.value = results
+}
+
+function isFieldDifferent(key) {
+  const vals = strategyTypes.map(t => compareEffective.value[t.type]?.[key])
+  const defined = vals.filter(v => v != null)
+  if (defined.length <= 1) return false
+  return new Set(defined.map(String)).size > 1
+}
+
+function compareMinVal(key) {
+  const vals = strategyTypes.map(t => compareEffective.value[t.type]?.[key]).filter(v => v != null)
+  return vals.length ? Math.min(...vals) : null
+}
+
 onMounted(async () => {
-  await Promise.all([fetchAllConfigs(), fetchEffective(), loadWorkflowConfig(), loadWorkflowHistory(), loadCustomTemplates()])
+  await Promise.all([fetchAllConfigs(), fetchEffective(), loadWorkflowConfig(), loadWorkflowHistory(), loadCustomTemplates(), fetchRunningStrategies()])
 })
 </script>
 
