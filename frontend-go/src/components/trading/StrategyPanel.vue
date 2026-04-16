@@ -1345,7 +1345,7 @@ async function saveConfig() {
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
     }
 
-    const response = await api.put(`/api/v1/strategies/configs/${props.type}`, configData)
+    const response = await api.post('/api/v1/strategies/configs/upsert', configData)
     configId.value = response.data.config_id
     notificationStore.showStrategyNotification('配置保存成功！', 'success')
   } catch (error) {
@@ -1622,6 +1622,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
+            pair_code: marketStore.currentPair || "XAU",
       quantity: batchQty,
       ladder_index: ladderIndex,
       target_spread: ladder.threshold
@@ -1776,6 +1777,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
+            pair_code: marketStore.currentPair || "XAU",
       quantity: batchQty,
       ladder_index: ladderIndex
     }
@@ -1904,6 +1906,7 @@ async function executeBatchOpening(ladder) {
       const executionData = {
         binance_account_id: binanceAccount.account_id,
         bybit_account_id: bybitMT5Account.account_id,
+            pair_code: marketStore.currentPair || "XAU",
         quantity: batchQuantity,
         target_spread: ladder.threshold
       }
@@ -2001,6 +2004,7 @@ async function executeBatchClosing(ladder) {
       const executionData = {
         binance_account_id: binanceAccount.account_id,
         bybit_account_id: bybitMT5Account.account_id,
+            pair_code: marketStore.currentPair || "XAU",
         quantity: batchQuantity
       }
 
@@ -2246,6 +2250,7 @@ async function startContinuousExecution(action) {
     const requestData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
+            pair_code: marketStore.currentPair || "XAU",
       opening_m_coin: config.value.openingMCoin || 5,
       closing_m_coin: config.value.closingMCoin || 5,
       ladders: ladders,

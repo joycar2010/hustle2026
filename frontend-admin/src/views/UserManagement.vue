@@ -282,6 +282,25 @@
             <div v-else class="text-center text-text-tertiary py-1">未配置代理 — 使用服务器直连</div>
           </div>
 
+          <!-- 产品对绑定 -->
+          <div class="bg-dark-200 rounded-lg p-2.5 text-xs">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-text-tertiary font-medium">产品对绑定</span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <span v-for="tag in getAccountPairTags(acc)" :key="tag.pair"
+                class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                :class="tag.side === 'A' ? 'bg-[#0ecb81]/15 text-[#0ecb81]' : 'bg-[#f0b90b]/15 text-[#f0b90b]'">
+                {{ tag.pair }}-{{ tag.side === 'A' ? '主' : '对冲' }}
+              </span>
+              <span v-if="!getAccountPairTags(acc).length" class="text-text-tertiary">未绑定产品对</span>
+              <button @click="openPairBindingModal(acc)"
+                class="px-1.5 py-0.5 bg-dark-50 hover:bg-dark-100 border border-border-primary rounded text-text-secondary transition-colors ml-auto">
+                设置
+              </button>
+            </div>
+          </div>
+
           <!-- 操作按钮 -->
           <div class="flex gap-2">
             <button @click="openEditAccount(acc)"
@@ -1166,6 +1185,47 @@
       </div>
     </Teleport>
 
+    <!-- Modal: 产品对账户绑定 -->
+    <Teleport to="body">
+      <div v-if="showPairBindModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" @click.self="showPairBindModal = false">
+        <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-lg shadow-2xl">
+          <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+            <div>
+              <h3 class="font-bold">产品对绑定 — {{ pairBindAccount?.account_name }}</h3>
+              <p class="text-xs text-text-tertiary mt-0.5">设置该账户在哪些产品对中作为主账号(A)或对冲账号(B)</p>
+            </div>
+            <button @click="showPairBindModal = false" class="text-text-tertiary hover:text-text-primary text-xl">✕</button>
+          </div>
+          <div class="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+            <div v-for="pair in activePairs" :key="pair.pair_code"
+              class="flex items-center justify-between bg-dark-200 rounded-xl px-4 py-3">
+              <div>
+                <span class="font-bold text-sm">{{ pair.pair_code }}</span>
+                <span class="text-xs text-text-tertiary ml-2">{{ pair.symbol_a?.symbol || '' }} / {{ pair.symbol_b?.symbol || '' }}</span>
+              </div>
+              <div class="flex gap-2">
+                <button @click="setPairBind(pair.pair_code, 'A')"
+                  :class="['px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-all',
+                    isPairBound(pair.pair_code, 'A') ? 'bg-[#0ecb81] text-dark-300 border-[#0ecb81]' : 'bg-dark-100 text-text-secondary border-border-primary hover:border-[#0ecb81]']">
+                  A侧(主)
+                </button>
+                <button @click="setPairBind(pair.pair_code, 'B')"
+                  :class="['px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-all',
+                    isPairBound(pair.pair_code, 'B') ? 'bg-[#f0b90b] text-dark-300 border-[#f0b90b]' : 'bg-dark-100 text-text-secondary border-border-primary hover:border-[#f0b90b]']">
+                  B侧(对冲)
+                </button>
+                <button v-if="isPairBound(pair.pair_code, 'A') || isPairBound(pair.pair_code, 'B')"
+                  @click="clearPairBind(pair.pair_code)"
+                  class="px-2 py-1.5 rounded-lg text-xs text-[#f6465d] hover:bg-[#f6465d]/10 transition-all">
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
 </template>
 
 <script setup>
@@ -1576,7 +1636,9 @@ async function loadUserAccounts() {
     // Enrich with live IPIPGO order data
     fetchIPIPGOOrders()
   } catch (e) { apiErr('加载账户失败', e) }
-  finally { accountsLoading.value = false }
+  finally { accountsLoading.value = false
+    // Load pair bindings for first user
+    loadAllPairBindings() }
 }
 
 function onPlatformChange() {
@@ -2394,6 +2456,99 @@ async function saveHedgeToggle() {
   } catch (e) {
     showToast('\u4fdd\u5b58\u5931\u8d25: ' + (e.response?.data?.detail || e.message), 'error')
   } finally { hedgeSaving.value = false }
+}
+
+// ── Pair-Account Binding ──
+const showPairBindModal = ref(false)
+const pairBindAccount = ref(null)
+const activePairs = ref([])
+const userPairBindings = ref([])  // for modal
+const allPairBindings = ref([])   // for card tags (all users)
+
+function getAccountPairTags(acc) {
+  const tags = []
+  for (const b of allPairBindings.value) {
+    if (b.account_a_id === acc.account_id) tags.push({ pair: b.pair_code, side: 'A' })
+    if (b.account_b_id === acc.account_id) tags.push({ pair: b.pair_code, side: 'B' })
+  }
+  return tags
+}
+
+async function loadPairBindings(userId) {
+  // Load for a specific user (used by modal)
+  try {
+    const r = await api.get('/api/v1/pair-accounts', { params: { user_id: userId } })
+    userPairBindings.value = r.data || []
+  } catch { userPairBindings.value = [] }
+}
+
+async function loadAllPairBindings() {
+  // Load bindings for ALL users' accounts shown in the list
+  const userIds = [...new Set(accounts.value.map(a => a._user_id || a.user_id).filter(Boolean))]
+  const all = []
+  for (const uid of userIds) {
+    try {
+      const r = await api.get('/api/v1/pair-accounts', { params: { user_id: uid } })
+      if (r.data) all.push(...r.data.map(b => ({ ...b, _user_id: uid })))
+    } catch {}
+  }
+  allPairBindings.value = all
+}
+
+async function loadActivePairs() {
+  try {
+    const r = await api.get('/api/v1/hedging/pairs')
+    activePairs.value = (Array.isArray(r.data) ? r.data : []).filter(p => p.is_active)
+  } catch { activePairs.value = [] }
+}
+
+async function openPairBindingModal(acc) {
+  pairBindAccount.value = acc
+  await loadActivePairs()
+  await loadPairBindings(acc._user_id || acc.user_id)
+  showPairBindModal.value = true
+}
+
+function isPairBound(pairCode, side) {
+  const b = userPairBindings.value.find(x => x.pair_code === pairCode)
+  if (!b || !pairBindAccount.value) return false
+  return side === 'A' ? b.account_a_id === pairBindAccount.value.account_id : b.account_b_id === pairBindAccount.value.account_id
+}
+
+async function setPairBind(pairCode, side) {
+  const accId = pairBindAccount.value?.account_id
+  const userId = pairBindAccount.value?._user_id || pairBindAccount.value?.user_id
+  if (!accId || !userId) return
+  const existing = userPairBindings.value.find(x => x.pair_code === pairCode) || {}
+  const body = {
+    pair_code: pairCode,
+    account_a_id: side === 'A' ? accId : (existing.account_a_id || null),
+    account_b_id: side === 'B' ? accId : (existing.account_b_id || null),
+  }
+  try {
+    await api.put('/api/v1/pair-accounts?user_id=' + userId, body)
+    await loadPairBindings(userId)
+    await loadAllPairBindings()
+    showToast(pairCode + ' ' + (side === 'A' ? '\u4e3b\u8d26\u53f7' : '\u5bf9\u51b2\u8d26\u53f7') + ' \u5df2\u7ed1\u5b9a', 'success')
+  } catch (e) { showToast('\u7ed1\u5b9a\u5931\u8d25: ' + (e.response?.data?.detail || e.message), 'error') }
+}
+
+async function clearPairBind(pairCode) {
+  const userId = pairBindAccount.value?._user_id || pairBindAccount.value?.user_id
+  if (!userId) return
+  const existing = userPairBindings.value.find(x => x.pair_code === pairCode) || {}
+  const accId = pairBindAccount.value?.account_id
+  const body = {
+    pair_code: pairCode,
+    account_a_id: existing.account_a_id === accId ? null : existing.account_a_id,
+    account_b_id: existing.account_b_id === accId ? null : existing.account_b_id,
+  }
+  try {
+    await api.put('/api/v1/pair-accounts?user_id=' + userId, body)
+    await loadPairBindings(userId)
+    await loadAllPairBindings()
+    showToast(pairCode + ' \u7ed1\u5b9a\u5df2\u6e05\u9664', 'success')
+  } catch (e) { showToast('\u64cd\u4f5c\u5931\u8d25', 'error') }
 }
 
 onMounted(async () => {

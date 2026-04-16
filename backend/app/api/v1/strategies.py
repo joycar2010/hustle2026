@@ -12,6 +12,48 @@ from app.core.database import get_db
 from app.core.security import get_current_user_id
 from app.models.strategy import StrategyConfig
 from app.models.account import Account
+
+async def _resolve_pair_accounts(db, user_id, pair_code, request_binance_id=None, request_bybit_id=None):
+    """Resolve A/B accounts: user_pair_accounts binding > request params > account_role fallback"""
+    from sqlalchemy import text as _text
+    from app.models.account import Account as _Account
+    from sqlalchemy import select as _select
+    from uuid import UUID as _UUID
+
+    binance_account = None
+    bybit_account = None
+
+    # 1. Try user_pair_accounts binding
+    _binding = await db.execute(_text(
+        "SELECT account_a_id, account_b_id FROM user_pair_accounts WHERE user_id=:uid AND pair_code=:pc"
+    ), {"uid": user_id, "pc": pair_code})
+    _row = _binding.fetchone()
+
+    if _row and _row[0]:
+        _r = await db.execute(_select(_Account).where(_Account.account_id == _row[0], _Account.user_id == _UUID(user_id)))
+        binance_account = _r.scalar_one_or_none()
+    if _row and _row[1]:
+        _r = await db.execute(_select(_Account).where(_Account.account_id == _row[1], _Account.user_id == _UUID(user_id)))
+        bybit_account = _r.scalar_one_or_none()
+
+    # 2. Fallback: use request-provided IDs
+    if not binance_account and request_binance_id:
+        _r = await db.execute(_select(_Account).where(_Account.account_id == request_binance_id, _Account.user_id == _UUID(user_id)))
+        binance_account = _r.scalar_one_or_none()
+    if not bybit_account and request_bybit_id:
+        _r = await db.execute(_select(_Account).where(_Account.account_id == request_bybit_id, _Account.user_id == _UUID(user_id)))
+        bybit_account = _r.scalar_one_or_none()
+
+    # 3. Fallback: account_role
+    if not binance_account:
+        _r = await db.execute(_select(_Account).where(_Account.user_id == _UUID(user_id), _Account.account_role == 'primary', _Account.is_active == True))
+        binance_account = _r.scalar_one_or_none()
+    if not bybit_account:
+        _r = await db.execute(_select(_Account).where(_Account.user_id == _UUID(user_id), _Account.account_role == 'hedge', _Account.is_active == True))
+        bybit_account = _r.scalar_one_or_none()
+
+    return binance_account, bybit_account
+
 from app.schemas.strategy import (
     StrategyConfigCreate,
     StrategyConfigUpdate,
@@ -469,18 +511,13 @@ async def execute_reverse_arbitrage(
     """Execute reverse arbitrage strategy (Binance short, Bybit long)"""
     try:
         # 1. Get accounts (with user ownership check)
-        binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
+        binance_account, bybit_account = await _resolve_pair_accounts(
+            db, user_id, request.pair_code or "XAU",
+            request.binance_account_id, request.bybit_account_id
         )
-        binance_account = binance_result.scalar_one_or_none()
-
-        bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
-        )
-        bybit_account = bybit_result.scalar_one_or_none()
 
         if not binance_account or not bybit_account:
-            raise HTTPException(status_code=404, detail="Account not found")
+            raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
 
         # 2. Check position limits
         strategy_id = f"{user_id}_reverse"
@@ -568,18 +605,13 @@ async def execute_forward_arbitrage(
     """Execute forward arbitrage strategy (Binance long, Bybit short)"""
     try:
         # 1. Get accounts (with user ownership check)
-        binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
+        binance_account, bybit_account = await _resolve_pair_accounts(
+            db, user_id, request.pair_code or "XAU",
+            request.binance_account_id, request.bybit_account_id
         )
-        binance_account = binance_result.scalar_one_or_none()
-
-        bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
-        )
-        bybit_account = bybit_result.scalar_one_or_none()
 
         if not binance_account or not bybit_account:
-            raise HTTPException(status_code=404, detail="Account not found")
+            raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
 
         # 2. Check position limits
         strategy_id = f"{user_id}_forward"
@@ -667,18 +699,13 @@ async def close_reverse_position(
     """Close reverse arbitrage position (Binance buy to close short, Bybit sell to close long)"""
     try:
         # 1. Get accounts (with user ownership check)
-        binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
+        binance_account, bybit_account = await _resolve_pair_accounts(
+            db, user_id, request.pair_code or "XAU",
+            request.binance_account_id, request.bybit_account_id
         )
-        binance_account = binance_result.scalar_one_or_none()
-
-        bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
-        )
-        bybit_account = bybit_result.scalar_one_or_none()
 
         if not binance_account or not bybit_account:
-            raise HTTPException(status_code=404, detail="Account not found")
+            raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
 
         # 2. Check if can close
         strategy_id = f"{user_id}_reverse"
@@ -765,18 +792,13 @@ async def close_forward_position(
     """Close forward arbitrage position (Binance sell to close long, Bybit buy to close short)"""
     try:
         # 1. Get accounts (with user ownership check)
-        binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
+        binance_account, bybit_account = await _resolve_pair_accounts(
+            db, user_id, request.pair_code or "XAU",
+            request.binance_account_id, request.bybit_account_id
         )
-        binance_account = binance_result.scalar_one_or_none()
-
-        bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
-        )
-        bybit_account = bybit_result.scalar_one_or_none()
 
         if not binance_account or not bybit_account:
-            raise HTTPException(status_code=404, detail="Account not found")
+            raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
 
         # 2. Check if can close
         strategy_id = f"{user_id}_forward"
@@ -1102,18 +1124,13 @@ async def execute_continuous_opening(
 
     try:
         # 1. Get accounts (with user ownership check)
-        binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
+        binance_account, bybit_account = await _resolve_pair_accounts(
+            db, user_id, request.pair_code or "XAU",
+            request.binance_account_id, request.bybit_account_id
         )
-        binance_account = binance_result.scalar_one_or_none()
-
-        bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
-        )
-        bybit_account = bybit_result.scalar_one_or_none()
 
         if not binance_account or not bybit_account:
-            raise HTTPException(status_code=404, detail="Account not found")
+            raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
 
         # 2. Convert ladder schemas to LadderConfig objects
         ladders = [
@@ -1241,18 +1258,13 @@ async def execute_continuous_closing(
 
     try:
         # 1. Get accounts (with user ownership check)
-        binance_result = await db.execute(
-            select(Account).where(Account.account_id == request.binance_account_id, Account.user_id == UUID(user_id))
+        binance_account, bybit_account = await _resolve_pair_accounts(
+            db, user_id, request.pair_code or "XAU",
+            request.binance_account_id, request.bybit_account_id
         )
-        binance_account = binance_result.scalar_one_or_none()
-
-        bybit_result = await db.execute(
-            select(Account).where(Account.account_id == request.bybit_account_id, Account.user_id == UUID(user_id))
-        )
-        bybit_account = bybit_result.scalar_one_or_none()
 
         if not binance_account or not bybit_account:
-            raise HTTPException(status_code=404, detail="Account not found")
+            raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
 
         # 2. Convert ladder schemas to LadderConfig objects
         # For closing, we don't need opening_spread and opening_trigger_count
