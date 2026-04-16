@@ -376,7 +376,9 @@ const reverseActualPosition = ref(0)
 // 后端已算好的账户余额缓存（含 unrealized_pnl）
 // 由 fetchAccountData / handleAccountBalanceUpdate 更新
 // key: platform_id (1=Binance, 2=MT5)
-const accountsBalanceByPlatform = ref({})  // { 1: balance, 2: balance }
+const accountsBalanceByPlatform = ref({})  // { 1: balance, 2: balance } (legacy)
+const accountsBalanceById = ref({})  // { account_id: balance } (for pair binding)
+const pairAccountBinding = ref({ account_a_id: null, account_b_id: null })  // current pair binding
 
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
@@ -468,7 +470,9 @@ const forwardSpread = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（来自 Binance totalUnrealizedProfit）
 // 后端 balance.unrealized_pnl 即为 Binance 账户当前持仓实时浮动盈亏（USDT）
 const binanceFloatingProfit = computed(() => {
-  const b = accountsBalanceByPlatform.value[1]
+  // Use pair-bound A-side account if available, fallback to platform 1
+  const aId = pairAccountBinding.value.account_a_id
+  const b = (aId && accountsBalanceById.value[aId]) || accountsBalanceByPlatform.value[1]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
   // fallback：用仓位数据估算（仅在后端数据未到达时）
@@ -488,7 +492,9 @@ const binanceFloatingProfit = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（= equity - balance，MT5 终端"盈亏"列）
 // 后端已处理合约乘数和 USD→USDT 汇率换算，直接使用，无需前端重算
 const bybitFloatingProfit = computed(() => {
-  const b = accountsBalanceByPlatform.value[2]
+  // Use pair-bound B-side account if available, fallback to platform 2
+  const bId = pairAccountBinding.value.account_b_id
+  const b = (bId && accountsBalanceById.value[bId]) || accountsBalanceByPlatform.value[2]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
   // fallback：用仓位数据估算（仅在后端数据未到达时，注意汇率可能有偏差）
@@ -556,6 +562,11 @@ watch(() => marketStore.marketData, (data) => {
 
 // Watch global pair selection — refresh all market data when pair changes
 watch(currentPair, () => {
+  // Fetch pair-account binding for current pair
+  api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU')).then(r => {
+    pairAccountBinding.value = r.data || {}
+  }).catch(() => { pairAccountBinding.value = {} })
+
   fetchOrderBook()
   fetchBinanceFundingRate()
   fetchBybitSwapRate()
@@ -616,12 +627,17 @@ function handleAccountBalanceUpdate(data) {
   // 每用户一个 Binance(1) + 一个 MT5(2)，直接按 platform_id 存
   if (data.accounts && data.accounts.length > 0) {
     const newBalances = {}
+    const newById = {}
     data.accounts.forEach(acc => {
       if (acc.balance && acc.platform_id) {
         newBalances[acc.platform_id] = acc.balance
       }
+      if (acc.balance && acc.account_id) {
+        newById[acc.account_id] = acc.balance
+      }
     })
     accountsBalanceByPlatform.value = newBalances
+    accountsBalanceById.value = newById
   }
 
   // Extract fee data from accounts
@@ -634,7 +650,7 @@ function handleAccountBalanceUpdate(data) {
     reverseActualPosition.value = 0
 
     // Get first account's positions and aggregate fees from all accounts
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2 || acc.platform_id === 3)
     const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
 
     // Use first account's total_positions instead of aggregating
@@ -647,7 +663,7 @@ function handleAccountBalanceUpdate(data) {
 
     // Aggregate fees from all accounts
     data.accounts.forEach(account => {
-      if (account.platform_id === 2) {
+      if (account.platform_id === 2 || account.platform_id === 3) {
         // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
         // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
       }
@@ -673,7 +689,7 @@ function handleAccountBalanceUpdate(data) {
         mark_price: position.mark_price || 0
       }
 
-      if (account.platform_id === 2) {
+      if (account.platform_id === 2 || account.platform_id === 3) {
         if (position.side === 'Buy') newBybitLong.push(posData)
         else if (position.side === 'Sell') newBybitShort.push(posData)
       } else if (account.platform_id === 1) {
@@ -704,6 +720,10 @@ onMounted(() => {
 
   // Fetch initial position data immediately on page load (prevents 0.00 display until WebSocket update)
   fetchAccountData()
+  // Fetch pair-account binding
+  api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU')).then(r => {
+    pairAccountBinding.value = r.data || {}
+  }).catch(() => {})
   // Position data is then kept up-to-date via WebSocket (account_balance / position_snapshot)
   fetchPendingOrderCounts()
   fetchOrderBook()
@@ -797,19 +817,24 @@ async function fetchAccountData() {
       // 缓存各平台余额 unrealized_pnl，供 totalProfit 计算使用
       // 每个用户只有一个 Binance(1) + 一个 MT5(2)，直接按 platform_id 存
       const newBalances = {}
+      const newById = {}
       data.accounts.forEach(acc => {
         if (acc.balance && acc.platform_id) {
           newBalances[acc.platform_id] = acc.balance
         }
+        if (acc.balance && acc.account_id) {
+          newById[acc.account_id] = acc.balance
+        }
       })
       accountsBalanceByPlatform.value = newBalances
+      accountsBalanceById.value = newById
 
       // Reset position values
       forwardActualPosition.value = 0
       reverseActualPosition.value = 0
 
       // Get first account's positions and aggregate fees from all accounts
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
+      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2 || acc.platform_id === 3)
       const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
 
       // Use first account's total_positions instead of aggregating
@@ -822,7 +847,7 @@ async function fetchAccountData() {
 
       // Aggregate fees from all accounts
       data.accounts.forEach(account => {
-        if (account.platform_id === 2) {
+        if (account.platform_id === 2 || account.platform_id === 3) {
           // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
           // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
         }
@@ -851,7 +876,7 @@ async function fetchAccountData() {
           mark_price: position.mark_price || 0
         }
 
-        if (account.platform_id === 2) {
+        if (account.platform_id === 2 || account.platform_id === 3) {
           if (position.side === 'Buy') newBybitLong.push(posData)
           else if (position.side === 'Sell') newBybitShort.push(posData)
         } else if (account.platform_id === 1) {

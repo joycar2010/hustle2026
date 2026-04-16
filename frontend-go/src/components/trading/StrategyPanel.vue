@@ -147,6 +147,12 @@
           </div>
         </div>
 
+        <!-- Pair account warning -->
+        <div v-if="pairAccountWarning" class="bg-[#f6465d]/10 border border-[#f6465d]/30 rounded px-3 py-2 text-xs text-[#f6465d] flex items-center gap-2">
+          <span class="text-sm">&#x26A0;</span>
+          <span>{{ pairAccountWarning }}</span>
+        </div>
+
         <!-- Opening/Closing Position Toggles -->
         <div class="grid grid-cols-2 gap-2">
           <!-- Opening Control -->
@@ -666,9 +672,16 @@ const executing = ref(false)
 const executingAnyStrategy = computed(() => executingOpening.value || executingClosing.value)
 const accountsData = ref(null)
 // 选择用户的默认+启用账户，优先 is_default && is_active，fallback 到第一个 is_active
-function pickAccount(accounts, platformId, isMt5 = false) {
-  const filter = acc => acc.platform_id === platformId && acc.is_active !== false && (!isMt5 || acc.is_mt5_account)
-  return accounts.find(acc => filter(acc) && acc.is_default) || accounts.find(filter)
+function pickAccount(accounts, side = 'A') {
+  // Use pair binding to find the correct account
+  const bindId = side === 'A' ? pairAccountBinding.value.account_a_id : pairAccountBinding.value.account_b_id
+  if (bindId) {
+    const bound = accounts.find(a => a.account_id === bindId && a.is_active !== false)
+    if (bound) return bound
+  }
+  // Fallback: account_role
+  if (side === 'A') return accounts.find(a => a.account_role === 'primary' && a.is_active !== false) || accounts.find(a => a.platform_id === 1 && a.is_active !== false)
+  return accounts.find(a => a.account_role === 'hedge' && a.is_active !== false) || accounts.find(a => (a.platform_id === 2 || a.platform_id === 3) && a.is_mt5_account && a.is_active !== false)
 }
 const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
@@ -741,6 +754,9 @@ const config = ref({
     { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3 },
   ]
 })
+
+const pairAccountBinding = ref({})
+const pairAccountWarning = ref('')  // warning if bound account is disabled  // current pair's A/B account binding
 
 const configId = ref(null)
 const validationErrors = ref([])
@@ -1214,43 +1230,82 @@ function handleOrdersFilled(data) {
 
   // 刷新持仓数据
   refreshPositions()
+  // Refresh pair-account binding on pair change
+  api.get('/api/v1/pair-accounts/' + (marketStore.currentPair || 'XAU')).then(r => {
+    pairAccountBinding.value = r.data || {}
+    fetchAccountData()  // re-check account status for new pair
+  }).catch(() => { pairAccountBinding.value = {} })
 }
 
 function handleAccountBalanceUpdate(data) {
   // Update available assets from WebSocket data
   if (data.accounts && data.accounts.length > 0) {
-    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1) || []
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2) || []
+    // Resolve A/B accounts based on pair binding
+    const aId = pairAccountBinding.value.account_a_id
+    const bId = pairAccountBinding.value.account_b_id
+    const allAccounts = data.accounts
 
-    // Use first account's available balance instead of summing all accounts
-    binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
+    const binanceAcc = (aId && allAccounts.find(a => a.account_id === aId)) || allAccounts.find(a => a.platform_id === 1)
+    const bybitAcc = (bId && allAccounts.find(a => a.account_id === bId)) || allAccounts.find(a => a.platform_id === 2 || a.platform_id === 3)
 
-    // MT5 accounts always report available_balance=0 from the aggregated API/WS broadcast.
-    // Only update bybitAssets from WS if it's a non-MT5 account with real data.
-    const bybitAcc = bybitAccounts[0]
+    if (binanceAcc) binanceAssets.value = binanceAcc.balance?.available_balance || 0
     if (bybitAcc) {
       const wsBal = bybitAcc.balance?.available_balance || 0
       if (!bybitAcc.is_mt5_account || wsBal > 0) {
         bybitAssets.value = wsBal
       }
-      // For MT5: keep the value set by fetchAccountData (from bridge) — don't overwrite with 0
     }
   }
 }
 
 async function fetchAccountData() {
   try {
+    // Fetch pair-account binding for current pair
+    try {
+      const pairR = await api.get('/api/v1/pair-accounts/' + (marketStore.currentPair || 'XAU'))
+      pairAccountBinding.value = pairR.data || {}
+    } catch { pairAccountBinding.value = {} }
+
     const accountResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
     const accountData = accountResponse.data
 
     accountsData.value = accountData
 
-    const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
-    const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
+    // Resolve A/B accounts based on pair binding, fallback to platform_id
+    const aId = pairAccountBinding.value.account_a_id
+    const bId = pairAccountBinding.value.account_b_id
+    const allAccounts = accountData.accounts || []
 
-    // Use first account's available balance
-    binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
-    bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
+    const binanceAcc = (aId && allAccounts.find(a => a.account_id === aId)) || allAccounts.find(a => a.platform_id === 1)
+    const bybitAcc = (bId && allAccounts.find(a => a.account_id === bId)) || allAccounts.find(a => a.platform_id === 2 || a.platform_id === 3)
+
+    binanceAssets.value = binanceAcc?.balance?.available_balance || 0
+    bybitAssets.value = bybitAcc?.balance?.available_balance || 0
+
+    // Check if bound accounts are disabled
+    const warnings = []
+    const warnAId = pairAccountBinding.value.account_a_id
+    const warnBId = pairAccountBinding.value.account_b_id
+    if (warnAId) {
+      const aAcc = allAccounts.find(a => a.account_id === warnAId)
+      if (!aAcc) {
+        const failedA = accountData.failed_accounts?.find(f => f.account_id === aId)
+        if (failedA) warnings.push('主账号(' + (failedA.account_name || warnAId.substring(0,8)) + ')已禁用')
+        else warnings.push('主账号未找到')
+      }
+    }
+    if (warnBId) {
+      const bAcc2 = allAccounts.find(a => a.account_id === warnBId)
+      if (!bAcc2) {
+        const failedB = accountData.failed_accounts?.find(f => f.account_id === bId2)
+        if (failedB) warnings.push('对冲账号(' + (failedB.account_name || warnBId.substring(0,8)) + ')已禁用')
+        else warnings.push('对冲账号未找到')
+      }
+    }
+    if (!warnAId && !warnBId && pairAccountBinding.value.pair_code) {
+      warnings.push('当前产品对未绑定账户')
+    }
+    pairAccountWarning.value = warnings.join(' | ')
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
@@ -1383,8 +1438,8 @@ function validateAccountsForExecution() {
   console.log('accounts:', accounts)
 
   // Find Binance and Bybit MT5 accounts (prefer is_default + is_active)
-  const binanceAccount = pickAccount(accounts, 1)
-  const bybitMT5Account = pickAccount(accounts, 2, true)
+  const binanceAccount = pickAccount(accounts, 'A')
+  const bybitMT5Account = pickAccount(accounts, 'B')
   console.log('binanceAccount:', binanceAccount)
   console.log('bybitMT5Account:', bybitMT5Account)
 
@@ -1604,8 +1659,8 @@ async function executeLadderOpening(ladderIndex, ladder) {
     executingOpening.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = pickAccount(accounts, 2, true)
+    const binanceAccount = pickAccount(accounts, 'A')
+    const bybitMT5Account = pickAccount(accounts, 'B')
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -1759,8 +1814,8 @@ async function executeLadderClosing(ladderIndex, ladder) {
     executingClosing.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = pickAccount(accounts, 2, true)
+    const binanceAccount = pickAccount(accounts, 'A')
+    const bybitMT5Account = pickAccount(accounts, 'B')
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -1883,8 +1938,8 @@ async function executeBatchOpening(ladder) {
     executingOpening.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = pickAccount(accounts, 2, true)
+    const binanceAccount = pickAccount(accounts, 'A')
+    const bybitMT5Account = pickAccount(accounts, 'B')
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -1981,8 +2036,8 @@ async function executeBatchClosing(ladder) {
     executingClosing.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = pickAccount(accounts, 2, true)
+    const binanceAccount = pickAccount(accounts, 'A')
+    const bybitMT5Account = pickAccount(accounts, 'B')
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -2221,8 +2276,8 @@ async function startContinuousExecution(action) {
       return
     }
 
-    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === 1)
-    const bybitMT5Account = accountsData.value.accounts.find(a => a.platform_id === 2)
+    const binanceAccount = pickAccount(accountsData.value.accounts || [], 'A')
+    const bybitMT5Account = pickAccount(accountsData.value.accounts || [], 'B')
     console.log('[DEBUG] Binance account:', binanceAccount)
     console.log('[DEBUG] Bybit account:', bybitMT5Account)
 

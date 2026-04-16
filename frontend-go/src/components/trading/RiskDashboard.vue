@@ -119,7 +119,7 @@ async function fetchRiskData() {
 
     // Extract risk data from aggregated account data
     const binanceAccounts = data.accounts?.filter(acc => acc.platform_id === 1) || []
-    const bybitAccounts = data.accounts?.filter(acc => acc.platform_id === 2) || []
+    const bybitAccounts = data.accounts?.filter(acc => acc.platform_id === 2 || acc.platform_id === 3) || []
 
     // Calculate total equity for each platform
     const binanceEquity = binanceAccounts.reduce((sum, acc) =>

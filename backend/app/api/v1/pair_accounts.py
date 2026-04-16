@@ -57,8 +57,8 @@ async def get_pair_account(
 ):
     """Get pair-account binding for current user and specific pair."""
     result = await db.execute(text("""
-        SELECT upa.account_a_id::text, aa.account_name,
-               upa.account_b_id::text, ab.account_name
+        SELECT upa.account_a_id::text, aa.account_name, COALESCE(aa.is_active, true),
+               upa.account_b_id::text, ab.account_name, COALESCE(ab.is_active, true)
         FROM user_pair_accounts upa
         LEFT JOIN accounts aa ON upa.account_a_id = aa.account_id
         LEFT JOIN accounts ab ON upa.account_b_id = ab.account_id
@@ -67,7 +67,11 @@ async def get_pair_account(
     row = result.fetchone()
     if not row:
         return {"pair_code": pair_code, "account_a_id": None, "account_b_id": None}
-    return {"pair_code": pair_code, "account_a_id": row[0], "account_a_name": row[1], "account_b_id": row[2], "account_b_name": row[3]}
+    return {
+        "pair_code": pair_code,
+        "account_a_id": row[0], "account_a_name": row[1], "account_a_active": row[2],
+        "account_b_id": row[3], "account_b_name": row[4], "account_b_active": row[5],
+    }
 
 
 @router.put("/pair-accounts")

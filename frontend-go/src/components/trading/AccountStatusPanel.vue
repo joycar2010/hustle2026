@@ -126,13 +126,13 @@
               {{ getDisplayValue(account, 'risk_ratio', false, true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === 2" class="flex justify-between">
+          <div v-if="account.platform_id === 2 || account.platform_id === 3" class="flex justify-between">
             <span class="text-gray-400">手续费(佣金)</span>
             <span class="font-mono" :class="getValueColor(account, 'commission_fee')">
               {{ getDisplayValue(account, 'commission_fee', true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === 2" class="flex justify-between">
+          <div v-if="account.platform_id === 2 || account.platform_id === 3" class="flex justify-between">
             <span class="text-gray-400">MT5过夜费</span>
             <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
               {{ getDisplayValue(account, 'funding_fee', true) }}
@@ -307,7 +307,8 @@ async function fetchAccountData() {
     }
 
     // ★ aggregated API 已包含MT5余额数据，直接渲染
-    activeAccounts.value = allAccounts
+    // Filter out disabled accounts (is_active=false) from display
+    activeAccounts.value = allAccounts.filter(a => a.is_active !== false)
     notificationStore.updateSystemAlerts(data)
     // 初始化时同步强平价到全局 store
     syncLiquidationPricesToStore(allAccounts)
@@ -477,7 +478,7 @@ async function toggleDisable(accountId) {
 
 function getPlatformName(platformId, isMt5Account) {
   if (platformId === 1) return '主账号'
-  if (platformId === 2) return isMt5Account ? '对冲账户' : '对冲账户'
+  if (platformId === 2 || platformId === 3) return isMt5Account ? '对冲账户' : '对冲账户'
   if (platformId === 3) return 'IC Markets'
   return '无角色'
 }
@@ -523,7 +524,7 @@ function formatNumber(num) {
 function getRiskColor(account) {
   if (account.error || !account.balance) return 'text-gray-400'
   const ratio = account.balance.risk_ratio || 0
-  if (account.platform_id === 2 && account.is_mt5_account) {
+  if ((account.platform_id === 2 || account.platform_id === 3) && account.is_mt5_account) {
     if (ratio === 0) return 'text-gray-400'
     if (ratio < 50) return 'text-[#f6465d]'
     if (ratio < 100) return 'text-[#f0b90b]'
@@ -622,7 +623,7 @@ function syncLiquidationPricesToStore(accounts) {
       strategyStore.setLiquidationPrices('binance', longLiq, shortLiq)
     }
 
-    if (acc.platform_id === 2 && acc.is_mt5_account) {
+    if ((acc.platform_id === 2 || acc.platform_id === 3) && acc.is_mt5_account) {
       // 对冲账户 MT5
       const longLiq  = b.long_liquidation_price  > 0 ? b.long_liquidation_price  : null
       const shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null

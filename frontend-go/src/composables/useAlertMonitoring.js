@@ -87,7 +87,7 @@ export function useAlertMonitoring() {
         // Check liquidation prices
         const liquidationData = {
           binance_account: message.data.accounts?.find(acc => acc.platform_id === 1),
-          bybit_account: message.data.accounts?.find(acc => acc.platform_id === 2 && acc.is_mt5_account),
+          bybit_account: message.data.accounts?.find(acc => (acc.platform_id === 2 || acc.platform_id === 3) && acc.is_mt5_account),
           binance_current_price: message.data.market?.binance_price,
           bybit_current_price: message.data.market?.bybit_price
         }

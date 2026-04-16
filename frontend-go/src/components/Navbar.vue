@@ -51,12 +51,13 @@
             </div>
 
             <!-- Global Trading Pair Selector (right of single-leg toggle) -->
-            <div class="flex items-center space-x-1.5 px-2 py-1.5 bg-dark-200 rounded-lg">
+            <div class="flex items-center space-x-1.5 px-2 py-1.5 bg-dark-200 rounded-lg relative">
               <svg class="w-3.5 h-3.5 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
               </svg>
               <select
-                v-model="currentPair"
+                :value="currentPair"
+                @change="onPairChange($event)"
                 class="text-xs font-semibold bg-transparent text-primary border-none outline-none cursor-pointer py-0 pr-1 appearance-none"
                 style="min-width: 56px"
               >
@@ -65,6 +66,13 @@
                 </option>
               </select>
             </div>
+            <!-- Pair disabled toast -->
+            <transition name="fade">
+              <div v-if="pairDisabledMsg" class="fixed top-20 left-1/2 -translate-x-1/2 z-[9999] bg-[#f6465d] text-white px-5 py-3 rounded-lg shadow-xl text-sm font-medium flex items-center gap-2 max-w-md">
+                <span class="text-base">&#x26A0;</span>
+                <span>{{ pairDisabledMsg }}</span>
+              </div>
+            </transition>
           </div>
 
           <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
@@ -291,6 +299,34 @@ const router = useRouter()
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 const { currentPair } = useTradingPair()
+const pairDisabledMsg = ref('')
+let pairDisabledTimer = null
+
+async function onPairChange(event) {
+  const newPair = event.target.value
+  const oldPair = currentPair.value
+  try {
+    const { data } = await api.get('/api/v1/pair-accounts/' + newPair)
+    const warnings = []
+    if (data.account_a_id && data.account_a_active === false) {
+      warnings.push('主账号(' + (data.account_a_name || '未知') + ')已禁用')
+    }
+    if (data.account_b_id && data.account_b_active === false) {
+      warnings.push('对冲账号(' + (data.account_b_name || '未知') + ')已禁用')
+    }
+    if (warnings.length > 0) {
+      // Revert selection
+      event.target.value = oldPair
+      pairDisabledMsg.value = newPair + ' 无法选择: ' + warnings.join(', ')
+      clearTimeout(pairDisabledTimer)
+      pairDisabledTimer = setTimeout(() => { pairDisabledMsg.value = '' }, 4000)
+      return
+    }
+  } catch {
+    // API error — allow selection (don't block on network issues)
+  }
+  currentPair.value = newPair
+}
 const mobileMenuOpen = ref(false)
 const userMenuOpen = ref(false)
 const userMenuRef = ref(null)
@@ -534,4 +570,7 @@ const SystemIcon = {
     transform: translateX(0.125rem) !important;
   }
 }
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

@@ -290,7 +290,7 @@ async function fetchDashboardData() {
       }
 
       // Find Bybit accounts (platform_id === 2)
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
+      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2 || acc.platform_id === 3)
       if (bybitAccounts.length > 0) {
         accounts.value.bybit.balance = bybitAccounts.reduce((sum, acc) =>
           sum + (acc.balance?.total_assets || 0), 0)
