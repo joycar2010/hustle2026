@@ -45,7 +45,7 @@ def _setup_logging():
 _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, pnl, hedging
+from app.api.v1 import auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, pnl, hedging, hedge_ratio
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor
 from app.tasks.redis_monitor import redis_monitor
@@ -354,6 +354,7 @@ app.include_router(automation.router, prefix="/api/v1/automation", tags=["Automa
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(pnl.router, prefix="/api/v1/pnl", tags=["PnL Analytics"])
 app.include_router(hedging.router, prefix="/api/v1/hedging", tags=["Hedging Platform Management"])
+app.include_router(hedge_ratio.router, prefix="/api/v1", tags=["对冲倍数"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
 app.include_router(test.router, prefix="/api/v1/test", tags=["Test"])
 app.include_router(rbac.router, prefix="/api/v1/rbac", tags=["RBAC权限管理"])

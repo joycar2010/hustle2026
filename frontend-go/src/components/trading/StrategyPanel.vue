@@ -188,6 +188,24 @@
           </div>
         </div>
 
+        <!-- Hedge Multiplier Control -->
+        <div v-if="showHedgeRatio" class="mt-2 bg-[#1a1d21] rounded p-2">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] text-gray-400">对冲倍数</span>
+            <span class="text-xs font-mono font-bold" :class="hedgeMultiplier > 1 ? 'text-[#f0b90b]' : 'text-gray-300'">{{ hedgeMultiplier }}x</span>
+          </div>
+          <div class="flex gap-1">
+            <button v-for="m in [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]" :key="m"
+              @click="setHedgeMultiplier(m)"
+              :disabled="continuousExecutionEnabled.opening || continuousExecutionEnabled.closing"
+              :class="['flex-1 py-1 rounded text-[10px] font-bold transition-all',
+                hedgeMultiplier === m ? 'bg-primary text-dark-300' : 'bg-dark-200 text-gray-400 hover:bg-dark-50',
+                (continuousExecutionEnabled.opening || continuousExecutionEnabled.closing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer']">
+              {{ m }}x
+            </button>
+          </div>
+        </div>
+
         <!-- Execution Status Display - 只显示开仓状态 -->
         <div v-if="continuousExecutionStatus.opening" class="mt-2 space-y-1.5">
             <div v-if="continuousExecutionStatus.opening" class="p-1.5 bg-[#1a1d21] rounded text-xs">
@@ -661,6 +679,28 @@ let lastUpdateTime = 0
 const UPDATE_THROTTLE = isMobile.value ? 100 : 500 // 移动端降低更新频率
 
 // Continuous execution state - separate for opening and closing
+const hedgeMultiplier = ref(1.0)
+const showHedgeRatio = ref(true)
+
+async function fetchHedgeMultiplier() {
+  try {
+    const r = await api.get('/api/v1/hedge-ratio', { params: { pair_code: marketStore.currentPair || 'XAU' } })
+    hedgeMultiplier.value = r.data?.hedge_multiplier ?? 1.0
+    showHedgeRatio.value = !!r.data?.enabled
+  } catch { hedgeMultiplier.value = 1.0; showHedgeRatio.value = false }
+}
+
+async function setHedgeMultiplier(m) {
+  if (continuousExecutionEnabled.value?.opening || continuousExecutionEnabled.value?.closing) return
+  if (!confirm(`确定将对冲倍数设为 ${m}x 吗？开仓和平仓都将按此倍数执行。`)) return
+  try {
+    await api.put('/api/v1/hedge-ratio', { hedge_multiplier: m, pair_code: marketStore.currentPair || 'XAU' })
+    hedgeMultiplier.value = m
+  } catch (e) {
+    console.error('Failed to set hedge multiplier:', e)
+  }
+}
+
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
@@ -736,6 +776,7 @@ async function loadEffectiveTriggerInterval() {
 }
 
 onMounted(async () => {
+  fetchHedgeMultiplier()
   // Load config from database (including enabled states)
   await loadConfigFromDB()
 

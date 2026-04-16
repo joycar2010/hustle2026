@@ -3,7 +3,7 @@ import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import text, select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional, Union
 from uuid import UUID
@@ -510,6 +510,14 @@ async def execute_reverse_arbitrage(
         bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
 
         # 4. Execute order using OrderExecutorV2
+        # Fetch hedge multiplier from user strategy config
+        _hm_result = await db.execute(
+            text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
+            {"uid": user_id, "pc": request.pair_code or "XAU"}
+        )
+        _hm_row = _hm_result.fetchone()
+        _hedge_multiplier = float(_hm_row[0]) if _hm_row and _hm_row[0] else 1.0
+
         result = await order_executor_v2.execute_reverse_opening(
             binance_account=binance_account,
             bybit_account=bybit_account,
@@ -518,6 +526,7 @@ async def execute_reverse_arbitrage(
             bybit_price=bybit_price,
             db=db,
             pair_code=request.pair_code or "XAU",
+            hedge_multiplier=_hedge_multiplier,
         )
 
         # 5. Record position if successful
@@ -600,6 +609,14 @@ async def execute_forward_arbitrage(
         bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
 
         # 4. Execute order using OrderExecutorV2
+        # Fetch hedge multiplier from user strategy config
+        _hm_result = await db.execute(
+            text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
+            {"uid": user_id, "pc": request.pair_code or "XAU"}
+        )
+        _hm_row = _hm_result.fetchone()
+        _hedge_multiplier = float(_hm_row[0]) if _hm_row and _hm_row[0] else 1.0
+
         result = await order_executor_v2.execute_forward_opening(
             binance_account=binance_account,
             bybit_account=bybit_account,
@@ -608,6 +625,7 @@ async def execute_forward_arbitrage(
             bybit_price=bybit_price,
             db=db,
             pair_code=request.pair_code or "XAU",
+            hedge_multiplier=_hedge_multiplier,
         )
 
         # 5. Record position if successful
@@ -689,6 +707,14 @@ async def close_reverse_position(
         bybit_price = market_data.bybit_quote.bid_price  # Market will use current bid
 
         # 4. Execute order using OrderExecutorV2
+        # Fetch hedge multiplier from user strategy config
+        _hm_result = await db.execute(
+            text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
+            {"uid": user_id, "pc": request.pair_code or "XAU"}
+        )
+        _hm_row = _hm_result.fetchone()
+        _hedge_multiplier = float(_hm_row[0]) if _hm_row and _hm_row[0] else 1.0
+
         result = await order_executor_v2.execute_reverse_closing(
             binance_account=binance_account,
             bybit_account=bybit_account,
@@ -697,6 +723,7 @@ async def close_reverse_position(
             bybit_price=bybit_price,
             db=db,
             pair_code=request.pair_code or "XAU",
+            hedge_multiplier=_hedge_multiplier,
         )
 
         # 5. Record position if successful
@@ -778,6 +805,14 @@ async def close_forward_position(
         bybit_price = market_data.bybit_quote.ask_price  # Market will use current ask
 
         # 4. Execute order using OrderExecutorV2
+        # Fetch hedge multiplier from user strategy config
+        _hm_result = await db.execute(
+            text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
+            {"uid": user_id, "pc": request.pair_code or "XAU"}
+        )
+        _hm_row = _hm_result.fetchone()
+        _hedge_multiplier = float(_hm_row[0]) if _hm_row and _hm_row[0] else 1.0
+
         result = await order_executor_v2.execute_forward_closing(
             binance_account=binance_account,
             bybit_account=bybit_account,
@@ -786,6 +821,7 @@ async def close_forward_position(
             bybit_price=bybit_price,
             db=db,
             pair_code=request.pair_code or "XAU",
+            hedge_multiplier=_hedge_multiplier,
         )
 
         # 5. Record position if successful

@@ -159,6 +159,7 @@ class OrderExecutorV2:
         db: Optional[AsyncSession] = None,
         spread_threshold: float = None,
         pair_code: str = "XAU",
+        hedge_multiplier: float = 1.0,
     ) -> Dict[str, Any]:
         """
         Execute reverse opening (Binance short, Bybit long).
@@ -229,8 +230,8 @@ class OrderExecutorV2:
                 "is_single_leg": False,
                 "message": message
             }
-        bybit_quantity = _a_to_b(binance_filled_qty, pair_code)
-        logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU -> bybit_quantity={bybit_quantity} Lot")
+        bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
+        logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU -> bybit_quantity={bybit_quantity} Lot (multiplier={hedge_multiplier})")
 
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
@@ -263,7 +264,8 @@ class OrderExecutorV2:
         bybit_filled_xau = _b_to_a(bybit_filled_qty, pair_code)
         # Only consider it single-leg if Bybit filled < 80% of Binance filled
         # This tolerates normal fill variance and exchange data delays
-        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < binance_filled_qty * 0.80
+        expected_hedge_xau = binance_filled_qty * hedge_multiplier
+        is_single_leg = binance_filled_qty > 0 and bybit_filled_xau < expected_hedge_xau * 0.80
 
         # Add detailed logging for single-leg detection
         logger.info(
@@ -316,6 +318,7 @@ class OrderExecutorV2:
         db: Optional[AsyncSession] = None,
         spread_threshold: float = None,
         pair_code: str = "XAU",
+        hedge_multiplier: float = 1.0,
     ) -> Dict[str, Any]:
         """
         Execute reverse closing (Binance long close, Bybit short close).
@@ -422,7 +425,7 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (close LONG position)
-        bybit_quantity = _a_to_b(binance_filled_qty, pair_code)
+        bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
@@ -494,6 +497,7 @@ class OrderExecutorV2:
         db: Optional[AsyncSession] = None,
         spread_threshold: float = None,
         pair_code: str = "XAU",
+        hedge_multiplier: float = 1.0,
     ) -> Dict[str, Any]:
         """
         Execute forward opening (Binance long, Bybit short).
@@ -566,7 +570,7 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (open SHORT position)
-        bybit_quantity = _a_to_b(binance_filled_qty, pair_code)
+        bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
@@ -638,6 +642,7 @@ class OrderExecutorV2:
         db: Optional[AsyncSession] = None,
         spread_threshold: float = None,
         pair_code: str = "XAU",
+        hedge_multiplier: float = 1.0,
     ) -> Dict[str, Any]:
         """
         Execute forward closing (Binance short close, Bybit long close).
@@ -758,8 +763,8 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (close SHORT position)
-        bybit_quantity = _a_to_b(binance_filled_qty, pair_code)
-        logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU)")
+        bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
+        logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU, multiplier={hedge_multiplier})")
 
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,

@@ -107,6 +107,8 @@
                       class="text-[#0ecb81] hover:opacity-80 text-xs transition-colors">分配角色</button>
                     <button @click="openNotifConfig(u)"
                       class="text-[#3370ff] hover:opacity-80 text-xs transition-colors">通知分配</button>
+                    <button @click="openHedgeRatio(u)"
+                      class="text-[#f0b90b] hover:opacity-80 text-xs transition-colors">对冲倍数</button>
                     <button @click="toggleUserStatus(u)"
                       :class="u.is_active ? 'text-[#f0b90b]' : 'text-[#0ecb81]'"
                       class="hover:opacity-80 text-xs transition-colors">
@@ -143,10 +145,11 @@
               <span v-if="!u.rbac_roles?.length" class="text-text-tertiary text-xs">未分配角色</span>
             </div>
             <div class="text-xs text-text-tertiary font-mono">{{ fmtDate(u.create_time) }}</div>
-            <div class="grid grid-cols-3 gap-1.5 pt-2 border-t border-border-primary">
+            <div class="grid grid-cols-4 gap-1.5 pt-2 border-t border-border-primary">
               <button @click="openEditUser(u)" class="py-1.5 bg-primary/10 text-primary rounded text-xs">编辑</button>
               <button @click="openAssignRole(u)" class="py-1.5 bg-[#0ecb81]/10 text-[#0ecb81] rounded text-xs">分配角色</button>
               <button @click="openNotifConfig(u)" class="py-1.5 bg-[#3370ff]/10 text-[#3370ff] rounded text-xs">通知分配</button>
+              <button @click="openHedgeRatio(u)" class="py-1.5 bg-[#f0b90b]/10 text-[#f0b90b] rounded text-xs">对冲倍数</button>
               <button @click="toggleUserStatus(u)"
                 :class="u.is_active ? 'bg-[#f0b90b]/10 text-[#f0b90b]' : 'bg-[#0ecb81]/10 text-[#0ecb81]'"
                 class="py-1.5 rounded text-xs">{{ u.is_active ? '禁用' : '启用' }}</button>
@@ -1131,6 +1134,38 @@
       </transition-group>
     </div>
   </div>
+
+    <!-- Modal: 对冲倍数权限 -->
+    <Teleport to="body">
+      <div v-if="showHedgeModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" @click.self="showHedgeModal = false">
+        <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-sm shadow-2xl">
+          <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
+            <h3 class="font-bold">对冲倍数权限 — {{ hedgeUser?.username }}</h3>
+            <button @click="showHedgeModal = false" class="text-text-tertiary hover:text-text-primary text-xl">✕</button>
+          </div>
+          <div class="p-6 text-center">
+            <div class="text-sm text-text-secondary mb-4">是否允许该用户在交易界面调节对冲倍数？</div>
+            <div class="flex items-center justify-center gap-3 mb-4">
+              <span class="text-sm" :class="!hedgeEnabled ? 'text-text-primary font-bold' : 'text-text-tertiary'">禁用</span>
+              <div @click="hedgeEnabled = !hedgeEnabled"
+                :class="['relative w-12 h-6 rounded-full cursor-pointer transition-colors', hedgeEnabled ? 'bg-primary' : 'bg-gray-600']">
+                <span :class="['absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform', hedgeEnabled ? 'translate-x-6' : 'translate-x-0.5']"/>
+              </div>
+              <span class="text-sm" :class="hedgeEnabled ? 'text-primary font-bold' : 'text-text-tertiary'">启用</span>
+            </div>
+            <div class="text-xs text-text-tertiary mb-5">启用后用户可在 go 站策略面板中选择 1.0x~1.5x 对冲倍数</div>
+            <div class="flex gap-3">
+              <button @click="showHedgeModal = false" class="flex-1 px-4 py-2 text-sm text-text-secondary hover:text-text-primary bg-dark-200 rounded-xl">取消</button>
+              <button @click="saveHedgeToggle" :disabled="hedgeSaving"
+                class="flex-1 px-4 py-2 text-sm font-bold bg-primary hover:bg-primary-hover text-dark-300 rounded-xl disabled:opacity-50">
+                {{ hedgeSaving ? '保存中...' : '保存' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
 </template>
 
 <script setup>
@@ -2314,6 +2349,34 @@ async function deleteMT5(client) {
 }
 
 // ── 初始化 ────────────────────────────────────────────────────
+// ── Hedge Ratio Per-User ──
+const showHedgeModal = ref(false)
+const hedgeUser = ref(null)
+const hedgeEnabled = ref(false)
+const hedgeSaving = ref(false)
+
+async function openHedgeRatio(u) {
+  hedgeUser.value = u
+  hedgeEnabled.value = !!u.hedge_ratio_enabled
+  showHedgeModal.value = true
+}
+
+async function saveHedgeToggle() {
+  hedgeSaving.value = true
+  try {
+    await api.put('/api/v1/hedge-ratio/toggle', {
+      user_id: hedgeUser.value?.user_id,
+      enabled: hedgeEnabled.value
+    })
+    const idx = users.value.findIndex(u => u.user_id === hedgeUser.value?.user_id)
+    if (idx >= 0) users.value[idx].hedge_ratio_enabled = hedgeEnabled.value
+    showHedgeModal.value = false
+    showToast(hedgeEnabled.value ? '\u5df2\u542f\u7528\u5bf9\u51b2\u500d\u6570\u8c03\u8282' : '\u5df2\u7981\u7528\u5bf9\u51b2\u500d\u6570\u8c03\u8282', 'success')
+  } catch (e) {
+    showToast('\u4fdd\u5b58\u5931\u8d25: ' + (e.response?.data?.detail || e.message), 'error')
+  } finally { hedgeSaving.value = false }
+}
+
 onMounted(async () => {
   await loadUsers()
   await loadPlatforms()  // 加载平台数据（账户编辑下拉框使用）
