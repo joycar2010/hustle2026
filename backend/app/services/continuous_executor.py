@@ -55,6 +55,7 @@ class ContinuousStrategyExecutor:
         pair_code: str = "XAU",
         order_executor: OrderExecutorV2 = None,
         position_mgr: Optional[PositionManager] = None,
+        hedge_multiplier: float = 1.0,
         trigger_check_interval: float = 0.5,  # 500ms default (increased to reduce API calls and avoid frequent order cancellations)
         api_spam_prevention_delay: float = 3.0,  # Default 3 seconds to prevent API spam
         delayed_single_leg_check_delay: float = 10.0,  # Default 10 seconds for first single-leg check
@@ -76,6 +77,7 @@ class ContinuousStrategyExecutor:
         self.pair_code = pair_code
         self.order_executor = order_executor
         self.position_mgr = position_mgr or position_manager
+        self.hedge_multiplier = hedge_multiplier
         self.trigger_check_interval = trigger_check_interval
         self.api_spam_prevention_delay = api_spam_prevention_delay
         self.delayed_single_leg_check_delay = delayed_single_leg_check_delay
@@ -205,6 +207,8 @@ class ContinuousStrategyExecutor:
 
         consecutive_no_fills = 0  # Track consecutive Binance timeouts/cancels without any fill
         MAX_CONSECUTIVE_NO_FILLS = 5  # After 5 consecutive no-fills, stop the ladder
+        unhedged_binance_xau = 0.0  # Accumulated Binance fills not yet hedged (below 0.01 Lot)
+        MIN_HEDGE_LOT = 0.01         # ICMarkets minimum lot size
         loop_count = 0
         current_position = 0  # initialise so the post-loop debug block always has a value
         while self.is_running and not self.stop_requested:
@@ -282,6 +286,7 @@ class ContinuousStrategyExecutor:
                 continue
 
             # Step 5: Calculate order quantity
+            is_closing = strategy_type in ('reverse_closing', 'forward_closing')
             try:
                 remaining = ladder.total_qty - current_position
                 order_qty = min(order_qty_limit, remaining)
@@ -332,6 +337,12 @@ class ContinuousStrategyExecutor:
                 logger.error(f"[ladder={ladder_idx}] Failed to snapshot positions: {e}")
                 pre_snapshot = {}
 
+            # ── Inject accumulated unhedged qty for B-side sizing ──────────────
+            # If previous iterations had Binance fills too small for B-side (< 0.01 Lot),
+            # we carry the deficit here and add it to the current order's B-side target.
+            # This is passed via executor state so order_executor can use it.
+            self._unhedged_binance_xau = unhedged_binance_xau
+
             # Step 7.9: Cancel any lingering open orders on A-side before placing new one
             # Prevents order accumulation on the exchange when previous cancels failed
             try:
@@ -374,7 +385,7 @@ class ContinuousStrategyExecutor:
                     order_qty,
                     binance_price,
                     bybit_price,
-                    spread_threshold
+                    spread_threshold,
                 )
             except Exception as e:
                 logger.error(f"[ladder={ladder_idx}] Exception executing order: {e}")
@@ -654,6 +665,25 @@ class ContinuousStrategyExecutor:
             )
 
             consecutive_no_fills = 0  # Reset on successful fill
+
+            # ── Unhedged accumulator: handle B-side below-min-lot skips ─────────
+            # When a partial Binance fill is too small to meet 0.01 Lot minimum,
+            # order_executor returns b_side_skipped_below_min=True. Accumulate
+            # the skipped XAU here and retry B-side on the next iteration.
+            if exec_result.get('b_side_skipped_below_min') and binance_filled_xau > 0:
+                unhedged_binance_xau += binance_filled_xau
+                logger.warning(
+                    f"[HEDGE_ACCUM] B-side skipped (< {MIN_HEDGE_LOT} Lot), "
+                    f"accumulated unhedged={unhedged_binance_xau:.4f} XAU"
+                )
+            elif binance_filled_xau > 0 and bybit_filled_lot > 0:
+                # Successful dual-side fill — reset accumulator
+                if unhedged_binance_xau > 0:
+                    logger.info(f"[HEDGE_ACCUM] Cleared accumulator after successful B-side fill")
+                unhedged_binance_xau = 0.0
+            elif unhedged_binance_xau > 0 and exec_result.get('bybit_filled_qty', 0) > 0:
+                unhedged_binance_xau = 0.0
+
             logger.info(f"Position updated: {'+'if is_opening else '-'}{filled_qty}")
 
             # Step 11: Push status updates
@@ -774,7 +804,7 @@ class ContinuousStrategyExecutor:
         quantity: float,
         binance_price: float,
         bybit_price: float,
-        spread_threshold: float = None
+        spread_threshold: float = None,
     ) -> Dict:
         """Execute order based on strategy type"""
         if strategy_type == 'reverse_opening':
@@ -786,6 +816,8 @@ class ContinuousStrategyExecutor:
                 bybit_price=bybit_price,
                 spread_threshold=spread_threshold,
                 pair_code=self.pair_code,
+                hedge_multiplier=self.hedge_multiplier,
+                accumulated_unhedged_xau=getattr(self, '_unhedged_binance_xau', 0.0),
             )
         elif strategy_type == 'reverse_closing':
             return await self.order_executor.execute_reverse_closing(
@@ -796,6 +828,7 @@ class ContinuousStrategyExecutor:
                 bybit_price=bybit_price,
                 spread_threshold=spread_threshold,
                 pair_code=self.pair_code,
+                hedge_multiplier=self.hedge_multiplier,
             )
         elif strategy_type == 'forward_opening':
             return await self.order_executor.execute_forward_opening(
@@ -806,6 +839,8 @@ class ContinuousStrategyExecutor:
                 bybit_price=bybit_price,
                 spread_threshold=spread_threshold,
                 pair_code=self.pair_code,
+                hedge_multiplier=self.hedge_multiplier,
+                accumulated_unhedged_xau=getattr(self, '_unhedged_binance_xau', 0.0),
             )
         elif strategy_type == 'forward_closing':
             return await self.order_executor.execute_forward_closing(
@@ -816,6 +851,7 @@ class ContinuousStrategyExecutor:
                 bybit_price=bybit_price,
                 spread_threshold=spread_threshold,
                 pair_code=self.pair_code,
+                hedge_multiplier=self.hedge_multiplier,
             )
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")

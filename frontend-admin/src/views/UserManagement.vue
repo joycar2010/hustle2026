@@ -1363,9 +1363,9 @@ async function saveUser() {
     if (isEditUser.value) {
       const data = { email: userForm.value.email || null, role: userForm.value.role, is_active: userForm.value.is_active }
       if (userForm.value.password)        data.password        = userForm.value.password
-      if (userForm.value.feishu_open_id  !== '') data.feishu_open_id  = userForm.value.feishu_open_id  || null
-      if (userForm.value.feishu_mobile   !== '') data.feishu_mobile   = userForm.value.feishu_mobile   || null
-      if (userForm.value.feishu_union_id !== '') data.feishu_union_id = userForm.value.feishu_union_id || null
+      data.feishu_open_id  = userForm.value.feishu_open_id  || null
+      data.feishu_mobile   = userForm.value.feishu_mobile   || null
+      data.feishu_union_id = userForm.value.feishu_union_id || null
       await api.put(`/api/v1/users/${currentUser.value.user_id}`, data)
       toast('用户已更新')
     } else {

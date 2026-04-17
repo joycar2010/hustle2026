@@ -4,7 +4,7 @@
       <h3 class="title">紧急手动交易</h3>
       <div class="emergency-badge">
         <div class="pulse-dot"></div>
-        <span class="badge-text">紧急模式</span>
+        <span class="badge-text">{{ currentPair }}</span>
       </div>
     </div>
 
@@ -13,14 +13,14 @@
       <div class="form-group">
         <label class="label">交易平台</label>
         <select v-model="exchange" class="select-input">
-          <option value="binance">主账号 (XAUUSDT)</option>
-          <option value="bybit">对冲账户 (XAUUSD.s)</option>
+          <option value="binance">主账号 ({{ pairConfig.binance }})</option>
+          <option value="bybit">对冲账户 ({{ pairConfig.mt5 }})</option>
         </select>
       </div>
 
       <!-- Quantity -->
       <div class="form-group">
-        <label class="label">下单总手数 (XAU)</label>
+        <label class="label">下单数量 ({{ aUnitLabel }})</label>
         <input
           v-model.number="quantity"
           type="number"
@@ -30,7 +30,7 @@
           placeholder="1"
         />
         <div class="hint-text">
-          对冲 实际下单量: {{ xauToLot(quantity).toFixed(2) }} Lot
+          对冲 实际下单量: {{ convertedQty }} {{ bUnitLabel }}
         </div>
       </div>
 
@@ -52,7 +52,7 @@
         </button>
       </div>
 
-      <!-- Close Position Buttons (多仓平空 left, 空仓平多 right) -->
+      <!-- Close Position Buttons -->
       <div class="close-buttons">
         <button
           @click="closePosition('long')"
@@ -82,7 +82,7 @@
           :disabled="loading"
           class="btn btn-danger"
         >
-          ⚠️ 平仓所有持仓
+          平仓所有持仓
         </button>
         <button
           @click="cancelAllOrders"
@@ -97,17 +97,39 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import api from '@/services/api'
-import { xauToLot, convertForPlatform } from '@/composables/useQuantityConverter'
+import { useTradingPair } from '@/composables/useTradingPair'
 
 const emit = defineEmits(['orderExecuted'])
+
+const { currentPair, pairConfig } = useTradingPair()
 
 const exchange = ref('binance')
 const quantity = ref(1)
 const loading = ref(false)
 const statusMsg = ref('')
 const statusOk = ref(true)
+
+// Dynamic unit labels based on pair config
+const aUnitLabel = computed(() => pairConfig.value.unitA || 'XAU')
+const bUnitLabel = computed(() => pairConfig.value.unitB || 'Lot')
+
+// Convert A-side quantity to B-side display
+const convertedQty = computed(() => {
+  const conv = pairConfig.value.conversionFactor || 100
+  const val = (quantity.value || 0) / conv
+  return val.toFixed(2)
+})
+
+// Convert quantity for the selected platform
+function convertForPlatform(qty, exch) {
+  if (exch === 'bybit') {
+    const conv = pairConfig.value.conversionFactor || 100
+    return Number((qty / conv).toFixed(2))
+  }
+  return qty
+}
 
 function showStatus(msg, ok = true) {
   statusMsg.value = msg
@@ -125,6 +147,7 @@ async function executeTrade(side) {
       exchange: exchange.value,
       side,
       quantity: actualQuantity,
+      pair_code: currentPair.value,
     })
     showStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送`, true)
     emit('orderExecuted')
@@ -145,6 +168,7 @@ async function closePosition(positionType) {
     await api.post(endpoint, {
       exchange: exchange.value,
       quantity: actualQuantity,
+      pair_code: currentPair.value,
     })
     showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
     emit('orderExecuted')
@@ -161,7 +185,9 @@ async function closeAllPositions() {
   if (loading.value) return
   loading.value = true
   try {
-    const res = await api.post('/api/v1/trading/manual/close-all')
+    const res = await api.post('/api/v1/trading/manual/close-all', {
+      pair_code: currentPair.value,
+    })
     showStatus(`平仓指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
     emit('orderExecuted')
   } catch (e) {
@@ -176,7 +202,9 @@ async function cancelAllOrders() {
   if (loading.value) return
   loading.value = true
   try {
-    const res = await api.post('/api/v1/trading/manual/cancel-all')
+    const res = await api.post('/api/v1/trading/manual/cancel-all', {
+      pair_code: currentPair.value,
+    })
     showStatus(`撤单指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
     emit('orderExecuted')
   } catch (e) {
@@ -307,53 +335,18 @@ async function cancelAllOrders() {
   cursor: not-allowed;
 }
 
-.btn-buy {
-  background-color: #0ecb81;
-}
-
-.btn-buy:hover:not(:disabled) {
-  background-color: #0db774;
-}
-
-.btn-sell {
-  background-color: #f6465d;
-}
-
-.btn-sell:hover:not(:disabled) {
-  background-color: #e03d52;
-}
-
-.btn-close-short {
-  background-color: #f0b90b;
-}
-
-.btn-close-short:hover:not(:disabled) {
-  background-color: #d9a509;
-}
-
-.btn-close-long {
-  background-color: #f0b90b;
-}
-
-.btn-close-long:hover:not(:disabled) {
-  background-color: #d9a509;
-}
-
-.btn-danger {
-  background-color: #f6465d;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background-color: #e03d52;
-}
-
-.btn-secondary {
-  background-color: #252930;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background-color: #2b3139;
-}
+.btn-buy { background-color: #0ecb81; }
+.btn-buy:hover:not(:disabled) { background-color: #0db774; }
+.btn-sell { background-color: #f6465d; }
+.btn-sell:hover:not(:disabled) { background-color: #e03d52; }
+.btn-close-short { background-color: #f0b90b; }
+.btn-close-short:hover:not(:disabled) { background-color: #d9a509; }
+.btn-close-long { background-color: #f0b90b; }
+.btn-close-long:hover:not(:disabled) { background-color: #d9a509; }
+.btn-danger { background-color: #f6465d; }
+.btn-danger:hover:not(:disabled) { background-color: #e03d52; }
+.btn-secondary { background-color: #252930; }
+.btn-secondary:hover:not(:disabled) { background-color: #2b3139; }
 
 .status-msg {
   padding: 6px 10px;
@@ -379,27 +372,13 @@ async function cancelAllOrders() {
   gap: 8px;
 }
 
-/* 移动端H5竖屏适配 */
 @media (orientation: portrait), (max-width: 750px) {
   .emergency-trading-container {
     width: 100%;
     max-height: 400px;
     box-sizing: border-box;
   }
-
-  .content {
-    padding: 12px;
-  }
-
-  .btn {
-    min-height: 44px; /* 移动端最小点击区域 */
-  }
-}
-
-/* PC端保持原有布局 */
-@media (min-width: 751px) and (orientation: landscape) {
-  .emergency-trading-container {
-    /* PC端样式保持不变 */
-  }
+  .content { padding: 12px; }
+  .btn { min-height: 44px; }
 }
 </style>

@@ -1187,10 +1187,50 @@ async def execute_continuous_opening(
         # Reset position tracker for this strategy before each new execution
         from app.services.position_manager import position_manager
         position_manager.reset_strategy(strategy_id)
+        # ── Safety guard: seed position_manager with actual Binance position ──
+        # Prevents double-opening after Python crash/restart (position_manager is in-memory only)
+        try:
+            from app.services.hedging_pair_service import hedging_pair_service as _hps_guard
+            from app.services.binance_client import BinanceFuturesClient as _BFC_guard
+            from app.core.proxy_utils import build_proxy_url as _bpu
+            _guard_pair = _hps_guard.get_pair(pair_code)
+            _guard_sym_a = _guard_pair.symbol_a.symbol if _guard_pair else "XAUUSDT"
+            _guard_client = _BFC_guard(binance_account.api_key, binance_account.api_secret,
+                                       proxy_url=_bpu(binance_account.proxy_config))
+            _guard_positions = await _guard_client.get_position_risk(symbol=_guard_sym_a)
+            await _guard_client.close()
+            _target_side = "SHORT" if strategy_type == "reverse" else "LONG"
+            _existing_qty = sum(
+                abs(float(p.get("positionAmt", 0)))
+                for p in _guard_positions
+                if p.get("positionSide", "") == _target_side and float(p.get("positionAmt", 0)) != 0
+            )
+            if _existing_qty > 0:
+                _first_ladder_idx = next((i for i, l in enumerate(ladders) if l.enabled), 0)
+                _ladder_total = ladders[_first_ladder_idx].total_qty if ladders else _existing_qty
+                _seed_qty = min(_existing_qty, _ladder_total)
+                position_manager.record_opening(strategy_id, _first_ladder_idx,
+                                                f"{strategy_type}_opening", _seed_qty)
+                logger.warning(
+                    f"[POSITION_GUARD] Pre-seeded {_seed_qty}/{_ladder_total} XAU "
+                    f"({_target_side}) from existing Binance position (pair={pair_code})"
+                )
+        except Exception as _guard_err:
+            logger.warning(f"[POSITION_GUARD] Position check skipped: {_guard_err}")
+
+        # Fetch hedge_multiplier for this user and pair
+        _hm_res = await db.execute(
+            text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
+            {"uid": user_id, "pc": pair_code}
+        )
+        _hm_row = _hm_res.fetchone()
+        _hedge_multiplier = float(_hm_row[0]) if _hm_row and _hm_row[0] else 1.0
+
         executor = ContinuousStrategyExecutor(
             strategy_id=strategy_id,
             pair_code=pair_code,
             order_executor=order_executor_v2,
+            hedge_multiplier=_hedge_multiplier,
             trigger_check_interval=trigger_check_interval,
             api_spam_prevention_delay=api_spam_prevention_delay,
             delayed_single_leg_check_delay=delayed_single_leg_check_delay,
@@ -1322,10 +1362,50 @@ async def execute_continuous_closing(
         # Reset position tracker for this strategy before each new execution
         from app.services.position_manager import position_manager
         position_manager.reset_strategy(strategy_id)
+        # ── Safety guard: seed position_manager with actual Binance position ──
+        # Prevents double-opening after Python crash/restart (position_manager is in-memory only)
+        try:
+            from app.services.hedging_pair_service import hedging_pair_service as _hps_guard
+            from app.services.binance_client import BinanceFuturesClient as _BFC_guard
+            from app.core.proxy_utils import build_proxy_url as _bpu
+            _guard_pair = _hps_guard.get_pair(pair_code)
+            _guard_sym_a = _guard_pair.symbol_a.symbol if _guard_pair else "XAUUSDT"
+            _guard_client = _BFC_guard(binance_account.api_key, binance_account.api_secret,
+                                       proxy_url=_bpu(binance_account.proxy_config))
+            _guard_positions = await _guard_client.get_position_risk(symbol=_guard_sym_a)
+            await _guard_client.close()
+            _target_side = "SHORT" if strategy_type == "reverse" else "LONG"
+            _existing_qty = sum(
+                abs(float(p.get("positionAmt", 0)))
+                for p in _guard_positions
+                if p.get("positionSide", "") == _target_side and float(p.get("positionAmt", 0)) != 0
+            )
+            if _existing_qty > 0:
+                _first_ladder_idx = next((i for i, l in enumerate(ladders) if l.enabled), 0)
+                _ladder_total = ladders[_first_ladder_idx].total_qty if ladders else _existing_qty
+                _seed_qty = min(_existing_qty, _ladder_total)
+                position_manager.record_opening(strategy_id, _first_ladder_idx,
+                                                f"{strategy_type}_opening", _seed_qty)
+                logger.warning(
+                    f"[POSITION_GUARD] Pre-seeded {_seed_qty}/{_ladder_total} XAU "
+                    f"({_target_side}) from existing Binance position (pair={pair_code})"
+                )
+        except Exception as _guard_err:
+            logger.warning(f"[POSITION_GUARD] Position check skipped: {_guard_err}")
+
+        # Fetch hedge_multiplier for this user and pair
+        _hm_res = await db.execute(
+            text("SELECT hedge_multiplier FROM strategy_configs WHERE user_id=:uid AND pair_code=:pc LIMIT 1"),
+            {"uid": user_id, "pc": pair_code}
+        )
+        _hm_row = _hm_res.fetchone()
+        _hedge_multiplier = float(_hm_row[0]) if _hm_row and _hm_row[0] else 1.0
+
         executor = ContinuousStrategyExecutor(
             strategy_id=strategy_id,
             pair_code=pair_code,
             order_executor=order_executor_v2,
+            hedge_multiplier=_hedge_multiplier,
             trigger_check_interval=trigger_check_interval,
             api_spam_prevention_delay=api_spam_prevention_delay,
             delayed_single_leg_check_delay=delayed_single_leg_check_delay,

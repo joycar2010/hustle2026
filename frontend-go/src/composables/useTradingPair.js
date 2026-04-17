@@ -11,15 +11,18 @@ watch(currentPair, (val) => {
   sessionStorage.setItem(STORAGE_KEY, val)
 })
 
-// All active pairs with display labels and symbol mappings
+// All active pairs with display labels, symbol mappings, and conversion factors
+// conversionFactor: how many A-side units per 1 B-side lot
+// unitA: A-side quantity unit name
+// unitB: B-side quantity unit name
 export const TRADING_PAIRS = [
-  { code: 'XAU',   label: 'XAU',   binance: 'XAUUSDT',    mt5: 'XAUUSD+',  platform: 'Bybit' },
-  { code: 'XAG',   label: 'XAG',   binance: 'XAGUSDT',    mt5: 'XAGUSD',   platform: 'Bybit' },
-  { code: 'BZ',    label: 'BZ',    binance: 'BZUSDT',     mt5: 'UKOUSD',   platform: 'Bybit' },
-  { code: 'CL',    label: 'CL',    binance: 'CLUSDT',     mt5: 'USOUSD',   platform: 'Bybit' },
-  { code: 'NG',    label: 'NG',    binance: 'NATGASUSDT', mt5: 'NG-C',     platform: 'Bybit' },
-  { code: 'BXAU',  label: 'BXAU',  binance: 'XAUUSDT',    mt5: 'XAUUSD+',  platform: 'Bybit' },
-  { code: 'ICXAU', label: 'ICXAU', binance: 'XAUUSDT',    mt5: 'XAUUSD',   platform: 'ICMarkets' },
+  { code: 'XAU',   label: 'XAU',   binance: 'XAUUSDT',    mt5: 'XAUUSD+',  platform: 'Bybit',      conversionFactor: 100,  unitA: 'XAU',   unitB: 'Lot' },
+  { code: 'XAG',   label: 'XAG',   binance: 'XAGUSDT',    mt5: 'XAGUSD',   platform: 'ICMarkets',  conversionFactor: 500,  unitA: 'XAG',   unitB: 'Lot' },
+  { code: 'BZ',    label: 'BZ',    binance: 'BZUSDT',     mt5: 'XBRUSD',   platform: 'ICMarkets',  conversionFactor: 1000, unitA: 'BBL',   unitB: 'Lot' },
+  { code: 'CL',    label: 'CL',    binance: 'CLUSDT',     mt5: 'XTIUSD',   platform: 'ICMarkets',  conversionFactor: 1000, unitA: 'BBL',   unitB: 'Lot' },
+  { code: 'NG',    label: 'NG',    binance: 'NATGASUSDT', mt5: 'XNGUSD',   platform: 'ICMarkets',  conversionFactor: 1000, unitA: 'mmBtu', unitB: 'Lot' },
+  { code: 'BXAU',  label: 'BXAU',  binance: 'XAUUSDT',    mt5: 'XAUUSD+',  platform: 'Bybit',      conversionFactor: 100,  unitA: 'oz',    unitB: 'Lot' },
+  { code: 'ICXAU', label: 'ICXAU', binance: 'XAUUSDT',    mt5: 'XAUUSD',   platform: 'ICMarkets',  conversionFactor: 100,  unitA: 'XAU',   unitB: 'Lot' },
 ]
 
 // Module-level computed — reactive to currentPair changes, shared across all callers

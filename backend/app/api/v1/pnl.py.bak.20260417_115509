@@ -1,0 +1,366 @@
+"""PnL 收益分析 API — 为 www 用户平台提供日/周/月收益图表数据"""
+import os
+import logging
+import math
+import time as _time
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any, List
+
+import httpx
+from fastapi import APIRouter, Query, Depends, HTTPException
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import get_current_user
+from app.core.database import get_db
+from app.core.proxy_utils import build_proxy_url
+from app.models.user import User
+from app.models.account import Account
+from app.models.mt5_client import MT5Client
+from app.services.binance_client import BinanceFuturesClient
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+# ── 简易内存缓存（60 秒 TTL）──────────────────────────
+_cache: Dict[str, Any] = {}
+_cache_ts: Dict[str, float] = {}
+CACHE_TTL = 60
+
+
+def _cache_get(key: str):
+    if key in _cache and _time.time() - _cache_ts.get(key, 0) < CACHE_TTL:
+        return _cache[key]
+    return None
+
+
+def _cache_set(key: str, val):
+    _cache[key] = val
+    _cache_ts[key] = _time.time()
+
+
+# ── 时间工具 ──────────────────────────────────────────
+def _beijing_date_to_utc_ms(date_str: str, end_of_day=False) -> int:
+    """北京时间日期 → UTC 毫秒时间戳"""
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    if end_of_day:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    # 北京 = UTC+8
+    utc_dt = dt - timedelta(hours=8)
+    return int(utc_dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def _utc_ms_to_beijing_date(ts_ms: int) -> str:
+    """UTC 毫秒 → 北京时间日期字符串 YYYY-MM-DD"""
+    dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+    beijing = dt + timedelta(hours=8)
+    return beijing.strftime("%Y-%m-%d")
+
+
+def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
+    """MT5 服务器时间（UTC+2/+3）→ 北京时间日期"""
+    # MT5 deal.time 是 UTC+0 的 unix timestamp（Bridge 已转为 UTC）
+    dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc)
+    beijing = dt + timedelta(hours=8)
+    return beijing.strftime("%Y-%m-%d")
+
+
+# ── 数据获取 ─────────────────────────────────────────
+
+async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str) -> list:
+    """获取 Binance income 记录（自动分页，limit=1000/次）
+    不传 symbol 则查询账户所有产品对的收入，覆盖 XAU/XAG/BZ/CL/NG 等全部合约。
+    """
+    client = BinanceFuturesClient(
+        account.api_key, account.api_secret,
+        proxy_url=build_proxy_url(account.proxy_config)
+    )
+    all_records = []
+    cursor_start = start_ms
+    try:
+        for _ in range(20):  # 最多 20 页 = 20000 条（多产品对记录更多）
+            records = await client.get_income(
+                # symbol 不传 → Binance 返回账户所有 symbol 的收入记录
+                income_type=income_type,
+                start_time=cursor_start,
+                end_time=end_ms,
+                limit=1000,
+            )
+            if not records:
+                break
+            all_records.extend(records)
+            if len(records) < 1000:
+                break
+            # 下一页从最后一条记录之后
+            cursor_start = int(records[-1].get("time", 0)) + 1
+    except Exception as e:
+        logger.error(f"Binance income ({income_type}) fetch failed [{account.account_name}]: {e}")
+    finally:
+        await client.close()
+    return all_records
+
+
+async def _get_active_mt5_symbols(db: AsyncSession) -> set:
+    """从 hedging_pairs 动态加载所有活跃产品对的 MT5 B 侧符号集合。
+    返回如 {"XAUUSD+", "XAUUSD", "XAGUSD", "UKOUSD", "USOUSD", "NG-C"} 等。
+    失败时回退到已知的默认符号集以保证向后兼容。
+    """
+    _FALLBACK_MT5_SYMBOLS = {"XAUUSD+", "XAUUSD.s", "XAUUSD", "XAGUSD", "UKOUSD", "USOUSD", "NG-C"}
+    try:
+        result = await db.execute(text("""
+            SELECT DISTINCT sb.symbol
+            FROM hedging_pairs hp
+            JOIN platform_symbols sb ON hp.symbol_b_id = sb.id
+            WHERE hp.is_active = true
+        """))
+        rows = result.fetchall()
+        symbols = {row[0] for row in rows if row[0]}
+        return symbols if symbols else _FALLBACK_MT5_SYMBOLS
+    except Exception as e:
+        logger.warning(f"Failed to load MT5 symbols from DB, using fallback: {e}")
+        return _FALLBACK_MT5_SYMBOLS
+
+
+async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
+    """获取 MT5 平仓 deal（entry==1），覆盖所有活跃产品对的 MT5 符号"""
+    bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
+    api_key = os.getenv("MT5_API_KEY", "")
+    headers = {"X-Api-Key": api_key} if api_key else {}
+
+    # 查找该账户对应的 Bridge 端口
+    try:
+        result = await db.execute(
+            select(MT5Client.bridge_service_port).where(
+                MT5Client.account_id == account.account_id,
+                MT5Client.is_active == True,
+                MT5Client.is_system_service == False,
+                MT5Client.bridge_service_port.isnot(None),
+            ).order_by(MT5Client.priority).limit(1)
+        )
+        bridge_port = result.scalar_one_or_none()
+    except Exception:
+        bridge_port = None
+
+    if not bridge_port:
+        return []
+
+    start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc)
+    days = max(1, int((end_dt - start_dt).total_seconds() / 86400) + 1)
+    days = min(days, 365)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.get(
+                f"{bridge_host}:{bridge_port}/mt5/history/deals",
+                headers=headers, params={"days": days},
+            )
+            resp.raise_for_status()
+            all_deals = resp.json().get("deals", [])
+    except Exception as e:
+        logger.error(f"MT5 Bridge deals fetch failed [{account.account_name}]: {e}")
+        return []
+
+    # 动态加载所有活跃产品对的 MT5 符号，替代硬编码的 {"XAUUSD+", "XAUUSD.s"}
+    target_symbols = await _get_active_mt5_symbols(db)
+    start_ts = start_ms / 1000
+    end_ts = end_ms / 1000
+    return [
+        d for d in all_deals
+        if d.get("symbol") in target_symbols
+        and start_ts <= d.get("time", 0) <= end_ts
+        and d.get("entry", 0) == 1  # 只要平仓 deal
+    ]
+
+
+# ── 统计计算 ─────────────────────────────────────────
+
+def _compute_summary(daily_list: list) -> dict:
+    """根据每日 PnL 数组计算汇总统计"""
+    if not daily_list:
+        return {
+            "cumulative_pnl": 0, "max_drawdown": 0, "max_drawdown_pct": 0,
+            "win_rate": 0, "profit_factor": 0, "sharpe_ratio": 0,
+            "best_day": None, "worst_day": None, "avg_daily_pnl": 0,
+            "total_trade_count": 0, "profitable_days": 0, "losing_days": 0,
+        }
+
+    pnls = [d["net_pnl"] for d in daily_list]
+    cumulative = []
+    s = 0
+    for p in pnls:
+        s += p
+        cumulative.append(s)
+
+    # 最大回撤
+    peak = 0
+    max_dd = 0
+    for c in cumulative:
+        peak = max(peak, c)
+        dd = c - peak
+        if dd < max_dd:
+            max_dd = dd
+    max_dd_pct = (max_dd / peak * 100) if peak > 0 else 0
+
+    # 胜率
+    profit_days = [p for p in pnls if p > 0]
+    loss_days = [p for p in pnls if p < 0]
+    total_days = len([p for p in pnls if p != 0])
+    win_rate = len(profit_days) / total_days if total_days > 0 else 0
+
+    # 盈亏比
+    sum_profit = sum(profit_days) if profit_days else 0
+    sum_loss = abs(sum(loss_days)) if loss_days else 0
+    profit_factor = round(sum_profit / sum_loss, 2) if sum_loss > 0 else (99.9 if sum_profit > 0 else 0)
+
+    # 夏普比率（年化，假设无风险利率=0）
+    if len(pnls) >= 2:
+        mean_pnl = sum(pnls) / len(pnls)
+        std_pnl = (sum((p - mean_pnl) ** 2 for p in pnls) / len(pnls)) ** 0.5
+        sharpe = (mean_pnl / std_pnl * math.sqrt(365)) if std_pnl > 0 else 0
+    else:
+        sharpe = 0
+
+    # 最佳/最差日
+    best_idx = pnls.index(max(pnls))
+    worst_idx = pnls.index(min(pnls))
+
+    return {
+        "cumulative_pnl": round(cumulative[-1], 2) if cumulative else 0,
+        "max_drawdown": round(max_dd, 2),
+        "max_drawdown_pct": round(max_dd_pct, 2),
+        "win_rate": round(win_rate, 4),
+        "profit_factor": profit_factor,
+        "sharpe_ratio": round(sharpe, 2),
+        "best_day": {"date": daily_list[best_idx]["date"], "pnl": round(pnls[best_idx], 2)},
+        "worst_day": {"date": daily_list[worst_idx]["date"], "pnl": round(pnls[worst_idx], 2)},
+        "avg_daily_pnl": round(sum(pnls) / len(pnls), 2) if pnls else 0,
+        "total_trade_count": sum(d.get("trade_count", 0) for d in daily_list),
+        "profitable_days": len(profit_days),
+        "losing_days": len(loss_days),
+    }
+
+
+# ── API 端点 ─────────────────────────────────────────
+
+@router.get("/daily")
+async def get_daily_pnl(
+    start_date: str = Query(..., description="开始日期（北京时间 YYYY-MM-DD）"),
+    end_date: str = Query(..., description="结束日期（北京时间 YYYY-MM-DD）"),
+    platform: str = Query("all", description="平台过滤: all/binance/mt5"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取每日收益数据（支持日/周/月前端聚合）"""
+    # 缓存检查
+    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached
+
+    try:
+        start_ms = _beijing_date_to_utc_ms(start_date)
+        end_ms = _beijing_date_to_utc_ms(end_date, end_of_day=True)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式错误，需 YYYY-MM-DD")
+
+    # 获取用户账户
+    result = await db.execute(select(Account).filter(Account.user_id == current_user.user_id))
+    accounts = result.scalars().all()
+    if not accounts:
+        return {"daily_pnl": [], "summary": _compute_summary([])}
+
+    # 按日期聚合容器
+    daily = defaultdict(lambda: {
+        "realized_pnl": 0, "funding_fee": 0, "mt5_pnl": 0, "mt5_swap": 0, "mt5_commission": 0,
+        "trade_count": 0, "win_count": 0,
+        "binance_pnl": 0, "binance_funding": 0,
+    })
+
+    # ── Binance 数据 ──
+    if platform in ("all", "binance"):
+        for account in accounts:
+            if account.platform_id != 1:
+                continue
+            # 已实现盈亏
+            pnl_records = await _fetch_binance_income(account, start_ms, end_ms, "REALIZED_PNL")
+            for r in pnl_records:
+                date_key = _utc_ms_to_beijing_date(int(r.get("time", 0)))
+                income = float(r.get("income", 0))
+                daily[date_key]["realized_pnl"] += income
+                daily[date_key]["binance_pnl"] += income
+                daily[date_key]["trade_count"] += 1
+                if income > 0:
+                    daily[date_key]["win_count"] += 1
+
+            # 资金费
+            fee_records = await _fetch_binance_income(account, start_ms, end_ms, "FUNDING_FEE")
+            for r in fee_records:
+                date_key = _utc_ms_to_beijing_date(int(r.get("time", 0)))
+                income = float(r.get("income", 0))
+                daily[date_key]["funding_fee"] += income
+                daily[date_key]["binance_funding"] += income
+
+    # ── MT5 数据 ──
+    if platform in ("all", "mt5"):
+        for account in accounts:
+            if account.platform_id != 2 or not account.is_mt5_account:
+                continue
+            deals = await _fetch_mt5_deals(account, start_ms, end_ms, db)
+            for d in deals:
+                date_key = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
+                profit = float(d.get("profit", 0))
+                swap = float(d.get("swap", 0))
+                commission = float(d.get("commission", 0))
+                daily[date_key]["mt5_pnl"] += profit
+                daily[date_key]["mt5_swap"] += swap
+                daily[date_key]["mt5_commission"] += commission
+                daily[date_key]["trade_count"] += 1
+                if profit > 0:
+                    daily[date_key]["win_count"] += 1
+
+    # 组装结果（按日期排序，填充空日期）
+    from datetime import date as _date
+    d_start = _date.fromisoformat(start_date)
+    d_end = _date.fromisoformat(end_date)
+    daily_list = []
+    current = d_start
+    while current <= d_end:
+        dk = current.isoformat()
+        d = daily.get(dk, {})
+        rpnl = d.get("realized_pnl", 0)
+        ffee = d.get("funding_fee", 0)
+        mt5p = d.get("mt5_pnl", 0)
+        mt5s = d.get("mt5_swap", 0)
+        mt5c = d.get("mt5_commission", 0)
+        net = rpnl + ffee + mt5p + mt5s + mt5c
+
+        daily_list.append({
+            "date": dk,
+            "realized_pnl": round(rpnl, 2),
+            "funding_fee": round(ffee, 2),
+            "net_pnl": round(net, 2),
+            "trade_count": d.get("trade_count", 0),
+            "win_count": d.get("win_count", 0),
+            "platform_breakdown": {
+                "binance": {
+                    "realized_pnl": round(d.get("binance_pnl", 0), 2),
+                    "funding_fee": round(d.get("binance_funding", 0), 2),
+                },
+                "mt5": {
+                    "realized_pnl": round(mt5p, 2),
+                    "swap": round(mt5s, 2),
+                    "commission": round(mt5c, 2),
+                },
+            },
+        })
+        current += timedelta(days=1)
+
+    summary = _compute_summary(daily_list)
+    resp = {"daily_pnl": daily_list, "summary": summary}
+    _cache_set(cache_key, resp)
+
+    logger.info(f"[PnL] user={current_user.username}, range={start_date}~{end_date}, "
+                f"days={len(daily_list)}, cumulative={summary['cumulative_pnl']}")
+    return resp

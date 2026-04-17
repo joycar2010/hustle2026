@@ -1719,8 +1719,11 @@ def notify_order_fill(order_id, filled_qty, status):
         "filled_qty": filled_qty,
         "status": status,
     }
-    # Only wake the monitor on terminal states — NOT on NEW (order placement ack)
-    if status in ("FILLED", "PARTIALLY_FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+    # Only wake the monitor on TERMINAL states — NOT on PARTIALLY_FILLED.
+    # PARTIALLY_FILLED means more fills may follow; waking now causes the monitor
+    # to return a partial filled_qty, leaving the remainder un-hedged (single-leg).
+    # The monitor's timeout will handle the case where no FILLED arrives.
+    if status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
         evt = _order_fill_events.get(order_id)
         if evt:
             evt.set()

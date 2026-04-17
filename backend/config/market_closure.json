@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "winter_open": "周一 07:00",
+  "winter_close": "周六 06:00",
+  "summer_open": "周一 06:00",
+  "summer_close": "周六 05:00"
+}

@@ -302,10 +302,19 @@ async def get_daily_pnl(
                 daily[date_key]["funding_fee"] += income
                 daily[date_key]["binance_funding"] += income
 
-    # ── MT5 数据 ──
+    # ── MT5 数据：只查 user_pair_accounts 中实际绑定的 B 侧账户 ──
     if platform in ("all", "mt5"):
+        # 精确查询：从 pair binding 获取该用户实际使用的 B 侧 MT5 账户（去重）
+        _bound_b_result = await db.execute(text(
+            "SELECT DISTINCT account_b_id FROM user_pair_accounts WHERE user_id = :uid AND account_b_id IS NOT NULL"
+        ), {"uid": str(current_user.user_id)})
+        _bound_b_ids = {str(r[0]) for r in _bound_b_result.fetchall()}
+
         for account in accounts:
-            if account.platform_id != 2 or not account.is_mt5_account:
+            if not account.is_mt5_account:
+                continue
+            # 只查绑定的 B 侧账户，跳过未绑定或非对冲用途的 MT5 账户
+            if str(account.account_id) not in _bound_b_ids:
                 continue
             deals = await _fetch_mt5_deals(account, start_ms, end_ms, db)
             for d in deals:

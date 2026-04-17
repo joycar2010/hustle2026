@@ -133,7 +133,7 @@ class OrderExecutorV2:
 
     def __init__(self):
         self.binance_timeout = 3.0
-        self.bybit_timeout = 0.3  # 0.1→0.3: Bybit订单有更多时间进入市场，同时保持快速执行
+        self.bybit_timeout = 1.0  # 0.3→1.0: ICMarkets撮合需要更多等待时间
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
         self.spread_check_interval = 1.0
@@ -160,6 +160,7 @@ class OrderExecutorV2:
         spread_threshold: float = None,
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
+        accumulated_unhedged_xau: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Execute reverse opening (Binance short, Bybit long).
@@ -230,8 +231,25 @@ class OrderExecutorV2:
                 "is_single_leg": False,
                 "message": message
             }
-        bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
-        logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU -> bybit_quantity={bybit_quantity} Lot (multiplier={hedge_multiplier})")
+        # Add any accumulated unhedged XAU from previous sub-lot fills
+        effective_xau_for_hedge = binance_filled_qty + accumulated_unhedged_xau
+        bybit_raw = _a_to_b(effective_xau_for_hedge, pair_code) * hedge_multiplier
+        # Ceiling rounding with amplification guard
+        if hedge_multiplier != 1.0:
+            import math as _math
+            bybit_ceil = _math.ceil(round(bybit_raw * 100, 4)) / 100
+            # Guard: if ceil causes > 2x amplification vs raw, accumulate instead
+            if bybit_raw > 0 and bybit_ceil / bybit_raw > 2.0:
+                bybit_quantity = 0  # force accumulate path
+                logger.info(f"[REVERSE_OPENING] Ceil guard: raw={bybit_raw:.6f} ceil={bybit_ceil} "
+                            f"ratio={bybit_ceil/bybit_raw:.1f}x > 2x, forcing accumulate")
+            else:
+                bybit_quantity = bybit_ceil
+        else:
+            bybit_quantity = bybit_raw
+        logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU "
+                    f"(+accumulated={accumulated_unhedged_xau:.4f}) -> bybit_quantity={bybit_quantity} Lot "
+                    f"(multiplier={hedge_multiplier})")
 
         # Skip B-side if converted quantity is below minimum lot size (0.01)
         if bybit_quantity < 0.01:
@@ -368,15 +386,12 @@ class OrderExecutorV2:
         required_volume = _a_to_b(quantity, pair_code)
 
         if total_long_volume < required_volume:
-            return {
-                "success": False,
-                "error": f"Bybit LONG持仓不足: 当前{total_long_volume} Lot, 需要{required_volume} Lot",
-                "binance_filled_qty": 0,
-                "bybit_filled_qty": 0,
-                "is_single_leg": False,
-                "position_exhausted": True,
-                "message": f"Bybit LONG持仓不足，无法执行反向平仓"
-            }
+            # 持仓不足时缩减下单量到实际可用持仓，而非直接退出
+            logger.warning(
+                f"[REVERSE_CLOSING] LONG持仓不足: 当前{total_long_volume} Lot, "
+                f"需要{required_volume} Lot, 缩减到可用量"
+            )
+            quantity = _b_to_a(total_long_volume, pair_code)  # 缩减 Binance 下单量
 
         # Step 1: Place A-side BUY order (MAKER/PostOnly) — routes by platform_id
         binance_result = await self._place_a_side_order(
@@ -439,19 +454,9 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (close LONG position)
         bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
-
-        # Skip B-side if converted quantity is below minimum lot size (0.01)
-        if bybit_quantity < 0.01:
-            logger.warning(f"B-side qty {bybit_quantity} below min 0.01 Lot, skipping for accumulation")
-            return {
-                "success": True,
-                "binance_filled_qty": binance_filled_qty,
-                "bybit_filled_qty": 0,
-                "binance_order_id": binance_order_id,
-                "is_single_leg": False,
-                "b_side_skipped_below_min": True,
-                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot"
-            }
+        # CLOSING: 四舍五入 — not ceiling, to avoid over-closing the hedge side
+        bybit_quantity = round(round(bybit_quantity * 100, 4)) / 100
+        bybit_quantity = max(bybit_quantity, 0.01)  # floor to minimum 0.01 Lot
 
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
@@ -525,6 +530,7 @@ class OrderExecutorV2:
         spread_threshold: float = None,
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
+        accumulated_unhedged_xau: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Execute forward opening (Binance long, Bybit short).
@@ -599,20 +605,26 @@ class OrderExecutorV2:
             }
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (open SHORT position)
-        bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
-
-        # Skip B-side if converted quantity is below minimum lot size (0.01)
-        if bybit_quantity < 0.01:
-            logger.warning(f"B-side qty {bybit_quantity} below min 0.01 Lot, skipping for accumulation")
-            return {
-                "success": True,
-                "binance_filled_qty": binance_filled_qty,
-                "bybit_filled_qty": 0,
-                "binance_order_id": binance_order_id,
-                "is_single_leg": False,
-                "b_side_skipped_below_min": True,
-                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot"
-            }
+        # Add any accumulated unhedged XAU from previous sub-lot fills
+        effective_xau_for_hedge = binance_filled_qty + accumulated_unhedged_xau
+        bybit_raw = _a_to_b(effective_xau_for_hedge, pair_code) * hedge_multiplier
+        # Ceiling rounding with amplification guard
+        if hedge_multiplier != 1.0:
+            import math as _math
+            bybit_ceil = _math.ceil(round(bybit_raw * 100, 4)) / 100
+            # Guard: if ceil causes > 2x amplification vs raw, accumulate instead
+            if bybit_raw > 0 and bybit_ceil / bybit_raw > 2.0:
+                bybit_quantity = 0  # force accumulate path
+                logger.info(f"[FORWARD_OPENING] Ceil guard: raw={bybit_raw:.6f} ceil={bybit_ceil} "
+                            f"ratio={bybit_ceil/bybit_raw:.1f}x > 2x, forcing accumulate")
+            else:
+                bybit_quantity = bybit_ceil
+        else:
+            bybit_quantity = round(round(bybit_raw * 100, 4)) / 100
+            bybit_quantity = max(bybit_quantity, 0.01)
+        logger.info(f"[FORWARD_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU "
+                    f"(+accumulated={accumulated_unhedged_xau:.4f}) -> bybit_quantity={bybit_quantity} Lot "
+                    f"(multiplier={hedge_multiplier})")
 
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
@@ -729,16 +741,12 @@ class OrderExecutorV2:
         logger.info(f"[FORWARD_CLOSING] Position check: total_short={total_short_volume} Lot, required={required_volume} Lot")
 
         if total_short_volume < required_volume:
-            logger.error(f"[FORWARD_CLOSING] Insufficient SHORT position: {total_short_volume} < {required_volume}")
-            return {
-                "success": False,
-                "error": f"Bybit SHORT持仓不足: 当前{total_short_volume} Lot, 需要{required_volume} Lot",
-                "binance_filled_qty": 0,
-                "bybit_filled_qty": 0,
-                "is_single_leg": False,
-                "position_exhausted": True,
-                "message": f"Bybit SHORT持仓不足，无法执行正向平仓"
-            }
+            # 持仓不足时缩减下单量到实际可用持仓，而非直接退出
+            logger.warning(
+                f"[FORWARD_CLOSING] SHORT持仓不足: 当前{total_short_volume} Lot, "
+                f"需要{required_volume} Lot, 缩减到可用量"
+            )
+            quantity = _b_to_a(total_short_volume, pair_code)  # 缩减 Binance 下单量
 
         # Step 1: Place A-side SELL order (MAKER/PostOnly) — routes by platform_id
         logger.info(f"[FORWARD_CLOSING] Placing A-side SELL order: quantity={quantity}, price={binance_price}")
@@ -807,19 +815,9 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (close SHORT position)
         bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
-
-        # Skip B-side if converted quantity is below minimum lot size (0.01)
-        if bybit_quantity < 0.01:
-            logger.warning(f"B-side qty {bybit_quantity} below min 0.01 Lot, skipping for accumulation")
-            return {
-                "success": True,
-                "binance_filled_qty": binance_filled_qty,
-                "bybit_filled_qty": 0,
-                "binance_order_id": binance_order_id,
-                "is_single_leg": False,
-                "b_side_skipped_below_min": True,
-                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot"
-            }
+        # CLOSING: 四舍五入 — not ceiling, to avoid over-closing the hedge side
+        bybit_quantity = round(round(bybit_quantity * 100, 4)) / 100
+        bybit_quantity = max(bybit_quantity, 0.01)  # floor to minimum 0.01 Lot
 
         logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU, multiplier={hedge_multiplier})")
 
@@ -1414,7 +1412,7 @@ class OrderExecutorV2:
         account: Account,
         symbol: str,
         quantity: float,
-        close_position: bool = True
+        close_position: bool = True,
     ) -> float:
         """
         Execute Bybit market BUY order with retry logic and volume verification.
@@ -1605,7 +1603,7 @@ class OrderExecutorV2:
         account: Account,
         symbol: str,
         quantity: float,
-        close_position: bool = True
+        close_position: bool = True,
     ) -> float:
         """
         Execute Bybit market SELL order with retry logic and volume verification.

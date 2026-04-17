@@ -28,16 +28,43 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _get_pair_symbols():
-    """Get symbol names from hedging pair config, with fallback"""
+def _get_pair_symbols(pair_code: str = "XAU"):
+    """Get symbol names from hedging pair config, with fallback.
+
+    Supports all pair codes (XAU, BXAU, ICXAU, XAG, BZ, CL, NG).
+    """
     try:
         from app.services.hedging_pair_service import hedging_pair_service
-        pair = hedging_pair_service.get_pair("XAU")
+        pair = hedging_pair_service.get_pair(pair_code)
         if pair:
             return pair.symbol_a.symbol, pair.symbol_b.symbol
     except Exception:
         pass
     return "XAUUSDT", "XAUUSD+"
+
+
+def _get_hedging_pair_by_code(pair_code: str = "XAU"):
+    """Get (symbol_a, symbol_b) tuple for a hedging pair code.
+
+    Used by close_all, cancel_all, and realtime trading history endpoints.
+    """
+    try:
+        from app.services.hedging_pair_service import hedging_pair_service
+        pair = hedging_pair_service.get_pair(pair_code)
+        if pair:
+            return pair.symbol_a.symbol, pair.symbol_b.symbol
+    except Exception:
+        pass
+    _fallbacks = {
+        "XAU": ("XAUUSDT", "XAUUSD+"),
+        "BXAU": ("XAUUSDT", "XAUUSD+"),
+        "ICXAU": ("XAUUSDT", "XAUUSD"),
+        "XAG": ("XAGUSDT", "XAGUSD"),
+        "BZ": ("BZUSDT", "XBRUSD"),
+        "CL": ("CLUSDT", "XTIUSD"),
+        "NG": ("NATGASUSDT", "XNGUSD"),
+    }
+    return _fallbacks.get(pair_code, ("XAUUSDT", "XAUUSD+"))
 
 
 def _build_stats(orders, accounts_map, enable_logging=True):
@@ -607,9 +634,6 @@ async def get_realtime_pending_orders(
         if not accounts:
             return []
 
-        binance_accs = [a.account_name for a in accounts if a.platform_id == 1]
-        logger.info(f"[orders/realtime] user={current_user.username}, binance_accounts={binance_accs}")
-
         result_orders = []
         status_list = [s.strip().upper() for s in (status or "").split(",") if s.strip()]
         want_open = any(s in ("NEW", "PENDING") for s in status_list)
@@ -622,14 +646,15 @@ async def get_realtime_pending_orders(
                 proxy_url=build_proxy_url(account.proxy_config)
             )
             try:
-                _sym_a, _ = _get_pair_symbols()
                 if want_open:
-                    raw_orders = await client.get_open_orders(symbol=_sym_a)
+                    # 挂单中：直接查 open orders（速度最快）
+                    raw_orders = await client.get_open_orders(symbol="XAUUSDT")
                 else:
+                    # 历史订单：查最近 days 天的所有订单
                     end_ms = int(_time.time() * 1000)
                     start_ms = end_ms - days * 86400 * 1000
                     raw_orders = await client.get_all_orders(
-                        symbol=_sym_a, start_time=start_ms, limit=min(limit * 3, 500)
+                        symbol="XAUUSDT", start_time=start_ms, limit=min(limit * 3, 500)
                     )
                     # 按 status 过滤
                     if status_list and "ALL" not in status_list:
@@ -656,12 +681,12 @@ async def get_realtime_pending_orders(
                     result_orders.append({
                         "id":         str(order.get("orderId", "")),
                         "timestamp":  beijing_time,
-                        "exchange":   account.account_name,
+                        "exchange":   "主账号",
                         "side":       order.get("side", "").lower(),
                         "quantity":   float(order.get("origQty") or order.get("qty", 0)),
                         "price":      float(order.get("price") or 0),
                         "status":     ui_status,
-                        "symbol":     order.get("symbol", _sym_a),
+                        "symbol":     order.get("symbol", "XAUUSDT"),
                         "source":     "strategy",
                         "filled_qty": float(order.get("executedQty") or 0),
                         "order_type": order.get("type", ""),
@@ -678,9 +703,12 @@ async def get_realtime_pending_orders(
         logger.error(f"Realtime pending orders error: {str(e)}", exc_info=True)
         return []
 
+class PairOnlyRequest(BaseModel):
+    pair_code: str = "XAU"  # current trading pair — routes to correct accounts
 
 class ManualOrderRequest(BaseModel):
     exchange: str  # "binance" or "bybit"
+    pair_code: str = "XAU"  # current trading pair from frontend
     side: str      # "buy" or "sell"
     quantity: float
     account_id: Optional[str] = None
@@ -690,12 +718,13 @@ class ManualOrderRequest(BaseModel):
 async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU"):
     """Resolve the correct account for manual/emergency trading using pair-account binding.
     
-    For Binance (A-side): use pair binding account_a_id, fallback to first platform=1
-    For Bybit (B-side): use pair binding account_b_id, fallback to first platform=2
+    For Binance (A-side): use pair binding account_a_id
+    For hedge (B-side): use pair binding account_b_id (platform varies by pair)
+    pair_code must match current frontend pair selection to get the right account.
     """
     from sqlalchemy import text
     
-    # Try pair-account binding first
+    # Try pair-account binding first — MUST use the actual pair_code from frontend
     result = await db.execute(text("""
         SELECT account_a_id::text, account_b_id::text
         FROM user_pair_accounts
@@ -714,12 +743,17 @@ async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU")
             if acc:
                 return acc
     
-    # Fallback: first matching platform account for this user
+    # Fallback: use Binance (platform=1) for A-side; for B-side use account_role=hedge
     accounts, _ = await _get_user_accounts(db, user_id)
-    target_platform = 1 if exchange == "binance" else 2
-    for account in accounts:
-        if account.platform_id == target_platform:
-            return account
+    if exchange == "binance":
+        for account in accounts:
+            if account.platform_id == 1:
+                return account
+    else:
+        # B-side: prefer account with role=hedge, then any non-Binance MT5 account
+        for account in sorted(accounts, key=lambda a: (0 if a.account_role == "hedge" else 1)):
+            if account.platform_id != 1:
+                return account
     return None
 
 @router.post("/manual/order")
@@ -740,24 +774,25 @@ async def place_manual_order(
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
         # Find the correct account via pair-account binding
-        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange)
+        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange, req.pair_code)
         if not target_account:
             raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
 
-        # Get current market prices
-        spread_data = await market_data_service.get_current_spread(use_cache=False)
+        # Resolve symbols from pair config
+        _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
+
+        # Get current market prices using pair-specific symbols
+        spread_data = await market_data_service.get_current_spread(
+            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
         # Determine price based on side and exchange
         if req.exchange == "binance":
-            # Binance: 买入开多用bid价挂单，卖出开空用ask价挂单
             if req.side == "buy":
                 price = spread_data.binance_quote.bid_price
-            else:  # sell
+            else:
                 price = spread_data.binance_quote.ask_price
-            _sym_a, _sym_b = _get_pair_symbols()
             symbol = _sym_a
         else:  # bybit
-            # Bybit: Market单不需要价格，直接以市价成交
             symbol = _sym_b
 
         # Import order executor
@@ -815,6 +850,7 @@ async def place_manual_order(
 
 @router.post("/manual/close-all")
 async def close_all_positions(
+    req: PairOnlyRequest = PairOnlyRequest(),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -829,20 +865,20 @@ async def close_all_positions(
         if not accounts:
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
-        # Get current market prices
-        spread_data = await market_data_service.get_current_spread(use_cache=False)
+        # Resolve symbols from pair config
+        _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
+
+        # Get current market prices using pair-specific symbols
+        spread_data = await market_data_service.get_current_spread(
+            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
         # Import order executor
         from app.services.order_executor import order_executor
 
         results = []
 
-        # Close Binance positions
-        binance_account = None
-        for account in accounts:
-            if account.platform_id == 1:
-                binance_account = account
-                break
+        # Resolve Binance (A-side) via pair binding
+        binance_account = await _resolve_manual_target_account(db, current_user.user_id, "binance", req.pair_code)
 
         if binance_account:
             try:
@@ -851,7 +887,8 @@ async def close_all_positions(
                 client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
                                                proxy_url=build_proxy_url(binance_account.proxy_config))
                 try:
-                    _sym_a, _ = _get_pair_symbols()
+                    _hpair = _get_hedging_pair_by_code(req.pair_code)
+                    _sym_a = _hpair[0] if _hpair else "XAUUSDT"
                     positions = await client.get_position_risk(_sym_a)
 
                     for pos in positions:
@@ -895,19 +932,16 @@ async def close_all_positions(
                 logger.error(f"Binance close positions error: {str(e)}", exc_info=True)
                 results.append({"exchange": "binance", "error": str(e)})
 
-        # Close Bybit positions
-        bybit_account = None
-        for account in accounts:
-            if account.platform_id == 2:
-                bybit_account = account
-                break
+        # Resolve hedge (B-side) via pair binding
+        bybit_account = await _resolve_manual_target_account(db, current_user.user_id, "bybit", req.pair_code)
 
         if bybit_account:
             try:
                 # Get Bybit MT5 positions
                 import MetaTrader5 as mt5
                 loop = asyncio.get_event_loop()
-                _, _sym_b = _get_pair_symbols()
+                _hpair = _get_hedging_pair_by_code(req.pair_code)
+                _sym_b = _hpair[1] if _hpair else "XAUUSD+"
                 positions = await loop.run_in_executor(None, mt5.positions_get, _sym_b)
 
                 if positions:
@@ -983,7 +1017,8 @@ async def sync_trades_from_exchanges(
                     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                                    proxy_url=build_proxy_url(account.proxy_config))
                     try:
-                        _sym_a, _ = _get_pair_symbols()
+                        _hpair = _get_hedging_pair_by_code(req.pair_code)
+                        _sym_a = _hpair[0] if _hpair else "XAUUSDT"
                         trades = await client.get_user_trades(
                             symbol=_sym_a,
                             start_time=start_time,
@@ -1094,7 +1129,8 @@ async def sync_trades_from_exchanges(
                             last_deal_time = datetime.fromtimestamp(history_deals[-1].time)
                             logger.info(f"MT5交易时间范围: {first_deal_time} 到 {last_deal_time}")
 
-                        _, _sym_b = _get_pair_symbols()
+                        _hpair = _get_hedging_pair_by_code(req.pair_code)
+                        _sym_b = _hpair[1] if _hpair else "XAUUSD+"
                         xauusd_count = 0
                         for deal in history_deals:
                             if deal.symbol != _sym_b:
@@ -1154,7 +1190,11 @@ async def sync_trades_from_exchanges(
 
 class ClosePositionRequest(BaseModel):
     exchange: str  # "binance" or "bybit"
-    quantity: float
+    pair_code: str = "XAU"  # current trading pair from frontend
+    quantity: float = 0  # quantity to close; 0 = close all of that position type
+
+
+
 
 
 @router.post("/manual/close-short")
@@ -1175,20 +1215,19 @@ async def close_short_position(
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
         # Find the correct account via pair-account binding
-        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange)
+        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange, req.pair_code)
         if not target_account:
             raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
 
         # Get current market prices
-        spread_data = await market_data_service.get_current_spread(use_cache=False)
+        _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
+        spread_data = await market_data_service.get_current_spread(
+            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
-        # Determine price based on exchange
         if req.exchange == "binance":
-            # Binance: 空仓以ask价挂单平仓
             price = spread_data.binance_quote.ask_price
-            _sym_a, _sym_b = _get_pair_symbols()
             symbol = _sym_a
-        else:  # bybit
+        else:
             symbol = _sym_b
 
         # Import order executor
@@ -1249,20 +1288,19 @@ async def close_long_position(
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
         # Find the correct account via pair-account binding
-        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange)
+        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange, req.pair_code)
         if not target_account:
             raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
 
         # Get current market prices
-        spread_data = await market_data_service.get_current_spread(use_cache=False)
+        _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
+        spread_data = await market_data_service.get_current_spread(
+            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
-        # Determine price based on exchange
         if req.exchange == "binance":
-            # Binance: 多仓以bid价挂单平仓
             price = spread_data.binance_quote.bid_price
-            _sym_a, _sym_b = _get_pair_symbols()
             symbol = _sym_a
-        else:  # bybit
+        else:
             symbol = _sym_b
 
         # Import order executor
@@ -1306,6 +1344,7 @@ async def close_long_position(
 
 @router.post("/manual/cancel-all")
 async def cancel_all_orders(
+    req: PairOnlyRequest = PairOnlyRequest(),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1321,12 +1360,8 @@ async def cancel_all_orders(
 
         results = []
 
-        # Cancel Binance orders
-        binance_account = None
-        for account in accounts:
-            if account.platform_id == 1:
-                binance_account = account
-                break
+        # Resolve Binance (A-side) via pair binding
+        binance_account = await _resolve_manual_target_account(db, current_user.user_id, "binance", req.pair_code)
 
         if binance_account:
             try:
@@ -1334,7 +1369,8 @@ async def cancel_all_orders(
                 client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
                                                proxy_url=build_proxy_url(binance_account.proxy_config))
                 try:
-                    _sym_a, _ = _get_pair_symbols()
+                    _hpair = _get_hedging_pair_by_code(req.pair_code)
+                    _sym_a = _hpair[0] if _hpair else "XAUUSDT"
                     open_orders = await client.get_open_orders(_sym_a)
 
                     for order in open_orders:
@@ -1368,7 +1404,8 @@ async def cancel_all_orders(
                 # Get Bybit MT5 open orders
                 import MetaTrader5 as mt5
                 loop = asyncio.get_event_loop()
-                _, _sym_b = _get_pair_symbols()
+                _hpair = _get_hedging_pair_by_code(req.pair_code)
+                _sym_b = _hpair[1] if _hpair else "XAUUSD+"
                 orders = await loop.run_in_executor(None, mt5.orders_get, _sym_b)
 
                 if orders:
@@ -1562,7 +1599,8 @@ async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms, symb
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        _sym_a = symbol or _get_pair_symbols()[0]
+        _hpair = _get_hedging_pair_by_code(req.pair_code)
+        _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
         all_trades = []
         seen_ids = set()
 
@@ -1597,7 +1635,8 @@ async def _get_binance_realized_pnl(account, start_time_ms, end_time_ms, symbol=
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        _sym_a = symbol or _get_pair_symbols()[0]
+        _hpair = _get_hedging_pair_by_code(req.pair_code)
+        _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
         total_pnl = 0.0
         total_count = 0
         chunk_start = start_time_ms
@@ -1632,7 +1671,8 @@ async def _get_binance_funding_fee(account, start_time_ms, end_time_ms, symbol=N
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        _sym_a = symbol or _get_pair_symbols()[0]
+        _hpair = _get_hedging_pair_by_code(req.pair_code)
+        _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
         total_funding = 0.0
         total_count = 0
         chunk_start = start_time_ms
@@ -1718,7 +1758,8 @@ async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms, db=None,
     # 时间过滤（Bridge 返回 unix timestamp，单位秒）
     start_ts = start_time_ms / 1000
     end_ts   = end_time_ms   / 1000
-    _sym_b = mt5_symbol or _get_pair_symbols()[1]
+    _hpair = _get_hedging_pair_by_code(req.pair_code)
+    _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
     target_symbols = {_sym_b, _sym_b.replace("+", ".s")}
     filtered = [
         d for d in all_deals
