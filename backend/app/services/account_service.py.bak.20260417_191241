@@ -1391,59 +1391,6 @@ class AccountDataService:
                         ticket=p.get('ticket'),
                     ))
                 daily_pnl = balance.daily_pnl or 0
-            elif platform_id == 4:  # Gate.io Futures
-                from app.services.gateio_client import GateioFuturesClient
-                from app.core.proxy_utils import build_proxy_url as _bpu
-                _gclient = GateioFuturesClient(
-                    api_key=account.api_key,
-                    api_secret=account.api_secret,
-                    proxy_url=_bpu(account.proxy_config),
-                )
-                try:
-                    acc_data, positions_raw = await asyncio.gather(
-                        _gclient.get_account(),
-                        _gclient.get_positions(),
-                    )
-                    _equity = float(acc_data.get("total", 0))
-                    _avail = float(acc_data.get("available", 0))
-                    _margin = float(acc_data.get("position_margin", 0))
-                    _upnl = float(acc_data.get("unrealised_pnl", 0))
-                    balance = AccountBalance(
-                        total_assets=_equity,
-                        available_balance=_avail,
-                        net_assets=_equity,
-                        frozen_assets=_margin,
-                        margin_balance=_equity,
-                        unrealized_pnl=_upnl,
-                        total_positions=len(positions_raw),
-                        daily_pnl=_upnl,
-                        funding_fee=0.0,
-                        commission_fee=0.0,
-                    )
-                    positions = []
-                    for p in positions_raw:
-                        size = float(p.get("size", 0))
-                        positions.append(AccountPosition(
-                            symbol=p.get("contract", ""),
-                            side="buy" if size > 0 else "sell",
-                            size=abs(size),
-                            entry_price=float(p.get("entry_price", 0)),
-                            mark_price=float(p.get("mark_price", 0)),
-                            unrealized_pnl=float(p.get("unrealised_pnl", 0)),
-                            leverage=int(p.get("leverage", 0)),
-                        ))
-                    daily_pnl = _upnl
-                except Exception as _ge:
-                    logger.error(f"Gate.io account data failed for {account_id_str}: {_ge}")
-                    balance = AccountBalance(
-                        total_assets=0, available_balance=0, net_assets=0,
-                        frozen_assets=0, margin_balance=0, unrealized_pnl=0,
-                        total_positions=0, daily_pnl=0, funding_fee=0, commission_fee=0,
-                    )
-                    positions = []
-                    daily_pnl = 0.0
-                finally:
-                    await _gclient.close()
             else:
                 raise ValueError(f"Unknown platform_id: {platform_id}")
 

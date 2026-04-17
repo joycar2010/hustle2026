@@ -23,6 +23,10 @@ export const TRADING_PAIRS = [
   { code: 'NG',    label: 'NG',    binance: 'NATGASUSDT', mt5: 'XNGUSD',   platform: 'ICMarkets',  conversionFactor: 1000, unitA: 'mmBtu', unitB: 'Lot' },
   { code: 'BXAU',  label: 'BXAU',  binance: 'XAUUSDT',    mt5: 'XAUUSD+',  platform: 'Bybit',      conversionFactor: 100,  unitA: 'oz',    unitB: 'Lot' },
   { code: 'ICXAU', label: 'ICXAU', binance: 'XAUUSDT',    mt5: 'XAUUSD',   platform: 'ICMarkets',  conversionFactor: 100,  unitA: 'XAU',   unitB: 'Lot' },
+  { code: 'GBXAU',  label: 'GBXAU',  binance: 'XAU_USDT',   mt5: 'XAUUSD+',  platform: 'Bybit',      conversionFactor: 100,  unitA: 'oz',    unitB: 'Lot' },
+  { code: 'GBXAUT', label: 'GBXAUT', binance: 'XAUT_USDT',  mt5: 'XAUUSD+',  platform: 'Bybit',      conversionFactor: 100,  unitA: 'oz',    unitB: 'Lot' },
+  { code: 'GCXAU',  label: 'GCXAU',  binance: 'XAU_USDT',   mt5: 'XAUUSD',   platform: 'ICMarkets',  conversionFactor: 100,  unitA: 'oz',    unitB: 'Lot' },
+  { code: 'GCXAUT', label: 'GCXAUT', binance: 'XAUT_USDT',  mt5: 'XAUUSD',   platform: 'ICMarkets',  conversionFactor: 100,  unitA: 'oz',    unitB: 'Lot' },
 ]
 
 // Module-level computed — reactive to currentPair changes, shared across all callers

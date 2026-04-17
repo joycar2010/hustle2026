@@ -1133,17 +1133,6 @@ class OrderExecutorV2:
                 price=price,
                 reduce_only=reduce_only,
             )
-        elif account.platform_id == 4:
-            # Gate.io Futures — PostOnly Limit order
-            gateio_side = "Buy" if side.upper() == "BUY" else "Sell"
-            return await self.place_gateio_order(
-                account=account,
-                symbol=symbol,
-                side=gateio_side,
-                quantity=quantity,
-                price=price,
-                reduce_only=reduce_only if isinstance(reduce_only, bool) else False,
-            )
         else:
             return {
                 "success": False,
@@ -1175,17 +1164,6 @@ class OrderExecutorV2:
             )
         elif account.platform_id == 2:
             return await self._monitor_bybit_linear_order(
-                account=account,
-                symbol=symbol,
-                order_id=str(order_id),
-                timeout=timeout,
-                spread_threshold=spread_threshold,
-                compare_op=compare_op,
-                strategy_type=strategy_type,
-                pair_code=pair_code,
-            )
-        elif account.platform_id == 4:
-            return await self._monitor_gateio_order(
                 account=account,
                 symbol=symbol,
                 order_id=str(order_id),
@@ -1917,171 +1895,6 @@ class OrderExecutorV2:
 
         except Exception as e:
             print(f"Failed to send partial fill alert: {e}")
-
-
-    # -----------------------------------------------------------------------
-    # Gate.io Futures -- PostOnly Limit + REST poll monitor
-    # -----------------------------------------------------------------------
-
-    async def place_gateio_order(
-        self,
-        account: Account,
-        symbol: str,
-        side: str,
-        quantity: float,
-        price: float,
-        reduce_only: bool = False,
-    ) -> Dict[str, Any]:
-        """Place a PostOnly limit order on Gate.io Futures (tif=poc)."""
-        from app.services.gateio_client import GateioFuturesClient
-        from app.core.proxy_utils import build_proxy_url
-        import math as _math
-
-        client = GateioFuturesClient(
-            api_key=account.api_key,
-            api_secret=account.api_secret,
-            proxy_url=build_proxy_url(account.proxy_config),
-        )
-        try:
-            info = await client.get_contract_info(symbol)
-            quanto = abs(float(info.get("quanto_multiplier", 1)))
-            size = int(round(quantity / quanto))
-            if side.lower() in ("sell", "short"):
-                size = -size
-
-            opr = float(info.get("order_price_round", 0.01))
-            prec = max(0, -int(_math.floor(_math.log10(opr)))) if opr > 0 else 2
-            price_str = str(round(price, prec))
-
-            result = await client.place_order(
-                contract=symbol, size=size, price=price_str,
-                tif="poc", reduce_only=reduce_only,
-            )
-            order_id = result.get("id")
-            logger.info(f"[GATEIO] Order placed: {symbol} {side} size={size} price={price_str} id={order_id}")
-            return {"success": True, "platform": "gateio", "order_id": str(order_id), "data": result}
-        except Exception as e:
-            logger.error(f"[GATEIO] place_order error: {e}")
-            return {"success": False, "platform": "gateio", "error": str(e)}
-        finally:
-            try:
-                await client.close()
-            except Exception:
-                pass
-
-    async def _monitor_gateio_order(
-        self,
-        account: Account,
-        symbol: str,
-        order_id: str,
-        timeout: float,
-        spread_threshold: float = None,
-        compare_op: str = None,
-        strategy_type: str = None,
-        pair_code: str = "XAU",
-    ) -> dict:
-        """Monitor Gate.io order via REST polling. Returns {filled_qty, spread_cancelled, api_error}.
-        filled_qty is in ACTUAL units (oz/bbl), not contract size.
-        """
-        from app.services.gateio_client import GateioFuturesClient
-        from app.core.proxy_utils import build_proxy_url
-
-        client = GateioFuturesClient(
-            api_key=account.api_key, api_secret=account.api_secret,
-            proxy_url=build_proxy_url(account.proxy_config),
-        )
-        deadline = asyncio.get_event_loop().time() + timeout
-        filled_qty = 0.0
-        spread_cancelled = False
-        api_error = False
-        quanto = 1.0
-
-        try:
-            try:
-                info = await client.get_contract_info(symbol)
-                quanto = abs(float(info.get("quanto_multiplier", 1)))
-            except Exception:
-                pass
-
-            while True:
-                now = asyncio.get_event_loop().time()
-                if now >= deadline:
-                    logger.warning(f"[GATEIO_MON] Timeout ({timeout}s), cancelling {order_id}")
-                    try:
-                        await client.cancel_order(order_id)
-                    except Exception as ce:
-                        logger.warning(f"[GATEIO_MON] Cancel error: {ce}")
-                    await asyncio.sleep(0.3)
-                    break
-
-                try:
-                    order = await client.get_order(order_id)
-                    status = order.get("status", "")
-                    total_size = abs(int(order.get("size", 0)))
-                    left = abs(int(order.get("left", total_size)))
-                    fill_size = total_size - left
-
-                    if status == "finished":
-                        filled_qty = fill_size * quanto
-                        break
-                    if status in ("cancelled",):
-                        filled_qty = fill_size * quanto
-                        break
-
-                    # Spread check
-                    if spread_threshold is not None and compare_op and strategy_type:
-                        from app.services.market_service import market_data_service
-                        try:
-                            _sym_a, _sym_b, _ = _get_pair_config(pair_code)
-                            md = await market_data_service.get_current_spread(binance_symbol=_sym_a, bybit_symbol=_sym_b)
-                            spreads = market_data_service.calculate_spread(md.binance_quote, md.bybit_quote)
-                            spread_map = {
-                                "reverse_opening": spreads.reverse_entry_spread,
-                                "reverse_closing": spreads.reverse_exit_spread,
-                                "forward_opening": spreads.forward_entry_spread,
-                                "forward_closing": spreads.forward_exit_spread,
-                            }
-                            cs = spread_map.get(strategy_type, 0.0)
-                            tol = 0.5
-                            ok = (compare_op == ">=" and cs >= spread_threshold - tol) or \
-                                 (compare_op == "<=" and cs <= spread_threshold + tol)
-                            if not ok:
-                                logger.info(f"[GATEIO_MON] Spread breached, cancelling {order_id}")
-                                try:
-                                    await client.cancel_order(order_id)
-                                    spread_cancelled = True
-                                    filled_qty = fill_size * quanto
-                                except Exception:
-                                    pass
-                                break
-                        except Exception:
-                            pass
-
-                except Exception as pe:
-                    logger.error(f"[GATEIO_MON] Poll error: {pe}")
-                    api_error = True
-                    break
-
-                await asyncio.sleep(self.order_check_interval)
-
-            # Final status
-            if not api_error:
-                try:
-                    order = await client.get_order(order_id)
-                    total_size = abs(int(order.get("size", 0)))
-                    left = abs(int(order.get("left", total_size)))
-                    filled_qty = (total_size - left) * quanto
-                except Exception:
-                    pass
-
-        finally:
-            try:
-                await client.close()
-            except Exception:
-                pass
-
-        logger.info(f"[GATEIO_MON] Order {order_id} final: filled={filled_qty} spread_cancel={spread_cancelled}")
-        return {"filled_qty": filled_qty, "spread_cancelled": spread_cancelled, "api_error": api_error}
 
 
 # Global instance

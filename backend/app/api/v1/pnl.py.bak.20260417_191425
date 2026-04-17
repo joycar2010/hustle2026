@@ -174,38 +174,6 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession
     ]
 
 
-
-async def _fetch_gateio_income(account, start_ms: int, end_ms: int) -> list:
-    """Fetch Gate.io realized PnL records from position close history."""
-    from app.services.gateio_client import GateioFuturesClient
-    from app.core.proxy_utils import build_proxy_url
-
-    client = GateioFuturesClient(
-        api_key=account.api_key,
-        api_secret=account.api_secret,
-        proxy_url=build_proxy_url(account.proxy_config),
-    )
-    records = []
-    try:
-        closes = await client.get_position_close(limit=200)
-        start_sec = start_ms / 1000
-        end_sec = end_ms / 1000
-        for c in closes:
-            ts = float(c.get("time", 0))
-            if start_sec <= ts <= end_sec:
-                records.append({
-                    "time": int(ts * 1000),
-                    "pnl": float(c.get("pnl", 0)),
-                    "pnl_fund": float(c.get("pnl_fund", 0)),
-                    "contract": c.get("contract", ""),
-                })
-    except Exception as e:
-        logger.error(f"Gate.io income fetch failed [{account.account_name}]: {e}")
-    finally:
-        await client.close()
-    return records
-
-
 # ── 统计计算 ─────────────────────────────────────────
 
 def _compute_summary(daily_list: list) -> dict:
@@ -362,22 +330,7 @@ async def get_daily_pnl(
             except Exception as e:
                 logger.error(f"Gate.io PnL fetch failed [{account.account_name}]: {e}")
 
-        # ── Gate.io 数据 (platform_id=4, A侧 CEX) ──
-    if platform in ("all", "binance"):  # 与 Binance 同类 CEX，归入同一过滤
-        for account in accounts:
-            if account.platform_id != 4:
-                continue
-            gateio_records = await _fetch_gateio_income(account, start_ms, end_ms)
-            for r in gateio_records:
-                date_key = _utc_ms_to_beijing_date(int(r.get("time", 0)) // 1000 if r.get("time", 0) > 1e10 else int(r.get("time", 0)))
-                pnl = float(r.get("pnl", 0))
-                daily[date_key]["realized_pnl"] += pnl
-                daily[date_key]["binance_pnl"] += pnl  # reuse binance_pnl field for CEX display
-                daily[date_key]["trade_count"] += 1
-                if pnl > 0:
-                    daily[date_key]["win_count"] += 1
-
-    # ── MT5 数据：只查 user_pair_accounts 中实际绑定的 B 侧账户 ──
+        # ── MT5 数据：只查 user_pair_accounts 中实际绑定的 B 侧账户 ──
     if platform in ("all", "mt5"):
         # 精确查询：从 pair binding 获取该用户实际使用的 B 侧 MT5 账户（去重）
         _bound_b_result = await db.execute(text(

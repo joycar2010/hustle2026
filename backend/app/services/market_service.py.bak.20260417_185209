@@ -164,27 +164,6 @@ class MarketDataService:
             timestamp=int(time.time() * 1000),
         )
 
-    async def get_gateio_quote(self, symbol: str = "XAU_USDT") -> MarketQuote:
-        """Get Gate.io Futures quote via REST API (no WS yet)."""
-        try:
-            from app.services.gateio_client import GateioFuturesClient
-            client = GateioFuturesClient("", "")  # Public endpoint, no auth
-            try:
-                ticker = await client.get_ticker(symbol)
-                bid = float(ticker.get("highest_bid", 0))
-                ask = float(ticker.get("lowest_ask", 0))
-                if bid > 0 and ask > 0:
-                    return MarketQuote(
-                        symbol=symbol, bid_price=bid, bid_qty=0,
-                        ask_price=ask, ask_qty=0,
-                        timestamp=int(time.time() * 1000),
-                    )
-            finally:
-                await client.close()
-        except Exception as e:
-            logger.warning(f"Gate.io quote failed for {symbol}: {e}")
-        raise Exception(f"Gate.io quote not available for {symbol}")
-
     async def get_current_spread(
         self,
         binance_symbol: str = None,

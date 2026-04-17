@@ -84,7 +84,7 @@
             class="px-3 py-1 text-xs rounded-lg transition-colors"
             :class="symbolFilter === null ? 'bg-primary text-dark-300' : 'bg-dark-200 text-text-secondary'">全部</button>
         </div>
-        <button @click="editingSymbol = { platform_id: platforms[0]?.platform_id || 1, symbol: '', base_asset: '', quote_asset: 'USD', contract_unit: 1, qty_unit: '', qty_precision: 2, qty_step: 0.01, min_qty: 0.01, price_precision: 2, price_step: 0.01, maker_fee_rate: 0, taker_fee_rate: 0, margin_rate_initial: 0 }" class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 text-xs font-medium rounded-lg">+ 新增品种</button>
+        <button @click="editingSymbol = { platform_id: platforms[0]?.platform_id || 1, symbol: '', base_asset: '', quote_asset: 'USD', contract_unit: 1, qty_unit: '', qty_precision: 2, qty_step: 0.01, min_qty: 0.01, price_precision: 2, price_step: 0.01, maker_fee_rate: 0, taker_fee_rate: 0, margin_rate_initial: 0, product_type: 'perpetual' }" class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 text-xs font-medium rounded-lg">+ 新增品种</button>
       </div>
 
       <div class="overflow-x-auto">
@@ -98,6 +98,7 @@
             <th class="text-right py-2 px-3">最小量</th>
             <th class="text-right py-2 px-3">价格精度</th>
             <th class="text-right py-2 px-3">Maker/Taker</th>
+            <th class="text-center py-2 px-3">类型</th>
             <th class="text-right py-2 px-3">保证金率</th>
             <th class="text-center py-2 px-3">状态</th>
             <th class="text-center py-2 px-3">操作</th>
@@ -112,6 +113,7 @@
               <td class="py-2 px-3 text-right font-mono text-xs">{{ s.min_qty }}</td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ s.price_precision }}位</td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ (s.maker_fee_rate*100).toFixed(2) }}%/{{ (s.taker_fee_rate*100).toFixed(2) }}%</td>
+              <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-xs" :class="s.product_type === 'perpetual' ? 'bg-blue-900/40 text-blue-300' : s.product_type === 'mt5' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-900/40 text-gray-300'">{{ {perpetual: '永续', mt5: 'MT5', spot: '现货'}[s.product_type] || s.product_type || '--' }}</span></td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ (s.margin_rate_initial*100).toFixed(1) }}%</td>
               <td class="py-2 px-3 text-center">
                 <button @click="toggleSymbolActive(s)" :class="s.is_active ? 'text-success hover:text-red-400' : 'text-text-tertiary hover:text-success'" class="text-xs">{{ s.is_active ? '● 启用' : '○ 禁用' }}</button>
@@ -195,6 +197,12 @@
           <div><label class="text-xs text-text-tertiary">Maker费率</label><input v-model.number="editingSymbol.maker_fee_rate" type="number" step="any" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm" /></div>
           <div><label class="text-xs text-text-tertiary">Taker费率</label><input v-model.number="editingSymbol.taker_fee_rate" type="number" step="any" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm" /></div>
           <div><label class="text-xs text-text-tertiary">初始保证金率</label><input v-model.number="editingSymbol.margin_rate_initial" type="number" step="any" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm" /></div>
+          <div><label class="text-xs text-text-tertiary">产品类型</label>
+            <select v-model="editingSymbol.product_type" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm">
+              <option value="perpetual">永续合约</option>
+              <option value="mt5">MT5</option>
+              <option value="spot">现货</option>
+            </select></div>
         </div>
         <div class="flex justify-end gap-2 mt-4">
           <button @click="editingSymbol = null" class="px-4 py-1.5 bg-dark-200 rounded-lg text-sm">取消</button>
