@@ -103,6 +103,7 @@ class AccountDataService:
                 _commission_rate_task,          # Maker/taker fee rate [6] (24h cached)
                 client.get_spot_price("BNBUSDT"),       # BNB/USDT price for fee conversion [7]
                 client.get_balance(),           # Futures wallet balances (includes BNB) [8]
+                client.get_premium_index("XAUUSDT"),    # Mark price + current funding rate [9]
             ]
 
             # Only fetch prices for assets we actually hold
@@ -121,6 +122,14 @@ class AccountDataService:
             commission_rate_data = results[6]
             bnb_price_data = results[7]
             futures_balance_data = results[8]
+            premium_index_data = results[9]
+
+            # Build price map from individual price queries (now offset by 10)
+            price_map = {}
+            for i, asset in enumerate(assets_to_price[:10]):
+                price_result = results[10 + i]
+                if not isinstance(price_result, Exception):
+                    price_map[f"{asset}USDT"] = float(price_result.get("price", 0))
 
             # commission_rate 成功返回时写入本地缓存（24h有效，weight=20每天只消耗一次）
             if not isinstance(commission_rate_data, Exception) and commission_rate_data:
@@ -145,13 +154,6 @@ class AccountDataService:
             bnb_usdt_price = 1.0
             if not isinstance(bnb_price_data, Exception):
                 bnb_usdt_price = float(bnb_price_data.get("price", 1.0)) or 1.0
-
-            # Build price map from individual price queries (now offset by 9)
-            price_map = {}
-            for i, asset in enumerate(assets_to_price[:10]):
-                price_result = results[9 + i]
-                if not isinstance(price_result, Exception):
-                    price_map[f"{asset}USDT"] = float(price_result.get("price", 0))
 
             # Process spot account data
             spot_total_usdt = 0.0
@@ -249,6 +251,8 @@ class AccountDataService:
             leverage = 0
             long_liquidation_price = 0.0
             short_liquidation_price = 0.0
+            xau_long_qty = 0.0   # XAUUSDT 多头合约数（用于估算下次资金费）
+            xau_short_qty = 0.0  # XAUUSDT 空头合约数
 
             if not isinstance(position_risk_data, Exception):
                 for pos in position_risk_data:
@@ -264,6 +268,13 @@ class AccountDataService:
                         position_side = pos.get("positionSide", "BOTH")
                         is_long = position_side == "LONG" or (position_side == "BOTH" and position_amt > 0)
                         is_short = position_side == "SHORT" or (position_side == "BOTH" and position_amt < 0)
+
+                        # 累计 XAUUSDT 多空合约数（用于预估资金费用）
+                        if pos.get("symbol") == "XAUUSDT":
+                            if is_long:
+                                xau_long_qty += abs_amt
+                            elif is_short:
+                                xau_short_qty += abs_amt
 
                         # Prefer native liquidationPrice from API (most accurate, already accounts for isolated wallet)
                         liq_price = float(pos.get("liquidationPrice", 0))
@@ -303,28 +314,35 @@ class AccountDataService:
             # Add unrealized PnL to daily PnL as per Binance documentation
             daily_pnl += futures_unrealized_pnl
 
-            # Calculate funding fees (separate long and short based on positionSide)
+            # Calculate funding fees
+            # funding_fee: 当日已结算资金费总额（保留历史数据，来自 income API）
+            # long/short_funding_rate: 预估下次资金费用（仓位价值 × 资金费率）
+            #   公式: 资金费用 = 合约数 × 标记价格 × 资金费率
+            #   资金费率 > 0: 多头付费（负值），空头收费（正值）
+            #   资金费率 < 0: 多头收费（正值），空头付费（负值）
             funding_fee = 0.0
-            long_funding_rate = 0.0
-            short_funding_rate = 0.0
             if not isinstance(funding_fee_data, Exception):
                 for item in funding_fee_data:
-                    fee_amount = float(item.get("income", 0))
-                    position_side = item.get("positionSide", "")
-                    funding_fee += fee_amount
-                    # Separate by position side (LONG/SHORT)
-                    if position_side == "LONG":
-                        long_funding_rate += fee_amount
-                    elif position_side == "SHORT":
-                        short_funding_rate += fee_amount
-                    else:
-                        # For BOTH mode or unspecified, use amount sign as fallback
-                        if fee_amount > 0:
-                            short_funding_rate += fee_amount
-                        else:
-                            long_funding_rate += fee_amount
+                    funding_fee += float(item.get("income", 0))
             else:
                 logger.warning(f"Failed to fetch funding fee data: {funding_fee_data}")
+
+            # 预估下次资金费用（基于当前 XAUUSDT 持仓 + premiumIndex 实时费率）
+            long_funding_rate = 0.0
+            short_funding_rate = 0.0
+            if not isinstance(premium_index_data, Exception) and premium_index_data:
+                try:
+                    mark_price = float(premium_index_data.get("markPrice", 0))
+                    funding_rate_pct = float(premium_index_data.get("lastFundingRate", 0))
+                    if mark_price > 0:
+                        # 多头：费率为正时付费（负值），费率为负时收费（正值）
+                        long_funding_rate = -(xau_long_qty * mark_price * funding_rate_pct)
+                        # 空头：费率为正时收费（正值），费率为负时付费（负值）
+                        short_funding_rate = xau_short_qty * mark_price * funding_rate_pct
+                except (TypeError, ValueError) as _e:
+                    logger.warning(f"Failed to parse premium index: {_e}")
+            else:
+                logger.warning(f"Failed to fetch premium index: {premium_index_data}")
 
             # 当日手续费汇总（USDT等值）
             # COMMISSION income 为负值，asset 字段标明币种
