@@ -363,7 +363,7 @@
               <button
                 @click="saveConfig"
                 title="保存配置"
-                class="flex-shrink-0 w-[26px] h-[26px] bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-[10px] flex items-center justify-center leading-none"
+                class="flex-shrink-0 w-[26px] h-[26px] bg-primary text-white rounded font-bold hover:bg-primary-hover transition-colors text-[10px] flex items-center justify-center leading-none"
               >
                 保
               </button>
@@ -476,7 +476,7 @@
         <!-- Save Strategy Button -->
         <button
           @click="saveStrategy"
-          class="w-full mt-2 px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
+          class="w-full mt-2 px-3 py-1.5 bg-[#f6465d] text-white rounded font-bold hover:bg-[#e03d52] transition-colors text-xs"
         >
           保存策略
         </button>
@@ -522,7 +522,7 @@
         </div>
         <button
           @click="saveAlertSettings"
-          class="w-full mt-2 px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
+          class="w-full mt-2 px-3 py-1.5 bg-primary text-white rounded font-bold hover:bg-primary-hover transition-colors text-xs"
         >
           保存提醒设置（{{ alertPairCode }}）
         </button>
@@ -697,7 +697,7 @@ const showHedgeRatio = ref(true)
 
 async function fetchHedgeMultiplier() {
   try {
-    const r = await api.get('/api/v1/hedge-ratio', { params: { pair_code: marketStore.currentPair || 'XAU' } })
+    const r = await api.get('/api/v1/hedge-ratio', { params: { pair_code: currentPair.value || 'XAU' } })
     hedgeMultiplier.value = r.data?.hedge_multiplier ?? 1.0
     showHedgeRatio.value = !!r.data?.enabled
   } catch { hedgeMultiplier.value = 1.0; showHedgeRatio.value = false }
@@ -707,7 +707,7 @@ async function setHedgeMultiplier(m) {
   if (continuousExecutionEnabled.value?.opening || continuousExecutionEnabled.value?.closing) return
   if (!confirm(`确定将对冲倍数设为 ${m}x 吗？开仓和平仓都将按此倍数执行。`)) return
   try {
-    await api.put('/api/v1/hedge-ratio', { hedge_multiplier: m, pair_code: marketStore.currentPair || 'XAU' })
+    await api.put('/api/v1/hedge-ratio', { hedge_multiplier: m, pair_code: currentPair.value || 'XAU' })
     hedgeMultiplier.value = m
   } catch (e) {
     console.error('Failed to set hedge multiplier:', e)
@@ -1231,7 +1231,7 @@ function handleOrdersFilled(data) {
   // 刷新持仓数据
   refreshPositions()
   // Refresh pair-account binding on pair change
-  api.get('/api/v1/pair-accounts/' + (marketStore.currentPair || 'XAU')).then(r => {
+  api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU')).then(r => {
     pairAccountBinding.value = r.data || {}
     fetchAccountData()  // re-check account status for new pair
   }).catch(() => { pairAccountBinding.value = {} })
@@ -1262,7 +1262,7 @@ async function fetchAccountData() {
   try {
     // Fetch pair-account binding for current pair
     try {
-      const pairR = await api.get('/api/v1/pair-accounts/' + (marketStore.currentPair || 'XAU'))
+      const pairR = await api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU'))
       pairAccountBinding.value = pairR.data || {}
     } catch { pairAccountBinding.value = {} }
 
@@ -1677,7 +1677,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-            pair_code: marketStore.currentPair || "XAU",
+            pair_code: currentPair.value || "XAU",
       quantity: batchQty,
       ladder_index: ladderIndex,
       target_spread: ladder.threshold
@@ -1832,7 +1832,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-            pair_code: marketStore.currentPair || "XAU",
+            pair_code: currentPair.value || "XAU",
       quantity: batchQty,
       ladder_index: ladderIndex
     }
@@ -1961,7 +1961,7 @@ async function executeBatchOpening(ladder) {
       const executionData = {
         binance_account_id: binanceAccount.account_id,
         bybit_account_id: bybitMT5Account.account_id,
-            pair_code: marketStore.currentPair || "XAU",
+            pair_code: currentPair.value || "XAU",
         quantity: batchQuantity,
         target_spread: ladder.threshold
       }
@@ -2059,7 +2059,7 @@ async function executeBatchClosing(ladder) {
       const executionData = {
         binance_account_id: binanceAccount.account_id,
         bybit_account_id: bybitMT5Account.account_id,
-            pair_code: marketStore.currentPair || "XAU",
+            pair_code: currentPair.value || "XAU",
         quantity: batchQuantity
       }
 
@@ -2305,7 +2305,7 @@ async function startContinuousExecution(action) {
     const requestData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-            pair_code: marketStore.currentPair || "XAU",
+            pair_code: currentPair.value || "XAU",
       opening_m_coin: config.value.openingMCoin || 5,
       closing_m_coin: config.value.closingMCoin || 5,
       ladders: ladders,

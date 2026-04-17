@@ -686,6 +686,42 @@ class ManualOrderRequest(BaseModel):
     account_id: Optional[str] = None
 
 
+
+async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU"):
+    """Resolve the correct account for manual/emergency trading using pair-account binding.
+    
+    For Binance (A-side): use pair binding account_a_id, fallback to first platform=1
+    For Bybit (B-side): use pair binding account_b_id, fallback to first platform=2
+    """
+    from sqlalchemy import text
+    
+    # Try pair-account binding first
+    result = await db.execute(text("""
+        SELECT account_a_id::text, account_b_id::text
+        FROM user_pair_accounts
+        WHERE user_id = :uid AND pair_code = :pc
+    """), {"uid": str(user_id), "pc": pair_code})
+    binding = result.fetchone()
+    
+    if binding:
+        target_id = binding[0] if exchange == "binance" else binding[1]
+        if target_id:
+            from app.models.account import Account as AccModel
+            acc_result = await db.execute(
+                select(AccModel).where(AccModel.account_id == target_id)
+            )
+            acc = acc_result.scalar_one_or_none()
+            if acc:
+                return acc
+    
+    # Fallback: first matching platform account for this user
+    accounts, _ = await _get_user_accounts(db, user_id)
+    target_platform = 1 if exchange == "binance" else 2
+    for account in accounts:
+        if account.platform_id == target_platform:
+            return account
+    return None
+
 @router.post("/manual/order")
 async def place_manual_order(
     req: ManualOrderRequest,
@@ -703,16 +739,8 @@ async def place_manual_order(
         if not accounts:
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
-        # Find the account for the specified exchange
-        target_account = None
-        for account in accounts:
-            if req.exchange == "binance" and account.platform_id == 1:
-                target_account = account
-                break
-            elif req.exchange == "bybit" and account.platform_id == 2:
-                target_account = account
-                break
-
+        # Find the correct account via pair-account binding
+        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange)
         if not target_account:
             raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
 
@@ -1146,16 +1174,8 @@ async def close_short_position(
         if not accounts:
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
-        # Find the account for the specified exchange
-        target_account = None
-        for account in accounts:
-            if req.exchange == "binance" and account.platform_id == 1:
-                target_account = account
-                break
-            elif req.exchange == "bybit" and account.platform_id == 2:
-                target_account = account
-                break
-
+        # Find the correct account via pair-account binding
+        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange)
         if not target_account:
             raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
 
@@ -1228,16 +1248,8 @@ async def close_long_position(
         if not accounts:
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
-        # Find the account for the specified exchange
-        target_account = None
-        for account in accounts:
-            if req.exchange == "binance" and account.platform_id == 1:
-                target_account = account
-                break
-            elif req.exchange == "bybit" and account.platform_id == 2:
-                target_account = account
-                break
-
+        # Find the correct account via pair-account binding
+        target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange)
         if not target_account:
             raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
 

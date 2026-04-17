@@ -82,8 +82,17 @@ async def update_hedge_ratio(
         )
     else:
         await db.execute(
-            text("""INSERT INTO strategy_configs (config_id, user_id, strategy_type, pair_code, target_spread, order_qty, hedge_multiplier, create_time, update_time)
-                    VALUES (gen_random_uuid(), :uid::uuid, 'forward_opening', :pc, 0, 0, :hm, NOW(), NOW())"""),
+            text("""INSERT INTO strategy_configs (
+                        config_id, user_id, strategy_type, pair_code,
+                        target_spread, order_qty, retry_times, mt5_stuck_threshold,
+                        is_enabled, opening_m_coin, closing_m_coin,
+                        hedge_multiplier, create_time, update_time
+                    ) VALUES (
+                        gen_random_uuid(), CAST(:uid AS uuid), 'forward', :pc,
+                        0, 0, 3, 30,
+                        false, 5, 5,
+                        :hm, NOW(), NOW()
+                    )"""),
             {"uid": user_id, "pc": body.pair_code, "hm": body.hedge_multiplier}
         )
 

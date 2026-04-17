@@ -72,33 +72,57 @@ class MarketDataService:
         symbol: str = "XAUUSDT",
         category: str = "linear",
     ) -> MarketQuote:
-        """Get Bybit market quote via MT5
+        """Get Bybit/MT5 market quote via MT5 Bridge.
 
-        Note: Bybit MT5 uses XAUUSD+ for gold.
-        Includes retry logic for when MT5 bridge is still initializing.
+        Supports multi-bridge: if the default bridge (MT5_BRIDGE_URL) doesn't have
+        the symbol, tries other active bridges from mt5_clients table.
         """
         mt5_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
+
+        # Build list of bridge clients to try: default first, then others
+        clients_to_try = [self.mt5_client]
+        try:
+            if not hasattr(self, '_alt_clients'):
+                self._alt_clients = {}
+            # Lazy-load alternative bridge URLs from mt5_clients
+            if not self._alt_clients:
+                from app.services.mt5_http_client import MT5HttpClient
+                import os
+                default_url = os.getenv("MT5_BRIDGE_URL", "http://172.31.14.113:8001")
+                from sqlalchemy import text as _text
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as _db:
+                    result = await _db.execute(_text(
+                        "SELECT DISTINCT bridge_url, bridge_service_port FROM mt5_clients WHERE is_active = true"
+                    ))
+                    for row in result.fetchall():
+                        url = row[0] or (f"http://172.31.14.113:{row[1]}" if row[1] else None)
+                        if url and url != default_url and url not in self._alt_clients:
+                            self._alt_clients[url] = MT5HttpClient(base_url=url)
+            for c in self._alt_clients.values():
+                clients_to_try.append(c)
+        except Exception:
+            pass  # Fallback: only use default client
 
         last_error = None
         max_retries = 2
         for attempt in range(max_retries + 1):
-            try:
-                # 通过 HTTP Bridge 获取 tick（异步，无需 run_in_executor）
-                tick = await self.mt5_client.get_tick(mt5_symbol)
+            for mt5_client in clients_to_try:
+                try:
+                    tick = await mt5_client.get_tick(mt5_symbol)
 
-                if tick and tick.get("bid", 0) > 0 and tick.get("ask", 0) > 0:
-                    return MarketQuote(
-                        symbol=symbol,
-                        bid_price=float(tick["bid"]),
-                        bid_qty=0,
-                        ask_price=float(tick["ask"]),
-                        ask_qty=0,
-                        timestamp=int(time.time() * 1000),
-                    )
-
-                last_error = f"No valid ticker data for {mt5_symbol} (tick={'None' if tick is None else tick})"
-            except Exception as e:
-                last_error = str(e)
+                    if tick and tick.get("bid", 0) > 0 and tick.get("ask", 0) > 0:
+                        return MarketQuote(
+                            symbol=symbol,
+                            bid_price=float(tick["bid"]),
+                            bid_qty=0,
+                            ask_price=float(tick["ask"]),
+                            ask_qty=0,
+                            timestamp=int(time.time() * 1000),
+                        )
+                except Exception:
+                    pass
+            last_error = f"No valid ticker data for {mt5_symbol} (tick=None)"
 
             if attempt < max_retries:
                 logger.warning(

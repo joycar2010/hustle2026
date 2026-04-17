@@ -1229,45 +1229,54 @@ class PositionStreamer:
     # MT5 持仓读取 — 无 symbol 过滤，返回所有持仓
     # ------------------------------------------------------------------
     async def _read_mt5_positions_all(self) -> dict:
+        """Read positions from ALL active MT5 bridges (Bybit + ICMarkets etc.)"""
         result = {}
         try:
             import httpx, os
             api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", ""))
             headers = {"X-Api-Key": api_key} if api_key else {}
-            if not PositionStreamer._bridge_url_cache:
-                try:
-                    from app.models.mt5_client import MT5Client as MT5ClientModel
-                    from sqlalchemy import select as sa_select
-                    async with AsyncSessionLocal() as _db:
-                        mc = (await _db.execute(
-                            sa_select(MT5ClientModel)
-                            .where(MT5ClientModel.is_active == True)
-                            .where(MT5ClientModel.is_system_service == False)
-                            .order_by(MT5ClientModel.priority)
-                            .limit(1)
-                        )).scalar_one_or_none()
-                        if mc and mc.bridge_service_port:
-                            PositionStreamer._bridge_url_cache = f"http://172.31.14.113:{mc.bridge_service_port}"
-                except Exception:
-                    pass
-            bridge_url = PositionStreamer._bridge_url_cache or os.getenv("MT5_BRIDGE_URL", "http://172.31.14.113:8002")
+
+            # Collect ALL active bridge URLs (not just one)
+            bridge_urls = set()
+            try:
+                from sqlalchemy import text as _text
+                async with AsyncSessionLocal() as _db:
+                    rows = await _db.execute(_text(
+                        "SELECT DISTINCT bridge_url, bridge_service_port FROM mt5_clients "
+                        "WHERE is_active = true AND is_system_service = false"
+                    ))
+                    for row in rows.fetchall():
+                        url = row[0] or (f"http://172.31.14.113:{row[1]}" if row[1] else None)
+                        if url:
+                            bridge_urls.add(url)
+            except Exception:
+                pass
+            if not bridge_urls:
+                bridge_urls.add(os.getenv("MT5_BRIDGE_URL", "http://172.31.14.113:8002"))
+
+            # Query ALL bridges concurrently
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{bridge_url}/mt5/positions", headers=headers)
-                if resp.status_code != 200:
-                    return result
-                positions = resp.json().get("positions", [])
-            for p in positions:
-                sym = p.get("symbol", "")
-                if not sym:
-                    continue
-                vol = float(p.get("volume", 0))
-                typ = p.get("type", -1)
-                if sym not in result:
-                    result[sym] = [0.0, 0.0]
-                if typ == 0:
-                    result[sym][0] += vol
-                elif typ == 1:
-                    result[sym][1] += vol
+                for bridge_url in bridge_urls:
+                    try:
+                        resp = await client.get(f"{bridge_url}/mt5/positions", headers=headers)
+                        if resp.status_code != 200:
+                            continue
+                        positions = resp.json().get("positions", [])
+                        for p in positions:
+                            sym = p.get("symbol", "")
+                            if not sym:
+                                continue
+                            vol = float(p.get("volume", 0))
+                            typ = p.get("type", -1)
+                            if sym not in result:
+                                result[sym] = [0.0, 0.0]
+                            if typ == 0:
+                                result[sym][0] += vol
+                            elif typ == 1:
+                                result[sym][1] += vol
+                    except Exception as e:
+                        logger.debug(f"[PositionStreamer] Bridge {bridge_url} error: {e}")
+
             return {sym: (round(v[0], 4), round(v[1], 4)) for sym, v in result.items()}
         except Exception as e:
             logger.debug(f"[PositionStreamer] MT5 read all error: {e}")
@@ -1700,11 +1709,18 @@ def unregister_order_watch(order_id):
 
 
 def notify_order_fill(order_id, filled_qty, status):
-    """Called by Binance WS stream when ORDER_TRADE_UPDATE arrives."""
+    """Called by Binance WS stream when ORDER_TRADE_UPDATE arrives.
+    
+    Only set the event for terminal states (FILLED, PARTIALLY_FILLED, CANCELED, EXPIRED).
+    The NEW status is just an order acknowledgement — setting the event on NEW causes
+    the monitor to return immediately with filled_qty=0, breaking the entire hedge flow.
+    """
     _order_fill_registry[order_id] = {
         "filled_qty": filled_qty,
         "status": status,
     }
-    evt = _order_fill_events.get(order_id)
-    if evt:
-        evt.set()
+    # Only wake the monitor on terminal states — NOT on NEW (order placement ack)
+    if status in ("FILLED", "PARTIALLY_FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+        evt = _order_fill_events.get(order_id)
+        if evt:
+            evt.set()

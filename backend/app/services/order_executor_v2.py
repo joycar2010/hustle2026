@@ -132,7 +132,7 @@ class OrderExecutorV2:
     """
 
     def __init__(self):
-        self.binance_timeout = 2.0
+        self.binance_timeout = 3.0
         self.bybit_timeout = 0.3  # 0.1→0.3: Bybit订单有更多时间进入市场，同时保持快速执行
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
@@ -232,6 +232,19 @@ class OrderExecutorV2:
             }
         bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
         logger.info(f"[REVERSE_OPENING] Bybit order: binance_filled={binance_filled_qty} XAU -> bybit_quantity={bybit_quantity} Lot (multiplier={hedge_multiplier})")
+
+        # Skip B-side if converted quantity is below minimum lot size (0.01)
+        if bybit_quantity < 0.01:
+            logger.warning(f"[REVERSE_OPENING] B-side qty {bybit_quantity} below min 0.01 Lot, returning partial fill for accumulation")
+            return {
+                "success": True,
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "b_side_skipped_below_min": True,
+                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot, will accumulate"
+            }
 
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
@@ -426,6 +439,20 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (close LONG position)
         bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
+
+        # Skip B-side if converted quantity is below minimum lot size (0.01)
+        if bybit_quantity < 0.01:
+            logger.warning(f"B-side qty {bybit_quantity} below min 0.01 Lot, skipping for accumulation")
+            return {
+                "success": True,
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "b_side_skipped_below_min": True,
+                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot"
+            }
+
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
@@ -531,6 +558,7 @@ class OrderExecutorV2:
         binance_order_id = binance_result["order_id"]
 
         # Step 2: Monitor A-side order — routes by platform_id
+        logger.info(f"[FORWARD_OPENING] >>>ENTERING MONITOR<<< order={binance_order_id} timeout={self.binance_timeout} plat={binance_account.platform_id}")
         monitor_result = await self._monitor_a_side_order(
             binance_account,
             sym_a,
@@ -545,6 +573,7 @@ class OrderExecutorV2:
         binance_filled_qty = monitor_result["filled_qty"]
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
+        logger.info(f"[FORWARD_OPENING] Monitor returned: filled={binance_filled_qty}, spread_cancelled={spread_cancelled}, api_error={binance_api_error}")
 
         if binance_filled_qty == 0:
             if binance_api_error:
@@ -571,6 +600,20 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market SELL order with Binance filled quantity (open SHORT position)
         bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
+
+        # Skip B-side if converted quantity is below minimum lot size (0.01)
+        if bybit_quantity < 0.01:
+            logger.warning(f"B-side qty {bybit_quantity} below min 0.01 Lot, skipping for accumulation")
+            return {
+                "success": True,
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "b_side_skipped_below_min": True,
+                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot"
+            }
+
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
@@ -764,6 +807,20 @@ class OrderExecutorV2:
 
         # Step 3: Place Bybit market BUY order with Binance filled quantity (close SHORT position)
         bybit_quantity = _a_to_b(binance_filled_qty, pair_code) * hedge_multiplier
+
+        # Skip B-side if converted quantity is below minimum lot size (0.01)
+        if bybit_quantity < 0.01:
+            logger.warning(f"B-side qty {bybit_quantity} below min 0.01 Lot, skipping for accumulation")
+            return {
+                "success": True,
+                "binance_filled_qty": binance_filled_qty,
+                "bybit_filled_qty": 0,
+                "binance_order_id": binance_order_id,
+                "is_single_leg": False,
+                "b_side_skipped_below_min": True,
+                "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot"
+            }
+
         logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU, multiplier={hedge_multiplier})")
 
         bybit_filled_qty = await self._execute_bybit_market_buy(

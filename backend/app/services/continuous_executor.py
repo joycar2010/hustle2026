@@ -203,6 +203,8 @@ class ContinuousStrategyExecutor:
 
         logger.info(f"Starting ladder {ladder_idx} [{strategy_type}] loop: total_qty={ladder.total_qty}, threshold={spread_threshold}, triggers_required={trigger_count_required}")
 
+        consecutive_no_fills = 0  # Track consecutive Binance timeouts/cancels without any fill
+        MAX_CONSECUTIVE_NO_FILLS = 5  # After 5 consecutive no-fills, stop the ladder
         loop_count = 0
         current_position = 0  # initialise so the post-loop debug block always has a value
         while self.is_running and not self.stop_requested:
@@ -330,6 +332,38 @@ class ContinuousStrategyExecutor:
                 logger.error(f"[ladder={ladder_idx}] Failed to snapshot positions: {e}")
                 pre_snapshot = {}
 
+            # Step 7.9: Cancel any lingering open orders on A-side before placing new one
+            # Prevents order accumulation on the exchange when previous cancels failed
+            try:
+                sym_a, _, _ = _get_pair_config(self.pair_code)
+                from app.core.proxy_utils import build_proxy_url
+                if binance_account.platform_id == 1:
+                    from app.services.binance_client import BinanceFuturesClient
+                    _cancel_client = BinanceFuturesClient(
+                        binance_account.api_key, binance_account.api_secret,
+                        proxy_url=build_proxy_url(binance_account.proxy_config)
+                    )
+                    try:
+                        open_orders = await _cancel_client.get_open_orders(symbol=sym_a)
+                        if open_orders and len(open_orders) > 0:
+                            await _cancel_client.cancel_all_orders(sym_a)
+                            logger.warning(f"[ladder={ladder_idx}] Cancelled {len(open_orders)} lingering open orders on {sym_a} before new order")
+                    finally:
+                        await _cancel_client.close()
+                elif binance_account.platform_id == 2:
+                    from app.services.bybit_client import BybitV5Client
+                    _cancel_client = BybitV5Client(
+                        api_key=binance_account.api_key, api_secret=binance_account.api_secret,
+                        proxy_url=build_proxy_url(binance_account.proxy_config),
+                    )
+                    try:
+                        resp = await _cancel_client.cancel_all_orders(category='linear', symbol=sym_a)
+                        if resp: logger.warning(f"[ladder={ladder_idx}] Cancelled lingering Bybit orders on {sym_a}")
+                    finally:
+                        await _cancel_client.close()
+            except Exception as e:
+                logger.warning(f"[ladder={ladder_idx}] Failed to cancel lingering orders: {e}")
+
             # Step 8: Execute order
             logger.info(f"[ladder={ladder_idx}] Executing {strategy_type}: {order_qty} units")
             try:
@@ -430,7 +464,7 @@ class ContinuousStrategyExecutor:
                     logger.error(f"[EMERGENCY] Binance API outage during {strategy_type} execution — stopping strategy immediately")
                     self.is_running = False
                     await self._send_binance_api_emergency_alert(strategy_type, exec_result)
-                    return
+                    return {'success': False, 'error': 'Binance API outage'}
 
                 # CRITICAL: Terminal (non-retryable) Binance error — stop the strategy and notify.
                 # Without this guard the loop keeps retrying forever, e.g. -4411 TradFi-Perps
@@ -481,7 +515,7 @@ class ContinuousStrategyExecutor:
                         logger.info(f"[TERMINAL] Alert published to ws:user_event for user {self.user_id}")
                     except Exception as _alert_err:
                         logger.warning(f"[TERMINAL] Failed to publish stop alert: {_alert_err}")
-                    return
+                    return {'success': False, 'error': f'Terminal Binance error: {err_code}'}
 
                 # CRITICAL FIX: Even if execution failed, record Binance filled qty to prevent over-trading
                 binance_filled = exec_result.get('binance_filled_qty', 0)
@@ -505,20 +539,85 @@ class ContinuousStrategyExecutor:
             spread_cancelled = exec_result.get('spread_cancelled', False)
             is_partial = binance_filled > 0 and binance_filled < order_qty * 0.95
 
+            # Scenario 1 pre-check: If monitor reports filled=0, verify via REST API
+            # The WS-based monitor can miss fills (ORDER_TRADE_UPDATE not received, 
+            # or TradFi-Perps orders have delayed WS events). A false-negative here
+            # means we leave unfilled Binance orders on the exchange that later fill
+            # without a corresponding B-side hedge → single-leg exposure.
+            if binance_filled == 0 and exec_result.get('binance_order_id'):
+                try:
+                    _order_id = exec_result['binance_order_id']
+                    _rest_status = await self.order_executor.base_executor.check_binance_order_status(
+                        binance_account, sym_a, _order_id
+                    )
+                    if _rest_status and _rest_status.get('success'):
+                        _actual_filled = _rest_status.get('filled_qty', 0)
+                        _actual_status = _rest_status.get('status', '')
+                        if _actual_filled > 0:
+                            logger.warning(
+                                f"[ladder={ladder_idx}] REST verify: order {_order_id} actually filled "
+                                f"{_actual_filled} (status={_actual_status}), WS monitor missed it! "
+                                f"Executing emergency B-side hedge."
+                            )
+                            binance_filled = _actual_filled
+                            exec_result['binance_filled_qty'] = _actual_filled
+                            # Emergency B-side hedge: the executor missed it, do it now
+                            try:
+                                sym_a_h, sym_b_h, conv_h = _get_pair_config(self.pair_code)
+                                from app.utils.quantity_converter import quantity_converter as _qc
+                                _b_qty = _qc.xau_to_lot(_actual_filled)
+                                # Determine B-side direction based on strategy type
+                                _is_opening_s = 'opening' in strategy_type
+                                if strategy_type in ('forward_opening', 'reverse_closing'):
+                                    _b_side = "Sell"
+                                    _close_pos = not _is_opening_s  # forward_opening=open short, reverse_closing=close short
+                                else:
+                                    _b_side = "Buy"
+                                    _close_pos = not _is_opening_s
+                                logger.warning(f"[EMERGENCY_HEDGE] Placing B-side {_b_side} {_b_qty} lot on {sym_b_h}")
+                                _b_result = await self.order_executor.base_executor.place_bybit_order(
+                                    account=bybit_account,
+                                    symbol=sym_b_h,
+                                    side=_b_side,
+                                    order_type="Market",
+                                    quantity=str(round(_b_qty, 2)),
+                                    close_position=_close_pos,
+                                )
+                                if _b_result.get('success'):
+                                    logger.warning(f"[EMERGENCY_HEDGE] B-side hedge SUCCESS: {_b_result.get('order_id')}")
+                                    exec_result['bybit_filled_qty'] = _b_qty
+                                else:
+                                    logger.error(f"[EMERGENCY_HEDGE] B-side hedge FAILED: {_b_result.get('error')}")
+                            except Exception as _hedge_err:
+                                logger.error(f"[EMERGENCY_HEDGE] B-side hedge exception: {_hedge_err}")
+                except Exception as _e:
+                    logger.warning(f"[ladder={ladder_idx}] REST verify failed: {_e}")
+
             # Scenario 1: Binance not filled or spread cancelled
             if binance_filled == 0:
-                logger.info("Scenario 1: Binance not filled, resetting triggers")
+                consecutive_no_fills += 1
+                logger.info(f"Scenario 1: Binance not filled ({consecutive_no_fills}/{MAX_CONSECUTIVE_NO_FILLS}), resetting triggers")
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
-                # 区分撤单原因：点差撤单 vs 超时未成交
+
+                # After too many consecutive no-fills, pause and reset (don't permanently stop)
+                # The strategy should keep waiting for market conditions to improve
+                if consecutive_no_fills >= MAX_CONSECUTIVE_NO_FILLS:
+                    logger.warning(
+                        f"[ladder={ladder_idx}] {consecutive_no_fills} consecutive no-fills — "
+                        f"pausing {MAX_CONSECUTIVE_NO_FILLS * 2}s then resuming"
+                    )
+                    consecutive_no_fills = 0  # Reset counter to allow another round
+                    await asyncio.sleep(MAX_CONSECUTIVE_NO_FILLS * 2)  # 10s pause
+                    self.trigger_mgr.reset()
+                    continue
+
+                # Progressive backoff: 1s → 2s → 3s → 4s → 5s
                 is_opening = strategy_type in ('reverse_opening', 'forward_opening')
-                if spread_cancelled:
-                    wait_time = (self.order_executor.open_wait_after_cancel_no_trade
-                                 if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
-                else:
-                    wait_time = (self.order_executor.open_wait_after_cancel_no_trade
-                                 if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
-                logger.info(f"Waiting {wait_time}s after cancel ({'spread' if spread_cancelled else 'timeout'}, {'open' if is_opening else 'close'})")
+                base_wait = (self.order_executor.open_wait_after_cancel_no_trade
+                             if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
+                wait_time = base_wait * consecutive_no_fills
+                logger.info(f"Waiting {wait_time}s after cancel ({'spread' if spread_cancelled else 'timeout'}, no-fill #{consecutive_no_fills})")
                 # Safe exit point 1: Binance order cancelled — no single-leg risk
                 if self.stop_requested:
                     logger.info(f"[GRACEFUL STOP] Stop requested — exiting after Binance cancel (safe, no single-leg)")
@@ -554,6 +653,7 @@ class ContinuousStrategyExecutor:
                 filled_qty
             )
 
+            consecutive_no_fills = 0  # Reset on successful fill
             logger.info(f"Position updated: {'+'if is_opening else '-'}{filled_qty}")
 
             # Step 11: Push status updates

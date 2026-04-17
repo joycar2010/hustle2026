@@ -89,12 +89,14 @@ export const useMarketStore = defineStore('market', () => {
         if (msg.type === 'position_snapshot' && msg.data) {
           // positionSnapshot 只由 position_snapshot 消息驱动，与 account_balance 完全隔离
           // 避免 account_balance 的 60s 缓存数据覆盖实时持仓快照
+          // Read from pairs map using current trading pair
+          const { currentPair: _cp } = useTradingPair()
+          const _pd = (msg.data.pairs ?? {})[_cp.value] || {}
           positionSnapshot.value = {
-            bybit_long_lots: msg.data.bybit_long_lots ?? 0,
-            bybit_short_lots: msg.data.bybit_short_lots ?? 0,
-            binance_long_xau: msg.data.binance_long_xau ?? 0,
-            binance_short_xau: msg.data.binance_short_xau ?? 0,
-            // 全产品对持仓（新字段）
+            bybit_long_lots: _pd.mt5_long ?? msg.data.bybit_long_lots ?? 0,
+            bybit_short_lots: _pd.mt5_short ?? msg.data.bybit_short_lots ?? 0,
+            binance_long_xau: _pd.binance_long ?? msg.data.binance_long_xau ?? 0,
+            binance_short_xau: _pd.binance_short ?? msg.data.binance_short_xau ?? 0,
             pairs: msg.data.pairs ?? {},
           }
         }
