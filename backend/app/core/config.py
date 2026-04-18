@@ -103,9 +103,15 @@ class Settings(BaseSettings):
         except:
             return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
+    OPENCLAW_LLM_BASE_URL: str = ""
+    OPENCLAW_LLM_API_KEY: str = ""
+    OPENCLAW_LLM_MODEL: str = "gpt-5"
+    OPENCLAW_LLM_PROTOCOL: str = "openai"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 # Global settings instance

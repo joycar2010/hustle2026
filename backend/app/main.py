@@ -45,7 +45,7 @@ def _setup_logging():
 _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, pnl, hedging, hedge_ratio
+from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, pnl, hedging, hedge_ratio, agent
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor
 from app.tasks.redis_monitor import redis_monitor
@@ -224,6 +224,22 @@ async def lifespan(app: FastAPI):
     # Start memory cleanup task
     cleanup_task = asyncio.create_task(periodic_memory_cleanup())
 
+    # OpenCLAW agent loop (Shadow mode by default)
+    try:
+        from app.services.agent import agent_loop as openclaw_loop
+        from app.services.agent import equity_fsm as openclaw_fsm
+        from app.services.agent import strategy_reviewer as openclaw_reviewer
+        from app.services.agent import no_profit_monitor as openclaw_npm
+        from app.services.agent import balance_monitor as openclaw_bm
+        openclaw_loop.start()
+        openclaw_fsm.start()
+        openclaw_npm.start()
+        openclaw_bm.start()
+        openclaw_reviewer.start()
+        logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer scheduled')
+    except Exception as e:
+        logger.error(f'[OpenCLAW] failed to start agent: {e}')
+
     logger.info("FastAPI application started - background services initializing...")
 
     yield
@@ -234,6 +250,21 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Stop OpenCLAW
+    try:
+        from app.services.agent import agent_loop as openclaw_loop
+        from app.services.agent import equity_fsm as openclaw_fsm
+        from app.services.agent import strategy_reviewer as openclaw_reviewer
+        from app.services.agent import no_profit_monitor as openclaw_npm
+        from app.services.agent import balance_monitor as openclaw_bm
+        await openclaw_loop.stop()
+        await openclaw_fsm.stop()
+        await openclaw_reviewer.stop()
+        await openclaw_npm.stop()
+        await openclaw_bm.stop()
+    except Exception as e:
+        logger.error(f'[OpenCLAW] stop error: {e}')
 
     # Stop all services
     try:
@@ -363,6 +394,7 @@ app.include_router(security_components.router, prefix="/api/v1/security", tags=[
 app.include_router(ssl_certificates.router, prefix="/api/v1/ssl", tags=["SSL证书管理"])
 app.include_router(system_monitor.router, prefix="/api/v1/monitor", tags=["系统监控"])
 app.include_router(key_management.router, prefix="/api/v1/keys", tags=["密钥管理"])
+app.include_router(agent.router, prefix="/api/v1/agent", tags=["OpenCLAW Agent"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["通知服务"])
 app.include_router(sound_files.router, prefix="/api/v1", tags=["声音文件管理"])
 app.include_router(timing_configs.router, prefix="/api/v1", tags=["时间配置管理"])

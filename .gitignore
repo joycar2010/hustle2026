@@ -1,2 +1,27 @@
+# Logs
 backend/backend.log*
-backend/backend.log*
+backend/api_debug.log*
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv + deps
+backend/venv/
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Node
+**/node_modules/
+**/dist/
+
+# Build artifacts
+*.bak
+*.bak.*
+
+# IDE
+.vscode/
+.idea/
