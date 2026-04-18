@@ -126,9 +126,9 @@
             </div>
           </div>
           <!-- Position count -->
-          <div v-if="(acc.positions || []).length" class="mt-2 pt-1.5 border-t border-border-secondary flex justify-between text-xs">
+          <div class="mt-2 pt-1.5 border-t border-border-secondary flex justify-between text-xs">
             <span class="text-text-tertiary">持仓</span>
-            <span class="font-mono text-primary font-bold">{{ acc.positions.length }} 笔</span>
+            <span class="font-mono font-bold" :class="(acc.positions || []).length ? 'text-primary' : 'text-text-tertiary'">{{ (acc.positions || []).length }} 笔</span>
           </div>
         </div>
       </div>
@@ -617,7 +617,7 @@ function accBorderClass(acc) {
   return 'border-border-primary'
 }
 
-function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets' }[id] || 'Unknown' }
+function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets', 4: 'Gate.io' }[id] || 'Unknown' }
 function isMT5Online(c) { return c.online || c.connection_status === 'connected' }
 
 function fmtNum(v) {

@@ -1404,10 +1404,26 @@ class AccountDataService:
                         _gclient.get_account(),
                         _gclient.get_positions(),
                     )
-                    _equity = float(acc_data.get("total", 0))
-                    _avail = float(acc_data.get("available", 0))
-                    _margin = float(acc_data.get("position_margin", 0))
-                    _upnl = float(acc_data.get("unrealised_pnl", 0))
+                    # Gate 统一保证金模式 (margin_mode_name=single_currency) 下 total/available/position_margin
+                    # 都只反映 classic 子账户；真实权益在 cross_* 字段。优先用 cross_*，否则回退 classic。
+                    _cross_avail = float(acc_data.get("cross_available", 0) or 0)
+                    _cross_im = float(acc_data.get("cross_initial_margin", 0) or 0)
+                    _cross_upnl = float(acc_data.get("cross_unrealised_pnl", 0) or 0)
+                    _classic_total = float(acc_data.get("total", 0) or 0)
+                    _classic_avail = float(acc_data.get("available", 0) or 0)
+                    _classic_margin = float(acc_data.get("position_margin", 0) or 0)
+                    _classic_upnl = float(acc_data.get("unrealised_pnl", 0) or 0)
+                    _is_unified = (acc_data.get("margin_mode_name") == "single_currency") or _classic_total == 0
+                    if _is_unified and (_cross_avail or _cross_im or _cross_upnl):
+                        _equity = _cross_avail + _cross_im + _cross_upnl
+                        _avail = _cross_avail
+                        _margin = _cross_im
+                        _upnl = _cross_upnl
+                    else:
+                        _equity = _classic_total
+                        _avail = _classic_avail
+                        _margin = _classic_margin
+                        _upnl = _classic_upnl
                     balance = AccountBalance(
                         total_assets=_equity,
                         available_balance=_avail,

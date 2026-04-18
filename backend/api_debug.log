@@ -616,3 +616,11 @@ Request: {'binance_account_id': UUID('e8519bed-b8eb-478c-b106-64232b004d53'), 'b
 Executor is_running: False
 Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_opening_continuous at 0x73f4d6977ec0>
 
+[2026-04-17 19:58:13.760211] Task created: a9ddced9-2344-4e60-8ef1-018d7c71c312
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x7ccfe1d5bd80>
+
+[2026-04-17 20:02:58.272509] Task created: d071e3ad-73ee-422f-8454-942ecb145ea4
+Executor is_running: False
+Coroutine: <coroutine object ContinuousStrategyExecutor.execute_forward_closing_continuous at 0x7ccfe1d5a980>
+
