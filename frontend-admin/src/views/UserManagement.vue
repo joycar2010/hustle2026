@@ -109,6 +109,11 @@
                       class="text-[#3370ff] hover:opacity-80 text-xs transition-colors">通知分配</button>
                     <button @click="openHedgeRatio(u)"
                       class="text-[#f0b90b] hover:opacity-80 text-xs transition-colors">对冲倍数</button>
+                    <button @click="openOpenclawAccess(u)"
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="u.openclaw_enabled ? 'text-[#0ecb81]' : 'text-[#3370ff]'">
+                      {{ u.openclaw_enabled ? '智能体量化✓' : '智能体量化' }}
+                    </button>
                     <button @click="toggleUserStatus(u)"
                       :class="u.is_active ? 'text-[#f0b90b]' : 'text-[#0ecb81]'"
                       class="hover:opacity-80 text-xs transition-colors">
@@ -150,10 +155,13 @@
               <button @click="openAssignRole(u)" class="py-1.5 bg-[#0ecb81]/10 text-[#0ecb81] rounded text-xs">分配角色</button>
               <button @click="openNotifConfig(u)" class="py-1.5 bg-[#3370ff]/10 text-[#3370ff] rounded text-xs">通知分配</button>
               <button @click="openHedgeRatio(u)" class="py-1.5 bg-[#f0b90b]/10 text-[#f0b90b] rounded text-xs">对冲倍数</button>
+              <button @click="openOpenclawAccess(u)"
+                :class="u.openclaw_enabled ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#3370ff]/10 text-[#3370ff]'"
+                class="py-1.5 rounded text-xs">{{ u.openclaw_enabled ? '智能体✓' : '智能体量化' }}</button>
               <button @click="toggleUserStatus(u)"
                 :class="u.is_active ? 'bg-[#f0b90b]/10 text-[#f0b90b]' : 'bg-[#0ecb81]/10 text-[#0ecb81]'"
                 class="py-1.5 rounded text-xs">{{ u.is_active ? '禁用' : '启用' }}</button>
-              <button @click="deleteUser(u)" class="py-1.5 bg-[#f6465d]/10 text-[#f6465d] rounded text-xs col-span-2">删除</button>
+              <button @click="deleteUser(u)" class="py-1.5 bg-[#f6465d]/10 text-[#f6465d] rounded text-xs">删除</button>
             </div>
           </div>
         </div>
@@ -1226,6 +1234,36 @@
       </div>
     </Teleport>
 
+
+    <!-- Modal: 智能体量化登录授权 -->
+    <transition name="modal">
+      <div v-if="showOpenclawModal"
+        class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+        @click.self="showOpenclawModal = false">
+        <div class="bg-dark-100 rounded-xl p-6 w-full max-w-md border border-border-primary">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold">智能体量化登录授权 — {{ openclawUser?.username }}</h3>
+            <button @click="showOpenclawModal = false" class="text-text-tertiary hover:text-text-primary">✕</button>
+          </div>
+          <div class="text-sm text-text-secondary mb-4">是否允许该用户登录 OpenCLAW 智能体控制台 (<a href="https://auto.hustle2026.xyz" target="_blank" class="text-primary">auto.hustle2026.xyz</a>) ？</div>
+          <label class="flex items-center gap-2 mb-4 text-sm">
+            <input type="checkbox" v-model="openclawEnabled" class="accent-primary">
+            <span>授予 auto.hustle2026.xyz 登录权限</span>
+          </label>
+          <div class="text-xs text-text-tertiary mb-5">
+            启用后该用户可使用自己的 admin 账号密码登录智能体控制台，并在 Settings 里添加属于其名下的作用域目标；
+            禁用即撤销访问（不影响 admin 本身登录 admin.hustle2026.xyz）。
+          </div>
+          <div class="flex justify-end gap-2">
+            <button @click="showOpenclawModal = false" class="px-4 py-2 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">取消</button>
+            <button @click="saveOpenclawToggle" :disabled="openclawSaving"
+              class="px-4 py-2 bg-primary text-dark-300 hover:bg-primary-hover rounded-lg text-sm font-semibold disabled:opacity-50">
+              {{ openclawSaving ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
 </template>
 
 <script setup>
@@ -2435,6 +2473,34 @@ const showHedgeModal = ref(false)
 const hedgeUser = ref(null)
 const hedgeEnabled = ref(false)
 const hedgeSaving = ref(false)
+
+// ── OpenCLAW (auto.hustle2026.xyz) login access ──
+const showOpenclawModal = ref(false)
+const openclawUser = ref(null)
+const openclawEnabled = ref(false)
+const openclawSaving = ref(false)
+
+async function openOpenclawAccess(u) {
+  openclawUser.value = u
+  openclawEnabled.value = !!u.openclaw_enabled
+  showOpenclawModal.value = true
+}
+
+async function saveOpenclawToggle() {
+  openclawSaving.value = true
+  try {
+    await api.put('/api/v1/users/openclaw-access', {
+      user_id: openclawUser.value?.user_id,
+      enabled: openclawEnabled.value,
+    })
+    const idx = users.value.findIndex(u => u.user_id === openclawUser.value?.user_id)
+    if (idx >= 0) users.value[idx].openclaw_enabled = openclawEnabled.value
+    showOpenclawModal.value = false
+    showToast(openclawEnabled.value ? '已授予智能体量化登录权限' : '已撤销智能体量化登录权限', 'success')
+  } catch (e) {
+    showToast('保存失败: ' + (e.response?.data?.detail || e.message), 'error')
+  } finally { openclawSaving.value = false }
+}
 
 async function openHedgeRatio(u) {
   hedgeUser.value = u

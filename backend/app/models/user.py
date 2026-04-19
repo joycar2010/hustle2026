@@ -23,6 +23,8 @@ class User(Base):
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     update_time = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    hedge_ratio_enabled = Column(Boolean, default=False, nullable=True)
+    openclaw_enabled = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")

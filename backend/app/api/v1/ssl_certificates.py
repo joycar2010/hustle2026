@@ -22,6 +22,10 @@ from app.schemas.ssl import (
 )
 
 router = APIRouter()
+
+# P5+ : Additional /certificates/issue route for new-domain issuance
+from app.api.v1.ssl_issue import make_router as _make_issue_router
+router.include_router(_make_issue_router())
 logger = logging.getLogger(__name__)
 
 # SSL证书存储路径

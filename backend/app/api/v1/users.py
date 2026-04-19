@@ -13,6 +13,10 @@ from app.models.position import Position
 from app.schemas.user import UserResponse, UserUpdate, UserCreate, PasswordChange
 
 router = APIRouter()
+
+# OpenCLAW agent access toggle
+from app.api.v1.openclaw_access import make_router as _make_openclaw_router
+router.include_router(_make_openclaw_router())
 logger = logging.getLogger(__name__)
 
 
@@ -150,6 +154,8 @@ async def get_all_users(
             "feishu_union_id": user.feishu_union_id,
             "rbac_roles": [],
             "is_active": user.is_active,
+            "hedge_ratio_enabled": bool(getattr(user, 'hedge_ratio_enabled', False) or False),
+            "openclaw_enabled": bool(getattr(user, 'openclaw_enabled', False) or False),
             "create_time": user.create_time,
             "update_time": user.update_time
         }

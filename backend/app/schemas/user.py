@@ -102,6 +102,8 @@ class UserResponse(BaseModel):
     feishu_union_id: Optional[str] = None
     rbac_roles: Optional[List[dict]] = []  # RBAC角色列表
     is_active: bool
+    hedge_ratio_enabled: Optional[bool] = False
+    openclaw_enabled: Optional[bool] = False
     create_time: datetime
     update_time: datetime
 

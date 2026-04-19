@@ -799,7 +799,10 @@
       <div class="card">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-bold">SSL 证书管理</h2>
-          <button @click="loadCurrentCert" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">刷新</button>
+          <div class="flex gap-2">
+            <button @click="showIssueModal = true" class="px-3 py-1.5 bg-primary text-dark-300 hover:bg-primary-hover rounded-lg text-sm font-semibold">+ 添加新域名证书</button>
+            <button @click="loadCurrentCert" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">刷新</button>
+          </div>
         </div>
 
         <!-- 所有域名证书卡片 -->
@@ -1398,6 +1401,54 @@
     </div>
 
   </div>
+
+    <!-- Modal: 添加新域名 SSL 证书 (certbot --nginx) -->
+    <transition name="modal">
+      <div v-if="showIssueModal"
+        class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+        @click.self="showIssueModal = false">
+        <div class="bg-dark-100 rounded-xl p-6 w-full max-w-lg border border-border-primary">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold">添加新域名 SSL 证书</h3>
+            <button @click="showIssueModal = false" class="text-text-tertiary hover:text-text-primary">✕</button>
+          </div>
+          <div class="text-xs text-text-tertiary mb-4">
+            自动调用 certbot 为新域名签发 Let's Encrypt 证书（HTTP-01 challenge 经 nginx）。<br/>
+            <span class="text-[#f0b90b]">前置条件:</span> 域名 DNS 已指向本服务器且 :80 可访问。
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">新域名</label>
+              <input v-model="issueForm.domain" placeholder="例如 new.hustle2026.xyz"
+                class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+            </div>
+            <div>
+              <label class="block text-xs text-text-tertiary mb-1">联系邮箱 (Let's Encrypt 通知用)</label>
+              <input v-model="issueForm.email" placeholder="admin@hustle2026.xyz"
+                class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+            </div>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" v-model="issueForm.auto_renew" class="accent-primary">
+              <span>自动续期 (certbot systemd timer 处理)</span>
+            </label>
+          </div>
+          <div v-if="issueError" class="mt-3 text-xs text-[#f6465d] bg-[#f6465d]/10 rounded p-2 break-all">
+            {{ issueError }}
+          </div>
+          <div v-if="issueResult" class="mt-3 text-xs text-[#0ecb81] bg-[#0ecb81]/10 rounded p-2">
+            ✓ 签发成功: {{ issueResult.domain }} · 到期 {{ issueResult.expires_at?.slice(0,10) }}
+            <div class="text-[10px] text-text-tertiary mt-1">{{ issueResult.nginx_deploy_hint }}</div>
+          </div>
+          <div class="flex justify-end gap-2 mt-5">
+            <button @click="showIssueModal = false" class="px-4 py-2 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">关闭</button>
+            <button @click="submitIssueCert" :disabled="issueSaving || !issueForm.domain"
+              class="px-4 py-2 bg-primary text-dark-300 hover:bg-primary-hover rounded-lg text-sm font-semibold disabled:opacity-50">
+              {{ issueSaving ? '签发中…(最长 2 分钟)' : '立即签发' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
 </template>
 
 <script setup>
@@ -2087,6 +2138,35 @@ async function viewCompLogs(comp) {
 const currentCert = ref(null)
 const allCerts = ref([])
 const sslCerts = ref([])
+// ── Issue new SSL cert ──
+const showIssueModal = ref(false)
+const issueForm = ref({ domain: '', email: 'admin@hustle2026.xyz', auto_renew: true })
+const issueSaving = ref(false)
+const issueError = ref('')
+const issueResult = ref(null)
+
+async function submitIssueCert() {
+  issueError.value = ''
+  issueResult.value = null
+  if (!issueForm.value.domain || !issueForm.value.domain.includes('.')) {
+    issueError.value = '请填写合法域名'
+    return
+  }
+  issueSaving.value = true
+  try {
+    const r = await api.post('/api/v1/ssl/certificates/issue', {
+      domain: issueForm.value.domain.trim().toLowerCase(),
+      email: issueForm.value.email.trim(),
+      auto_renew: !!issueForm.value.auto_renew,
+    }, { timeout: 130000 })
+    issueResult.value = r.data
+    await loadCurrentCert()
+  } catch (e) {
+    issueError.value = e.response?.data?.detail || e.message
+  } finally {
+    issueSaving.value = false
+  }
+}
 
 function getCertStatusClass(s) {
   return { healthy: 'bg-[#0ecb81]/20 text-[#0ecb81]', warning: 'bg-[#f0b90b]/20 text-[#f0b90b]', critical: 'bg-[#f6465d]/20 text-[#f6465d]', expired: 'bg-[#f6465d]/20 text-[#f6465d]' }[s] || 'bg-dark-200 text-text-secondary'

@@ -33,11 +33,16 @@ def _get_redis():
 
 async def require_admin(db: AsyncSession = Depends(get_db),
                         user_id: str = Depends(get_current_user_id)) -> str:
-    row = (await db.execute(text("SELECT role FROM users WHERE user_id = CAST(:u AS UUID)"),
+    row = (await db.execute(text("SELECT role, openclaw_enabled FROM users WHERE user_id = CAST(:u AS UUID)"),
                             {'u': user_id})).first()
-    if not row or row[0] not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail='OpenCLAW 控制台仅限超级管理员/系统管理员访问')
-    return user_id
+    if not row:
+        raise HTTPException(status_code=403, detail='用户不存在')
+    role, openclaw_enabled = row[0], bool(row[1])
+    if role in ADMIN_ROLES:
+        return user_id
+    if openclaw_enabled:
+        return user_id
+    raise HTTPException(status_code=403, detail='OpenCLAW 控制台需管理员或 [智能体量化] 授权账户方可访问')
 
 
 # ───── Read ─────
@@ -46,12 +51,13 @@ async def require_admin(db: AsyncSession = Depends(get_db),
 async def whoami(db: AsyncSession = Depends(get_db),
                  user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
     """Lightweight check used by frontend route guard."""
-    row = (await db.execute(text("SELECT username, role FROM users WHERE user_id = CAST(:u AS UUID)"),
+    row = (await db.execute(text("SELECT username, role, openclaw_enabled FROM users WHERE user_id = CAST(:u AS UUID)"),
                             {'u': user_id})).first()
     if not row:
         raise HTTPException(status_code=404, detail='user_not_found')
+    is_admin = row[1] in ADMIN_ROLES or bool(row[2])
     return {'user_id': user_id, 'username': row[0], 'role': row[1],
-            'is_admin': row[1] in ADMIN_ROLES}
+            'openclaw_enabled': bool(row[2]), 'is_admin': is_admin}
 
 
 @router.get('/status')

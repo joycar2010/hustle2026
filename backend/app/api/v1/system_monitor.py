@@ -13,11 +13,28 @@ from app.core.security import get_current_user_id_optional
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Legacy fallback if DB unavailable
 SSL_DOMAINS = [
     "go.hustle2026.xyz",
     "admin.hustle2026.xyz",
     "www.hustle2026.xyz",
+    "auto.hustle2026.xyz",
 ]
+
+
+async def get_ssl_domains_from_db():
+    """Return active SSL domain list from ssl_certificates table, falling back to hardcoded list."""
+    try:
+        from app.core.database import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(_text(
+                "SELECT DISTINCT domain_name FROM ssl_certificates WHERE status = 'active' ORDER BY domain_name"
+            ))).all()
+        domains = [r[0] for r in rows]
+        return domains if domains else SSL_DOMAINS
+    except Exception:
+        return SSL_DOMAINS
 
 
 def check_redis_status() -> Dict[str, Any]:
@@ -181,7 +198,7 @@ async def get_system_status(
             "timestamp": datetime.utcnow().isoformat(),
             "redis": check_redis_status(),
             "feishu": check_feishu_status(),
-            "ssl_certificate": [check_ssl_cert(d) for d in SSL_DOMAINS],
+            "ssl_certificate": [check_ssl_cert(d) for d in (await get_ssl_domains_from_db())],
             "mt5_clients": check_mt5_clients(),
         }
     except Exception as e:
@@ -193,4 +210,5 @@ async def get_system_status(
 async def get_current_ssl_certificate(
     current_user_id: Optional[str] = Depends(get_current_user_id_optional)
 ):
-    return [check_ssl_cert(d) for d in SSL_DOMAINS]
+    domains = await get_ssl_domains_from_db()
+    return [check_ssl_cert(d) for d in domains]
