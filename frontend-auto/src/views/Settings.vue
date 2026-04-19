@@ -347,6 +347,11 @@ async function refresh() {
 }
 
 let timer
-onMounted(() => { refresh(); loadConfig(); timer = setInterval(refresh, 10000) })
+onMounted(() => {
+  refresh()
+  loadConfig()
+  loadTargets()                 // initial matrix population
+  timer = setInterval(() => { refresh(); loadTargets() }, 10000)
+})
 onUnmounted(() => clearInterval(timer))
 </script>

@@ -76,6 +76,275 @@ def _size_legs(notional_usdt: float, mark_price: float, conversion_factor: float
     return a_contracts, b_lots
 
 
+async def _settle_or_market_binance(
+    place_result: Dict[str, Any], account: Account, symbol: str,
+    side: str, position_side: str, quantity: float,
+    poll_s: float = 0.5, max_polls: int = 4,
+) -> Dict[str, Any]:
+    '''R2: ensure a Binance post-only LIMIT actually fills, else cancel + re-send MARKET.
+
+    Behavior:
+      1. If place_result status already FILLED -> return unchanged.
+      2. Poll get_order up to (poll_s * max_polls) seconds (default 2s).
+      3. Still not FILLED -> cancel + re-issue as MARKET.
+      4. Attach _r2_action field for audit.
+    '''
+    from app.services.binance_client import BinanceFuturesClient
+    from app.services.order_executor import order_executor
+    from app.core.proxy_utils import build_proxy_url
+
+    if not place_result or not place_result.get('success'):
+        return place_result
+    data = place_result.get('data') or {}
+    order_id = place_result.get('order_id') or data.get('orderId')
+    if data.get('status') == 'FILLED':
+        place_result['_r2_action'] = 'filled_immediate'
+        return place_result
+    if not order_id:
+        place_result['_r2_action'] = 'no_order_id'
+        return place_result
+
+    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                  proxy_url=build_proxy_url(account.proxy_config))
+    try:
+        for i in range(max_polls):
+            await asyncio.sleep(poll_s)
+            try:
+                status = await client.get_order(symbol, int(order_id))
+            except Exception as e:
+                logger.warning(f'[R2] get_order #{order_id} failed: {e}')
+                break
+            if status.get('status') == 'FILLED':
+                place_result['_r2_action'] = f'filled_after_{(i+1)*poll_s:.1f}s'
+                place_result['data'] = status
+                return place_result
+            if status.get('status') in ('CANCELED', 'REJECTED', 'EXPIRED'):
+                break
+
+        try:
+            await client.cancel_order(symbol, int(order_id))
+        except Exception as e:
+            logger.warning(f'[R2] cancel_order #{order_id} failed: {e}')
+            place_result['_r2_action'] = 'cancel_failed'
+            return place_result
+
+        try:
+            reissue = await order_executor.place_binance_order(
+                account=account, symbol=symbol, side=side, order_type='MARKET',
+                quantity=quantity, position_side=position_side, post_only=False,
+            )
+            reissue['_r2_action'] = 'reissued_market'
+            reissue['_r2_original_order_id'] = order_id
+            return reissue
+        except Exception as e:
+            logger.error(f'[R2] reissue market failed: {e}')
+            place_result['_r2_action'] = f'reissue_failed:{str(e)[:100]}'
+            return place_result
+    finally:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+
+# ═════════ A-leg platform-dispatched open adapters ═════════
+
+async def _open_a_binance(a_acc, a_sym, a_side, a_pos, a_qty, a_price):
+    from app.services.order_executor import order_executor
+    r = await order_executor.place_binance_order(
+        account=a_acc, symbol=a_sym, side=a_side, order_type='LIMIT',
+        quantity=a_qty, price=a_price, position_side=a_pos, post_only=True,
+    )
+    return await _settle_or_market_binance(r, a_acc, a_sym, a_side, a_pos, a_qty)
+
+
+async def _open_a_bybit_perp(a_acc, a_sym, a_side, a_qty, a_price,
+                              poll_s: float = 0.5, max_polls: int = 4):
+    '''Bybit v5 linear perpetual A-leg: PostOnly Limit + fall back to Market if not filled.'''
+    from app.services.bybit_client import BybitClient
+    from app.core.proxy_utils import build_proxy_url
+
+    client = BybitClient(a_acc.api_key, a_acc.api_secret,
+                         proxy_url=build_proxy_url(a_acc.proxy_config))
+    try:
+        bs = 'Buy' if a_side.upper() == 'BUY' else 'Sell'
+        try:
+            r = await client.place_order(
+                category='linear', symbol=a_sym, side=bs, order_type='Limit',
+                qty=str(a_qty), price=str(a_price), time_in_force='PostOnly',
+            )
+        except Exception as e:
+            return {'success': False, 'error': f'place_order:{e}'[:300]}
+
+        order_id = ((r.get('result') or {}).get('orderId')) if isinstance(r, dict) else None
+        if not order_id:
+            return {'success': False, 'error': f'no_order_id:{str(r)[:200]}', 'data': r}
+
+        for i in range(max_polls):
+            await asyncio.sleep(poll_s)
+            try:
+                q = await client.get_order(category='linear', symbol=a_sym, order_id=order_id)
+            except Exception as e:
+                logger.warning(f'[bybit_perp R2] get_order failed: {e}')
+                break
+            rows = (q.get('result') or {}).get('list') or []
+            if rows:
+                st = rows[0].get('orderStatus')
+                if st == 'Filled':
+                    return {'success': True, 'platform': 'bybit_perp', 'data': rows[0],
+                            '_r2_action': f'filled_after_{(i+1)*poll_s:.1f}s'}
+                if st in ('Cancelled', 'Rejected', 'Deactivated'):
+                    break
+
+        try:
+            await client.cancel_order(category='linear', symbol=a_sym, order_id=order_id)
+        except Exception:
+            pass
+        try:
+            mk = await client.place_order(
+                category='linear', symbol=a_sym, side=bs, order_type='Market',
+                qty=str(a_qty), time_in_force='IOC',
+            )
+            return {'success': True, 'platform': 'bybit_perp', 'data': mk,
+                    '_r2_action': 'reissued_market', '_r2_original_order_id': order_id}
+        except Exception as e:
+            return {'success': False, 'platform': 'bybit_perp',
+                    'error': f'reissue_market:{e}'[:300]}
+    finally:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+
+async def _open_a_gate(a_acc, a_sym, a_side, a_qty, a_price,
+                       poll_s: float = 0.5, max_polls: int = 4):
+    '''Gate v4 USDT-perp A-leg: PostOnly Limit + fallback to IOC market.'''
+    from app.services.gateio_client import GateioFuturesClient
+    from app.core.proxy_utils import build_proxy_url
+
+    contract = a_sym if '_' in a_sym else a_sym.replace('USDT', '_USDT')
+    # Gate size: positive=long, negative=short (contracts). int only.
+    size = max(1, int(a_qty))
+    if a_side.upper() == 'SELL':
+        size = -size
+
+    client = GateioFuturesClient(
+        api_key=a_acc.api_key, api_secret=a_acc.api_secret,
+        proxy_url=build_proxy_url(a_acc.proxy_config),
+    )
+    try:
+        try:
+            r = await client.place_order(
+                contract=contract, size=size, price=str(a_price), tif='poc',
+                reduce_only=False, text='t-openclaw-open',
+            )
+        except Exception as e:
+            return {'success': False, 'error': f'place_order:{e}'[:300]}
+
+        order_id = str((r or {}).get('id') or '') if isinstance(r, dict) else ''
+        # Gate may immediately reject PostOnly if it would cross — check status
+        init_status = (r or {}).get('status') if isinstance(r, dict) else None
+        if init_status == 'finished':
+            return {'success': True, 'platform': 'gateio', 'data': r,
+                    '_r2_action': 'filled_immediate'}
+
+        if order_id:
+            for i in range(max_polls):
+                await asyncio.sleep(poll_s)
+                try:
+                    q = await client._request('GET', f'/futures/{client.settle}/orders/{order_id}')
+                except Exception as e:
+                    logger.warning(f'[gate R2] get order failed: {e}')
+                    break
+                if q.get('status') == 'finished':
+                    return {'success': True, 'platform': 'gateio', 'data': q,
+                            '_r2_action': f'filled_after_{(i+1)*poll_s:.1f}s'}
+                if q.get('finish_as') in ('cancelled', 'reduce_only'):
+                    break
+
+            try:
+                await client.cancel_order(order_id)
+            except Exception:
+                pass
+
+        try:
+            mk = await client.place_order(
+                contract=contract, size=size, price=None, tif='ioc',
+                reduce_only=False, text='t-openclaw-mkt',
+            )
+            return {'success': True, 'platform': 'gateio', 'data': mk,
+                    '_r2_action': 'reissued_market', '_r2_original_order_id': order_id}
+        except Exception as e:
+            return {'success': False, 'platform': 'gateio',
+                    'error': f'reissue_market:{e}'[:300]}
+    finally:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+
+async def _dispatch_a_open(a_acc, a_sym, a_side, a_pos, a_qty, a_price):
+    '''Platform-dispatched A-leg open with R2 settler. Returns {success, _r2_action, ...}.'''
+    if a_acc.platform_id == 1:
+        return await _open_a_binance(a_acc, a_sym, a_side, a_pos, a_qty, a_price)
+    if a_acc.platform_id == 2 and not getattr(a_acc, 'is_mt5_account', False):
+        return await _open_a_bybit_perp(a_acc, a_sym, a_side, a_qty, a_price)
+    if a_acc.platform_id == 4:
+        return await _open_a_gate(a_acc, a_sym, a_side, a_qty, a_price)
+    return {'success': False, 'error': f'unsupported a_platform:{a_acc.platform_id} is_mt5={getattr(a_acc, "is_mt5_account", None)}'}
+
+
+async def _dispatch_a_reduce(a_acc, a_sym, side_indicator: str, qty: float):
+    '''Market reduce on A-leg, platform-dispatched. side_indicator: sell_long|buy_short.'''
+    from app.services.order_executor import order_executor
+    from app.core.proxy_utils import build_proxy_url
+
+    if a_acc.platform_id == 1:
+        side = 'SELL' if side_indicator == 'sell_long' else 'BUY'
+        pos = 'LONG' if side_indicator == 'sell_long' else 'SHORT'
+        return await order_executor.place_binance_order(
+            account=a_acc, symbol=a_sym, side=side, order_type='MARKET',
+            quantity=qty, position_side=pos,
+        )
+    if a_acc.platform_id == 2 and not getattr(a_acc, 'is_mt5_account', False):
+        from app.services.bybit_client import BybitClient
+        client = BybitClient(a_acc.api_key, a_acc.api_secret,
+                             proxy_url=build_proxy_url(a_acc.proxy_config))
+        try:
+            bs = 'Sell' if side_indicator == 'sell_long' else 'Buy'
+            return await client.place_order(
+                category='linear', symbol=a_sym, side=bs, order_type='Market',
+                qty=str(qty), time_in_force='IOC', reduce_only=True,
+            )
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
+    if a_acc.platform_id == 4:
+        from app.services.gateio_client import GateioFuturesClient
+        client = GateioFuturesClient(
+            api_key=a_acc.api_key, api_secret=a_acc.api_secret,
+            proxy_url=build_proxy_url(a_acc.proxy_config),
+        )
+        try:
+            contract = a_sym if '_' in a_sym else a_sym.replace('USDT', '_USDT')
+            size = -int(qty) if side_indicator == 'sell_long' else int(qty)
+            r = await client.place_order(
+                contract=contract, size=size, price=None, tif='ioc',
+                reduce_only=True, text='t-openclaw-reduce',
+            )
+            return {'success': True, 'platform': 'gateio', 'data': r}
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
+    return {'success': False, 'error': f'unsupported a_platform:{a_acc.platform_id}'}
+
+
 async def _place_pair_open(
     a_account: Account, b_account: Account, direction: str,
     a_qty: float, b_qty: float, a_price: float,
@@ -93,67 +362,199 @@ async def _place_pair_open(
     else:
         a_side, a_pos, b_side = 'SELL', 'SHORT', 'Buy'
 
-    a_task = order_executor.place_binance_order(
-        account=a_account, symbol=a_symbol, side=a_side, order_type='LIMIT',
-        quantity=a_qty, price=a_price, position_side=a_pos, post_only=True,
-    )
+    async def _a_then_settle():
+        # Platform-dispatched A-leg open (Binance / Bybit-perp / Gate) with
+        # per-platform R2 settle-or-market fallback built in.
+        return await _dispatch_a_open(
+            a_account, a_symbol, a_side, a_pos, a_qty, a_price,
+        )
+
     b_task = order_executor.place_bybit_order(
         account=b_account, symbol=b_symbol, side=b_side, order_type='Market',
         quantity=str(b_qty), category='linear',
     )
-    results = await asyncio.gather(a_task, b_task, return_exceptions=True)
+    results = await asyncio.gather(_a_then_settle(), b_task, return_exceptions=True)
+    a_r, b_r = results[0], results[1]
+    a_ok = not isinstance(a_r, Exception) and (a_r or {}).get('success') is not False
+    b_ok = not isinstance(b_r, Exception) and (b_r or {}).get('success') is not False
+    unwind = None
+    if a_ok and not b_ok:
+        unwind = await _emergency_unwind('a', a_account, a_symbol, a_qty, a_side)
+    elif b_ok and not a_ok:
+        unwind = await _emergency_unwind('b', b_account, b_symbol, b_qty, b_side)
     return {
-        'a_result': str(results[0])[:500],
-        'b_result': str(results[1])[:500],
-        'a_ok': not isinstance(results[0], Exception),
-        'b_ok': not isinstance(results[1], Exception),
+        'a_result': str(a_r)[:500],
+        'b_result': str(b_r)[:500],
+        'a_ok': a_ok,
+        'b_ok': b_ok,
+        'a_r2': (a_r or {}).get('_r2_action') if isinstance(a_r, dict) else None,
+        'r1_unwind': unwind,
     }
+
+
+async def _close_a_leg(account: Account, symbol: str, side_to_close: str) -> Dict[str, Any]:
+    '''Platform-dispatched A-leg close. Returns {success, status, platform, error?}.
+
+    D2 fix: pre-OpenCLAW code hardcoded Binance. Now routes by account.platform_id:
+      - 1 (Binance futures)   -> BinanceFuturesClient + place_binance_order MARKET
+      - 4 (Gate futures)      -> GateioFuturesClient + place_order tif=ioc reduce_only=True
+      - 2 (Bybit perpetual)   -> NotImplementedError (add when BXAU target activated)
+    '''
+    from app.services.order_executor import order_executor
+    from app.core.proxy_utils import build_proxy_url
+
+    a_closing_side = 'SELL' if side_to_close == 'long' else 'BUY'  # Binance
+    a_pos_side = 'LONG' if side_to_close == 'long' else 'SHORT'
+
+    if account.platform_id == 1:
+        from app.services.binance_client import BinanceFuturesClient
+        client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                      proxy_url=build_proxy_url(account.proxy_config))
+        try:
+            positions = await client.get_positions(symbol=symbol)
+            for pos in positions:
+                if pos.get('positionSide') == a_pos_side and abs(float(pos.get('positionAmt', 0))) > 0:
+                    amt = abs(float(pos['positionAmt']))
+                    r = await order_executor.place_binance_order(
+                        account=account, symbol=symbol, side=a_closing_side,
+                        order_type='MARKET', quantity=amt, position_side=a_pos_side,
+                    )
+                    return {**r, 'platform': 'binance'}
+            return {'success': True, 'status': 'no_position', 'platform': 'binance'}
+        finally:
+            await client.close()
+
+    if account.platform_id == 4:
+        from app.services.gateio_client import GateioFuturesClient
+        client = GateioFuturesClient(
+            api_key=account.api_key, api_secret=account.api_secret,
+            proxy_url=build_proxy_url(account.proxy_config),
+        )
+        try:
+            contract = symbol if '_' in symbol else symbol.replace('USDT', '_USDT')
+            positions = await client.get_positions(contract)
+            for pos in positions:
+                size = int(pos.get('size', 0))
+                if size == 0:
+                    continue
+                if (side_to_close == 'long' and size > 0) or (side_to_close == 'short' and size < 0):
+                    r = await client.place_order(
+                        contract=contract, size=-size, price=None, tif='ioc',
+                        reduce_only=True, text='t-openclaw-close',
+                    )
+                    return {'success': True, 'status': 'closed', 'platform': 'gateio', 'data': r}
+            return {'success': True, 'status': 'no_position', 'platform': 'gateio'}
+        finally:
+            await client.close()
+
+    # Bybit v5 perpetual (non-MT5) — e.g. BXAU target
+    if account.platform_id == 2 and not getattr(account, 'is_mt5_account', False):
+        from app.services.bybit_client import BybitClient
+        client = BybitClient(account.api_key, account.api_secret,
+                             proxy_url=build_proxy_url(account.proxy_config))
+        try:
+            pos_resp = await client.get_positions(category='linear', symbol=symbol)
+            rows = (pos_resp.get('result') or {}).get('list') or []
+            for pos in rows:
+                size = float(pos.get('size', 0) or 0)
+                if size == 0:
+                    continue
+                pos_side = (pos.get('side') or '').lower()  # 'Buy'/'Sell'/'None' (hedge mode)
+                want_long = side_to_close == 'long'
+                if (want_long and pos_side == 'buy') or (not want_long and pos_side == 'sell'):
+                    opposite = 'Sell' if want_long else 'Buy'
+                    r = await client.place_order(
+                        category='linear', symbol=symbol, side=opposite,
+                        order_type='Market', qty=str(size), time_in_force='IOC',
+                        reduce_only=True,
+                    )
+                    return {'success': True, 'status': 'closed', 'platform': 'bybit_perp', 'data': r}
+            return {'success': True, 'status': 'no_position', 'platform': 'bybit_perp'}
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+    return {'success': False, 'error': f'unsupported a_platform:{account.platform_id} is_mt5={getattr(account, "is_mt5_account", None)}',
+            'platform': 'unknown'}
 
 
 async def _place_pair_close(
     a_account: Account, b_account: Account, side_to_close: str,
+    a_symbol: str = A_SYMBOL, b_symbol: str = B_SYMBOL,
 ) -> Dict[str, Any]:
-    """Close positions on both legs. side_to_close='long' or 'short' refers to A leg.
-    B leg position is the opposite side.
-    """
+    '''Close both legs simultaneously with platform-dispatched A-side.'''
     from app.services.order_executor import order_executor
-    from app.services.binance_client import BinanceFuturesClient
-    from app.core.proxy_utils import build_proxy_url
 
-    # A leg: close via market (opposite side, reduceOnly equivalent)
-    a_pos_side = 'LONG' if side_to_close == 'long' else 'SHORT'
-    a_closing_side = 'SELL' if side_to_close == 'long' else 'BUY'
+    # B leg opposite of A side: if A was LONG (B hedged SHORT), close B by BUYing
+    b_close_side = 'Buy' if side_to_close == 'long' else 'Sell'
 
-    async def _close_a():
-        client = BinanceFuturesClient(a_account.api_key, a_account.api_secret,
-                                       proxy_url=build_proxy_url(a_account.proxy_config))
-        try:
-            positions = await client.get_positions(symbol=A_SYMBOL)
-            for p in positions:
-                if p.get('positionSide') == a_pos_side and abs(float(p.get('positionAmt', 0))) > 0:
-                    amt = abs(float(p['positionAmt']))
-                    return await order_executor.place_binance_order(
-                        account=a_account, symbol=A_SYMBOL, side=a_closing_side,
-                        order_type='MARKET', quantity=amt, position_side=a_pos_side,
-                    )
-            return {'status': 'no_position'}
-        finally:
-            await client.close()
-
-    # B leg: opposite of A → if A was LONG (hedge was SHORT on B), closing A LONG means also closing B SHORT
-    b_close_side = 'Buy' if side_to_close == 'long' else 'Sell'  # opposite of opening side
     async def _close_b():
         return await order_executor.place_bybit_order(
-            account=b_account, symbol=B_SYMBOL, side=b_close_side, order_type='Market',
+            account=b_account, symbol=b_symbol, side=b_close_side, order_type='Market',
             quantity='0', category='linear', close_position=True,
         )
 
-    results = await asyncio.gather(_close_a(), _close_b(), return_exceptions=True)
+    results = await asyncio.gather(
+        _close_a_leg(a_account, a_symbol, side_to_close),
+        _close_b(),
+        return_exceptions=True,
+    )
+    a_r, b_r = results[0], results[1]
+    a_ok = not isinstance(a_r, Exception) and (a_r or {}).get('success') is not False
+    b_ok = not isinstance(b_r, Exception) and (b_r or {}).get('success') is not False
     return {
-        'a_result': str(results[0])[:500], 'b_result': str(results[1])[:500],
-        'a_ok': not isinstance(results[0], Exception),
-        'b_ok': not isinstance(results[1], Exception),
+        'a_result': str(a_r)[:500], 'b_result': str(b_r)[:500],
+        'a_ok': a_ok, 'b_ok': b_ok,
     }
+
+
+async def _emergency_unwind(
+    succeeded_leg: str, account: Account, symbol: str,
+    filled_qty: float, original_side: str,
+) -> Dict[str, Any]:
+    '''R1: when one leg fills but the other fails, immediately reverse-market
+    the succeeded leg to avoid naked directional exposure.
+
+    original_side: 'BUY'/'SELL' on A, or 'Buy'/'Sell' on B.
+    '''
+    from app.services.order_executor import order_executor
+
+    try:
+        if succeeded_leg == 'a':
+            # Binance: opposite side MARKET close
+            opposite = 'SELL' if original_side.upper() == 'BUY' else 'BUY'
+            pos_side = 'LONG' if original_side.upper() == 'BUY' else 'SHORT'
+            r = await order_executor.place_binance_order(
+                account=account, symbol=symbol, side=opposite,
+                order_type='MARKET', quantity=filled_qty, position_side=pos_side,
+            )
+            return {'unwound': True, 'leg': 'a', 'result': str(r)[:400]}
+        else:  # b
+            opposite = 'Sell' if original_side.lower() == 'buy' else 'Buy'
+            r = await order_executor.place_bybit_order(
+                account=account, symbol=symbol, side=opposite,
+                order_type='Market', quantity=str(filled_qty),
+                category='linear', close_position=True,
+            )
+            return {'unwound': True, 'leg': 'b', 'result': str(r)[:400]}
+    except Exception as e:
+        logger.error(f'[R1] emergency unwind {succeeded_leg} failed: {e}')
+        return {'unwound': False, 'leg': succeeded_leg, 'error': str(e)[:400]}
+
+
+async def _is_killed_fresh(db: AsyncSession) -> bool:
+    '''R3: tight kill re-check called right before asyncio.gather.
+
+    Goes straight to DB (single row, indexed PK) — ~5-15 ms. Acceptable overhead
+    since it's called once per order batch, not per tick.
+    '''
+    row = (await db.execute(text(
+        'SELECT kill_switch FROM agent_state WHERE id = 1'
+    ))).first()
+    return bool(row and row[0])
+
 
 
 async def execute_proposal(db: AsyncSession, decision_id: int, proposal: Proposal, ctx=None) -> Dict[str, Any]:
@@ -191,41 +592,48 @@ async def execute_proposal(db: AsyncSession, decision_id: int, proposal: Proposa
         if not a_acc or not b_acc:
             return {'ok': False, 'reason': f'account_not_found_for_scope:{ctx.label if ctx else "default"}'}
 
-        spread = await fetch_spread()
+        pair_code = ctx.pair_code if ctx else 'XAU'
+        spread = await fetch_spread(pair_code)
+        # Take A-side quote from whichever exchange the pair routes to
         a_price = (spread or {}).get('binance_quote', {}).get('ask_price')
         if not a_price:
-            return {'ok': False, 'reason': 'cannot_fetch_a_price'}
+            return {'ok': False, 'reason': f'cannot_fetch_a_price for {pair_code}'}
 
         a_qty, b_qty = _size_legs(proposal.qty, float(a_price), conv)
 
         t0 = time.time()
+        # R3: tight kill re-check just before dispatch (closes ~500ms race window)
+        if await _is_killed_fresh(db):
+            return {'ok': False, 'reason': 'kill_switch_on_at_dispatch'}
         if proposal.action == 'open_long':
             exec_result = await _place_pair_open(a_acc, b_acc, 'long', a_qty, b_qty, float(a_price), a_sym, b_sym)
         elif proposal.action == 'open_short':
             exec_result = await _place_pair_open(a_acc, b_acc, 'short', a_qty, b_qty, float(a_price), a_sym, b_sym)
         elif proposal.action == 'close_long':
-            exec_result = await _place_pair_close(a_acc, b_acc, 'long')
+            exec_result = await _place_pair_close(a_acc, b_acc, 'long', a_sym, b_sym)
         elif proposal.action == 'close_short':
-            exec_result = await _place_pair_close(a_acc, b_acc, 'short')
+            exec_result = await _place_pair_close(a_acc, b_acc, 'short', a_sym, b_sym)
         elif proposal.action == 'rebalance':
-            # Caller should have set leg to the missing one; only place the single side
+            from app.services.order_executor import order_executor
             if proposal.leg == 'a':
-                from app.services.order_executor import order_executor
                 side = 'BUY' if proposal.qty > 0 else 'SELL'
                 pos = 'LONG' if proposal.qty > 0 else 'SHORT'
-                r = await order_executor.place_binance_order(
-                    account=a_acc, symbol=A_SYMBOL, side=side, order_type='LIMIT',
-                    quantity=a_qty, price=float(a_price), position_side=pos, post_only=True,
-                )
-                exec_result = {'a_result': str(r)[:500], 'a_ok': True, 'b_result': 'skipped', 'b_ok': True}
+                r = await _dispatch_a_open(a_acc, a_sym, side, pos, a_qty, float(a_price))
+                exec_result = {
+                    'a_result': str(r)[:500],
+                    'a_ok': bool(r and r.get('success') is not False),
+                    'b_result': 'skipped', 'b_ok': True,
+                    'a_r2': (r or {}).get('_r2_action') if isinstance(r, dict) else None,
+                }
             elif proposal.leg == 'b':
-                from app.services.order_executor import order_executor
                 side = 'Buy' if proposal.qty > 0 else 'Sell'
                 r = await order_executor.place_bybit_order(
-                    account=b_acc, symbol=B_SYMBOL, side=side, order_type='Market',
+                    account=b_acc, symbol=b_sym, side=side, order_type='Market',
                     quantity=str(b_qty), category='linear',
                 )
-                exec_result = {'b_result': str(r)[:500], 'b_ok': True, 'a_result': 'skipped', 'a_ok': True}
+                exec_result = {'b_result': str(r)[:500],
+                               'b_ok': bool(r and r.get('success') is not False),
+                               'a_result': 'skipped', 'a_ok': True}
             else:
                 return {'ok': False, 'reason': 'rebalance_requires_single_leg'}
         else:
@@ -252,6 +660,18 @@ async def execute_proposal(db: AsyncSession, decision_id: int, proposal: Proposa
                                               'a_price': float(a_price), 'overall_ok': overall_ok}),
               'id': decision_id})
         await db.commit()
+
+        # R6: force invalidate account_data_service cache so next Guard tick sees
+        # fresh positions. Without this, 60s stale cache masks new positions ->
+        # Guard thinks total_position_cap still has headroom -> runaway double-trade.
+        if overall_ok:
+            try:
+                from app.services.account_service import account_data_service
+                account_data_service.invalidate_cache(str(a_acc.account_id))
+                account_data_service.invalidate_cache(str(b_acc.account_id))
+                logger.info(f'[R6] cache invalidated {a_acc.account_id} {b_acc.account_id}')
+            except Exception as e:
+                logger.warning(f'[R6] cache invalidate failed (non-fatal): {e}')
 
         return {'ok': overall_ok, 'exec': exec_result, 'elapsed_ms': elapsed_ms,
                 'a_qty': a_qty, 'b_qty': b_qty}

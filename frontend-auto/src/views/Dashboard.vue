@@ -107,6 +107,7 @@
         <thead class="text-text-tertiary">
           <tr class="text-left">
             <th class="py-1">时间</th>
+            <th>目标</th>
             <th>触发</th>
             <th>动作</th>
             <th>数量</th>
@@ -118,6 +119,11 @@
         <tbody>
           <tr v-for="d in decisions.slice(0, 10)" :key="d.id" class="border-t border-border-primary hover:bg-dark-200">
             <td class="py-1.5 font-mono text-text-tertiary">{{ fmtTime(d.created_at) }}</td>
+            <td class="text-[11px]">
+              <span v-if="d.username" class="font-semibold text-text-secondary">{{ d.username }}</span>
+              <span v-if="d.pair_code" class="font-mono text-primary">/{{ d.pair_code }}</span>
+              <span v-if="!d.username && !d.pair_code" class="text-text-tertiary">—</span>
+            </td>
             <td class="text-text-secondary">{{ d.trigger }}</td>
             <td><span class="font-mono" :class="actionColor(d.action)">{{ d.action }}</span></td>
             <td class="font-mono">{{ d.qty }}</td>
@@ -125,7 +131,7 @@
               <span class="px-1.5 py-0.5 rounded text-[10px]" :class="verdictBadge(d.verdict)">{{ d.verdict }}</span>
             </td>
             <td class="font-mono text-text-tertiary">{{ (d.tokens_in||0)+(d.tokens_out||0) }} / {{ d.latency_ms }}</td>
-            <td class="text-text-secondary truncate max-w-[280px]" :title="d.reject_reason || d.reason">
+            <td class="text-text-secondary truncate max-w-[240px]" :title="d.reject_reason || d.reason">
               {{ d.reject_reason || d.reason }}
             </td>
           </tr>

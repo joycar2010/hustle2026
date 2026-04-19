@@ -498,30 +498,79 @@ async def toggle_scope_target(target_id: int, req: ToggleReq,
 @router.post('/decisions/{decision_id}/approve')
 async def approve_decision(decision_id: int, db: AsyncSession = Depends(get_db),
                            user_id: str = Depends(require_admin)) -> Dict[str, Any]:
-    row = (await db.execute(text("""
-        SELECT verdict, proposal FROM agent_decisions WHERE id = :id
-    """), {'id': decision_id})).first()
+    """Approve a pending decision — re-validates Guard against CURRENT market state
+    (not the stale snapshot from when the proposal was generated minutes ago) and
+    threads the originating target's ScopeContext all the way through executor.
+
+    Guards against the common failure mode where an operator pauses, market moves,
+    and a proposal that was safe 3 minutes ago now violates caps.
+    """
+    row = (await db.execute(text(
+        "SELECT verdict, proposal, scope_target_id FROM agent_decisions WHERE id = :id"
+    ), {'id': decision_id})).first()
     if not row:
         raise HTTPException(status_code=404, detail='decision not found')
     if row[0] != 'pending':
         raise HTTPException(status_code=400, detail=f'decision is {row[0]}, not pending')
 
-    from app.services.agent.guard import Proposal
+    from app.services.agent.guard import Proposal, run_guard
     from app.services.agent.executor import execute_proposal
+    from app.services.agent.market_snapshot import build_snapshot
+    from app.services.agent.scope import list_target_rows, resolve_target
+
     pj = row[1] or {}
-    p = Proposal(
+    scope_target_id = row[2]
+
+    proposal = Proposal(
         action=pj.get('action', 'noop'), leg=pj.get('leg', 'both'),
         qty=float(pj.get('qty', 0)), reason=pj.get('reason', ''),
         trigger=pj.get('trigger', ''), confidence=float(pj.get('confidence', 0)),
         is_rebalance_补腿=bool(pj.get('is_rebalance_补腿', False)),
     )
-    exec_res = await execute_proposal(db, decision_id, p)
+
+    # Resolve scope context from the original decision's target
+    ctx = None
+    if scope_target_id is not None:
+        rows = await list_target_rows(db, enabled_only=False)
+        trow = next((r for r in rows if r['id'] == scope_target_id), None)
+        if trow is None:
+            raise HTTPException(status_code=400, detail=f'目标 #{scope_target_id} 已被删除，无法执行')
+        if not trow['enabled']:
+            raise HTTPException(status_code=400, detail=f'目标 #{scope_target_id} 已禁用，无法执行')
+        ctx = await resolve_target(db, trow, force=True)
+        if ctx is None:
+            raise HTTPException(status_code=400, detail=f'目标 #{scope_target_id} scope 解析失败')
+
+    # Re-run Guard against fresh market snapshot — protects against time decay
+    fresh_snap = await build_snapshot(db, ctx)
+    if fresh_snap is None:
+        raise HTTPException(status_code=503, detail='市场快照构建失败（Go 行情不可达？）')
+    cfg = await config_loader.load_config(db, target_id=ctx.target_id if ctx else None)
+    g = run_guard(proposal, fresh_snap, cfg)
+    if not g.ok:
+        reason = 'approve_revalidate_failed: ' + ';'.join(g.violations)
+        await db.execute(text(
+            "UPDATE agent_decisions SET verdict='rejected', reject_reason=:rr WHERE id=:id"
+        ), {'rr': reason, 'id': decision_id})
+        await db.commit()
+        raise HTTPException(status_code=409, detail=f'重检拒绝: {reason}')
+
+    exec_res = await execute_proposal(db, decision_id, proposal, ctx=ctx)
     verdict = 'executed' if exec_res.get('ok') else 'rejected'
-    await db.execute(text("""
-        UPDATE agent_decisions SET verdict = :v, reject_reason = :rr WHERE id = :id
-    """), {'v': verdict, 'rr': None if exec_res.get('ok') else exec_res.get('reason'), 'id': decision_id})
+    await db.execute(text(
+        "UPDATE agent_decisions SET verdict=:v, reject_reason=:rr WHERE id=:id"
+    ), {'v': verdict, 'rr': None if exec_res.get('ok') else exec_res.get('reason'),
+        'id': decision_id})
     await db.commit()
-    return {'ok': exec_res.get('ok'), 'verdict': verdict, 'exec': exec_res, 'approved_by': user_id}
+
+    return {
+        'ok': exec_res.get('ok'),
+        'verdict': verdict,
+        'exec': exec_res,
+        'approved_by': user_id,
+        'scope': ctx.label if ctx else 'legacy',
+        'revalidated': True,
+    }
 
 
 @router.post('/decisions/{decision_id}/reject')

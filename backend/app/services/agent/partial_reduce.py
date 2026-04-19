@@ -1,26 +1,26 @@
-"""Smart partial position reduction.
+"""D4 (partial_reduce): accept ctx, use ctx.a_symbol/b_symbol + platform dispatch for A leg.
 
-Used by equity_fsm forced reduce: cut open positions by reduce_pct,
-chunked into N market orders spaced chunk_interval seconds apart, on BOTH
-legs simultaneously (preserve market-neutral hedge).
-
-Direction inferred from current net positions:
-  a_size > 0 (LONG)  → SELL on A, BUY on B (B was hedged short)
-  a_size < 0 (SHORT) → BUY on A, SELL on B
-If a_size == 0 (flat A) but b_size != 0 → close only B to fully exit hedge.
-
-Logs each chunk to agent_decisions with trigger='forced_reduce_chunk'.
+If ctx is None, falls back to legacy scan (best-effort on first enabled target).
 """
 import asyncio
 import logging
 import time
-import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+
+async def _noop():
+    return {'status': 'skipped'}
+
+
+async def _place_a_reduce_chunk(a_acc, a_symbol, side_indicator: str, qty: float) -> Dict[str, Any]:
+    """Delegates to executor._dispatch_a_reduce for platform-aware reduce."""
+    from app.services.agent.executor import _dispatch_a_reduce
+    return await _dispatch_a_reduce(a_acc, a_symbol, side_indicator, qty)
 
 
 async def execute_partial_reduce(
@@ -29,54 +29,56 @@ async def execute_partial_reduce(
     reduce_pct: float = 0.30,
     chunks: int = 5,
     chunk_interval_s: float = 30.0,
+    ctx=None,
 ) -> Dict[str, Any]:
-    """Reduce current XAU positions by reduce_pct over N chunks @ chunk_interval_s spacing."""
+    """D4: reduce current positions by reduce_pct over N chunks with platform-aware A-leg."""
     from app.services.agent.market_snapshot import collect_xau_positions_and_equity, fetch_conversion_factor
-    from app.services.agent.executor import _resolve_accounts, A_SYMBOL, B_SYMBOL
     from app.services.order_executor import order_executor
     from app.services.agent.feishu_broadcast import broadcast
+    from app.services.agent.scope import list_active_contexts, resolve_a_b_accounts
 
-    a_acc, b_acc = await _resolve_accounts(db)
+    # Resolve ctx if not given — pick first enabled target (best-effort)
+    if ctx is None:
+        ctxs = await list_active_contexts(db)
+        ctx = ctxs[0] if ctxs else None
+    if ctx is None:
+        return {'ok': False, 'reason': 'no_active_scope_target'}
+
+    a_acc, b_acc = await resolve_a_b_accounts(db, ctx)
     if not a_acc or not b_acc:
-        return {'ok': False, 'reason': 'account_not_found'}
+        return {'ok': False, 'reason': f'account_not_found_for_scope:{ctx.label}'}
 
-    eq = await collect_xau_positions_and_equity(db)
+    eq = await collect_xau_positions_and_equity(db, ctx)
     a_size, b_size = eq['a_size'], eq['b_size']
-    conv = await fetch_conversion_factor(db)
+    conv = ctx.conversion_factor
+    a_symbol, b_symbol = ctx.a_symbol, ctx.b_symbol
 
     if abs(a_size) < 0.01 and abs(b_size) < 0.01:
         return {'ok': True, 'reason': 'no_position_nothing_to_reduce'}
 
-    # Total reduction targets
     a_target_total = abs(a_size) * reduce_pct
     b_target_total = abs(b_size) * reduce_pct
-    a_per_chunk = round(a_target_total / chunks, 2)
-    b_per_chunk = round(b_target_total / chunks, 2)
-    if a_per_chunk < 0.01 and b_per_chunk < 0.01:
-        return {'ok': False, 'reason': f'chunk_size_below_min:a={a_per_chunk},b={b_per_chunk}'}
-    a_per_chunk = max(0.01, a_per_chunk)
-    b_per_chunk = max(0.01, b_per_chunk)
+    a_per_chunk = max(0.01, round(a_target_total / chunks, 2))
+    b_per_chunk = max(0.01, round(b_target_total / chunks, 2))
 
-    # Direction: opposite of current net side
-    a_side, a_pos_side = ('SELL', 'LONG') if a_size > 0 else ('BUY', 'SHORT')
-    b_side = 'Buy' if b_size > 0 else 'Sell'  # opposite to close
+    # Direction indicators
+    a_indicator = 'sell_long' if a_size > 0 else 'buy_short'
+    b_side = 'Buy' if b_size > 0 else 'Sell'  # opposite to close B
 
     logger.warning(
-        f'[partial_reduce] start parent={parent_decision_id} pct={reduce_pct} '
-        f'chunks={chunks} a_per={a_per_chunk} b_per={b_per_chunk}'
+        f'[partial_reduce] start parent={parent_decision_id} scope={ctx.label} '
+        f'pct={reduce_pct} chunks={chunks} a_per={a_per_chunk} b_per={b_per_chunk}'
     )
 
     chunk_results: List[Dict[str, Any]] = []
     for i in range(chunks):
         t0 = time.time()
-        a_task = order_executor.place_binance_order(
-            account=a_acc, symbol=A_SYMBOL, side=a_side, order_type='MARKET',
-            quantity=a_per_chunk, position_side=a_pos_side,
-        ) if abs(a_size) >= 0.01 else _noop()
-        b_task = order_executor.place_bybit_order(
-            account=b_acc, symbol=B_SYMBOL, side=b_side, order_type='Market',
-            quantity=str(b_per_chunk), category='linear', close_position=False,
-        ) if abs(b_size) >= 0.01 else _noop()
+        a_task = (_place_a_reduce_chunk(a_acc, a_symbol, a_indicator, a_per_chunk)
+                  if abs(a_size) >= 0.01 else _noop())
+        b_task = (order_executor.place_bybit_order(
+                      account=b_acc, symbol=b_symbol, side=b_side, order_type='Market',
+                      quantity=str(b_per_chunk), category='linear', close_position=False)
+                  if abs(b_size) >= 0.01 else _noop())
 
         results = await asyncio.gather(a_task, b_task, return_exceptions=True)
         chunk = {
@@ -87,15 +89,20 @@ async def execute_partial_reduce(
         }
         chunk_results.append(chunk)
 
-        # Per-chunk audit row
         await db.execute(text("""
-            INSERT INTO agent_decisions (trigger, market_snapshot, proposal, verdict, reject_reason)
-            VALUES ('forced_reduce_chunk', '{}', CAST(:p AS JSONB), 'executed', :rr)
+            INSERT INTO agent_decisions
+              (trigger, market_snapshot, proposal, verdict, reject_reason,
+               scope_user_id, scope_pair_code, scope_target_id)
+            VALUES ('forced_reduce_chunk', '{}', CAST(:p AS JSONB), 'executed', :rr,
+                    CAST(:su AS UUID), :sp, :st)
         """), {
-            'p': __import__('json').dumps({'parent_decision_id': parent_decision_id,
-                                           'chunk': i + 1, 'a_qty': a_per_chunk,
-                                           'b_qty': b_per_chunk}),
-            'rr': f'parent={parent_decision_id};chunk={i+1}/{chunks}',
+            'p': __import__('json').dumps({
+                'parent_decision_id': parent_decision_id,
+                'chunk': i + 1, 'a_qty': a_per_chunk, 'b_qty': b_per_chunk,
+                'scope': ctx.label,
+            }),
+            'rr': f'parent={parent_decision_id};chunk={i+1}/{chunks};scope={ctx.label}',
+            'su': ctx.user_id, 'sp': ctx.pair_code, 'st': ctx.target_id,
         })
         await db.commit()
 
@@ -107,17 +114,22 @@ async def execute_partial_reduce(
 
     await broadcast(
         db, level='warn', category='partial_reduce_done',
-        message=f'分批减仓完成 | 减幅 {reduce_pct*100:.0f}% | A: {a_ok_count}/{chunks} 成功 | B: {b_ok_count}/{chunks} 成功',
-        payload={'parent_decision_id': parent_decision_id, 'chunks': chunk_results},
+        message=f'[{ctx.label}] 分批减仓完成 | 减幅 {reduce_pct*100:.0f}% | A: {a_ok_count}/{chunks} | B: {b_ok_count}/{chunks}',
+        payload={'parent_decision_id': parent_decision_id, 'scope': ctx.label, 'chunks': chunk_results},
     )
+
+    # R6: invalidate account cache so next Guard tick sees reduced positions
+    try:
+        from app.services.account_service import account_data_service
+        account_data_service.invalidate_cache(str(a_acc.account_id))
+        account_data_service.invalidate_cache(str(b_acc.account_id))
+    except Exception:
+        pass
 
     return {
         'ok': a_ok_count + b_ok_count > 0,
         'chunks': chunk_results,
         'a_ok_count': a_ok_count, 'b_ok_count': b_ok_count,
         'reduce_pct': reduce_pct,
+        'scope': ctx.label,
     }
-
-
-async def _noop():
-    return {'status': 'skipped'}

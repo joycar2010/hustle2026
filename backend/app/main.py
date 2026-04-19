@@ -231,12 +231,14 @@ async def lifespan(app: FastAPI):
         from app.services.agent import strategy_reviewer as openclaw_reviewer
         from app.services.agent import no_profit_monitor as openclaw_npm
         from app.services.agent import balance_monitor as openclaw_bm
+        from app.services.agent import leg_monitor as openclaw_legs
         openclaw_loop.start()
         openclaw_fsm.start()
         openclaw_npm.start()
         openclaw_bm.start()
         openclaw_reviewer.start()
-        logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer scheduled')
+        openclaw_legs.start()
+        logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer + leg_monitor scheduled')
     except Exception as e:
         logger.error(f'[OpenCLAW] failed to start agent: {e}')
 
@@ -258,11 +260,13 @@ async def lifespan(app: FastAPI):
         from app.services.agent import strategy_reviewer as openclaw_reviewer
         from app.services.agent import no_profit_monitor as openclaw_npm
         from app.services.agent import balance_monitor as openclaw_bm
+        from app.services.agent import leg_monitor as openclaw_legs
         await openclaw_loop.stop()
         await openclaw_fsm.stop()
         await openclaw_reviewer.stop()
         await openclaw_npm.stop()
         await openclaw_bm.stop()
+        await openclaw_legs.stop()
     except Exception as e:
         logger.error(f'[OpenCLAW] stop error: {e}')
 

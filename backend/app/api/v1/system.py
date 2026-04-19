@@ -47,14 +47,17 @@ REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..",
 FRONTEND_ADMIN_DIR = "/home/ubuntu/hustle2026/frontend-admin"
 FRONTEND_GO_DIR = "/home/ubuntu/hustle2026/frontend-go"
 FRONTEND_WWW_DIR = "/home/ubuntu/hustle2026/frontend-www"
+FRONTEND_AUTO_DIR = "/home/ubuntu/hustle2026/frontend-auto"
 
 # Nginx deploy targets = each project's own dist/
 NGINX_ADMIN_DIST = os.path.join(FRONTEND_ADMIN_DIR, "dist")
 NGINX_GO_DIST = os.path.join(FRONTEND_GO_DIR, "dist")
+NGINX_AUTO_DIST = os.path.join(FRONTEND_AUTO_DIR, "dist")
 
 # Build output = same as deploy (each project builds into its own dist/)
 BUILD_ADMIN_DIST = NGINX_ADMIN_DIST
 BUILD_GO_DIST = NGINX_GO_DIST
+BUILD_AUTO_DIST = NGINX_AUTO_DIST
 
 
 def _run(cmd: List[str], cwd: Optional[str] = None, timeout: int = 600) -> subprocess.CompletedProcess:
@@ -106,6 +109,11 @@ def _build_frontend() -> Dict[str, str]:
         _run(["npx", "vite", "build"], cwd=FRONTEND_WWW_DIR, timeout=600)
         results["www_dist"] = os.path.join(FRONTEND_WWW_DIR, "dist")
 
+    # Build auto (OpenCLAW control panel) — P0 fix: was missing from push/rollback
+    if os.path.isdir(FRONTEND_AUTO_DIR):
+        _run(["npx", "vite", "build"], cwd=FRONTEND_AUTO_DIR, timeout=600)
+        results["auto_dist"] = NGINX_AUTO_DIST
+
     return results
 
 
@@ -151,6 +159,7 @@ def _deploy_frontend() -> Dict[str, str]:
         "admin": NGINX_ADMIN_DIST,
         "go": NGINX_GO_DIST,
         "www": os.path.join(FRONTEND_WWW_DIR, "dist"),
+        "auto": NGINX_AUTO_DIST,
     }
 
 
@@ -931,6 +940,37 @@ async def push_to_github(
         if warning_msg:
             response_data["warning"] = warning_msg
 
+        # P2: auto-tag milestone commits so they survive accidental delete-backup operations.
+        # Triggers when remark contains version numbers, Chinese release keywords, or
+        # English release markers. Tag is pushed to origin so it persists independently
+        # of branch history rewrites.
+        import re as _re
+        if remark and _re.search(
+            r"[0-9]+\.[0-9]+|稳定|release|版本|milestone|init|初步",
+            remark, _re.IGNORECASE
+        ):
+            try:
+                safe_name = _re.sub(r"[^a-zA-Z0-9._-]", "-", remark)[:40].strip("-")
+                from datetime import datetime as _dt
+                tag_name = "backup-{}-{}".format(
+                    _dt.utcnow().strftime("%Y%m%d-%H%M"), safe_name
+                )
+                commit_hash_for_tag = _run(
+                    ["git", "rev-parse", "HEAD"], cwd=".."
+                ).stdout.strip()
+                _run(
+                    ["git", "tag", "-a", tag_name, "-m",
+                     "Auto-backup tag: {}".format(remark), commit_hash_for_tag],
+                    cwd="..", timeout=30,
+                )
+                try:
+                    _run(["git", "push", "origin", tag_name], cwd="..", timeout=60)
+                    response_data["tag"] = tag_name
+                except Exception:
+                    response_data["tag"] = "{} (local only, push failed)".format(tag_name)
+            except Exception as tag_exc:
+                response_data["tag"] = "tag_failed: {}".format(str(tag_exc)[:100])
+
         return response_data
     except HTTPException:
         raise
@@ -998,13 +1038,21 @@ async def rollback_version(
                 detail=f"Git reset failed: {exc}",
             )
 
-        # Step 3: redeploy dist to Nginx directories (source of truth is now
-        # the restored commit's dist-admin + dist folders).
+        # Step 3: rebuild all 4 frontends from the restored source code so the
+        # Nginx dist/ directories are always consistent with the checked-out commit.
+        # P0 fix: without rebuild, dist/ (excluded by .gitignore) stays at whatever
+        # version was live before rollback — source and dist would diverge.
+        build_status: Dict[str, Any] = {}
+        try:
+            build_status = _build_frontend()
+        except Exception as exc:
+            # Non-fatal — source already restored; rebuilt dist is best-effort.
+            build_status = {"error": str(exc)}
+
         deploy_status: Dict[str, Any] = {}
         try:
             deploy_status = _deploy_frontend()
         except Exception as exc:
-            # Do not bail out — the source code is restored, but warn loudly.
             deploy_status = {"error": str(exc)}
 
         # Step 4: restart services so the new code is live
@@ -1015,6 +1063,7 @@ async def rollback_version(
             "message": f"Successfully rolled back to {target[:7]}",
             "commit": target,
             "commit_message": commit_message,
+            "build": build_status,
             "deploy": deploy_status,
             "restart": restart_status,
         }
