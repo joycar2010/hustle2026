@@ -68,17 +68,27 @@
           <div class="text-[10px] text-text-tertiary">{{ stats.tokens_total?.calls }} 次</div>
         </div>
         <div>
-          <div class="text-text-tertiary">中转站已消耗</div>
-          <div class="font-mono font-bold text-base">{{ stats.balance?.currency_symbol || '¥' }}{{ stats.balance?.spent_cny?.toFixed(4) ?? '--' }}</div>
-          <div class="text-[10px] text-text-tertiary">raw: {{ stats.balance?.relay_usage_raw }}</div>
+          <div class="text-text-tertiary">
+            {{ stats.balance?.source === 'chesspnt_self' ? '账户(joycar)' : '中转站已消耗' }}
+          </div>
+          <div class="font-mono font-bold text-base">
+            {{ stats.balance?.source === 'chesspnt_self'
+               ? (stats.balance?.quota_units ? (stats.balance.quota_units/1000000).toFixed(2)+'M units' : '--')
+               : ('¥' + (stats.balance?.spent_cny?.toFixed(4) ?? '--')) }}
+          </div>
+          <div class="text-[10px] text-text-tertiary">
+            {{ stats.balance?.source === 'chesspnt_self' ? '直连钱包实时报价' : ('raw: ' + stats.balance?.relay_usage_raw) }}
+          </div>
         </div>
         <div>
-          <div class="text-text-tertiary">当前余额</div>
+          <div class="text-text-tertiary">
+            {{ stats.balance?.source === 'chesspnt_self' ? '钱包余额(实时)' : '当前余额' }}
+          </div>
           <div class="font-mono font-bold text-base" :class="balanceColor">
-            {{ stats.balance?.currency_symbol || '¥' }}{{ stats.balance?.balance_cny?.toFixed(2) ?? '--' }}
+            ¥{{ stats.balance?.balance_cny?.toFixed(2) ?? '--' }}
           </div>
           <div class="text-[10px]" :class="stats.balance?.low_balance ? 'text-danger' : 'text-text-tertiary'">
-            {{ stats.balance?.low_balance ? '⚠ 低于阈值' : '正常' }}
+            {{ stats.balance?.source === 'chesspnt_self' ? '来源: chesspnt.com' : (stats.balance?.low_balance ? '⚠ 低于阈值' : '正常') }}
           </div>
         </div>
       </div>
@@ -246,7 +256,7 @@ const balanceColor = computed(() => {
   const b = stats.value?.balance?.balance_cny
   if (b == null) return 'text-text-primary'
   if (b < 20) return 'text-danger'
-  if (b < 50) return 'text-warning'
+  if (b < 100) return 'text-warning'
   return 'text-success'
 })
 

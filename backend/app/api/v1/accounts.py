@@ -319,13 +319,41 @@ async def delete_account(
             detail="Account not found",
         )
 
-    # 先删除关联的 mt5_clients 记录（ORM 没有 cascade delete-orphan，直接删子行避免 NOT NULL 违约）
+    # Delete all FK-referencing child rows before deleting the account.
+    # Tables with NOT NULL account_id (no CASCADE):
+    #   account_snapshots, mt5_clients, order_records, positions, trades,
+    #   user_pair_accounts (a/b)
+    # Tables with nullable FK (SET NULL / allowed):
+    #   hedging_pairs.account_a_id / account_b_id — nulled to preserve pair config
+    from sqlalchemy import text as _text
+
+    aid_str = str(account_id)
+    for tbl in ('account_snapshots', 'order_records', 'positions', 'trades'):
+        await db.execute(_text(f'DELETE FROM {tbl} WHERE account_id = CAST(:aid AS UUID)'),
+                         {'aid': aid_str})
+
+    # mt5_clients
     mt5_result = await db.execute(
         select(MT5Client).where(MT5Client.account_id == account_id)
     )
-    mt5_clients = mt5_result.scalars().all()
-    for mt5_client in mt5_clients:
+    for mt5_client in mt5_result.scalars().all():
         await db.delete(mt5_client)
+
+    # user_pair_accounts — null out the FK slot rather than deleting the pair binding
+    await db.execute(_text(
+        'UPDATE user_pair_accounts SET account_a_id = NULL WHERE account_a_id = CAST(:aid AS UUID)'
+    ), {'aid': aid_str})
+    await db.execute(_text(
+        'UPDATE user_pair_accounts SET account_b_id = NULL WHERE account_b_id = CAST(:aid AS UUID)'
+    ), {'aid': aid_str})
+
+    # hedging_pairs — null out FK slots
+    await db.execute(_text(
+        'UPDATE hedging_pairs SET account_a_id = NULL WHERE account_a_id = CAST(:aid AS UUID)'
+    ), {'aid': aid_str})
+    await db.execute(_text(
+        'UPDATE hedging_pairs SET account_b_id = NULL WHERE account_b_id = CAST(:aid AS UUID)'
+    ), {'aid': aid_str})
 
     await db.delete(account)
     await db.commit()

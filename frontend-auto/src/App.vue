@@ -41,9 +41,11 @@
           </div>
           <div class="w-px h-6 bg-border-primary"></div>
           <div class="flex flex-col leading-tight">
-            <span class="text-text-tertiary text-[10px]">中转站余额</span>
+            <span class="text-text-tertiary text-[10px]">
+              {{ llm?.balance?.source === 'chesspnt_self' ? '钱包余额(实时)' : '中转站余额' }}
+            </span>
             <span class="font-mono font-semibold" :class="balanceColor">
-              {{ llm?.balance?.balance_cny != null ? (llm.balance.currency_symbol || '¥') + llm.balance.balance_cny.toFixed(2) : '--' }}
+              {{ llm?.balance?.balance_cny != null ? '¥' + llm.balance.balance_cny.toFixed(2) : '--' }}
             </span>
           </div>
           <div v-if="llm?.balance?.low_balance" class="px-1.5 py-0.5 bg-danger/20 text-danger rounded text-[10px] font-bold">低</div>
@@ -85,7 +87,7 @@ const balanceColor = computed(() => {
   const b = llm.value?.balance?.balance_cny
   if (b == null) return 'text-text-primary'
   if (b < 20) return 'text-danger'
-  if (b < 50) return 'text-warning'
+  if (b < 100) return 'text-warning'
   return 'text-success'
 })
 

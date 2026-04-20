@@ -55,6 +55,8 @@ class MT5ClientUpdate(BaseModel):
     password_type: Optional[str] = None
     proxy_id: Optional[int] = None
     is_active: Optional[bool] = None
+    is_system_service: Optional[bool] = None
+    bridge_url: Optional[str] = Field(None, max_length=500)
     priority: Optional[int] = Field(None, ge=0)
 
     @validator('password_type')

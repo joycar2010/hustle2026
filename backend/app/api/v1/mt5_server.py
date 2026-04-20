@@ -5,8 +5,23 @@ import os
 
 router = APIRouter()
 
-AGENT_IP = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113").replace("http://", "").replace("https://", "")
-AGENT_PORT = int(os.getenv("MT5_AGENT_PORT", "8765"))
+def _get_agent_config():
+    try:
+        from sqlalchemy import text
+        from app.core.database import SessionLocal
+        with SessionLocal() as session:
+            row = session.execute(text("SELECT value FROM mt5_config WHERE key = 'agent_url'")).fetchone()
+            if row:
+                url = row[0]  # e.g. http://172.31.14.113:8765
+                parts = url.replace("http://", "").replace("https://", "").split(":")
+                return parts[0], int(parts[1]) if len(parts) > 1 else 8765
+    except Exception:
+        pass
+    ip = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113").replace("http://", "").replace("https://", "")
+    port = int(os.getenv("MT5_AGENT_PORT", "8765"))
+    return ip, port
+
+AGENT_IP, AGENT_PORT = _get_agent_config()
 
 
 @router.get("/mt5-server/status")

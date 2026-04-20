@@ -5,9 +5,9 @@
         <!-- Logo -->
         <div class="flex items-center space-x-6">
           <!-- Alert Switches -->
-          <div class="hidden xl:flex items-center space-x-2 mr-8" :class="{ 'xl:hidden': navbarCollapsed }">
+          <div class="flex items-center space-x-2 mr-1 xl:mr-8" :class="{ 'xl:hidden': navbarCollapsed }">
             <!-- Alert Sound Switch -->
-            <div class="flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
+            <div class="hidden xl:flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
               <svg class="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
               </svg>
@@ -29,7 +29,7 @@
             </div>
 
             <!-- Single-Leg Alert Switch -->
-            <div class="flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
+            <div class="hidden xl:flex items-center space-x-2 px-3 py-2 bg-dark-200 rounded-lg">
               <svg class="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
@@ -220,6 +220,22 @@
         leave-to-class="transform opacity-0 -translate-y-2"
       >
         <div v-if="mobileMenuOpen" class="lg:hidden py-4 space-y-1 border-t border-border-secondary">
+          <!-- Mobile pair selector row -->
+          <div class="flex items-center gap-3 px-4 py-3 border-t border-border-secondary mt-2">
+            <svg class="w-4 h-4 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+            <span class="text-sm text-text-secondary">产品对</span>
+            <select
+              :value="currentPair"
+              @change="onPairChange(); mobileMenuOpen = false"
+              class="flex-1 text-sm font-semibold bg-dark-200 text-primary border border-border-primary rounded-lg px-3 py-1.5 outline-none cursor-pointer"
+            >
+              <option v-for="p in TRADING_PAIRS" :key="p.code" :value="p.code" class="bg-dark-200 text-text-primary">
+                {{ p.label }}
+              </option>
+            </select>
+          </div>
           <router-link
             v-for="item in navItems"
             :key="item.path"

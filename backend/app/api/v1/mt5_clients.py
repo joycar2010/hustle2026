@@ -191,6 +191,72 @@ async def _get_client_for_user(client_id: int, user_id: str, db: AsyncSession) -
     return client
 
 
+
+
+@router.get("/mt5-clients/dashboard")
+async def mt5_dashboard(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """聚合返回 MT5 客户端 + 实例，前端一次调用即可渲染。状态由 Go healthwatch 维护。"""
+    from app.models.mt5_instance import MT5Instance
+
+    is_admin = await _is_admin(user_id, db)
+    if is_admin:
+        client_q = (
+            select(MT5Client, User.username, Account.platform_id, Platform.display_name, Account.account_name)
+            .join(Account, MT5Client.account_id == Account.account_id)
+            .join(User, Account.user_id == User.user_id)
+            .join(Platform, Account.platform_id == Platform.platform_id)
+            .order_by(User.username, Account.account_name, MT5Client.priority)
+        )
+    else:
+        client_q = (
+            select(MT5Client, User.username, Account.platform_id, Platform.display_name, Account.account_name)
+            .join(Account, MT5Client.account_id == Account.account_id)
+            .join(User, Account.user_id == User.user_id)
+            .join(Platform, Account.platform_id == Platform.platform_id)
+            .where(Account.user_id == uuid.UUID(user_id))
+            .order_by(Account.account_name, MT5Client.priority)
+        )
+
+    rows = (await db.execute(client_q)).all()
+    clients = []
+    client_ids = []
+    for client, username, platform_id, platform_name, account_name in rows:
+        d = MT5ClientResponse.from_orm(client)
+        d.username = username
+        d.platform_id = platform_id
+        d.platform_name = platform_name
+        d.account_name = account_name
+        clients.append(d)
+        client_ids.append(client.client_id)
+
+    # Load instances from DB (no Agent call)
+    instances_by_client = {}
+    if client_ids:
+        inst_rows = (await db.execute(
+            select(MT5Instance).where(MT5Instance.client_id.in_(client_ids))
+        )).scalars().all()
+        for inst in inst_rows:
+            cid = inst.client_id
+            if cid not in instances_by_client:
+                instances_by_client[cid] = []
+            instances_by_client[cid].append({
+                "instance_id": str(inst.instance_id),
+                "instance_name": inst.instance_name,
+                "server_ip": inst.server_ip,
+                "service_port": inst.service_port,
+                "status": inst.status,
+                "is_active": inst.is_active,
+                "instance_type": inst.instance_type,
+                "client_id": inst.client_id,
+                "mt5_path": inst.mt5_path,
+                "deploy_path": inst.deploy_path,
+            })
+
+    return {"clients": clients, "instances_by_client": instances_by_client}
+
 @router.get("/mt5-clients/all", response_model=List[MT5ClientResponse])
 async def get_all_mt5_clients(
     user_id: str = Depends(get_current_user_id),

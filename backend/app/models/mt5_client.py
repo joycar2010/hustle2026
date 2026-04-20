@@ -40,6 +40,7 @@ class MT5Client(Base):
     connection_status = Column(String(20), nullable=False, default='disconnected', comment='连接状态')
     is_active = Column(Boolean, nullable=False, default=True, comment='是否启用')
     is_system_service = Column(Boolean, nullable=False, default=False, comment='是否为系统服务账号')
+    role = Column(String(20), default="trading", comment="角色: quote_source/trading/user")
     priority = Column(Integer, nullable=False, default=0, comment='优先级')
 
     # 连接统计

@@ -1243,7 +1243,8 @@ class PositionStreamer:
                 async with AsyncSessionLocal() as _db:
                     rows = await _db.execute(_text(
                         "SELECT DISTINCT bridge_url, bridge_service_port FROM mt5_clients "
-                        "WHERE is_active = true AND is_system_service = false"
+                        "WHERE is_active = true AND is_system_service = false "
+                        "AND connection_status NOT IN ('error', 'disconnected')"
                     ))
                     for row in rows.fetchall():
                         url = row[0] or (f"http://172.31.14.113:{row[1]}" if row[1] else None)
@@ -1254,8 +1255,8 @@ class PositionStreamer:
             if not bridge_urls:
                 bridge_urls.add(os.getenv("MT5_BRIDGE_URL", "http://172.31.14.113:8002"))
 
-            # Query ALL bridges concurrently
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            # Query ALL bridges concurrently — short timeout to avoid CLOSE_WAIT accumulation
+            async with httpx.AsyncClient(timeout=3.0) as client:
                 for bridge_url in bridge_urls:
                     try:
                         resp = await client.get(f"{bridge_url}/mt5/positions", headers=headers)

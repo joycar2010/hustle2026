@@ -224,6 +224,15 @@ async def lifespan(app: FastAPI):
     # Start memory cleanup task
     cleanup_task = asyncio.create_task(periodic_memory_cleanup())
 
+    # MT5 sync service — explicit lifespan start so it survives init_mt5 failures
+    try:
+        from app.services.mt5_sync_service import mt5_sync_service
+        if not mt5_sync_service.running:
+            await mt5_sync_service.start()
+            logger.info('[MT5Sync] mt5_sync_service started from lifespan')
+    except Exception as _mte:
+        logger.error(f'[MT5Sync] failed to start: {_mte}')
+
     # OpenCLAW agent loop (Shadow mode by default)
     try:
         from app.services.agent import agent_loop as openclaw_loop
@@ -271,6 +280,12 @@ async def lifespan(app: FastAPI):
         logger.error(f'[OpenCLAW] stop error: {e}')
 
     # Stop all services
+    try:
+        from app.services.mt5_sync_service import mt5_sync_service as _mts
+        await _mts.stop()
+    except Exception:
+        pass
+
     try:
         from app.services.hedging_pair_service import hedging_pair_service
         await hedging_pair_service.stop()

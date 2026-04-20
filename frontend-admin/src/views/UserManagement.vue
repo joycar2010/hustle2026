@@ -1940,16 +1940,7 @@ async function loadAllInstances() {
       }
     }
 
-    // Refresh live status from Agent per instance
-    for (const cid of Object.keys(map)) {
-      for (const inst of map[cid]) {
-        try {
-          const sr = await api.get(`/api/v1/mt5/instances/${inst.instance_id}/status`)
-          inst._live_running = sr.data?.is_running ?? sr.data?.status === 'running'
-          inst.status = sr.data?.status || inst.status
-        } catch { /* keep DB status */ }
-      }
-    }
+    // Status from DB (maintained by Go healthwatch)
 
     clientInstances.value = map
   } catch {}
@@ -2021,8 +2012,12 @@ async function controlTerminal(instanceName, action) {
 
 async function toggleSystemService(client) {
   try {
-    await api.put(`/api/v1/mt5-clients/${client.client_id}`, { is_system_service: !client.is_system_service })
-    toast(client.is_system_service ? '已切换为完整交易模式' : '已设为系统服务（仅行情数据）')
+    const newVal = !client.is_system_service
+    const resp = await api.put(`/api/v1/mt5-clients/${client.client_id}`, { is_system_service: newVal })
+    // Immediately update local state — don't rely on loadMT5Clients succeeding
+    const idx = mt5Clients.value.findIndex(c => c.client_id === client.client_id)
+    if (idx >= 0) mt5Clients.value[idx].is_system_service = resp.data?.is_system_service ?? newVal
+    toast(newVal ? '已设为系统服务（仅行情数据）' : '已切换为完整交易模式')
     await loadMT5Clients()
   } catch (e) { apiErr('切换失败', e) }
 }
@@ -2325,18 +2320,50 @@ async function onMt5UserChange() {
 }
 
 async function loadAllMT5Clients() {
-  mt5Loading.value = true
-  try {
-    const r = await api.get('/api/v1/mt5-clients/all')
-    mt5Clients.value = Array.isArray(r.data) ? r.data : (r.data?.clients ?? [])
-    await Promise.all([loadAllInstances(), loadTerminals()])
-  } catch (e) { apiErr('加载MT5客户端失败', e) }
-  finally { mt5Loading.value = false }
+  await autoLoadMT5Tab()
 }
 
 async function autoLoadMT5Tab() {
-  // 默认加载所有用户的 MT5 客户端
-  await loadAllMT5Clients()
+  mt5Loading.value = true
+  try {
+    const r = await api.get('/api/v1/mt5-clients/dashboard')
+    mt5Clients.value = r.data.clients || []
+    clientInstances.value = r.data.instances_by_client || {}
+  } catch (e) { apiErr('加载MT5客户端失败', e) }
+  finally { mt5Loading.value = false }
+  loadTerminalsLazy()
+}
+
+async function loadTerminalsLazy() {
+  try {
+    const r = await api.get('/api/v1/mt5/instances/terminal/list', { params: { _t: Date.now() } })
+    const all = Array.isArray(r.data) ? r.data : []
+    const cloned = all.map(t => JSON.parse(JSON.stringify(t)))
+    const map = {}
+    for (const client of mt5Clients.value) {
+      const cid = client.client_id
+      let matching = []
+      if (client.agent_instance_name) {
+        matching = cloned.filter(t => t.instance_name === client.agent_instance_name)
+      }
+      if (!matching.length) {
+        matching = cloned.filter(t => t.display_name === client.client_name)
+      }
+      if (!matching.length) {
+        const cName = (client.client_name || '').toLowerCase().replace(/[^a-z0-9]/g, '-')
+        matching = cloned.filter(t => {
+          const tName = (t.instance_name || '').toLowerCase()
+          const tDisplay = (t.display_name || '').toLowerCase().replace(/[^a-z0-9]/g, '-')
+          return tName === cName || tDisplay === cName
+        })
+      }
+      if (matching.length) map[cid] = matching
+      else if (client.agent_instance_name) {
+        map[cid] = [{ instance_name: client.agent_instance_name, display_name: client.client_name, is_running: false, health_status: { is_running: false, details: {} }, _placeholder: true }]
+      }
+    }
+    clientTerminals.value = { ...map }
+  } catch {}
 }
 
 async function loadMT5Clients() {
@@ -2345,9 +2372,10 @@ async function loadMT5Clients() {
   try {
     const r = await api.get(`/api/v1/accounts/${mt5SelectedAccountId.value}/mt5-clients`)
     mt5Clients.value = Array.isArray(r.data) ? r.data : (r.data?.clients ?? [])
-    await Promise.all([loadAllInstances(), loadTerminals()])
+    await loadAllInstances()
   } catch (e) { apiErr('加载MT5客户端失败', e) }
   finally { mt5Loading.value = false }
+  loadTerminalsLazy()
 }
 
 function getMT5BorderColor(client) {
@@ -2404,7 +2432,11 @@ async function saveMT5() {
     if (isEditMT5.value) {
       const data = { ...mt5Form.value }
       if (!data.mt5_password) delete data.mt5_password
-      await api.put(`/api/v1/mt5-clients/${currentMT5.value.client_id}`, data)
+      const resp = await api.put(`/api/v1/mt5-clients/${currentMT5.value.client_id}`, data)
+      // Optimistically update the local list immediately so UI refreshes even if loadMT5Clients fails
+      const updated = resp.data
+      const idx = mt5Clients.value.findIndex(c => c.client_id === currentMT5.value.client_id)
+      if (idx >= 0 && updated) Object.assign(mt5Clients.value[idx], updated)
       toast('MT5客户端已更新')
     } else {
       const data = { ...mt5Form.value, account_id: mt5SelectedAccountId.value }

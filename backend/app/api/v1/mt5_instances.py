@@ -615,17 +615,25 @@ async def auto_failover(
 
 # ==================== MT5 终端进程控制（RDP 会话层） ====================
 
+_terminal_cache = {"data": None, "ts": 0}
+
 @router.get("/terminal/list")
 async def list_mt5_terminals():
-    """列出 Windows Agent 管理的所有 MT5 终端进程"""
-    import os
+    """列出 Windows Agent 管理的所有 MT5 终端进程（30s 缓存）"""
+    import os, time
+    now = time.time()
+    if _terminal_cache["data"] is not None and now - _terminal_cache["ts"] < 30:
+        return _terminal_cache["data"]
     agent_ip = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113").replace("http://", "").replace("https://", "")
     agent = MT5AgentService(agent_ip)
     try:
         instances = await agent._http_request("/instances")
-        return instances if isinstance(instances, list) else []
+        result = instances if isinstance(instances, list) else []
+        _terminal_cache["data"] = result
+        _terminal_cache["ts"] = now
+        return result
     except Exception as e:
-        return []
+        return _terminal_cache["data"] or []
 
 
 @router.post("/terminal/{instance_name}/control")

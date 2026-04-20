@@ -13,9 +13,22 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# MT5 Agent 配置
-MT5_AGENT_URL = os.getenv("MT5_AGENT_URL", "http://172.31.14.113:8765")
-MT5_AGENT_API_KEY = os.getenv("MT5_AGENT_API_KEY", "HustleXAU_MT5_Agent_Key_2026")
+# MT5 Agent 配置 - 从 DB mt5_config 表读取，env var 作为回退
+def _get_mt5_config(key: str, env_key: str, default: str) -> str:
+    """Get config from mt5_config table with env fallback."""
+    try:
+        from sqlalchemy import text
+        from app.core.database import SessionLocal
+        with SessionLocal() as session:
+            row = session.execute(text("SELECT value FROM mt5_config WHERE key = :k"), {"k": key}).fetchone()
+            if row:
+                return row[0]
+    except Exception:
+        pass
+    return os.getenv(env_key, default)
+
+MT5_AGENT_URL = _get_mt5_config("agent_url", "MT5_AGENT_URL", "http://172.31.14.113:8765")
+MT5_AGENT_API_KEY = _get_mt5_config("agent_api_key", "MT5_AGENT_API_KEY", "HustleXAU_MT5_Agent_Key_2026")
 
 async def call_agent_api(method: str, path: str, **kwargs):
     """
@@ -644,7 +657,8 @@ async def deploy_bridge(
             "mt5_password": client.mt5_password,
             "mt5_server": client.mt5_server,
             "mt5_path": mt5_path,
-            "service_port": service_port
+            "service_port": service_port,
+            "auto_login": True
         }
     )
 
@@ -946,3 +960,38 @@ async def delete_bridge(
                 "service_name": client.bridge_service_name
             }
         }
+
+@router.put("/bridge/{client_id}/credentials")
+async def update_bridge_credentials(
+    client_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update MT5 credentials for a deployed bridge and restart it."""
+    if current_user.role not in ["超级管理员", "系统管理员", "管理员"]:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    result = await db.execute(
+        select(MT5Client).where(MT5Client.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail=f"MT5客户端 {client_id} 不存在")
+    if not client.bridge_service_name:
+        raise HTTPException(status_code=400, detail="该客户端尚未部署 Bridge")
+
+    logger.info(f"User {current_user.username} updating credentials for {client.client_name}")
+
+    try:
+        update_result = await call_agent_api(
+            "POST",
+            f"/bridge/{client.bridge_service_name}/update-credentials",
+            json={
+                "mt5_login": str(client.mt5_login),
+                "mt5_password": client.mt5_password,
+                "mt5_server": client.mt5_server
+            }
+        )
+        return {"success": True, "message": "凭证已更新并重启 Bridge", "result": update_result}
+    except HTTPException as e:
+        return {"success": False, "message": f"更新凭证失败: {e.detail}"}
