@@ -85,7 +85,7 @@
             {{ stats.balance?.source === 'chesspnt_self' ? '钱包余额(实时)' : '当前余额' }}
           </div>
           <div class="font-mono font-bold text-base" :class="balanceColor">
-            ¥{{ stats.balance?.balance_cny?.toFixed(2) ?? '--' }}
+            ${{ stats.balance?.balance_usd?.toFixed(2) ?? '--' }}
           </div>
           <div class="text-[10px]" :class="stats.balance?.low_balance ? 'text-danger' : 'text-text-tertiary'">
             {{ stats.balance?.source === 'chesspnt_self' ? '来源: chesspnt.com' : (stats.balance?.low_balance ? '⚠ 低于阈值' : '正常') }}
@@ -253,10 +253,10 @@ const modes = [
 ]
 
 const balanceColor = computed(() => {
-  const b = stats.value?.balance?.balance_cny
+  const b = stats.value?.balance?.balance_usd
   if (b == null) return 'text-text-primary'
-  if (b < 20) return 'text-danger'
-  if (b < 100) return 'text-warning'
+  if (b < 3) return 'text-danger'
+  if (b < 15) return 'text-warning'
   return 'text-success'
 })
 

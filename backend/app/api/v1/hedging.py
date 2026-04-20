@@ -76,6 +76,7 @@ class SymbolCreate(BaseModel):
     swap_type: Optional[str] = None
     trading_hours: Optional[Dict] = None
     is_active: bool = True
+    product_type: Optional[str] = "perpetual"
 
 
 class SymbolUpdate(BaseModel):
@@ -99,6 +100,7 @@ class SymbolUpdate(BaseModel):
     swap_type: Optional[str] = None
     trading_hours: Optional[Dict] = None
     is_active: Optional[bool] = None
+    product_type: Optional[str] = None
 
 
 class PairCreate(BaseModel):
@@ -117,7 +119,6 @@ class PairCreate(BaseModel):
     max_position_value_usd: Optional[float] = None
     min_hedgeable_qty_a: Optional[float] = None
     min_hedgeable_qty_b: Optional[float] = None
-    is_active: bool = True
     sort_order: int = 0
 
 
@@ -136,7 +137,6 @@ class PairUpdate(BaseModel):
     max_position_value_usd: Optional[float] = None
     min_hedgeable_qty_a: Optional[float] = None
     min_hedgeable_qty_b: Optional[float] = None
-    is_active: Optional[bool] = None
     sort_order: Optional[int] = None
 
 

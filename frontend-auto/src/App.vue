@@ -45,7 +45,7 @@
               {{ llm?.balance?.source === 'chesspnt_self' ? '钱包余额(实时)' : '中转站余额' }}
             </span>
             <span class="font-mono font-semibold" :class="balanceColor">
-              {{ llm?.balance?.balance_cny != null ? '¥' + llm.balance.balance_cny.toFixed(2) : '--' }}
+              {{ llm?.balance?.balance_usd != null ? '$' + llm.balance.balance_usd.toFixed(2) : '--' }}
             </span>
           </div>
           <div v-if="llm?.balance?.low_balance" class="px-1.5 py-0.5 bg-danger/20 text-danger rounded text-[10px] font-bold">低</div>
@@ -84,7 +84,7 @@ const isAdmin = computed(() => me.value?.is_admin === true)
 const modeLabel = computed(() => ({ shadow: 'Shadow', semi: '半自动', auto: '全自动', off: '已停机' })[status.value?.mode] || '--')
 const modeColor = computed(() => ({ shadow: 'bg-yellow-400', semi: 'bg-blue-400', auto: 'bg-success', off: 'bg-text-tertiary' })[status.value?.mode] || 'bg-text-tertiary')
 const balanceColor = computed(() => {
-  const b = llm.value?.balance?.balance_cny
+  const b = llm.value?.balance?.balance_usd
   if (b == null) return 'text-text-primary'
   if (b < 20) return 'text-danger'
   if (b < 100) return 'text-warning'

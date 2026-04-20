@@ -113,7 +113,7 @@
               <td class="py-2 px-3 text-right font-mono text-xs">{{ s.min_qty }}</td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ s.price_precision }}位</td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ (s.maker_fee_rate*100).toFixed(2) }}%/{{ (s.taker_fee_rate*100).toFixed(2) }}%</td>
-              <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-xs" :class="s.product_type === 'perpetual' ? 'bg-blue-900/40 text-blue-300' : s.product_type === 'mt5' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-900/40 text-gray-300'">{{ {perpetual: '永续', mt5: 'MT5', spot: '现货'}[s.product_type] || s.product_type || '--' }}</span></td>
+              <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-xs" :class="s.product_type === 'perpetual' ? 'bg-blue-900/40 text-blue-300' : s.product_type === 'futures' ? 'bg-orange-900/40 text-orange-300' : s.product_type === 'mt5' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-900/40 text-gray-300'">{{ {perpetual: '永续', futures: '交割', mt5: 'MT5', spot: '现货'}[s.product_type] || s.product_type || '--' }}</span></td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ (s.margin_rate_initial*100).toFixed(1) }}%</td>
               <td class="py-2 px-3 text-center">
                 <button @click="toggleSymbolActive(s)" :class="s.is_active ? 'text-success hover:text-red-400' : 'text-text-tertiary hover:text-success'" class="text-xs">{{ s.is_active ? '● 启用' : '○ 禁用' }}</button>
@@ -200,6 +200,7 @@
           <div><label class="text-xs text-text-tertiary">产品类型</label>
             <select v-model="editingSymbol.product_type" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm">
               <option value="perpetual">永续合约</option>
+              <option value="futures">交割合约</option>
               <option value="mt5">MT5</option>
               <option value="spot">现货</option>
             </select></div>

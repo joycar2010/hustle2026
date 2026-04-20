@@ -800,13 +800,8 @@
               placeholder="1–100，数字越小优先级越高" />
             <p class="text-xs text-text-tertiary mt-1">用于多客户端故障转移排序</p>
           </div>
-          <div>
-            <label class="block text-xs text-text-tertiary mb-1">MT5桥接地址</label>
-            <input v-model="mt5Form.bridge_url"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="http://172.31.14.113:8001" />
-            <p class="text-xs text-text-tertiary mt-1">MT5微服务桥接节点地址，留空使用系统默认</p>
-          </div>
+            <!-- bridge_url 由系统自动管理 -->
+
           <div class="flex items-center gap-3">
             <div @click="mt5Form.is_system_service = !mt5Form.is_system_service"
               :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors',
@@ -1233,8 +1228,6 @@
         </div>
       </div>
     </Teleport>
-
-
     <!-- Modal: 智能体量化登录授权 -->
     <transition name="modal">
       <div v-if="showOpenclawModal"
@@ -1875,7 +1868,7 @@ const isEditMT5            = ref(false)
 const currentMT5           = ref(null)
 const mt5Form = ref({
   client_name: '', mt5_login: '', mt5_password: '', password_type: 'primary',
-  mt5_server: '', bridge_url: '', proxy_id: null,
+  mt5_server: '', proxy_id: null,
   priority: 1, is_active: true, is_system_service: false
 })
 
@@ -2403,7 +2396,7 @@ function openAddMT5() {
   currentMT5.value = null
   mt5Form.value = {
     client_name: '', mt5_login: '', mt5_password: '', password_type: 'primary',
-    mt5_server: '', bridge_url: '', proxy_id: null,
+    mt5_server: '', proxy_id: null,
     priority: 1, is_active: true
   }
   showMT5Modal.value = true
@@ -2416,7 +2409,6 @@ function openEditMT5(client) {
     client_name:   client.client_name,
     mt5_login:     client.mt5_login,
     mt5_password:  '',
-    bridge_url:    client.bridge_url || '',
     password_type: client.password_type || 'primary',
     mt5_server:    client.mt5_server,
     proxy_id:      client.proxy_id || null,
