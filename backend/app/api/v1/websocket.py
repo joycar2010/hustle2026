@@ -82,70 +82,156 @@ async def websocket_endpoint(
 
 
 async def _push_initial_snapshot(websocket: WebSocket, user_id: str = None):
-    """Read current MT5 + Binance positions and push position_snapshot to this client (user-scoped)."""
+    """Push initial position_snapshot to a freshly-connected client.
+
+    Strict per-user isolation:
+      - MT5 positions are read from THIS user\'s MT5 bridges only
+        (mt5_clients.account_id → accounts.user_id).
+      - Binance positions are read from THIS user\'s Binance accounts only.
+      - Output payload includes a `pairs` map keyed by pair_code, matching the
+        Publisher A format consumed by frontend stores/market.js.
+    """
     try:
         from app.models.account import Account
-        from app.services.mt5_client import MT5Client
         from app.services.binance_client import BinanceFuturesClient
+        from app.services.hedging_pair_service import hedging_pair_service
         from app.core.database import get_db_context
-        from sqlalchemy import select
+        from sqlalchemy import select, text as _text
         from uuid import UUID as _UUID
+        import httpx, os
 
-        long_lots = 0.0
-        short_lots = 0.0
-        binance_long_xau = 0.0
-        binance_short_xau = 0.0
+        if not user_id:
+            return
 
+        # 1) Load active hedging pairs (pair_code → sym_a, sym_b)
+        pairs_meta = {}
+        try:
+            for pair in (hedging_pair_service.list_active_pairs() or []):
+                if not pair.is_active:
+                    continue
+                sa = pair.symbol_a.symbol if pair.symbol_a else None
+                sb = pair.symbol_b.symbol if pair.symbol_b else None
+                if sa and sb:
+                    pairs_meta[pair.pair_code] = {"sym_a": sa, "sym_b": sb}
+        except Exception as e:
+            logger.warning(f"[SNAPSHOT] pairs load failed: {e}")
+
+        if not pairs_meta:
+            pairs_meta["XAU"] = {"sym_a": "XAUUSDT", "sym_b": "XAUUSD+"}
+
+        # 2) Read this user\'s Binance positions per-symbol
+        bn_by_symbol: dict = {}
         async with get_db_context() as db:
-            query = select(Account).where(Account.is_active == True)
-            if user_id:
-                query = query.where(Account.user_id == _UUID(user_id))
-            result = await db.execute(query)
-            accounts = result.scalars().all()
+            result = await db.execute(
+                select(Account).where(
+                    Account.is_active == True,
+                    Account.user_id == _UUID(user_id),
+                )
+            )
+            user_accounts = result.scalars().all()
 
-        for acc in accounts:
-            if acc.platform_id == 2 and acc.is_mt5_account and acc.mt5_id and acc.mt5_primary_pwd and acc.mt5_server:
-                # Bybit MT5 — use shared client from realtime_market_service to avoid connection conflicts
-                try:
-                    from app.services.realtime_market_service import market_data_service
-                    mt5 = market_data_service.mt5_client
-                    if mt5 and mt5.connected:
-                        positions = mt5.get_positions("XAUUSD+")
-                    else:
-                        mt5 = MT5Client(int(acc.mt5_id), acc.mt5_primary_pwd, acc.mt5_server)
-                        positions = mt5.get_positions("XAUUSD+")
-                    long_lots = round(sum(p['volume'] for p in positions if p.get('type') == 0), 2)
-                    short_lots = round(sum(p['volume'] for p in positions if p.get('type') == 1), 2)
-                except Exception as e:
-                    logger.warning(f"[SNAPSHOT] MT5 read failed: {e}")
-            elif acc.platform_id == 1 and acc.api_key and acc.api_secret:
-                # Binance
-                try:
-                    client = BinanceFuturesClient(acc.api_key, acc.api_secret)
-                    pos_data = await client.get_position_risk("XAUUSDT")
-                    await client.close()
-                    for pos in pos_data:
+            # Resolve this user\'s MT5 bridge URLs
+            mt5_bridges: list = []
+            try:
+                rows = await db.execute(_text(
+                    "SELECT mc.bridge_url, mc.bridge_service_port "
+                    "FROM mt5_clients mc JOIN accounts a ON mc.account_id = a.account_id "
+                    "WHERE mc.is_active = true AND mc.is_system_service = false "
+                    "AND a.user_id = :uid"
+                ), {"uid": _UUID(user_id)})
+                for row in rows.fetchall():
+                    url = row[0] or (f"http://172.31.14.113:{row[1]}" if row[1] else None)
+                    if url:
+                        mt5_bridges.append(url)
+            except Exception as e:
+                logger.warning(f"[SNAPSHOT] bridge query failed: {e}")
+
+        # Binance per-symbol query
+        for acc in user_accounts:
+            if acc.platform_id != 1 or not acc.api_key or not acc.api_secret:
+                continue
+            try:
+                client = BinanceFuturesClient(acc.api_key, acc.api_secret)
+                # Query each pair\'s side-A symbol
+                for meta in pairs_meta.values():
+                    sym_a = meta["sym_a"]
+                    try:
+                        pos_data = await client.get_position_risk(sym_a)
+                    except Exception:
+                        continue
+                    long_v, short_v = bn_by_symbol.get(sym_a, (0.0, 0.0))
+                    for pos in (pos_data or []):
                         amt = float(pos.get("positionAmt", 0))
-                        if amt > 0:
-                            binance_long_xau = round(amt, 3)
-                        elif amt < 0:
-                            binance_short_xau = round(abs(amt), 3)
-                except Exception as e:
-                    logger.warning(f"[SNAPSHOT] Binance read failed: {e}")
+                        ps = (pos.get("positionSide") or "BOTH").upper()
+                        if ps == "LONG" and amt > 0:
+                            long_v += amt
+                        elif ps == "SHORT" and amt < 0:
+                            short_v += abs(amt)
+                        else:  # BOTH
+                            if amt > 0:
+                                long_v += amt
+                            elif amt < 0:
+                                short_v += abs(amt)
+                    bn_by_symbol[sym_a] = (round(long_v, 3), round(short_v, 3))
+                await client.close()
+            except Exception as e:
+                logger.warning(f"[SNAPSHOT] Binance read failed for {acc.account_id}: {e}")
 
+        # 3) MT5 per-symbol query — concurrent across this user\'s bridges
+        mt5_by_symbol: dict = {}
+        api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", ""))
+        headers = {"X-Api-Key": api_key} if api_key else {}
+        if mt5_bridges:
+            async with httpx.AsyncClient(timeout=3.0) as cli:
+                for url in mt5_bridges:
+                    try:
+                        resp = await cli.get(f"{url}/mt5/positions", headers=headers)
+                        if resp.status_code != 200:
+                            continue
+                        for p in resp.json().get("positions", []):
+                            sym = p.get("symbol", "")
+                            if not sym:
+                                continue
+                            vol = float(p.get("volume", 0))
+                            typ = p.get("type", -1)
+                            l, s = mt5_by_symbol.get(sym, (0.0, 0.0))
+                            if typ == 0:
+                                l += vol
+                            elif typ == 1:
+                                s += vol
+                            mt5_by_symbol[sym] = (round(l, 4), round(s, 4))
+                    except Exception as e:
+                        logger.debug(f"[SNAPSHOT] MT5 bridge {url} read error: {e}")
+
+        # 4) Compose pairs payload
+        pairs_out = {}
+        for pc, meta in pairs_meta.items():
+            sa, sb = meta["sym_a"], meta["sym_b"]
+            bn_l, bn_s = bn_by_symbol.get(sa, (0.0, 0.0))
+            mt5_l, mt5_s = mt5_by_symbol.get(sb, (0.0, 0.0))
+            if mt5_l == 0.0 and mt5_s == 0.0:
+                alt = sb.replace("+", ".s")
+                mt5_l, mt5_s = mt5_by_symbol.get(alt, (0.0, 0.0))
+            pairs_out[pc] = {
+                "mt5_long": mt5_l, "mt5_short": mt5_s,
+                "binance_long": bn_l, "binance_short": bn_s,
+            }
+
+        xau_pd = pairs_out.get("XAU", {})
         await manager.send_personal_message(
             {
                 "type": "position_snapshot",
                 "data": {
-                    "bybit_long_lots": long_lots,
-                    "bybit_short_lots": short_lots,
-                    "binance_long_xau": binance_long_xau,
-                    "binance_short_xau": binance_short_xau,
-                }
+                    "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
+                    "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
+                    "binance_long_xau": xau_pd.get("binance_long", 0.0),
+                    "binance_short_xau": xau_pd.get("binance_short", 0.0),
+                    "pairs": pairs_out,
+                },
             },
             websocket,
         )
-        logger.info(f"[SNAPSHOT] Initial push: bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
+        logger.info(f"[SNAPSHOT] Initial push for user={user_id} pairs={list(pairs_out.keys())}")
     except Exception as e:
         logger.warning(f"[SNAPSHOT] Initial push failed: {e}")
 

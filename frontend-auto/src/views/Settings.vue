@@ -260,6 +260,28 @@ const balanceColor = computed(() => {
   return 'text-success'
 })
 
+const refreshingSession = ref(false)
+const sessionStatus = ref('')
+
+async function refreshChesspntSession() {
+  refreshingSession.value = true
+  sessionStatus.value = ''
+  try {
+    const res = await api.post('/api/v1/agent/chesspnt-refresh')
+    if (res.data?.ok) {
+      sessionStatus.value = '✅ Cookie 已更新'
+      await refresh()
+    } else {
+      sessionStatus.value = '❌ ' + (res.data?.error || '失败')
+    }
+  } catch (e) {
+    sessionStatus.value = '❌ ' + (e.response?.data?.detail || e.message)
+  } finally {
+    refreshingSession.value = false
+    setTimeout(() => { sessionStatus.value = '' }, 5000)
+  }
+}
+
 function fmtInt(n) { return n != null ? Number(n).toLocaleString() : '--' }
 function fmtTime(t) { return dayjs(t).format('MM-DD HH:mm:ss') }
 function stateBadge(s) {
@@ -272,14 +294,17 @@ function stateBadge(s) {
 
 async function saveLlm() {
   try {
-    await api.post('/api/v1/agent/llm-config', {
+    const res = await api.post('/api/v1/agent/llm-config', {
       model: llm.model, streaming: llm.streaming,
       recharge_total_cny: llm.recharge_total_cny,
       balance_alert_threshold_cny: llm.balance_alert_threshold_cny,
       usage_multiplier: llm.usage_multiplier,
       currency_symbol: llm.currency_symbol,
     })
-    alert('LLM 配置已保存并热加载生效')
+    if (res.data?.llm_settings) {
+      Object.assign(llm, res.data.llm_settings)
+    }
+    alert('LLM 配置已保存: 模型=' + (res.data?.llm_settings?.model || llm.model))
     await refresh()
   } catch (e) { alert('保存失败: ' + (e.response?.data?.detail || e.message)) }
 }
@@ -365,3 +390,4 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(timer))
 </script>
+// v2

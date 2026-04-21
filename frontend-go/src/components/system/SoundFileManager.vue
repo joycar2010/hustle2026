@@ -29,16 +29,6 @@
             </svg>
             {{ importing ? '导入中...' : '导入现有文件' }}
           </button>
-          <button
-            @click="syncToFeishu"
-            class="btn-primary"
-            :disabled="syncing || sounds.length === 0"
-          >
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            {{ syncing ? '同步中...' : '同步到飞书' }}
-          </button>
         </div>
       </div>
 
@@ -63,25 +53,9 @@
             <div class="flex-1">
               <div class="flex items-center gap-2">
                 <span class="font-medium">{{ sound.filename }}</span>
-                <span
-                  v-if="sound.is_synced"
-                  class="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded"
-                  :title="`已同步 - file_key: ${sound.file_key}`"
-                >
-                  已同步
-                </span>
-                <span
-                  v-else
-                  class="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded"
-                >
-                  未同步
-                </span>
               </div>
               <div class="text-xs text-text-secondary mt-1">
                 <span>{{ formatFileSize(sound.size) }}</span>
-                <span v-if="sound.file_key" class="ml-3">
-                  file_key: <span class="font-mono">{{ sound.file_key }}</span>
-                </span>
               </div>
             </div>
           </div>
@@ -146,7 +120,6 @@ import api from '@/services/api'
 const sounds = ref([])
 const loading = ref(false)
 const uploading = ref(false)
-const syncing = ref(false)
 const importing = ref(false)
 const fileInput = ref(null)
 const currentAudio = ref(null)
@@ -213,36 +186,6 @@ async function importExisting() {
     alert(error.response?.data?.detail || '导入失败')
   } finally {
     importing.value = false
-  }
-}
-
-async function syncToFeishu() {
-  if (!confirm('确定要将所有声音文件同步到飞书云文档吗？')) {
-    return
-  }
-
-  syncing.value = true
-  try {
-    const response = await api.post('/api/v1/sounds/sync-to-feishu')
-    if (response.data.success) {
-      const results = response.data.results || []
-      const successCount = results.filter(r => r.success).length
-      const failedCount = results.length - successCount
-
-      let message = `同步完成！\n成功: ${successCount} 个文件`
-      if (failedCount > 0) {
-        message += `\n失败: ${failedCount} 个文件`
-      }
-      alert(message)
-
-      // 重新加载列表以显示更新后的同步状态
-      await loadSounds()
-    }
-  } catch (error) {
-    console.error('同步失败:', error)
-    alert(error.response?.data?.detail || '同步失败')
-  } finally {
-    syncing.value = false
   }
 }
 

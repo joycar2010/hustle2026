@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
-from app.services.feishu_service import get_feishu_service
 from app.core.security import get_current_user
 from app.models.audio_file import AudioFile
 
@@ -216,79 +215,3 @@ async def import_existing_sounds(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/sounds/sync-to-feishu")
-async def sync_all_sounds_to_feishu(
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """将所有本地声音文件同步到飞书云文档"""
-    try:
-        feishu = get_feishu_service()
-        if not feishu:
-            raise HTTPException(status_code=400, detail="飞书服务未配置")
-
-        # 从数据库查询所有音频文件
-        result = await db.execute(select(AudioFile))
-        audio_files = result.scalars().all()
-
-        if not audio_files:
-            return {
-                "success": True,
-                "message": "没有声音文件需要同步，请先导入现有文件",
-                "results": []
-            }
-
-        results = []
-        for audio_file in audio_files:
-            try:
-                file_path = os.path.join(SOUNDS_DIR, audio_file.file_name)
-                if not os.path.exists(file_path):
-                    results.append({
-                        "filename": audio_file.file_name,
-                        "success": False,
-                        "error": "本地文件不存在"
-                    })
-                    continue
-
-                upload_result = await feishu.upload_audio_file(file_path)
-                if upload_result.get("success"):
-                    file_key = upload_result.get("file_key")
-                    # 更新数据库记录
-                    audio_file.file_key = file_key
-                    audio_file.is_synced = True
-                    audio_file.synced_at = datetime.utcnow()
-                    audio_file.updated_at = datetime.utcnow()
-
-                    results.append({
-                        "filename": audio_file.file_name,
-                        "success": True,
-                        "file_key": file_key
-                    })
-                else:
-                    results.append({
-                        "filename": audio_file.file_name,
-                        "success": False,
-                        "error": upload_result.get("error")
-                    })
-            except Exception as e:
-                results.append({
-                    "filename": audio_file.file_name,
-                    "success": False,
-                    "error": str(e)
-                })
-
-        await db.commit()
-
-        success_count = sum(1 for r in results if r["success"])
-
-        return {
-            "success": True,
-            "message": f"同步完成: {success_count}/{len(results)} 个文件成功",
-            "results": results
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"同步声音文件到飞书失败: {e}", exc_info=True)
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))

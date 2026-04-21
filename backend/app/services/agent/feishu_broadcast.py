@@ -1,14 +1,27 @@
-"""Feishu broadcast wrapper for agent alerts and Shadow-mode decisions.
+"""Feishu broadcast wrapper for agent (OpenCLAW) alerts.
 
-Reuses existing FeishuService (app_id/app_secret based) and sends to all
-admin/operator users that have feishu_open_id set.
+This module is now a thin compatibility shim over ``alert_bus.AlertBus``.
+All de-dup, fan-out (Feishu / WebSocket / DB persist) and recipient filtering
+happen inside the bus.
 
-All sends also persist into agent_alerts table.
+Behaviour:
+    - When ``owner_user_id`` is provided → the alert is targeted at THAT user
+      (their popup + their Feishu) — no longer broadcast to every admin.
+      This is the per-user routing requested in the architecture review.
+
+    - When ``owner_user_id`` is omitted (legacy callers) → falls back to
+      broadcasting to all admin/operator users with a Feishu binding, which
+      preserves the original behaviour for system-wide alerts that don't
+      belong to a single trader.
+
+Returns the inserted agent_alerts.id (or 0 if dedup suppressed it).
 """
 import logging
 from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.alert_bus import alert_bus, AlertEvent
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +33,6 @@ LEVEL_PREFIX = {
 }
 
 
-async def _list_recipients(db: AsyncSession):
-    rows = (await db.execute(text('''
-        SELECT user_id, username, feishu_open_id FROM users
-        WHERE feishu_open_id IS NOT NULL AND feishu_open_id <> ''
-    '''))).all()
-    return rows
-
-
 async def broadcast(
     db: AsyncSession,
     *,
@@ -36,39 +41,33 @@ async def broadcast(
     message: str,
     payload: Optional[dict] = None,
     ack_required: bool = False,
+    owner_user_id: Optional[str] = None,
+    pair_code: str = "",
+    cooldown_s: int = 60,
 ) -> int:
-    """Send to all eligible operators; log to agent_alerts.
+    """Emit an OpenCLAW alert through the unified AlertBus."""
+    title = LEVEL_PREFIX.get(level, '[OpenCLAW] ').strip(' ')
+    event = AlertEvent(
+        user_id=owner_user_id or "",
+        template_key=f"openclaw:{category}",
+        title=title,
+        message=message,
+        pair_code=pair_code,
+        severity=level,
+        cooldown_s=cooldown_s,
+        payload=payload or {},
+        ack_required=ack_required,
+    )
+    delivered = await alert_bus.emit(event)
+    if not delivered:
+        return 0  # Suppressed by dedup — no agent_alerts row written.
 
-    Returns the new agent_alerts.id.
-    """
-    full = LEVEL_PREFIX.get(level, '[OpenCLAW] ') + message
-    sent_count = 0
-    sent_ok = False
+    # Recover the row id we just inserted (best-effort; only used by callers
+    # that wanted an ack handle. Not load-bearing.)
     try:
-        from app.services.feishu_service import get_feishu_service
-        feishu = get_feishu_service()
-        if feishu:
-            for r in await _list_recipients(db):
-                try:
-                    res = await feishu.send_text_message(receive_id=r[2], content=full)
-                    if res.get('success'):
-                        sent_count += 1
-                        sent_ok = True
-                except Exception as e:
-                    logger.warning(f'[feishu] send to {r[1]} failed: {e}')
-    except Exception as e:
-        logger.error(f'[feishu] init failed: {e}')
-
-    res = await db.execute(text('''
-        INSERT INTO agent_alerts (level, category, message, payload, feishu_sent, ack_required)
-        VALUES (:lv, :cat, :msg, CAST(:pl AS JSONB), :ok, :ack)
-        RETURNING id
-    '''), {
-        'lv': level, 'cat': category, 'msg': message,
-        'pl': __import__('json').dumps(payload or {}),
-        'ok': sent_ok, 'ack': ack_required,
-    })
-    new_id = res.scalar_one()
-    await db.commit()
-    logger.info(f'[OpenCLAW alert#{new_id}] {level}/{category}: {message} (feishu sent={sent_count})')
-    return new_id
+        row = (await db.execute(text(
+            "SELECT id FROM agent_alerts ORDER BY id DESC LIMIT 1"
+        ))).first()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0

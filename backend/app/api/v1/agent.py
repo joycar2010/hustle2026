@@ -388,8 +388,8 @@ async def set_llm_config(req: LlmConfigReq, db: AsyncSession = Depends(get_db),
                                 jerr = _json.loads(body).get('error', {}).get('message', body)
                             except Exception:
                                 jerr = body
-                            raise HTTPException(status_code=400,
-                                detail=f'模型 {req.model} 流式验证失败: {jerr}')
+                            import logging
+                            logging.getLogger(__name__).warning(f'模型 {req.model} 流式验证失败(不阻止保存): {jerr}')
                         # Drain SSE: ensure we get at least one well-formed event
                         got_event = False
                         async for chunk in resp.content.iter_chunked(1024):
@@ -400,13 +400,11 @@ async def set_llm_config(req: LlmConfigReq, db: AsyncSession = Depends(get_db),
                                 got_event = True
                                 break
                         if not got_event:
-                            raise HTTPException(status_code=400,
-                                detail=f'模型 {req.model} 流式响应空')
-            except HTTPException:
-                raise
+                            import logging
+                            logging.getLogger(__name__).warning(f'模型 {req.model} 流式响应空(不阻止保存)')
             except Exception as e:
-                raise HTTPException(status_code=400,
-                    detail=f'模型 {req.model} 流式验证异常: {str(e)[:200]}')
+                import logging
+                logging.getLogger(__name__).warning(f'模型 {req.model} 流式验证异常(不阻止保存): {e}')
         ls['model'] = req.model
     if req.streaming is not None:
         ls['streaming'] = bool(req.streaming)
@@ -430,6 +428,54 @@ async def set_llm_config(req: LlmConfigReq, db: AsyncSession = Depends(get_db),
     from app.services.agent.codex_client import invalidate_model_cache
     invalidate_model_cache()
     return {'ok': True, 'llm_settings': ls}
+
+
+
+@router.post('/chesspnt-refresh')
+async def refresh_chesspnt_session(db: AsyncSession = Depends(get_db),
+                                   user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Login to chesspnt.com and update session cookie in DB."""
+    import aiohttp, json as _json
+    cfg = await config_loader.load_config(db, force=True)
+    auth = dict(cfg.get('chesspnt_auth', {}) or {})
+    base = auth.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+
+    # Use stored credentials or defaults
+    username = auth.get('username', 'joycar')
+    password = auth.get('password', 'Lk106504!')
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(
+                f'{base}/api/user/login',
+                json={'username': username, 'password': password}
+            ) as resp:
+                data = await resp.json()
+                if not data.get('success'):
+                    return {'ok': False, 'error': data.get('message', 'login failed')}
+
+                # Extract session cookie from response headers
+                cookies = resp.headers.getall('Set-Cookie', [])
+                new_cookie = ''
+                for c in cookies:
+                    if 'session=' in c:
+                        new_cookie = c.split('session=')[1].split(';')[0]
+                        break
+
+                if not new_cookie:
+                    return {'ok': False, 'error': 'no session cookie in response'}
+
+                # Update DB
+                auth['session_cookie'] = new_cookie
+                await db.execute(text(
+                    "UPDATE agent_active_config SET value=cast(:v as jsonb), updated_at=NOW() WHERE key='chesspnt_auth'"
+                ), {'v': _json.dumps(auth)})
+                await db.commit()
+                config_loader.invalidate()
+
+                return {'ok': True, 'message': 'session cookie updated', 'user': data.get('data', {}).get('username')}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
 
 
 # ───── Weekly strategy reviewer (P5) ─────

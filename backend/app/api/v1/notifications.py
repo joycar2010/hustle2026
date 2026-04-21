@@ -22,7 +22,6 @@ from app.models.notification_config import (
     NotificationLog
 )
 from app.services.feishu_service import get_feishu_service, init_feishu_service
-from app.services.audio_manager import get_audio_file_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -531,44 +530,14 @@ async def send_notification(
                     color_map = {1: "blue", 2: "blue", 3: "orange", 4: "red"}
                     color = color_map.get(template.priority, "blue")
 
-                    # Check if template has alert sound
-                    if template.alert_sound and template.alert_sound.strip():
-                        # Get audio file_key
-                        audio_file_key = await get_audio_file_key(feishu, template.alert_sound)
-
-                        if audio_file_key:
-                            # Send card with audio
-                            logger.info(f"发送带音频的卡片消息: {template.alert_sound}")
-                            result = await feishu.send_card_with_audio(
-                                receive_id=feishu_user_id,
-                                title=title,
-                                content=content,
-                                audio_file_key=audio_file_key,
-                                audio_title=f"{template.template_name}提醒",
-                                receive_id_type=receive_id_type,
-                                color=color,
-                                loop=True,  # 循环播放
-                                auto_play=True  # 自动播放
-                            )
-                        else:
-                            # Fallback to normal card if audio upload failed
-                            logger.warning(f"音频文件上传失败，发送普通卡片: {template.alert_sound}")
-                            result = await feishu.send_card_message(
-                                receive_id=feishu_user_id,
-                                title=title,
-                                content=content,
-                                receive_id_type=receive_id_type,
-                                color=color
-                            )
-                    else:
-                        # Send normal card without audio
-                        result = await feishu.send_card_message(
-                            receive_id=feishu_user_id,
-                            title=title,
-                            content=content,
-                            receive_id_type=receive_id_type,
-                            color=color
-                        )
+                    # Send normal card (Feishu does not support custom audio for alerts)
+                    result = await feishu.send_card_message(
+                        receive_id=feishu_user_id,
+                        title=title,
+                        content=content,
+                        receive_id_type=receive_id_type,
+                        color=color
+                    )
 
                     # Log notification
                     log = NotificationLog(

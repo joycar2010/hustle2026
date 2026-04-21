@@ -11,6 +11,23 @@ from app.models.risk_settings import RiskSettings
 from app.services.account_service import account_data_service
 from app.services.risk_alert_service import RiskAlertService
 from app.services.spread_alert_service import SpreadAlertService, spread_alert_service
+
+async def _is_agent_active(db) -> bool:
+    """Check if agent is active (not off/kill_switch). Risk alerts should only fire when agent is running."""
+    try:
+        from sqlalchemy import text
+        row = (await db.execute(text("SELECT mode, kill_switch FROM agent_state WHERE id=1"))).first()
+        if not row:
+            return True
+        mode, kill = row[0], row[1]
+        if kill:
+            return False
+        if mode in ('off', None):
+            return False
+        return True
+    except Exception:
+        return True
+
 from app.services.market_service import market_data_service
 from app.core.proxy_utils import build_proxy_url
 from sqlalchemy import select
@@ -250,6 +267,9 @@ class AccountBalanceStreamer:
     async def _check_spread_alerts(self, active_accounts):
         """Check spread alerts for all active users (every 20 seconds)"""
         try:
+            async with get_db_session(timeout=3.0) as check_db:
+                if not await _is_agent_active(check_db):
+                    return
             # Group accounts by user
             user_accounts = {}
             user_ids = []
@@ -275,15 +295,11 @@ class AccountBalanceStreamer:
                 risk_settings_list = result.scalars().all()
 
                 # Create a mapping of user_id -> risk_settings
-                risk_settings_map = {str(rs.user_id): rs for rs in risk_settings_list}
-
-                # Check spread alerts per user — pair-code-aware market data
-                for user_id, accounts in user_accounts.items():
+                # Iterate each risk_settings row independently (one per user+pair_code)
+                for risk_settings in risk_settings_list:
+                    user_id = str(risk_settings.user_id)
+                    pair_code = getattr(risk_settings, "pair_code", "XAU") or "XAU"
                     try:
-                        risk_settings = risk_settings_map.get(user_id)
-                        if not risk_settings:
-                            continue
-
                         alert_settings = {
                             'forwardOpenPrice': risk_settings.forward_open_price,
                             'forwardClosePrice': risk_settings.forward_close_price,
@@ -295,11 +311,9 @@ class AccountBalanceStreamer:
                             'reverseCloseSyncCount': risk_settings.reverse_close_sync_count,
                         }
 
-                        if not any(alert_settings.values()):
+                        if not any(v is not None for v in alert_settings.values()):
                             continue
 
-                        # Fetch pair-aware spread data based on user's configured pair
-                        pair_code = getattr(risk_settings, 'pair_code', 'XAU') or 'XAU'
                         market_data = await _get_spread_for_pair(pair_code)
                         market_dict = {
                             'forward_spread': market_data.forward_entry_spread if hasattr(market_data, 'forward_entry_spread') else None,
@@ -313,7 +327,7 @@ class AccountBalanceStreamer:
                             alert_settings=alert_settings
                         )
                     except Exception as e:
-                        logger.error(f"Error checking spread alerts for user {user_id}: {e}")
+                        logger.error(f"Error checking spread alerts for user {user_id} pair {pair_code}: {e}")
 
         except asyncio.TimeoutError:
             logger.error(f"Timeout in _check_spread_alerts")
@@ -430,6 +444,9 @@ class RiskMetricsStreamer:
         """Check risk alerts and send Feishu notifications with batch queries"""
         logger.info(f"[BROADCAST] _check_risk_alerts called, active_accounts数量={len(active_accounts)}")
         try:
+            async with get_db_session(timeout=3.0) as check_db:
+                if not await _is_agent_active(check_db):
+                    return
             # Group accounts by user
             user_accounts = {}
             user_ids = []
@@ -1115,6 +1132,9 @@ class PositionStreamer:
 
     BROADCAST_INTERVAL = 1.0  # 每秒广播一次
     _bridge_url_cache: str = None   # 模块级缓存，避免每秒 DB 查询
+    _user_bridges_cache: list = None   # [(user_id, bridge_url), ...]
+    _user_bridges_cache_at: float = 0.0
+    USER_BRIDGES_CACHE_TTL: float = 30.0  # seconds
 
     def __init__(self):
         self.running = False
@@ -1166,8 +1186,8 @@ class PositionStreamer:
             try:
                 await asyncio.sleep(self.BROADCAST_INTERVAL)
 
-                # 1. Read ALL MT5 positions by symbol
-                mt5_by_symbol = await self._read_mt5_positions_all()
+                # 1. Read MT5 positions per-user: {user_id: {symbol: (long, short)}}
+                mt5_by_user = await self._read_mt5_positions_all()
 
                 # 2. Build pairs_map from active hedging pairs
                 pairs_map = {}
@@ -1181,39 +1201,39 @@ class PositionStreamer:
                         sym_b = pair.symbol_b.symbol if pair.symbol_b else None
                         if not sym_a or not sym_b:
                             continue
-                        mt5_l, mt5_s = mt5_by_symbol.get(sym_b, (0.0, 0.0))
-                        if mt5_l == 0.0 and mt5_s == 0.0:
-                            alt = sym_b.replace("+", ".s")
-                            mt5_l, mt5_s = mt5_by_symbol.get(alt, (0.0, 0.0))
-                        pairs_map[pair.pair_code] = {
-                            "sym_a": sym_a, "sym_b": sym_b,
-                            "mt5_long": mt5_l, "mt5_short": mt5_s,
-                        }
+                        pairs_map[pair.pair_code] = {"sym_a": sym_a, "sym_b": sym_b}
                 except Exception as _pe:
                     logger.debug(f"[PositionStreamer] pairs_map error: {_pe}")
 
-                # 3. Broadcast per-user
-                for uid, sym_positions in self._binance_positions.items():
-                    if uid == "_default":
-                        continue
+                # 3. Union of all known users (Binance cache OR MT5 owners)
+                all_uids = set(self._binance_positions.keys()) | set(mt5_by_user.keys())
+                all_uids.discard("_default")
+
+                # 4. Per-user, per-pair payload — strict isolation by user_id + pair_code
+                for uid in all_uids:
+                    bn_syms = self._binance_positions.get(uid, {})
+                    mt5_syms = mt5_by_user.get(uid, {})
                     pairs_out = {}
                     for pair_code, pd in pairs_map.items():
                         sym_a = pd["sym_a"]
-                        bn_l, bn_s = sym_positions.get(sym_a, (0.0, 0.0))
+                        sym_b = pd["sym_b"]
+                        bn_l, bn_s = bn_syms.get(sym_a, (0.0, 0.0))
+                        mt5_l, mt5_s = mt5_syms.get(sym_b, (0.0, 0.0))
+                        if mt5_l == 0.0 and mt5_s == 0.0:
+                            alt = sym_b.replace("+", ".s")
+                            mt5_l, mt5_s = mt5_syms.get(alt, (0.0, 0.0))
                         pairs_out[pair_code] = {
-                            "mt5_long": pd["mt5_long"], "mt5_short": pd["mt5_short"],
+                            "mt5_long": mt5_l, "mt5_short": mt5_s,
                             "binance_long": bn_l, "binance_short": bn_s,
                         }
-                    xau_pd = pairs_map.get("XAU", {})
-                    xau_sym_a = xau_pd.get("sym_a", "")
-                    bn_l_xau, bn_s_xau = sym_positions.get(xau_sym_a, (0.0, 0.0))
+                    xau_pd = pairs_out.get("XAU", {})
                     evt = {
                         "user_id": uid, "type": "position_snapshot",
                         "data": {
                             "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
                             "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
-                            "binance_long_xau": bn_l_xau,
-                            "binance_short_xau": bn_s_xau,
+                            "binance_long_xau": xau_pd.get("binance_long", 0.0),
+                            "binance_short_xau": xau_pd.get("binance_short", 0.0),
                             "pairs": pairs_out,
                         }
                     }
@@ -1225,60 +1245,160 @@ class PositionStreamer:
                 logger.error(f"[PositionStreamer] loop error: {e}", exc_info=True)
                 await asyncio.sleep(2)
 
+
+    async def push_snapshot_for_user(self, user_id: str) -> None:
+        """Push a fresh per-user position_snapshot via Redis on demand.
+
+        Called by snapshot_request_listener when the Go Hub forwards a
+        client-initiated `request_snapshot` command. Reads MT5 from THIS
+        user\'s bridges only — strict user_id isolation.
+        """
+        if not user_id:
+            return
+        try:
+            import json as _json
+            from app.core.redis_client import redis_client as _rc
+
+            mt5_by_user = await self._read_mt5_positions_all()
+            mt5_syms = mt5_by_user.get(user_id, {})
+            bn_syms = self._binance_positions.get(user_id, {})
+
+            pairs_meta = {}
+            try:
+                from app.services.hedging_pair_service import hedging_pair_service
+                for pair in (hedging_pair_service.list_active_pairs() or []):
+                    if not pair.is_active:
+                        continue
+                    sa = pair.symbol_a.symbol if pair.symbol_a else None
+                    sb = pair.symbol_b.symbol if pair.symbol_b else None
+                    if sa and sb:
+                        pairs_meta[pair.pair_code] = {"sym_a": sa, "sym_b": sb}
+            except Exception:
+                pass
+
+            pairs_out = {}
+            for pc, meta in pairs_meta.items():
+                sa, sb = meta["sym_a"], meta["sym_b"]
+                bn_l, bn_s = bn_syms.get(sa, (0.0, 0.0))
+                mt5_l, mt5_s = mt5_syms.get(sb, (0.0, 0.0))
+                if mt5_l == 0.0 and mt5_s == 0.0:
+                    alt = sb.replace("+", ".s")
+                    mt5_l, mt5_s = mt5_syms.get(alt, (0.0, 0.0))
+                pairs_out[pc] = {
+                    "mt5_long": mt5_l, "mt5_short": mt5_s,
+                    "binance_long": bn_l, "binance_short": bn_s,
+                }
+
+            xau_pd = pairs_out.get("XAU", {})
+            evt = {
+                "user_id": user_id, "type": "position_snapshot",
+                "data": {
+                    "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
+                    "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
+                    "binance_long_xau": xau_pd.get("binance_long", 0.0),
+                    "binance_short_xau": xau_pd.get("binance_short", 0.0),
+                    "pairs": pairs_out,
+                }
+            }
+            await _rc.publish("ws:user_event", _json.dumps(evt))
+            logger.info(f"[PositionStreamer] On-demand snapshot pushed user={user_id}")
+        except Exception as e:
+            logger.warning(f"[PositionStreamer] push_snapshot_for_user error: {e}")
+
     # ------------------------------------------------------------------
     # MT5 持仓读取 — 无 symbol 过滤，返回所有持仓
     # ------------------------------------------------------------------
     async def _read_mt5_positions_all(self) -> dict:
-        """Read positions from ALL active MT5 bridges (Bybit + ICMarkets etc.)"""
-        result = {}
+        """Read positions from each active MT5 bridge, grouped by user_id.
+
+        Returns: {user_id: {symbol: (long, short)}}
+
+        Each non-system mt5_clients row maps 1:1 to a trading account, and the
+        owning user_id is resolved via accounts.user_id. This guarantees per-user
+        isolation — no user can ever see another user's MT5 positions.
+        """
+        result: dict = {}
         try:
             import httpx, os
             api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", ""))
             headers = {"X-Api-Key": api_key} if api_key else {}
 
-            # Collect ALL active bridge URLs (not just one)
-            bridge_urls = set()
-            try:
-                from sqlalchemy import text as _text
-                async with AsyncSessionLocal() as _db:
-                    rows = await _db.execute(_text(
-                        "SELECT DISTINCT bridge_url, bridge_service_port FROM mt5_clients "
-                        "WHERE is_active = true AND is_system_service = false "
-                        "AND connection_status NOT IN ('error', 'disconnected')"
-                    ))
-                    for row in rows.fetchall():
-                        url = row[0] or (f"http://172.31.14.113:{row[1]}" if row[1] else None)
-                        if url:
-                            bridge_urls.add(url)
-            except Exception:
-                pass
-            if not bridge_urls:
-                bridge_urls.add(os.getenv("MT5_BRIDGE_URL", "http://172.31.14.113:8002"))
+            # (user_id, bridge_url) tuples — every active non-system bridge.
+            # Cached for 30s to avoid hammering the DB every second; the bridge
+            # set only changes when accounts are added/removed.
+            import time as _time
+            now = _time.monotonic()
+            if (PositionStreamer._user_bridges_cache is not None and
+                    now - PositionStreamer._user_bridges_cache_at < PositionStreamer.USER_BRIDGES_CACHE_TTL):
+                bridges = list(PositionStreamer._user_bridges_cache)
+            else:
+                bridges = []
+                try:
+                    from sqlalchemy import text as _text
+                    async with AsyncSessionLocal() as _db:
+                        rows = await _db.execute(_text(
+                            "SELECT a.user_id::text, mc.bridge_url, mc.bridge_service_port "
+                            "FROM mt5_clients mc JOIN accounts a ON mc.account_id = a.account_id "
+                            "WHERE mc.is_active = true AND mc.is_system_service = false "
+                            "AND mc.connection_status NOT IN ('error', 'disconnected')"
+                        ))
+                        for row in rows.fetchall():
+                            uid = row[0]
+                            url = row[1] or (f"http://172.31.14.113:{row[2]}" if row[2] else None)
+                            if uid and url:
+                                bridges.append((uid, url))
+                    PositionStreamer._user_bridges_cache = list(bridges)
+                    PositionStreamer._user_bridges_cache_at = now
+                except Exception as e:
+                    logger.debug(f"[PositionStreamer] bridge query error: {e}")
 
-            # Query ALL bridges concurrently — short timeout to avoid CLOSE_WAIT accumulation
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                for bridge_url in bridge_urls:
-                    try:
-                        resp = await client.get(f"{bridge_url}/mt5/positions", headers=headers)
+            if not bridges:
+                return result
+
+            async def _fetch_one(uid: str, url: str):
+                try:
+                    async with httpx.AsyncClient(timeout=3.0) as cli:
+                        resp = await cli.get(f"{url}/mt5/positions", headers=headers)
                         if resp.status_code != 200:
-                            continue
+                            return uid, {}
                         positions = resp.json().get("positions", [])
-                        for p in positions:
-                            sym = p.get("symbol", "")
-                            if not sym:
-                                continue
-                            vol = float(p.get("volume", 0))
-                            typ = p.get("type", -1)
-                            if sym not in result:
-                                result[sym] = [0.0, 0.0]
-                            if typ == 0:
-                                result[sym][0] += vol
-                            elif typ == 1:
-                                result[sym][1] += vol
-                    except Exception as e:
-                        logger.debug(f"[PositionStreamer] Bridge {bridge_url} error: {e}")
+                except Exception as e:
+                    logger.debug(f"[PositionStreamer] Bridge {url} (user {uid}) error: {e}")
+                    return uid, {}
+                acc: dict = {}
+                for p in positions:
+                    sym = p.get("symbol", "")
+                    if not sym:
+                        continue
+                    vol = float(p.get("volume", 0))
+                    typ = p.get("type", -1)
+                    if sym not in acc:
+                        acc[sym] = [0.0, 0.0]
+                    if typ == 0:
+                        acc[sym][0] += vol
+                    elif typ == 1:
+                        acc[sym][1] += vol
+                return uid, {s: (round(v[0], 4), round(v[1], 4)) for s, v in acc.items()}
 
-            return {sym: (round(v[0], 4), round(v[1], 4)) for sym, v in result.items()}
+            # Concurrent fetch across all user bridges
+            results = await asyncio.gather(
+                *[_fetch_one(u, url) for u, url in bridges],
+                return_exceptions=True,
+            )
+            for r in results:
+                if isinstance(r, Exception):
+                    continue
+                uid, syms = r
+                if uid not in result:
+                    result[uid] = {}
+                # Merge — a user may own multiple bridges (multiple MT5 accounts)
+                for s, (l, sh) in syms.items():
+                    if s in result[uid]:
+                        prev_l, prev_s = result[uid][s]
+                        result[uid][s] = (round(prev_l + l, 4), round(prev_s + sh, 4))
+                    else:
+                        result[uid][s] = (l, sh)
+            return result
         except Exception as e:
             logger.debug(f"[PositionStreamer] MT5 read all error: {e}")
             return result
@@ -1340,6 +1460,72 @@ class PositionStreamer:
 
 
 position_streamer = PositionStreamer()
+
+
+# ── On-demand snapshot listener ───────────────────────────────────────────────
+# Subscribes to ws:snapshot_request (published by Go Hub when a client sends
+# `request_snapshot`) and triggers PositionStreamer.push_snapshot_for_user.
+# This bypasses the 1s broadcast cycle so the UI gets sub-second feedback after
+# a manual refresh or an order fill.
+class SnapshotRequestListener:
+    def __init__(self):
+        self.running = False
+        self.task = None
+
+    async def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.task = asyncio.create_task(self._loop())
+        logger.info("SnapshotRequestListener started")
+
+    async def stop(self):
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+
+    async def _loop(self):
+        import json as _json
+        from app.core.redis_client import redis_client as _rc
+        while self.running:
+            pubsub = None
+            try:
+                if not _rc.client:
+                    await asyncio.sleep(2)
+                    continue
+                pubsub = _rc.client.pubsub()
+                await pubsub.subscribe("ws:snapshot_request")
+                async for msg in pubsub.listen():
+                    if not self.running:
+                        break
+                    if msg.get("type") != "message":
+                        continue
+                    try:
+                        data = _json.loads(msg.get("data") or "{}")
+                        uid = data.get("user_id")
+                        if uid:
+                            asyncio.create_task(position_streamer.push_snapshot_for_user(uid))
+                    except Exception as e:
+                        logger.debug(f"[SnapshotRequestListener] msg parse error: {e}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[SnapshotRequestListener] loop error: {e}")
+                await asyncio.sleep(2)
+            finally:
+                if pubsub is not None:
+                    try:
+                        await pubsub.unsubscribe()
+                        await pubsub.close()
+                    except Exception:
+                        pass
+
+
+snapshot_request_listener = SnapshotRequestListener()
 
 
 class BinancePositionPusher:
@@ -1590,37 +1776,65 @@ class BinancePositionPusher:
                 f"long={long_xau} short={short_xau} user={user_id}"
             )
 
-            # Immediately push a position_snapshot via Redis → Go Hub → frontend.
-            # Don't wait for PositionStreamer's 1s cycle — user expects sub-second UI update.
+            # Immediately push a full per-user position_snapshot via Redis → Go Hub → frontend.
+            # Don\'t wait for PositionStreamer\'s 1s cycle — user expects sub-second UI update.
+            # Reads THIS user\'s MT5 bridges (not the shared system bridge) and emits a
+            # complete `pairs` map matching Publisher A format, so the frontend store can
+            # replace the entire snapshot rather than partially patch.
             if user_id:
                 try:
                     import json as _json
                     from app.core.redis_client import redis_client as _rc
 
-                    # Read current MT5 positions from PositionStreamer cache for a complete snapshot
-                    import inspect
-                    mt5_client = market_data_service.mt5_client
-                    bybit_long, bybit_short = 0.0, 0.0
-                    if mt5_client:
-                        _, sym_b = _get_pair_symbols()
-                        _result = mt5_client.get_positions(sym_b)
-                        _positions = (await _result) if inspect.isawaitable(_result) else _result
-                        if _positions:
-                            bybit_long = round(sum(float(p.get('volume', 0)) for p in _positions if p.get('type') == 0), 2)
-                            bybit_short = round(sum(float(p.get('volume', 0)) for p in _positions if p.get('type') == 1), 2)
+                    mt5_by_user = await position_streamer._read_mt5_positions_all()
+                    mt5_syms = mt5_by_user.get(user_id, {})
+                    # Inject the just-updated Binance position into the cache so the
+                    # snapshot we publish includes it without waiting for the 1s loop.
+                    sym = self._symbol()
+                    bn_syms = dict(position_streamer._binance_positions.get(user_id, {}))
+                    bn_syms[sym] = (long_xau, short_xau)
 
+                    # Build pairs map from active hedging pairs
+                    pairs_meta = {}
+                    try:
+                        from app.services.hedging_pair_service import hedging_pair_service
+                        for pair in (hedging_pair_service.list_active_pairs() or []):
+                            if not pair.is_active:
+                                continue
+                            sa = pair.symbol_a.symbol if pair.symbol_a else None
+                            sb = pair.symbol_b.symbol if pair.symbol_b else None
+                            if sa and sb:
+                                pairs_meta[pair.pair_code] = {"sym_a": sa, "sym_b": sb}
+                    except Exception:
+                        pass
+
+                    pairs_out = {}
+                    for pc, meta in pairs_meta.items():
+                        sa, sb = meta["sym_a"], meta["sym_b"]
+                        bn_l, bn_s = bn_syms.get(sa, (0.0, 0.0))
+                        mt5_l, mt5_s = mt5_syms.get(sb, (0.0, 0.0))
+                        if mt5_l == 0.0 and mt5_s == 0.0:
+                            alt = sb.replace("+", ".s")
+                            mt5_l, mt5_s = mt5_syms.get(alt, (0.0, 0.0))
+                        pairs_out[pc] = {
+                            "mt5_long": mt5_l, "mt5_short": mt5_s,
+                            "binance_long": bn_l, "binance_short": bn_s,
+                        }
+
+                    xau_pd = pairs_out.get("XAU", {})
                     evt = {
                         "user_id": user_id,
                         "type": "position_snapshot",
                         "data": {
-                            "bybit_long_lots": bybit_long,
-                            "bybit_short_lots": bybit_short,
-                            "binance_long_xau": long_xau,
-                            "binance_short_xau": short_xau,
+                            "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
+                            "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
+                            "binance_long_xau": xau_pd.get("binance_long", long_xau),
+                            "binance_short_xau": xau_pd.get("binance_short", short_xau),
+                            "pairs": pairs_out,
                         }
                     }
                     await _rc.publish("ws:user_event", _json.dumps(evt))
-                    logger.info(f"[BinancePositionPusher] Instant snapshot pushed via Redis for user {user_id}")
+                    logger.info(f"[BinancePositionPusher] Instant snapshot pushed user={user_id} pairs={list(pairs_out.keys())}")
                 except Exception as push_err:
                     logger.warning(f"[BinancePositionPusher] Instant push failed: {push_err}")
 

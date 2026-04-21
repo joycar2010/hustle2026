@@ -44,6 +44,11 @@ export const useNotificationStore = defineStore('notification', () => {
 
   // Check market data against alert thresholds
   function checkMarketAlerts(marketData) {
+    // Spread alerts are produced server-side by spread_alert_service and
+    // delivered via the  WebSocket event. The duplicated client
+    // checks below are intentionally disabled to keep a single source of truth.
+    return
+    // eslint-disable-next-line no-unreachable
     if (!alertSettings.value || !marketData) return
 
     const newAlerts = []
@@ -107,6 +112,12 @@ export const useNotificationStore = defineStore('notification', () => {
 
   // Check account data against alert thresholds
   function checkAccountAlerts(accountData) {
+    // Net-asset alerts are produced server-side by RiskAlertService
+    // (check_binance_net_asset / check_bybit_net_asset / check_total_net_asset)
+    // and delivered via the risk_alert WebSocket event. Disabled to avoid
+    // duplicate / divergent thresholds.
+    return
+    // eslint-disable-next-line no-unreachable
     if (!alertSettings.value || !accountData) return
 
     const newAlerts = []
@@ -159,6 +170,11 @@ export const useNotificationStore = defineStore('notification', () => {
 
   // Check liquidation price alerts
   function checkLiquidationAlerts(accountData) {
+    // Liquidation alerts are produced server-side by RiskAlertService
+    // (check_binance_liquidation / check_bybit_liquidation) and delivered via
+    // the risk_alert WebSocket event. Disabled to avoid duplicates.
+    return
+    // eslint-disable-next-line no-unreachable
     if (!alertSettings.value || !accountData) return
 
     const newAlerts = []
@@ -273,6 +289,11 @@ export const useNotificationStore = defineStore('notification', () => {
 
   // Check MT5 lag count
   function checkMT5LagAlert(lagCount) {
+    // MT5 lag alerts are produced server-side by RiskAlertService.check_mt5_lag
+    // and delivered via the risk_alert WebSocket event. Disabled here to avoid
+    // duplicates.
+    return
+    // eslint-disable-next-line no-unreachable
     if (!alertSettings.value || lagCount === undefined) return
 
     if (lagCount >= alertSettings.value.mt5LagCount) {

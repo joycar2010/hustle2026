@@ -21,6 +21,7 @@ import logging
 
 from app.models.notification_config import NotificationTemplate
 from app.services.feishu_service import get_feishu_service
+from app.services.alert_bus import alert_bus, Severity
 from app.models.notification_config import NotificationConfig
 from app.websocket.manager import manager
 
@@ -43,23 +44,29 @@ class _SafeDict(dict):
 class RiskAlertService:
     """风险控制提醒服务"""
 
+    # Class-level cooldown cache shared across all instances
+    _cooldown_cache: Dict[str, datetime] = {}
+
     def __init__(self, db: AsyncSession):
         self.db = db
-        # 冷却时间缓存：{user_id}_{template_key} -> last_sent_time
-        self.cooldown_cache: Dict[str, datetime] = {}
+
+    @property
+    def cooldown_cache(self) -> Dict[str, datetime]:
+        return RiskAlertService._cooldown_cache
 
     async def _can_send_alert(
         self, user_id: str, template_key: str, cooldown_seconds: int = 60
     ) -> bool:
-        """检查是否可以发送提醒（冷却时间）"""
-        cache_key = f"{user_id}_{template_key}"
-        last_sent = self.cooldown_cache.get(cache_key)
-
-        if last_sent:
-            elapsed = (get_beijing_time() - last_sent).total_seconds()
-            if elapsed < cooldown_seconds:
-                return False
-
+        """Cross-process dedup via AlertBus (Redis SETNX EX). Falls back to
+        the in-process cooldown_cache if Redis is down."""
+        if cooldown_seconds <= 0:
+            return True
+        dedup_key = f"alert:dedup:{user_id}:_:{template_key}"
+        claimed = await alert_bus.try_dedup(dedup_key, cooldown_seconds)
+        if not claimed:
+            return False
+        # Mirror to local cache for legacy diagnostics — not authoritative.
+        self.cooldown_cache[f"{user_id}_{template_key}"] = get_beijing_time()
         return True
 
     async def _send_alert(
@@ -136,6 +143,28 @@ class RiskAlertService:
                 logger.debug(f"User not found: {user_id}")
                 return False
 
+            # 检查用户通知偏好设置
+            from sqlalchemy import text as _text
+            notif_row = (await self.db.execute(
+                _text("SELECT feishu_enabled, enable_risk_notifications FROM user_notification_settings WHERE user_id = CAST(:uid AS UUID)"),
+                {"uid": user_id}
+            )).first()
+            if notif_row:
+                feishu_enabled, enable_risk = notif_row[0], notif_row[1]
+                if feishu_enabled is False:
+                    logger.debug(f"User {user_id} has feishu disabled in notification settings")
+                    return False
+                risk_templates = {
+                    'binance_net_asset_alert', 'bybit_net_asset_alert', 'total_net_asset_alert',
+                    'binance_liquidation_alert', 'bybit_liquidation_alert',
+                    'forward_open_spread_alert', 'forward_close_spread_alert',
+                    'reverse_open_spread_alert', 'reverse_close_spread_alert',
+                    'single_leg_alert', 'mt5_lag_alert',
+                }
+                if template_key in risk_templates and enable_risk is False:
+                    logger.debug(f"User {user_id} has risk notifications disabled")
+                    return False
+
             # 检查用户是否配置了飞书
             if not user.email and not user.feishu_open_id:
                 logger.debug(f"User {user_id} has no feishu configuration")
@@ -202,6 +231,24 @@ class RiskAlertService:
                 cache_key = f"{user_id}_{template_key}"
                 self.cooldown_cache[cache_key] = get_beijing_time()
                 logger.info(f"Alert sent: {template_key} to user {user_id}")
+
+                # Mirror to unified AlertBus ledger (agent_alerts table) — best
+                # effort; failures here must not abort the existing flow.
+                try:
+                    severity = {1: Severity.INFO, 2: Severity.INFO,
+                                3: Severity.WARN, 4: Severity.DANGER}.get(
+                        template.priority, Severity.WARN)
+                    await alert_bus.persist(
+                        user_id=user_id,
+                        template_key=template_key,
+                        severity=severity,
+                        title=title,
+                        message=content,
+                        payload=dict(variables) if variables else {},
+                        feishu_sent=True,
+                    )
+                except Exception as _be:
+                    logger.debug(f"[risk_alert] AlertBus persist skipped: {_be}")
 
                 # 发送邮件（如果模板启用了邮件渠道且用户有邮箱）
                 if template.enable_email and user.email:

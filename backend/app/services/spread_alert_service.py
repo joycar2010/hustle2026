@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.core.config import settings
 from app.services.feishu_service import get_feishu_service
+from app.services.alert_bus import alert_bus, Severity
 from app.models.notification_config import NotificationTemplate, NotificationLog
 from app.websocket.manager import manager
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -250,20 +251,15 @@ class SpreadAlertService:
                 logger.warning(f"模板不存在、未启用或未开启自动检查: {template_key}")
                 return
 
-            # 检查冷却时间（使用模板的配置）
+            # 跨进程冷却（Redis SETNX EX）— 重启不丢，跨 worker 一致
             cooldown = template.cooldown_seconds or 0
             if cooldown > 0:
-                key = f"{template_key}_{user_id}"
-                now = get_beijing_time()
-
-                if key in self.last_alert_time:
-                    last_time = self.last_alert_time[key]
-                    elapsed = (now - last_time).total_seconds()
-                    if elapsed < cooldown:
-                        logger.info(f"模板 {template_key} 在冷却中，剩余 {cooldown - elapsed:.0f} 秒")
-                        return
-
-                self.last_alert_time[key] = now
+                dedup_key = f"alert:dedup:{user_id}:_:{template_key}"
+                claimed = await alert_bus.try_dedup(dedup_key, cooldown)
+                if not claimed:
+                    logger.info(f"模板 {template_key} 在冷却中（AlertBus 去重命中）")
+                    return
+                self.last_alert_time[f"{template_key}_{user_id}"] = get_beijing_time()
 
             # 渲染模板（safe format：缺失变量回退为占位符而不是抛 KeyError）
             class _SafeDict(dict):
@@ -279,9 +275,22 @@ class SpreadAlertService:
                 logger.warning("飞书服务未初始化")
                 return
 
-            # 获取用户信息（这里简化处理，实际应该从user_notification_settings获取）
-            from app.models.user import User
+            # 检查用户通知偏好设置
+            from sqlalchemy import text as _text
             import uuid as uuid_lib
+            notif_row = (await db.execute(
+                _text("SELECT feishu_enabled, enable_risk_notifications FROM user_notification_settings WHERE user_id = CAST(:uid AS UUID)"),
+                {"uid": user_id}
+            )).first()
+            if notif_row:
+                if notif_row[0] is False:
+                    logger.debug(f"User {user_id} has feishu disabled")
+                    return
+                if notif_row[1] is False:
+                    logger.debug(f"User {user_id} has risk notifications disabled")
+                    return
+
+            from app.models.user import User
             user_result = await db.execute(
                 select(User).filter(User.user_id == uuid_lib.UUID(user_id))
             )
@@ -384,6 +393,21 @@ class SpreadAlertService:
 
             if result.get("success"):
                 logger.info(f"点差值提醒发送成功: {template_key} -> {user_id}")
+                try:
+                    severity = {1: Severity.INFO, 2: Severity.INFO,
+                                3: Severity.WARN, 4: Severity.DANGER}.get(
+                        template.priority, Severity.WARN)
+                    await alert_bus.persist(
+                        user_id=user_id,
+                        template_key=template_key,
+                        severity=severity,
+                        title=title,
+                        message=content,
+                        payload=dict(variables) if variables else {},
+                        feishu_sent=True,
+                    )
+                except Exception as _be:
+                    logger.debug(f"[spread_alert] AlertBus persist skipped: {_be}")
             else:
                 logger.error(f"点差值提醒发送失败: {template_key} -> {user_id}, 错误: {result.get('error')}")
             # NOTE: WebSocket popup broadcast happens earlier (right after Feishu send),

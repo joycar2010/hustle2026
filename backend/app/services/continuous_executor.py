@@ -955,8 +955,29 @@ class ContinuousStrategyExecutor:
                 except Exception as be:
                     logger.warning(f"[POSITION_SNAPSHOT] Binance fetch failed: {be}")
 
-            await ws_manager.broadcast_position_snapshot(long_lots, short_lots, binance_long_xau, binance_short_xau)
-            logger.info(f"[POSITION_SNAPSHOT] bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
+            # User-scoped: publish via Redis ws:user_event so only this user's frontend receives it.
+            # Previously called broadcast_position_snapshot which sent to ALL users (data leak across accounts).
+            if self.user_id:
+                try:
+                    from app.core.redis_client import redis_client as _rc
+                    import json as _json
+                    evt = {
+                        "user_id": self.user_id,
+                        "type": "position_snapshot",
+                        "data": {
+                            "pair_code": self.pair_code,
+                            "bybit_long_lots": long_lots,
+                            "bybit_short_lots": short_lots,
+                            "binance_long_xau": binance_long_xau,
+                            "binance_short_xau": binance_short_xau,
+                        }
+                    }
+                    await _rc.publish("ws:user_event", _json.dumps(evt))
+                    logger.info(f"[POSITION_SNAPSHOT] user={self.user_id} bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
+                except Exception as pub_err:
+                    logger.warning(f"[POSITION_SNAPSHOT] Redis publish failed: {pub_err}")
+            else:
+                logger.warning("[POSITION_SNAPSHOT] self.user_id is None, snapshot not published")
         except Exception as e:
             logger.warning(f"[POSITION_SNAPSHOT] Failed: {e}")
 
