@@ -46,6 +46,25 @@ async def broadcast(
     cooldown_s: int = 60,
 ) -> int:
     """Emit an OpenCLAW alert through the unified AlertBus."""
+    # kill_switch guard: during emergency halt, suppress all non-essential
+    # OpenCLAW alerts. System meta-events (kill_switch / mode_change) and
+    # critical-level fatal events (e.g. forced_reduce_done) always pass.
+    ALWAYS_PASS_CATEGORIES = {'kill_switch', 'mode_change', 'openclaw_toggle'}
+    if level != 'critical' and category not in ALWAYS_PASS_CATEGORIES:
+        try:
+            from app.services.agent import state as _agent_state
+            _st = await _agent_state.get_state(db)
+            if (_st.get('kill_switch') or _st.get('mode') == 'off'
+                    or not _st.get('openclaw_enabled', True)):
+                logger.info(
+                    f"[OpenCLAW] alert suppressed (system halted): "
+                    f"level={level} category={category}"
+                )
+                return 0
+        except Exception as _ge:
+            # Guard failure must not break the alert path — fall through.
+            logger.debug(f"[OpenCLAW] kill_switch guard check failed: {_ge}")
+
     title = LEVEL_PREFIX.get(level, '[OpenCLAW] ').strip(' ')
     event = AlertEvent(
         user_id=owner_user_id or "",

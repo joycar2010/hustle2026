@@ -43,6 +43,7 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
     cfg = await config_loader.load_config(db, target_id=ctx.target_id if ctx else None)
     mode = state['mode']
     kill = state['kill_switch']
+    openclaw_on = state.get('openclaw_enabled', True)
 
     user_prompt = snapshot_to_user_prompt(snap)
     proposal_json: Optional[Dict[str, Any]] = None
@@ -79,7 +80,10 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
             proposal_dict = asdict(p)
             guard_result: GuardResult = run_guard(p, snap, cfg)
 
-            if kill:
+            if not openclaw_on:
+                verdict = 'rejected'
+                reject_reason = 'openclaw_globally_disabled'
+            elif kill:
                 verdict = 'rejected'
                 reject_reason = 'kill_switch_on'
             elif mode == 'off':

@@ -115,8 +115,8 @@ async def compute_balance(db: AsyncSession) -> Dict[str, Any]:
     """Unified balance: chesspnt direct → relay fallback.
 
     Returns dict compatible with existing frontend fields:
-      balance_cny, spent_cny, recharge_total_cny, balance_usd, relay_usage_raw,
-      currency_symbol, low_balance, alert_threshold_cny, usage_multiplier,
+      balance_cny, spent_cny, balance_usd, relay_usage_raw,
+      low_balance, alert_threshold_cny,
       source ('chesspnt_self' | 'relay_estimate')
     """
     cfg = await config_loader.load_config(db)
@@ -125,7 +125,6 @@ async def compute_balance(db: AsyncSession) -> Dict[str, Any]:
 
     threshold_cny = float(ls.get('balance_alert_threshold_cny', 20) or 20)
     usd_to_cny = float(ls.get('usd_to_cny_rate', 7.3) or 7.3)
-    currency_symbol = ls.get('currency_symbol', '$')
 
     # ── Priority 1: chesspnt real-time quota ──
     cp = await fetch_chesspnt_balance(auth)
@@ -139,40 +138,29 @@ async def compute_balance(db: AsyncSession) -> Dict[str, Any]:
             'balance_usd': balance_usd,
             'balance_cny': balance_cny,
             'balance': balance_cny,
-            # legacy fields (no spent/recharge concept in chesspnt quota)
+            # legacy fields (no spent concept in chesspnt quota)
             'spent_cny': None,
-            'recharge_total_cny': None,
             'relay_usage_raw': None,
-            'currency_symbol': '¥',
             'alert_threshold_cny': threshold_cny,
             'alert_threshold': threshold_cny,
-            'usage_multiplier': None,
             'usd_to_cny_rate': usd_to_cny,
             'low_balance': low,
             'chesspnt_username': cp.get('username'),
         }
 
-    # ── Priority 2: relay billing/usage estimate ──
-    multiplier = float(ls.get('usage_multiplier', 1.0) or 1.0)
-    recharge_cny = float(ls.get('recharge_total_cny', 0) or 0)
+    # ── Priority 2: relay billing/usage estimate (degraded; no recharge/multiplier) ──
     raw = await fetch_relay_usage()
-    spent_cny = (raw * multiplier) if raw is not None else None
-    balance_cny = (recharge_cny - spent_cny) if spent_cny is not None else None
-    low = balance_cny is not None and balance_cny < threshold_cny
+    low = False  # cannot assess without recharge_total; surface raw usage only
     return {
         'source': 'relay_estimate',
         'relay_usage_raw': raw,
-        'spent_cny': spent_cny,
-        'spent': spent_cny,
-        'recharge_total_cny': recharge_cny,
-        'recharge_total': recharge_cny,
-        'balance_cny': balance_cny,
-        'balance_usd': (balance_cny / usd_to_cny) if balance_cny else None,
-        'balance': balance_cny,
+        'spent_cny': raw,
+        'spent': raw,
+        'balance_cny': None,
+        'balance_usd': None,
+        'balance': None,
         'alert_threshold_cny': threshold_cny,
         'alert_threshold': threshold_cny,
-        'usage_multiplier': multiplier,
-        'currency_symbol': currency_symbol,
         'low_balance': low,
     }
 

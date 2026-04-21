@@ -4,14 +4,28 @@
     <div class="bg-dark-100 rounded-xl p-5 border border-border-primary">
       <h3 class="font-semibold mb-3 flex items-center justify-between">
         <span>Codex 模型配置</span>
-        <span class="text-xs text-text-tertiary">热加载生效，无需重启</span>
+        <span class="flex items-center gap-3">
+          <span v-if="sessionStatus" class="text-xs" :class="sessionStatus.startsWith('✅') ? 'text-success' : 'text-danger'">{{ sessionStatus }}</span>
+          <button @click="refreshChesspntSession" :disabled="refreshingSession"
+            class="text-xs px-3 py-1 bg-dark-200 border border-border-primary rounded hover:border-primary disabled:opacity-40">
+            {{ refreshingSession ? '刷新中…' : '刷新 chesspnt Cookie' }}
+          </button>
+          <span class="text-xs text-text-tertiary">热加载生效，无需重启</span>
+        </span>
       </h3>
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
         <div>
-          <div class="text-xs text-text-tertiary mb-1">模型</div>
+          <div class="text-xs text-text-tertiary mb-1 flex items-center justify-between">
+            <span>模型 <span class="text-text-tertiary">({{ (llm.available_models || []).length }})</span></span>
+            <button @click="refreshModels" :disabled="refreshingModels"
+              class="text-[10px] px-2 py-0.5 bg-dark-200 border border-border-primary rounded hover:border-primary disabled:opacity-40">
+              {{ refreshingModels ? '刷新中…' : '🔄 刷新' }}
+            </button>
+          </div>
           <select v-model="llm.model" class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none">
             <option v-for="m in llm.available_models || []" :key="m" :value="m">{{ m }}</option>
           </select>
+          <div v-if="modelsRefreshStatus" class="text-[10px] mt-1" :class="modelsRefreshStatus.startsWith('✅') ? 'text-success' : 'text-danger'">{{ modelsRefreshStatus }}</div>
         </div>
         <div class="flex flex-col">
           <div class="text-xs text-text-tertiary mb-1">流式获取</div>
@@ -20,33 +34,12 @@
             <span class="text-sm">启用 stream=true</span>
           </label>
         </div>
-        <div></div>
         <div>
-          <div class="text-xs text-text-tertiary mb-1">已充值额度（{{ llm.currency_symbol || "$" }}，中继原生计价）</div>
-          <input v-model.number="llm.recharge_total_cny" type="number" step="1" min="0"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
-        </div>
-        <div>
-          <div class="text-xs text-text-tertiary mb-1">低额告警阈值（{{ llm.currency_symbol || "$" }}）</div>
+          <div class="text-xs text-text-tertiary mb-1">低额告警阈值（¥）</div>
           <input v-model.number="llm.balance_alert_threshold_cny" type="number" step="1" min="0"
             class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
         </div>
-        <div>
-          <div class="text-xs text-text-tertiary mb-1">换算系数 (raw×x=金额)</div>
-          <input v-model.number="llm.usage_multiplier" type="number" step="0.01" min="0"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none"
-            placeholder="1.0">
-          <div class="text-[10px] text-text-tertiary mt-1">raw={{ stats?.balance?.relay_usage_raw?.toFixed(4) ?? '--' }} · 中继原生 USD=1.0, 人民币折算 ≈7.3</div>
-        </div>
-        <div>
-          <div class="text-xs text-text-tertiary mb-1">货币符号</div>
-          <select v-model="llm.currency_symbol"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
-            <option value="$">$ USD</option>
-            <option value="¥">¥ CNY</option>
-          </select>
-        </div>
-        <div class="flex items-end">
+        <div class="flex items-end lg:col-start-3">
           <button @click="saveLlm" class="w-full px-4 py-2 bg-primary text-dark-300 font-semibold rounded hover:bg-primary-hover">
             保存 LLM 配置
           </button>
@@ -241,7 +234,7 @@ const interventions = ref([])
 const config = ref({})
 const stats = ref(null)
 const scopeOpts = ref({ users: [], pair_codes: [] })
-const llm = reactive({ model: 'gpt-5', streaming: true, recharge_total_cny: 100, balance_alert_threshold_cny: 20, usage_multiplier: 1.0, currency_symbol: '$', available_models: [] })
+const llm = reactive({ model: 'gpt-5', streaming: true, balance_alert_threshold_cny: 20, available_models: [] })
 const targets = ref([])
 const newTarget = ref({ user_id: null, pair_code: null, priority: 0 })
 
@@ -262,6 +255,29 @@ const balanceColor = computed(() => {
 
 const refreshingSession = ref(false)
 const sessionStatus = ref('')
+const refreshingModels = ref(false)
+const modelsRefreshStatus = ref('')
+
+async function refreshModels() {
+  refreshingModels.value = true
+  modelsRefreshStatus.value = ''
+  try {
+    const res = await api.post('/api/v1/agent/chesspnt-models/refresh')
+    if (res.data?.ok) {
+      const added = res.data.added || []
+      const removed = res.data.removed || []
+      modelsRefreshStatus.value = '✅ ' + res.data.count + ' 个模型' + (added.length ? ' (+' + added.length + ')' : '') + (removed.length ? ' (-' + removed.length + ')' : '')
+      await refresh()
+    } else {
+      modelsRefreshStatus.value = '❌ ' + (res.data?.error || '失败')
+    }
+  } catch (e) {
+    modelsRefreshStatus.value = '❌ ' + (e.response?.data?.detail || e.message)
+  } finally {
+    refreshingModels.value = false
+    setTimeout(() => { modelsRefreshStatus.value = '' }, 8000)
+  }
+}
 
 async function refreshChesspntSession() {
   refreshingSession.value = true
@@ -296,10 +312,7 @@ async function saveLlm() {
   try {
     const res = await api.post('/api/v1/agent/llm-config', {
       model: llm.model, streaming: llm.streaming,
-      recharge_total_cny: llm.recharge_total_cny,
       balance_alert_threshold_cny: llm.balance_alert_threshold_cny,
-      usage_multiplier: llm.usage_multiplier,
-      currency_symbol: llm.currency_symbol,
     })
     if (res.data?.llm_settings) {
       Object.assign(llm, res.data.llm_settings)
@@ -372,10 +385,7 @@ async function refresh() {
     if (st) {
       stats.value = st.data
       Object.assign(llm, { model: st.data.model, streaming: st.data.streaming, available_models: st.data.available_models,
-        recharge_total_cny: st.data.balance?.recharge_total_cny ?? llm.recharge_total_cny,
-        balance_alert_threshold_cny: st.data.balance?.alert_threshold_cny ?? llm.balance_alert_threshold_cny,
-        usage_multiplier: st.data.balance?.usage_multiplier ?? llm.usage_multiplier,
-        currency_symbol: st.data.balance?.currency_symbol ?? llm.currency_symbol })
+        balance_alert_threshold_cny: st.data.balance?.alert_threshold_cny ?? llm.balance_alert_threshold_cny })
     }
     if (so) { scopeOpts.value = so.data; if (so.data.current_scope) Object.assign(scope, so.data.current_scope) }
   } catch (e) { console.error(e) }

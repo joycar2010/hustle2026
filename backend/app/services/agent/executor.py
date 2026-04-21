@@ -551,9 +551,10 @@ async def _is_killed_fresh(db: AsyncSession) -> bool:
     since it's called once per order batch, not per tick.
     '''
     row = (await db.execute(text(
-        'SELECT kill_switch FROM agent_state WHERE id = 1'
+        'SELECT kill_switch, openclaw_enabled FROM agent_state WHERE id = 1'
     ))).first()
-    return bool(row and row[0])
+    # Killed if explicit kill_switch OR global openclaw disabled
+    return bool(row and (row[0] or not row[1]))
 
 
 
@@ -566,6 +567,8 @@ async def execute_proposal(db: AsyncSession, decision_id: int, proposal: Proposa
     st = await agent_state.get_state(db)
     if st['kill_switch']:
         return {'ok': False, 'reason': 'kill_switch_on_at_execute'}
+    if not st.get('openclaw_enabled', True):
+        return {'ok': False, 'reason': 'openclaw_globally_disabled'}
 
     cfg = await config_loader.load_config(db, target_id=ctx.target_id if ctx else None)
     rl = cfg.get('rate_limits', {})

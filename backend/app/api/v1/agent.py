@@ -90,6 +90,7 @@ async def get_status(target_id: Optional[int] = Query(None),
 
     return {
         'mode': s['mode'], 'kill_switch': s['kill_switch'],
+        'openclaw_enabled': s.get('openclaw_enabled', True),
         'shadow_started_at': s.get('shadow_started_at').isoformat() if s.get('shadow_started_at') else None,
         'last_decision_at': s.get('last_decision_at').isoformat() if s.get('last_decision_at') else None,
         'position_ratio': position_ratio, 'daily_volume_ratio': daily_ratio,
@@ -346,13 +347,27 @@ async def toggle_kill(req: KillReq, db: AsyncSession = Depends(get_db),
     return {'ok': True, 'kill_switch': req.on}
 
 
+class OpenclawToggleReq(BaseModel):
+    on: bool
+
+
+@router.post('/openclaw-toggle')
+async def toggle_openclaw_global(req: OpenclawToggleReq, db: AsyncSession = Depends(get_db),
+                                 user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Global OpenCLAW enable/disable. Disabling short-circuits all decisions,
+    executions and alerts regardless of per-user settings."""
+    await agent_state.set_openclaw_enabled(db, req.on)
+    from app.services.agent.feishu_broadcast import broadcast
+    await broadcast(db, level='critical' if not req.on else 'info', category='openclaw_toggle',
+                    message=f'OpenCLAW 全局开关 {"已启用" if req.on else "已停用（全员禁）"}（操作员 {user_id[:8]}）',
+                    payload={'on': req.on, 'operator': user_id})
+    return {'ok': True, 'openclaw_enabled': req.on}
+
+
 class LlmConfigReq(BaseModel):
     model: Optional[str] = None
     streaming: Optional[bool] = None
-    recharge_total_cny: Optional[float] = None
     balance_alert_threshold_cny: Optional[float] = None
-    usage_multiplier: Optional[float] = None
-    currency_symbol: Optional[str] = None
 
 
 @router.post('/llm-config')
@@ -408,14 +423,11 @@ async def set_llm_config(req: LlmConfigReq, db: AsyncSession = Depends(get_db),
         ls['model'] = req.model
     if req.streaming is not None:
         ls['streaming'] = bool(req.streaming)
-    if req.recharge_total_cny is not None:
-        ls['recharge_total_cny'] = float(req.recharge_total_cny)
     if req.balance_alert_threshold_cny is not None:
         ls['balance_alert_threshold_cny'] = float(req.balance_alert_threshold_cny)
-    if req.usage_multiplier is not None:
-        ls['usage_multiplier'] = float(req.usage_multiplier)
-    if req.currency_symbol is not None:
-        ls['currency_symbol'] = str(req.currency_symbol)[:5]
+    # Strip obsolete fields if present in prior config
+    for _k in ('recharge_total_cny', 'usage_multiplier', 'currency_symbol'):
+        ls.pop(_k, None)
 
     import json as _json
     await db.execute(text("""
@@ -476,6 +488,68 @@ async def refresh_chesspnt_session(db: AsyncSession = Depends(get_db),
                 return {'ok': True, 'message': 'session cookie updated', 'user': data.get('data', {}).get('username')}
     except Exception as e:
         return {'ok': False, 'error': str(e)}
+
+
+@router.post('/chesspnt-models/refresh')
+async def refresh_chesspnt_models(db: AsyncSession = Depends(get_db),
+                                  user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Pull live model list from chesspnt /api/user/models and overwrite
+    llm_settings.available_models. Manual-only (no scheduler) — operator clicks
+    when session cookie is fresh and they want to surface newly-released models.
+    Returns the new model list and the diff (added/removed) for UI display.
+    """
+    import aiohttp, json as _json
+    cfg = await config_loader.load_config(db, force=True)
+    auth = cfg.get('chesspnt_auth', {}) or {}
+    base = auth.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+    cookie = auth.get('session_cookie', '')
+    user_hdr = auth.get('new_api_user', '')
+    if not cookie:
+        return {'ok': False, 'error': 'no chesspnt session_cookie configured — refresh cookie first'}
+
+    headers = {
+        'accept': 'application/json, text/plain, */*',
+        'cookie': f'session={cookie}',
+    }
+    if user_hdr:
+        headers['new-api-user'] = str(user_hdr)
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(f'{base}/api/user/models', headers=headers) as resp:
+                if resp.status not in (200, 201):
+                    return {'ok': False, 'error': f'HTTP {resp.status}'}
+                body = await resp.json()
+                models = body.get('data') if isinstance(body, dict) else body
+                if not isinstance(models, list) or not models:
+                    return {'ok': False, 'error': f'unexpected response shape: {str(body)[:200]}'}
+                models = sorted({str(m) for m in models if m})
+    except Exception as e:
+        return {'ok': False, 'error': f'fetch failed: {e}'}
+
+    ls = dict(cfg.get('llm_settings', {}) or {})
+    old = set(ls.get('available_models') or [])
+    new = set(models)
+    ls['available_models'] = models
+    # If currently selected model no longer exists, leave it (operator will see warning in UI).
+    await db.execute(text("""
+        INSERT INTO agent_active_config (key, value, updated_by)
+        VALUES ('llm_settings', CAST(:v AS JSONB), CAST(:u AS UUID))
+        ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW(), updated_by=EXCLUDED.updated_by
+    """), {'v': _json.dumps(ls), 'u': user_id})
+    await db.commit()
+    config_loader.invalidate()
+    from app.services.agent.codex_client import invalidate_model_cache
+    invalidate_model_cache()
+
+    return {
+        'ok': True,
+        'count': len(models),
+        'available_models': models,
+        'added': sorted(new - old),
+        'removed': sorted(old - new),
+        'current_model_still_present': ls.get('model') in new if ls.get('model') else None,
+    }
 
 
 # ───── Weekly strategy reviewer (P5) ─────

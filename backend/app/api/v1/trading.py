@@ -756,6 +756,144 @@ async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU")
                 return account
     return None
 
+async def _close_mt5_hedge_by_ticket_aggregation(
+    *,
+    target_account,
+    symbol: str,
+    position_type: int,   # 0 = LONG (close with SELL), 1 = SHORT (close with BUY)
+    requested_volume: float,
+) -> dict:
+    """Close MT5 positions on the hedge side by iterating over open tickets
+    and calling the bridge's single-ticket close endpoint per ticket.
+
+    Why:
+        MT5 Bridge /mt5/position/close picks ONE ticket (closest to the
+        requested volume) and then sends volume=req.volume which may exceed
+        that ticket's volume → retcode=10014 INVALID_VOLUME. Closing ticket
+        by ticket avoids this entirely.
+
+    Returns:
+        {
+            "success": bool,
+            "filled_volume": float,   # lots actually closed
+            "remaining":     float,   # lots still open on requested side
+            "details":       [{"ticket": 123, "volume": 0.09, "ok": true}, ...],
+            "error":         Optional[str],
+        }
+    """
+    import os, httpx, inspect as _inspect
+    from app.models.mt5_client import MT5Client as MT5ClientModel
+    from app.core.database import AsyncSessionLocal
+    from sqlalchemy import select as _sa_select
+
+    api_key = os.getenv("MT5_API_KEY", "")
+    bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
+
+    # Resolve the per-account bridge URL (same logic as place_bybit_order).
+    try:
+        async with AsyncSessionLocal() as _db:
+            _mc = (await _db.execute(
+                _sa_select(MT5ClientModel)
+                .where(MT5ClientModel.account_id == target_account.account_id)
+                .where(MT5ClientModel.is_active == True)
+                .where(MT5ClientModel.is_system_service == False)
+                .order_by(MT5ClientModel.priority)
+                .limit(1)
+            )).scalar_one_or_none()
+            if _mc and _mc.bridge_url:
+                bridge_url = _mc.bridge_url
+            elif _mc and _mc.bridge_service_port:
+                bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+    except Exception as _e:
+        logger.debug(f"[manual/close] bridge resolve error: {_e}")
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-Api-Key"] = api_key
+
+    details = []
+    filled = 0.0
+    remaining_to_close = round(float(requested_volume), 2)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # 1) Snapshot current positions on the requested side.
+            resp = await client.get(f"{bridge_url}/mt5/positions",
+                                     params={"symbol": symbol}, headers=headers)
+            if resp.status_code != 200:
+                return {
+                    "success": False,
+                    "filled_volume": 0.0,
+                    "remaining": 0.0,
+                    "details": [],
+                    "error": f"Bridge positions query {resp.status_code}: {resp.text[:120]}",
+                }
+            positions = resp.json().get("positions", []) or []
+            side_positions = [p for p in positions if int(p.get("type", -1)) == position_type]
+            side_positions.sort(key=lambda p: float(p.get("volume", 0)), reverse=True)
+
+            total_side_volume = round(sum(float(p.get("volume", 0)) for p in side_positions), 2)
+            if total_side_volume <= 0:
+                return {
+                    "success": False,
+                    "filled_volume": 0.0,
+                    "remaining": 0.0,
+                    "details": [],
+                    "error": f"No matching {('LONG' if position_type == 0 else 'SHORT')} positions for {symbol}",
+                }
+
+            # 2) Iterate tickets, close up to requested volume.
+            close_side = "sell" if position_type == 0 else "buy"
+            for p in side_positions:
+                if remaining_to_close <= 0.0001:
+                    break
+                ticket = int(p.get("ticket") or 0)
+                pos_vol = round(float(p.get("volume", 0)), 2)
+                if ticket <= 0 or pos_vol <= 0:
+                    continue
+                close_vol = round(min(pos_vol, remaining_to_close), 2)
+                payload = {
+                    "symbol": symbol,
+                    "side":   close_side,
+                    "ticket": ticket,
+                    "volume": close_vol,
+                }
+                logger.info(f"[manual/close] per-ticket close: {bridge_url}/mt5/position/close {payload}")
+                r = await client.post(f"{bridge_url}/mt5/position/close", json=payload, headers=headers)
+                ok = r.status_code == 200
+                if ok:
+                    filled = round(filled + close_vol, 4)
+                    remaining_to_close = round(max(0.0, remaining_to_close - close_vol), 2)
+                    details.append({"ticket": ticket, "volume": close_vol, "ok": True})
+                else:
+                    try:
+                        err_body = r.json()
+                        err_msg = err_body.get("detail", r.text)
+                    except Exception:
+                        err_msg = r.text[:120]
+                    logger.warning(f"[manual/close] ticket {ticket} vol={close_vol} failed: {r.status_code} {err_msg}")
+                    details.append({"ticket": ticket, "volume": close_vol, "ok": False, "error": str(err_msg)[:120]})
+
+            # 3) Final result.
+            post_remaining = round(max(0.0, total_side_volume - filled), 2)
+            return {
+                "success": filled > 0,
+                "filled_volume": filled,
+                "remaining": post_remaining,
+                "details": details,
+                "error": None if filled > 0 else (details[-1].get("error") if details else "unknown close error"),
+            }
+    except Exception as e:
+        logger.error(f"[manual/close] bridge unreachable: {e}", exc_info=True)
+        return {
+            "success": False,
+            "filled_volume": filled,
+            "remaining": 0.0,
+            "details": details,
+            "error": f"Bridge request failed: {e}",
+        }
+
+
 @router.post("/manual/order")
 async def place_manual_order(
     req: ManualOrderRequest,
@@ -1244,17 +1382,26 @@ async def close_short_position(
                 quantity=str(req.quantity),
                 price=str(price),
             )
-        else:  # bybit — Market Taker单平空仓，close_position=True关联持仓ticket
-            bybit_qty = round(float(req.quantity), 2)
-            result = await order_executor.place_bybit_order(
-                account=target_account,
+        else:  # bybit / MT5 hedge — iterate over tickets to avoid 10014
+            close_result = await _close_mt5_hedge_by_ticket_aggregation(
+                target_account=target_account,
                 symbol=symbol,
-                side="Buy",
-                order_type="Market",
-                quantity=str(bybit_qty),
-                price=None,
-                close_position=True,
+                position_type=1,
+                requested_volume=float(req.quantity),
             )
+            if not close_result["success"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{'空仓平多'} failed: {close_result.get('error') or 'no position closed'}"
+                )
+            return {
+                "success": True,
+                "filled_volume": close_result["filled_volume"],
+                "remaining_volume": close_result["remaining"],
+                "details": close_result["details"],
+                "quantity": req.quantity,
+                "exchange": req.exchange,
+            }
 
         return {
             "success": result.get("success"),
@@ -1317,17 +1464,26 @@ async def close_long_position(
                 quantity=str(req.quantity),
                 price=str(price),
             )
-        else:  # bybit — Market Taker单平多仓，close_position=True关联持仓ticket
-            bybit_qty = round(float(req.quantity), 2)
-            result = await order_executor.place_bybit_order(
-                account=target_account,
+        else:  # bybit / MT5 hedge — iterate over tickets to avoid 10014
+            close_result = await _close_mt5_hedge_by_ticket_aggregation(
+                target_account=target_account,
                 symbol=symbol,
-                side="Sell",
-                order_type="Market",
-                quantity=str(bybit_qty),
-                price=None,
-                close_position=True,
+                position_type=0,
+                requested_volume=float(req.quantity),
             )
+            if not close_result["success"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{'多仓平空'} failed: {close_result.get('error') or 'no position closed'}"
+                )
+            return {
+                "success": True,
+                "filled_volume": close_result["filled_volume"],
+                "remaining_volume": close_result["remaining"],
+                "details": close_result["details"],
+                "quantity": req.quantity,
+                "exchange": req.exchange,
+            }
 
         return {
             "success": result.get("success"),

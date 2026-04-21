@@ -242,6 +242,28 @@
 
     <!-- ===== 通知服务 ===== -->
     <div v-if="activeTab==='notify'" class="space-y-4">
+      <!-- OpenCLAW 全局总开关 -->
+      <div :class="['card border-2', openclawStatus.openclaw_enabled ? 'border-[#0ecb81]/40' : 'border-[#f6465d]']">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold flex items-center gap-2">
+              OpenCLAW 全局总开关
+              <span v-if="openclawStatus.openclaw_enabled" class="text-xs px-2 py-0.5 rounded bg-[#0ecb81]/20 text-[#0ecb81]">运行中</span>
+              <span v-else class="text-xs px-2 py-0.5 rounded bg-[#f6465d]/20 text-[#f6465d]">已停用（全员禁）</span>
+            </h2>
+            <p class="text-xs text-text-tertiary mt-1">
+              停用后立即短路所有用户的 OpenCLAW 决策、执行与告警；优先级高于 per-user 开关与 kill switch；is_admin 鉴权不受影响。
+            </p>
+            <p v-if="openclawStatus.kill_switch" class="text-xs text-[#f6465d] mt-1">⚠ 当前 kill switch 也处于开启状态</p>
+          </div>
+          <button @click="toggleOpenclawGlobal" :disabled="openclawToggling"
+            :class="['px-6 py-3 rounded-lg font-bold text-base transition disabled:opacity-50',
+              openclawStatus.openclaw_enabled ? 'bg-[#f6465d] text-white hover:bg-red-600' : 'bg-[#0ecb81] text-dark-300 hover:bg-green-500']">
+            {{ openclawToggling ? '处理中…' : (openclawStatus.openclaw_enabled ? '停用 OpenCLAW' : '启用 OpenCLAW') }}
+          </button>
+        </div>
+      </div>
+
 
       <!-- 飞书机器人配置 -->
       <div class="card">
@@ -555,12 +577,11 @@
         <div class="flex items-center justify-between mb-4">
           <div>
             <h2 class="text-lg font-bold">提醒声音管理</h2>
-            <p class="text-xs text-text-tertiary mt-0.5">管理用于通知模板的告警音文件，支持同步至飞书云端</p>
+            <p class="text-xs text-text-tertiary mt-0.5">管理用于通知模板的告警音文件</p>
           </div>
           <div class="flex gap-2">
             <button @click="loadSounds" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">刷新</button>
             <button @click="importExistingSounds" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">导入已有</button>
-            <button @click="syncSoundsToFeishu" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm text-white">同步飞书</button>
           </div>
         </div>
         <!-- 上传 -->
@@ -1477,6 +1498,38 @@ const tabs = [
   { id: 'database', label: '数据库管理' },
 ]
 
+// ── OpenCLAW 全局开关状态 ──────────────────────────────────
+const openclawStatus = ref({ openclaw_enabled: true, kill_switch: false, mode: 'shadow' })
+const openclawToggling = ref(false)
+async function loadOpenclawStatus() {
+  try {
+    const r = await api.get('/api/v1/agent/status')
+    openclawStatus.value = {
+      openclaw_enabled: r.data?.openclaw_enabled !== false,
+      kill_switch: !!r.data?.kill_switch,
+      mode: r.data?.mode || 'shadow',
+    }
+  } catch (e) { /* not fatal — admin may not have agent perms */ }
+}
+async function toggleOpenclawGlobal() {
+  const next = !openclawStatus.value.openclaw_enabled
+  if (next) {
+    if (!confirm('确认启用 OpenCLAW 全局开关？所有 per-user 启用的用户将恢复决策与执行。')) return
+  } else {
+    if (!confirm('⚠ 停用后立即短路所有用户的 OpenCLAW（决策/执行/告警全停）。继续？')) return
+  }
+  openclawToggling.value = true
+  try {
+    await api.post('/api/v1/agent/openclaw-toggle', { on: next })
+    toast(next ? 'OpenCLAW 已启用' : 'OpenCLAW 已停用（全员禁）')
+    await loadOpenclawStatus()
+  } catch (e) {
+    toast('切换失败: ' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    openclawToggling.value = false
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────
 const buildTime = dayjs().format('YYYY-MM-DD HH:mm')
 function fmtDate(d) { return d ? dayjs(d).format('YYYY-MM-DD HH:mm:ss') : '--' }
@@ -1784,9 +1837,10 @@ const marketStatus = ref({ is_open: false })
 
 const templateCategories = [
   { val: '', label: '全部' },
-  { val: 'trade', label: '交易类' },
+  { val: 'trading', label: '交易类' },
   { val: 'risk', label: '风险类' },
   { val: 'system', label: '系统类' },
+  { val: 'openclaw', label: 'OpenCLAW' },
 ]
 const templateCategoryFilter = ref('')
 const templates = ref([])
@@ -1807,10 +1861,10 @@ const soundUploading = ref(false)
 const soundFileInput = ref(null)
 
 function getCategoryClass(cat) {
-  return { trade: 'bg-blue-500/20 text-blue-400', risk: 'bg-[#f6465d]/20 text-[#f6465d]', system: 'bg-purple-500/20 text-purple-400' }[cat] || 'bg-dark-300 text-text-secondary'
+  return { trading: 'bg-blue-500/20 text-blue-400', trade: 'bg-blue-500/20 text-blue-400', risk: 'bg-[#f6465d]/20 text-[#f6465d]', system: 'bg-purple-500/20 text-purple-400', openclaw: 'bg-[#f0b90b]/20 text-[#f0b90b]' }[cat] || 'bg-dark-300 text-text-secondary'
 }
 function getCategoryLabel(cat) {
-  return { trade: '交易类', risk: '风险类', system: '系统类' }[cat] || (cat || '其他')
+  return { trading: '交易类', trade: '交易类', risk: '风险类', system: '系统类', openclaw: 'OpenCLAW' }[cat] || (cat || '其他')
 }
 function getPriorityClass(p) {
   return { 1: 'bg-dark-300 text-text-secondary', 2: 'bg-blue-500/20 text-blue-400', 3: 'bg-yellow-500/20 text-yellow-400', 4: 'bg-[#f6465d]/20 text-[#f6465d]' }[p] || 'bg-dark-300 text-text-secondary'
@@ -2016,12 +2070,6 @@ async function importExistingSounds() {
     toast('导入成功'); await loadSounds()
   } catch (e) { toast('导入失败', 'error') }
 }
-async function syncSoundsToFeishu() {
-  try {
-    await api.post('/api/v1/sounds/sync-to-feishu')
-    toast('同步成功'); await loadSounds()
-  } catch (e) { toast('同步失败', 'error') }
-}
 async function playSound(filename) {
   try {
     // /sounds/ is a static mount served by Python backend, no auth required
@@ -2052,7 +2100,7 @@ async function initNotifyTab() {
   await Promise.all([
     loadFeishuConfig(), checkFeishuStatus(), loadNotifyUsers(),
     loadMarketClosureConfig(), loadMarketStatus(),
-    loadTemplates(), loadNotifyLogs(), loadSounds(),
+    loadTemplates(), loadNotifyLogs(), loadSounds(), loadOpenclawStatus(),
   ])
 }
 

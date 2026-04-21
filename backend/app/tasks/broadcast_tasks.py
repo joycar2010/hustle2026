@@ -1647,6 +1647,13 @@ class BinancePositionPusher:
                 ) as ws:
                     logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
 
+                    # Bootstrap: REST snapshot once per (re)connect to seed the
+                    # cache with pre-existing positions (WS only pushes deltas).
+                    try:
+                        await self._bootstrap_positions_via_rest(client, user_id, api_key)
+                    except Exception as _be:
+                        logger.warning(f"[BinancePositionPusher] bootstrap failed {api_key[:8]}…: {_be}")
+
                     keepalive_task = asyncio.create_task(
                         self._keepalive_loop(client, listen_key)
                     )
@@ -1837,6 +1844,58 @@ class BinancePositionPusher:
                     logger.info(f"[BinancePositionPusher] Instant snapshot pushed user={user_id} pairs={list(pairs_out.keys())}")
                 except Exception as push_err:
                     logger.warning(f"[BinancePositionPusher] Instant push failed: {push_err}")
+
+
+    async def _bootstrap_positions_via_rest(self, client, user_id: str, api_key: str) -> None:
+        """One-shot REST snapshot on WS (re)connect to seed
+        position_streamer._binance_positions with all currently-open positions.
+        Subsequent updates come from the User Data Stream ACCOUNT_UPDATE
+        event — REST is used only to fill the cold-start gap.
+        """
+        if not user_id:
+            return
+        try:
+            rows = await client.get_position_risk(symbol=None)
+        except Exception as e:
+            logger.warning(f"[BinancePositionPusher] bootstrap REST error {api_key[:8]}…: {e}")
+            return
+        if not rows or not isinstance(rows, list):
+            logger.info(f"[BinancePositionPusher] bootstrap {api_key[:8]}…: no positions")
+            return
+
+        by_symbol: dict = {}
+        for r in rows:
+            try:
+                sym = r.get("symbol")
+                if not sym:
+                    continue
+                amt = float(r.get("positionAmt") or 0)
+                side = (r.get("positionSide") or "BOTH").upper()
+                long_v, short_v = by_symbol.get(sym, (0.0, 0.0))
+                if side == "LONG":
+                    long_v += max(0.0, amt)
+                elif side == "SHORT":
+                    short_v += max(0.0, abs(amt))
+                else:  # BOTH (one-way mode): sign of amt decides
+                    if amt > 0:
+                        long_v += amt
+                    elif amt < 0:
+                        short_v += abs(amt)
+                by_symbol[sym] = (round(long_v, 3), round(short_v, 3))
+            except Exception:
+                continue
+
+        non_zero = {s: v for s, v in by_symbol.items() if v != (0.0, 0.0)}
+        if not non_zero:
+            logger.info(f"[BinancePositionPusher] bootstrap {api_key[:8]}…: all positions = 0")
+            return
+
+        for sym, (long_v, short_v) in non_zero.items():
+            position_streamer.set_binance_positions(long_v, short_v, user_id=user_id, symbol=sym)
+        logger.info(
+            f"[BinancePositionPusher] bootstrap {api_key[:8]}… user={user_id} "
+            f"symbols={list(non_zero.keys())} counts={non_zero}"
+        )
 
 
 binance_position_pusher = BinancePositionPusher()

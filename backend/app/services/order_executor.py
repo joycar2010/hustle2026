@@ -731,4 +731,160 @@ async def _trigger_ip_ban_alert(e) -> None:
 
 
 # Global instance
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared "close MT5 hedge by ticket aggregation" helper.
+# Reason: MT5 Bridge /mt5/position/close picks ONE ticket and sends the full
+#         requested volume → if requested > that ticket's volume, MT5 returns
+#         retcode=10014 (INVALID_VOLUME) and nothing closes. Even when the
+#         account has enough total LONG/SHORT volume across multiple tickets.
+#         Solution: enumerate tickets ourselves and close each one with its
+#         own bound volume.
+# Used by:
+#   - api.v1.trading.{close_long,close_short}      (manual emergency)
+#   - services.order_executor_v2._execute_bybit_market_sell (reverse_closing)
+#   - services.order_executor_v2._execute_bybit_market_buy  (forward_closing)
+# ─────────────────────────────────────────────────────────────────────────────
+async def close_bybit_position_aggregated(
+    account,
+    symbol: str,
+    requested_volume: float,
+    position_type: int,   # 0 = LONG (close with SELL), 1 = SHORT (close with BUY)
+) -> dict:
+    """Close MT5 hedge positions by iterating over open tickets. Returns:
+        {
+            "success":       bool,         # True iff at least one ticket closed
+            "filled_volume": float,        # total lots actually closed
+            "remaining":     float,        # lots still open on requested side
+            "details":       list[dict],   # per-ticket result
+            "error":         Optional[str],
+        }
+    """
+    import os, httpx, logging
+    from sqlalchemy import select as _sa_select
+    from app.models.mt5_client import MT5Client as MT5ClientModel
+    from app.core.database import AsyncSessionLocal
+
+    logger = logging.getLogger(__name__)
+    api_key = os.getenv("MT5_API_KEY", "")
+    bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
+
+    # Resolve per-account bridge URL.
+    try:
+        async with AsyncSessionLocal() as _db:
+            _mc = (await _db.execute(
+                _sa_select(MT5ClientModel)
+                .where(MT5ClientModel.account_id == account.account_id)
+                .where(MT5ClientModel.is_active == True)
+                .where(MT5ClientModel.is_system_service == False)
+                .order_by(MT5ClientModel.priority)
+                .limit(1)
+            )).scalar_one_or_none()
+            if _mc and _mc.bridge_url:
+                bridge_url = _mc.bridge_url
+            elif _mc and _mc.bridge_service_port:
+                bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+    except Exception as _e:
+        logger.debug(f"[close_aggregated] bridge resolve error: {_e}")
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-Api-Key"] = api_key
+
+    details = []
+    filled = 0.0
+    remaining_to_close = round(float(requested_volume), 2)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{bridge_url}/mt5/positions",
+                params={"symbol": symbol},
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                return {
+                    "success": False, "filled_volume": 0.0, "remaining": 0.0,
+                    "details": [],
+                    "error": f"Bridge positions {resp.status_code}: {resp.text[:120]}",
+                }
+            positions = resp.json().get("positions", []) or []
+            side_positions = [p for p in positions if int(p.get("type", -1)) == position_type]
+            # Largest first → fewest API calls.
+            side_positions.sort(key=lambda p: float(p.get("volume", 0)), reverse=True)
+
+            total_side_volume = round(sum(float(p.get("volume", 0)) for p in side_positions), 2)
+            if total_side_volume <= 0:
+                return {
+                    "success": False, "filled_volume": 0.0, "remaining": 0.0,
+                    "details": [],
+                    "error": f"No matching {('LONG' if position_type == 0 else 'SHORT')} positions for {symbol}",
+                }
+
+            close_side = "sell" if position_type == 0 else "buy"
+            for p in side_positions:
+                if remaining_to_close <= 0.0001:
+                    break
+                ticket = int(p.get("ticket") or 0)
+                pos_vol = round(float(p.get("volume", 0)), 2)
+                if ticket <= 0 or pos_vol <= 0:
+                    continue
+                close_vol = round(min(pos_vol, remaining_to_close), 2)
+                if close_vol <= 0:
+                    continue
+                payload = {
+                    "symbol": symbol,
+                    "side":   close_side,
+                    "ticket": ticket,
+                    "volume": close_vol,
+                }
+                logger.info(
+                    f"[close_aggregated] {bridge_url}/mt5/position/close "
+                    f"ticket={ticket} vol={close_vol} (pos_vol={pos_vol})"
+                )
+                r = await client.post(
+                    f"{bridge_url}/mt5/position/close", json=payload, headers=headers,
+                )
+                ok = r.status_code == 200
+                if ok:
+                    filled = round(filled + close_vol, 4)
+                    remaining_to_close = round(max(0.0, remaining_to_close - close_vol), 2)
+                    details.append({"ticket": ticket, "volume": close_vol, "ok": True})
+                else:
+                    try:
+                        err_msg = r.json().get("detail", r.text)
+                    except Exception:
+                        err_msg = r.text[:120]
+                    logger.warning(
+                        f"[close_aggregated] ticket {ticket} vol={close_vol} "
+                        f"failed: {r.status_code} {err_msg}"
+                    )
+                    details.append({
+                        "ticket": ticket, "volume": close_vol,
+                        "ok": False, "error": str(err_msg)[:120],
+                    })
+
+            post_remaining = round(max(0.0, total_side_volume - filled), 2)
+            return {
+                "success": filled > 0,
+                "filled_volume": filled,
+                "remaining": post_remaining,
+                "details": details,
+                "error": None if filled > 0 else (
+                    details[-1].get("error") if details else "unknown close error"
+                ),
+            }
+    except Exception as e:
+        logger.error(f"[close_aggregated] bridge unreachable: {e}", exc_info=True)
+        return {
+            "success": False, "filled_volume": filled, "remaining": 0.0,
+            "details": details, "error": f"Bridge request failed: {e}",
+        }
+
+
+# Attach to OrderExecutor singleton so callers can do
+# `order_executor.close_bybit_position_aggregated(...)`.
+OrderExecutor.close_bybit_position_aggregated = staticmethod(close_bybit_position_aggregated)
+
 order_executor = OrderExecutor()

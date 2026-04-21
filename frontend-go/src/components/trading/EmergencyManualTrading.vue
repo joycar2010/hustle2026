@@ -165,12 +165,21 @@ async function closePosition(positionType) {
     const actualQuantity = convertForPlatform(quantity.value, exchange.value)
     const endpoint = positionType === 'short' ? '/api/v1/trading/manual/close-short' : '/api/v1/trading/manual/close-long'
 
-    await api.post(endpoint, {
+    const resp = await api.post(endpoint, {
       exchange: exchange.value,
       quantity: actualQuantity,
       pair_code: currentPair.value,
     })
-    showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
+    const label = positionType === 'short' ? '空仓平多' : '多仓平空'
+    const d = resp?.data || {}
+    if (d.filled_volume !== undefined) {
+      const filled = Number(d.filled_volume).toFixed(2)
+      const rem = Number(d.remaining_volume || 0).toFixed(2)
+      const unit = exchange.value === 'bybit' ? (pairConfig.value.unitB || 'Lot') : (pairConfig.value.unitA || 'XAU')
+      showStatus(`${label} 已平 ${filled} ${unit}，剩余 ${rem} ${unit}`, d.success !== false)
+    } else {
+      showStatus(`${label}指令已发送`, d.success !== false)
+    }
     emit('orderExecuted')
   } catch (e) {
     showStatus(e.response?.data?.detail || '平仓失败', false)

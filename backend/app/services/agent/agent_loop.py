@@ -97,7 +97,7 @@ async def agent_loop_main(stop_event: asyncio.Event):
                 logger.warning(f'[agent_loop] spread sample error: {_spread_err}')
             async with AsyncSessionLocal() as db:
                 state = await agent_state.get_state(db)
-                if state['kill_switch'] or state['mode'] == 'off':
+                if state['kill_switch'] or state['mode'] == 'off' or not state.get('openclaw_enabled', True):
                     pass  # collect samples but no decisions
                 else:
                     await _spread_threshold_tick(db)

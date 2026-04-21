@@ -458,6 +458,46 @@ class OrderExecutorV2:
         bybit_quantity = round(round(bybit_quantity * 100, 4)) / 100
         bybit_quantity = max(bybit_quantity, 0.01)  # floor to minimum 0.01 Lot
 
+        # Final pre-check: cap bybit_quantity to current LONG volume to avoid
+        # MT5 retcode=10014 (invalid volume — request > position). The earlier
+        # Step 0 check used `quantity` (Binance plan), not the hedge-scaled
+        # post-fill amount, so it cannot catch this case.
+        try:
+            _pre_r = mt5_client.get_positions(sym_b)
+            _pre_pos = (await _pre_r) if inspect.isawaitable(_pre_r) else _pre_r
+            cur_long_volume = round(sum(
+                float(p.get('volume', 0)) for p in _pre_pos
+                if int(p.get('type', -1)) == 0
+            ), 2)
+            if cur_long_volume <= 0:
+                logger.error(
+                    f"[REVERSE_CLOSING] Bybit LONG=0 在下单前 — 取消 SELL 防 single-leg "
+                    f"(binance_filled={binance_filled_qty}, requested_lot={bybit_quantity})"
+                )
+                return {
+                    "success": False,
+                    "error": "Bybit LONG=0 在下单前",
+                    "binance_filled_qty": binance_filled_qty,
+                    "bybit_filled_qty": 0,
+                    "binance_order_id": binance_order_id,
+                    "is_single_leg": True,
+                    "message": "Bybit 多仓为 0，无法平仓 — Binance 已成交需要人工补救",
+                    "single_leg_details": {
+                        "binance_filled": binance_filled_qty,
+                        "bybit_filled": 0,
+                        "bybit_filled_xau": 0,
+                        "unfilled_qty": binance_filled_qty,
+                    },
+                }
+            if bybit_quantity > cur_long_volume:
+                logger.warning(
+                    f"[REVERSE_CLOSING] Cap bybit_quantity {bybit_quantity}→{cur_long_volume} "
+                    f"(current LONG insufficient — hedge_mult={hedge_multiplier})"
+                )
+                bybit_quantity = cur_long_volume
+        except Exception as _pre_e:
+            logger.warning(f"[REVERSE_CLOSING] pre-check 持仓查询失败 (continue with original qty): {_pre_e}")
+
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
@@ -818,6 +858,43 @@ class OrderExecutorV2:
         # CLOSING: 四舍五入 — not ceiling, to avoid over-closing the hedge side
         bybit_quantity = round(round(bybit_quantity * 100, 4)) / 100
         bybit_quantity = max(bybit_quantity, 0.01)  # floor to minimum 0.01 Lot
+
+        # Final pre-check: cap to current SHORT volume — symmetric with reverse.
+        try:
+            _pre_r = mt5_client.get_positions(sym_b)
+            _pre_pos = (await _pre_r) if inspect.isawaitable(_pre_r) else _pre_r
+            cur_short_volume = round(sum(
+                float(p.get('volume', 0)) for p in _pre_pos
+                if int(p.get('type', -1)) == 1
+            ), 2)
+            if cur_short_volume <= 0:
+                logger.error(
+                    f"[FORWARD_CLOSING] Bybit SHORT=0 在下单前 — 取消 BUY 防 single-leg "
+                    f"(binance_filled={binance_filled_qty}, requested_lot={bybit_quantity})"
+                )
+                return {
+                    "success": False,
+                    "error": "Bybit SHORT=0 在下单前",
+                    "binance_filled_qty": binance_filled_qty,
+                    "bybit_filled_qty": 0,
+                    "binance_order_id": binance_order_id,
+                    "is_single_leg": True,
+                    "message": "Bybit 空仓为 0，无法平仓 — Binance 已成交需要人工补救",
+                    "single_leg_details": {
+                        "binance_filled": binance_filled_qty,
+                        "bybit_filled": 0,
+                        "bybit_filled_xau": 0,
+                        "unfilled_qty": binance_filled_qty,
+                    },
+                }
+            if bybit_quantity > cur_short_volume:
+                logger.warning(
+                    f"[FORWARD_CLOSING] Cap bybit_quantity {bybit_quantity}→{cur_short_volume} "
+                    f"(current SHORT insufficient — hedge_mult={hedge_multiplier})"
+                )
+                bybit_quantity = cur_short_volume
+        except Exception as _pre_e:
+            logger.warning(f"[FORWARD_CLOSING] pre-check 持仓查询失败 (continue with original qty): {_pre_e}")
 
         logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU, multiplier={hedge_multiplier})")
 
@@ -1429,6 +1506,95 @@ class OrderExecutorV2:
                 spread_check_task.cancel()
             unregister_order_watch(order_id)
 
+    async def _verify_close_via_position_diff(
+        self,
+        *,
+        account: Account,
+        symbol: str,
+        expected_volume: float,
+        position_type: int,
+        side_label: str,
+        ticket: int,
+    ) -> float:
+        """Confirm a CLOSE order actually reduced the broker-side position.
+
+        Strategy:
+          • Query positions ≤ self.mt5_deal_sync_wait seconds (poll every
+            self.mt5_poll_interval) until the relevant side's volume drops
+            by ≥ expected_volume × partial_fill_threshold OR time runs out.
+          • Returns the observed volume reduction (clipped to expected_volume).
+            0.0 means "no reduction observed" — the caller MUST treat this
+            as a real failure (not phantom success).
+
+        position_type: 0 = LONG (reduces when SELL-to-close), 1 = SHORT.
+        """
+        mt5_client = _get_mt5_client_for_account(account)
+
+        # Snapshot pre-close volume for the side we expect to shrink.
+        try:
+            _r0 = mt5_client.get_positions(symbol)
+            pos0 = (await _r0) if inspect.isawaitable(_r0) else _r0
+            pre_volume = round(sum(
+                float(p.get('volume', 0)) for p in pos0
+                if int(p.get('type', -1)) == position_type
+            ), 4)
+        except Exception as e:
+            logger.warning(f"[{side_label}] 平仓前持仓查询失败 (ticket={ticket}): {e}")
+            # If we can't snapshot pre-state, fall back to a single post-poll
+            # attempt; treat 0 as 0 (no phantom credit).
+            pre_volume = None
+
+        max_wait = self.mt5_deal_sync_wait
+        elapsed = 0.0
+        observed_reduction = 0.0
+        check_count = 0
+
+        while elapsed < max_wait:
+            await asyncio.sleep(self.mt5_poll_interval)
+            elapsed += self.mt5_poll_interval
+            check_count += 1
+            try:
+                _r = mt5_client.get_positions(symbol)
+                pos_now = (await _r) if inspect.isawaitable(_r) else _r
+                cur_volume = round(sum(
+                    float(p.get('volume', 0)) for p in pos_now
+                    if int(p.get('type', -1)) == position_type
+                ), 4)
+                if pre_volume is not None:
+                    observed_reduction = max(0.0, round(pre_volume - cur_volume, 4))
+                else:
+                    # No pre-snapshot — best we can do: treat reduction as
+                    # min(expected, current_loss_since_zero) which is unsafe;
+                    # log and stay 0.
+                    observed_reduction = 0.0
+                logger.info(
+                    f"[{side_label}] 平仓确认 #{check_count} ({elapsed:.1f}s): "
+                    f"pre={pre_volume} cur={cur_volume} reduced={observed_reduction} "
+                    f"(target={expected_volume})"
+                )
+                if observed_reduction >= expected_volume * self.partial_fill_threshold:
+                    break
+            except Exception as e:
+                logger.warning(f"[{side_label}] 平仓持仓查询失败 #{check_count}: {e}")
+
+        actual_filled = min(observed_reduction, expected_volume)
+        if actual_filled <= 0:
+            logger.error(
+                f"[{side_label}] 平仓未观察到持仓减少 (ticket={ticket}, "
+                f"pre={pre_volume}, expected={expected_volume}) — 视为未成交"
+            )
+        elif actual_filled < expected_volume * self.partial_fill_threshold:
+            logger.warning(
+                f"[{side_label}] 平仓部分成交 (ticket={ticket}): "
+                f"actual={actual_filled}/{expected_volume}"
+            )
+        else:
+            logger.info(
+                f"[{side_label}] 平仓确认成交 (ticket={ticket}): "
+                f"actual={actual_filled}/{expected_volume}"
+            )
+        return actual_filled
+
     async def _execute_bybit_market_buy(
         self,
         account: Account,
@@ -1449,6 +1615,21 @@ class OrderExecutorV2:
         total_filled = 0
         remaining = round(quantity, 2)
 
+        # ── CLOSE path: delegate to shared ticket-aggregation helper. ──
+        if close_position:
+            from app.services.order_executor import order_executor as _oe
+            agg = await _oe.close_bybit_position_aggregated(
+                account=account, symbol=symbol,
+                requested_volume=remaining, position_type=1,  # close SHORT
+            )
+            filled = float(agg.get("filled_volume") or 0.0)
+            logger.info(
+                f"[BYBIT_BUY] aggregated close: filled={filled}/{remaining} "
+                f"remaining={agg.get('remaining')} ok={agg.get('success')} "
+                f"error={agg.get('error')}"
+            )
+            return filled
+
         for attempt in range(self.max_retries + 1):  # Initial + 1 retry
             logger.info(f"[BYBIT_BUY] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
 
@@ -1463,7 +1644,27 @@ class OrderExecutorV2:
             )
 
             if not result["success"]:
-                logger.error(f"[BYBIT_BUY] Order placement failed: {result.get('error')}")
+                err = str(result.get('error') or '')
+                logger.error(f"[BYBIT_BUY] Order placement failed: {err}")
+                if "10014" in err and close_position and not getattr(self, "_buy_10014_retried", False):
+                    try:
+                        self._buy_10014_retried = True
+                        mt5_client = _get_mt5_client_for_account(account)
+                        _r = mt5_client.get_positions(symbol)
+                        positions = (await _r) if inspect.isawaitable(_r) else _r
+                        cur_short = round(sum(
+                            float(p.get('volume', 0)) for p in positions
+                            if int(p.get('type', -1)) == 1
+                        ), 2)
+                        if cur_short > 0 and cur_short < remaining:
+                            logger.warning(
+                                f"[BYBIT_BUY] retcode=10014 收缩重试: "
+                                f"requested={remaining} cur_short={cur_short}, retry with cur_short"
+                            )
+                            remaining = cur_short
+                            continue
+                    except Exception as _e:
+                        logger.warning(f"[BYBIT_BUY] 10014 收缩查询失败: {_e}")
                 break
 
             order_id = result["order_id"]
@@ -1473,18 +1674,24 @@ class OrderExecutorV2:
             # Wait for Bybit timeout (initial delay for order to enter market)
             await asyncio.sleep(self.bybit_timeout)
 
-            # ── 平仓快速路径 ────────────────────────────────────────────────────────
-            # MT5 Bridge 平仓指令（close_position=True）HTTP 200 = 仓位已平。
-            # 平仓不产生新持仓，deals history 字段不匹配导致查询始终返回 0，
-            # 无需等待 3s polling + 1s recheck（合计 4 秒），直接视为成交。
+            # ── 平仓确认：before/after 持仓 diff（取代之前的"HTTP 200 直接采信"） ──
             if close_position:
-                actual_filled = remaining
-                logger.info(
-                    f"[BYBIT_BUY] 平仓快速路径：主文单成功，跳过 deals polling，"
-                    f"直接采信 {actual_filled:.4f} Lot (ticket={ticket})"
+                actual_filled = await self._verify_close_via_position_diff(
+                    account=account,
+                    symbol=symbol,
+                    expected_volume=remaining,
+                    position_type=1,  # closing SHORT via BUY
+                    side_label="BYBIT_BUY",
+                    ticket=ticket,
                 )
-                total_filled += actual_filled
-                break
+                if actual_filled > 0:
+                    total_filled += actual_filled
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    break
+                remaining = round(max(0.0, remaining - actual_filled), 2)
+                if remaining <= 0:
+                    break
+                continue
 
             # ── 개창 확인: 포지션 목록 직접 조회（deals polling 완전 대체） ────────────
             # 문제: _check_mt5_filled_volume(deals history) 는 MT5 deal 레코드가
@@ -1640,6 +1847,24 @@ class OrderExecutorV2:
         total_filled = 0
         remaining = round(quantity, 2)
 
+        # ── CLOSE path: delegate to shared ticket-aggregation helper. ──
+        # The MT5 Bridge /mt5/position/close picks ONE ticket and uses the
+        # full requested volume → retcode=10014 when requested > that ticket.
+        # The helper iterates tickets and binds volume per ticket, fixing it.
+        if close_position:
+            from app.services.order_executor import order_executor as _oe
+            agg = await _oe.close_bybit_position_aggregated(
+                account=account, symbol=symbol,
+                requested_volume=remaining, position_type=0,  # close LONG
+            )
+            filled = float(agg.get("filled_volume") or 0.0)
+            logger.info(
+                f"[BYBIT_SELL] aggregated close: filled={filled}/{remaining} "
+                f"remaining={agg.get('remaining')} ok={agg.get('success')} "
+                f"error={agg.get('error')}"
+            )
+            return filled
+
         for attempt in range(self.max_retries + 1):  # Initial + 1 retry
             logger.info(f"[BYBIT_SELL] Attempt {attempt + 1}/{self.max_retries + 1}: remaining={remaining} Lot")
 
@@ -1654,7 +1879,29 @@ class OrderExecutorV2:
             )
 
             if not result["success"]:
-                logger.error(f"[BYBIT_SELL] Order placement failed: {result.get('error')}")
+                err = str(result.get('error') or '')
+                logger.error(f"[BYBIT_SELL] Order placement failed: {err}")
+                # retcode=10014 = invalid volume → likely request > current LONG
+                # position. Snap to actual position and retry once.
+                if "10014" in err and close_position and not getattr(self, "_sell_10014_retried", False):
+                    try:
+                        self._sell_10014_retried = True
+                        mt5_client = _get_mt5_client_for_account(account)
+                        _r = mt5_client.get_positions(symbol)
+                        positions = (await _r) if inspect.isawaitable(_r) else _r
+                        cur_long = round(sum(
+                            float(p.get('volume', 0)) for p in positions
+                            if int(p.get('type', -1)) == 0
+                        ), 2)
+                        if cur_long > 0 and cur_long < remaining:
+                            logger.warning(
+                                f"[BYBIT_SELL] retcode=10014 收缩重试: "
+                                f"requested={remaining} cur_long={cur_long}, retry with cur_long"
+                            )
+                            remaining = cur_long
+                            continue
+                    except Exception as _e:
+                        logger.warning(f"[BYBIT_SELL] 10014 收缩查询失败: {_e}")
                 break
 
             order_id = result["order_id"]
@@ -1664,18 +1911,27 @@ class OrderExecutorV2:
             # Wait for Bybit timeout
             await asyncio.sleep(self.bybit_timeout)
 
-            # ── 平仓快速路径 ────────────────────────────────────────────────────────
-            # MT5 Bridge 平仓指令（close_position=True）HTTP 200 = 仓位已平。
-            # 平仓不产生新持仓，deals history 字段不匹配导致查询始终返回 0，
-            # 无需等待 3s polling + 1s recheck（合计 4 秒），直接视为成交。
+            # ── 平仓确认：before/after 持仓 diff（取代之前的"HTTP 200 直接采信"） ──
+            # HTTP 200 仅代表指令已提交到 MT5 终端，不代表 broker 实际成交。
+            # 现在通过查询持仓变化来确认真实成交量；变化为 0 → 真实未成交。
             if close_position:
-                actual_filled = remaining
-                logger.info(
-                    f"[BYBIT_SELL] 平仓快速路径：主文单成功，跳过 deals polling，"
-                    f"直接采信 {actual_filled:.4f} Lot (ticket={ticket})"
+                actual_filled = await self._verify_close_via_position_diff(
+                    account=account,
+                    symbol=symbol,
+                    expected_volume=remaining,
+                    position_type=0,  # closing LONG via SELL
+                    side_label="BYBIT_SELL",
+                    ticket=ticket,
                 )
-                total_filled += actual_filled
-                break
+                if actual_filled > 0:
+                    total_filled += actual_filled
+                if actual_filled >= remaining * self.partial_fill_threshold:
+                    break
+                # 否则 fall-through：减去 actual_filled 后 retry 剩余
+                remaining = round(max(0.0, remaining - actual_filled), 2)
+                if remaining <= 0:
+                    break
+                continue
 
             # ── 开仓确认: 포지션 목록 직접 조회（deals polling 완전 대체） ────────────
             # deals history는 MT5 반영까지 수초 지연되어 항상 0 반환.
