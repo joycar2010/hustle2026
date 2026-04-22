@@ -58,8 +58,8 @@
               <select
                 :value="currentPair"
                 @change="onPairChange($event)"
-                class="text-xs font-semibold bg-transparent text-primary border-none outline-none cursor-pointer py-0 pr-1 appearance-none"
-                style="min-width: 56px"
+                class="text-xs font-semibold bg-transparent text-primary border-none outline-none cursor-pointer py-0 pr-4 appearance-none"
+                style="min-width: 96px; width: auto"
               >
                 <option v-for="p in TRADING_PAIRS" :key="p.code" :value="p.code" class="bg-dark-200 text-text-primary">
                   {{ p.label }}

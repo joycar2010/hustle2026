@@ -13,10 +13,30 @@
 
     <!-- ═══════ 对冲产品对 ═══════ -->
     <div v-if="activeTab === 'pairs'" class="space-y-4">
-      <div class="flex justify-end mb-2">
+      <!-- Stats -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">产品对总数</div>
+          <div class="text-xl font-bold font-mono">{{ pairStats.total }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">已启用</div>
+          <div class="text-xl font-bold font-mono text-success">{{ pairStats.active }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">已禁用</div>
+          <div class="text-xl font-bold font-mono text-text-tertiary">{{ pairStats.inactive }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">涉及平台</div>
+          <div class="text-xl font-bold font-mono text-primary">{{ pairStats.platforms }}</div>
+        </div>
+      </div>
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs text-text-tertiary">第 {{ pairPage }} / {{ pairTotalPages }} 页 · 共 {{ pairStats.total }} 条</span>
         <button @click="createPair" class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 text-xs font-medium rounded-lg">+ 新增对冲对</button>
       </div>
-      <div v-for="pair in pairs" :key="pair.id"
+      <div v-for="pair in pairsPaged" :key="pair.id"
         class="bg-dark-100 rounded-xl border border-border-primary p-5">
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-3">
@@ -38,6 +58,7 @@
             <div v-if="pair.platform_a" class="space-y-1">
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">平台</span><span class="text-xs font-medium">{{ pair.platform_a.display_name }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">产品</span><span class="text-xs font-mono text-primary">{{ pair.symbol_a?.symbol }}</span></div>
+              <div class="flex justify-between items-center"><span class="text-xs text-text-tertiary">产品类型</span><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="{ 'perpetual': 'bg-blue-900/40 text-blue-300', 'futures': 'bg-orange-900/40 text-orange-300', 'mt5': 'bg-purple-900/40 text-purple-300', 'spot': 'bg-green-900/40 text-green-300' }[pair.symbol_a?.product_type] || 'bg-gray-900/40 text-gray-300'">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货'})[pair.symbol_a?.product_type] || (pair.symbol_a?.product_type || '--') }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">合约面值</span><span class="text-xs font-mono">{{ pair.symbol_a?.contract_unit }} {{ pair.symbol_a?.qty_unit }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">数量精度</span><span class="text-xs font-mono">{{ pair.symbol_a?.qty_precision }}位 / 步长{{ pair.symbol_a?.qty_step }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">价格精度</span><span class="text-xs font-mono">{{ pair.symbol_a?.price_precision }}位 / tick {{ pair.symbol_a?.price_step }}</span></div>
@@ -50,6 +71,7 @@
             <div v-if="pair.platform_b" class="space-y-1">
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">平台</span><span class="text-xs font-medium">{{ pair.platform_b.display_name }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">产品</span><span class="text-xs font-mono text-primary">{{ pair.symbol_b?.symbol }}</span></div>
+              <div class="flex justify-between items-center"><span class="text-xs text-text-tertiary">产品类型</span><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="{ 'perpetual': 'bg-blue-900/40 text-blue-300', 'futures': 'bg-orange-900/40 text-orange-300', 'mt5': 'bg-purple-900/40 text-purple-300', 'spot': 'bg-green-900/40 text-green-300' }[pair.symbol_b?.product_type] || 'bg-gray-900/40 text-gray-300'">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货'})[pair.symbol_b?.product_type] || (pair.symbol_b?.product_type || '--') }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">合约面值</span><span class="text-xs font-mono">{{ pair.symbol_b?.contract_unit }} {{ pair.symbol_b?.qty_unit }}/手</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">数量精度</span><span class="text-xs font-mono">{{ pair.symbol_b?.qty_precision }}位 / 步长{{ pair.symbol_b?.qty_step }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">价格精度</span><span class="text-xs font-mono">{{ pair.symbol_b?.price_precision }}位 / tick {{ pair.symbol_b?.price_step }}</span></div>
@@ -69,10 +91,40 @@
       </div>
 
       <div v-if="!pairs.length" class="text-center py-12 text-text-tertiary text-sm">暂无对冲产品对配置</div>
+      <!-- Pagination -->
+      <div v-if="pairTotalPages > 1" class="flex items-center justify-center gap-1 pt-2">
+        <button @click="pairPage = 1" :disabled="pairPage === 1" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">«</button>
+        <button @click="pairPage--" :disabled="pairPage === 1" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">‹</button>
+        <span class="px-3 text-xs text-text-secondary">{{ pairPage }} / {{ pairTotalPages }}</span>
+        <button @click="pairPage++" :disabled="pairPage === pairTotalPages" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">›</button>
+        <button @click="pairPage = pairTotalPages" :disabled="pairPage === pairTotalPages" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">»</button>
+      </div>
     </div>
 
     <!-- ═══════ 平台品种 ═══════ -->
     <div v-if="activeTab === 'symbols'" class="space-y-3">
+      <!-- Stats -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">品种总数（当前过滤）</div>
+          <div class="text-xl font-bold font-mono">{{ symbolStats.total }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">已启用</div>
+          <div class="text-xl font-bold font-mono text-success">{{ symbolStats.active }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">已禁用</div>
+          <div class="text-xl font-bold font-mono text-text-tertiary">{{ symbolStats.inactive }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">类型分布</div>
+          <div class="text-xs font-mono mt-0.5 text-text-secondary truncate">
+            <span v-for="(n,k) in symbolStats.byType" :key="k" class="mr-2">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货'})[k] || k }}:{{ n }}</span>
+            <span v-if="!Object.keys(symbolStats.byType).length">--</span>
+          </div>
+        </div>
+      </div>
       <div class="flex justify-between items-center mb-2">
         <div class="flex gap-2">
           <button v-for="p in platforms" :key="p.platform_id" @click="symbolFilter = p.platform_id"
@@ -84,7 +136,7 @@
             class="px-3 py-1 text-xs rounded-lg transition-colors"
             :class="symbolFilter === null ? 'bg-primary text-dark-300' : 'bg-dark-200 text-text-secondary'">全部</button>
         </div>
-        <button @click="editingSymbol = { platform_id: platforms[0]?.platform_id || 1, symbol: '', base_asset: '', quote_asset: 'USD', contract_unit: 1, qty_unit: '', qty_precision: 2, qty_step: 0.01, min_qty: 0.01, price_precision: 2, price_step: 0.01, maker_fee_rate: 0, taker_fee_rate: 0, margin_rate_initial: 0, product_type: 'perpetual' }" class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 text-xs font-medium rounded-lg">+ 新增品种</button>
+        <button @click="openImportModal" class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 text-xs font-medium rounded-lg">+ 新增品种</button>
       </div>
 
       <div class="overflow-x-auto">
@@ -104,7 +156,7 @@
             <th class="text-center py-2 px-3">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="s in filteredSymbols" :key="s.id" class="border-b border-border-primary/50 hover:bg-dark-200/50">
+            <tr v-for="s in symbolsPaged" :key="s.id" class="border-b border-border-primary/50 hover:bg-dark-200/50">
               <td class="py-2 px-3 text-xs">{{ platformName(s.platform_id) }}</td>
               <td class="py-2 px-3 font-mono text-primary text-xs">{{ s.symbol }}</td>
               <td class="py-2 px-3 text-xs">{{ s.base_asset }}/{{ s.quote_asset }}</td>
@@ -126,14 +178,45 @@
           </tbody>
         </table>
       </div>
+      <!-- Pagination -->
+      <div v-if="symbolTotalPages > 1" class="flex items-center justify-center gap-1 pt-2">
+        <button @click="symbolPage = 1" :disabled="symbolPage === 1" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">«</button>
+        <button @click="symbolPage--" :disabled="symbolPage === 1" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">‹</button>
+        <span class="px-3 text-xs text-text-secondary">{{ symbolPage }} / {{ symbolTotalPages }}</span>
+        <button @click="symbolPage++" :disabled="symbolPage === symbolTotalPages" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">›</button>
+        <button @click="symbolPage = symbolTotalPages" :disabled="symbolPage === symbolTotalPages" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">»</button>
+      </div>
     </div>
 
     <!-- ═══════ 平台列表 ═══════ -->
     <div v-if="activeTab === 'platforms'" class="space-y-3">
-      <div class="flex justify-end mb-2">
+      <!-- Stats -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">平台总数</div>
+          <div class="text-xl font-bold font-mono">{{ platformStats.total }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">已启用</div>
+          <div class="text-xl font-bold font-mono text-success">{{ platformStats.active }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">已禁用</div>
+          <div class="text-xl font-bold font-mono text-text-tertiary">{{ platformStats.inactive }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
+          <div class="text-[10px] text-text-tertiary">类型分布</div>
+          <div class="text-xs font-mono mt-0.5 text-text-secondary truncate">
+            <span v-for="(n,k) in platformStats.byType" :key="k" class="mr-2">{{ k.toUpperCase() }}:{{ n }}</span>
+            <span v-if="!Object.keys(platformStats.byType).length">--</span>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs text-text-tertiary">第 {{ platformPage }} / {{ platformTotalPages }} 页 · 共 {{ platformStats.total }} 条</span>
         <button @click="createPlatform" class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-dark-300 text-xs font-medium rounded-lg">+ 新增平台</button>
       </div>
-      <div v-for="p in platforms" :key="p.platform_id"
+      <div v-for="p in platformsPaged" :key="p.platform_id"
         class="bg-dark-100 rounded-xl border border-border-primary p-4 flex items-center justify-between">
         <div class="flex-1 min-w-0">
           <div class="flex items-center flex-wrap gap-2">
@@ -171,6 +254,58 @@
         <div class="flex gap-2 ml-4 flex-shrink-0">
           <button @click="editPlatform(p)" class="text-xs px-3 py-1 bg-dark-200 hover:bg-dark-50 rounded-lg">编辑</button>
           <button @click="deletePlatform(p)" class="text-xs px-3 py-1 bg-red-900/30 hover:bg-red-900/50 text-red-300 rounded-lg">删除</button>
+        </div>
+      </div>
+      <!-- Pagination -->
+      <div v-if="platformTotalPages > 1" class="flex items-center justify-center gap-1 pt-2">
+        <button @click="platformPage = 1" :disabled="platformPage === 1" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">«</button>
+        <button @click="platformPage--" :disabled="platformPage === 1" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">‹</button>
+        <span class="px-3 text-xs text-text-secondary">{{ platformPage }} / {{ platformTotalPages }}</span>
+        <button @click="platformPage++" :disabled="platformPage === platformTotalPages" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">›</button>
+        <button @click="platformPage = platformTotalPages" :disabled="platformPage === platformTotalPages" class="px-2 py-1 text-xs bg-dark-200 hover:bg-dark-50 rounded disabled:opacity-40">»</button>
+      </div>
+    </div>
+
+    <!-- ═══════ 从平台导入品种 ═══════ -->
+    <div v-if="importOpen" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" @click.self="importOpen = false">
+      <div class="bg-dark-100 rounded-xl border border-border-primary p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
+        <h3 class="font-bold mb-1">+ 新增品种（从平台导入）</h3>
+        <div class="text-xs text-text-tertiary mb-4">选择平台与产品类别、填写符号，点击「开始导入」即自动从交易所拉取所有规格并写入数据库（同符号已存在则覆盖更新）。支持批量：多个符号用逗号、空格或换行分隔。</div>
+        <div class="space-y-3">
+          <div><label class="text-xs text-text-tertiary">平台</label>
+            <select v-model.number="importForm.platform_id" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm">
+              <option v-for="p in platforms" :key="p.platform_id" :value="p.platform_id">{{ p.display_name || p.platform_name }}</option>
+            </select>
+          </div>
+          <div><label class="text-xs text-text-tertiary">产品类别</label>
+            <select v-model="importForm.product_type" class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm">
+              <option value="perpetual">永续合约 (perpetual)</option>
+              <option value="futures">交割合约 (futures)</option>
+              <option value="spot">现货 (spot)</option>
+            </select>
+            <div class="text-[10px] text-text-tertiary mt-1">MT5/IC Markets 暂不支持自动拉取，需在编辑器里手动添加（编辑现有同平台品种作为模板）</div>
+          </div>
+          <div><label class="text-xs text-text-tertiary">符号</label>
+            <textarea v-model="importForm.symbols_raw" rows="4" placeholder="如 XAUUSDT&#10;XAGUSDT&#10;BZUSDT"
+              class="w-full bg-dark-200 border border-border-primary rounded px-2 py-1.5 text-sm font-mono"></textarea>
+            <div class="text-[10px] text-text-tertiary mt-1">将按所选平台/类别去对应的交易所公开接口逐个拉取规格写入</div>
+          </div>
+          <div v-if="importResult" class="text-xs space-y-1 max-h-40 overflow-y-auto bg-dark-200 rounded p-2 border border-border-primary">
+            <div v-if="importResult.imported?.length" class="text-success">
+              ✅ 成功 {{ importResult.imported.length }} 条:
+              <span v-for="x in importResult.imported" :key="x.id" class="font-mono mr-2">{{ x.symbol }}({{ x._action === 'created' ? '新建' : '更新' }})</span>
+            </div>
+            <div v-for="(msg, sym) in (importResult.errors || {})" :key="sym" class="text-red-400">
+              ❌ {{ sym }}: {{ msg }}
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button @click="importOpen = false" class="px-4 py-1.5 bg-dark-200 rounded-lg text-sm">关闭</button>
+          <button @click="runImport" :disabled="importRunning"
+            class="px-4 py-1.5 bg-primary text-dark-300 rounded-lg text-sm font-medium disabled:opacity-50">
+            {{ importRunning ? '拉取中…' : '开始导入' }}
+          </button>
         </div>
       </div>
     </div>
@@ -315,7 +450,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api.js'
 
 const activeTab = ref('pairs')
@@ -338,6 +473,105 @@ const systemMt5Accounts = ref([])
 const filteredSymbols = computed(() =>
   symbolFilter.value ? symbols.value.filter(s => s.platform_id === symbolFilter.value) : symbols.value
 )
+
+// ── Stats & pagination ─────────────────────────────────────
+const PAGE_SIZE = 10
+const pairPage = ref(1)
+const symbolPage = ref(1)
+const platformPage = ref(1)
+
+const pairStats = computed(() => {
+  const list = pairs.value || []
+  const active = list.filter(p => p.is_active).length
+  const platformsUsed = new Set()
+  list.forEach(p => { if (p.platform_a?.platform_id) platformsUsed.add(p.platform_a.platform_id); if (p.platform_b?.platform_id) platformsUsed.add(p.platform_b.platform_id) })
+  return { total: list.length, active, inactive: list.length - active, platforms: platformsUsed.size }
+})
+
+const symbolStats = computed(() => {
+  const list = filteredSymbols.value || []
+  const active = list.filter(x => x.is_active).length
+  const byType = {}
+  list.forEach(x => { const k = x.product_type || 'unknown'; byType[k] = (byType[k] || 0) + 1 })
+  return { total: list.length, active, inactive: list.length - active, byType }
+})
+
+const platformStats = computed(() => {
+  const list = platforms.value || []
+  const active = list.filter(x => x.is_active).length
+  const byType = {}
+  list.forEach(x => { const k = (x.platform_type || 'other').toLowerCase(); byType[k] = (byType[k] || 0) + 1 })
+  return { total: list.length, active, inactive: list.length - active, byType }
+})
+
+// Reset to page 1 when filter changes
+watch(symbolFilter, () => { symbolPage.value = 1 })
+
+const pairsPaged = computed(() => {
+  const list = pairs.value || []
+  const start = (pairPage.value - 1) * PAGE_SIZE
+  return list.slice(start, start + PAGE_SIZE)
+})
+const symbolsPaged = computed(() => {
+  const list = filteredSymbols.value
+  const start = (symbolPage.value - 1) * PAGE_SIZE
+  return list.slice(start, start + PAGE_SIZE)
+})
+const platformsPaged = computed(() => {
+  const list = platforms.value || []
+  const start = (platformPage.value - 1) * PAGE_SIZE
+  return list.slice(start, start + PAGE_SIZE)
+})
+
+const pairTotalPages = computed(() => Math.max(1, Math.ceil((pairs.value?.length || 0) / PAGE_SIZE)))
+const symbolTotalPages = computed(() => Math.max(1, Math.ceil((filteredSymbols.value?.length || 0) / PAGE_SIZE)))
+const platformTotalPages = computed(() => Math.max(1, Math.ceil((platforms.value?.length || 0) / PAGE_SIZE)))
+
+const importOpen = ref(false)
+const importRunning = ref(false)
+const importResult = ref(null)
+const importForm = ref({ platform_id: null, product_type: 'perpetual', symbols_raw: '' })
+
+function openImportModal() {
+  importForm.value = {
+    platform_id: platforms.value[0]?.platform_id || 1,
+    product_type: 'perpetual',
+    symbols_raw: '',
+  }
+  importResult.value = null
+  importOpen.value = true
+}
+
+async function runImport() {
+  const symbols = (importForm.value.symbols_raw || '')
+    .split(/[\s,;]+/).map(x => x.trim()).filter(Boolean)
+  if (!symbols.length) { toast('请至少填写一个符号', 'error'); return }
+  if (!importForm.value.platform_id) { toast('请选择平台', 'error'); return }
+  importRunning.value = true
+  importResult.value = null
+  try {
+    const r = await api.post('/api/v1/hedging/symbols/import-from-platform', {
+      platform_id: importForm.value.platform_id,
+      product_type: importForm.value.product_type,
+      symbols,
+    })
+    importResult.value = r.data
+    await loadAll()
+    const okN = r.data.imported?.length || 0
+    const errN = Object.keys(r.data.errors || {}).length
+    if (okN && !errN) {
+      toast(`已导入 ${okN} 条`)
+    } else if (okN && errN) {
+      toast(`导入 ${okN} 条，失败 ${errN} 条（详见弹窗）`)
+    } else {
+      toast(`全部失败（${errN} 条），请检查符号是否正确`, 'error')
+    }
+  } catch (e) {
+    toast('导入失败：' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    importRunning.value = false
+  }
+}
 
 function platformName(pid) {
   const p = platforms.value.find(x => x.platform_id === pid)

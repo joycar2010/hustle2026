@@ -69,7 +69,7 @@ class SpreadAlertService:
         if market_data.get('forward_spread') is not None and alert_settings.get('forwardOpenPrice') is not None:
             spread = market_data['forward_spread']
             threshold = alert_settings['forwardOpenPrice']
-            sync_count = alert_settings.get('forwardOpenSyncCount', 1)  # 默认1次
+            sync_count = alert_settings.get('forwardOpenSyncCount') or 1  # 默认1次
 
             alert_type = 'forward_open'
             if spread >= threshold:
@@ -95,7 +95,7 @@ class SpreadAlertService:
         if market_data.get('forward_spread') is not None and alert_settings.get('forwardClosePrice') is not None:
             spread = market_data['forward_spread']
             threshold = alert_settings['forwardClosePrice']
-            sync_count = alert_settings.get('forwardCloseSyncCount', 1)  # 默认1次
+            sync_count = alert_settings.get('forwardCloseSyncCount') or 1  # 默认1次
 
             alert_type = 'forward_close'
             if spread <= threshold:
@@ -121,7 +121,7 @@ class SpreadAlertService:
         if market_data.get('reverse_spread') is not None and alert_settings.get('reverseOpenPrice') is not None:
             spread = market_data['reverse_spread']
             threshold = alert_settings['reverseOpenPrice']
-            sync_count = alert_settings.get('reverseOpenSyncCount', 1)  # 默认1次
+            sync_count = alert_settings.get('reverseOpenSyncCount') or 1  # 默认1次
 
             alert_type = 'reverse_open'
             if spread >= threshold:
@@ -147,7 +147,7 @@ class SpreadAlertService:
         if market_data.get('reverse_spread') is not None and alert_settings.get('reverseClosePrice') is not None:
             spread = market_data['reverse_spread']
             threshold = alert_settings['reverseClosePrice']
-            sync_count = alert_settings.get('reverseCloseSyncCount', 1)  # 默认1次
+            sync_count = alert_settings.get('reverseCloseSyncCount') or 1  # 默认1次
 
             alert_type = 'reverse_close'
             if spread <= threshold:

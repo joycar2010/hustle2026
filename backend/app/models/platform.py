@@ -75,6 +75,7 @@ class PlatformSymbol(Base):
 
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
+    product_type = Column(String(20), nullable=True, comment="perpetual / futures / spot / mt5")
 
     # Relationships
     platform = relationship("Platform", back_populates="symbols")

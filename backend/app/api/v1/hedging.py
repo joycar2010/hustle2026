@@ -1,4 +1,5 @@
 """Hedging platform management API — platforms, symbols, hedging pairs CRUD"""
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -318,6 +319,315 @@ async def delete_symbol(
     await db.delete(s)
     await db.commit()
     return {"message": "Symbol deleted"}
+
+
+# ── Symbol metadata fetch from platform API ────────────────────────
+# Pulls precision/step/fees from the exchange's public instrument endpoint so
+# the admin form can auto-fill fields instead of hand-entering. Supported:
+#   binance  (perpetual|futures|spot)
+#   bybit    (perpetual=linear | futures=inverse | spot)
+#   gateio   (perpetual | spot)
+#   okx      (perpetual=SWAP | futures=FUTURES | spot=SPOT)
+# icmarkets / MT5: fetched from MT5 bridge elsewhere — not handled here.
+class FetchSymbolMetaReq(BaseModel):
+    platform_id: int
+    symbol: str
+    product_type: str = "perpetual"   # perpetual|futures|spot|mt5
+
+
+def _num_precision(step: float) -> int:
+    """Derive decimal precision from a step/tick string like 0.001 → 3."""
+    if step is None:
+        return 0
+    ss = f"{float(step):.20f}".rstrip("0").rstrip(".")
+    if "." in ss:
+        return len(ss.split(".")[1])
+    return 0
+
+
+@router.post("/symbols/fetch-from-platform")
+async def fetch_symbol_from_platform(
+    req: FetchSymbolMetaReq,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    plat = (await db.execute(select(Platform).where(Platform.platform_id == req.platform_id))).scalar_one_or_none()
+    if not plat:
+        raise HTTPException(status_code=404, detail="平台不存在")
+    name = (plat.platform_name or "").lower()
+    sym_raw = (req.symbol or "").strip()
+    if not sym_raw:
+        raise HTTPException(status_code=400, detail="请先填写符号")
+    sym = sym_raw.upper()
+    pt = (req.product_type or "perpetual").lower()
+
+    # Proxy (optional) — reuse what accounts use
+    proxy = None
+    try:
+        from app.core.proxy_utils import build_proxy_url
+        if getattr(plat, "proxy_config", None):
+            proxy = build_proxy_url(plat.proxy_config)
+    except Exception:
+        proxy = None
+
+    timeout = httpx.Timeout(15.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout, proxy=proxy, follow_redirects=True) as cli:
+        try:
+            if name == "binance":
+                if pt in ("perpetual", "futures"):
+                    r = await cli.get("https://fapi.binance.com/fapi/v1/exchangeInfo")
+                    r.raise_for_status()
+                    info = r.json()
+                    s_row = next((x for x in info.get("symbols", []) if x.get("symbol") == sym), None)
+                    if not s_row:
+                        raise HTTPException(status_code=404, detail=f"币安永续未找到 {sym}")
+                    filters = {f["filterType"]: f for f in s_row.get("filters", [])}
+                    lot = filters.get("LOT_SIZE", {})
+                    pf = filters.get("PRICE_FILTER", {})
+                    qty_step = float(lot.get("stepSize", 0)) or 0.001
+                    price_step = float(pf.get("tickSize", 0)) or 0.01
+                    return {
+                        "base_asset": s_row.get("baseAsset") or "",
+                        "quote_asset": s_row.get("quoteAsset") or "USDT",
+                        "contract_unit": 1,
+                        "qty_unit": s_row.get("baseAsset") or "",
+                        "qty_precision": int(s_row.get("quantityPrecision", _num_precision(qty_step))),
+                        "qty_step": qty_step,
+                        "min_qty": float(lot.get("minQty", qty_step)),
+                        "price_precision": int(s_row.get("pricePrecision", _num_precision(price_step))),
+                        "price_step": price_step,
+                        "maker_fee_rate": 0.0002,
+                        "taker_fee_rate": 0.0005,
+                        "margin_rate_initial": float(s_row.get("requiredMarginPercent", 5) or 5) / 100.0,
+                        "product_type": "perpetual" if "PERPETUAL" in (s_row.get("contractType") or "") else "futures",
+                    }
+                elif pt == "spot":
+                    r = await cli.get("https://api.binance.com/api/v3/exchangeInfo", params={"symbol": sym})
+                    r.raise_for_status()
+                    info = r.json()
+                    s_row = next((x for x in info.get("symbols", []) if x.get("symbol") == sym), None)
+                    if not s_row:
+                        raise HTTPException(status_code=404, detail=f"币安现货未找到 {sym}")
+                    filters = {f["filterType"]: f for f in s_row.get("filters", [])}
+                    lot = filters.get("LOT_SIZE", {})
+                    pf = filters.get("PRICE_FILTER", {})
+                    qty_step = float(lot.get("stepSize", 0)) or 0.00001
+                    price_step = float(pf.get("tickSize", 0)) or 0.01
+                    return {
+                        "base_asset": s_row.get("baseAsset"),
+                        "quote_asset": s_row.get("quoteAsset"),
+                        "contract_unit": 1,
+                        "qty_unit": s_row.get("baseAsset"),
+                        "qty_precision": int(s_row.get("baseAssetPrecision", _num_precision(qty_step))),
+                        "qty_step": qty_step,
+                        "min_qty": float(lot.get("minQty", qty_step)),
+                        "price_precision": int(s_row.get("quoteAssetPrecision", _num_precision(price_step))),
+                        "price_step": price_step,
+                        "maker_fee_rate": 0.001,
+                        "taker_fee_rate": 0.001,
+                        "margin_rate_initial": 1.0,
+                        "product_type": "spot",
+                    }
+
+            if name == "bybit":
+                cat = {"perpetual": "linear", "futures": "inverse", "spot": "spot"}.get(pt, "linear")
+                r = await cli.get("https://api.bybit.com/v5/market/instruments-info",
+                                  params={"category": cat, "symbol": sym})
+                r.raise_for_status()
+                data = r.json()
+                arr = data.get("result", {}).get("list", []) or []
+                if not arr:
+                    raise HTTPException(status_code=404, detail=f"Bybit({cat}) 未找到 {sym}")
+                it = arr[0]
+                lot = it.get("lotSizeFilter", {}) or {}
+                pf = it.get("priceFilter", {}) or {}
+                qty_step = float(lot.get("qtyStep") or lot.get("basePrecision") or 0.001)
+                price_step = float(pf.get("tickSize") or 0.01)
+                min_qty = float(lot.get("minOrderQty") or lot.get("minTrdAmt") or qty_step)
+                return {
+                    "base_asset": it.get("baseCoin") or "",
+                    "quote_asset": it.get("quoteCoin") or "USDT",
+                    "contract_unit": 1,
+                    "qty_unit": it.get("baseCoin") or "",
+                    "qty_precision": _num_precision(qty_step),
+                    "qty_step": qty_step,
+                    "min_qty": min_qty,
+                    "price_precision": _num_precision(price_step),
+                    "price_step": price_step,
+                    "maker_fee_rate": 0.0001 if cat != "spot" else 0.001,
+                    "taker_fee_rate": 0.0006 if cat != "spot" else 0.001,
+                    "margin_rate_initial": 0.05 if cat != "spot" else 1.0,
+                    "product_type": "spot" if cat == "spot" else ("futures" if cat == "inverse" else "perpetual"),
+                }
+
+            if name == "gateio":
+                if pt == "perpetual":
+                    # USDT-settled perp
+                    settle = "usdt"
+                    r = await cli.get(f"https://api.gateio.ws/api/v4/futures/{settle}/contracts/{sym_raw}")
+                    r.raise_for_status()
+                    it = r.json()
+                    qty_step = float(it.get("order_size_min") or 1)  # Gate perp is integer contracts
+                    price_step = float(it.get("order_price_round") or 0.01)
+                    contract_unit = float(it.get("quanto_multiplier") or 1)
+                    base = (it.get("name") or "").split("_")[0]
+                    quote = (it.get("name") or "").split("_")[-1] or "USDT"
+                    return {
+                        "base_asset": base,
+                        "quote_asset": quote,
+                        "contract_unit": contract_unit,
+                        "qty_unit": "Cont",
+                        "qty_precision": 0,
+                        "qty_step": qty_step,
+                        "min_qty": qty_step,
+                        "price_precision": _num_precision(price_step),
+                        "price_step": price_step,
+                        "maker_fee_rate": float(it.get("maker_fee_rate") or 0.00015),
+                        "taker_fee_rate": float(it.get("taker_fee_rate") or 0.0005),
+                        "margin_rate_initial": float(it.get("leverage_min") and (1.0 / float(it["leverage_max"] or 50)) or 0.02),
+                        "product_type": "perpetual",
+                    }
+                elif pt == "spot":
+                    r = await cli.get(f"https://api.gateio.ws/api/v4/spot/currency_pairs/{sym_raw}")
+                    r.raise_for_status()
+                    it = r.json()
+                    price_prec = int(it.get("precision", 6))
+                    qty_prec = int(it.get("amount_precision", 6))
+                    qty_step = 10 ** (-qty_prec)
+                    price_step = 10 ** (-price_prec)
+                    return {
+                        "base_asset": it.get("base"),
+                        "quote_asset": it.get("quote"),
+                        "contract_unit": 1,
+                        "qty_unit": it.get("base"),
+                        "qty_precision": qty_prec,
+                        "qty_step": qty_step,
+                        "min_qty": float(it.get("min_base_amount") or qty_step),
+                        "price_precision": price_prec,
+                        "price_step": price_step,
+                        "maker_fee_rate": float(it.get("fee") or 0.002) / 100.0,
+                        "taker_fee_rate": float(it.get("fee") or 0.002) / 100.0,
+                        "margin_rate_initial": 1.0,
+                        "product_type": "spot",
+                    }
+
+            if name == "okx":
+                inst_type = {"perpetual": "SWAP", "futures": "FUTURES", "spot": "SPOT"}.get(pt, "SWAP")
+                r = await cli.get("https://www.okx.com/api/v5/public/instruments",
+                                  params={"instType": inst_type, "instId": sym_raw})
+                r.raise_for_status()
+                arr = r.json().get("data", []) or []
+                if not arr:
+                    raise HTTPException(status_code=404, detail=f"OKX({inst_type}) 未找到 {sym_raw}")
+                it = arr[0]
+                qty_step = float(it.get("lotSz") or 1)
+                price_step = float(it.get("tickSz") or 0.01)
+                contract_unit = float(it.get("ctVal") or 1)
+                return {
+                    "base_asset": it.get("baseCcy") or it.get("ctValCcy") or "",
+                    "quote_asset": it.get("quoteCcy") or it.get("settleCcy") or "USDT",
+                    "contract_unit": contract_unit,
+                    "qty_unit": it.get("ctValCcy") or it.get("baseCcy") or "Cont",
+                    "qty_precision": _num_precision(qty_step),
+                    "qty_step": qty_step,
+                    "min_qty": float(it.get("minSz") or qty_step),
+                    "price_precision": _num_precision(price_step),
+                    "price_step": price_step,
+                    "maker_fee_rate": 0.0002,
+                    "taker_fee_rate": 0.0005,
+                    "margin_rate_initial": 1.0 / float(it.get("lever") or 50) if it.get("lever") else 0.02,
+                    "product_type": "perpetual" if inst_type == "SWAP" else ("futures" if inst_type == "FUTURES" else "spot"),
+                }
+
+            raise HTTPException(status_code=400, detail=f"平台 {plat.platform_name} 暂不支持自动拉取，请手动填写（MT5/IC Markets 可在 MT5 终端查询）")
+
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=502, detail=f"交易所 API 返回 {e.response.status_code}：{e.response.text[:200]}")
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"请求交易所失败：{e}")
+
+
+# ── Batch import: fetch + upsert directly into platform_symbols ──────
+class ImportSymbolsReq(BaseModel):
+    platform_id: int
+    product_type: str = "perpetual"
+    symbols: List[str]  # one or many
+
+
+@router.post("/symbols/import-from-platform")
+async def import_symbols_from_platform(
+    req: ImportSymbolsReq,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Fetch instrument metadata from the exchange and UPSERT into
+    platform_symbols — the one-click 导入 flow replacing manual entry.
+
+    Returns {imported: [...], skipped: [...], errors: {sym: msg}}.
+    """
+    if not req.symbols:
+        raise HTTPException(status_code=400, detail="请至少提供一个符号")
+
+    imported: List[Dict[str, Any]] = []
+    errors: Dict[str, str] = {}
+
+    for raw in req.symbols:
+        sym = (raw or "").strip()
+        if not sym:
+            continue
+        try:
+            meta = await fetch_symbol_from_platform(
+                FetchSymbolMetaReq(platform_id=req.platform_id, symbol=sym, product_type=req.product_type),
+                user_id=user_id, db=db,
+            )
+        except HTTPException as he:
+            errors[sym] = str(he.detail)
+            continue
+        except Exception as e:
+            errors[sym] = str(e)
+            continue
+
+        # Upsert — match by (platform_id, symbol)
+        existing = (await db.execute(
+            select(PlatformSymbol).where(
+                PlatformSymbol.platform_id == req.platform_id,
+                PlatformSymbol.symbol == sym,
+            )
+        )).scalar_one_or_none()
+
+        fields = {
+            "platform_id": req.platform_id,
+            "symbol": sym,
+            "base_asset": meta.get("base_asset") or "",
+            "quote_asset": meta.get("quote_asset") or "USDT",
+            "contract_unit": meta.get("contract_unit") or 1,
+            "qty_unit": meta.get("qty_unit") or "",
+            "qty_precision": int(meta.get("qty_precision") or 0),
+            "qty_step": meta.get("qty_step") or 0,
+            "min_qty": meta.get("min_qty") or 0,
+            "price_precision": int(meta.get("price_precision") or 0),
+            "price_step": meta.get("price_step") or 0,
+            "maker_fee_rate": meta.get("maker_fee_rate") or 0,
+            "taker_fee_rate": meta.get("taker_fee_rate") or 0,
+            "margin_rate_initial": meta.get("margin_rate_initial") or 0,
+            "product_type": meta.get("product_type") or req.product_type,
+            "is_active": True,
+        }
+
+        if existing:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+            await db.commit()
+            await db.refresh(existing)
+            imported.append({**_row_to_dict(existing), "_action": "updated"})
+        else:
+            row = PlatformSymbol(**fields)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            imported.append({**_row_to_dict(row), "_action": "created"})
+
+    return {"imported": imported, "errors": errors, "total": len(imported)}
 
 
 # ── Hedging Pairs ──────────────────────────────────────────────────

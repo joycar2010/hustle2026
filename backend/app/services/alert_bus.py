@@ -354,29 +354,21 @@ class AlertBus:
                     logger.debug(f"[alert_bus] subscribers fan-out failed: {_sub_err}")
                 return recipients
 
-            # Fan-out: only deliver to users who have opted-in to OpenCLAW
-            # (openclaw_enabled=true) AND have Feishu binding. Falls back to
-            # admin/operator role if no openclaw users exist (so kill_switch
-            # alerts still reach someone during early bootstrap).
+            # System-wide fan-out (no target user_id): deliver to admin /
+            # operator / security-admin roles with a Feishu binding. The
+            # `users.openclaw_enabled` column is the per-user auto.hustle2026.xyz
+            # login flag and MUST NOT be used as a recipient filter here.
             rows = (
                 await db.execute(
                     _text(
                         "SELECT u.feishu_open_id FROM users u "
                         "WHERE u.feishu_open_id IS NOT NULL AND u.feishu_open_id <> '' "
-                        "AND u.openclaw_enabled = true"
+                        "AND u.is_active = true "
+                        "AND (u.role IN ('超级管理员','系统管理员','安全管理员') "
+                        "     OR COALESCE(u.role,'user') IN ('admin','operator','security_admin'))"
                     )
                 )
             ).fetchall()
-            if not rows:
-                rows = (
-                    await db.execute(
-                        _text(
-                            "SELECT u.feishu_open_id FROM users u "
-                            "WHERE u.feishu_open_id IS NOT NULL AND u.feishu_open_id <> '' "
-                            "AND (u.role = '超级管理员' OR u.role = '系统管理员' OR COALESCE(u.role, 'user') IN ('admin','operator'))"
-                        )
-                    )
-                ).fetchall()
             for r in rows:
                 recipients.append({"receive_id": r[0], "receive_id_type": "open_id"})
             return recipients

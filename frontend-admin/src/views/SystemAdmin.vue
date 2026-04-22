@@ -252,7 +252,7 @@
               <span v-else class="text-xs px-2 py-0.5 rounded bg-[#f6465d]/20 text-[#f6465d]">已停用（全员禁）</span>
             </h2>
             <p class="text-xs text-text-tertiary mt-1">
-              停用后立即短路所有用户的 OpenCLAW 决策、执行与告警；优先级高于 per-user 开关与 kill switch；is_admin 鉴权不受影响。
+              停用后立即短路 OpenCLAW agent 自身（决策/执行/余额监控/策略复盘等 OpenCLAW 模块）的告警和动作；交易员点差行情、资产余额等业务弹窗与飞书提醒不受影响。优先级高于 per-user 开关与 kill switch；is_admin 鉴权不受影响。
             </p>
             <p v-if="openclawStatus.kill_switch" class="text-xs text-[#f6465d] mt-1">⚠ 当前 kill switch 也处于开启状态</p>
           </div>
