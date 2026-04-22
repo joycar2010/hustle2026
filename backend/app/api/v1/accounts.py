@@ -1,5 +1,5 @@
 """Account management API endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from typing import List, Optional
@@ -12,6 +12,8 @@ from app.models.mt5_client import MT5Client
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountUpdate, AccountResponse
 from app.services.account_service import account_data_service
+from app.api.v1.subaccount import get_view_context, ViewContext
+from app.services.subaccount_projector import project_response
 
 router = APIRouter()
 
@@ -23,20 +25,35 @@ class AccountSecretResponse(BaseModel):
 
 @router.get("", response_model=List[AccountResponse])
 async def list_accounts(
-    user_id: str = Depends(get_current_user_id),
+    filter_user_id: Optional[str] = Query(None, alias="user_id",
+        description="Admin-only: filter accounts by owner user_id"),
+    show_all: bool = Query(False, alias="all",
+        description="Admin-only: return all accounts across all users"),
+    caller_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """List accounts.  Admin roles return all users' accounts; others see only their own."""
+    """List accounts.
+
+    - Regular users: always see only their own accounts (filter params ignored).
+    - Admins: may pass ?user_id=<uuid> to filter to a specific user, or
+      ?all=true to return every account. Default (no params) → only the
+      caller's own accounts, matching non-admin behaviour."""
     ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
-    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    user_result = await db.execute(select(User).where(User.user_id == caller_id))
     caller = user_result.scalar_one_or_none()
     is_admin = caller is not None and caller.role in ADMIN_ROLES
 
-    if is_admin:
+    if is_admin and filter_user_id:
+        try:
+            target_uuid = UUID(filter_user_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid user_id format")
+        result = await db.execute(select(Account).where(Account.user_id == target_uuid))
+    elif is_admin and show_all:
         result = await db.execute(select(Account))
     else:
         result = await db.execute(
-            select(Account).where(Account.user_id == UUID(user_id))
+            select(Account).where(Account.user_id == UUID(caller_id))
         )
     accounts = result.scalars().all()
     return accounts
@@ -559,9 +576,10 @@ async def get_account_pnl(
 
 @router.get("/dashboard/aggregated")
 async def get_aggregated_dashboard(
-    user_id: str = Depends(get_current_user_id),
+    ctx: ViewContext = Depends(get_view_context),
     db: AsyncSession = Depends(get_db),
 ):
+    user_id = ctx.data_user_id
     """Get aggregated dashboard data for all user accounts.
 
     IMPORTANT: This route MUST be defined BEFORE /{account_id}/dashboard
@@ -627,6 +645,13 @@ async def get_aggregated_dashboard(
                 "error": "账户未激活"
             })
 
+        # Sub-account projection: scale every whitelisted monetary field
+        # (total_assets, available_balance, unrealized_pnl, daily_pnl, ...)
+        # by the sub's shares/parent_shares multiplier so the dashboard cards
+        # reflect only their slice, not the parent's raw totals.
+        if ctx.is_sub:
+            aggregated_data = project_response(aggregated_data, ctx.multiplier)
+
         return aggregated_data
     except Exception as e:
         raise HTTPException(
@@ -685,9 +710,12 @@ async def get_user_fund_flow(
 
     # ── Permission gate: fund_view_enabled or admin role ──
     _perm = (await db.execute(text(
-        "SELECT fund_view_enabled, role FROM users WHERE user_id = CAST(:u AS UUID)"
+        "SELECT fund_view_enabled, role, is_subaccount FROM users WHERE user_id = CAST(:u AS UUID)"
     ), {"u": user_id})).first()
     _admin_roles = {"超级管理员", "系统管理员", "super_admin", "system_admin", "admin"}
+    if _perm and _perm[2]:
+        from fastapi import HTTPException as _HE
+        raise _HE(status_code=403, detail="子账号不可查看资金流向")
     if not _perm or (not bool(_perm[0]) and (_perm[1] not in _admin_roles)):
         from fastapi import HTTPException as _HE
         raise _HE(status_code=403, detail="未授予查看资金流向权限")

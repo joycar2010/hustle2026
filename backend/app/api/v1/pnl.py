@@ -5,6 +5,7 @@ import math
 import time as _time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from typing import Optional, Dict, Any, List
 
 import httpx
@@ -17,6 +18,8 @@ from app.core.database import get_db
 from app.core.proxy_utils import build_proxy_url
 from app.models.user import User
 from app.models.account import Account
+from app.api.v1.subaccount import get_view_context, ViewContext
+from app.services.subaccount_projector import project_response
 from app.models.mt5_client import MT5Client
 from app.services.binance_client import BinanceFuturesClient
 
@@ -281,15 +284,98 @@ async def get_daily_pnl(
     start_date: str = Query(..., description="开始日期（北京时间 YYYY-MM-DD）"),
     end_date: str = Query(..., description="结束日期（北京时间 YYYY-MM-DD）"),
     platform: str = Query("all", description="平台过滤: all/binance/mt5"),
-    current_user: User = Depends(get_current_user),
+    ctx: ViewContext = Depends(get_view_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取每日收益数据（支持日/周/月前端聚合）"""
-    # 缓存检查
-    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}"
+    # Sub-account: read parent's data instead of empty self data
+    from app.models.user import User as _U
+    _row = (await db.execute(__import__('sqlalchemy').select(_U).where(_U.user_id == ctx.data_user_id))).scalar_one_or_none()
+    current_user = _row
+    # Sub-account: clamp start_date to MIN(subscription.created_at) so the chart
+    # only shows data from after the sub joined. With M2M we take the earliest
+    # subscription across all parents.
+    if ctx.is_sub:
+        from sqlalchemy import text as _text
+        _row_sub = (await db.execute(_text(
+            "SELECT MIN(created_at) FROM sub_account_subscriptions WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
+        ), {"u": ctx.auth_user_id})).first()
+        if _row_sub and _row_sub[0]:
+            _join_date_str = _row_sub[0].astimezone().strftime('%Y-%m-%d')
+            if _join_date_str > start_date:
+                start_date = _join_date_str
+
+    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:v2"
     cached = _cache_get(cache_key)
     if cached:
         return cached
+
+    # ── Sub path: short-circuit to per-share NAV replay from subscription_daily_nav ──
+    # This is mathematically correct regardless of parent cashflow events
+    # (mint/burn keeps nav_per_share stable across deposits/withdrawals).
+    # Falls back to parent raw PnL × multiplier when snapshot history is too
+    # sparse (e.g. sub just joined — <3 snapshot rows means the line chart
+    # would be blank).
+    if ctx.is_sub:
+        from app.services.subaccount_nav import (
+            list_parent_daily_navs, list_active_subscriptions_by_sub,
+        )
+        subs = await list_active_subscriptions_by_sub(db, ctx.auth_user_id)
+        if not subs:
+            return {"daily_pnl": [], "summary": _compute_summary([])}
+
+        # date → aggregated PnL across all parent subscriptions
+        date_pnl: Dict[str, Decimal] = defaultdict(lambda: Decimal(0))
+        total_snapshots = 0
+        for _sid, parent_uid, shares, _inv_u, _inv_c, nav_at_join, _created in subs:
+            navs = await list_parent_daily_navs(db, parent_uid, start_date, end_date)
+            total_snapshots += len(navs)
+            prev_nav = nav_at_join
+            for snap_date, nav, _ta, _ass in navs:
+                pnl = shares * (nav - prev_nav)
+                date_pnl[snap_date.isoformat()] += pnl
+                prev_nav = nav
+
+        # If enough snapshot history, use the mathematically-precise per-share
+        # replay. Threshold: >= 3 snapshot rows means at least 2 meaningful
+        # deltas on the chart.
+        if total_snapshots >= 3:
+            daily_list = [
+                {
+                    "date": dk,
+                    "realized_pnl": round(float(v), 2),
+                    "funding_fee": 0,
+                    "net_pnl": round(float(v), 2),
+                    "trade_count": 0,
+                    "win_count": 0,
+                    "platform_breakdown": {
+                        "binance": {"realized_pnl": 0, "funding_fee": 0},
+                        "mt5": {"realized_pnl": 0, "swap": 0, "commission": 0},
+                    },
+                }
+                for dk, v in sorted(date_pnl.items())
+            ]
+            resp = {
+                "daily_pnl": daily_list,
+                "summary": _compute_summary(daily_list),
+                "data_source": "per_share_replay",
+                "note": None,
+            }
+            _cache_set(cache_key, resp)
+            logger.info(
+                f"[PnL-sub] sub={ctx.auth_user_id} range={start_date}~{end_date} "
+                f"parents={len(subs)} days={len(daily_list)} source=per_share"
+            )
+            return resp
+
+        logger.info(
+            f"[PnL-sub] sub={ctx.auth_user_id} sparse snapshots "
+            f"(n={total_snapshots}); falling back to parent raw PnL × multiplier"
+        )
+        # Fall through to the parent-path fetching below, then apply
+        # project_response at the tail (see tail-patch below).
+
+    # ── Parent path: legacy binance/MT5 income API ──
+    """获取每日收益数据（支持日/周/月前端聚合）"""
 
     try:
         start_ms = _beijing_date_to_utc_ms(start_date)
@@ -447,4 +533,12 @@ async def get_daily_pnl(
 
     logger.info(f"[PnL] user={current_user.username}, range={start_date}~{end_date}, "
                 f"days={len(daily_list)}, cumulative={summary['cumulative_pnl']}")
+    # Parent path — for subs that fell through (sparse snapshots), we still
+    # apply project_response to scale monetary fields by the sub's multiplier.
+    if ctx.is_sub:
+        scaled = project_response(resp, ctx.multiplier)
+        if isinstance(scaled, dict):
+            scaled["data_source"] = "parent_raw_x_multiplier"
+            scaled["note"] = "历史快照不足，采用父账号原始 PnL × 份额比例近似展示"
+        return scaled
     return resp

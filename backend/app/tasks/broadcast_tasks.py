@@ -799,67 +799,183 @@ class PendingOrdersStreamer:
                     await asyncio.sleep(self.interval)
                     continue
 
-                # Fetch pending orders directly from Binance API
+                # Fetch pending orders across all REST-capable platforms
+                # (binance/bybit/gateio/okx). IC Markets (MT5-only) pending
+                # orders flow through the position stream, not this one.
                 try:
                     from app.models.account import Account
                     from app.core.database import AsyncSessionLocal
                     from app.services.binance_client import BinanceFuturesClient
+                    from app.services.bybit_client import BybitV5Client
+                    from app.services.gateio_client import GateioFuturesClient
+                    from app.services.okx_client import OKXClient
                     from app.utils.time_utils import utc_ms_to_beijing
+                    from app.core.proxy_utils import build_proxy_url
                     from sqlalchemy import select
 
-                    pending_orders = []
-
-                    # Get all Binance accounts from database, grouped by user
+                    # Query every active REST-capable account.
                     async with AsyncSessionLocal() as db:
                         result = await db.execute(
-                            select(Account).where(Account.platform_id == 1, Account.is_active == True)
+                            select(Account).where(
+                                Account.platform_id.in_([1, 2, 4, 5]),
+                                Account.is_active == True,
+                            )
                         )
                         accounts = result.scalars().all()
 
+                        # Skip MT5 accounts even if platform_id==2 (Bybit row
+                        # occasionally used as the MT5 parent row).
+                        accounts = [a for a in accounts if not getattr(a, "is_mt5_account", False)]
+
                         # Group by user_id
-                        user_accounts = {}
+                        user_accounts: dict = {}
                         for account in accounts:
                             uid = str(account.user_id)
-                            if uid not in user_accounts:
-                                user_accounts[uid] = []
-                            user_accounts[uid].append(account)
+                            user_accounts.setdefault(uid, []).append(account)
 
-                        # Fetch and send per user
+                        async def _fetch_binance(account):
+                            out = []
+                            client = BinanceFuturesClient(
+                                account.api_key, account.api_secret,
+                                proxy_url=build_proxy_url(account.proxy_config)
+                            )
+                            try:
+                                sym_a, _ = _get_pair_symbols()
+                                open_orders = await client.get_open_orders(symbol=sym_a)
+                                for order in open_orders:
+                                    out.append({
+                                        "id": str(order.get("orderId")),
+                                        "timestamp": utc_ms_to_beijing(order.get("time", 0) or 0),
+                                        "exchange": "主账号",
+                                        "platform": "binance",
+                                        "side": str(order.get("side", "")).lower(),
+                                        "quantity": float(order.get("origQty", 0) or 0),
+                                        "price": float(order.get("price", 0) or 0),
+                                        "status": str(order.get("status", "")).lower(),
+                                        "symbol": order.get("symbol", ""),
+                                        "source": "strategy",
+                                    })
+                            finally:
+                                await client.close()
+                            return out
+
+                        async def _fetch_bybit(account):
+                            out = []
+                            client = BybitV5Client(
+                                account.api_key, account.api_secret,
+                                proxy_url=build_proxy_url(account.proxy_config)
+                            )
+                            try:
+                                resp = await client.get_open_orders(category="linear", limit=50)
+                                rows = (resp or {}).get("result", {}).get("list", []) or []
+                                for order in rows:
+                                    try:
+                                        ct = int(order.get("createdTime") or 0)
+                                    except (TypeError, ValueError):
+                                        ct = 0
+                                    out.append({
+                                        "id": str(order.get("orderId", "")),
+                                        "timestamp": utc_ms_to_beijing(ct),
+                                        "exchange": "主账号",
+                                        "platform": "bybit",
+                                        "side": str(order.get("side", "")).lower(),
+                                        "quantity": float(order.get("qty", 0) or 0),
+                                        "price": float(order.get("price", 0) or 0),
+                                        "status": str(order.get("orderStatus", "")).lower(),
+                                        "symbol": order.get("symbol", ""),
+                                        "source": "strategy",
+                                    })
+                            finally:
+                                await client.close()
+                            return out
+
+                        async def _fetch_gateio(account):
+                            out = []
+                            client = GateioFuturesClient(
+                                api_key=account.api_key, api_secret=account.api_secret,
+                                proxy_url=build_proxy_url(account.proxy_config),
+                            )
+                            try:
+                                rows = await client.list_open_orders(contract=None, limit=100)
+                                for order in rows or []:
+                                    ct = int(order.get("create_time", 0) or 0) * 1000
+                                    size_raw = order.get("size", 0)
+                                    try:
+                                        sz = float(size_raw)
+                                    except (TypeError, ValueError):
+                                        sz = 0.0
+                                    side = "buy" if sz > 0 else "sell" if sz < 0 else ""
+                                    out.append({
+                                        "id": str(order.get("id", "")),
+                                        "timestamp": utc_ms_to_beijing(ct),
+                                        "exchange": "主账号",
+                                        "platform": "gateio",
+                                        "side": side,
+                                        "quantity": abs(sz),
+                                        "price": float(order.get("price", 0) or 0),
+                                        "status": str(order.get("status", "")).lower(),
+                                        "symbol": order.get("contract", ""),
+                                        "source": "strategy",
+                                    })
+                            finally:
+                                await client.close()
+                            return out
+
+                        async def _fetch_okx(account):
+                            out = []
+                            passphrase = getattr(account, "passphrase", None) or ""
+                            client = OKXClient(
+                                account.api_key, account.api_secret, passphrase,
+                                proxy_url=build_proxy_url(account.proxy_config),
+                            )
+                            try:
+                                rows = []
+                                for inst_type in ("SWAP", "FUTURES"):
+                                    chunk = await client.get_open_orders(
+                                        inst_id=None, inst_type=inst_type, limit=100
+                                    )
+                                    rows.extend(chunk)
+                                for order in rows:
+                                    try:
+                                        ct_ms = int(order.get("cTime", 0) or 0)
+                                    except (TypeError, ValueError):
+                                        ct_ms = 0
+                                    out.append({
+                                        "id": str(order.get("ordId", "")),
+                                        "timestamp": utc_ms_to_beijing(ct_ms),
+                                        "exchange": "主账号",
+                                        "platform": "okx",
+                                        "side": str(order.get("side", "")).lower(),
+                                        "quantity": float(order.get("sz", 0) or 0),
+                                        "price": float(order.get("px", 0) or 0),
+                                        "status": str(order.get("state", "")).lower(),
+                                        "symbol": order.get("instId", ""),
+                                        "source": "strategy",
+                                    })
+                            finally:
+                                await client.close()
+                            return out
+
+                        _DISPATCH = {1: _fetch_binance, 2: _fetch_bybit,
+                                     4: _fetch_gateio, 5: _fetch_okx}
+
                         for uid, user_accs in user_accounts.items():
                             user_orders = []
                             for account in user_accs:
+                                fetcher = _DISPATCH.get(account.platform_id)
+                                if not fetcher:
+                                    continue
                                 try:
-                                    from app.core.proxy_utils import build_proxy_url
-                                    client = BinanceFuturesClient(
-                                        account.api_key, account.api_secret,
-                                        proxy_url=build_proxy_url(account.proxy_config)
-                                    )
-                                    try:
-                                        sym_a, _ = _get_pair_symbols()
-                                        open_orders = await client.get_open_orders(symbol=sym_a)
-                                        for order in open_orders:
-                                            order_time = order.get("time", 0)
-                                            beijing_time = utc_ms_to_beijing(order_time)
-                                            user_orders.append({
-                                                "id": str(order.get("orderId")),
-                                                "timestamp": beijing_time,
-                                                "exchange": "主账号",
-                                                "side": order.get("side", "").lower(),
-                                                "quantity": float(order.get("origQty", 0)),
-                                                "price": float(order.get("price", 0)),
-                                                "status": order.get("status", "").lower(),
-                                                "symbol": order.get("symbol", ""),
-                                                "source": "strategy"
-                                            })
-                                    finally:
-                                        await client.close()
+                                    user_orders.extend(await fetcher(account))
                                 except Exception as e:
-                                    logger.error(f"Failed to fetch orders for account {account.account_id}: {e}")
-
+                                    logger.error(
+                                        f"Failed to fetch orders for account "
+                                        f"{account.account_id} (pid={account.platform_id}): {e}"
+                                    )
                             user_orders.sort(key=lambda x: x["timestamp"], reverse=True)
                             await manager.send_to_user({
                                 "type": "pending_orders",
-                                "data": user_orders[:8]
+                                "data": user_orders[:20],
                             }, uid)
                     self.broadcast_count += 1
                     self.last_broadcast_time = datetime.now().isoformat()

@@ -260,6 +260,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f'[dashboard_stream] start err: {e}')
 
+    # Sub-account: daily NAV snapshot scheduler (00:05 Asia/Shanghai)
+    try:
+        from app.services.subaccount_snapshot_scheduler import daily_snapshot_loop
+        nav_snapshot_task = asyncio.create_task(daily_snapshot_loop())
+        app_state['nav_snapshot_task'] = nav_snapshot_task
+        logger.info('[nav-scheduler] daily snapshot task scheduled')
+    except Exception as e:
+        logger.error(f'[nav-scheduler] failed to start: {e}')
+
     logger.info("FastAPI application started - background services initializing...")
 
     yield
@@ -270,6 +279,15 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Stop NAV scheduler
+    _nst = app_state.get('nav_snapshot_task')
+    if _nst:
+        _nst.cancel()
+        try:
+            await _nst
+        except asyncio.CancelledError:
+            pass
 
     # Stop OpenCLAW
     try:
@@ -358,6 +376,55 @@ app.add_middleware(
 # app.add_middleware(PermissionInterceptor, redis_client=redis_client.client)
 
 # Add request logging middleware
+@app.middleware("http")
+async def subaccount_write_guard(request: Request, call_next):
+    """Sub-accounts are view-only. Reject any non-GET except auth + sub-self
+    profile reads. Auth dependency in target endpoints will run before/after,
+    but we short-circuit here to keep the rule centralized."""
+    method = request.method.upper()
+    path = request.url.path
+    if method in ('GET', 'HEAD', 'OPTIONS'):
+        return await call_next(request)
+    ALLOW_PREFIX = (
+        '/api/v1/auth/',          # login / refresh / logout
+        '/api/v1/users/me/avatar',  # cosmetic
+        '/ws',
+    )
+    if any(path.startswith(x) for x in ALLOW_PREFIX):
+        return await call_next(request)
+
+    # Need bearer token to know if caller is a sub. Anonymous → let downstream 401.
+    auth = request.headers.get('authorization', '')
+    if not auth.lower().startswith('bearer '):
+        return await call_next(request)
+    token = auth[7:].strip()
+
+    try:
+        from app.core.security import decode_access_token
+        payload = decode_access_token(token)
+        uid = payload.get('sub') if payload else None
+    except Exception:
+        return await call_next(request)
+    if not uid:
+        return await call_next(request)
+
+    try:
+        from app.core.database import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        async with AsyncSessionLocal() as _db:
+            row = (await _db.execute(_text(
+                "SELECT is_subaccount FROM users WHERE user_id = CAST(:u AS UUID)"
+            ), {'u': uid})).first()
+        if row and row[0]:
+            return JSONResponse(status_code=403, content={
+                'detail': '子账号仅支持查看，无任何写操作权限',
+                'code': 'subaccount_readonly',
+            })
+    except Exception:
+        pass
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def maintenance_guard(request: Request, call_next):
     """Block mutating trading/strategy requests while maintenance is on.
@@ -472,6 +539,8 @@ app.include_router(system_monitor.router, prefix="/api/v1/monitor", tags=["系�
 app.include_router(key_management.router, prefix="/api/v1/keys", tags=["密钥管理"])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["OpenCLAW Agent"])
 app.include_router(site_status.router, prefix="/api/v1", tags=["Site Status"])
+from app.api.v1 import subaccount
+app.include_router(subaccount.router, prefix="/api/v1", tags=["Sub-account"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["通知服务"])
 app.include_router(sound_files.router, prefix="/api/v1", tags=["声音文件管理"])
 app.include_router(timing_configs.router, prefix="/api/v1", tags=["时间配置管理"])

@@ -109,6 +109,15 @@ async def _execute_forced_reduce(db: AsyncSession, account_id, current_pct: floa
     })})
     decision_id = res.scalar_one()
     await db.commit()
+    try:
+        from app.services.agent.ws_events import push_decision_event
+        await push_decision_event({
+            'trigger': trigger,
+            'verdict': verdict,
+            'reject_reason': reject_reason,
+        })
+    except Exception:
+        pass
 
     exec_res = await execute_partial_reduce(
         db, parent_decision_id=decision_id,

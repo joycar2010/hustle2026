@@ -654,9 +654,16 @@ watch(() => marketStore.lastMessage, (message) => {
   } else if (message.type === 'mt5_position_update') {
     handleMt5PositionUpdate(message.data)
   } else if (message.type === 'pending_orders' && message.data) {
-    // Real-time pending orders from WS (pushed every 2s by PendingOrdersStreamer)
+    // Real-time pending orders from WS (pushed every 2s by
+    // PendingOrdersStreamer across all REST platforms). Drive both the
+    // raw counter AND the ASK / BID card badges — the latter were
+    // previously only populated by the one-shot onMounted HTTP call, so
+    // the 挂N badge never updated after a new order.
     if (Array.isArray(message.data)) {
       pendingOrderCount.value = message.data.length
+      const orders = message.data
+      askOrderCount.value = orders.filter(o => (o?.side || '').toLowerCase() === 'sell').length
+      bidOrderCount.value = orders.filter(o => (o?.side || '').toLowerCase() === 'buy').length
     }
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
@@ -1289,7 +1296,11 @@ defineExpose({
   binanceLongTotal,
   binanceShortTotal,
   bybitLongTotal,
-  bybitShortTotal
+  bybitShortTotal,
+  // Imperative refresh entrypoint for siblings (StrategyPanel calls this
+  // right after a successful order so the 挂N badge updates without
+  // waiting for the 2s WS tick).
+  fetchPendingOrderCounts,
 })
 </script>
 

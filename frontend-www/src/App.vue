@@ -1,13 +1,15 @@
 <template>
   <div class="min-h-screen bg-dark-200 text-text-primary">
     <AnnouncementBanner v-if="isAuthenticated" />
-    <router-view />
+    <SubAccountBanner /><router-view />
     <MobileNavbar v-if="isAuthenticated && showNav" />
     <div v-if="isAuthenticated && showNav" class="h-16 md:h-12"></div>
   </div>
 </template>
 
 <script setup>
+import SubAccountBanner from '@/components/SubAccountBanner.vue'
+
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'

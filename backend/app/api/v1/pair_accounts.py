@@ -30,12 +30,17 @@ async def list_pair_accounts(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all pair-account bindings for a user. Admin can query other users."""
+    """List all pair-account bindings for a user. Admin can query other users.
+
+    Includes per-side is_active flags so the client can filter the pair selector
+    to only pairs whose A+B accounts are both bound AND active."""
     target_uid = user_id_param or user_id
     result = await db.execute(text("""
         SELECT upa.pair_code,
                upa.account_a_id::text, aa.account_name as a_name,
-               upa.account_b_id::text, ab.account_name as b_name
+               COALESCE(aa.is_active, false) as a_active,
+               upa.account_b_id::text, ab.account_name as b_name,
+               COALESCE(ab.is_active, false) as b_active
         FROM user_pair_accounts upa
         LEFT JOIN accounts aa ON upa.account_a_id = aa.account_id
         LEFT JOIN accounts ab ON upa.account_b_id = ab.account_id
@@ -44,7 +49,11 @@ async def list_pair_accounts(
     """), {"uid": target_uid})
     rows = result.fetchall()
     return [
-        {"pair_code": r[0], "account_a_id": r[1], "account_a_name": r[2], "account_b_id": r[3], "account_b_name": r[4]}
+        {
+            "pair_code": r[0],
+            "account_a_id": r[1], "account_a_name": r[2], "account_a_active": bool(r[3]),
+            "account_b_id": r[4], "account_b_name": r[5], "account_b_active": bool(r[6]),
+        }
         for r in rows
     ]
 

@@ -1,31 +1,56 @@
 <template>
   <div class="space-y-3">
-    <div class="bg-dark-100 rounded-xl p-4 border border-border-primary flex justify-between items-center">
+    <!-- Header + approx count -->
+    <div class="bg-dark-100 rounded-xl p-4 border border-border-primary flex flex-wrap justify-between items-center gap-3">
       <div>
         <h2 class="font-semibold">决策流</h2>
-        <div class="text-xs text-text-tertiary mt-1">每 5 秒刷新 · 共 {{ items.length }} 条</div>
+        <div class="text-xs text-text-tertiary mt-1">
+          已加载 {{ items.length }} / 约 {{ totalApprox || '—' }} 条 · 头部每 5s 自动刷新
+        </div>
       </div>
-      <div class="flex flex-col gap-2 text-xs">
-        <div class="flex gap-2 items-center">
-          <span class="text-text-tertiary">目标:</span>
-          <button @click="selectedTarget = null"
-            class="px-2 py-1 rounded text-[11px]"
-            :class="selectedTarget === null ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">全部</button>
-          <button v-for="t in targets" :key="t.id" @click="selectedTarget = t.id"
-            class="px-2 py-1 rounded text-[11px]"
-            :class="selectedTarget === t.id ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">
-            {{ t.username }}/{{ t.pair_code }}
-          </button>
-        </div>
-        <div class="flex gap-2">
-          <button v-for="f in filters" :key="f" @click="active=f"
-            class="px-3 py-1.5 rounded border" :class="active===f ? 'bg-primary text-dark-300 border-primary' : 'border-border-primary text-text-secondary hover:bg-dark-200'">
-            {{ f }} <span class="opacity-60 ml-1">{{ counts[f] || 0 }}</span>
-          </button>
-        </div>
+      <div class="flex items-center gap-2 text-xs">
+        <span class="text-text-tertiary">目标:</span>
+        <button @click="setTarget(null)"
+          class="px-2 py-1 rounded text-[11px]"
+          :class="selectedTarget === null ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">全部</button>
+        <button v-for="t in targets" :key="t.id" @click="setTarget(t.id)"
+          class="px-2 py-1 rounded text-[11px]"
+          :class="selectedTarget === t.id ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">
+          {{ t.username }}/{{ t.pair_code }}
+        </button>
       </div>
     </div>
 
+    <!-- Filter row -->
+    <div class="bg-dark-100 rounded-xl p-3 border border-border-primary flex flex-wrap items-center gap-3 text-xs">
+      <div class="flex items-center gap-1">
+        <span class="text-text-tertiary">判决:</span>
+        <button v-for="v in VERDICTS" :key="v" @click="toggleVerdict(v)"
+          class="px-2 py-1 rounded"
+          :class="selectedVerdicts.includes(v) ? verdictActiveClass(v) : 'bg-dark-200 text-text-secondary'">{{ v }}</button>
+      </div>
+      <div class="flex items-center gap-1">
+        <span class="text-text-tertiary">时间:</span>
+        <button v-for="w in WINDOWS" :key="w.key" @click="windowKey = w.key; reload()"
+          class="px-2 py-1 rounded"
+          :class="windowKey === w.key ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">{{ w.label }}</button>
+      </div>
+      <div class="flex items-center gap-1">
+        <span class="text-text-tertiary">最低置信度:</span>
+        <input v-model.number="minConfidence" type="number" step="0.05" min="0" max="1"
+          @change="reload()"
+          class="w-20 bg-dark-200 border border-border-primary rounded px-2 py-1 font-mono">
+      </div>
+      <div class="flex items-center gap-1 flex-1 min-w-[180px]">
+        <span class="text-text-tertiary">关键字:</span>
+        <input v-model="searchText" @keyup.enter="reload()" placeholder="原因 / reject_reason"
+          class="flex-1 bg-dark-200 border border-border-primary rounded px-2 py-1">
+        <button @click="reload()" class="px-3 py-1 rounded bg-primary text-dark-300 font-semibold">应用</button>
+        <button @click="resetFilters()" class="px-3 py-1 rounded bg-dark-200 text-text-secondary">重置</button>
+      </div>
+    </div>
+
+    <!-- Table -->
     <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
       <table class="w-full text-xs">
         <thead class="bg-dark-200 text-text-tertiary">
@@ -44,10 +69,10 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="d in filtered" :key="d.id">
+          <template v-for="d in items" :key="d.id">
             <tr class="border-t border-border-primary hover:bg-dark-200 cursor-pointer" @click="toggle(d.id)">
               <td class="px-3 py-2 font-mono text-text-tertiary">{{ d.id }}</td>
-              <td class="font-mono text-text-tertiary">{{ fmtTime(d.created_at) }}</td>
+              <td class="font-mono text-text-tertiary" :title="d.created_at">{{ fmtTime(d.created_at) }}</td>
               <td class="text-text-tertiary text-[11px]">
                 <span v-if="d.username" class="font-semibold text-text-secondary">{{ d.username }}</span>
                 <span v-if="d.pair_code" class="font-mono text-primary">/{{ d.pair_code }}</span>
@@ -85,28 +110,43 @@
           </template>
         </tbody>
       </table>
-      <div v-if="filtered.length===0" class="p-6 text-center text-text-tertiary text-sm">无符合条件决策</div>
+      <div v-if="items.length===0 && !loading" class="p-6 text-center text-text-tertiary text-sm">无符合条件决策</div>
+      <div v-if="loading" class="p-4 text-center text-text-tertiary text-sm">加载中…</div>
+      <div v-if="hasMore && !loading" class="p-3 text-center">
+        <button @click="loadMore()" class="px-4 py-1.5 bg-dark-200 hover:bg-dark-300 text-text-secondary rounded text-xs">加载更多</button>
+      </div>
+      <div v-if="!hasMore && items.length > 0" class="p-3 text-center text-text-tertiary text-[10px]">已到末尾</div>
     </div>
   </div>
 </template>
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/api'
 import dayjs from 'dayjs'
+import { useWsStream } from '@/stores/wsStream.js'
+
+const VERDICTS = ['executed', 'shadow', 'pending', 'rejected']
+const WINDOWS = [
+  { key: '1h',  label: '1h' },
+  { key: '24h', label: '24h' },
+  { key: '7d',  label: '7d' },
+  { key: '30d', label: '30d' },
+  { key: 'all', label: '全部' },
+]
+const PAGE = 50
 
 const items = ref([])
 const expanded = ref(null)
-const active = ref('全部')
 const targets = ref([])
 const selectedTarget = ref(null)
-const filters = ['全部', 'executed', 'shadow', 'pending', 'rejected']
-
-const counts = computed(() => {
-  const c = { '全部': items.value.length }
-  for (const it of items.value) c[it.verdict] = (c[it.verdict] || 0) + 1
-  return c
-})
-const filtered = computed(() => active.value === '全部' ? items.value : items.value.filter(d => d.verdict === active.value))
+const selectedVerdicts = ref([])
+const windowKey = ref('24h')
+const minConfidence = ref(null)
+const searchText = ref('')
+const hasMore = ref(false)
+const nextCursor = ref(null)
+const totalApprox = ref(null)
+const loading = ref(false)
 
 function fmtTime(t) { return dayjs(t).format('MM-DD HH:mm:ss') }
 function toggle(id) { expanded.value = expanded.value === id ? null : id }
@@ -126,30 +166,138 @@ function verdictBadge(v) {
     skipped: 'bg-dark-200 text-text-tertiary',
   })[v] || 'bg-dark-200 text-text-tertiary'
 }
-async function refresh() {
-  try {
-    const tid = selectedTarget.value
-    const [r, ts] = await Promise.all([
-      api.get('/api/v1/agent/decisions?limit=100' + (tid != null ? '&target_id=' + tid : '')),
-      targets.value.length === 0 ? api.get('/api/v1/agent/scope/targets').catch(() => null) : Promise.resolve(null),
-    ])
-    items.value = r.data?.items || []
-    if (ts) targets.value = ts.data?.items?.filter(t => t.enabled) || []
-  } catch (e) { console.error(e) }
+function verdictActiveClass(v) {
+  return ({
+    executed: 'bg-success/30 text-success font-semibold',
+    shadow:   'bg-yellow-900/40 text-yellow-400 font-semibold',
+    pending:  'bg-blue-900/40 text-blue-400 font-semibold',
+    rejected: 'bg-danger/30 text-danger font-semibold',
+  })[v] || 'bg-primary text-dark-300 font-semibold'
 }
+
+function toggleVerdict(v) {
+  const i = selectedVerdicts.value.indexOf(v)
+  if (i >= 0) selectedVerdicts.value.splice(i, 1)
+  else selectedVerdicts.value.push(v)
+  reload()
+}
+function setTarget(tid) { selectedTarget.value = tid; reload() }
+function resetFilters() {
+  selectedVerdicts.value = []
+  windowKey.value = '24h'
+  minConfidence.value = null
+  searchText.value = ''
+  reload()
+}
+
+function _buildParams({ cursor } = {}) {
+  const p = { limit: PAGE }
+  if (cursor != null) p.cursor = cursor
+  if (selectedTarget.value != null) p.target_id = selectedTarget.value
+  if (selectedVerdicts.value.length) p.verdict = selectedVerdicts.value.join(',')
+  if (minConfidence.value != null && minConfidence.value !== '') p.min_confidence = minConfidence.value
+  if (searchText.value) p.q = searchText.value
+  if (windowKey.value && windowKey.value !== 'all') {
+    const now = new Date()
+    const secs = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 }[windowKey.value]
+    const from = new Date(now.getTime() - secs * 1000)
+    p.from = from.toISOString()
+  }
+  return p
+}
+
+async function reload() {
+  loading.value = true
+  try {
+    const r = await api.get('/api/v1/agent/decisions', { params: _buildParams() })
+    items.value = r.data?.items || []
+    nextCursor.value = r.data?.next_cursor ?? null
+    hasMore.value = !!r.data?.has_more
+    totalApprox.value = r.data?.total_approx ?? null
+  } catch (e) { console.error(e) }
+  finally { loading.value = false }
+}
+async function loadMore() {
+  if (!hasMore.value || loading.value || nextCursor.value == null) return
+  loading.value = true
+  try {
+    const r = await api.get('/api/v1/agent/decisions', { params: _buildParams({ cursor: nextCursor.value }) })
+    const newItems = r.data?.items || []
+    // Avoid dupes on slow networks
+    const seen = new Set(items.value.map(x => x.id))
+    for (const it of newItems) if (!seen.has(it.id)) items.value.push(it)
+    nextCursor.value = r.data?.next_cursor ?? null
+    hasMore.value = !!r.data?.has_more
+  } catch (e) { console.error(e) }
+  finally { loading.value = false }
+}
+
+async function refreshHead() {
+  // Tail-poll: only fetch rows newer than items[0]; prepend them.
+  // Cheapest: refetch page 1 with current filters, merge on id.
+  try {
+    const r = await api.get('/api/v1/agent/decisions', { params: _buildParams() })
+    const fresh = r.data?.items || []
+    if (!fresh.length || !items.value.length) {
+      items.value = fresh
+      nextCursor.value = r.data?.next_cursor ?? null
+      hasMore.value = !!r.data?.has_more
+      totalApprox.value = r.data?.total_approx ?? null
+      return
+    }
+    const topId = items.value[0].id
+    const added = fresh.filter(x => x.id > topId)
+    if (added.length) items.value = [...added, ...items.value]
+    totalApprox.value = r.data?.total_approx ?? totalApprox.value
+  } catch (e) { /* swallow for background refresh */ }
+}
+
 async function approve(id) {
   if (!confirm(`批准决策 #${id} 并立即执行？`)) return
-  try { await api.post(`/api/v1/agent/decisions/${id}/approve`); await refresh() }
+  try { await api.post(`/api/v1/agent/decisions/${id}/approve`); await reload() }
   catch (e) { alert('批准失败: ' + (e.response?.data?.detail || e.message)) }
 }
 async function reject(id) {
   if (!confirm(`拒绝决策 #${id}？`)) return
-  try { await api.post(`/api/v1/agent/decisions/${id}/reject`, { reason: '操作员拒绝' }); await refresh() }
+  try { await api.post(`/api/v1/agent/decisions/${id}/reject`, { reason: '操作员拒绝' }); await reload() }
   catch (e) { alert('拒绝失败: ' + (e.response?.data?.detail || e.message)) }
 }
-import { watch as _watch } from 'vue'
-_watch(selectedTarget, () => refresh())
-let timer
-onMounted(() => { refresh(); timer = setInterval(refresh, 5000) })
-onUnmounted(() => clearInterval(timer))
+
+// Use the WS stream_hub channel agent.decisions for live head updates.
+// Falls back to a 30s safety poll in case the socket is down (reconnect is
+// handled by wsStream but during backoff we still want fresh data).
+const ws = useWsStream()
+let safetyTimer
+let wsWatchStop = null
+
+function _prependIfNew(d) {
+  if (!d || d.id == null) return
+  if (items.value.find(x => x.id === d.id)) return
+  // Respect currently-applied filters — drop events that wouldn't match.
+  if (selectedTarget.value != null && d.target_id !== selectedTarget.value) return
+  if (selectedVerdicts.value.length && !selectedVerdicts.value.includes(d.verdict)) return
+  items.value = [d, ...items.value]
+}
+
+onMounted(async () => {
+  try {
+    const ts = await api.get('/api/v1/agent/scope/targets')
+    targets.value = ts.data?.items?.filter(t => t.enabled) || []
+  } catch {}
+  await reload()
+  ws.connect()
+  ws.subscribe('agent.decisions')
+  // Whenever the channel payload updates, prepend the new decision
+  const { watch } = await import('vue')
+  wsWatchStop = watch(() => ws.channels['agent.decisions'], (payload) => {
+    if (payload && payload.event === 'decision_new') _prependIfNew(payload)
+  })
+  // 30s safety poll in case WS is flapping
+  safetyTimer = setInterval(refreshHead, 30000)
+})
+onUnmounted(() => {
+  clearInterval(safetyTimer)
+  try { ws.unsubscribe('agent.decisions') } catch {}
+  if (wsWatchStop) wsWatchStop()
+})
 </script>

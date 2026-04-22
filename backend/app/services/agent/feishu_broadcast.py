@@ -76,6 +76,9 @@ async def broadcast(
         cooldown_s=cooldown_s,
         payload=payload or {},
         ack_required=ack_required,
+        # System-wide OpenCLAW operational events (no owner) are admin-only.
+        # Traders should never see OpenCLAW toggle/kill_switch/mode_change popups.
+        admin_only=(not owner_user_id),
     )
     delivered = await alert_bus.emit(event)
     if not delivered:

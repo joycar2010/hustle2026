@@ -26,6 +26,8 @@ class User(Base):
     hedge_ratio_enabled = Column(Boolean, default=False, nullable=True)
     openclaw_enabled = Column(Boolean, default=False, nullable=False)
     fund_view_enabled = Column(Boolean, default=False, nullable=False)
+    parent_user_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    is_subaccount = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")

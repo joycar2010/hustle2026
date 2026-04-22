@@ -133,6 +133,28 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
     decision_id = res.scalar_one()
     await db.execute(text('UPDATE agent_state SET last_decision_at=NOW() WHERE id=1'))
     await db.commit()
+    # Live-push to admins subscribed to agent.decisions
+    try:
+        from app.services.agent.ws_events import push_decision_event
+        await push_decision_event({
+            'id': decision_id,
+            'trigger': trigger,
+            'verdict': verdict,
+            'reject_reason': reject_reason,
+            'target_id': ctx.target_id if ctx else None,
+            'pair_code': ctx.pair_code if ctx else None,
+            'user_id':   ctx.user_id if ctx else None,
+            'action':    proposal_dict.get('action'),
+            'leg':       proposal_dict.get('leg'),
+            'qty':       proposal_dict.get('qty'),
+            'reason':    proposal_dict.get('reason'),
+            'confidence': proposal_dict.get('confidence'),
+            'tokens_in':  usage.get('prompt_tokens'),
+            'tokens_out': usage.get('completion_tokens'),
+            'latency_ms': latency_ms,
+        })
+    except Exception:
+        pass
 
     # In auto mode with an actionable verdict, fire the execution layer
     if verdict == 'executed' and proposal_dict.get('action', 'noop') != 'noop':

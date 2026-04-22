@@ -127,9 +127,24 @@ onMounted(() => {
   // 监听 WebSocket 推送的挂单更新
   watch(() => marketStore.lastMessage, (message) => {
     if (message && message.type === 'pending_orders') {
-      // 如果当前筛选条件是挂单中，直接使用推送的数据
-      if (filterStatus.value === 'new,pending' && !filterSource.value) {
-        orders.value = message.data.slice(0, 8)
+      // Accept WS data whenever the viewer is looking at the open-orders
+      // slice (any status string that contains new/pending). Previously
+      // this was restricted to the literal default filter, so any filter
+      // adjustment froze the feed.
+      const fs = (filterStatus.value || '').toLowerCase()
+      const wantsOpen = !fs || fs.includes('new') || fs.includes('pending')
+      if (wantsOpen) {
+        const rows = Array.isArray(message.data) ? message.data.slice() : []
+        // Optional client-side source filter so a user-selected source
+        // narrows the pushed set instead of disabling it entirely.
+        const src = (filterSource.value || '').toLowerCase()
+        const filtered = src ? rows.filter(r => String(r?.source || '').toLowerCase() === src) : rows
+        filtered.sort((a, b) => {
+          const ta = new Date(a?.timestamp || 0).getTime()
+          const tb = new Date(b?.timestamp || 0).getTime()
+          return tb - ta
+        })
+        orders.value = filtered.slice(0, 50)
       }
     }
   })

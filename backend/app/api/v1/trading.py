@@ -614,79 +614,91 @@ async def get_realtime_pending_orders(
     source: Optional[str] = Query(default=None, description="来源过滤: strategy | manual"),
     limit: int = Query(default=50, ge=1, le=200, description="返回条数"),
     days: int = Query(default=7, ge=1, le=90, description="历史查询天数（仅状态非挂单中时有效）"),
+    pair_code: Optional[str] = Query(default=None, description="可选：按当前产品对过滤对应的平台 symbol"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    实时从 Binance API 获取订单历史，无需数据库。
+    """Real-time order list across all user accounts that have a REST
+    open-orders endpoint: Binance (1), Bybit (2), Gate.io (4), OKX (5).
 
-    status=new,pending  → 当前挂单中（get_open_orders，最快）
-    status=filled       → 已成交历史（get_all_orders + FILLED 过滤）
-    status=canceled     → 已取消历史（get_all_orders + CANCELED 过滤）
-    status=all/空       → 全部（get_all_orders，最近 days 天）
+    When pair_code is provided, each account is filtered to that platform's
+    A-side symbol for the pair (e.g. XAU → Binance XAUUSDT, GBXAU → Gate
+    XAU_USDT, OBXAU → OKX XAU-USDT-SWAP). If omitted, we list across all
+    symbols for that account (Bybit/Gate/OKX) or default to the pair's
+    platform symbol where the exchange requires a symbol filter (Binance).
+
+    status=new,pending  → currently-open orders (fastest path per platform)
+    status=filled/canceled/all → Binance-only historical query (existing
+        behaviour preserved, other platforms return only their open orders).
     """
     import time as _time
     try:
         from app.utils.time_utils import utc_ms_to_beijing
         from app.services.binance_client import BinanceFuturesClient
+        from app.services.bybit_client import BybitV5Client
+        from app.services.gateio_client import GateioFuturesClient
+        from app.services.okx_client import OKXClient
+        from app.services.hedging_pair_service import hedging_pair_service
 
         accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
         if not accounts:
             return []
 
-        result_orders = []
         status_list = [s.strip().upper() for s in (status or "").split(",") if s.strip()]
         want_open = any(s in ("NEW", "PENDING") for s in status_list)
 
-        for account in accounts:
-            if account.platform_id != 1:
-                continue
+        # Resolve per-platform symbol filter when pair_code is given.
+        # Only the A-side counts here (dashboard shows the 主账号 card).
+        symbol_a_for_pid: dict = {}
+        if pair_code:
+            try:
+                pair = hedging_pair_service.get_pair(pair_code)
+                if pair:
+                    symbol_a_for_pid[pair.symbol_a.platform_id] = pair.symbol_a.symbol
+            except Exception:
+                pass
+
+        result_orders: list = []
+
+        async def _collect_binance(account, sym_filter):
             client = BinanceFuturesClient(
                 account.api_key, account.api_secret,
                 proxy_url=build_proxy_url(account.proxy_config)
             )
             try:
+                target_symbol = sym_filter or "XAUUSDT"
                 if want_open:
-                    # 挂单中：直接查 open orders（速度最快）
-                    raw_orders = await client.get_open_orders(symbol="XAUUSDT")
+                    raw_orders = await client.get_open_orders(symbol=target_symbol)
                 else:
-                    # 历史订单：查最近 days 天的所有订单
                     end_ms = int(_time.time() * 1000)
                     start_ms = end_ms - days * 86400 * 1000
                     raw_orders = await client.get_all_orders(
-                        symbol="XAUUSDT", start_time=start_ms, limit=min(limit * 3, 500)
+                        symbol=target_symbol, start_time=start_ms, limit=min(limit * 3, 500)
                     )
-                    # 按 status 过滤
                     if status_list and "ALL" not in status_list:
                         target = set(status_list)
                         if "CANCELED" in target or "CANCELLED" in target:
                             target.update({"CANCELED", "CANCELLED"})
                         raw_orders = [o for o in raw_orders if o.get("status", "").upper() in target]
-
                 for order in raw_orders:
-                    order_time = order.get("time", 0) or order.get("updateTime", 0)
-                    beijing_time = utc_ms_to_beijing(order_time)
-                    order_status = order.get("status", "").lower()
-                    if order_status == "new":
-                        ui_status = "new"
-                    elif order_status == "partially_filled":
-                        ui_status = "pending"
-                    elif order_status == "filled":
-                        ui_status = "filled"
-                    elif order_status in ("canceled", "cancelled", "expired", "rejected"):
-                        ui_status = "canceled"
-                    else:
-                        ui_status = order_status
-
+                    ot = order.get("time", 0) or order.get("updateTime", 0)
+                    s_raw = order.get("status", "").lower()
+                    ui_status = (
+                        "new" if s_raw == "new" else
+                        "pending" if s_raw == "partially_filled" else
+                        "filled" if s_raw == "filled" else
+                        "canceled" if s_raw in ("canceled", "cancelled", "expired", "rejected") else s_raw
+                    )
                     result_orders.append({
                         "id":         str(order.get("orderId", "")),
-                        "timestamp":  beijing_time,
+                        "timestamp":  utc_ms_to_beijing(ot),
                         "exchange":   "主账号",
+                        "platform":   "binance",
                         "side":       order.get("side", "").lower(),
                         "quantity":   float(order.get("origQty") or order.get("qty", 0)),
                         "price":      float(order.get("price") or 0),
                         "status":     ui_status,
-                        "symbol":     order.get("symbol", "XAUUSDT"),
+                        "symbol":     order.get("symbol", target_symbol),
                         "source":     "strategy",
                         "filled_qty": float(order.get("executedQty") or 0),
                         "order_type": order.get("type", ""),
@@ -695,6 +707,159 @@ async def get_realtime_pending_orders(
                 logger.error(f"Binance realtime orders error [{account.account_name}]: {e}")
             finally:
                 await client.close()
+
+        async def _collect_bybit(account, sym_filter):
+            if not want_open:
+                return  # Bybit historical not wired into this endpoint
+            client = BybitV5Client(
+                account.api_key, account.api_secret,
+                proxy_url=build_proxy_url(account.proxy_config)
+            )
+            try:
+                resp = await client.get_open_orders(
+                    category="linear", symbol=sym_filter, limit=50
+                )
+                rows = (resp or {}).get("result", {}).get("list", []) or []
+                for order in rows:
+                    ms_raw = order.get("createdTime") or order.get("updatedTime") or 0
+                    try:
+                        ot_ms = int(ms_raw)
+                    except (TypeError, ValueError):
+                        ot_ms = 0
+                    raw_status = str(order.get("orderStatus", "")).lower()
+                    ui_status = (
+                        "new" if raw_status in ("new", "untriggered") else
+                        "pending" if raw_status in ("partiallyfilled", "partially_filled") else
+                        "filled" if raw_status == "filled" else
+                        "canceled" if raw_status in ("cancelled", "canceled", "rejected") else raw_status
+                    )
+                    result_orders.append({
+                        "id":         str(order.get("orderId", "")),
+                        "timestamp":  utc_ms_to_beijing(ot_ms),
+                        "exchange":   "主账号",
+                        "platform":   "bybit",
+                        "side":       str(order.get("side", "")).lower(),
+                        "quantity":   float(order.get("qty") or 0),
+                        "price":      float(order.get("price") or 0),
+                        "status":     ui_status,
+                        "symbol":     order.get("symbol", sym_filter or ""),
+                        "source":     "strategy",
+                        "filled_qty": float(order.get("cumExecQty") or 0),
+                        "order_type": order.get("orderType", ""),
+                    })
+            except Exception as e:
+                logger.error(f"Bybit realtime orders error [{account.account_name}]: {e}")
+            finally:
+                await client.close()
+
+        async def _collect_gateio(account, sym_filter):
+            if not want_open:
+                return
+            client = GateioFuturesClient(
+                api_key=account.api_key, api_secret=account.api_secret,
+                proxy_url=build_proxy_url(account.proxy_config),
+            )
+            try:
+                rows = await client.list_open_orders(contract=sym_filter, limit=100)
+                for order in rows or []:
+                    ct = int(order.get("create_time", 0) or 0) * 1000
+                    size_raw = order.get("size", 0)
+                    try:
+                        sz = float(size_raw)
+                    except (TypeError, ValueError):
+                        sz = 0.0
+                    side = "buy" if sz > 0 else "sell" if sz < 0 else ""
+                    raw_status = str(order.get("status", "")).lower()
+                    ui_status = "new" if raw_status == "open" else raw_status
+                    fill_left = float(order.get("left", 0) or 0)
+                    filled = abs(sz) - abs(fill_left)
+                    result_orders.append({
+                        "id":         str(order.get("id", "")),
+                        "timestamp":  utc_ms_to_beijing(ct),
+                        "exchange":   "主账号",
+                        "platform":   "gateio",
+                        "side":       side,
+                        "quantity":   abs(sz),
+                        "price":      float(order.get("price") or 0),
+                        "status":     ui_status,
+                        "symbol":     order.get("contract", sym_filter or ""),
+                        "source":     "strategy",
+                        "filled_qty": filled if filled >= 0 else 0,
+                        "order_type": order.get("tif", ""),
+                    })
+            except Exception as e:
+                logger.error(f"Gate.io realtime orders error [{account.account_name}]: {e}")
+            finally:
+                await client.close()
+
+        async def _collect_okx(account, sym_filter):
+            if not want_open:
+                return
+            passphrase = getattr(account, "passphrase", None) or ""
+            client = OKXClient(
+                account.api_key, account.api_secret, passphrase,
+                proxy_url=build_proxy_url(account.proxy_config),
+            )
+            try:
+                # Cover both perpetual (SWAP) and dated futures (FUTURES) —
+                # Gate doesn't need the split, OKX does. Two cheap calls.
+                rows: list = []
+                for inst_type in ("SWAP", "FUTURES"):
+                    chunk = await client.get_open_orders(
+                        inst_id=sym_filter, inst_type=inst_type, limit=100
+                    )
+                    rows.extend(chunk)
+                for order in rows:
+                    try:
+                        ct_ms = int(order.get("cTime", 0) or 0)
+                    except (TypeError, ValueError):
+                        ct_ms = 0
+                    side = str(order.get("side", "")).lower()
+                    raw_state = str(order.get("state", "")).lower()
+                    ui_status = (
+                        "new" if raw_state == "live" else
+                        "pending" if raw_state == "partially_filled" else
+                        "filled" if raw_state == "filled" else
+                        "canceled" if raw_state in ("canceled", "cancelled") else raw_state
+                    )
+                    result_orders.append({
+                        "id":         str(order.get("ordId", "")),
+                        "timestamp":  utc_ms_to_beijing(ct_ms),
+                        "exchange":   "主账号",
+                        "platform":   "okx",
+                        "side":       side,
+                        "quantity":   float(order.get("sz") or 0),
+                        "price":      float(order.get("px") or 0),
+                        "status":     ui_status,
+                        "symbol":     order.get("instId", sym_filter or ""),
+                        "source":     "strategy",
+                        "filled_qty": float(order.get("accFillSz") or 0),
+                        "order_type": order.get("ordType", ""),
+                    })
+            except Exception as e:
+                logger.error(f"OKX realtime orders error [{account.account_name}]: {e}")
+            finally:
+                await client.close()
+
+        for account in accounts:
+            if not getattr(account, "is_active", True):
+                continue
+            if getattr(account, "is_mt5_account", False):
+                # MT5 pending orders flow through mt5 position stream, not
+                # through this endpoint.
+                continue
+            pid = account.platform_id
+            sym_filter = symbol_a_for_pid.get(pid)
+            if pid == 1:
+                await _collect_binance(account, sym_filter)
+            elif pid == 2:
+                await _collect_bybit(account, sym_filter)
+            elif pid == 4:
+                await _collect_gateio(account, sym_filter)
+            elif pid == 5:
+                await _collect_okx(account, sym_filter)
+            # pid == 3 (IC Markets / MT5-only): skip — no REST open-orders
+            # concept.
 
         result_orders.sort(key=lambda x: x["timestamp"], reverse=True)
         return result_orders[:limit]
@@ -1680,11 +1845,18 @@ async def get_realtime_trading_history(
         # 获取用户账户
         accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
         if not accounts:
-            return {"binanceTrades": [], "mt5Trades": [], "stats": {}, "timeZone": "Asia/Shanghai (UTC+8)"}
+            return {"accountTrades": [], "mt5Trades": [], "stats": {}, "timeZone": "Asia/Shanghai (UTC+8)",
+                    "warnings": ["用户未配置任何交易账户"]}
 
         # 按 pair 的 A 侧平台筛选主账号，B 侧筛选对冲账户
         primary_accs = [a for a in accounts if a.platform_id == a_platform_id and not a.is_mt5_account]
         mt5_accs     = [a for a in accounts if a.is_mt5_account and a.platform_id == b_platform_id]
+        _unsupported_a_platform = None  # set when loop hits an unknown platform
+        _warnings: list = []
+        if not primary_accs:
+            _warnings.append(f"未找到匹配 {pair_code} 主账号（需 platform_id={a_platform_id}）")
+        if not mt5_accs:
+            _warnings.append(f"未找到匹配 {pair_code} 对冲账户（需 MT5 + platform_id={b_platform_id}）")
         logger.info(f"[realtime] user={current_user.username}, "                    f"primary={[a.account_name for a in primary_accs]}, "                    f"mt5={[a.account_name for a in mt5_accs]}")
 
         # 实时获取主账号成交历史（按 A 侧平台类型分发）
@@ -1712,6 +1884,15 @@ async def get_realtime_trading_history(
                     binance_realized_pnl += pnl
                 except Exception as e:
                     logger.error(f"Bybit A-side trades error [{account.account_name}]: {str(e)}")
+            else:
+                # Unsupported primary platform (Gate.io=4, OKX=5, …).
+                # Surface a warning rather than silently returning empty.
+                logger.warning(
+                    f"[realtime] unsupported A-side platform_id={a_platform_id} "
+                    f"for pair={pair_code} (account={account.account_name}); "
+                    f"realtime trades not implemented yet"
+                )
+                _unsupported_a_platform = a_platform_id
 
         # 实时获取对冲账户成交历史（MT5 Bridge，按 B 侧平台筛选）
         mt5_trades = []
@@ -1736,6 +1917,7 @@ async def get_realtime_trading_history(
             "mt5Trades": formatted_mt5,
             "stats": stats,
             "pair_code": pair_code,
+            "warnings": (_warnings + ([f"不支持的主账号平台 id={_unsupported_a_platform}（Gate.io/OKX 实时查询尚未实现，请切换到 Binance/Bybit 系列产品对）"] if _unsupported_a_platform else [])),
             "timeZone": "Asia/Shanghai (UTC+8)"
         }
     except Exception as e:
@@ -1755,8 +1937,10 @@ async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms, symb
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        _hpair = _get_hedging_pair_by_code(req.pair_code)
-        _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
+        # Use the symbol passed in by the caller (already resolved from pair_code
+        # in the endpoint handler). Falls back to XAUUSDT if caller forgot.
+        _sym_a = symbol or "XAUUSDT"
+        _sym_b = ""  # unused on A-side helpers
         all_trades = []
         seen_ids = set()
 
@@ -1791,8 +1975,10 @@ async def _get_binance_realized_pnl(account, start_time_ms, end_time_ms, symbol=
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        _hpair = _get_hedging_pair_by_code(req.pair_code)
-        _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
+        # Use the symbol passed in by the caller (already resolved from pair_code
+        # in the endpoint handler). Falls back to XAUUSDT if caller forgot.
+        _sym_a = symbol or "XAUUSDT"
+        _sym_b = ""  # unused on A-side helpers
         total_pnl = 0.0
         total_count = 0
         chunk_start = start_time_ms
@@ -1827,8 +2013,10 @@ async def _get_binance_funding_fee(account, start_time_ms, end_time_ms, symbol=N
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        _hpair = _get_hedging_pair_by_code(req.pair_code)
-        _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
+        # Use the symbol passed in by the caller (already resolved from pair_code
+        # in the endpoint handler). Falls back to XAUUSDT if caller forgot.
+        _sym_a = symbol or "XAUUSDT"
+        _sym_b = ""  # unused on A-side helpers
         total_funding = 0.0
         total_count = 0
         chunk_start = start_time_ms
@@ -1914,8 +2102,9 @@ async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms, db=None,
     # 时间过滤（Bridge 返回 unix timestamp，单位秒）
     start_ts = start_time_ms / 1000
     end_ts   = end_time_ms   / 1000
-    _hpair = _get_hedging_pair_by_code(req.pair_code)
-    _sym_a, _sym_b = (_hpair[0], _hpair[1]) if _hpair else ("XAUUSDT", "XAUUSD+")
+    # mt5_symbol passed in by the endpoint. Some MT5 brokers append ".s"
+    # to symbol names — accept both variants.
+    _sym_b = mt5_symbol or "XAUUSD+"
     target_symbols = {_sym_b, _sym_b.replace("+", ".s")}
     filtered = [
         d for d in all_deals

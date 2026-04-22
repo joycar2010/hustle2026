@@ -97,7 +97,16 @@ async def agent_loop_main(stop_event: asyncio.Event):
                 logger.warning(f'[agent_loop] spread sample error: {_spread_err}')
             async with AsyncSessionLocal() as db:
                 state = await agent_state.get_state(db)
-                if state['kill_switch'] or state['mode'] == 'off' or not state.get('openclaw_enabled', True):
+                # Shadow mode is observation-only and must keep generating decisions
+                # regardless of the OpenCLAW global toggle. The toggle only gates
+                # live execution (re-checked inside executor.execute_proposal).
+                # Kill switch is an emergency stop that applies to all modes.
+                _halt = (
+                    state['kill_switch']
+                    or state['mode'] == 'off'
+                    or (state['mode'] != 'shadow' and not state.get('openclaw_enabled', True))
+                )
+                if _halt:
                     pass  # collect samples but no decisions
                 else:
                     await _spread_threshold_tick(db)

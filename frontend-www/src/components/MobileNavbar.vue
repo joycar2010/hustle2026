@@ -2,7 +2,7 @@
   <!-- Mobile: bottom tab bar -->
   <nav class="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-dark-100 border-t border-border-primary safe-bottom">
     <div class="flex items-center justify-around px-1 py-1">
-      <router-link v-for="item in tabs" :key="item.path" :to="item.path"
+      <router-link v-for="item in visibleTabs" :key="item.path" :to="item.path"
         class="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-colors"
         :class="isActive(item.path) ? 'text-primary' : 'text-text-tertiary hover:text-text-secondary'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" v-html="item.svg"></svg>
@@ -18,7 +18,7 @@
   <!-- PC: horizontal nav bar at bottom -->
   <nav class="hidden md:block fixed bottom-0 left-0 right-0 z-50 bg-dark-100 border-t border-border-primary">
     <div class="max-w-5xl mx-auto flex items-center justify-center gap-1 px-4 py-2">
-      <router-link v-for="item in tabs" :key="item.path" :to="item.path"
+      <router-link v-for="item in visibleTabs" :key="item.path" :to="item.path"
         class="flex items-center gap-2 px-5 py-2 rounded-xl transition-colors"
         :class="isActive(item.path) ? 'bg-primary/10 text-primary' : 'text-text-tertiary hover:text-text-secondary hover:bg-dark-50'">
         <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" v-html="item.svg"></svg>
@@ -35,10 +35,15 @@
 <script setup>
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
+import { computed } from 'vue'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const visibleTabs = computed(() => tabs.filter(t => {
+  if (t.path === '/fund-flow' && auth.viewCaps && !auth.viewCaps.fund_flow) return false
+  return true
+}))
 
 const tabs = [
   { path: '/',        label: '总览',   svg: '<path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>' },

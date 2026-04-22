@@ -141,9 +141,35 @@ async def get_all_users(
     )
     users = result.scalars().all()
 
+    # One-shot aggregations (avoid N+1):
+    #   sub_counts[parent_uuid]   = # active sub-accounts under that parent
+    #   notif_counts[user_uuid]   = # active notification subscriptions
+    from sqlalchemy import text as _text
+    sub_counts: dict = {}
+    notif_counts: dict = {}
+    try:
+        sc_rows = (await db.execute(_text("""
+            SELECT parent_user_id::text, COUNT(*) FROM sub_account_subscriptions
+            WHERE status = 'active' AND parent_user_id IS NOT NULL
+            GROUP BY parent_user_id
+        """))).fetchall()
+        sub_counts = {r[0]: int(r[1]) for r in sc_rows}
+    except Exception:
+        pass
+    try:
+        nc_rows = (await db.execute(_text("""
+            SELECT subscriber_user_id::text, COUNT(*) FROM notification_subscriptions
+            WHERE is_enabled = true
+            GROUP BY subscriber_user_id
+        """))).fetchall()
+        notif_counts = {r[0]: int(r[1]) for r in nc_rows}
+    except Exception:
+        pass
+
     # Format response with RBAC roles
     users_response = []
     for user in users:
+        uid_str = str(user.user_id)
         user_dict = {
             "user_id": user.user_id,
             "username": user.username,
@@ -154,6 +180,10 @@ async def get_all_users(
             "feishu_union_id": user.feishu_union_id,
             "rbac_roles": [],
             "is_active": user.is_active,
+            "is_subaccount": bool(getattr(user, 'is_subaccount', False) or False),
+            "parent_user_id": str(user.parent_user_id) if getattr(user, 'parent_user_id', None) else None,
+            "sub_account_count": sub_counts.get(uid_str, 0),
+            "notif_subscription_count": notif_counts.get(uid_str, 0),
             "hedge_ratio_enabled": bool(getattr(user, 'hedge_ratio_enabled', False) or False),
             "openclaw_enabled": bool(getattr(user, 'openclaw_enabled', False) or False),
             "fund_view_enabled": bool(getattr(user, 'fund_view_enabled', False) or False),

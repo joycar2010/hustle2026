@@ -139,9 +139,14 @@ function showStatus(msg, ok = true) {
 
 async function executeTrade(side) {
   if (loading.value) return
+  const q = Number(quantity.value)
+  if (!q || q <= 0 || Number.isNaN(q)) {
+    showStatus('请输入有效的下单数量（大于 0）', false)
+    return
+  }
   loading.value = true
   try {
-    const actualQuantity = convertForPlatform(quantity.value, exchange.value)
+    const actualQuantity = convertForPlatform(q, exchange.value)
 
     await api.post('/api/v1/trading/manual/order', {
       exchange: exchange.value,
@@ -160,9 +165,14 @@ async function executeTrade(side) {
 
 async function closePosition(positionType) {
   if (loading.value) return
+  const q = Number(quantity.value)
+  if (!q || q <= 0 || Number.isNaN(q)) {
+    showStatus('请输入有效的平仓数量（大于 0）', false)
+    return
+  }
   loading.value = true
   try {
-    const actualQuantity = convertForPlatform(quantity.value, exchange.value)
+    const actualQuantity = convertForPlatform(q, exchange.value)
     const endpoint = positionType === 'short' ? '/api/v1/trading/manual/close-short' : '/api/v1/trading/manual/close-long'
 
     const resp = await api.post(endpoint, {

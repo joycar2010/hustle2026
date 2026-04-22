@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/services/api'
+import { reloadTradingPairs } from '@/composables/useTradingPair'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token') || null)
@@ -24,6 +25,10 @@ export const useAuthStore = defineStore('auth', () => {
         username: response.data.username,
         email: response.data.email || `${response.data.username}@hustle.com`
       }
+
+      // Refresh the global trading-pair list so the navbar selector reflects
+      // THIS user's configured pairs (not the prior session's). Non-blocking.
+      reloadTradingPairs(true).catch(() => {})
 
       return true
     } catch (error) {
@@ -49,6 +54,9 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     localStorage.removeItem('token')
+    // Reset the pair cache so the next user (or login page) doesn't see
+    // the outgoing user's configured set.
+    reloadTradingPairs(true).catch(() => {})
   }
 
   return {

@@ -68,6 +68,14 @@
       </div>
     </div>
 
+    <!-- Query warnings (account binding missing / unsupported platform / etc.) -->
+    <div v-if="queryWarnings.length" class="card mb-4 border-yellow-500/40 bg-yellow-500/5">
+      <div class="text-yellow-400 text-sm font-semibold mb-1">⚠ 查询提示</div>
+      <ul class="text-yellow-200/90 text-xs space-y-0.5 ml-4 list-disc">
+        <li v-for="(w, i) in queryWarnings" :key="i">{{ w }}</li>
+      </ul>
+    </div>
+
     <!-- Statistics Section -->
     <div class="card mb-6">
       <!-- ① 两侧都无数据 -->
@@ -329,6 +337,7 @@ const stats = ref({
 // Trading History Data
 const accountTrades = ref([])
 const mt5Trades = ref([])
+const queryWarnings = ref([])
 
 // Computed Net Profit
 const netProfit = computed(() => {
@@ -426,6 +435,7 @@ async function showRecentDays(days) {
 }
 
 function updateData(data) {
+  queryWarnings.value = Array.isArray(data.warnings) ? data.warnings : []
   if (data.stats) {
     stats.value = { ...stats.value, ...data.stats }
   }
@@ -448,6 +458,7 @@ function updateData(data) {
 }
 
 function clearData() {
+  queryWarnings.value = []
   stats.value = {
     totalVolume: 0,
     totalAmount: 0,

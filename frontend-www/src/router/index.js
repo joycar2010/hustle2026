@@ -19,6 +19,10 @@ router.beforeEach((to, from, next) => {
     return next()
   }
   if (!auth.isAuthenticated) return next('/login')
+  // Sub-account cannot visit fund-flow
+  if (to.path === '/fund-flow' && auth.viewCaps && auth.viewCaps.fund_flow === false) {
+    return next('/')
+  }
   next()
 })
 

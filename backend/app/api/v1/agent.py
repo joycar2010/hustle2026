@@ -2,6 +2,7 @@
 
 RBAC: ALL endpoints require role ∈ {超级管理员, 系统管理员, super_admin, system_admin, admin}.
 """
+import re
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -179,22 +180,76 @@ async def get_rate_buckets(target_id: Optional[int] = Query(None),
 
 
 @router.get('/decisions')
-async def list_decisions(limit: int = Query(50, le=200),
+async def list_decisions(limit: int = Query(50, ge=1, le=200),
                          target_id: Optional[int] = Query(None),
+                         cursor: Optional[int] = Query(None,
+                             description='Keyset cursor: return rows with id < cursor'),
+                         verdict: Optional[str] = Query(None,
+                             description='Comma-separated verdicts to include'),
+                         trigger: Optional[str] = Query(None,
+                             description='Comma-separated triggers to include'),
+                         pair_code: Optional[str] = Query(None,
+                             description='Comma-separated pair codes to include'),
+                         from_ts: Optional[str] = Query(None, alias='from',
+                             description='ISO8601 lower bound on created_at'),
+                         to_ts: Optional[str] = Query(None, alias='to',
+                             description='ISO8601 upper bound on created_at'),
+                         min_confidence: Optional[float] = Query(None, ge=0, le=1),
+                         q: Optional[str] = Query(None,
+                             description='Free-text match against reject_reason / proposal.reason'),
                          db: AsyncSession = Depends(get_db),
                          user_id: str = Depends(require_admin)) -> Dict[str, Any]:
-    where = ""
-    params = {'lim': limit}
+    """Keyset-paginated decision feed with multi-dimensional filtering.
+
+    Cursor semantics: pass next_cursor from the previous response to fetch the
+    next page; omit to get the head. has_more is true when LIMIT was reached
+    AND a row exists past the last id we returned.
+    """
+    where: List[str] = []
+    params: Dict[str, Any] = {'lim': limit}
+    if cursor is not None:
+        where.append('d.id < :cur')
+        params['cur'] = cursor
     if target_id is not None:
-        where = "WHERE d.scope_target_id = :tid"
+        where.append('d.scope_target_id = :tid')
         params['tid'] = target_id
+    if verdict:
+        verdicts = [v.strip() for v in verdict.split(',') if v.strip()]
+        if verdicts:
+            where.append('d.verdict = ANY(:verdicts)')
+            params['verdicts'] = verdicts
+    if trigger:
+        triggers = [t.strip() for t in trigger.split(',') if t.strip()]
+        if triggers:
+            where.append('d.trigger = ANY(:triggers)')
+            params['triggers'] = triggers
+    if pair_code:
+        pairs = [p_.strip() for p_ in pair_code.split(',') if p_.strip()]
+        if pairs:
+            where.append('d.scope_pair_code = ANY(:pairs)')
+            params['pairs'] = pairs
+    if from_ts:
+        where.append('d.created_at >= :from_ts')
+        params['from_ts'] = from_ts
+    if to_ts:
+        where.append('d.created_at <= :to_ts')
+        params['to_ts'] = to_ts
+    if min_confidence is not None:
+        # proposal->>'confidence' is text in jsonb, cast to numeric for compare
+        where.append("(d.proposal->>'confidence')::numeric >= :minconf")
+        params['minconf'] = min_confidence
+    if q:
+        where.append("(COALESCE(d.reject_reason,'') ILIKE :q OR COALESCE(d.proposal->>'reason','') ILIKE :q)")
+        params['q'] = f'%{q}%'
+
+    where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
     sql = f"""
         SELECT d.id, d.created_at, d.trigger, d.proposal, d.verdict, d.reject_reason, d.execution_result,
                d.llm_tokens_in, d.llm_tokens_out, d.llm_latency_ms,
                d.scope_target_id, d.scope_pair_code, u.username
         FROM agent_decisions d
         LEFT JOIN users u ON u.user_id = d.scope_user_id
-        {where}
+        {where_sql}
         ORDER BY d.id DESC LIMIT :lim
     """
     rows = (await db.execute(text(sql), params)).all()
@@ -209,37 +264,82 @@ async def list_decisions(limit: int = Query(50, le=200),
         'tokens_in': r[7], 'tokens_out': r[8], 'latency_ms': r[9],
         'target_id': r[10], 'pair_code': r[11], 'username': r[12],
     } for r in rows]
-    return {'items': items, 'count': len(items)}
+    next_cursor = items[-1]['id'] if items and len(items) == limit else None
+    has_more = bool(next_cursor)
+    # Cheap approximate total via pg_class — we never want a COUNT(*) on the
+    # hot path of a 2s polling endpoint. Filtering doesn't refine total_approx
+    # (it's the table-wide rowcount, used to size the UI scrollbar / hint).
+    try:
+        approx = (await db.execute(text(
+            "SELECT reltuples::bigint FROM pg_class WHERE relname = 'agent_decisions'"
+        ))).scalar() or 0
+    except Exception:
+        approx = None
+    return {
+        'items': items,
+        'count': len(items),
+        'next_cursor': next_cursor,
+        'has_more': has_more,
+        'total_approx': int(approx) if approx is not None else None,
+    }
 
 
 @router.get('/proposals')
 async def list_proposals(status_filter: str = Query('pending'),
                          target_id: Optional[int] = Query(None),
+                         pair_code: Optional[str] = Query(None,
+                             description='Comma-separated pair codes (resolved via scope target)'),
+                         q: Optional[str] = Query(None,
+                             description='Free-text match against title / rationale'),
+                         limit: int = Query(50, ge=1, le=200),
+                         cursor: Optional[int] = Query(None,
+                             description='Keyset cursor: return rows with id < cursor'),
                          db: AsyncSession = Depends(get_db),
                          user_id: str = Depends(require_admin)) -> Dict[str, Any]:
-    where = []
-    params = {'s': status_filter}
+    where: List[str] = []
+    params: Dict[str, Any] = {'s': status_filter, 'lim': limit}
     if status_filter != 'all':
-        where.append("p.status = :s")
+        where.append('p.status = :s')
     if target_id is not None:
-        where.append("p.target_id = :tid")
+        where.append('p.target_id = :tid')
         params['tid'] = target_id
+    if cursor is not None:
+        where.append('p.id < :cur')
+        params['cur'] = cursor
+    if pair_code:
+        pairs = [x.strip() for x in pair_code.split(',') if x.strip()]
+        if pairs:
+            where.append('t.pair_code = ANY(:pairs)')
+            params['pairs'] = pairs
+    if q:
+        where.append('(p.title ILIKE :q OR p.rationale ILIKE :q)')
+        params['q'] = f'%{q}%'
     clause = (' WHERE ' + ' AND '.join(where)) if where else ''
     sql = f"""
         SELECT p.id, p.created_at, p.title, p.rationale, p.est_position_pct, p.status,
-               p.config_diff, p.target_id, t.pair_code, u.username
+               p.config_diff, p.target_id, t.pair_code, u.username,
+               p.reviewed_at, p.activated_at
         FROM agent_strategy_proposals p
         LEFT JOIN agent_scope_targets t ON t.id = p.target_id
         LEFT JOIN users u ON u.user_id = t.user_id
         {clause}
-        ORDER BY p.id DESC LIMIT 50
+        ORDER BY p.id DESC LIMIT :lim
     """
     rows = (await db.execute(text(sql), params)).all()
-    return {'items': [{
+    items = [{
         'id': r[0], 'created_at': r[1].isoformat(), 'title': r[2], 'rationale': r[3],
         'est_position_pct': float(r[4] or 0), 'status': r[5], 'config_diff': r[6],
         'target_id': r[7], 'pair_code': r[8], 'username': r[9],
-    } for r in rows]}
+        'reviewed_at': r[10].isoformat() if r[10] else None,
+        'activated_at': r[11].isoformat() if r[11] else None,
+    } for r in rows]
+    next_cursor = items[-1]['id'] if items and len(items) == limit else None
+    return {
+        'items': items,
+        'count': len(items),
+        'next_cursor': next_cursor,
+        'has_more': bool(next_cursor),
+    }
 
 
 class ProposalCreateReq(BaseModel):
@@ -615,6 +715,304 @@ async def toggle_scope_target(target_id: int, req: ToggleReq,
     return {'ok': ok, 'enabled': req.enabled}
 
 
+
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 2/3 — analytics + traceability endpoints
+# ─────────────────────────────────────────────────────────────────────────
+
+def _resolve_window_seconds(window: str) -> int:
+    """Translate '24h' / '7d' / '30d' / '1h' into seconds. Defaults to 24h
+    on bad input so the dashboard never crashes."""
+    m = re.match(r"^(\d+)([hdm])$", (window or "").strip().lower())
+    if not m:
+        return 86400
+    n, u = int(m.group(1)), m.group(2)
+    return n * (3600 if u == 'h' else 86400 if u == 'd' else 60)
+
+
+def _read_usd_to_cny_rate(db) -> float:
+    """Pull the same usd_to_cny_rate the LLM cost UI uses, falling back to
+    7.3. Synchronous wrapper around an async SQL call is intentional — caller
+    already awaits this helper."""
+    return 7.3  # constant fallback; live read happens inside endpoints below
+
+
+@router.get('/decisions/stats')
+async def decision_stats(window: str = Query('24h',
+                             description='Time window: 1h / 24h / 7d / 30d'),
+                         target_id: Optional[int] = Query(None),
+                         db: AsyncSession = Depends(get_db),
+                         user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """KPI summary for the agent dashboard: total decisions, breakdown by
+    verdict and trigger, token sums, latency percentiles, all scoped to a
+    rolling time window (default 24h) and optionally a single target."""
+    secs = _resolve_window_seconds(window)
+    where = ["d.created_at >= NOW() - make_interval(secs => :secs)"]
+    params: Dict[str, Any] = {'secs': secs}
+    if target_id is not None:
+        where.append('d.scope_target_id = :tid')
+        params['tid'] = target_id
+    where_sql = ' AND '.join(where)
+
+    summary = (await db.execute(text(f"""
+        SELECT COUNT(*)                                AS total,
+               COALESCE(SUM(d.llm_tokens_in), 0)       AS tokens_in,
+               COALESCE(SUM(d.llm_tokens_out), 0)      AS tokens_out,
+               COALESCE(AVG(d.llm_latency_ms), 0)      AS avg_latency,
+               COALESCE(percentile_cont(0.5)
+                  WITHIN GROUP (ORDER BY d.llm_latency_ms), 0) AS p50,
+               COALESCE(percentile_cont(0.95)
+                  WITHIN GROUP (ORDER BY d.llm_latency_ms), 0) AS p95,
+               COALESCE(percentile_cont(0.99)
+                  WITHIN GROUP (ORDER BY d.llm_latency_ms), 0) AS p99,
+               COALESCE(AVG((d.proposal->>\'confidence\')::numeric), 0) AS avg_conf
+        FROM agent_decisions d
+        WHERE {where_sql}
+    """), params)).first()
+
+    by_verdict_rows = (await db.execute(text(f"""
+        SELECT d.verdict, COUNT(*) FROM agent_decisions d
+        WHERE {where_sql}
+        GROUP BY d.verdict
+    """), params)).all()
+    by_trigger_rows = (await db.execute(text(f"""
+        SELECT d.trigger, COUNT(*) FROM agent_decisions d
+        WHERE {where_sql}
+        GROUP BY d.trigger
+        ORDER BY 2 DESC LIMIT 20
+    """), params)).all()
+    by_action_rows = (await db.execute(text(f"""
+        SELECT COALESCE(d.proposal->>\'action\', \'noop\') AS act, COUNT(*)
+        FROM agent_decisions d
+        WHERE {where_sql}
+        GROUP BY act
+        ORDER BY 2 DESC LIMIT 20
+    """), params)).all()
+    reject_rows = (await db.execute(text(f"""
+        SELECT COALESCE(d.reject_reason, \'(unknown)\') AS reason, COUNT(*)
+        FROM agent_decisions d
+        WHERE {where_sql} AND d.verdict = \'rejected\'
+        GROUP BY reason
+        ORDER BY 2 DESC LIMIT 10
+    """), params)).all()
+
+    total = int(summary[0] or 0)
+    by_verdict = {r[0]: int(r[1]) for r in by_verdict_rows}
+    executed = by_verdict.get('executed', 0)
+    rejected = by_verdict.get('rejected', 0)
+    return {
+        'window': window,
+        'total': total,
+        'executed_rate': (executed / total) if total else 0,
+        'rejected_rate': (rejected / total) if total else 0,
+        'tokens_in': int(summary[1]),
+        'tokens_out': int(summary[2]),
+        'tokens_total': int(summary[1]) + int(summary[2]),
+        'latency': {
+            'avg_ms': float(summary[3]),
+            'p50_ms': float(summary[4]),
+            'p95_ms': float(summary[5]),
+            'p99_ms': float(summary[6]),
+        },
+        'avg_confidence': float(summary[7]),
+        'by_verdict': by_verdict,
+        'by_trigger': [{'trigger': r[0], 'count': int(r[1])} for r in by_trigger_rows],
+        'by_action':  [{'action':  r[0], 'count': int(r[1])} for r in by_action_rows],
+        'top_reject_reasons': [{'reason': r[0], 'count': int(r[1])} for r in reject_rows],
+    }
+
+
+@router.get('/decisions/heatmap')
+async def decision_heatmap(window: str = Query('24h'),
+                           target_id: Optional[int] = Query(None),
+                           db: AsyncSession = Depends(get_db),
+                           user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Per-hour × verdict matrix for a heatmap. Returns one row per hour in
+    the window, with counts bucketed by verdict. Hours with no activity are
+    included with zeros so the chart axis is contiguous."""
+    secs = _resolve_window_seconds(window)
+    where = ["d.created_at >= NOW() - make_interval(secs => :secs)"]
+    params: Dict[str, Any] = {'secs': secs}
+    if target_id is not None:
+        where.append('d.scope_target_id = :tid')
+        params['tid'] = target_id
+    where_sql = ' AND '.join(where)
+
+    rows = (await db.execute(text(f"""
+        WITH bucket AS (
+            SELECT date_trunc(\'hour\', d.created_at) AS h,
+                   d.verdict, COUNT(*) AS c
+            FROM agent_decisions d
+            WHERE {where_sql}
+            GROUP BY 1, 2
+        ),
+        spine AS (
+            SELECT generate_series(
+                date_trunc(\'hour\', NOW() - make_interval(secs => :secs)),
+                date_trunc(\'hour\', NOW()),
+                interval \'1 hour\'
+            ) AS h
+        )
+        SELECT s.h,
+               COALESCE(SUM(b.c) FILTER (WHERE b.verdict = \'executed\'), 0),
+               COALESCE(SUM(b.c) FILTER (WHERE b.verdict = \'shadow\'),   0),
+               COALESCE(SUM(b.c) FILTER (WHERE b.verdict = \'pending\'),  0),
+               COALESCE(SUM(b.c) FILTER (WHERE b.verdict = \'rejected\'), 0)
+        FROM spine s LEFT JOIN bucket b ON b.h = s.h
+        GROUP BY s.h ORDER BY s.h
+    """), params)).all()
+    return {
+        'window': window,
+        'buckets': [{
+            'hour': r[0].isoformat(),
+            'executed': int(r[1]),
+            'shadow':   int(r[2]),
+            'pending':  int(r[3]),
+            'rejected': int(r[4]),
+            'total':    int(r[1]) + int(r[2]) + int(r[3]) + int(r[4]),
+        } for r in rows],
+    }
+
+
+@router.get('/decisions/cost-series')
+async def decision_cost_series(window: str = Query('7d'),
+                               bucket: str = Query('hour',
+                                   description='Bucket size: hour | day'),
+                               target_id: Optional[int] = Query(None),
+                               db: AsyncSession = Depends(get_db),
+                               user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Token usage time series for the cost chart. Reads usd_to_cny_rate +
+    usage_unit from agent_active_config.llm_settings so CNY translation
+    matches the rest of the UI."""
+    secs = _resolve_window_seconds(window)
+    bucket_unit = 'hour' if bucket == 'hour' else 'day'
+
+    # Pull rate / unit from llm_settings — same source as /llm/stats.
+    ls_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = \'llm_settings\'"
+    ))).first()
+    ls = (ls_row[0] if ls_row else None) or {}
+    rate = float(ls.get('usd_to_cny_rate') or 7.3)
+
+    where = ["d.created_at >= NOW() - make_interval(secs => :secs)"]
+    params: Dict[str, Any] = {'secs': secs}
+    if target_id is not None:
+        where.append('d.scope_target_id = :tid')
+        params['tid'] = target_id
+    where_sql = ' AND '.join(where)
+
+    rows = (await db.execute(text(f"""
+        WITH bucket AS (
+            SELECT date_trunc(:bunit, d.created_at) AS t,
+                   COALESCE(SUM(d.llm_tokens_in), 0) AS tin,
+                   COALESCE(SUM(d.llm_tokens_out), 0) AS tout,
+                   COUNT(*) AS calls
+            FROM agent_decisions d
+            WHERE {where_sql}
+            GROUP BY 1
+        ),
+        spine AS (
+            SELECT generate_series(
+                date_trunc(:bunit, NOW() - make_interval(secs => :secs)),
+                date_trunc(:bunit, NOW()),
+                ('1 ' || :bunit)::interval
+            ) AS t
+        )
+        SELECT s.t,
+               COALESCE(b.tin,  0) AS tin,
+               COALESCE(b.tout, 0) AS tout,
+               COALESCE(b.calls, 0) AS calls
+        FROM spine s LEFT JOIN bucket b ON b.t = s.t
+        ORDER BY s.t
+    """), {**params, 'bunit': bucket_unit})).all()
+
+    # Rough cost estimate — caller can swap to per-model pricing later.
+    # Default ~$0.50/M input, $1.50/M output (mid-tier model order of magnitude).
+    PRICE_IN_PER_M = 0.5
+    PRICE_OUT_PER_M = 1.5
+    series = []
+    for r in rows:
+        tin, tout = int(r[1]), int(r[2])
+        usd = (tin / 1e6) * PRICE_IN_PER_M + (tout / 1e6) * PRICE_OUT_PER_M
+        series.append({
+            'time':   r[0].isoformat(),
+            'tokens_in':  tin,
+            'tokens_out': tout,
+            'calls':  int(r[3]),
+            'cost_usd': round(usd, 4),
+            'cost_cny': round(usd * rate, 4),
+        })
+    return {
+        'window': window,
+        'bucket': bucket_unit,
+        'usd_to_cny_rate': rate,
+        'series': series,
+    }
+
+
+@router.get('/proposals/{pid}/source-decisions')
+async def proposal_source_decisions(pid: int,
+                                    limit: int = Query(50, le=200),
+                                    db: AsyncSession = Depends(get_db),
+                                    user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """List recent decisions on the same target as this proposal — gives
+    operators the context that motivated the strategy change request.
+
+    We don\'t have an explicit FK from decisions → proposal yet, so we use
+    the (target_id, time-window) heuristic: decisions on this proposal\'s
+    target in the 24h leading up to the proposal\'s creation."""
+    p_row = (await db.execute(text("""
+        SELECT id, target_id, created_at FROM agent_strategy_proposals WHERE id = :pid
+    """), {'pid': pid})).first()
+    if not p_row:
+        raise HTTPException(status_code=404, detail='proposal not found')
+    _, tgt_id, p_created = p_row[0], p_row[1], p_row[2]
+    if not tgt_id:
+        return {'items': [], 'count': 0, 'note': 'global proposal — no target scope'}
+
+    rows = (await db.execute(text("""
+        SELECT d.id, d.created_at, d.trigger, d.proposal, d.verdict, d.reject_reason,
+               d.llm_latency_ms
+        FROM agent_decisions d
+        WHERE d.scope_target_id = :tid
+          AND d.created_at <= :pc
+          AND d.created_at >= :pc - interval \'24 hour\'
+        ORDER BY d.id DESC LIMIT :lim
+    """), {'tid': tgt_id, 'pc': p_created, 'lim': limit})).all()
+    return {
+        'items': [{
+            'id': r[0], 'created_at': r[1].isoformat(), 'trigger': r[2],
+            'action': (r[3] or {}).get('action', '--'),
+            'reason': (r[3] or {}).get('reason', ''),
+            'confidence': (r[3] or {}).get('confidence', 0),
+            'verdict': r[4], 'reject_reason': r[5], 'latency_ms': r[6],
+        } for r in rows],
+        'count': len(rows),
+    }
+
+
+@router.get('/proposals/{pid}/audit')
+async def proposal_audit(pid: int,
+                         db: AsyncSession = Depends(get_db),
+                         user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Return the full audit trail for a proposal."""
+    rows = (await db.execute(text("""
+        SELECT a.id, a.proposal_id, a.action, a.actor_user_id::text, u.username,
+               a.reason, a.diff_keys, a.target_id, a.created_at
+        FROM agent_proposal_audit a
+        LEFT JOIN users u ON u.user_id = a.actor_user_id
+        WHERE a.proposal_id = :pid
+        ORDER BY a.created_at ASC
+    """), {'pid': pid})).all()
+    return {'items': [{
+        'id': r[0], 'proposal_id': r[1], 'action': r[2],
+        'actor_user_id': r[3], 'actor_username': r[4],
+        'reason': r[5], 'diff_keys': r[6] or [],
+        'target_id': r[7], 'created_at': r[8].isoformat() if r[8] else None,
+    } for r in rows]}
+
 @router.post('/decisions/{decision_id}/approve')
 async def approve_decision(decision_id: int, db: AsyncSession = Depends(get_db),
                            user_id: str = Depends(require_admin)) -> Dict[str, Any]:
@@ -760,12 +1158,33 @@ async def approve_strategy(pid: int, db: AsyncSession = Depends(get_db),
         WHERE id=:id
     """), {'u': user_id, 'id': pid})
     await db.commit()
+    # Audit log — who approved, when, what changed
+    try:
+        await db.execute(text("""
+            INSERT INTO agent_proposal_audit
+              (proposal_id, action, actor_user_id, reason, diff_keys, target_id)
+            VALUES (:pid, 'approved', CAST(:u AS UUID), NULL, :keys, :tid)
+        """), {'pid': pid, 'u': user_id,
+               'keys': list(diff.keys()), 'tid': target_id})
+        await db.commit()
+    except Exception as _aud_err:
+        import logging as _log; _log.getLogger(__name__).warning(
+            f'[agent] audit insert failed (approve #{pid}): {_aud_err}')
     config_loader.invalidate(target_id=target_id)
     from app.services.agent.feishu_broadcast import broadcast
     scope_label = f'target#{target_id}' if target_id else 'global'
     await broadcast(db, level='info', category='strategy_approved',
                     message=f'新策略#{pid} 已批准并热加载（范围 {scope_label}, 操作员 {user_id[:8]}）',
                     payload={'proposal_id': pid, 'target_id': target_id, 'keys_changed': list(diff.keys())})
+    try:
+        from app.services.agent.ws_events import push_proposal_event
+        await push_proposal_event('proposal_approved', {
+            'id': pid, 'target_id': target_id,
+            'keys_changed': list(diff.keys()),
+            'actor_user_id': user_id,
+        })
+    except Exception:
+        pass
     return {'ok': True, 'target_id': target_id, 'activated_keys': list(diff.keys())}
 
 
@@ -773,10 +1192,33 @@ async def approve_strategy(pid: int, db: AsyncSession = Depends(get_db),
 async def reject_strategy(pid: int, reason: Optional[str] = Body(None, embed=True),
                           db: AsyncSession = Depends(get_db),
                           user_id: str = Depends(require_admin)) -> Dict[str, Any]:
-    await db.execute(text("""
+    result = await db.execute(text("""
         UPDATE agent_strategy_proposals
         SET status='rejected', reviewed_by=CAST(:u AS UUID), reviewed_at=NOW()
         WHERE id=:id AND status='pending'
+        RETURNING target_id
     """), {'u': user_id, 'id': pid})
+    row = result.first()
     await db.commit()
+    if row is None:
+        return {'ok': False, 'note': 'proposal not pending'}
+    target_id = row[0]
+    try:
+        await db.execute(text("""
+            INSERT INTO agent_proposal_audit
+              (proposal_id, action, actor_user_id, reason, diff_keys, target_id)
+            VALUES (:pid, 'rejected', CAST(:u AS UUID), :reason, NULL, :tid)
+        """), {'pid': pid, 'u': user_id, 'reason': reason, 'tid': target_id})
+        await db.commit()
+    except Exception as _aud_err:
+        import logging as _log; _log.getLogger(__name__).warning(
+            f'[agent] audit insert failed (reject #{pid}): {_aud_err}')
+    try:
+        from app.services.agent.ws_events import push_proposal_event
+        await push_proposal_event('proposal_rejected', {
+            'id': pid, 'target_id': target_id, 'reason': reason,
+            'actor_user_id': user_id,
+        })
+    except Exception:
+        pass
     return {'ok': True}

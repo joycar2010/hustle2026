@@ -227,6 +227,26 @@ class GateioFuturesClient:
             "DELETE", f"/futures/{self.settle}/orders/{order_id}",
         )
 
+    async def list_open_orders(
+        self, contract: Optional[str] = None, limit: int = 100
+    ) -> List[Dict]:
+        """GET /futures/{settle}/orders?status=open
+
+        Returns list of currently-open (pending / partially filled) orders.
+        Contract filter is optional — omit to list across all USDT-perp symbols
+        for this account."""
+        params = {"status": "open", "limit": limit}
+        if contract:
+            params["contract"] = contract
+        try:
+            result = await self._request(
+                "GET", f"/futures/{self.settle}/orders", params=params,
+            )
+            return result if isinstance(result, list) else []
+        except GateioError as e:
+            logger.error(f"[GATEIO] list_open_orders failed: {e}")
+            return []
+
     async def get_order(self, order_id: str) -> Dict:
         """GET /futures/{settle}/orders/{order_id}"""
         return await self._request(

@@ -28,8 +28,40 @@ export const TRADING_PAIRS = reactive([...DEFAULT_PAIRS])
 let _loaded = false
 let _loading = null
 
-export async function reloadTradingPairs() {
-  if (_loading) return _loading
+// Filter the global TRADING_PAIRS array to just those pair_codes the current
+// user has bound to BOTH an active main (A) and active hedge (B) account.
+// Called after the catalog load and whenever the user reopens the navbar,
+// so newly-bound pairs show up without a hard refresh.
+async function _applyUserConfiguredFilter(allPairs) {
+  try {
+    const r = await api.get('/api/v1/pair-accounts')
+    const bindings = Array.isArray(r.data) ? r.data : []
+    const configured = new Set(
+      bindings
+        .filter(b =>
+          b.account_a_id && b.account_b_id &&
+          b.account_a_active !== false && b.account_b_active !== false
+        )
+        .map(b => b.pair_code)
+    )
+    if (configured.size === 0) {
+      // User hasn't set up anything yet — leave the full catalog visible
+      // rather than blanking the dropdown entirely (would leave them with
+      // no way to navigate). They'll see warnings on selection.
+      return allPairs
+    }
+    return allPairs.filter(p => configured.has(p.code))
+  } catch {
+    return allPairs
+  }
+}
+
+export async function reloadTradingPairs(force = false) {
+  // `force` is used when auth state changes (login / logout) — we drop any
+  // in-flight load and restart so the new user's /pair-accounts is the one
+  // that decides the filter.
+  if (_loading && !force) return _loading
+  if (force) _loading = null
   _loading = (async () => {
     try {
       const r = await api.get('/api/v1/hedging/pairs')
@@ -48,8 +80,14 @@ export async function reloadTradingPairs() {
           unitB: p.symbol_b?.qty_unit || 'Lot',
         }))
       if (items.length) {
-        TRADING_PAIRS.splice(0, TRADING_PAIRS.length, ...items)
+        const visible = await _applyUserConfiguredFilter(items)
+        TRADING_PAIRS.splice(0, TRADING_PAIRS.length, ...visible)
         _loaded = true
+        // If the saved currentPair is no longer in the visible set, drift to
+        // the first configured pair so dropdown + downstream queries align.
+        if (visible.length && !visible.find(x => x.code === currentPair.value)) {
+          currentPair.value = visible[0].code
+        }
       }
     } catch (e) {
       // keep DEFAULT_PAIRS on failure; retry on next call

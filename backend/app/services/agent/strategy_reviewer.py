@@ -122,7 +122,7 @@ async def _last_review_at(db: AsyncSession, target_id: int) -> Optional[datetime
     return row[0] if row and row[0] else None
 
 
-async def _generate_proposal(stats: Dict[str, Any], target_label: str) -> Optional[Dict[str, Any]]:
+async def _generate_proposal(db: AsyncSession, stats: Dict[str, Any], target_label: str) -> Optional[Dict[str, Any]]:
     user_prompt = (
         f"目标: {target_label}\n"
         f"过去 {stats['window_days']} 天统计:\n"
@@ -137,7 +137,7 @@ async def _generate_proposal(stats: Dict[str, Any], target_label: str) -> Option
         "请按规范输出 JSON。"
     )
     try:
-        result, usage, latency = await call_decider(REVIEWER_SYSTEM_PROMPT, user_prompt, temperature=0.2)
+        result, usage, latency = await call_decider(REVIEWER_SYSTEM_PROMPT, user_prompt, temperature=0.2, db=db)
         logger.info(f'[reviewer] generated proposal tokens={usage} latency={latency}ms')
         return result
     except Exception as e:
@@ -159,7 +159,7 @@ async def _review_one_target(db: AsyncSession, target_row: Dict[str, Any]) -> Op
         )
         return None
 
-    result = await _generate_proposal(stats, target_label)
+    result = await _generate_proposal(db, stats, target_label)
     if not result or result.get('action') != 'propose':
         logger.info(f'[reviewer] target #{tid} → no_change or LLM failed')
         # Still log a no-change summary alert so operator sees the reviewer ran

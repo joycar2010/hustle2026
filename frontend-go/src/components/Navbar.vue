@@ -323,6 +323,9 @@ async function onPairChange(event) {
   const oldPair = currentPair.value
   try {
     const { data } = await api.get('/api/v1/pair-accounts/' + newPair)
+    // Only block when an EXPLICIT binding exists AND that side is disabled.
+    // Missing binding (null) is allowed — /trading history query matches by
+    // platform_id on user's accounts, not by user_pair_accounts row.
     const warnings = []
     if (data.account_a_id && data.account_a_active === false) {
       warnings.push('主账号(' + (data.account_a_name || '未知') + ')已禁用')
@@ -331,7 +334,6 @@ async function onPairChange(event) {
       warnings.push('对冲账号(' + (data.account_b_name || '未知') + ')已禁用')
     }
     if (warnings.length > 0) {
-      // Revert selection
       event.target.value = oldPair
       pairDisabledMsg.value = newPair + ' 无法选择: ' + warnings.join(', ')
       clearTimeout(pairDisabledTimer)

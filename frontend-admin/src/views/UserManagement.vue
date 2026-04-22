@@ -24,7 +24,7 @@
     ═══════════════════════════════════════════ -->
     <div v-if="activeTab === 'users'" class="space-y-4">
       <!-- 统计卡片 -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div class="bg-dark-100 rounded-xl border border-border-primary p-3.5">
           <div class="text-xs text-text-tertiary mb-1">总用户数</div>
           <div class="text-xl font-bold font-mono text-text-primary">{{ users.length }}</div>
@@ -40,6 +40,10 @@
         <div class="bg-dark-100 rounded-xl border border-border-primary p-3.5">
           <div class="text-xs text-text-tertiary mb-1">管理员</div>
           <div class="text-xl font-bold font-mono text-[#f0b90b]">{{ adminCount }}</div>
+        </div>
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-3.5">
+          <div class="text-xs text-text-tertiary mb-1">子账号</div>
+          <div class="text-xl font-bold font-mono text-purple-300">{{ subAccountCount }}</div>
         </div>
       </div>
 
@@ -65,6 +69,7 @@
               <tr class="border-b border-border-secondary text-text-tertiary">
                 <th class="text-left px-4 py-2.5 whitespace-nowrap">用户名</th>
                 <th class="text-left px-3 py-2.5 whitespace-nowrap">邮箱</th>
+                <th class="text-left px-3 py-2.5 whitespace-nowrap">用户类型</th>
                 <th class="text-left px-3 py-2.5 whitespace-nowrap">RBAC角色</th>
                 <th class="text-center px-3 py-2.5 whitespace-nowrap">状态</th>
                 <th class="text-left px-3 py-2.5 whitespace-nowrap">创建时间</th>
@@ -73,15 +78,23 @@
             </thead>
             <tbody>
               <tr v-if="usersLoading">
-                <td colspan="6" class="text-center py-10 text-text-tertiary">加载中...</td>
+                <td colspan="7" class="text-center py-10 text-text-tertiary">加载中...</td>
               </tr>
               <tr v-else-if="!users.length">
-                <td colspan="6" class="text-center py-10 text-text-tertiary">暂无用户数据</td>
+                <td colspan="7" class="text-center py-10 text-text-tertiary">暂无用户数据</td>
               </tr>
               <tr v-for="u in users" :key="u.user_id"
                 class="border-b border-border-secondary hover:bg-dark-50 transition-colors">
                 <td class="px-4 py-2.5 font-medium whitespace-nowrap">{{ u.username }}</td>
                 <td class="px-3 py-2.5 text-text-tertiary whitespace-nowrap">{{ u.email || '-' }}</td>
+                <td class="px-3 py-2.5 whitespace-nowrap">
+                  <span v-if="u.is_subaccount"
+                    class="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-300">子账号</span>
+                  <span v-else-if="isAdminUser(u)"
+                    class="px-1.5 py-0.5 rounded text-[10px] bg-[#f0b90b]/10 text-[#f0b90b]">管理员</span>
+                  <span v-else
+                    class="px-1.5 py-0.5 rounded text-[10px] bg-[#3370ff]/10 text-[#3370ff]">交易员</span>
+                </td>
                 <td class="px-3 py-2.5 whitespace-nowrap">
                   <div class="flex flex-wrap gap-1">
                     <span v-for="r in (u.rbac_roles || [])" :key="r.role_id || r"
@@ -103,12 +116,27 @@
                   <div class="flex items-center justify-center gap-2">
                     <button @click="openEditUser(u)"
                       class="text-primary hover:text-primary-hover text-xs transition-colors">编辑</button>
+                    <button @click="openSubAccountModal(u)" v-if="!u.is_subaccount"
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="hasSubAccounts(u) ? 'text-[#0ecb81]' : 'text-purple-400'">
+                      {{ hasSubAccounts(u) ? '子账号✓' : '子账号' }}
+                    </button>
+                    <span v-else class="text-[10px] text-purple-300">子账号身份</span>
                     <button @click="openAssignRole(u)"
-                      class="text-[#0ecb81] hover:opacity-80 text-xs transition-colors">分配角色</button>
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="(u.rbac_roles?.length) ? 'text-[#0ecb81]' : 'text-[#3370ff]'">
+                      {{ (u.rbac_roles?.length) ? '分配角色✓' : '分配角色' }}
+                    </button>
                     <button @click="openNotifConfig(u)"
-                      class="text-[#3370ff] hover:opacity-80 text-xs transition-colors">通知分配</button>
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="(u.notif_subscription_count > 0) ? 'text-[#0ecb81]' : 'text-[#3370ff]'">
+                      {{ (u.notif_subscription_count > 0) ? '通知分配✓' : '通知分配' }}
+                    </button>
                     <button @click="openHedgeRatio(u)"
-                      class="text-[#f0b90b] hover:opacity-80 text-xs transition-colors">对冲倍数</button>
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="u.hedge_ratio_enabled ? 'text-[#0ecb81]' : 'text-[#f0b90b]'">
+                      {{ u.hedge_ratio_enabled ? '对冲倍数✓' : '对冲倍数' }}
+                    </button>
                     <button @click="openOpenclawAccess(u)"
                       class="hover:opacity-80 text-xs transition-colors"
                       :class="u.openclaw_enabled ? 'text-[#0ecb81]' : 'text-[#3370ff]'">
@@ -120,9 +148,9 @@
                       {{ u.fund_view_enabled ? '查看资金✓' : '查看资金' }}
                     </button>
                     <button @click="toggleUserStatus(u)"
-                      :class="u.is_active ? 'text-[#f0b90b]' : 'text-[#0ecb81]'"
-                      class="hover:opacity-80 text-xs transition-colors">
-                      {{ u.is_active ? '禁用' : '启用' }}
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="u.is_active ? 'text-[#0ecb81]' : 'text-[#f0b90b]'">
+                      {{ u.is_active ? '已启用✓' : '已禁用' }}
                     </button>
                     <button @click="deleteUser(u)"
                       class="text-[#f6465d] hover:opacity-80 text-xs transition-colors">删除</button>
@@ -157,9 +185,19 @@
             <div class="text-xs text-text-tertiary font-mono">{{ fmtDate(u.create_time) }}</div>
             <div class="grid grid-cols-4 gap-1.5 pt-2 border-t border-border-primary">
               <button @click="openEditUser(u)" class="py-1.5 bg-primary/10 text-primary rounded text-xs">编辑</button>
-              <button @click="openAssignRole(u)" class="py-1.5 bg-[#0ecb81]/10 text-[#0ecb81] rounded text-xs">分配角色</button>
-              <button @click="openNotifConfig(u)" class="py-1.5 bg-[#3370ff]/10 text-[#3370ff] rounded text-xs">通知分配</button>
-              <button @click="openHedgeRatio(u)" class="py-1.5 bg-[#f0b90b]/10 text-[#f0b90b] rounded text-xs">对冲倍数</button>
+              <button @click="openSubAccountModal(u)" v-if="!u.is_subaccount"
+                :class="hasSubAccounts(u) ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-purple-500/10 text-purple-300'"
+                class="py-1.5 rounded text-xs">{{ hasSubAccounts(u) ? '子账号✓' : '子账号' }}</button>
+              <span v-else class="py-1.5 text-[10px] text-purple-300 text-center">子账号身份</span>
+              <button @click="openAssignRole(u)"
+                :class="(u.rbac_roles?.length) ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#3370ff]/10 text-[#3370ff]'"
+                class="py-1.5 rounded text-xs">{{ (u.rbac_roles?.length) ? '角色✓' : '分配角色' }}</button>
+              <button @click="openNotifConfig(u)"
+                :class="(u.notif_subscription_count > 0) ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#3370ff]/10 text-[#3370ff]'"
+                class="py-1.5 rounded text-xs">{{ (u.notif_subscription_count > 0) ? '通知✓' : '通知分配' }}</button>
+              <button @click="openHedgeRatio(u)"
+                :class="u.hedge_ratio_enabled ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#f0b90b]/10 text-[#f0b90b]'"
+                class="py-1.5 rounded text-xs">{{ u.hedge_ratio_enabled ? '对冲✓' : '对冲倍数' }}</button>
               <button @click="openOpenclawAccess(u)"
                 :class="u.openclaw_enabled ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#3370ff]/10 text-[#3370ff]'"
                 class="py-1.5 rounded text-xs">{{ u.openclaw_enabled ? '智能体✓' : '智能体量化' }}</button>
@@ -167,8 +205,8 @@
                 :class="u.fund_view_enabled ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#f0b90b]/10 text-[#f0b90b]'"
                 class="py-1.5 rounded text-xs">{{ u.fund_view_enabled ? '查看资金✓' : '查看资金' }}</button>
               <button @click="toggleUserStatus(u)"
-                :class="u.is_active ? 'bg-[#f0b90b]/10 text-[#f0b90b]' : 'bg-[#0ecb81]/10 text-[#0ecb81]'"
-                class="py-1.5 rounded text-xs">{{ u.is_active ? '禁用' : '启用' }}</button>
+                :class="u.is_active ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#f0b90b]/10 text-[#f0b90b]'"
+                class="py-1.5 rounded text-xs">{{ u.is_active ? '已启用✓' : '已禁用' }}</button>
               <button @click="deleteUser(u)" class="py-1.5 bg-[#f6465d]/10 text-[#f6465d] rounded text-xs">删除</button>
             </div>
           </div>
@@ -1137,7 +1175,8 @@
                 </div>
               </div>
             </div>
-          </template>
+
+</template>
         </div>
         <div class="px-6 py-4 border-t border-border-secondary flex gap-3 flex-shrink-0">
           <button @click="saveNotifConfig" :disabled="notifLoading"
@@ -1148,6 +1187,188 @@
             class="flex-1 py-2 bg-dark-200 hover:bg-dark-50 text-text-secondary rounded-lg text-sm border border-border-primary transition-colors">
             取消
           </button>
+        </div>
+      </div>
+    </div>
+
+          
+    <!-- ════════ 子账号管理 Modal ════════ -->
+    <div v-if="subModalOpen" @click.self="closeSubModal"
+         class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div class="bg-dark-100 rounded-xl border border-border-primary p-5 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-bold">子账号管理 — 父账号 <span class="text-primary">{{ subParent?.username }}</span></h3>
+          <button @click="closeSubModal" class="text-text-tertiary hover:text-text-primary text-lg">×</button>
+        </div>
+        <div class="text-xs text-text-tertiary mb-4">
+          子账号按"基金份额"模型登录 www.hustle2026.xyz 查看父账号资产；不可下单 / 划转 / 修改账户 / 查看资金流向。
+          创建时填写人民币投入，系统按当下汇率折算 USDT 并锁定份额。
+        </div>
+
+        <!-- 现有子账号列表 -->
+        <div class="bg-dark-200 rounded-lg p-3 border border-border-primary mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-sm">已创建子账号</span>
+            <button @click="reloadSubs" class="text-xs text-text-tertiary hover:text-primary">🔄 刷新</button>
+          </div>
+          <div v-if="subListLoading" class="text-center py-4 text-xs text-text-tertiary">加载中…</div>
+          <div v-else-if="!subList.length" class="text-center py-4 text-xs text-text-tertiary">暂无子账号</div>
+          <table v-else class="w-full text-xs">
+            <thead class="text-text-tertiary border-b border-border-primary">
+              <tr>
+                <th class="text-left py-1.5">用户名</th>
+                <th class="text-right py-1.5">投入(¥)</th>
+                <th class="text-right py-1.5">折合(USDT)</th>
+                <th class="text-right py-1.5">份额</th>
+                <th class="text-right py-1.5">当前估值(USDT)</th>
+                <th class="text-right py-1.5">占比</th>
+                <th class="text-center py-1.5">状态</th>
+                <th class="text-center py-1.5">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in subList" :key="row.id" class="border-b border-border-secondary/50">
+                <td class="py-1.5 font-mono text-text-primary">{{ row.sub_username }}</td>
+                <td class="py-1.5 text-right font-mono">{{ Number(row.invested_cny).toLocaleString() }}</td>
+                <td class="py-1.5 text-right font-mono">{{ Number(row.invested_usdt).toFixed(2) }}</td>
+                <td class="py-1.5 text-right font-mono">{{ Number(row.shares).toFixed(4) }}</td>
+                <td class="py-1.5 text-right font-mono"
+                  :class="row.sub_current_value_usdt >= row.invested_usdt ? 'text-success' : 'text-danger'">
+                  {{ Number(row.sub_current_value_usdt).toFixed(2) }}
+                </td>
+                <td class="py-1.5 text-right font-mono">{{ ((row.multiplier || 0) * 100).toFixed(2) }}%</td>
+                <td class="py-1.5 text-center">
+                  <span :class="row.status === 'active' ? 'text-success' : 'text-text-tertiary'"
+                    class="text-[10px] px-1.5 py-0.5 rounded"
+                    :style="row.status === 'active' ? 'background:rgba(14,203,129,0.1)' : 'background:rgba(255,255,255,0.05)'">
+                    {{ row.status === 'active' ? '启用' : '停用' }}
+                  </span>
+                </td>
+                <td class="py-1.5 text-center">
+                  <button v-if="row.status === 'active'" @click="deactivateSub(row)"
+                    class="text-[10px] text-danger hover:opacity-80">停用</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 父账号入金/出金登记 -->
+        <div class="bg-dark-200 rounded-lg p-3 border border-border-primary mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-sm">父账号入金 / 出金登记</span>
+            <button @click="reloadCashflow" class="text-xs text-text-tertiary hover:text-primary">🔄 刷新</button>
+          </div>
+          <div class="text-[10px] text-text-tertiary mb-3">
+            父账号注资 / 提取时必须在此登记，系统按当下 NAV 铸造 / 销毁虚拟份额，使子账号估值不受影响。
+            份额状态：当前虚拟份额 <span class="font-mono text-primary">{{ cashflowState.virtual_shares != null ? Number(cashflowState.virtual_shares).toFixed(4) : '--' }}</span>
+            · 基准初始资产 <span class="font-mono">{{ cashflowState.bootstrap_total_assets != null ? Number(cashflowState.bootstrap_total_assets).toFixed(2) + ' USDT' : '--' }}</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 mb-2">
+            <select v-model="cashForm.direction" class="bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-xs">
+              <option value="deposit">入金 +</option>
+              <option value="withdraw">出金 -</option>
+            </select>
+            <input v-model.number="cashForm.amount_usdt" type="number" min="0.01" step="0.01" placeholder="金额(USDT)"
+              class="bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-xs font-mono" />
+            <input v-model="cashForm.note" placeholder="备注(可选)"
+              class="bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-xs" />
+          </div>
+          <div class="flex justify-end mb-3">
+            <button @click="submitCashflow" :disabled="cashSubmitting"
+              class="px-3 py-1.5 bg-[#f0b90b]/80 hover:bg-[#f0b90b] text-dark-300 rounded-lg text-xs font-medium disabled:opacity-50">
+              {{ cashSubmitting ? '登记中…' : '登记并重算份额' }}
+            </button>
+          </div>
+          <div v-if="cashEvents.length" class="max-h-44 overflow-y-auto">
+            <table class="w-full text-[10px]">
+              <thead class="text-text-tertiary border-b border-border-primary">
+                <tr>
+                  <th class="text-left py-1">时间</th>
+                  <th class="text-center py-1">方向</th>
+                  <th class="text-right py-1">金额(USDT)</th>
+                  <th class="text-right py-1">NAV</th>
+                  <th class="text-right py-1">Δ份额</th>
+                  <th class="text-left py-1 pl-2">备注</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="ev in cashEvents" :key="ev.id" class="border-b border-border-secondary/30">
+                  <td class="py-1 text-text-tertiary">{{ fmtDate(ev.created_at) }}</td>
+                  <td class="py-1 text-center" :class="ev.direction === 'deposit' ? 'text-success' : 'text-danger'">
+                    {{ ev.direction === 'deposit' ? '入金' : '出金' }}
+                  </td>
+                  <td class="py-1 text-right font-mono">{{ Number(ev.amount_usdt).toFixed(2) }}</td>
+                  <td class="py-1 text-right font-mono text-text-tertiary">{{ Number(ev.nav_at_event).toFixed(4) }}</td>
+                  <td class="py-1 text-right font-mono"
+                    :class="ev.shares_delta >= 0 ? 'text-success' : 'text-danger'">
+                    {{ ev.shares_delta > 0 ? '+' : '' }}{{ Number(ev.shares_delta).toFixed(4) }}
+                  </td>
+                  <td class="py-1 pl-2 text-text-secondary truncate max-w-[120px]">{{ ev.note || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="text-center py-3 text-[10px] text-text-tertiary">暂无入金/出金记录</div>
+        </div>
+
+        <!-- 新增 -->
+        <div class="bg-dark-200 rounded-lg p-3 border border-border-primary">
+          <div class="font-medium text-sm mb-3">+ 新增子账号</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-text-tertiary">用户名</label>
+              <input v-model="subForm.username" placeholder="如 sub_alice"
+                class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label class="text-xs text-text-tertiary">登录密码</label>
+              <input v-model="subForm.password" type="password" placeholder="至少 6 位"
+                class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label class="text-xs text-text-tertiary">投入金额（人民币 ¥）</label>
+              <input v-model.number="subForm.invested_cny" type="number" min="100" step="100" placeholder="如 10000"
+                class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
+            </div>
+            <div>
+              <label class="text-xs text-text-tertiary">汇率覆盖（CNY/USDT，留空自动取实时）</label>
+              <input v-model.number="subForm.fx_override" type="number" step="0.01" placeholder="自动"
+                class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
+            </div>
+          </div>
+          <div class="text-[10px] text-text-tertiary mt-2">
+            汇率优先级：手动覆盖 → OKX/Binance C2C 实时 → 缓存 → 7.20 兜底。一旦创建则永久冻结。
+          </div>
+          <div class="flex justify-end gap-2 mt-3">
+            <button @click="closeSubModal" class="px-3 py-1.5 bg-dark-100 rounded-lg text-xs">关闭</button>
+            <button @click="createSub" :disabled="subCreating"
+              class="px-3 py-1.5 bg-primary text-dark-300 rounded-lg text-xs font-medium disabled:opacity-50">
+              {{ subCreating ? '创建中…' : '创建子账号' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- M2M: 订阅已有子账号 -->
+        <div class="bg-dark-200 rounded-lg p-3 border border-border-primary mt-3">
+          <div class="font-medium text-sm mb-2">订阅已有子账号 <span class="text-[10px] text-text-tertiary">(多父账号 M2M)</span></div>
+          <div class="text-[10px] text-text-tertiary mb-2">
+            将一个已经是"子账号"身份的用户再订阅一份到本父账号。系统按当前 NAV 铸造份额并自动把最大份额的父账号设为主父账号（WS 主视图）。
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <input v-model="m2mForm.sub_username" placeholder="已存在的子账号用户名"
+              class="bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-xs" />
+            <input v-model.number="m2mForm.invested_cny" type="number" min="100" step="100" placeholder="投入 ¥CNY"
+              class="bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-xs font-mono" />
+            <input v-model.number="m2mForm.fx_override" type="number" step="0.01" placeholder="汇率覆盖(可选)"
+              class="bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-xs font-mono" />
+          </div>
+          <div class="flex justify-end mt-2">
+            <button @click="subscribeExistingSub" :disabled="m2mSubmitting"
+              class="px-3 py-1.5 bg-purple-500/80 hover:bg-purple-500 text-white rounded-lg text-xs font-medium disabled:opacity-50">
+              {{ m2mSubmitting ? '订阅中…' : '订阅到本父账号' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1334,6 +1555,152 @@ function apiErr(label, e) {
 }
 
 // ── Formatters ────────────────────────────────────────────────
+const subModalOpen = ref(false)
+const subParent = ref(null)
+const subList = ref([])
+const subListLoading = ref(false)
+const subCreating = ref(false)
+const subForm = ref({ username: '', password: '', invested_cny: null, fx_override: null })
+
+const cashEvents = ref([])
+const cashflowState = ref({ virtual_shares: null, bootstrap_total_assets: null })
+const cashForm = ref({ direction: 'deposit', amount_usdt: null, note: '' })
+const cashSubmitting = ref(false)
+
+async function reloadCashflow() {
+  if (!subParent.value) return
+  try {
+    const r = await api.get(`/api/v1/users/${subParent.value.user_id}/parent-cashflow`)
+    cashflowState.value = r.data.share_state || {}
+    cashEvents.value = r.data.events || []
+  } catch (e) {
+    showToast('加载父账号资金记录失败：' + (e.response?.data?.detail || e.message), 'error')
+  }
+}
+
+async function submitCashflow() {
+  const f = cashForm.value
+  if (!f.amount_usdt || f.amount_usdt <= 0) { showToast('金额必须 > 0', 'error'); return }
+  if (!confirm(`确认${f.direction === 'deposit' ? '入金' : '出金'} ${f.amount_usdt} USDT？系统将按当下 NAV ${f.direction === 'deposit' ? '铸造' : '销毁'}对应虚拟份额。`)) return
+  cashSubmitting.value = true
+  try {
+    const r = await api.post(`/api/v1/users/${subParent.value.user_id}/parent-cashflow`, {
+      direction: f.direction,
+      amount_usdt: Number(f.amount_usdt),
+      note: (f.note || '').trim() || null,
+    })
+    showToast(`已登记：${f.direction === 'deposit' ? '入金' : '出金'} ${f.amount_usdt} USDT @ NAV ${r.data.nav_at_event.toFixed(4)}，份额 Δ ${r.data.shares_delta.toFixed(4)}`)
+    cashForm.value = { direction: 'deposit', amount_usdt: null, note: '' }
+    await reloadCashflow()
+    await reloadSubs()   // sub 估值会因 total_assets 变化重算
+  } catch (e) {
+    showToast('登记失败：' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    cashSubmitting.value = false
+  }
+}
+
+async function openSubAccountModal(u) {
+  subParent.value = u
+  subForm.value = { username: '', password: '', invested_cny: null, fx_override: null }
+  subModalOpen.value = true
+  await reloadSubs()
+  await reloadCashflow()
+}
+
+function closeSubModal() {
+  subModalOpen.value = false
+  subParent.value = null
+  subList.value = []
+}
+
+const m2mForm = ref({ sub_username: '', invested_cny: null, fx_override: null })
+const m2mSubmitting = ref(false)
+
+async function subscribeExistingSub() {
+  if (!subParent.value) return
+  const f = m2mForm.value
+  if (!f.sub_username || !f.invested_cny || f.invested_cny <= 0) {
+    showToast('请填写子账号用户名和投入金额', 'error'); return
+  }
+  // Resolve sub_username → sub_user_id
+  m2mSubmitting.value = true
+  try {
+    const ur = await api.get('/api/v1/users/', { params: { search: f.sub_username, limit: 20 } })
+    const list = ur.data?.items || ur.data || []
+    const hit = list.find(u => u.username === f.sub_username && u.is_subaccount)
+    if (!hit) {
+      showToast(`未找到子账号用户名「${f.sub_username}」`, 'error')
+      m2mSubmitting.value = false; return
+    }
+    const body = {
+      sub_user_id: hit.user_id,
+      invested_cny: Number(f.invested_cny),
+      fx_override: f.fx_override ? Number(f.fx_override) : null,
+    }
+    const r = await api.post(`/api/v1/users/${subParent.value.user_id}/sub-accounts/subscribe-existing`, body)
+    showToast(`已订阅：${f.sub_username} @ NAV ${Number(r.data.nav_per_share_at_join).toFixed(4)}，份额 ${Number(r.data.shares).toFixed(4)}`)
+    m2mForm.value = { sub_username: '', invested_cny: null, fx_override: null }
+    await reloadSubs()
+  } catch (e) {
+    showToast('订阅失败：' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    m2mSubmitting.value = false
+  }
+}
+
+async function reloadSubs() {
+  if (!subParent.value) return
+  subListLoading.value = true
+  try {
+    const r = await api.get(`/api/v1/users/${subParent.value.user_id}/sub-accounts`)
+    subList.value = r.data || []
+  } catch (e) {
+    showToast('加载子账号失败：' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    subListLoading.value = false
+  }
+}
+
+async function createSub() {
+  const f = subForm.value
+  if (!f.username || !f.password || !f.invested_cny) {
+    showToast('请填写用户名、密码、投入金额', 'error'); return
+  }
+  if (f.password.length < 6) { showToast('密码至少 6 位', 'error'); return }
+  if (f.invested_cny <= 0) { showToast('投入金额必须 > 0', 'error'); return }
+  subCreating.value = true
+  try {
+    const body = {
+      username: f.username.trim(),
+      password: f.password,
+      invested_cny: Number(f.invested_cny),
+    }
+    if (f.fx_override && f.fx_override > 0) body.fx_override = Number(f.fx_override)
+    const r = await api.post(`/api/v1/users/${subParent.value.user_id}/sub-accounts`, body)
+    showToast(`子账号已创建：投入 ¥${r.data.invested_cny} = ${Number(r.data.invested_usdt).toFixed(2)} USDT，份额 ${Number(r.data.shares).toFixed(4)}`)
+    subForm.value = { username: '', password: '', invested_cny: null, fx_override: null }
+    await reloadSubs()
+    await loadUsers()  // refresh user list to show is_subaccount badges
+  } catch (e) {
+    showToast('创建失败：' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    subCreating.value = false
+  }
+}
+
+async function deactivateSub(row) {
+  if (!confirm(`停用子账号 ${row.sub_username}？停用后该用户无法登录，订阅记录保留。`)) return
+  try {
+    await api.delete(`/api/v1/sub-accounts/${row.id}`)
+    showToast('已停用')
+    await reloadSubs()
+    await loadUsers()
+  } catch (e) {
+    showToast('停用失败：' + (e.response?.data?.detail || e.message), 'error')
+  }
+}
+
 function fmtDate(d) {
   if (!d) return '-'
   return dayjs(d).format('MM-DD HH:mm')
@@ -1396,6 +1763,16 @@ const adminCount = computed(() =>
     (u.rbac_roles || []).some(r => (r.role_name || r || '').includes('管理员'))
   ).length
 )
+const subAccountCount = computed(() =>
+  users.value.filter(u => u.is_subaccount).length
+)
+function isAdminUser(u) {
+  return (u.rbac_roles || []).some(r => (r.role_name || r || '').includes('管理员'))
+}
+function hasSubAccounts(u) {
+  // user has at least one active sub-account under them
+  return Number(u.sub_account_count) > 0
+}
 
 async function loadUsers() {
   usersLoading.value = true

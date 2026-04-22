@@ -41,12 +41,12 @@ async def get_runtime_model_and_stream(db) -> Tuple[str, bool]:
         from app.services.agent import config_loader
         cfg = await config_loader.load_config(db)
         ls = cfg.get('llm_settings', {}) or {}
-        model = ls.get('model') or os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5')
+        model = ls.get('model') or os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.2')
         stream = bool(ls.get('streaming', True))
         _model_cache = (model, stream, time.time())
         return model, stream
     except Exception:
-        return os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5'), True
+        return os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.2'), True
 
 
 def invalidate_model_cache():
@@ -74,8 +74,17 @@ async def call_decider(
     if db is not None:
         model, stream_enabled = await get_runtime_model_and_stream(db)
     else:
-        model = os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5')
+        # A caller forgot to pass db — we can't read the runtime DB config, so
+        # we fall back to env (default gpt-5.2). Log loudly so this is obvious
+        # in journalctl instead of silently running an older model.
+        import logging as _logging
+        model = os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.2')
         stream_enabled = True
+        _logging.getLogger(__name__).warning(
+            '[codex_client] call_decider invoked without db session; '
+            'using env/default model=%s (configured DB model ignored). '
+            'Fix the caller to pass db= for hot-reload support.', model
+        )
 
     t0 = time.time()
     text = ''

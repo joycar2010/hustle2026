@@ -80,6 +80,7 @@ class AlertEvent:
     cooldown_s: int = 60
     payload: Dict[str, Any] = field(default_factory=dict)
     ack_required: bool = False
+    admin_only: bool = False  # if True, system-wide WS fan-out targets only admin/operator/security_admin roles
 
     def dedup_key(self) -> str:
         return f"alert:dedup:{self.user_id or '_global'}:{self.pair_code or '_'}:{self.template_key}"
@@ -249,19 +250,40 @@ class AlertBus:
             except Exception:
                 pass
         else:
-            # System-wide: broadcast
-            await ws_manager.broadcast(msg)
-            try:
-                from app.websocket.stream_hub import stream_hub
-                await stream_hub.publish("alerts.global", msg["data"])
-            except Exception:
-                pass
-            try:
-                rc = redis_client.client
-                if rc is not None:
-                    await rc.publish("ws:broadcast", json.dumps(msg))
-            except Exception:
-                pass
+            if event.admin_only:
+                # Admin-restricted system event: fan out per-user to admins only
+                admin_uids = await self._fetch_admin_user_ids()
+                for uid in admin_uids:
+                    try:
+                        await ws_manager.send_to_user(msg, uid)
+                    except Exception:
+                        pass
+                    try:
+                        from app.websocket.stream_hub import stream_hub
+                        await stream_hub.publish(f"alerts.{uid}", msg["data"])
+                    except Exception:
+                        pass
+                    try:
+                        rc = redis_client.client
+                        if rc is not None:
+                            payload = {"user_id": uid, **msg}
+                            await rc.publish("ws:user_event", json.dumps(payload))
+                    except Exception:
+                        pass
+            else:
+                # System-wide: broadcast to all connected users
+                await ws_manager.broadcast(msg)
+                try:
+                    from app.websocket.stream_hub import stream_hub
+                    await stream_hub.publish("alerts.global", msg["data"])
+                except Exception:
+                    pass
+                try:
+                    rc = redis_client.client
+                    if rc is not None:
+                        await rc.publish("ws:broadcast", json.dumps(msg))
+                except Exception:
+                    pass
 
     async def _sink_db(self, event: AlertEvent, feishu_sent: bool) -> None:
         """Persist to agent_alerts. Schema constraints: level in
@@ -372,6 +394,24 @@ class AlertBus:
             for r in rows:
                 recipients.append({"receive_id": r[0], "receive_id_type": "open_id"})
             return recipients
+
+
+    async def _fetch_admin_user_ids(self) -> list:
+        """Return user_ids of users with admin/operator/security_admin role."""
+        from app.core.database import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        try:
+            async with AsyncSessionLocal() as db:
+                rows = (await db.execute(_text(
+                    "SELECT user_id::text FROM users "
+                    "WHERE is_active = true "
+                    "AND (role IN ('超级管理员','系统管理员','安全管理员') "
+                    "     OR COALESCE(role,'user') IN ('admin','operator','security_admin','super_admin','system_admin'))"
+                ))).fetchall()
+                return [r[0] for r in rows]
+        except Exception as e:
+            logger.warning(f"[AlertBus] admin uid fetch failed: {e}")
+            return []
 
 
 # ── Local-fallback dedup (Redis down) ────────────────────────────────────────

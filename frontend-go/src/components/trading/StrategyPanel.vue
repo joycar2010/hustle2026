@@ -1693,6 +1693,8 @@ async function executeLadderOpening(ladderIndex, ladder) {
       if (response.data.success) {
         console.log(`Ladder ${ladderIndex + 1} batch executed successfully`)
         console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
+        // Immediate refresh so 挂N badge doesn't lag behind by up to 2s.
+        try { props.marketCardsRef?.fetchPendingOrderCounts?.() } catch (_) {}
 
         // Phase 3: 成功执行，重置失败计数
         ladderFailureCounts.value.opening[ladderIndex] = 0
@@ -1974,6 +1976,8 @@ async function executeBatchOpening(ladder) {
         if (response.data.success) {
           console.log(`Batch ${i + 1} executed successfully`)
           remainingQuantity -= batchQuantity
+          // Immediate refresh so 挂N badge updates this tick.
+          try { props.marketCardsRef?.fetchPendingOrderCounts?.() } catch (_) {}
 
           // Wait for order to be filled before next batch
           if (i < numBatches - 1) {
