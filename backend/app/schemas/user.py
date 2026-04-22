@@ -104,6 +104,7 @@ class UserResponse(BaseModel):
     is_active: bool
     hedge_ratio_enabled: Optional[bool] = False
     openclaw_enabled: Optional[bool] = False
+    fund_view_enabled: Optional[bool] = False
     create_time: datetime
     update_time: datetime
 

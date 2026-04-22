@@ -14,14 +14,17 @@
       </div>
     </header>
     <div class="md:hidden bg-dark-100 border-b border-border-primary px-4 py-3 flex items-center justify-between">
-      <span class="font-semibold text-sm">收益总览</span>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="font-semibold text-sm flex-shrink-0">收益总览</span>
+        <span class="text-xs text-text-secondary truncate">{{ auth.user?.username || '--' }}</span>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
         <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-red-500'"></div>
         <span class="text-xs text-text-tertiary">{{ lastUpdate }}</span>
       </div>
     </div>
 
-    <div class="px-4 py-4 md:px-6 md:py-6 max-w-5xl mx-auto space-y-5">
+    <div v-if="maintenanceActive" class="px-4 py-16 md:px-6 md:py-24 max-w-5xl mx-auto text-center"><div class="text-6xl mb-4">🛠</div><div class="text-xl font-semibold mb-2">系统维护中</div><div class="text-sm text-text-tertiary">{{ maintenanceReason || '统计数据暂不可用' }}</div><div v-if="maintenanceResume" class="text-sm text-text-tertiary mt-1">预计 {{ new Date(maintenanceResume).toLocaleString('zh-CN', { hour12: false }) }} 恢复</div></div><div v-show="!maintenanceActive" class="px-4 py-4 md:px-6 md:py-6 max-w-5xl mx-auto space-y-5">
 
       <!-- KPI Dashboard -->
       <div class="grid grid-cols-3 md:grid-cols-6 gap-3">
@@ -99,6 +102,8 @@
 </template>
 
 <script setup>
+import { useMaintenance } from '@/composables/useMaintenance.js'
+const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Line } from 'vue-chartjs'

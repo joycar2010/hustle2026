@@ -7,6 +7,7 @@ const routes = [
   { path: '/daily',  name: 'Daily',    component: () => import('@/views/Daily.vue'),    meta: { requiresAuth: true } },
   { path: '/weekly', name: 'Weekly',   component: () => import('@/views/Weekly.vue'),   meta: { requiresAuth: true } },
   { path: '/monthly',name: 'Monthly',  component: () => import('@/views/Monthly.vue'),  meta: { requiresAuth: true } },
+  { path: '/fund-flow', name: 'FundFlow', component: () => import('@/views/FundFlow.vue'), meta: { requiresAuth: true } },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })

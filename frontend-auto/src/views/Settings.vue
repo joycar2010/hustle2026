@@ -227,9 +227,18 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/api'
+import { useWsStream } from '@/stores/wsStream.js'
+import { watch } from 'vue'
 import dayjs from 'dayjs'
 
+const wsStore = useWsStream()
+wsStore.subscribe('agent.status')
+wsStore.subscribe('agent.llm-stats')
+watch(() => wsStore.channels['agent.llm-stats'], (v) => { if (v) stats.value = { ...(stats.value||{}), balance: v } })
 const status = ref(null)
+// Push-update: when agent.status arrives via stream, mirror into local status ref
+watch(() => wsStore.channels['agent.status'], (val) => { if (val) status.value = { ...(status.value||{}), ...val } }, { deep: true })
+
 const interventions = ref([])
 const config = ref({})
 const stats = ref(null)
@@ -375,7 +384,7 @@ async function loadConfig() {
 async function refresh() {
   try {
     const [s, i, st, so] = await Promise.all([
-      api.get('/api/v1/agent/status').catch(() => null),
+      Promise.resolve(null),  // status now via WS stream channel agent.status
       api.get('/api/v1/agent/equity-interventions').catch(() => null),
       api.get('/api/v1/agent/llm-stats').catch(() => null),
       api.get('/api/v1/agent/scope-options').catch(() => null),

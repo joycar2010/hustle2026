@@ -156,6 +156,7 @@ async def get_all_users(
             "is_active": user.is_active,
             "hedge_ratio_enabled": bool(getattr(user, 'hedge_ratio_enabled', False) or False),
             "openclaw_enabled": bool(getattr(user, 'openclaw_enabled', False) or False),
+            "fund_view_enabled": bool(getattr(user, 'fund_view_enabled', False) or False),
             "create_time": user.create_time,
             "update_time": user.update_time
         }

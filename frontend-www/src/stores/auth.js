@@ -30,5 +30,10 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('www_token')
   }
 
+  // Restore session: if token persisted but user not yet fetched, do it now.
+  if (token.value && !user.value) {
+    fetchUser()
+  }
+
   return { token, user, isAuthenticated, login, logout, fetchUser }
 })

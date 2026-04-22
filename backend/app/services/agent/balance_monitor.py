@@ -171,6 +171,12 @@ async def _tick():
     global _last_alert_ts
     async with AsyncSessionLocal() as db:
         info = await compute_balance(db)
+        # Publish current balance snapshot to WS stream hub
+        try:
+            from app.websocket.stream_hub import stream_hub
+            await stream_hub.publish('agent.llm-stats', info)
+        except Exception:
+            pass
         logger.debug(
             f'[balance] source={info["source"]} balance_cny={info.get("balance_cny")}'
         )

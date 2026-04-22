@@ -458,6 +458,119 @@
         </div>
       </div>
 
+      <!-- 网站信息通知（公告 + 系统维护） -->
+      <div :class="['card', maintenanceState.is_active ? 'border-2 border-[#f6465d]' : '']">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-lg font-bold">网站信息通知</h2>
+            <p class="text-xs text-text-tertiary mt-0.5">推送至 go/www 跑马灯；维护态会禁用 go 策略按钮、隐藏 www 统计</p>
+          </div>
+          <button @click="loadAnnouncements" class="px-3 py-1.5 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">刷新</button>
+        </div>
+
+        <!-- 维护态总开关 -->
+        <div :class="['rounded-xl p-3 mb-4', maintenanceState.is_active ? 'bg-[#f6465d]/10 border border-[#f6465d]/30' : 'bg-dark-200']">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="font-semibold flex items-center gap-2">
+                系统维护模式
+                <span v-if="maintenanceState.is_active" class="text-xs px-2 py-0.5 rounded bg-[#f6465d]/30 text-[#f6465d]">维护中</span>
+                <span v-else class="text-xs px-2 py-0.5 rounded bg-success/20 text-success">正常</span>
+              </div>
+              <div class="text-xs text-text-tertiary mt-1">
+                <template v-if="maintenanceState.is_active">
+                  原因：{{ maintenanceState.reason || '—' }}
+                  <span v-if="maintenanceState.scheduled_resume_at"> · 预计恢复：{{ fmtTimeLocal(maintenanceState.scheduled_resume_at) }}</span>
+                </template>
+                <template v-else>开启后影响所有前端：跑马灯红色提示、go 策略按钮禁用、www 统计隐藏</template>
+              </div>
+            </div>
+            <button v-if="!maintenanceState.is_active" @click="openMaintToggleModal" class="px-3 py-1.5 bg-[#f6465d] hover:bg-red-600 text-white rounded text-sm whitespace-nowrap">开启维护</button>
+            <button v-else @click="closeMaintenance" class="px-3 py-1.5 bg-success hover:bg-green-500 text-dark-300 font-semibold rounded text-sm whitespace-nowrap">关闭维护</button>
+          </div>
+        </div>
+
+        <!-- 公告编辑 -->
+        <div class="bg-dark-200 rounded-xl p-3 mb-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <input v-model="newAnnouncement.title" type="text" placeholder="标题（必填）" maxlength="200" class="bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm" />
+            <select v-model="newAnnouncement.level" class="bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm">
+              <option value="info">普通信息</option>
+              <option value="warning">警告</option>
+              <option value="critical">紧急</option>
+            </select>
+          </div>
+          <textarea v-model="newAnnouncement.content" rows="2" placeholder="公告内容（必填）" class="w-full mt-2 bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm"></textarea>
+          <div class="grid grid-cols-2 gap-2 mt-2">
+            <input v-model="newAnnouncement.start_at" type="datetime-local" placeholder="生效时间（可选）" class="bg-dark-300 border border-border-primary rounded px-2 py-1.5 text-xs" />
+            <input v-model="newAnnouncement.end_at" type="datetime-local" placeholder="失效时间（可选）" class="bg-dark-300 border border-border-primary rounded px-2 py-1.5 text-xs" />
+          </div>
+          <div class="flex justify-end gap-2 mt-3">
+            <button v-if="editingAnnouncementId" @click="resetAnnouncementForm" class="px-3 py-1.5 bg-dark-300 hover:bg-dark-50 rounded text-sm">取消编辑</button>
+            <button @click="submitAnnouncement" :disabled="!newAnnouncement.title || !newAnnouncement.content" class="px-4 py-1.5 bg-primary hover:bg-primary-hover disabled:opacity-50 text-dark-300 font-semibold rounded text-sm">{{ editingAnnouncementId ? '保存修改' : '发送公告' }}</button>
+          </div>
+        </div>
+
+        <!-- 历史记录 -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead class="text-text-tertiary">
+              <tr class="text-left border-b border-border-primary">
+                <th class="py-2 pr-2">状态</th>
+                <th class="py-2 pr-2">级别</th>
+                <th class="py-2 pr-2">标题</th>
+                <th class="py-2 pr-2">生效</th>
+                <th class="py-2 pr-2">失效</th>
+                <th class="py-2 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!announcements.length"><td colspan="6" class="py-4 text-center text-text-tertiary">暂无公告</td></tr>
+              <tr v-for="a in announcements" :key="a.id" class="border-b border-border-secondary hover:bg-dark-200">
+                <td class="py-1.5 pr-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px]" :class="a.is_active ? 'bg-success/20 text-success' : 'bg-dark-300 text-text-tertiary'">
+                    {{ a.is_active ? '启用' : '停用' }}
+                  </span>
+                </td>
+                <td class="py-1.5 pr-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px]"
+                    :class="{'bg-[#3370ff]/20 text-[#3370ff]': a.level==='info', 'bg-[#f0b90b]/20 text-[#f0b90b]': a.level==='warning', 'bg-[#f6465d]/20 text-[#f6465d]': a.level==='critical'}">
+                    {{ {info:'普通',warning:'警告',critical:'紧急'}[a.level] || a.level }}
+                  </span>
+                </td>
+                <td class="py-1.5 pr-2 truncate max-w-[200px]" :title="a.content">{{ a.title }}</td>
+                <td class="py-1.5 pr-2 text-text-tertiary whitespace-nowrap">{{ fmtTimeLocal(a.start_at) || '立即' }}</td>
+                <td class="py-1.5 pr-2 text-text-tertiary whitespace-nowrap">{{ fmtTimeLocal(a.end_at) || '永久' }}</td>
+                <td class="py-1.5 text-right whitespace-nowrap">
+                  <button @click="editAnnouncement(a)" class="px-2 py-0.5 bg-dark-300 hover:bg-dark-50 rounded text-[10px] mr-1">编辑</button>
+                  <button @click="duplicateAnnouncement(a)" class="px-2 py-0.5 bg-dark-300 hover:bg-dark-50 rounded text-[10px] mr-1">复制再发</button>
+                  <button @click="toggleAnnouncementActive(a)" class="px-2 py-0.5 bg-dark-300 hover:bg-dark-50 rounded text-[10px] mr-1">
+                    {{ a.is_active ? '停用' : '启用' }}
+                  </button>
+                  <button @click="deleteAnnouncement(a)" class="px-2 py-0.5 bg-[#f6465d]/20 text-[#f6465d] hover:bg-[#f6465d]/30 rounded text-[10px]">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 维护开启确认 modal -->
+      <div v-if="showMaintModal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" @click.self="showMaintModal=false">
+        <div class="bg-dark-100 rounded-xl border border-border-primary p-5 w-full max-w-md">
+          <h3 class="text-base font-bold mb-3">⚠ 开启系统维护</h3>
+          <div class="text-xs text-text-tertiary mb-3">开启后立即影响所有用户：跑马灯红色提示、go 策略按钮禁用、www 统计页隐藏。</div>
+          <label class="text-xs text-text-tertiary">维护原因</label>
+          <input v-model="maintForm.reason" type="text" placeholder="例如：升级网关到 v2.1" class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm mt-1" />
+          <label class="text-xs text-text-tertiary mt-3 block">预计恢复时间（可选）</label>
+          <input v-model="maintForm.scheduled_resume_at" type="datetime-local" class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm mt-1" />
+          <div class="flex justify-end gap-2 mt-4">
+            <button @click="showMaintModal=false" class="px-3 py-1.5 bg-dark-300 hover:bg-dark-50 rounded text-sm">取消</button>
+            <button @click="confirmOpenMaintenance" class="px-4 py-1.5 bg-[#f6465d] hover:bg-red-600 text-white rounded text-sm">确认开启</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 通知模板管理 -->
       <div class="card">
         <div class="flex items-center justify-between mb-4">
@@ -1473,7 +1586,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
 
@@ -1528,6 +1641,109 @@ async function toggleOpenclawGlobal() {
   } finally {
     openclawToggling.value = false
   }
+}
+
+// ── Site announcements + maintenance ──────────────────────
+function toLocalInput(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  const pad = n => String(n).padStart(2,'0')
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+const announcements = ref([])
+const maintenanceState = reactive({ is_active: false, reason: null, scheduled_resume_at: null })
+const newAnnouncement = ref({ title: '', content: '', level: 'info', start_at: '', end_at: '' })
+const editingAnnouncementId = ref(null)
+const showMaintModal = ref(false)
+const maintForm = ref({ reason: '', scheduled_resume_at: '' })
+
+function fmtTimeLocal(s) { if (!s) return ''; try { return new Date(s).toLocaleString('zh-CN', { hour12: false }) } catch { return s } }
+
+async function loadAnnouncements() {
+  try {
+    const [a, m] = await Promise.all([
+      api.get('/api/v1/announcements'),
+      api.get('/api/v1/maintenance/state'),
+    ])
+    announcements.value = a.data?.items || []
+    Object.assign(maintenanceState, m.data || {})
+  } catch (e) { toast('加载公告失败: ' + (e.response?.data?.detail || e.message), 'error') }
+}
+
+function resetAnnouncementForm() {
+  editingAnnouncementId.value = null
+  newAnnouncement.value = { title: '', content: '', level: 'info', start_at: '', end_at: '' }
+}
+
+async function submitAnnouncement() {
+  const body = { ...newAnnouncement.value }
+  body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null
+  body.end_at   = body.end_at   ? new Date(body.end_at).toISOString()   : null
+  try {
+    if (editingAnnouncementId.value) {
+      await api.put(`/api/v1/announcements/${editingAnnouncementId.value}`, body)
+      toast('公告已更新')
+    } else {
+      await api.post('/api/v1/announcements', body)
+      toast('公告已发送')
+    }
+    resetAnnouncementForm()
+    await loadAnnouncements()
+  } catch (e) { toast('保存失败: ' + (e.response?.data?.detail || e.message), 'error') }
+}
+
+function editAnnouncement(a) {
+  editingAnnouncementId.value = a.id
+  newAnnouncement.value = {
+    title: a.title, content: a.content, level: a.level,
+    start_at: toLocalInput(a.start_at),
+    end_at: toLocalInput(a.end_at),
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function duplicateAnnouncement(a) {
+  editingAnnouncementId.value = null
+  newAnnouncement.value = { title: a.title + ' (副本)', content: a.content, level: a.level, start_at: '', end_at: '' }
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+async function toggleAnnouncementActive(a) {
+  try {
+    await api.put(`/api/v1/announcements/${a.id}`, { is_active: !a.is_active })
+    await loadAnnouncements()
+  } catch (e) { toast('切换失败: ' + (e.response?.data?.detail || e.message), 'error') }
+}
+
+async function deleteAnnouncement(a) {
+  if (!confirm(`删除公告「${a.title}」？`)) return
+  try { await api.delete(`/api/v1/announcements/${a.id}`); await loadAnnouncements() }
+  catch (e) { toast('删除失败: ' + (e.response?.data?.detail || e.message), 'error') }
+}
+
+function openMaintToggleModal() {
+  maintForm.value = { reason: '', scheduled_resume_at: '' }
+  showMaintModal.value = true
+}
+
+async function confirmOpenMaintenance() {
+  try {
+    await api.post('/api/v1/maintenance/toggle', {
+      on: true,
+      reason: maintForm.value.reason || '系统维护中',
+      scheduled_resume_at: maintForm.value.scheduled_resume_at || null,
+    })
+    showMaintModal.value = false
+    toast('系统维护已开启')
+    await loadAnnouncements()
+  } catch (e) { toast('开启失败: ' + (e.response?.data?.detail || e.message), 'error') }
+}
+
+async function closeMaintenance() {
+  if (!confirm('确认关闭维护模式？')) return
+  try { await api.post('/api/v1/maintenance/toggle', { on: false }); toast('维护已关闭'); await loadAnnouncements() }
+  catch (e) { toast('关闭失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }
 
 // ── Helpers ────────────────────────────────────────────────
@@ -2100,7 +2316,7 @@ async function initNotifyTab() {
   await Promise.all([
     loadFeishuConfig(), checkFeishuStatus(), loadNotifyUsers(),
     loadMarketClosureConfig(), loadMarketStatus(),
-    loadTemplates(), loadNotifyLogs(), loadSounds(), loadOpenclawStatus(),
+    loadTemplates(), loadNotifyLogs(), loadSounds(), loadOpenclawStatus(), loadAnnouncements(),
   ])
 }
 

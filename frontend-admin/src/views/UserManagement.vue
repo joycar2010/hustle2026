@@ -114,6 +114,11 @@
                       :class="u.openclaw_enabled ? 'text-[#0ecb81]' : 'text-[#3370ff]'">
                       {{ u.openclaw_enabled ? '智能体量化✓' : '智能体量化' }}
                     </button>
+                    <button @click="openFundViewAccess(u)"
+                      class="hover:opacity-80 text-xs transition-colors"
+                      :class="u.fund_view_enabled ? 'text-[#0ecb81]' : 'text-[#f0b90b]'">
+                      {{ u.fund_view_enabled ? '查看资金✓' : '查看资金' }}
+                    </button>
                     <button @click="toggleUserStatus(u)"
                       :class="u.is_active ? 'text-[#f0b90b]' : 'text-[#0ecb81]'"
                       class="hover:opacity-80 text-xs transition-colors">
@@ -158,6 +163,9 @@
               <button @click="openOpenclawAccess(u)"
                 :class="u.openclaw_enabled ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#3370ff]/10 text-[#3370ff]'"
                 class="py-1.5 rounded text-xs">{{ u.openclaw_enabled ? '智能体✓' : '智能体量化' }}</button>
+              <button @click="openFundViewAccess(u)"
+                :class="u.fund_view_enabled ? 'bg-[#0ecb81]/10 text-[#0ecb81]' : 'bg-[#f0b90b]/10 text-[#f0b90b]'"
+                class="py-1.5 rounded text-xs">{{ u.fund_view_enabled ? '查看资金✓' : '查看资金' }}</button>
               <button @click="toggleUserStatus(u)"
                 :class="u.is_active ? 'bg-[#f0b90b]/10 text-[#f0b90b]' : 'bg-[#0ecb81]/10 text-[#0ecb81]'"
                 class="py-1.5 rounded text-xs">{{ u.is_active ? '禁用' : '启用' }}</button>
@@ -1228,6 +1236,35 @@
         </div>
       </div>
     </Teleport>
+    <!-- Modal: 查看资金权限 -->
+    <transition name="modal">
+      <div v-if="showFundViewModal"
+        class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+        @click.self="showFundViewModal = false">
+        <div class="bg-dark-100 rounded-xl p-6 w-full max-w-md border border-border-primary">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold">查看资金权限 — {{ fundViewUser?.username }}</h3>
+            <button @click="showFundViewModal = false" class="text-text-tertiary hover:text-text-primary">✕</button>
+          </div>
+          <div class="text-sm text-text-secondary mb-4">是否允许该用户在 <a href="https://www.hustle2026.xyz/fund-flow" target="_blank" class="text-primary">www.hustle2026.xyz/fund-flow</a> 查看资金流向（划转 / 充值 / 提现）记录？</div>
+          <label class="flex items-center gap-2 mb-4 text-sm">
+            <input type="checkbox" v-model="fundViewEnabled" class="accent-primary">
+            <span>授予「资金流向」查看权限</span>
+          </label>
+          <div class="text-xs text-text-tertiary mb-5">
+            启用后该用户可访问 www 站点底部导航的「资金流向」页；未开启时该入口与后端接口都会被屏蔽。
+          </div>
+          <div class="flex justify-end gap-2">
+            <button @click="showFundViewModal = false" class="px-4 py-2 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">取消</button>
+            <button @click="saveFundViewToggle" :disabled="fundViewSaving"
+              class="px-4 py-2 bg-primary text-dark-300 hover:bg-primary-hover rounded-lg text-sm font-semibold disabled:opacity-50">
+              {{ fundViewSaving ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
     <!-- Modal: 智能体量化登录授权 -->
     <transition name="modal">
       <div v-if="showOpenclawModal"
@@ -2524,6 +2561,34 @@ async function saveOpenclawToggle() {
   } catch (e) {
     showToast('保存失败: ' + (e.response?.data?.detail || e.message), 'error')
   } finally { openclawSaving.value = false }
+}
+
+// ── Fund-view (www.hustle2026.xyz/fund-flow) access ──
+const showFundViewModal = ref(false)
+const fundViewUser = ref(null)
+const fundViewEnabled = ref(false)
+const fundViewSaving = ref(false)
+
+async function openFundViewAccess(u) {
+  fundViewUser.value = u
+  fundViewEnabled.value = !!u.fund_view_enabled
+  showFundViewModal.value = true
+}
+
+async function saveFundViewToggle() {
+  fundViewSaving.value = true
+  try {
+    await api.put('/api/v1/users/fund-view-access', {
+      user_id: fundViewUser.value?.user_id,
+      enabled: fundViewEnabled.value,
+    })
+    const idx = users.value.findIndex(u => u.user_id === fundViewUser.value?.user_id)
+    if (idx >= 0) users.value[idx].fund_view_enabled = fundViewEnabled.value
+    showFundViewModal.value = false
+    showToast(fundViewEnabled.value ? '已授予查看资金权限' : '已撤销查看资金权限', 'success')
+  } catch (e) {
+    showToast('保存失败: ' + (e.response?.data?.detail || e.message), 'error')
+  } finally { fundViewSaving.value = false }
 }
 
 async function openHedgeRatio(u) {

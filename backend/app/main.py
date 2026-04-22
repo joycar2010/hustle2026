@@ -45,7 +45,7 @@ def _setup_logging():
 _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, pnl, hedging, hedge_ratio, agent
+from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, pnl, hedging, hedge_ratio, agent, site_status
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor, snapshot_request_listener
 from app.tasks.redis_monitor import redis_monitor
@@ -252,6 +252,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f'[OpenCLAW] failed to start agent: {e}')
 
+    # WS-based dashboard stream (push user.accounts.{uid} every 5s)
+    try:
+        from app.services import dashboard_stream
+        dashboard_stream.start()
+        logger.info('[dashboard_stream] started')
+    except Exception as e:
+        logger.error(f'[dashboard_stream] start err: {e}')
+
     logger.info("FastAPI application started - background services initializing...")
 
     yield
@@ -277,6 +285,11 @@ async def lifespan(app: FastAPI):
         await openclaw_npm.stop()
         await openclaw_bm.stop()
         await openclaw_legs.stop()
+        try:
+            from app.services import dashboard_stream
+            await dashboard_stream.stop()
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f'[OpenCLAW] stop error: {e}')
 
@@ -345,6 +358,48 @@ app.add_middleware(
 # app.add_middleware(PermissionInterceptor, redis_client=redis_client.client)
 
 # Add request logging middleware
+@app.middleware("http")
+async def maintenance_guard(request: Request, call_next):
+    """Block mutating trading/strategy requests while maintenance is on.
+    Allow-list: GET/HEAD/OPTIONS + auth + site-status + maintenance endpoints +
+    admin toggle itself so operator can disable. Everything else POST/PUT/DELETE
+    returns 503."""
+    method = request.method.upper()
+    path = request.url.path
+    if method in ('GET', 'HEAD', 'OPTIONS'):
+        return await call_next(request)
+    ALLOW_PREFIX = (
+        '/api/v1/auth/',
+        '/api/v1/users/me',
+        '/api/v1/site-status',
+        '/api/v1/announcements',
+        '/api/v1/maintenance',
+        '/api/v1/agent/openclaw-toggle',
+        '/api/v1/agent/kill',
+        '/ws',
+    )
+    if any(path.startswith(x) for x in ALLOW_PREFIX):
+        return await call_next(request)
+    try:
+        from app.core.database import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        async with AsyncSessionLocal() as _db:
+            row = (await _db.execute(_text(
+                "SELECT is_active, reason, scheduled_resume_at FROM system_maintenance_state WHERE id=1"
+            ))).first()
+        if row and row[0]:
+            resume = row[2].isoformat() if row[2] else None
+            return JSONResponse(status_code=503, content={
+                'detail': f'系统维护中' + (f'：{row[1]}' if row[1] else ''),
+                'code': 'maintenance',
+                'reason': row[1],
+                'scheduled_resume_at': resume,
+            })
+    except Exception:
+        pass
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     print(f"[REQUEST] {request.method} {request.url.path}")
@@ -416,6 +471,7 @@ app.include_router(ssl_certificates.router, prefix="/api/v1/ssl", tags=["SSL证�
 app.include_router(system_monitor.router, prefix="/api/v1/monitor", tags=["系统监控"])
 app.include_router(key_management.router, prefix="/api/v1/keys", tags=["密钥管理"])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["OpenCLAW Agent"])
+app.include_router(site_status.router, prefix="/api/v1", tags=["Site Status"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["通知服务"])
 app.include_router(sound_files.router, prefix="/api/v1", tags=["声音文件管理"])
 app.include_router(timing_configs.router, prefix="/api/v1", tags=["时间配置管理"])

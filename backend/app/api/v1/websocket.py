@@ -63,8 +63,31 @@ async def websocket_endpoint(
             # Handle client commands
             try:
                 msg = json.loads(data)
-                if msg.get("type") == "request_snapshot":
+                mtype = msg.get("type")
+                if mtype == "request_snapshot":
                     asyncio.create_task(_push_initial_snapshot(websocket, user_id))
+                    continue
+                if mtype == "subscribe":
+                    from app.websocket.stream_hub import stream_hub
+                    ch = (msg.get("channel") or "").strip()
+                    if not ch:
+                        continue
+                    # Guard per-user channels: ch looks like "user.accounts.{uid}" or "alerts.{uid}"
+                    if (ch.startswith("user.") or ch.startswith("alerts.")) and ch != "alerts.global":
+                        owner = ch.rsplit(".", 1)[-1]
+                        if owner != user_id:
+                            await websocket.send_json({"type": "error", "channel": ch, "message": "forbidden"})
+                            continue
+                    await stream_hub.subscribe(websocket, ch, user_id)
+                    continue
+                if mtype == "unsubscribe":
+                    from app.websocket.stream_hub import stream_hub
+                    ch = (msg.get("channel") or "").strip()
+                    if ch:
+                        await stream_hub.unsubscribe(websocket, ch, user_id)
+                    continue
+                if mtype == "ping":
+                    await websocket.send_json({"type": "pong", "t": msg.get("t")})
                     continue
             except (json.JSONDecodeError, AttributeError):
                 pass
@@ -76,8 +99,18 @@ async def websocket_endpoint(
             )
 
     except WebSocketDisconnect:
+        try:
+            from app.websocket.stream_hub import stream_hub
+            await stream_hub.unsubscribe_all(websocket)
+        except Exception:
+            pass
         manager.disconnect(websocket, user_id)
     except Exception as e:
+        try:
+            from app.websocket.stream_hub import stream_hub
+            await stream_hub.unsubscribe_all(websocket)
+        except Exception:
+            pass
         manager.disconnect(websocket, user_id)
 
 

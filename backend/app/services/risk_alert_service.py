@@ -351,6 +351,46 @@ class RiskAlertService:
                 user_id=user_id
             )
 
+            # ── Stream hub: per-user alerts channel for Python /api/v1/ws clients ──
+            try:
+                from app.websocket.stream_hub import stream_hub
+                await stream_hub.publish(f"alerts.{user_id}", alert_message["data"])
+            except Exception as _se:
+                logger.debug(f"[RISK_ALERT] stream publish (trader self) failed: {_se}")
+
+            # ── Fan-out to subscribers (admins watching this trader) ──
+            # Each subscriber receives the same payload via their own alerts.{uid}
+            # channel + Redis bridge so they get popup + Go-WS too.
+            try:
+                from sqlalchemy import text as _text
+                sub_rows = (await self.db.execute(_text(
+                    "SELECT DISTINCT subscriber_user_id FROM notification_subscriptions "
+                    "WHERE trader_user_id = CAST(:uid AS UUID) "
+                    "AND template_id = CAST(:tid AS UUID) "
+                    "AND is_enabled = true"
+                ), {"uid": user_id, "tid": str(template.template_id)})).fetchall()
+                from app.websocket.stream_hub import stream_hub
+                from app.core.redis_client import redis_client as _rc
+                import json as _json
+                for sub in sub_rows:
+                    sid = str(sub[0])
+                    if sid == user_id:
+                        continue  # already sent to self above
+                    try:
+                        await stream_hub.publish(f"alerts.{sid}", alert_message["data"])
+                    except Exception:
+                        pass
+                    try:
+                        await _rc.publish("ws:user_event", _json.dumps({
+                            "user_id": sid,
+                            "type": alert_message["type"],
+                            "data": alert_message["data"],
+                        }))
+                    except Exception:
+                        pass
+            except Exception as _fe:
+                logger.debug(f"[RISK_ALERT] subscriber fan-out failed: {_fe}")
+
             logger.info(f"Alert broadcasted to frontend: {template_key} for user {user_id}")
 
         except Exception as e:

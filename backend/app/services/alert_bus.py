@@ -191,7 +191,7 @@ class AlertBus:
         if feishu is None:
             return False
 
-        recipients = await self._resolve_feishu_recipients(event.user_id)
+        recipients = await self._resolve_feishu_recipients(event.user_id, event.template_key)
         if not recipients:
             return False
 
@@ -234,6 +234,12 @@ class AlertBus:
         }
         if event.user_id:
             await ws_manager.send_to_user(msg, event.user_id)
+            # Stream hub: per-user alerts channel (Python WS /api/v1/ws subscribers)
+            try:
+                from app.websocket.stream_hub import stream_hub
+                await stream_hub.publish(f"alerts.{event.user_id}", msg["data"])
+            except Exception:
+                pass
             # Also publish via Redis → Go Hub for the Go WS connection (frontend-go)
             try:
                 rc = redis_client.client
@@ -245,6 +251,11 @@ class AlertBus:
         else:
             # System-wide: broadcast
             await ws_manager.broadcast(msg)
+            try:
+                from app.websocket.stream_hub import stream_hub
+                await stream_hub.publish("alerts.global", msg["data"])
+            except Exception:
+                pass
             try:
                 rc = redis_client.client
                 if rc is not None:
@@ -280,7 +291,7 @@ class AlertBus:
             await db.commit()
 
     # ── Recipients ───────────────────────────────────────────────────────────
-    async def _resolve_feishu_recipients(self, user_id: str) -> list:
+    async def _resolve_feishu_recipients(self, user_id: str, template_key: str = "") -> list:
         """Return a list of {receive_id, receive_id_type, user_id} dicts.
 
         - If user_id is given: only that user (if they have a Feishu binding
@@ -288,8 +299,10 @@ class AlertBus:
         - If empty: fan out to admin/operator users with a Feishu binding.
         """
         recipients: list = []
+        seen_ids: set = set()
         async with AsyncSessionLocal() as db:
             if user_id:
+                # 1. Trader self (primary recipient)
                 row = (
                     await db.execute(
                         _text(
@@ -304,23 +317,66 @@ class AlertBus:
                     )
                 ).first()
                 if row and row[3]:
-                    if row[0]:
+                    if row[0] and row[0] not in seen_ids:
                         recipients.append({"receive_id": row[0], "receive_id_type": "open_id"})
-                    elif row[1]:
+                        seen_ids.add(row[0])
+                    elif row[1] and row[1] not in seen_ids:
                         recipients.append({"receive_id": row[1], "receive_id_type": "mobile"})
-                    elif row[2]:
+                        seen_ids.add(row[1])
+                    elif row[2] and row[2] not in seen_ids:
                         recipients.append({"receive_id": row[2], "receive_id_type": "email"})
+                        seen_ids.add(row[2])
+                # 2. Fan-out to subscribers of this trader for the matching template
+                try:
+                    rows = (
+                        await db.execute(
+                            _text(
+                                "SELECT DISTINCT su.feishu_open_id "
+                                "FROM notification_subscriptions ns "
+                                "JOIN users su ON su.user_id = ns.subscriber_user_id "
+                                "JOIN notification_templates nt ON nt.template_id = ns.template_id "
+                                "LEFT JOIN user_notification_settings uns ON uns.user_id = su.user_id "
+                                "WHERE ns.trader_user_id = CAST(:uid AS UUID) "
+                                "  AND ns.is_enabled = true "
+                                "  AND nt.template_key = :tk "
+                                "  AND su.feishu_open_id IS NOT NULL AND su.feishu_open_id <> '' "
+                                "  AND su.user_id <> CAST(:uid AS UUID) "
+                                "  AND COALESCE(uns.feishu_enabled, true) = true"
+                            ),
+                            {"uid": user_id, "tk": template_key or ""},
+                        )
+                    ).fetchall()
+                    for r in rows:
+                        if r[0] and r[0] not in seen_ids:
+                            recipients.append({"receive_id": r[0], "receive_id_type": "open_id"})
+                            seen_ids.add(r[0])
+                except Exception as _sub_err:
+                    logger.debug(f"[alert_bus] subscribers fan-out failed: {_sub_err}")
                 return recipients
 
+            # Fan-out: only deliver to users who have opted-in to OpenCLAW
+            # (openclaw_enabled=true) AND have Feishu binding. Falls back to
+            # admin/operator role if no openclaw users exist (so kill_switch
+            # alerts still reach someone during early bootstrap).
             rows = (
                 await db.execute(
                     _text(
                         "SELECT u.feishu_open_id FROM users u "
                         "WHERE u.feishu_open_id IS NOT NULL AND u.feishu_open_id <> '' "
-                        "AND COALESCE(u.role, 'user') IN ('admin','operator')"
+                        "AND u.openclaw_enabled = true"
                     )
                 )
             ).fetchall()
+            if not rows:
+                rows = (
+                    await db.execute(
+                        _text(
+                            "SELECT u.feishu_open_id FROM users u "
+                            "WHERE u.feishu_open_id IS NOT NULL AND u.feishu_open_id <> '' "
+                            "AND (u.role = '超级管理员' OR u.role = '系统管理员' OR COALESCE(u.role, 'user') IN ('admin','operator'))"
+                        )
+                    )
+                ).fetchall()
             for r in rows:
                 recipients.append({"receive_id": r[0], "receive_id_type": "open_id"})
             return recipients

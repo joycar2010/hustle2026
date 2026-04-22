@@ -2,11 +2,23 @@
   <div class="pb-20 md:pb-6">
     <header class="hidden md:flex bg-dark-100 border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40">
       <span class="font-semibold">HustleXAU · 月收益</span>
-      <button @click="$router.push('/')" class="text-sm text-text-tertiary hover:text-text-primary">返回总览</button>
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-text-secondary">{{ auth.user?.username || '--' }}</span>
+        <button @click="$router.push('/')" class="text-sm text-text-tertiary hover:text-text-primary">返回总览</button>
+      </div>
     </header>
-    <div class="md:hidden bg-dark-100 border-b border-border-primary px-4 py-3"><span class="font-semibold text-sm">月收益分析</span></div>
+    <div class="md:hidden bg-dark-100 border-b border-border-primary px-4 py-3 flex items-center justify-between">
+      <span class="font-semibold text-sm flex-shrink-0">月收益分析</span>
+      <span class="text-xs text-text-secondary truncate">{{ auth.user?.username || '--' }}</span>
+    </div>
 
-    <div class="px-4 py-4 md:px-6 md:py-6 max-w-5xl mx-auto space-y-4">
+    <div v-if="maintenanceActive" class="px-4 py-16 md:px-6 md:py-24 max-w-5xl mx-auto text-center">
+      <div class="text-6xl mb-4">🛠</div>
+      <div class="text-xl font-semibold mb-2">系统维护中</div>
+      <div class="text-sm text-text-tertiary">{{ maintenanceReason || '统计数据暂不可用' }}</div>
+      <div v-if="maintenanceResume" class="text-sm text-text-tertiary mt-1">预计 {{ new Date(maintenanceResume).toLocaleString('zh-CN', { hour12: false }) }} 恢复</div>
+    </div>
+    <div v-show="!maintenanceActive" class="px-4 py-4 md:px-6 md:py-6 max-w-5xl mx-auto space-y-4">
 
       <!-- KPI -->
       <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
@@ -79,6 +91,10 @@
 </template>
 
 <script setup>
+import { useMaintenance } from '@/composables/useMaintenance.js'
+const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
+import { useAuthStore } from '@/stores/auth.js'
+const auth = useAuthStore()
 import { ref, computed, onMounted } from 'vue'
 import { Bar, Line } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Filler } from 'chart.js'

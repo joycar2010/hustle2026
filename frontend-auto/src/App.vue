@@ -9,6 +9,7 @@
     </div>
   </div>
   <div v-else class="min-h-screen flex flex-col">
+    <AnnouncementBanner />
     <header class="bg-dark-200 border-b border-border-primary px-6 py-3 flex items-center justify-between">
       <div class="flex items-center gap-6">
         <div class="flex items-center gap-2">
@@ -66,6 +67,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '@/api'
+import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
 
 const router = useRouter()
 const route = useRoute()

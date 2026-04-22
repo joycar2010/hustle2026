@@ -1,7 +1,7 @@
 """Account management API endpoints"""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -664,3 +664,165 @@ async def get_account_dashboard(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fund flow aggregator (transfer / deposit / withdrawal)
+# ─────────────────────────────────────────────────────────────────────────────
+@router.get("/me/fund-flow")
+async def get_user_fund_flow(
+    days: int = 30,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return cash-flow events (transfers/deposits/withdrawals) for every
+    account the caller owns, merged and sorted desc by time."""
+    import time as _time
+    import logging as _logging
+    from app.core.proxy_utils import build_proxy_url
+    _log = _logging.getLogger(__name__)
+
+    # ── Permission gate: fund_view_enabled or admin role ──
+    _perm = (await db.execute(text(
+        "SELECT fund_view_enabled, role FROM users WHERE user_id = CAST(:u AS UUID)"
+    ), {"u": user_id})).first()
+    _admin_roles = {"超级管理员", "系统管理员", "super_admin", "system_admin", "admin"}
+    if not _perm or (not bool(_perm[0]) and (_perm[1] not in _admin_roles)):
+        from fastapi import HTTPException as _HE
+        raise _HE(status_code=403, detail="未授予查看资金流向权限")
+
+    days = max(1, min(int(days or 30), 90))
+    end_ms = int(_time.time() * 1000)
+    start_ms = end_ms - days * 86400_000
+
+    rs = await db.execute(select(Account).where(Account.user_id == UUID(user_id),
+                                                Account.is_active == True))
+    accounts = rs.scalars().all()
+
+    flows: list = []
+    errors: dict = {}
+
+    for acc in accounts:
+        plat_name = {1: "Binance", 2: "Bybit", 3: "ICMarkets"}.get(acc.platform_id, str(acc.platform_id))
+        try:
+            if acc.platform_id == 1 and not acc.is_mt5_account:
+                from app.services.binance_client import BinanceFuturesClient
+                client = BinanceFuturesClient(acc.api_key, acc.api_secret,
+                                              proxy_url=build_proxy_url(acc.proxy_config))
+                try:
+                    for itype in ("TRANSFER", "INTERNAL_TRANSFER", "WELCOME_BONUS"):
+                        try:
+                            data = await client.get_income(income_type=itype,
+                                                           start_time=start_ms, limit=1000)
+                            for r in (data or []):
+                                amt = float(r.get("income", 0))
+                                flows.append({
+                                    "account_id": str(acc.account_id),
+                                    "account_name": acc.account_name,
+                                    "platform": "Binance",
+                                    "type": itype.lower(),
+                                    "asset": r.get("asset") or "USDT",
+                                    "amount": amt,
+                                    "direction": "in" if amt > 0 else "out",
+                                    "timestamp": int(r.get("time", 0)),
+                                    "info": r.get("info") or "",
+                                })
+                        except Exception as ie:
+                            _log.debug(f"[fund-flow] binance income {itype} failed: {ie}")
+                finally:
+                    try: await client.close()
+                    except Exception: pass
+            elif acc.platform_id == 2 and not acc.is_mt5_account:
+                from app.services.bybit_client import BybitV5Client
+                client = BybitV5Client(acc.api_key, acc.api_secret,
+                                       proxy_url=build_proxy_url(acc.proxy_config))
+                try:
+                    try:
+                        data = await client.get_transaction_log(
+                            account_type="UNIFIED", start_time=start_ms,
+                            end_time=end_ms, limit=50)
+                        rows = (data or {}).get("result", {}).get("list", []) or []
+                        for r in rows:
+                            t = (r.get("type") or "").upper()
+                            if t not in ("TRANSFER_IN", "TRANSFER_OUT", "DEPOSIT",
+                                         "WITHDRAW", "INTERNAL_DEPOSIT", "INTERNAL_WITHDRAW",
+                                         "BONUS", "BONUS_RECOLLECT"):
+                                continue
+                            amt = float(r.get("change", 0) or 0)
+                            flows.append({
+                                "account_id": str(acc.account_id),
+                                "account_name": acc.account_name,
+                                "platform": "Bybit",
+                                "type": t.lower(),
+                                "asset": r.get("currency") or "USDT",
+                                "amount": amt,
+                                "direction": "in" if amt > 0 else "out",
+                                "timestamp": int(r.get("transactionTime", 0)),
+                                "info": r.get("tradeId") or r.get("orderId") or "",
+                            })
+                    except Exception as be:
+                        _log.debug(f"[fund-flow] bybit transaction-log failed: {be}")
+                finally:
+                    try: await client.close()
+                    except Exception: pass
+            elif acc.is_mt5_account or acc.platform_id == 3:
+                import os, httpx
+                from app.models.mt5_client import MT5Client as MT5ClientModel
+                bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
+                api_key_mt5 = os.getenv("MT5_API_KEY", "")
+                headers = {"X-Api-Key": api_key_mt5} if api_key_mt5 else {}
+                mc_res = await db.execute(
+                    select(MT5ClientModel)
+                    .where(MT5ClientModel.account_id == acc.account_id)
+                    .where(MT5ClientModel.is_active == True)
+                    .order_by(MT5ClientModel.priority).limit(1)
+                )
+                mc = mc_res.scalar_one_or_none()
+                if mc and mc.bridge_service_port:
+                    bridge_url = mc.bridge_url or f"{bridge_host}:{mc.bridge_service_port}"
+                    try:
+                        async with httpx.AsyncClient(timeout=15.0) as hc:
+                            resp = await hc.get(f"{bridge_url}/mt5/history/deals",
+                                                params={"days": days}, headers=headers)
+                            raw = resp.json() if resp.status_code == 200 else []
+                            # Bridge returns either {"deals": [...]} or bare [...]
+                            if isinstance(raw, dict):
+                                deals = raw.get('deals') or raw.get('data') or []
+                            else:
+                                deals = raw or []
+                        for d in (deals or []):
+                            if int(d.get("type", -1)) not in (2, 4, 5, 6, 7):
+                                continue
+                            amt = float(d.get("profit", 0) or 0)
+                            if amt == 0:
+                                amt = float(d.get("volume", 0) or 0)
+                            comment = (d.get("comment") or "").lower()
+                            kind = "deposit" if amt > 0 else "withdrawal"
+                            if "transfer" in comment or "划转" in comment:
+                                kind = "transfer_in" if amt > 0 else "transfer_out"
+                            flows.append({
+                                "account_id": str(acc.account_id),
+                                "account_name": acc.account_name,
+                                "platform": "MT5",
+                                "type": kind,
+                                "asset": "USD",
+                                "amount": amt,
+                                "direction": "in" if amt > 0 else "out",
+                                "timestamp": int(d.get("time", 0)) * 1000 if d.get("time") else 0,
+                                "info": d.get("comment") or "",
+                            })
+                    except Exception as me:
+                        _log.debug(f"[fund-flow] mt5 deals failed: {me}")
+        except Exception as e:
+            errors[str(acc.account_id)] = f"{plat_name}:{acc.account_name}: {e}"
+            _log.warning(f"[fund-flow] account {acc.account_id} failed: {e}")
+
+    flows.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    return {
+        "ok": True,
+        "days": days,
+        "total": len(flows),
+        "flows": flows,
+        "errors": errors,
+    }

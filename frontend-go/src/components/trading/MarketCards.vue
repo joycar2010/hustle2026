@@ -1,18 +1,15 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto overflow-hidden w-full">
-    <!-- System Status Marquee -->
+    <!-- Unified System Status + Announcement Marquee -->
     <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
       <button
         @click="showSystemStatusModal = true"
-        :class="[
-          'w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
-          systemHealthy ? 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30' : 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-        ]"
+        :class="['w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer', unifiedBarBgClass]"
         :title="'点击查看详细系统状态'"
       >
         <div class="marquee-container w-full overflow-hidden">
-          <div class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-            {{ systemStatusText }}
+          <div class="marquee-content text-xs whitespace-nowrap" :class="unifiedBarTextClass">
+            {{ unifiedBarText }}
           </div>
         </div>
       </button>
@@ -260,6 +257,9 @@ import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useProxyStore } from '@/stores/proxy'
 import { useStrategyStore } from '@/stores/strategy'
+import { useWsStream } from '@/stores/wsStream.js'
+
+
 import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
 import SpreadDataTable from './SpreadDataTable.vue'
@@ -270,6 +270,70 @@ const notificationStore = useNotificationStore()
 const { currentPair, pairConfig } = useTradingPair()
 const proxyStore = useProxyStore()
 const strategyStore = useStrategyStore()
+
+// ── Site announcements + maintenance (site.status channel) ──
+const wsStream = useWsStream()
+wsStream.subscribe('site.status')
+// Initial snapshot (in case WS hasn't delivered yet)
+api.get('/api/v1/site-status').then(r => { wsStream.channels['site.status'] = r.data }).catch(() => {})
+const siteStatus = computed(() => wsStream.channels['site.status'] || { announcements: [], maintenance: {} })
+const maintenanceActive = computed(() => !!siteStatus.value.maintenance?.is_active)
+const maintReason = computed(() => siteStatus.value.maintenance?.reason || '')
+const maintResumeText = computed(() => {
+  const t = siteStatus.value.maintenance?.scheduled_resume_at
+  if (!t) return ''
+  try { return `预计 ${new Date(t).toLocaleString('zh-CN', { hour12: false })} 恢复` } catch { return '' }
+})
+const announcementText = computed(() => {
+  const arr = siteStatus.value.announcements || []
+  if (!arr.length) return ''
+  return arr.map(a => `[${{info:'公告',warning:'警告',critical:'紧急'}[a.level]||a.level}] ${a.title}${a.content ? '：' + a.content : ''}`).join('  ·  ')
+})
+const annBgClass = computed(() => {
+  const arr = siteStatus.value.announcements || []
+  const has = (lv) => arr.some(a => a.level === lv)
+  if (has('critical')) return 'bg-[#f6465d]/20 border-[#f6465d]/50'
+  if (has('warning')) return 'bg-[#f0b90b]/20 border-[#f0b90b]/50'
+  return 'bg-[#3370ff]/20 border-[#3370ff]/50'
+})
+const annTextClass = computed(() => {
+  const arr = siteStatus.value.announcements || []
+  const has = (lv) => arr.some(a => a.level === lv)
+  if (has('critical')) return 'text-[#f6465d]'
+  if (has('warning')) return 'text-[#f0b90b]'
+  return 'text-[#3370ff]'
+})
+
+// Unified marquee: priority = maintenance > critical ann > warning ann > unhealthy system > info ann > healthy
+const unifiedBarText = computed(() => {
+  if (maintenanceActive.value) {
+    return `⚠ 系统维护中${maintResumeText.value ? ` · ${maintResumeText.value}` : ''}${maintReason.value ? ` — ${maintReason.value}` : ''}`
+  }
+  const parts = []
+  if (announcementText.value) parts.push(`📢 ${announcementText.value}`)
+  parts.push(systemStatusText.value)
+  return parts.join('    ·    ')
+})
+const unifiedBarBgClass = computed(() => {
+  if (maintenanceActive.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  const arr = siteStatus.value.announcements || []
+  const has = (lv) => arr.some(a => a.level === lv)
+  if (has('critical')) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  if (has('warning')) return 'bg-[#f0b90b]/20 hover:bg-[#f0b90b]/30'
+  if (!systemHealthy.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  if (has('info')) return 'bg-[#3370ff]/20 hover:bg-[#3370ff]/30'
+  return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
+})
+const unifiedBarTextClass = computed(() => {
+  if (maintenanceActive.value) return 'text-[#f6465d] font-bold'
+  const arr = siteStatus.value.announcements || []
+  const has = (lv) => arr.some(a => a.level === lv)
+  if (has('critical')) return 'text-[#f6465d]'
+  if (has('warning')) return 'text-[#f0b90b]'
+  if (!systemHealthy.value) return 'text-[#f6465d]'
+  if (has('info')) return 'text-[#3370ff]'
+  return 'text-[#0ecb81]'
+})
 
 // System Status Modal
 const showSystemStatusModal = ref(false)

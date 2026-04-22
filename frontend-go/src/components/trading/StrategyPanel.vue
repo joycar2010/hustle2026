@@ -160,15 +160,15 @@
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpeningExecution"
-              :disabled="strategyStore.isLocked(`${type}_opening`)"
+              :disabled="maintenanceActive || strategyStore.isLocked(`${type}_opening`)"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                strategyStore.isLocked(`${type}_opening`) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (maintenanceActive || strategyStore.isLocked(`${type}_opening`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 continuousExecutionEnabled.opening
                   ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                   : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
-              :title="strategyStore.isLocked(`${type}_opening`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="maintenanceActive ? `系统维护中${maintenanceReason ? '（' + maintenanceReason + '）' : ''}，请稍后再试` : (strategyStore.isLocked(`${type}_opening`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : '')"
             >
               {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
             </button>
@@ -179,15 +179,15 @@
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosingExecution"
-              :disabled="strategyStore.isLocked(`${type}_closing`)"
+              :disabled="maintenanceActive || strategyStore.isLocked(`${type}_closing`)"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                strategyStore.isLocked(`${type}_closing`) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (maintenanceActive || strategyStore.isLocked(`${type}_closing`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 continuousExecutionEnabled.closing
                   ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                   : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
               ]"
-              :title="strategyStore.isLocked(`${type}_closing`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="maintenanceActive ? `系统维护中${maintenanceReason ? '（' + maintenanceReason + '）' : ''}，请稍后再试` : (strategyStore.isLocked(`${type}_closing`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : '')"
             >
               {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
             </button>
@@ -537,6 +537,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useStrategyStore } from '@/stores/strategy'
+import { useMaintenance } from '@/composables/useMaintenance.js'
 import api from '@/services/api'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 import { xauToLot } from '@/composables/useQuantityConverter'
@@ -646,6 +647,7 @@ function resetLadderFailures(type) {
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const strategyStore = useStrategyStore()
+const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
 
 // Local position refs — driven directly by marketStore.positionSnapshot (WebSocket position_snapshot)
 // Decoupled from MarketCards computed chain; updates whenever backend pushes a snapshot
