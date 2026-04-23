@@ -48,18 +48,27 @@ func GetSpread(c *gin.Context) {
 	var aBid, aAsk float64
 	switch pair.APlatformID {
 	case 1, 0: // Binance WS ticker (0 = legacy default)
-		aBid, aAsk, _ = GlobalTicks.Get(pair.BinanceSymbol)
+		aBid, aAsk, _ = GlobalTicks.Get(pair.ASymbol)
 		if aBid == 0 || aAsk == 0 {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("Binance data not ready for %s", pair.BinanceSymbol)})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("Binance data not ready for %s", pair.ASymbol)})
 			return
 		}
-	case 4: // Gate — REST poll (1s cached)
-		gt, err := GetGateTick(pair.BinanceSymbol)
-		if err != nil || gt.Bid == 0 || gt.Ask == 0 {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Gate data not ready for %s: %v", pair.BinanceSymbol, err)})
+	case 4: // Gate — WS ticker with REST fallback
+		aBid, aAsk, _ = GlobalTicks.Get(pair.ASymbol)
+		if aBid == 0 || aAsk == 0 {
+			gt, err := GetGateTick(pair.ASymbol)
+			if err != nil || gt.Bid == 0 || gt.Ask == 0 {
+				c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Gate data not ready for %s: %v", pair.ASymbol, err)})
+				return
+			}
+			aBid, aAsk = gt.Bid, gt.Ask
+		}
+	case 5: // OKX — WS ticker
+		aBid, aAsk, _ = GlobalTicks.Get(pair.ASymbol)
+		if aBid == 0 || aAsk == 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("OKX data not ready for %s", pair.ASymbol)})
 			return
 		}
-		aBid, aAsk = gt.Bid, gt.Ask
 	default:
 		c.JSON(http.StatusNotImplemented, gin.H{"error": fmt.Sprintf("A-side platform %d not supported for pair %s", pair.APlatformID, pair.PairCode)})
 		return
@@ -74,7 +83,7 @@ func GetSpread(c *gin.Context) {
 
 	now := time.Now().UnixMilli()
 	sd := SpreadData{PairCode: pairCode, Timestamp: now}
-	sd.BinanceQuote.Symbol = pair.BinanceSymbol
+	sd.BinanceQuote.Symbol = pair.ASymbol
 	sd.BinanceQuote.Bid = binanceBid
 	sd.BinanceQuote.Ask = binanceAsk
 	sd.BinanceQuote.Ts = now
@@ -98,13 +107,18 @@ func ComputeSpreadForPair(pair pairs.PairConfig) map[string]interface{} {
 	var ts int64
 	switch pair.APlatformID {
 	case 1, 0:
-		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.BinanceSymbol)
-	case 4:
-		gt, err := GetGateTick(pair.BinanceSymbol)
-		if err != nil {
-			return nil
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.ASymbol)
+	case 4: // Gate WS with REST fallback
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.ASymbol)
+		if binanceBid == 0 || binanceAsk == 0 {
+			gt, err := GetGateTick(pair.ASymbol)
+			if err != nil {
+				return nil
+			}
+			binanceBid, binanceAsk, ts = gt.Bid, gt.Ask, gt.Ts
 		}
-		binanceBid, binanceAsk, ts = gt.Bid, gt.Ask, gt.Ts
+	case 5: // OKX WS
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.ASymbol)
 	default:
 		return nil
 	}

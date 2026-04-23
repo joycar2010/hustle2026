@@ -1,0 +1,10 @@
+# Go build output — never commit binaries (they are 43MB and built from source)
+hustle-go
+hustle-go.bak*
+*.exe
+*.test
+*.out
+__debug_bin*
+server
+hustle-go.old
+hustle-go.prev

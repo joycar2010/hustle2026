@@ -7,15 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"hustle-go/internal/mt5config"
 	"hustle-go/internal/pairs"
 )
 
-// QuoteResponse is the Binance quote HTTP response
 type QuoteResponse struct {
 	Symbol    string  `json:"symbol"`
 	PairCode  string  `json:"pair_code,omitempty"`
@@ -25,10 +24,7 @@ type QuoteResponse struct {
 	Timestamp int64   `json:"timestamp"`
 }
 
-// GetBinanceQuote returns the latest Binance best bid/ask.
-// Accepts ?pair_code=XAU (default "XAU").
 func GetBinanceQuote(c *gin.Context) {
-	// Accept both ?pair= and ?pair_code= (Python client uses the former)
 	pairCode := c.Query("pair_code")
 	if pairCode == "" {
 		pairCode = c.DefaultQuery("pair", "XAU")
@@ -39,13 +35,13 @@ func GetBinanceQuote(c *gin.Context) {
 		return
 	}
 
-	bid, ask, ts := GlobalTicks.Get(pair.BinanceSymbol)
+	bid, ask, ts := GlobalTicks.Get(pair.ASymbol)
 	if bid == 0 || ask == 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("No data for %s", pair.BinanceSymbol)})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("No data for %s", pair.ASymbol)})
 		return
 	}
 	c.JSON(http.StatusOK, QuoteResponse{
-		Symbol:    pair.BinanceSymbol,
+		Symbol:    pair.ASymbol,
 		PairCode:  pairCode,
 		Bid:       bid,
 		Ask:       ask,
@@ -54,10 +50,7 @@ func GetBinanceQuote(c *gin.Context) {
 	})
 }
 
-// GetOrderBook returns best bid/ask with volume from both Binance and MT5/Bybit.
-// Accepts ?pair_code=XAU (default "XAU").
 func GetOrderBook(c *gin.Context) {
-	// Accept both ?pair= and ?pair_code= (Python client uses the former)
 	pairCode := c.Query("pair_code")
 	if pairCode == "" {
 		pairCode = c.DefaultQuery("pair", "XAU")
@@ -77,11 +70,11 @@ func GetOrderBook(c *gin.Context) {
 	ch := make(chan result, 2)
 
 	go func() {
-		data, err := getBinanceOrderBook(pair.BinanceSymbol)
+		data, err := getBinanceOrderBook(pair.ASymbol)
 		ch <- result{data: data, err: err, key: "binance"}
 	}()
 	go func() {
-		data, err := GetBybitOrderBook(pair.BinanceSymbol)
+		data, err := GetBybitOrderBook(pair.ASymbol)
 		ch <- result{data: data, err: err, key: "bybit"}
 	}()
 
@@ -126,10 +119,7 @@ func getBinanceOrderBook(symbol string) (map[string]interface{}, error) {
 	}, nil
 }
 
-// GetFundingRate returns Binance funding rate + per-lot cost.
-// Accepts ?pair_code=XAU (default "XAU").
 func GetFundingRate(c *gin.Context) {
-	// Accept both ?pair= and ?pair_code= (Python client uses the former)
 	pairCode := c.Query("pair_code")
 	if pairCode == "" {
 		pairCode = c.DefaultQuery("pair", "XAU")
@@ -148,7 +138,7 @@ func GetFundingRate(c *gin.Context) {
 		LastFundingRate string `json:"lastFundingRate"`
 		NextFundingTime int64  `json:"nextFundingTime"`
 	}
-	apiURL := fmt.Sprintf("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=%s", pair.BinanceSymbol)
+	apiURL := fmt.Sprintf("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=%s", pair.ASymbol)
 	if err := getJSON(ctx, apiURL, &resp); err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -156,7 +146,6 @@ func GetFundingRate(c *gin.Context) {
 	markPrice, _ := strconv.ParseFloat(resp.MarkPrice, 64)
 	rate, _ := strconv.ParseFloat(resp.LastFundingRate, 64)
 
-	// per-lot cost: conversion_factor * mark_price * rate
 	perLot := pair.ConversionFactor * markPrice * rate
 	c.JSON(http.StatusOK, gin.H{
 		"symbol":             resp.Symbol,
@@ -171,10 +160,7 @@ func GetFundingRate(c *gin.Context) {
 	})
 }
 
-// GetBybitSwapRate returns MT5 broker overnight swap rates.
-// Accepts ?pair_code=XAU (default "XAU").
 func GetBybitSwapRate(c *gin.Context) {
-	// Accept both ?pair= and ?pair_code= (Python client uses the former)
 	pairCode := c.Query("pair_code")
 	if pairCode == "" {
 		pairCode = c.DefaultQuery("pair", "XAU")
@@ -187,10 +173,8 @@ func GetBybitSwapRate(c *gin.Context) {
 
 	base := pair.BridgeURL
 	if base == "" {
-		base = os.Getenv("MT5_SERVICE_URL")
-	}
-	if base == "" {
-		base = "http://172.31.14.113:8887"
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no bridge URL configured for pair " + pairCode})
+		return
 	}
 	apiURL := base + "/mt5/symbol_info/" + url.PathEscape(pair.MT5Symbol)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
@@ -198,9 +182,7 @@ func GetBybitSwapRate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if k := os.Getenv("MT5_API_KEY"); k != "" {
-		req.Header.Set("X-Api-Key", k)
-	}
+	req.Header.Set("X-Api-Key", mt5config.BridgeAPIKey())
 	client := &http.Client{Timeout: 5 * time.Second}
 	httpResp, err := client.Do(req)
 	if err != nil {
