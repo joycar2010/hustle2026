@@ -259,7 +259,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useProxyStore } from '@/stores/proxy'
-import { PlatformId } from '@/constants/platform'
+import { PlatformId, isHedge } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
 import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
@@ -588,10 +588,11 @@ watch(() => marketStore.lastMessage, (message) => {
 // Atomically replaces both Bybit and Binance positions — no intermediate zero state, no flash.
 function handlePositionSnapshot(data) {
   if (!data) return
-  const longLots = data.bybit_long_lots ?? 0
-  const shortLots = data.bybit_short_lots ?? 0
-  const binanceLong = data.binance_long_xau ?? 0
-  const binanceShort = data.binance_short_xau ?? 0
+  const pairData = data.pairs?.[currentPair.value]
+  const longLots = pairData ? (pairData.mt5_long ?? 0) : (data.bybit_long_lots ?? 0)
+  const shortLots = pairData ? (pairData.mt5_short ?? 0) : (data.bybit_short_lots ?? 0)
+  const binanceLong = pairData ? (pairData.binance_long ?? 0) : (data.binance_long_xau ?? 0)
+  const binanceShort = pairData ? (pairData.binance_short ?? 0) : (data.binance_short_xau ?? 0)
   // Atomic swap: replace all arrays in one tick
   bybitLongPositions.value = longLots > 0 ? [{ size: longLots }] : []
   bybitShortPositions.value = shortLots > 0 ? [{ size: shortLots }] : []
@@ -630,7 +631,7 @@ function handleAccountBalanceUpdate(data) {
     reverseActualPosition.value = 0
 
     // Get first account's positions and aggregate fees from all accounts
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+    const bybitAccounts = data.accounts.filter(acc => isHedge(acc.platform_id))
     const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
 
     // Use first account's total_positions instead of aggregating
@@ -643,7 +644,7 @@ function handleAccountBalanceUpdate(data) {
 
     // Aggregate fees from all accounts
     data.accounts.forEach(account => {
-      if (account.platform_id === PlatformId.BYBIT) {
+      if (isHedge(account.platform_id)) {
         // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
         // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
       }
@@ -669,7 +670,7 @@ function handleAccountBalanceUpdate(data) {
         mark_price: position.mark_price || 0
       }
 
-      if (account.platform_id === PlatformId.BYBIT) {
+      if (isHedge(account.platform_id)) {
         if (position.side === 'Buy') newBybitLong.push(posData)
         else if (position.side === 'Sell') newBybitShort.push(posData)
       } else if (account.platform_id === PlatformId.BINANCE) {
@@ -810,7 +811,7 @@ async function fetchAccountData() {
       reverseActualPosition.value = 0
 
       // Get first account's positions and aggregate fees from all accounts
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+      const bybitAccounts = data.accounts.filter(acc => isHedge(acc.platform_id))
       const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
 
       // Use first account's total_positions instead of aggregating
@@ -823,7 +824,7 @@ async function fetchAccountData() {
 
       // Aggregate fees from all accounts
       data.accounts.forEach(account => {
-        if (account.platform_id === PlatformId.BYBIT) {
+        if (isHedge(account.platform_id)) {
           // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
           // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
         }
@@ -852,7 +853,7 @@ async function fetchAccountData() {
           mark_price: position.mark_price || 0
         }
 
-        if (account.platform_id === PlatformId.BYBIT) {
+        if (isHedge(account.platform_id)) {
           if (position.side === 'Buy') newBybitLong.push(posData)
           else if (position.side === 'Sell') newBybitShort.push(posData)
         } else if (account.platform_id === PlatformId.BINANCE) {

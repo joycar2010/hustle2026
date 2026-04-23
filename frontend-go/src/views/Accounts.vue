@@ -389,9 +389,10 @@ async function fetchAccounts() {
 
 function getPlatformName(platformId, isMt5Account) {
   if (platformId === 1) return '主账号'
-  if (platformId === 2) {
-    return '对冲账户'
-  }
+  if (platformId === 2) return '对冲账户'
+  if (platformId === 3) return 'IC Markets 对冲'
+  if (platformId === 4) return 'Gate.io'
+  if (platformId === 5) return 'OKX'
   return 'Unknown'
 }
 

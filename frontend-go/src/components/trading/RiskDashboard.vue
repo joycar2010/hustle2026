@@ -68,7 +68,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
-import { PlatformId } from '@/constants/platform'
+import { PlatformId, isHedge } from '@/constants/platform'
 
 const marketStore = useMarketStore()
 
@@ -120,7 +120,7 @@ async function fetchRiskData() {
 
     // Extract risk data from aggregated account data
     const binanceAccounts = data.accounts?.filter(acc => acc.platform_id === PlatformId.BINANCE) || []
-    const bybitAccounts = data.accounts?.filter(acc => acc.platform_id === PlatformId.BYBIT) || []
+    const bybitAccounts = data.accounts?.filter(acc => isHedge(acc.platform_id)) || []
 
     // Calculate total equity for each platform
     const binanceEquity = binanceAccounts.reduce((sum, acc) =>

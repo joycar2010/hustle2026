@@ -199,7 +199,7 @@ let fallbackTimer = null
 
 const timeRanges = [
   { label: '15分钟', val: '15m' }, { label: '1小时', val: '1h' },
-  { label: '6小时', val: '6h' }, { label: '1天', val: '1d' }, { label: '7天', val: '7d' },
+  { label: '6小时', val: '6h' }, { label: '1天', val: '1d' }, { label: '2天', val: '2d' },
 ]
 const directions = [
   { label: '全部', val: 'all' }, { label: '正套', val: 'forward' }, { label: '反套', val: 'reverse' },
@@ -322,7 +322,7 @@ const statCards = computed(() => {
     const hours = Math.max(rs.length * 0.5 / 3600, 0.01) // WS: ~2 per sec, History: varies
     if (historyData.value.length) {
       // Use actual time span from history
-      const rangeMap = { '15m': 0.25, '1h': 1, '6h': 6, '1d': 24, '7d': 168 }
+      const rangeMap = { '15m': 0.25, '1h': 1, '6h': 6, '1d': 24, '2d': 48 }
       const h = rangeMap[activeRange.value] || 1
       freqStr = (opps / h).toFixed(1)
     } else {
@@ -409,7 +409,7 @@ function selectPair(pc) {
 function setRange(val) {
   activeRange.value = val
   currentPage.value = 1
-  const map = { '15m': 15, '1h': 60, '6h': 360, '1d': 1440, '7d': 10080 }
+  const map = { '15m': 15, '1h': 60, '6h': 360, '1d': 1440, '2d': 2880 }
   startTime.value = dayjs().subtract(map[val], 'minute').format('YYYY-MM-DDTHH:mm')
   endTime.value = dayjs().format('YYYY-MM-DDTHH:mm')
   fetchHistory(1)

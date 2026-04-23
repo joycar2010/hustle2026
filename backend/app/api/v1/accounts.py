@@ -576,6 +576,7 @@ async def get_account_pnl(
 
 @router.get("/dashboard/aggregated")
 async def get_aggregated_dashboard(
+    include_inactive: bool = False,
     ctx: ViewContext = Depends(get_view_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -631,19 +632,24 @@ async def get_aggregated_dashboard(
     try:
         aggregated_data = await account_data_service.get_aggregated_account_data(list(active_accounts))
 
-        # Add inactive accounts to the response
-        inactive_accounts = [acc for acc in accounts if not acc.is_active]
-        for inactive_acc in inactive_accounts:
-            aggregated_data.setdefault("failed_accounts", []).append({
-                "account_id": str(inactive_acc.account_id),
-                "account_name": inactive_acc.account_name,
-                "platform_id": inactive_acc.platform_id,
-                "is_mt5_account": inactive_acc.is_mt5_account,
-                "is_active": False,
-                "account_role": inactive_acc.account_role,
-                "proxy_config": inactive_acc.proxy_config,
-                "error": "账户未激活"
-            })
+        # Add inactive accounts to the response ONLY when explicitly requested
+        # (admin pages). For regular user dashboards the disabled accounts should
+        # never leak into failed_accounts because the frontend merges that list
+        # into the account sidebar — and a disabled account has no business being
+        # rendered next to live trading accounts.
+        if include_inactive:
+            inactive_accounts = [acc for acc in accounts if not acc.is_active]
+            for inactive_acc in inactive_accounts:
+                aggregated_data.setdefault("failed_accounts", []).append({
+                    "account_id": str(inactive_acc.account_id),
+                    "account_name": inactive_acc.account_name,
+                    "platform_id": inactive_acc.platform_id,
+                    "is_mt5_account": inactive_acc.is_mt5_account,
+                    "is_active": False,
+                    "account_role": inactive_acc.account_role,
+                    "proxy_config": inactive_acc.proxy_config,
+                    "error": "账户未激活"
+                })
 
         # Sub-account projection: scale every whitelisted monetary field
         # (total_assets, available_balance, unrealized_pnl, daily_pnl, ...)

@@ -18,6 +18,7 @@ export const PlatformId = Object.freeze({
   BYBIT: 2,
   IC_MARKETS: 3,
   GATE: 4,
+  OKX: 5,
 });
 
 const _ID_TO_KEY = Object.freeze({
@@ -25,6 +26,7 @@ const _ID_TO_KEY = Object.freeze({
   [PlatformId.BYBIT]: 'bybit',
   [PlatformId.IC_MARKETS]: 'ic_markets',
   [PlatformId.GATE]: 'gate',
+  [PlatformId.OKX]: 'okx',
 });
 
 const _KEY_TO_ID = Object.freeze({
@@ -37,6 +39,7 @@ const _KEY_TO_ID = Object.freeze({
   gate: PlatformId.GATE,
   gate_io: PlatformId.GATE,
   gateio: PlatformId.GATE,
+  okx: PlatformId.OKX,
 });
 
 /** Return the canonical lowercase key (matches backend orders.platform / platforms.platform_name). */
@@ -65,6 +68,7 @@ export const PLATFORM_DISPLAY = Object.freeze({
   [PlatformId.BYBIT]: '对冲账户',
   [PlatformId.IC_MARKETS]: '对冲账户',
   [PlatformId.GATE]: 'Gate',
+  [PlatformId.OKX]: 'OKX',
 });
 
 export const isBinance = (pid) => pid === PlatformId.BINANCE;

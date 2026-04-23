@@ -164,7 +164,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
-import { PlatformId } from '@/constants/platform'
+import { PlatformId, isHedge } from '@/constants/platform'
 
 const marketStore = useMarketStore()
 
@@ -290,8 +290,8 @@ async function fetchDashboardData() {
           sum + (acc.positions?.length || 0), 0)
       }
 
-      // Find Bybit accounts (platform_id === 2)
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+      // Find hedge accounts (Bybit / IC Markets / ...)
+      const bybitAccounts = data.accounts.filter(acc => isHedge(acc.platform_id))
       if (bybitAccounts.length > 0) {
         accounts.value.bybit.balance = bybitAccounts.reduce((sum, acc) =>
           sum + (acc.balance?.total_assets || 0), 0)

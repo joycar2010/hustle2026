@@ -126,13 +126,13 @@
               {{ getDisplayValue(account, 'risk_ratio', false, true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === PlatformId.BYBIT" class="flex justify-between">
+          <div v-if="isHedge(account.platform_id)" class="flex justify-between">
             <span class="text-gray-400">手续费(佣金)</span>
             <span class="font-mono" :class="getValueColor(account, 'commission_fee')">
               {{ getDisplayValue(account, 'commission_fee', true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === PlatformId.BYBIT" class="flex justify-between">
+          <div v-if="isHedge(account.platform_id)" class="flex justify-between">
             <span class="text-gray-400">MT5过夜费</span>
             <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
               {{ getDisplayValue(account, 'funding_fee', true) }}
@@ -175,7 +175,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
-import { PlatformId } from '@/constants/platform'
+import { PlatformId, isHedge } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
 
 const marketStore = useMarketStore()
@@ -289,23 +289,10 @@ async function fetchAccountData() {
       })))
     }
 
-    if (data.failed_accounts && data.failed_accounts.length > 0) {
-      for (const failedAcc of data.failed_accounts) {
-        allAccounts.push({
-          account_id: failedAcc.account_id,
-          account_name: failedAcc.account_name,
-          platform_id: failedAcc.platform_id || 0,
-          is_mt5_account: failedAcc.is_mt5_account || false,
-          is_active: failedAcc.is_active !== undefined ? failedAcc.is_active : true,
-          balance: {
-            total_assets: 0, available_balance: 0, net_assets: 0,
-            margin_balance: 0, frozen_assets: 0, total_positions: 0,
-            daily_pnl: 0, funding_fee: 0, risk_ratio: 0
-          },
-          error: failedAcc.error
-        })
-      }
-    }
+    // NOTE: data.failed_accounts is intentionally NOT merged into the active
+    // account list. The backend emits it only for admin (include_inactive=true)
+    // or for transient fetch errors; either way those accounts must not show up
+    // in the regular user sidebar. Errors surface via notificationStore below.
 
     // ★ aggregated API 已包含MT5余额数据，直接渲染
     activeAccounts.value = allAccounts
@@ -480,6 +467,8 @@ function getPlatformName(platformId, isMt5Account) {
   if (platformId === 1) return '主账号'
   if (platformId === 2) return isMt5Account ? '对冲账户' : '对冲账户'
   if (platformId === 3) return 'IC Markets'
+  if (platformId === 4) return 'Gate.io'
+  if (platformId === 5) return 'OKX'
   return '无角色'
 }
 
@@ -524,7 +513,7 @@ function formatNumber(num) {
 function getRiskColor(account) {
   if (account.error || !account.balance) return 'text-gray-400'
   const ratio = account.balance.risk_ratio || 0
-  if (account.platform_id === PlatformId.BYBIT && account.is_mt5_account) {
+  if (account.is_mt5_account) {
     if (ratio === 0) return 'text-gray-400'
     if (ratio < 50) return 'text-[#f6465d]'
     if (ratio < 100) return 'text-[#f0b90b]'
@@ -623,7 +612,7 @@ function syncLiquidationPricesToStore(accounts) {
       strategyStore.setLiquidationPrices('binance', longLiq, shortLiq)
     }
 
-    if (acc.platform_id === PlatformId.BYBIT && acc.is_mt5_account) {
+    if (acc.is_mt5_account && isHedge(acc.platform_id)) {
       // 对冲账户 MT5
       const longLiq  = b.long_liquidation_price  > 0 ? b.long_liquidation_price  : null
       const shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null
