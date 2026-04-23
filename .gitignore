@@ -30,3 +30,8 @@ frontend-auto/dist/
 # IDE
 .vscode/
 .idea/
+
+# Ad-hoc numbered backups
+*.bak2
+*.bak3
+*.bak4

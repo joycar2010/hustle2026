@@ -2568,6 +2568,8 @@ async function saveDeploy() {
     '配置 MT5 登录信息',
     '部署 Bridge 服务代码',
     '注册 NSSM Windows 服务',
+    '配置崩溃自动重启策略',
+    '绑定 MT5WindowsAgent 启动依赖',
     '启动 Bridge 服务',
     '创建桌面快捷方式',
     '添加防火墙入站规则',
@@ -2586,7 +2588,7 @@ async function saveDeploy() {
     stepDone(1)
 
     // Steps 2-8: Agent 内部完成，模拟进度
-    for (let i = 2; i <= 8; i++) {
+    for (let i = 2; i <= 10; i++) {
       stepRun(i); await new Promise(r => setTimeout(r, 400)); stepDone(i)
     }
 

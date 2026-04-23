@@ -1138,15 +1138,22 @@ class AccountDataService:
                         logger.warning(f"MT5 client lookup failed for {account_id_str}: {e}")
 
                     mt5_http = MT5HttpClient(base_url=bridge_url)
-                    async def _noop_pnl():
-                        return 0
-                    _bybit_pnl_coro = self.get_bybit_daily_pnl(account.api_key, account.api_secret, account_type, proxy_url=proxy_url) if account.api_key else _noop_pnl()
-                    mt5_info, mt5_positions_raw, mt5_deals_raw, daily_pnl = await asyncio.gather(
+                    # MT5 账户 daily_pnl 由 Bridge 数据（_realized_pnl + _floating_pnl）计算，
+                    # 不再调用 Bybit get_bybit_daily_pnl，避免账户 socks5 代理故障导致整体拉取失败。
+                    # return_exceptions=True: 任一路失败不拖垮整条数据拉取，单路错误降级为 None/[]。
+                    _mt5_results = await asyncio.gather(
                         mt5_http.get_account_info(),
                         mt5_http.get_positions(),
                         mt5_http.get_deals_history(),
-                        _bybit_pnl_coro,
+                        return_exceptions=True,
                     )
+                    mt5_info = _mt5_results[0] if not isinstance(_mt5_results[0], Exception) else None
+                    mt5_positions_raw = _mt5_results[1] if not isinstance(_mt5_results[1], Exception) else []
+                    mt5_deals_raw = _mt5_results[2] if not isinstance(_mt5_results[2], Exception) else []
+                    for _idx, _name in enumerate(("account_info", "positions", "deals_history")):
+                        if isinstance(_mt5_results[_idx], Exception):
+                            logger.warning(f"MT5 bridge {_name} failed for {account_id_str} via {bridge_url}: {_mt5_results[_idx]}")
+                    daily_pnl = 0.0
                     # Convert MT5 Bridge response to AccountBalance
                     if mt5_info:
                         # 从仓位列表统计总持仓手数和浮动盈亏

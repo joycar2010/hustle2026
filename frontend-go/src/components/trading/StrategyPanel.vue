@@ -449,10 +449,15 @@
           </div>
         </div>
 
-        <!-- Save Strategy Button -->
+        <!-- Save Strategy Button (red for reverse arbitrage, yellow for forward) -->
         <button
           @click="saveStrategy"
-          class="w-full mt-2 px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
+          :class="[
+            'w-full mt-2 px-3 py-1.5 rounded font-bold transition-colors text-xs',
+            type === 'reverse'
+              ? 'bg-[#f6465d] text-white hover:bg-[#d73848]'
+              : 'bg-[#f0b90b] text-[#1a1d21] hover:bg-[#e0a800]'
+          ]"
         >
           保存策略
         </button>
@@ -1346,7 +1351,7 @@ async function saveConfig() {
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
     }
 
-    const response = await api.put(`/api/v1/strategies/configs/${props.type}`, configData)
+    const response = await api.post('/api/v1/strategies/configs/upsert', { ...configData, pair_code: currentPair.value })
     configId.value = response.data.config_id
     notificationStore.showStrategyNotification('配置保存成功！', 'success')
   } catch (error) {

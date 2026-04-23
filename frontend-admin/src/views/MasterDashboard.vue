@@ -197,6 +197,26 @@
             <div class="flex justify-between"><span>内存</span><span class="font-mono text-text-secondary">{{ mt5System.memory || '--' }}</span></div>
             <div class="flex justify-between"><span>实例</span><span class="font-mono text-text-secondary">{{ mt5System.instances ?? '--' }}</span></div>
           </div>
+          <!-- Agent + Bridges (mt5-infra) -->
+          <div v-if="mt5Infra.bridges?.total" class="mt-2 pt-1.5 border-t border-border-secondary text-[10px]">
+            <div class="flex justify-between text-text-tertiary mb-1">
+              <span>Agent</span>
+              <span>
+                <span :class="mt5Infra.reachable ? 'text-green-400' : 'text-red-400'">{{ mt5Infra.reachable ? (mt5Infra.status === 'ok' ? '正常' : '降级') : '不可达' }}</span>
+                <span class="text-text-tertiary ml-1.5 font-mono">{{ fmtUptime(mt5Infra.uptime_seconds) }}</span>
+              </span>
+            </div>
+            <div class="flex justify-between text-text-tertiary mb-1">
+              <span>Bridges</span>
+              <span :class="mt5Infra.bridges.alive === mt5Infra.bridges.total ? 'text-green-400' : 'text-red-400'">{{ mt5Infra.bridges.alive }}/{{ mt5Infra.bridges.total }} 活跃</span>
+            </div>
+            <div class="grid grid-cols-2 gap-x-2 gap-y-0.5">
+              <div v-for="b in mt5Infra.bridges.detail" :key="b.service" class="flex items-center justify-between">
+                <span class="truncate text-text-tertiary" :title="b.service">:{{ b.port }}</span>
+                <div :class="['w-1.5', 'h-1.5', 'rounded-full', b.state === 'running' || b.state === 'paused' ? 'bg-green-500' : 'bg-red-500']"></div>
+              </div>
+            </div>
+          </div>
           <!-- MT5 client list -->
           <div v-if="monitorData.mt5_clients?.length" class="mt-2 pt-1.5 border-t border-border-secondary space-y-1">
             <div v-for="c in monitorData.mt5_clients" :key="c.mt5_login" class="flex items-center justify-between text-[10px]">
@@ -364,6 +384,7 @@ const lastUpdate = ref('--')
 
 const goStatus = ref({ online: false, uptime: '', memory: '', redis: false })
 const mt5System = ref({ online: false })
+const mt5Infra = ref({ reachable: false, status: null, uptime_seconds: 0, instances: { running: 0, total: 0 }, bridges: { alive: 0, total: 0, detail: [] } })
 const stats = ref({ wsConnections: 0, totalUsers: 0, activeAccounts: 0, totalPositions: 0 })
 const allAccounts = ref([])
 const userFinancials = ref([])
@@ -506,6 +527,21 @@ async function fetchMT5Status() {
   } catch { mt5System.value = { online: false } }
 }
 
+async function fetchMT5Infra() {
+  try {
+    const r = await api.get('/api/v1/mt5-infra/status')
+    mt5Infra.value = r.data || mt5Infra.value
+  } catch { mt5Infra.value = { ...mt5Infra.value, reachable: false } }
+}
+
+function fmtUptime(sec) {
+  if (!sec || sec < 1) return '--'
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return d + 'd' + h + 'h'
+  if (h > 0) return h + 'h' + m + 'm'
+  return m + 'm'
+}
+
 async function fetchStats() {
   try {
     const r = await api.get('/api/v1/ws/stats')
@@ -584,7 +620,7 @@ async function fetchHedgingPairs() {
 
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchProxyAccounts(), fetchHedgingPairs()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   refreshing.value = false
 }

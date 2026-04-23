@@ -1545,8 +1545,8 @@ async def close_short_position(
                 side="BUY",
                 position_side="SHORT",
                 order_type="LIMIT",
-                quantity=str(req.quantity),
-                price=str(price),
+                quantity=float(req.quantity),
+                price=price,
             )
         else:  # bybit / MT5 hedge — iterate over tickets to avoid 10014
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
@@ -1627,8 +1627,8 @@ async def close_long_position(
                 side="SELL",
                 position_side="LONG",
                 order_type="LIMIT",
-                quantity=str(req.quantity),
-                price=str(price),
+                quantity=float(req.quantity),
+                price=price,
             )
         else:  # bybit / MT5 hedge — iterate over tickets to avoid 10014
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
