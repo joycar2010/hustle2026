@@ -132,6 +132,28 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
     })
     decision_id = res.scalar_one()
     await db.execute(text('UPDATE agent_state SET last_decision_at=NOW() WHERE id=1'))
+
+    # Auto-create proposal record for non-noop decisions (independent audit trail)
+    if proposal_dict.get('action') not in (None, 'noop'):
+        try:
+            await db.execute(text("""
+                INSERT INTO agent_proposals
+                    (created_at, target_id, scope_user_id, scope_pair_code, title, description,
+                     status, source_decision_id, proposal_snapshot)
+                VALUES (now(), :tid, :uid, :pc,
+                        :title, :desc, :status, :did, CAST(:snap AS JSONB))
+            """), {
+                'tid': ctx.target_id if ctx else None,
+                'uid': str(ctx.user_id) if ctx else None,
+                'pc': ctx.pair_code if ctx else None,
+                'title': f"{proposal_dict.get('action', 'unknown')} {ctx.pair_code if ctx else 'XAU'}",
+                'desc': proposal_dict.get('reason', ''),
+                'status': verdict,
+                'did': decision_id,
+                'snap': json.dumps(proposal_dict),
+            })
+        except Exception as _pe:
+            logger.warning(f'[decider] auto-proposal insert failed: {_pe}')
     await db.commit()
     # Live-push to admins subscribed to agent.decisions
     try:

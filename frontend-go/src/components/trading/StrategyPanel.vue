@@ -371,7 +371,7 @@
                     'w-5 h-5 rounded text-xs font-bold flex items-center justify-center transition-colors',
                     config.ladders.length >= 5
                       ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                      : 'bg-[#f0b90b] text-[#1a1d21] hover:bg-[#e0a800]'
+                      : 'bg-[#f6465d] text-white hover:bg-[#d73848]'
                   ]"
                   title="添加阶梯"
                 >
@@ -456,7 +456,7 @@
             'w-full mt-2 px-3 py-1.5 rounded font-bold transition-colors text-xs',
             type === 'reverse'
               ? 'bg-[#f6465d] text-white hover:bg-[#d73848]'
-              : 'bg-[#f0b90b] text-[#1a1d21] hover:bg-[#e0a800]'
+              : 'bg-[#f6465d] text-white hover:bg-[#d73848]'
           ]"
         >
           保存策略

@@ -3,10 +3,20 @@
     <!-- Header + filters -->
     <div class="bg-dark-100 rounded-xl p-4 border border-border-primary flex flex-wrap justify-between items-center gap-3">
       <div>
-        <h2 class="font-semibold">策略提议中心</h2>
-        <div class="text-xs text-text-tertiary mt-1">
-          已加载 {{ items.length }} 条 · Codex/操作员发起的配置变更，批准后写入
-          <span class="font-mono">agent_active_config</span> / <span class="font-mono">agent_target_config</span>
+        <h2 class="font-semibold flex items-center gap-2">
+          策略提议中心
+          <span v-if="proposalStats.pending > 0" class="px-2 py-0.5 rounded text-[10px] bg-blue-900/30 text-blue-400 animate-pulse">
+            {{ proposalStats.pending }} 待审批
+          </span>
+        </h2>
+        <div class="text-xs text-text-tertiary mt-1 flex items-center gap-3">
+          <span>已加载 {{ items.length }} 条</span>
+          <span class="text-text-tertiary">·</span>
+          <span class="text-success">✓ {{ proposalStats.approved }}</span>
+          <span class="text-danger">✕ {{ proposalStats.rejected }}</span>
+          <span class="text-warning">↺ {{ proposalStats.rolled_back }}</span>
+          <span class="text-text-tertiary">·</span>
+          <span>批准后写入 <span class="font-mono">agent_active_config</span> / <span class="font-mono">agent_target_config</span></span>
         </div>
       </div>
       <div class="flex flex-wrap gap-2 text-xs items-center">
@@ -121,6 +131,21 @@
                 <div>
                   <div class="text-text-tertiary text-[10px] mb-1">RATIONALE</div>
                   <div class="text-text-primary text-xs whitespace-pre-wrap leading-relaxed">{{ p.rationale || '(空)' }}</div>
+                </div>
+
+                <!-- LLM Proposal Detail (if linked to decision) -->
+                <div v-if="p.source_decision_id" class="bg-dark-300 rounded-lg p-3 border border-border-primary">
+                  <div class="text-text-tertiary text-[10px] mb-2">来源决策 #{{ p.source_decision_id }}</div>
+                  <div v-if="p.proposal_snapshot" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                    <div><span class="text-text-tertiary">动作:</span> <span class="font-mono text-primary">{{ p.proposal_snapshot?.action }}</span></div>
+                    <div><span class="text-text-tertiary">腿:</span> <span class="font-mono">{{ p.proposal_snapshot?.leg }}</span></div>
+                    <div><span class="text-text-tertiary">数量:</span> <span class="font-mono">{{ p.proposal_snapshot?.qty }}</span></div>
+                    <div><span class="text-text-tertiary">置信度:</span>
+                      <span class="font-mono" :class="(p.proposal_snapshot?.confidence || 0) > 0.5 ? 'text-success' : 'text-warning'">
+                        {{ ((p.proposal_snapshot?.confidence || 0) * 100).toFixed(0) }}%
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Config diff card grid -->
@@ -244,6 +269,17 @@ const newProp = ref({
   est_position_pct: null, json_err: null,
 })
 
+const proposalStats = ref({ pending: 0, approved: 0, rejected: 0, rolled_back: 0 })
+function updateStats() {
+  const all = items.value
+  proposalStats.value = {
+    pending: all.filter(p => p.status === 'pending').length,
+    approved: all.filter(p => p.status === 'approved').length,
+    rejected: all.filter(p => p.status === 'rejected').length,
+    rolled_back: all.filter(p => p.status === 'rolled_back').length,
+  }
+}
+
 function fmtTime(t) { return dayjs(t).format('MM-DD HH:mm') }
 function toggle(id) { expanded.value = expanded.value === id ? null : id }
 function statusBadge(s) {
@@ -308,6 +344,7 @@ async function reload() {
     items.value = r.data?.items || []
     nextCursor.value = r.data?.next_cursor ?? null
     hasMore.value = !!r.data?.has_more
+    updateStats()
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
