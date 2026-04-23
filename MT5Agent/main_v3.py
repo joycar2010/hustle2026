@@ -108,6 +108,8 @@ class BridgeDeployRequest(BaseModel):
     mt5_path: str
     service_port: int
     api_key: str = "OQ6bUimHZDmXEZzJKE"
+    symbols: list = []  # 产品列表，用于配置 Market Watch 和图表
+    mt5_template_path: str = ""  # 平台 MT5 模板目录路径（含 terminal64.exe），空则从 mt5_path 推断
 
 # ====================== 数据库连接 ======================
 def get_db_connection():
@@ -141,7 +143,9 @@ def load_instances_from_db() -> Dict:
                 mt5_login,
                 mt5_password,
                 mt5_server,
-                password_type
+                password_type,
+                mt5_path,
+                bridge_service_port
             FROM mt5_clients
             WHERE agent_instance_name IS NOT NULL
             AND is_active = true
@@ -152,14 +156,19 @@ def load_instances_from_db() -> Dict:
 
         for row in rows:
             instance_name = row['agent_instance_name']
-            # 根据agent_instance_name确定MT5路径
-            if instance_name == 'bybit_system_service':
-                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
-            elif instance_name == 'mt5-01':
-                mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"
-            else:
-                # 默认路径
-                mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+            # 优先使用 DB 中的 mt5_path
+            mt5_path = row.get('mt5_path')
+            if not mt5_path:
+                # 兜底：根据 instance_name 猜测路径
+                if instance_name == 'bybit_system_service':
+                    mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+                elif instance_name == 'mt5-01':
+                    mt5_path = "D:\\MetaTrader 5-01\\terminal64.exe"
+                elif row.get('bridge_service_port'):
+                    # 新部署的实例路径格式
+                    mt5_path = f"D:\\MetaTrader 5-{row['bridge_service_port']}\\terminal64.exe"
+                else:
+                    mt5_path = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 
             instances[instance_name] = {
                 "name": row['client_name'],
@@ -599,14 +608,215 @@ def debug_processes():
     return {"processes": processes, "count": len(processes)}
 
 
+AGENT_START_TS = time.time()
+# Service name → uvicorn listen port. Authoritative source for /health checks.
+# Built-in defaults; dynamically deployed bridges are merged in from
+# C:\MT5Agent\bridge_ports.json on startup and on every /bridge/deploy call.
+_DEFAULT_BRIDGE_SERVICE_PORTS = {
+    "hustle-mt5-mt5-by01":  8001,
+    "hustle-mt5-mt5-by02":  8002,
+    "hustle-mt5-mt5-by03":  8003,
+    "hustle-mt5-mt5-ic01":  8021,
+    "hustle-mt5-mt5-ic02":  8022,
+    "hustle-mt5-mt5-bysys": 8886,
+    "hustle-mt5-mt5-icsys": 8888,
+}
+BRIDGE_PORTS_FILE = Path("C:/MT5Agent/bridge_ports.json")
+
+
+def _load_persisted_bridge_ports() -> Dict[str, int]:
+    """Merge built-in defaults with any persisted bridge → port mapping.
+    Never throws; returns at least the built-in defaults.
+    """
+    merged = dict(_DEFAULT_BRIDGE_SERVICE_PORTS)
+    try:
+        if BRIDGE_PORTS_FILE.exists():
+            with open(BRIDGE_PORTS_FILE, "r", encoding="utf-8") as f:
+                extra = json.load(f) or {}
+            # Only accept str → int entries; ignore anything else
+            for k, v in extra.items():
+                try:
+                    merged[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    continue
+    except Exception as e:
+        logger.warning(f"bridge_ports.json load failed: {e}")
+    return merged
+
+
+def _persist_bridge_port(service_name: str, port: int):
+    """Upsert {service_name: port} into BRIDGE_PORTS_FILE and refresh the
+    module-level BRIDGE_SERVICE_PORTS so /health picks it up immediately."""
+    global BRIDGE_SERVICE_PORTS, BRIDGE_SERVICES, BRIDGE_PORTS
+    data = {}
+    try:
+        if BRIDGE_PORTS_FILE.exists():
+            with open(BRIDGE_PORTS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+    except Exception:
+        data = {}
+    data[service_name] = int(port)
+    try:
+        BRIDGE_PORTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(BRIDGE_PORTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"bridge_ports.json write failed: {e}")
+    BRIDGE_SERVICE_PORTS = _load_persisted_bridge_ports()
+    BRIDGE_SERVICES = list(BRIDGE_SERVICE_PORTS.keys())
+    BRIDGE_PORTS = list(BRIDGE_SERVICE_PORTS.values())
+
+
+def _harden_bridge_service(service_name: str):
+    """Apply the two Windows-level self-heal policies to a bridge service:
+      1. sc failure: 30s/60s/120s exponential restart on crash (reset 24h).
+      2. sc depend= MT5WindowsAgent: Agent starts first, bridges follow.
+    Both are idempotent — safe to re-run on redeployment. Errors are logged
+    but do not abort deployment; an unhardened service still runs, just
+    without the automatic recovery net.
+    """
+    cmds = [
+        ["sc.exe", "failure", service_name,
+         "reset=", "86400",
+         "actions=", "restart/30000/restart/60000/restart/120000"],
+        ["sc.exe", "failureflag", service_name, "1"],
+        ["sc.exe", "config", service_name, "depend=", "MT5WindowsAgent"],
+    ]
+    for cmd in cmds:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode != 0:
+                logger.warning(f"hardening cmd failed: {' '.join(cmd)} → {r.stderr.strip() or r.stdout.strip()}")
+        except Exception as e:
+            logger.warning(f"hardening cmd error: {' '.join(cmd)} → {e}")
+
+
+BRIDGE_SERVICE_PORTS = _load_persisted_bridge_ports()
+BRIDGE_SERVICES = list(BRIDGE_SERVICE_PORTS.keys())
+BRIDGE_PORTS = list(BRIDGE_SERVICE_PORTS.values())
+
+
+def _query_bridge_services_status():
+    """Query SCM state for each bridge service via sc.exe — runs in parallel."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _one(svc):
+        entry = {"service": svc, "state": "unknown", "pid": None}
+        try:
+            proc = subprocess.run(
+                ["sc.exe", "query", svc],
+                capture_output=True, text=True, timeout=1.5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            for line in (proc.stdout or "").splitlines():
+                line_s = line.strip()
+                if line_s.startswith("STATE"):
+                    parts = line_s.split()
+                    if len(parts) >= 4:
+                        entry["state"] = parts[3].lower()
+                elif line_s.startswith("PID"):
+                    parts = line_s.split()
+                    if len(parts) >= 3:
+                        try:
+                            entry["pid"] = int(parts[2])
+                        except ValueError:
+                            pass
+        except Exception as e:
+            entry["error"] = str(e)
+        return entry
+
+    with ThreadPoolExecutor(max_workers=len(BRIDGE_SERVICES)) as ex:
+        return list(ex.map(_one, BRIDGE_SERVICES))
+
+
+def _listening_bridge_ports():
+    """Probe which bridge ports are actually reachable on localhost.
+    Direct TCP connect is reliable across sessions/privileges; we run them
+    in parallel so a single /health call stays well under 1 second."""
+    import socket as _socket
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _probe(port):
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.settimeout(0.3)
+        try:
+            s.connect(("127.0.0.1", port))
+            return port
+        except Exception:
+            return None
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+    with ThreadPoolExecutor(max_workers=len(BRIDGE_PORTS)) as ex:
+        results = list(ex.map(_probe, BRIDGE_PORTS))
+    return sorted([p for p in results if p is not None])
+
+
 @app.get("/health")
 def health_check():
-    """健康检查"""
+    """
+    Health & infra snapshot — no API key required so external monitors
+    (scheduled task, admin backend) can poll cheaply.
+    Returns: agent status, uptime, managed MT5 instances summary,
+    7 bridge service states, listening bridge ports.
+    """
+    now = time.time()
+    uptime_s = int(now - AGENT_START_TS)
+
+    # MT5 instance counts — cheap, read from loaded instances
+    total_inst = 0
+    running_inst = 0
+    try:
+        instances = load_instances()
+        total_inst = len(instances)
+        for _n, cfg in instances.items():
+            if controller.is_instance_running(cfg.get("path", "")):
+                running_inst += 1
+    except Exception as e:
+        logger.warning(f"/health instances probe failed: {e}")
+
+    bridges = _query_bridge_services_status()
+    # Treat both Running (4) and Paused (7) as "alive" — Paused is the standard
+    # operating state under our nssm+Agent setup; uvicorn keeps serving requests.
+    bridge_alive = sum(1 for b in bridges if b["state"] in ("running", "paused"))
+    bridge_running = sum(1 for b in bridges if b["state"] == "running")
+    bridge_paused = sum(1 for b in bridges if b["state"] == "paused")
+    bridge_stopped = sum(1 for b in bridges if b["state"] == "stopped")
+    # Local TCP probe is unreliable from this nssm-launched service context
+    # (loopback connect blocked under some Windows session isolation), so we
+    # rely on SCM state as the source of truth here. The external healthcheck
+    # task (running as Administrator) does the real port probing.
+    listening = []
+    for b in bridges:
+        port = BRIDGE_SERVICE_PORTS.get(b["service"])
+        b["port"] = port
+
+    agent_ok = True  # reached here → process alive
+    overall_ok = agent_ok and bridge_alive == len(BRIDGE_SERVICES)
+
     return {
-        "status": "ok",
+        "status": "ok" if overall_ok else "degraded",
         "agent": "MT5 Windows Agent V3",
         "version": "3.0.0",
-        "session": os.environ.get("SESSIONNAME", "Unknown")
+        "session": os.environ.get("SESSIONNAME", "Unknown"),
+        "uptime_seconds": uptime_s,
+        "timestamp": int(now),
+        "instances": {
+            "total": total_inst,
+            "running": running_inst,
+        },
+        "bridges": {
+            "total": len(BRIDGE_SERVICES),
+            "alive": bridge_alive,
+            "running": bridge_running,
+            "paused": bridge_paused,
+            "stopped": bridge_stopped,
+            "listening_ports": listening,
+            "detail": bridges,
+        },
     }
 
 @app.get("/instances", response_model=List[InstanceStatus], dependencies=[Depends(verify_api_key)])
@@ -733,138 +943,204 @@ def get_logs(lines: int = 100):
 # ====================== Bridge 实例控制 ======================
 @app.get("/bridge/{service_name}/status", dependencies=[Depends(verify_api_key)])
 def get_bridge_status(service_name: str):
-    """获取 Bridge 服务状态"""
+    """获取 Bridge 服务状态（基于端口监听检测，不依赖 NSSM）"""
     try:
-        result = subprocess.run(
-            ['nssm', 'status', service_name],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        status = result.stdout.strip()
-        is_running = status == "SERVICE_RUNNING"
+        import socket as _socket
+        deploy_dir = Path(f"D:/{service_name}")
+        env_file = deploy_dir / ".env"
 
+        # 从 .env 读取端口
+        port = None
+        if env_file.exists():
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("SERVICE_PORT="):
+                        try:
+                            port = int(line.strip().split("=", 1)[1])
+                        except Exception:
+                            pass
+
+        # 检查端口是否监听
+        is_running = False
+        if port:
+            try:
+                with _socket.create_connection(("127.0.0.1", port), timeout=1):
+                    is_running = True
+            except Exception:
+                is_running = False
+
+        status = "SERVICE_RUNNING" if is_running else "SERVICE_STOPPED"
         return {
             "service_name": service_name,
             "status": status,
-            "is_running": is_running
+            "is_running": is_running,
+            "port": port,
         }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Command timeout")
     except Exception as e:
         logger.error(f"Failed to get bridge status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/bridge/{service_name}/start", dependencies=[Depends(verify_api_key)])
 def start_bridge(service_name: str):
-    """启动 Bridge 服务"""
+    """启动 Bridge 服务（直接启动进程，支持 Session 2 桌面模式）"""
+    import socket as _socket, time as _time
+
+    deploy_dir = Path(f"D:/{service_name}")
+    env_file = deploy_dir / ".env"
+    python_exe = deploy_dir / "venv" / "Scripts" / "python.exe"
+    app_dir = deploy_dir / "app"
+
+    if not deploy_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Bridge 目录不存在: {deploy_dir}")
+    if not python_exe.exists():
+        raise HTTPException(status_code=404, detail=f"Python 环境不存在: {python_exe}")
+
+    # 读取 .env
+    env = dict(os.environ)
+    port = None
     try:
-        result = subprocess.run(
-            ['nssm', 'start', service_name],
-            capture_output=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=10
-        )
-
-        stdout = (result.stdout or "").strip()
-        stderr = (result.stderr or "").strip()
-        message = stdout or stderr or "Operation completed"
-
-        # Check if already running or if there's a startup issue
-        # returncode 1 with "START:" = already running (success)
-        # returncode 1 with "Unexpected status" = startup failed (failure)
-        already_running = result.returncode == 1 and "START:" in message and "Unexpected" not in message
-        startup_failed = "Unexpected status" in message or "SERVICE_STOPPED" in message
-
-        success = result.returncode == 0 or already_running
-
-        logger.info(f"Bridge {service_name} start: returncode={result.returncode}, success={success}, startup_failed={startup_failed}")
-
-        if startup_failed:
-            return {
-                "service_name": service_name,
-                "operation": "start",
-                "success": False,
-                "message": f"Service failed to start: {message}"
-            }
-
-        return {
-            "service_name": service_name,
-            "operation": "start",
-            "success": success,
-            "message": "Service is already running" if already_running else ("Service started successfully" if success else message)
-        }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Command timeout")
+        with open(env_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+                    if k.strip() == "SERVICE_PORT":
+                        try:
+                            port = int(v.strip())
+                        except Exception:
+                            pass
     except Exception as e:
-        logger.error(f"Failed to start bridge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f".env 读取失败: {e}")
+
+    if not port:
+        raise HTTPException(status_code=500, detail="无法从 .env 获取 SERVICE_PORT")
+
+    # 检查是否已运行
+    try:
+        with _socket.create_connection(("127.0.0.1", port), timeout=1):
+            return {"service_name": service_name, "operation": "start",
+                    "success": True, "message": f"Bridge 已在端口 {port} 运行"}
+    except Exception:
+        pass
+
+    env["PYTHONUNBUFFERED"] = "1"
+
+    try:
+        log_out = open(deploy_dir / "logs" / "stdout.log", "w")
+        log_err = open(deploy_dir / "logs" / "stderr.log", "w")
+        proc = subprocess.Popen(
+            [str(python_exe), "-m", "uvicorn", "main:app",
+             "--host", "0.0.0.0", "--port", str(port)],
+            cwd=str(app_dir),
+            env=env,
+            stdout=log_out,
+            stderr=log_err,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+        log_out.close()
+        log_err.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"启动失败: {e}")
+
+    # 等待端口就绪（最多 15s）
+    for _ in range(15):
+        _time.sleep(1)
+        if proc.poll() is not None:
+            raise HTTPException(status_code=500,
+                                detail=f"Bridge 进程意外退出，rc={proc.returncode}")
+        try:
+            with _socket.create_connection(("127.0.0.1", port), timeout=1):
+                logger.info(f"Bridge {service_name} started, PID={proc.pid}, port={port}")
+                return {"service_name": service_name, "operation": "start",
+                        "success": True, "message": f"Bridge 启动成功 (PID={proc.pid}, port={port})"}
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=500, detail=f"Bridge 启动超时，端口 {port} 未就绪")
+
 
 @app.post("/bridge/{service_name}/stop", dependencies=[Depends(verify_api_key)])
 def stop_bridge(service_name: str):
-    """停止 Bridge 服务"""
+    """停止 Bridge 服务（按端口查找进程并终止）"""
+    import socket as _socket
+
+    deploy_dir = Path(f"D:/{service_name}")
+    env_file = deploy_dir / ".env"
+
+    # 读取端口
+    port = None
     try:
-        result = subprocess.run(
-            ['nssm', 'stop', service_name],
-            capture_output=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=10
-        )
-
-        stdout = (result.stdout or "").strip()
-        stderr = (result.stderr or "").strip()
-        message = stdout or stderr or "Operation completed"
-
-        # Check if already stopped
-        already_stopped = result.returncode != 0 and "STOP:" in message
-
-        success = result.returncode == 0 or already_stopped
-
-        logger.info(f"Bridge {service_name} stop: returncode={result.returncode}, success={success}")
-        return {
-            "service_name": service_name,
-            "operation": "stop",
-            "success": success,
-            "message": "Service is already stopped" if already_stopped else message
-        }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Command timeout")
+        with open(env_file, encoding="utf-8") as f:
+            for line in f:
+                if line.strip().startswith("SERVICE_PORT="):
+                    try:
+                        port = int(line.strip().split("=", 1)[1])
+                    except Exception:
+                        pass
     except Exception as e:
-        logger.error(f"Failed to stop bridge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f".env 读取失败: {e}")
+
+    if not port:
+        raise HTTPException(status_code=500, detail="无法从 .env 获取 SERVICE_PORT")
+
+    # 检查是否在运行
+    try:
+        with _socket.create_connection(("127.0.0.1", port), timeout=1):
+            pass
+    except Exception:
+        return {"service_name": service_name, "operation": "stop",
+                "success": True, "message": "Bridge 已停止"}
+
+    # 用 psutil 找到监听该端口的进程并终止
+    killed = []
+    try:
+        for conn in psutil.net_connections(kind="tcp"):
+            if conn.laddr.port == port and conn.status == "LISTEN":
+                try:
+                    proc = psutil.Process(conn.pid)
+                    # 终止整个进程树
+                    for child in proc.children(recursive=True):
+                        child.kill()
+                    proc.kill()
+                    killed.append(conn.pid)
+                    logger.info(f"Killed bridge process PID={conn.pid} on port {port}")
+                except Exception as e:
+                    logger.warning(f"Failed to kill PID={conn.pid}: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"进程查找失败: {e}")
+
+    if not killed:
+        # 兜底：按 deploy_path 查找 uvicorn 进程
+        deploy_str = str(deploy_dir).lower()
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+                if service_name.lower() in cmdline and "uvicorn" in cmdline:
+                    proc.kill()
+                    killed.append(proc.pid)
+            except Exception:
+                pass
+
+    return {"service_name": service_name, "operation": "stop",
+            "success": True, "message": f"已终止进程: {killed}" if killed else "进程已停止"}
+
 
 @app.post("/bridge/{service_name}/restart", dependencies=[Depends(verify_api_key)])
 def restart_bridge(service_name: str):
     """重启 Bridge 服务"""
+    # 先停止
     try:
-        result = subprocess.run(
-            ['nssm', 'restart', service_name],
-            capture_output=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=15
-        )
+        stop_bridge(service_name)
+    except Exception:
+        pass
 
-        stdout = (result.stdout or "").strip()
-        stderr = (result.stderr or "").strip()
-        message = stdout or stderr or "Operation completed"
+    import time as _time
+    _time.sleep(2)
 
-        success = result.returncode == 0
-
-        logger.info(f"Bridge {service_name} restart: returncode={result.returncode}, success={success}")
-        return {
-            "service_name": service_name,
-            "operation": "restart",
-            "success": success,
-            "message": message
-        }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Command timeout")
-    except Exception as e:
-        logger.error(f"Failed to restart bridge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 再启动
+    return start_bridge(service_name)
 
 
 @app.post("/bridge/deploy", dependencies=[Depends(verify_api_key)])
@@ -890,9 +1166,13 @@ def deploy_bridge(request: BridgeDeployRequest):
             raise HTTPException(status_code=400, detail=f"MT5客户端目录已存在: {mt5_client_dir}")
 
         # 复制整个 MT5 客户端目录
-        source_mt5_dir = Path("D:/MetaTrader 5-template")  # 源模板目录
+        # 优先用 mt5_template_path（平台配置），其次兜底 D:/MetaTrader 5-template
+        if request.mt5_template_path:
+            source_mt5_dir = Path(request.mt5_template_path).parent
+        else:
+            source_mt5_dir = Path("D:/MetaTrader 5-template")  # 兜底默认
         if not source_mt5_dir.exists():
-            raise HTTPException(status_code=404, detail=f"MT5源目录不存在: {source_mt5_dir}")
+            raise HTTPException(status_code=404, detail=f"MT5模板源目录不存在: {source_mt5_dir}")
 
         logger.info(f"Copying MT5 client from {source_mt5_dir} to {mt5_client_dir}")
         
@@ -922,55 +1202,120 @@ def deploy_bridge(request: BridgeDeployRequest):
         
         logger.info(f"MT5 client copied successfully (robocopy exit code: {result.returncode})")
 
-        # 修改 MT5 配置文件 - common.ini
+        # 修改 MT5 配置文件 - common.ini（UTF-16-LE with BOM，保持 MT5 原生格式）
         common_ini_path = mt5_client_dir / "Config" / "common.ini"
-        if common_ini_path.exists():
-            try:
-                # 读取配置，尝试多种编码
-                config = configparser.ConfigParser()
-                encodings = ['utf-8', 'utf-16', 'gbk', 'cp1252', 'latin1']
-                config_loaded = False
-                
-                for encoding in encodings:
-                    try:
-                        config.read(common_ini_path, encoding=encoding)
-                        config_loaded = True
-                        logger.info(f"Successfully read common.ini with encoding: {encoding}")
-                        break
-                    except (UnicodeDecodeError, UnicodeError):
-                        continue
-                
-                if not config_loaded:
-                    logger.warning(f"Could not read common.ini with any encoding, skipping configuration")
-                else:
-                    # 修改登录信息
-                    if 'Common' not in config:
-                        config['Common'] = {}
+        try:
+            # 确保 Config 目录存在
+            (mt5_client_dir / "Config").mkdir(parents=True, exist_ok=True)
 
-                    config['Common']['Login'] = str(request.mt5_login)
-                    config['Common']['Server'] = request.mt5_server
+            if common_ini_path.exists():
+                # 读取已有文件（UTF-16-LE with BOM）
+                with open(common_ini_path, 'rb') as f:
+                    raw = f.read()
+                text = raw.decode('utf-16-le')
+                if text.startswith('\ufeff'):
+                    text = text[1:]
+                lines = text.splitlines()
+                new_lines = []
+                for line in lines:
+                    if line.strip().startswith('Login='):
+                        new_lines.append(f'Login={request.mt5_login}')
+                    elif line.strip().startswith('Server='):
+                        new_lines.append(f'Server={request.mt5_server}')
+                    else:
+                        new_lines.append(line)
+                output = '\r\n'.join(new_lines) + '\r\n'
+            else:
+                # 无 common.ini（IC Markets 等新模板），从头创建
+                output = f'[Common]\r\nLogin={request.mt5_login}\r\nServer={request.mt5_server}\r\nProxyEnable=0\r\nProxyType=0\r\nProxyAddress=\r\nCertInstall=0\r\nNewsEnable=1\r\n[Charts]\r\nProfileLast=Default\r\nMaxBars=100000\r\nPrintColor=0\r\nSaveDeleted=0\r\nTradeHistory=1\r\nTradeLevels=1\r\n[Experts]\r\nAllowDllImport=0\r\nEnabled=1\r\nAccount=1\r\nProfile=1\r\n'
 
-                    # 保存配置
-                    with open(common_ini_path, 'w', encoding='utf-8') as f:
-                        config.write(f)
+            # 写回 UTF-16-LE with BOM
+            with open(common_ini_path, 'wb') as f:
+                f.write(b'\xff\xfe')  # BOM
+                f.write(output.encode('utf-16-le'))
 
-                    logger.info(f"Updated MT5 configuration: Login={request.mt5_login}, Server={request.mt5_server}")
-            except Exception as e:
-                logger.warning(f"Failed to update common.ini: {e}, continuing anyway")
+            logger.info(f"Updated MT5 common.ini (UTF-16-LE): Login={request.mt5_login}, Server={request.mt5_server}")
+        except Exception as e:
+            logger.warning(f"Failed to update common.ini: {e}, continuing anyway")
+
         # 清理旧的账户数据（让 MT5 重新登录）
         accounts_dat = mt5_client_dir / "Config" / "accounts.dat"
         if accounts_dat.exists():
             accounts_dat.unlink()
             logger.info("Cleared old accounts.dat")
 
-        # 清理旧的服务器数据
-        servers_dat = mt5_client_dir / "Config" / "servers.dat"
-        if servers_dat.exists():
-            servers_dat.unlink()
-            logger.info("Cleared old servers.dat")
+        # 清理旧的服务器数据（不删！保留模板中已配置的服务器列表）
+        # servers_dat 包含该平台的服务器信息，删除后 MT5 需要重新发现，会导致无法自动连接
+        # servers_dat = mt5_client_dir / "Config" / "servers.dat"
 
         # 新的 MT5 客户端路径
         new_mt5_path = str(mt5_client_dir / "terminal64.exe")
+
+        # ==================== 1.5 配置产品/符号（Chart Profiles） ====================
+        if request.symbols:
+            try:
+                # 配置 Default chart profile — 每个产品一个图表窗口
+                charts_dir = mt5_client_dir / "Profiles" / "Charts" / "Default"
+                charts_dir.mkdir(parents=True, exist_ok=True)
+
+                # 删除旧的 chart 文件
+                for old_chr in charts_dir.glob("chart*.chr"):
+                    old_chr.unlink()
+
+                # 为每个产品创建图表文件（UTF-16-LE with BOM）
+                for idx, symbol in enumerate(request.symbols):
+                    chr_content = (
+                        f'<chart>\r\n'
+                        f'id={128968168864101562 + idx}\r\n'
+                        f'symbol={symbol}\r\n'
+                        f'period_type=0\r\n'
+                        f'period_size=1\r\n'
+                        f'digits=2\r\n'
+                        f'tick_size=0.000000\r\n'
+                        f'scale_fix=0\r\n'
+                        f'</chart>\r\n'
+                    )
+                    chr_path = charts_dir / f"chart{idx+1:02d}.chr"
+                    with open(chr_path, 'wb') as f:
+                        f.write(b'\xff\xfe')
+                        f.write(chr_content.encode('utf-16-le'))
+
+                # 更新 terminal.ini 的 MarketWatch 符号列表（确保 Market Watch 窗口显示这些产品）
+                terminal_ini_path = mt5_client_dir / "Config" / "terminal.ini"
+                if terminal_ini_path.exists():
+                    with open(terminal_ini_path, 'rb') as f:
+                        raw = f.read()
+                    text = raw.decode('utf-16-le') if raw[:2] == b'\xff\xfe' else raw.decode('utf-8', errors='replace')
+                    if text.startswith('\ufeff'):
+                        text = text[1:]
+
+                    # 在文件末尾添加/更新 Symbols 配置
+                    lines = text.splitlines()
+                    # 移除旧的 [SymbolsSelected] 部分
+                    new_lines = []
+                    skip = False
+                    for line in lines:
+                        if line.strip() == '[SymbolsSelected]':
+                            skip = True
+                            continue
+                        if skip and line.startswith('['):
+                            skip = False
+                        if not skip:
+                            new_lines.append(line)
+
+                    # 添加新的 [SymbolsSelected] 部分
+                    new_lines.append('[SymbolsSelected]')
+                    for symbol in request.symbols:
+                        new_lines.append(f'{symbol}=1')
+
+                    output = '\r\n'.join(new_lines) + '\r\n'
+                    with open(terminal_ini_path, 'wb') as f:
+                        f.write(b'\xff\xfe')
+                        f.write(output.encode('utf-16-le'))
+
+                logger.info(f"Configured {len(request.symbols)} symbols in chart profiles: {request.symbols}")
+            except Exception as e:
+                logger.warning(f"Failed to configure symbols: {e}, continuing anyway")
 
         # ==================== 2. 部署 Bridge 服务 ====================
         deploy_dir = Path(f"D:/{request.service_name}")
@@ -1015,19 +1360,19 @@ INSTANCE_NAME={request.service_name}
         app_dir = str(deploy_dir / "app")
 
         nssm_commands = [
-            ['nssm', 'install', request.service_name, uvicorn_path],
-            ['nssm', 'set', request.service_name, 'AppParameters', f'main:app --host 0.0.0.0 --port {request.service_port}'],
-            ['nssm', 'set', request.service_name, 'AppDirectory', app_dir],
-            ['nssm', 'set', request.service_name, 'AppExit', 'Default', 'Restart'],
-            ['nssm', 'set', request.service_name, 'AppEnvironmentExtra', ':PYTHONUNBUFFERED=1'],
-            ['nssm', 'set', request.service_name, 'AppStdout', str(deploy_dir / 'logs' / 'stdout.log')],
-            ['nssm', 'set', request.service_name, 'AppStderr', str(deploy_dir / 'logs' / 'stderr.log')],
-            ['nssm', 'set', request.service_name, 'AppRotateFiles', '1'],
-            ['nssm', 'set', request.service_name, 'AppRotateOnline', '1'],
-            ['nssm', 'set', request.service_name, 'AppRotateSeconds', '86400'],
-            ['nssm', 'set', request.service_name, 'AppRotateBytes', '10485760'],
-            ['nssm', 'set', request.service_name, 'DisplayName', request.service_name],
-            ['nssm', 'set', request.service_name, 'Start', 'SERVICE_AUTO_START'],
+            ['C:/nssm/nssm.exe', 'install', request.service_name, uvicorn_path],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppParameters', f'main:app --host 0.0.0.0 --port {request.service_port}'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppDirectory', app_dir],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppExit', 'Default', 'Restart'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppEnvironmentExtra', ':PYTHONUNBUFFERED=1'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppStdout', str(deploy_dir / 'logs' / 'stdout.log')],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppStderr', str(deploy_dir / 'logs' / 'stderr.log')],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppRotateFiles', '1'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppRotateOnline', '1'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppRotateSeconds', '86400'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'AppRotateBytes', '10485760'],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'DisplayName', request.service_name],
+            ['C:/nssm/nssm.exe', 'set', request.service_name, 'Start', 'SERVICE_AUTO_START'],
         ]
 
         for cmd in nssm_commands:
@@ -1038,10 +1383,46 @@ INSTANCE_NAME={request.service_name}
 
         logger.info(f"Bridge service {request.service_name} configured successfully")
 
+        # ==================== 3.1 加固：sc failure + depend= MT5WindowsAgent ====================
+        # Ensures newly-deployed bridges inherit the same self-heal + start-order
+        # policies as the built-in seven. Harmless if re-run on redeploy.
+        _harden_bridge_service(request.service_name)
+        _persist_bridge_port(request.service_name, request.service_port)
+        logger.info(f"Bridge service {request.service_name} hardened (sc failure + depend=MT5WindowsAgent), port persisted")
+
         # 启动服务
-        result = subprocess.run(['nssm', 'start', request.service_name], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(['C:/nssm/nssm.exe', 'start', request.service_name], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             logger.warning(f"Failed to start service: {result.stderr}")
+
+        # ==================== 3.5 首次启动 MT5 写入登录凭证 ====================
+        # MT5 不在 common.ini 存密码，需要启动一次让它自动登录并保存 accounts.dat
+        try:
+            mt5_exe = mt5_client_dir / "terminal64.exe"
+            if mt5_exe.exists():
+                # 用命令行参数传入完整凭证启动 MT5（/portable 模式）
+                mt5_cmd = [
+                    str(mt5_exe), '/portable',
+                    f'/login:{request.mt5_login}',
+                    f'/password:{request.mt5_password}',
+                    f'/server:{request.mt5_server}',
+                ]
+                logger.info(f"Starting MT5 for initial login: {request.mt5_login}@{request.mt5_server}")
+                mt5_proc = subprocess.Popen(mt5_cmd, cwd=str(mt5_client_dir))
+
+                # 等待 MT5 启动并登录保存凭证（给足时间让它连接服务器并写入 accounts.dat）
+                time.sleep(15)
+
+                # 关闭 MT5（凭证已保存到 accounts.dat）
+                mt5_proc.terminate()
+                try:
+                    mt5_proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    mt5_proc.kill()
+                logger.info(f"MT5 initial login completed, credentials saved to accounts.dat")
+        except Exception as e:
+            logger.warning(f"Failed to perform MT5 initial login: {e}")
+
         # ==================== 4. 创建桌面快捷方式 ====================
         try:
             desktop_path = Path("C:/Users/Administrator/Desktop")
@@ -1062,7 +1443,7 @@ INSTANCE_NAME={request.service_name}
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("{win_shortcut_path}")
 $Shortcut.TargetPath = "{win_target_path}"
-$Shortcut.Arguments = "/portable"
+$Shortcut.Arguments = "/portable /login:{request.mt5_login} /password:{request.mt5_password} /server:{request.mt5_server}"
 $Shortcut.WorkingDirectory = "{win_working_dir}"
 $Shortcut.IconLocation = "{win_target_path}"
 $Shortcut.Description = "MT5 Client - {request.mt5_login} on port {request.service_port}"
@@ -1081,6 +1462,28 @@ $Shortcut.Save()
                     logger.warning(f"Failed to create shortcut: {result.stderr}")
         except Exception as e:
             logger.warning(f"Failed to create desktop shortcut: {e}")
+
+        # ==================== 5. 添加 Windows 防火墙入站规则 ====================
+        try:
+            fw_rule_name = f"MT5Bridge-{request.service_port}"
+            # 先删除同名旧规则（避免重复）
+            subprocess.run(
+                ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={fw_rule_name}'],
+                capture_output=True, text=True, timeout=10
+            )
+            result = subprocess.run(
+                ['netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                 f'name={fw_rule_name}', 'dir=in', 'action=allow', 'protocol=TCP',
+                 f'localport={request.service_port}'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                logger.info(f"Firewall rule added: {fw_rule_name} (TCP {request.service_port} inbound)")
+            else:
+                logger.warning(f"Failed to add firewall rule: {result.stderr}")
+        except Exception as e:
+            logger.warning(f"Failed to add firewall rule: {e}")
+
         return {
             "success": True,
             "service_name": request.service_name,
@@ -1101,6 +1504,11 @@ $Shortcut.Save()
                 shutil.rmtree(deploy_dir)
             if 'mt5_client_dir' in locals() and mt5_client_dir.exists():
                 shutil.rmtree(mt5_client_dir)
+            # 清理防火墙规则
+            subprocess.run(
+                ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name=MT5Bridge-{request.service_port}'],
+                capture_output=True, text=True, timeout=10
+            )
         except:
             pass
         raise HTTPException(status_code=500, detail=f"部署失败: {str(e)}")
@@ -1124,16 +1532,47 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
     try:
         deploy_dir = Path(f"D:/{service_name}")
 
-        # 1. 停止服务
+        # 1. 停止 NSSM 服务
         try:
-            subprocess.run(['nssm', 'stop', service_name], capture_output=True, text=True, timeout=10)
+            subprocess.run(['C:/nssm/nssm.exe', 'stop', service_name], capture_output=True, text=True, timeout=15)
             logger.info(f"Stopped service: {service_name}")
+            time.sleep(2)
         except Exception as e:
             logger.warning(f"Failed to stop service: {e}")
 
+        # 1.5 强制杀掉所有使用该部署目录的进程（Python/uvicorn/nssm子进程）
+        try:
+            deploy_str = str(deploy_dir).replace('/', '\\')
+            # 方法1: 用 psutil 扫描所有进程
+            for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline', 'cwd']):
+                try:
+                    info = proc.info
+                    cmdline = ' '.join(info.get('cmdline') or [])
+                    exe = info.get('exe') or ''
+                    cwd = info.get('cwd') or ''
+                    if (service_name in cmdline or deploy_str.lower() in cmdline.lower()
+                        or deploy_str.lower() in exe.lower()
+                        or deploy_str.lower() in cwd.lower()):
+                        proc.kill()
+                        logger.info(f"Killed process: PID={proc.pid}, name={info.get('name')}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            # 方法2: 用 taskkill 按服务端口号杀（bridge 服务的 uvicorn 进程）
+            if mt5_client_port:
+                try:
+                    subprocess.run(
+                        ['powershell', '-Command',
+                         f'$p = Get-NetTCPConnection -LocalPort {mt5_client_port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess; if ($p) {{ Stop-Process -Id $p -Force }}'],
+                        capture_output=True, text=True, timeout=10)
+                except Exception:
+                    pass
+            time.sleep(3)
+        except Exception as e:
+            logger.warning(f"Failed to kill processes: {e}")
+
         # 2. 删除服务
         try:
-            result = subprocess.run(['nssm', 'remove', service_name, 'confirm'],
+            result = subprocess.run(['C:/nssm/nssm.exe', 'remove', service_name, 'confirm'],
                                   capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 logger.info(f"Removed service: {service_name}")
@@ -1142,29 +1581,80 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
         except Exception as e:
             logger.warning(f"Failed to remove service: {e}")
 
-        # 3. 删除 Bridge 部署目录
+        # 3. 删除 Bridge 部署目录（带重试 + 强制进程清理）
         if deploy_dir.exists():
-            shutil.rmtree(deploy_dir)
-            logger.info(f"Removed Bridge deployment directory: {deploy_dir}")
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(deploy_dir)
+                    logger.info(f"Removed Bridge deployment directory: {deploy_dir}")
+                    break
+                except Exception as e:
+                    logger.warning(f"rmtree attempt {attempt+1} failed: {e}")
+                    # 用 taskkill 强制杀掉所有可能锁文件的进程
+                    try:
+                        # 查找使用该目录的句柄
+                        handle_result = subprocess.run(
+                            ['powershell', '-Command',
+                             f'Get-Process python* | Where-Object {{ $_.Path -and $_.Path -like "*{service_name}*" }} | Stop-Process -Force'],
+                            capture_output=True, text=True, timeout=10)
+                        # 也杀 uvicorn
+                        subprocess.run(
+                            ['powershell', '-Command',
+                             f'Get-Process | Where-Object {{ $_.MainWindowTitle -match "{service_name}" -or ($_.Path -and $_.Path -like "*{service_name}*") }} | Stop-Process -Force'],
+                            capture_output=True, text=True, timeout=10)
+                    except Exception:
+                        pass
+                    time.sleep(3 + attempt * 2)  # 递增等待
 
         # 4. 删除 MT5 客户端目录（如果提供了端口号）
         if mt5_client_port:
             mt5_client_dir = Path(f"D:/MetaTrader 5-{mt5_client_port}")
             if mt5_client_dir.exists():
-                # 先确保 MT5 进程已停止
-                mt5_exe = mt5_client_dir / "terminal64.exe"
-                if mt5_exe.exists():
-                    for proc in psutil.process_iter(['name', 'exe']):
-                        try:
-                            if proc.info['exe'] and Path(proc.info['exe']).resolve() == mt5_exe.resolve():
-                                proc.kill()
-                                logger.info(f"Killed MT5 process: PID={proc.pid}")
-                                time.sleep(2)
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            continue
+                # 先杀掉该目录下的所有进程（terminal64.exe + 子进程）
+                mt5_dir_str = str(mt5_client_dir).replace('/', '\\').lower()
+                for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+                    try:
+                        exe = (proc.info.get('exe') or '').lower()
+                        cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                        if mt5_dir_str in exe or mt5_dir_str in cmdline:
+                            proc.kill()
+                            logger.info(f"Killed MT5 process: PID={proc.pid}, exe={exe}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
 
+            # 也杀掉使用该 mt5_login 的 terminal64.exe（可能从其他路径启动）
+            if mt5_login:
+                for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+                    try:
+                        if (proc.info.get('name') or '').lower() != 'terminal64.exe':
+                            continue
+                        cmdline = ' '.join(proc.info.get('cmdline') or [])
+                        exe_path = proc.info.get('exe') or ''
+                        # 检查进程的 common.ini 是否包含该 login
+                        proc_dir = Path(exe_path).parent if exe_path else None
+                        if proc_dir:
+                            common_ini = proc_dir / "Config" / "common.ini"
+                            if common_ini.exists():
+                                try:
+                                    raw = common_ini.read_bytes()
+                                    text = raw.decode('utf-16-le', errors='ignore')
+                                    if f'Login={mt5_login}' in text:
+                                        proc.kill()
+                                        logger.info(f"Killed MT5 terminal (login={mt5_login}): PID={proc.pid}, exe={exe_path}")
+                                except Exception:
+                                    pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            time.sleep(3)  # 等进程完全退出
+
+            if mt5_client_dir.exists():
                 # 删除 MT5 客户端目录
-                shutil.rmtree(mt5_client_dir)
+                import shutil as _shutil
+                _shutil.rmtree(mt5_client_dir, ignore_errors=True)
+                if mt5_client_dir.exists():
+                    # 二次尝试
+                    time.sleep(2)
+                    _shutil.rmtree(mt5_client_dir, ignore_errors=True)
                 logger.info(f"Removed MT5 client directory: {mt5_client_dir}")
 
         # 5. 删除桌面快捷方式（如果提供了登录账号和端口号）
@@ -1179,6 +1669,21 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
                     logger.info(f"Removed desktop shortcut: {shortcut_path}")
             except Exception as e:
                 logger.warning(f"Failed to remove desktop shortcut: {e}")
+
+        # 6. 删除 Windows 防火墙入站规则
+        if mt5_client_port:
+            try:
+                fw_rule_name = f"MT5Bridge-{mt5_client_port}"
+                result = subprocess.run(
+                    ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={fw_rule_name}'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    logger.info(f"Firewall rule removed: {fw_rule_name}")
+                else:
+                    logger.warning(f"Failed to remove firewall rule: {result.stderr}")
+            except Exception as e:
+                logger.warning(f"Failed to remove firewall rule: {e}")
 
         return {
             "success": True,
@@ -1255,6 +1760,93 @@ async def startup_event():
 
     # 启动后台监控任务
     asyncio.create_task(monitoring_task())
+
+    # 延迟启动 Bridge 服务（等待 MT5 终端启动）
+    asyncio.create_task(_auto_start_bridges())
+
+
+async def _auto_start_bridges():
+    """开机后自动启动所有已部署的 Bridge 服务（在用户会话中）"""
+    import asyncio, socket
+
+    # 等待 30s，让 MT5 终端进程有时间先启动
+    await asyncio.sleep(30)
+
+    bridge_base = Path("D:/")
+    started = []
+
+    for svc_dir in sorted(bridge_base.glob("hustle-mt5-*")):
+        svc = svc_dir.name
+        env_file = svc_dir / ".env"
+        python_exe = svc_dir / "venv" / "Scripts" / "python.exe"
+        app_dir = svc_dir / "app"
+
+        if not env_file.exists() or not python_exe.exists() or not app_dir.exists():
+            continue
+
+        # 读取端口
+        port = None
+        try:
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("SERVICE_PORT="):
+                        port = int(line.strip().split("=", 1)[1])
+                        break
+        except Exception:
+            continue
+
+        if not port:
+            continue
+
+        # 检查端口是否已监听
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                logger.info(f"[AutoStart] {svc}:{port} already running")
+                continue
+        except Exception:
+            pass  # 未监听，需要启动
+
+        # 加载 .env
+        env = dict(os.environ)
+        try:
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        env[k.strip()] = v.strip()
+        except Exception as e:
+            logger.warning(f"[AutoStart] {svc}: .env read error: {e}")
+            continue
+
+        env["PYTHONUNBUFFERED"] = "1"
+
+        # 启动 Bridge 进程
+        try:
+            log_out = open(svc_dir / "logs" / "stdout.log", "w")
+            log_err = open(svc_dir / "logs" / "stderr.log", "w")
+            proc = subprocess.Popen(
+                [str(python_exe), "-m", "uvicorn", "main:app",
+                 "--host", "0.0.0.0", "--port", str(port)],
+                cwd=str(app_dir),
+                env=env,
+                stdout=log_out,
+                stderr=log_err,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            log_out.close()
+            log_err.close()
+            started.append(f"{svc}:{port} (PID={proc.pid})")
+            logger.info(f"[AutoStart] Started {svc} on port {port}, PID={proc.pid}")
+        except Exception as e:
+            logger.error(f"[AutoStart] Failed to start {svc}: {e}")
+
+        await asyncio.sleep(2)  # 间隔启动，避免同时争用 MT5 API
+
+    if started:
+        logger.info(f"[AutoStart] Started {len(started)} bridge(s): {', '.join(started)}")
+    else:
+        logger.info("[AutoStart] No bridges needed starting")
 
 # ====================== 主程序入口 ======================
 if __name__ == "__main__":

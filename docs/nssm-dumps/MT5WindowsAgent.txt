@@ -1,0 +1,13 @@
+﻿C:\nssm\nssm.exe install MT5WindowsAgent "C:\Program Files\Python311\python.exe"
+C:\nssm\nssm.exe set MT5WindowsAgent AppParameters C:\MT5Agent\main_v3.py
+C:\nssm\nssm.exe set MT5WindowsAgent AppDirectory C:\MT5Agent
+C:\nssm\nssm.exe set MT5WindowsAgent AppExit Default Restart
+C:\nssm\nssm.exe set MT5WindowsAgent AppEvents Start/Pre "powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\MT5Agent\preflight.ps1"
+C:\nssm\nssm.exe set MT5WindowsAgent AppEnvironmentExtra :PYTHONIOENCODING=utf-8
+C:\nssm\nssm.exe set MT5WindowsAgent AppStdout C:\MT5Agent\agent.log
+C:\nssm\nssm.exe set MT5WindowsAgent AppStderr C:\MT5Agent\agent_error.log
+C:\nssm\nssm.exe set MT5WindowsAgent Description "MT5 ?????? V3 - ????? 8765"
+C:\nssm\nssm.exe set MT5WindowsAgent DisplayName "MT5 Windows Agent"
+C:\nssm\nssm.exe set MT5WindowsAgent ObjectName .\Administrator "****"
+C:\nssm\nssm.exe set MT5WindowsAgent Start SERVICE_AUTO_START
+C:\nssm\nssm.exe set MT5WindowsAgent Type SERVICE_WIN32_OWN_PROCESS

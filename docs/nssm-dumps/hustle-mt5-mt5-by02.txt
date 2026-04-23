@@ -1,0 +1,12 @@
+﻿C:\nssm\nssm.exe install hustle-mt5-mt5-by02 D:\hustle-mt5-mt5-by02\venv\Scripts\uvicorn.exe
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 AppParameters "main:app --host 0.0.0.0 --port 8002"
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 AppDirectory D:\hustle-mt5-mt5-by02\app
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 AppExit Default Restart
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 AppStdout D:\hustle-mt5-mt5-by02\logs\stdout.log
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 AppStderr D:\hustle-mt5-mt5-by02\logs\stderr.log
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 AppThrottle 0
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 DependOnService :MT5WindowsAgent
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 DisplayName hustle-mt5-mt5-by02
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 ObjectName LocalSystem
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 Start SERVICE_AUTO_START
+C:\nssm\nssm.exe set hustle-mt5-mt5-by02 Type SERVICE_WIN32_OWN_PROCESS

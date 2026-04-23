@@ -1,0 +1,17 @@
+﻿C:\nssm\nssm.exe install hustle-mt5-mt5-bysys D:\hustle-mt5-mt5-bysys\venv\Scripts\uvicorn.exe
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppParameters "main:app --host 0.0.0.0 --port 8886"
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppDirectory D:\hustle-mt5-mt5-bysys\app
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppExit Default Restart
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppEnvironmentExtra :PYTHONUNBUFFERED=1
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppStdout D:\hustle-mt5-mt5-bysys\logs\stdout.log
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppStderr D:\hustle-mt5-mt5-bysys\logs\stderr.log
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppThrottle 0
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppRotateFiles 1
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppRotateOnline 1
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppRotateSeconds 86400
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys AppRotateBytes 10485760
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys DependOnService :MT5WindowsAgent
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys DisplayName hustle-mt5-mt5-bysys
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys ObjectName LocalSystem
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys Start SERVICE_AUTO_START
+C:\nssm\nssm.exe set hustle-mt5-mt5-bysys Type SERVICE_WIN32_OWN_PROCESS
