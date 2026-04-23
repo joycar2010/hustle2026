@@ -1,0 +1,27 @@
+{
+  "agent": {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "api_key": "HustleXAU_MT5_Agent_Key_2026"
+  },
+  "backend": {
+    "url": "https://admin.hustle2026.xyz",
+    "username": "admin",
+    "password": "Hustle@2026",
+    "enabled": false
+  },
+  "database": {
+    "host": "172.31.2.22",
+    "port": 5432,
+    "database": "postgres",
+    "user": "postgres",
+    "password": "Lk106504"
+  },
+  "monitoring": {
+    "enabled": true,
+    "check_interval": 30,
+    "freeze_threshold": 10,
+    "cpu_threshold": 95,
+    "memory_threshold": 90
+  }
+}

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.log
+agent-*.log
+agent_error*.log
+backup_*/
+venv/
