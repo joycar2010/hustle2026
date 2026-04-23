@@ -204,6 +204,21 @@ async def init_all_background_services():
             return_exceptions=True
         )
 
+        # Proxy health scheduler — rolling failure-rate window + Feishu alert on threshold.
+        # Also starts the IP-expiry checker which previously was never started.
+        try:
+            from app.services.proxy_manager import proxy_manager
+            await proxy_manager.start_health_scheduler()
+            logger.info("[proxy] health scheduler started")
+        except Exception as _pe:
+            logger.error(f"[proxy] health scheduler failed to start: {_pe}")
+        try:
+            from app.tasks.proxy_expiry_checker import proxy_expiry_checker
+            await proxy_expiry_checker.start()
+            logger.info("[proxy] expiry checker started")
+        except Exception as _pe:
+            logger.error(f"[proxy] expiry checker failed to start: {_pe}")
+
         app_state["init_progress"] = 100
         app_state["init_complete"] = True
         logger.info("All background services initialized successfully")

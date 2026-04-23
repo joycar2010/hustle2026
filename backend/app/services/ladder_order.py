@@ -8,14 +8,22 @@ from typing import List, Dict, Optional
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.models.order import Order, OrderStatus
 from app.models.arbitrage import ArbitrageTask
 from app.services.order_executor import OrderExecutor
 from app.services.market_service import MarketDataService
+from app.core.platform import PlatformId
 import logging
 
 logger = logging.getLogger(__name__)
+
+# NOTE (data-model debt): `Order.task_id` is referenced below but `OrderRecord` has no
+# `task_id` column (see app/models/order.py). This service also has no external callers
+# (its singleton `ladder_order_service` is imported nowhere), so these queries never run
+# today. Flagged for the next owner: either add `task_id` to `order_records` or wire
+# orders to arbitrage_tasks via an association table.
 
 
 class LadderOrderService:
@@ -169,7 +177,7 @@ class LadderOrderService:
 
         # Get all pending orders for this task
         result = await db.execute(
-            select(Order).where(
+            select(Order).options(selectinload(Order.account)).where(
                 Order.task_id == task_id,
                 Order.status.in_([OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED])
             )
@@ -180,10 +188,10 @@ class LadderOrderService:
         for order in orders:
             try:
                 # Cancel order on exchange
-                if order.platform == "binance":
+                if order.platform == PlatformId.BINANCE.key:
                     # Cancel Binance order
                     pass  # Implement Binance cancel logic
-                elif order.platform == "bybit":
+                elif order.platform == PlatformId.BYBIT.key:
                     # Cancel Bybit order
                     pass  # Implement Bybit cancel logic
 

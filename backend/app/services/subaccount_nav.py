@@ -101,6 +101,42 @@ async def _upsert_daily_snapshot(
             "src": source,
         })
         await db.commit()
+        # C3: check day-over-day NAV drop, alert all active subs if > 5%
+        try:
+            prev_row = (await db.execute(text(
+                "SELECT nav_per_share FROM subscription_daily_nav "
+                "WHERE parent_user_id = CAST(:p AS UUID) "
+                "AND snapshot_date < (NOW() AT TIME ZONE """"Asia/Shanghai"""")::date "
+                "ORDER BY snapshot_date DESC LIMIT 1"
+            ), {"p": parent_user_id})).first()
+            if prev_row and float(prev_row[0]) > 0:
+                nav_prev_val = float(prev_row[0])
+                nav_now_val = float(nav_per_share)
+                if (nav_prev_val - nav_now_val) / nav_prev_val >= 0.05:
+                    from app.services.risk_alert_service import risk_alert_service
+                    subs_rows = (await db.execute(text(
+                        "SELECT s.sub_user_id::text, u_sub.username, u_par.username, s.shares "
+                        "FROM sub_account_subscriptions s "
+                        "LEFT JOIN users u_sub ON u_sub.user_id = s.sub_user_id "
+                        "LEFT JOIN users u_par ON u_par.user_id = s.parent_user_id "
+                        "WHERE s.parent_user_id = CAST(:p AS UUID) AND s.status = """"active"""""
+                    ), {"p": parent_user_id})).all()
+                    for sub_uid, sub_name, par_name, shares in subs_rows:
+                        try:
+                            cur_value = float(shares) * nav_now_val
+                            await risk_alert_service.check_subaccount_nav_drop(
+                                sub_user_id=sub_uid,
+                                sub_username=sub_name or sub_uid[:8],
+                                parent_username=par_name or "—",
+                                nav_now=nav_now_val,
+                                nav_prev=nav_prev_val,
+                                current_value=cur_value,
+                                threshold_pct=5.0,
+                            )
+                        except Exception:
+                            pass
+        except Exception as _nav_alert_err:
+            logger.debug(f"[nav] drop-check failed for {parent_user_id}: {_nav_alert_err}")
     except Exception as e:
         logger.debug(f"[nav] daily snapshot upsert failed for {parent_user_id}: {e}")
         try:

@@ -1,18 +1,18 @@
 """
 代理管理服务
-支持青果网络代理和本地服务器IP代理
+支持ipipgo代理和本地服务器IP代理
 """
 import asyncio
 import logging
 import time
-from typing import List, Dict, Any, Optional
+from collections import deque, defaultdict
+from typing import List, Dict, Any, Optional, Deque
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, update
 from sqlalchemy.orm import selectinload
 
 from app.models.proxy import ProxyPool, AccountProxyBinding, ProxyHealthLog
-from app.services.qingguo_proxy_service import qingguo_proxy_service
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,16 @@ class ProxyManager:
         self.health_check_interval = 300  # 健康检查间隔(秒)
         self.health_check_timeout = 10  # 健康检查超时(秒)
         self.health_check_running = False
+
+        # ── 滚动失败率窗口 + 告警 ─────────────────────────────────────────
+        # 按 proxy_id 保存最近一个窗口内的 (timestamp, is_success) 样本
+        self._rolling_samples: Dict[int, Deque] = defaultdict(lambda: deque(maxlen=200))
+        # 按 proxy_id 保存上次告警时间，用于冷却
+        self._last_alert_at: Dict[int, datetime] = {}
+        self.rolling_window_sec = 300       # 5 分钟滑窗
+        self.min_samples_for_alert = 5      # 窗口内至少 5 次样本才评估
+        self.failure_rate_threshold = 0.5   # 失败率 ≥ 50% 触发告警
+        self.alert_cooldown_sec = 600       # 10 分钟告警冷却,同代理不再轰炸
 
     async def create_proxy(
         self,
@@ -362,18 +372,21 @@ class ProxyManager:
         health_result: Dict[str, Any]
     ):
         """
-        更新代理健康状态
+        更新代理健康状态 + 维护滚动失败率窗口 + 必要时触发告警
 
         Args:
             db: 数据库会话
             proxy: 代理对象
             health_result: 健康检查结果
         """
+        is_success = bool(health_result['is_success'])
+        now = datetime.utcnow()
+
         # 记录健康检查日志
         log = ProxyHealthLog(
             proxy_id=proxy.id,
-            check_time=datetime.utcnow(),
-            is_success=health_result['is_success'],
+            check_time=now,
+            is_success=is_success,
             latency_ms=health_result['latency_ms'],
             error_message=health_result['error_message'],
             check_type='auto',
@@ -382,78 +395,173 @@ class ProxyManager:
         )
         db.add(log)
 
-        # 更新代理健康分数
-        if health_result['is_success']:
-            # 成功：健康分数+5，最高100
+        # ── 滚动失败率窗口维护 ────────────────────────────────────────
+        # 推入新样本；按 window 秒过期旧样本
+        samples = self._rolling_samples[proxy.id]
+        samples.append((now, is_success))
+        cutoff = now - timedelta(seconds=self.rolling_window_sec)
+        while samples and samples[0][0] < cutoff:
+            samples.popleft()
+
+        total = len(samples)
+        fails = sum(1 for _, ok in samples if not ok)
+        failure_rate = (fails / total) if total > 0 else 0.0
+
+        # 更新代理健康分数 + 累计计数（累计字段保持以兼容历史 UI）
+        if is_success:
             proxy.health_score = min(100, proxy.health_score + 5)
             proxy.failed_requests = max(0, proxy.failed_requests - 1)
         else:
-            # 失败：健康分数-10，最低0
             proxy.health_score = max(0, proxy.health_score - 10)
             proxy.failed_requests += 1
 
-            # 连续失败3次，标记为失败状态
-            if proxy.failed_requests >= 3:
-                proxy.status = 'failed'
+        # ── 滚动窗口阈值判断:替代"连续失败 3 次"的脆弱判定 ─────────────
+        prev_status = proxy.status
+        if total >= self.min_samples_for_alert and failure_rate >= self.failure_rate_threshold:
+            proxy.status = 'failed'
+        elif is_success and proxy.status == 'failed' and failure_rate < self.failure_rate_threshold:
+            # 窗口内恢复,状态回滚
+            proxy.status = 'active'
 
         # 更新延迟
         if health_result['latency_ms']:
             if proxy.avg_latency_ms:
-                # 移动平均
                 proxy.avg_latency_ms = (proxy.avg_latency_ms * 0.7 + health_result['latency_ms'] * 0.3)
             else:
                 proxy.avg_latency_ms = health_result['latency_ms']
 
-        proxy.last_check_time = datetime.utcnow()
+        proxy.last_check_time = now
         proxy.total_requests += 1
 
         await db.commit()
 
-    async def fetch_proxies_from_qingguo(
-        self,
-        db: AsyncSession,
-        num: int = 1,
-        region: Optional[str] = None,
-        protocol: str = "http",
-        expire_time: int = 3600,
-        created_by: Optional[str] = None
-    ) -> List[ProxyPool]:
-        """
-        从青果网络获取代理并保存到数据库
-
-        Args:
-            db: 数据库会话
-            num: 获取数量
-            region: 地区
-            protocol: 协议类型
-            expire_time: 有效期(秒)
-            created_by: 创建人ID
-
-        Returns:
-            创建的代理列表
-        """
-        try:
-            # 从青果网络获取代理
-            proxies_data = await qingguo_proxy_service.get_proxies(
-                num=num,
-                region=region,
-                protocol=protocol,
-                expire_time=expire_time
+        # ── 告警触发:状态跨入 failed 或滚动失败率持续超标 ────────────
+        if prev_status != 'failed' and proxy.status == 'failed':
+            await self._maybe_alert_proxy_failure(
+                proxy=proxy,
+                failure_rate=failure_rate,
+                window_samples=total,
+                window_fails=fails,
+                reason="status_transition_to_failed",
+            )
+        elif (proxy.status == 'failed' and failure_rate >= self.failure_rate_threshold
+              and total >= self.min_samples_for_alert):
+            await self._maybe_alert_proxy_failure(
+                proxy=proxy,
+                failure_rate=failure_rate,
+                window_samples=total,
+                window_fails=fails,
+                reason="sustained_high_failure_rate",
             )
 
-            # 保存到数据库
-            proxies = []
-            for proxy_data in proxies_data:
-                proxy_data['proxy_type'] = proxy_data.pop('protocol', 'http')
-                proxy = await self.create_proxy(db, proxy_data, created_by)
-                proxies.append(proxy)
+    async def _maybe_alert_proxy_failure(
+        self,
+        proxy: ProxyPool,
+        failure_rate: float,
+        window_samples: int,
+        window_fails: int,
+        reason: str,
+    ):
+        """触发代理失败告警(飞书 + 日志),带冷却保护。"""
+        now = datetime.utcnow()
+        last = self._last_alert_at.get(proxy.id)
+        if last and (now - last).total_seconds() < self.alert_cooldown_sec:
+            logger.debug(
+                f"[PROXY_ALERT] cooldown active for proxy={proxy.id}, skipping alert ({reason})"
+            )
+            return
+        self._last_alert_at[proxy.id] = now
 
-            logger.info(f"从青果网络获取并保存 {len(proxies)} 个代理")
-            return proxies
+        title = "⚠️ 代理健康告警"
+        color = "red"
+        body = (
+            f"代理: {proxy.host}:{proxy.port} (provider={proxy.provider}, id={proxy.id})\n"
+            f"窗口: 最近 {self.rolling_window_sec // 60} 分钟 共 {window_samples} 次检查\n"
+            f"失败次数: {window_fails} / {window_samples}  (失败率 {failure_rate * 100:.1f}%)\n"
+            f"健康分: {proxy.health_score}  状态: {proxy.status}\n"
+            f"触发原因: {reason}\n"
+            f"请排查网络/订阅状态,必要时切换到备用 IP。"
+        )
+        logger.warning(
+            f"[PROXY_ALERT] proxy_id={proxy.id} host={proxy.host}:{proxy.port} "
+            f"rate={failure_rate*100:.1f}% samples={window_samples} reason={reason}"
+        )
 
+        # 推送飞书告警给所有管理员(与 ProxyExpiryChecker._notify 一致的路径)
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.user import User
+            from app.services.feishu_service import get_feishu_service
+
+            feishu = get_feishu_service()
+            if not feishu:
+                logger.warning("[PROXY_ALERT] feishu service not ready, alert not pushed")
+                return
+
+            async with AsyncSessionLocal() as db:
+                res = await db.execute(
+                    select(User).where(
+                        User.is_active == True,
+                        User.role.in_(["超级管理员", "系统管理员", "管理员"]),
+                    )
+                )
+                admins = res.scalars().all()
+
+            for admin in admins:
+                if not getattr(admin, "feishu_open_id", None):
+                    continue
+                try:
+                    await feishu.send_card_message(
+                        receive_id=admin.feishu_open_id,
+                        title=title,
+                        content=body,
+                        color=color,
+                    )
+                except Exception as _e:
+                    logger.error(f"[PROXY_ALERT] send to {admin.username} failed: {_e}")
         except Exception as e:
-            logger.error(f"从青果网络获取代理失败: {str(e)}")
-            raise
+            logger.error(f"[PROXY_ALERT] dispatch failed: {e}")
+
+    async def _run_rolling_health_check(self):
+        """后台调度循环:定时对所有 active/failed 代理跑一次健康检查,驱动滚动窗口。"""
+        from app.core.database import AsyncSessionLocal
+        logger.info(
+            f"[PROXY_HEALTH_SCHEDULER] started, interval={self.health_check_interval}s, "
+            f"window={self.rolling_window_sec}s, rate_threshold={self.failure_rate_threshold}"
+        )
+        self.health_check_running = True
+        # 启动后延迟 30 秒避免与 app 启动抢 I/O
+        await asyncio.sleep(30)
+        while self.health_check_running:
+            try:
+                async with AsyncSessionLocal() as db:
+                    proxies = await self.get_proxies(db, status=None, min_health_score=0)
+                    # 仅对 active / failed 的做检查,expired 跳过
+                    targets = [p for p in proxies if p.status in ('active', 'failed')]
+                for proxy in targets:
+                    try:
+                        result = await self.check_proxy_health(proxy, timeout=self.health_check_timeout)
+                    except Exception as e:
+                        logger.error(f"[PROXY_HEALTH_SCHEDULER] check error proxy={proxy.id}: {e}")
+                        continue
+                    try:
+                        async with AsyncSessionLocal() as db2:
+                            db2.add(proxy)  # attach
+                            await self.update_proxy_health(db2, proxy, result)
+                    except Exception as e:
+                        logger.error(f"[PROXY_HEALTH_SCHEDULER] update error proxy={proxy.id}: {e}")
+            except Exception as e:
+                logger.error(f"[PROXY_HEALTH_SCHEDULER] loop iteration failed: {e}")
+            await asyncio.sleep(self.health_check_interval)
+
+    async def start_health_scheduler(self):
+        """幂等启动后台健康检查调度器。"""
+        if self.health_check_running:
+            return
+        asyncio.create_task(self._run_rolling_health_check())
+
+    async def stop_health_scheduler(self):
+        self.health_check_running = False
 
     async def auto_assign_proxy(
         self,
@@ -463,56 +571,67 @@ class ProxyManager:
         created_by: Optional[str] = None
     ) -> ProxyPool:
         """
-        自动为账户分配代理
-        优先使用现有可用代理，如果没有则从青果网络获取
+        自动为账户分配代理（ipipgo 静态订阅池）
+
+        流程:
+          1. 优先挑选 provider='ipipgo'、状态 active、未被其他账户占用、健康分 >= 60 的代理
+          2. 次选任意 active、未占用、健康分 >= 60 的代理（兼容历史本地代理等）
+          3. 池内无可用代理时抛出明确错误 —— ipipgo 为预分配订阅制，需管理员在后台补充 IP
 
         Args:
             db: 数据库会话
             account_id: 账户ID
             platform_id: 平台ID
-            created_by: 创建人ID
+            created_by: 创建人ID (保留签名用于向后兼容)
 
         Returns:
             分配的代理对象
-        """
-        # 1. 查找可用的代理（健康分数>60，状态为active）
-        available_proxies = await self.get_proxies(
-            db,
-            status='active',
-            min_health_score=60
-        )
 
-        # 过滤掉已经被其他账户绑定的代理
-        result = await db.execute(
+        Raises:
+            RuntimeError: 池内没有可用 ipipgo 代理时抛出
+        """
+        # 已绑定的代理 id 集合
+        bound_result = await db.execute(
             select(AccountProxyBinding.proxy_id)
             .where(
                 and_(
                     AccountProxyBinding.platform_id == platform_id,
-                    AccountProxyBinding.is_active == True
+                    AccountProxyBinding.is_active == True,
                 )
             )
         )
-        bound_proxy_ids = {row[0] for row in result.all()}
+        bound_proxy_ids = {row[0] for row in bound_result.all()}
 
-        available_proxies = [p for p in available_proxies if p.id not in bound_proxy_ids]
+        # 1) 优先 ipipgo
+        ipipgo_proxies = await self.get_proxies(
+            db,
+            status='active',
+            provider='ipipgo',
+            min_health_score=60,
+        )
+        ipipgo_proxies = [p for p in ipipgo_proxies if p.id not in bound_proxy_ids]
 
-        # 2. 如果有可用代理，选择健康分数最高的
-        if available_proxies:
-            proxy = available_proxies[0]
-            logger.info(f"使用现有代理: {proxy.id}")
+        if ipipgo_proxies:
+            proxy = ipipgo_proxies[0]
+            logger.info(f"auto_assign: 使用 ipipgo 代理 proxy_id={proxy.id} for account={account_id}")
         else:
-            # 3. 没有可用代理，从青果网络获取
-            logger.info("没有可用代理，从青果网络获取新代理")
-            proxies = await self.fetch_proxies_from_qingguo(
-                db,
-                num=1,
-                created_by=created_by
+            # 2) 次选任意可用
+            fallback = await self.get_proxies(db, status='active', min_health_score=60)
+            fallback = [p for p in fallback if p.id not in bound_proxy_ids]
+            if not fallback:
+                msg = (
+                    f"ipipgo 代理池无可用代理 (account={account_id}, platform={platform_id}). "
+                    "请管理员到 ipipgo 后台购买/同步新 IP 后再试。"
+                )
+                logger.error(msg)
+                raise RuntimeError(msg)
+            proxy = fallback[0]
+            logger.info(
+                f"auto_assign: ipipgo 池空，退化到 provider={proxy.provider} proxy_id={proxy.id}"
             )
-            proxy = proxies[0]
 
-        # 4. 绑定代理到账户
+        # 3) 绑定
         await self.bind_proxy_to_account(db, account_id, proxy.id, platform_id)
-
         return proxy
 
 

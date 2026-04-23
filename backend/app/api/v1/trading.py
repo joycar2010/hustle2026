@@ -7,6 +7,7 @@ from sqlalchemy import select, func
 from pydantic import BaseModel
 from app.core.security import get_current_user
 from app.core.database import get_db
+from app.core.platform import PlatformId
 from app.models.user import User
 from app.models.order import OrderRecord
 from app.models.account import Account
@@ -693,7 +694,7 @@ async def get_realtime_pending_orders(
                         "id":         str(order.get("orderId", "")),
                         "timestamp":  utc_ms_to_beijing(ot),
                         "exchange":   "主账号",
-                        "platform":   "binance",
+                        "platform":   PlatformId.BINANCE.key,
                         "side":       order.get("side", "").lower(),
                         "quantity":   float(order.get("origQty") or order.get("qty", 0)),
                         "price":      float(order.get("price") or 0),
@@ -737,7 +738,7 @@ async def get_realtime_pending_orders(
                         "id":         str(order.get("orderId", "")),
                         "timestamp":  utc_ms_to_beijing(ot_ms),
                         "exchange":   "主账号",
-                        "platform":   "bybit",
+                        "platform":   PlatformId.BYBIT.key,
                         "side":       str(order.get("side", "")).lower(),
                         "quantity":   float(order.get("qty") or 0),
                         "price":      float(order.get("price") or 0),
@@ -898,7 +899,7 @@ async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU")
     binding = result.fetchone()
     
     if binding:
-        target_id = binding[0] if exchange == "binance" else binding[1]
+        target_id = binding[0] if exchange == PlatformId.BINANCE.key else binding[1]
         if target_id:
             from app.models.account import Account as AccModel
             acc_result = await db.execute(
@@ -910,7 +911,7 @@ async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU")
     
     # Fallback: use Binance (platform=1) for A-side; for B-side use account_role=hedge
     accounts, _ = await _get_user_accounts(db, user_id)
-    if exchange == "binance":
+    if exchange == PlatformId.BINANCE.key:
         for account in accounts:
             if account.platform_id == 1:
                 return account
@@ -1089,7 +1090,7 @@ async def place_manual_order(
             binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
         # Determine price based on side and exchange
-        if req.exchange == "binance":
+        if req.exchange == PlatformId.BINANCE.key:
             if req.side == "buy":
                 price = spread_data.binance_quote.bid_price
             else:
@@ -1102,7 +1103,7 @@ async def place_manual_order(
         from app.services.order_executor import order_executor
 
         # Place order
-        if req.exchange == "binance":
+        if req.exchange == PlatformId.BINANCE.key:
             result = await order_executor.place_binance_order(
                 account=target_account,
                 symbol=symbol,
@@ -1181,7 +1182,7 @@ async def close_all_positions(
         results = []
 
         # Resolve Binance (A-side) via pair binding
-        binance_account = await _resolve_manual_target_account(db, current_user.user_id, "binance", req.pair_code)
+        binance_account = await _resolve_manual_target_account(db, current_user.user_id, PlatformId.BINANCE.key, req.pair_code)
 
         if binance_account:
             try:
@@ -1222,7 +1223,7 @@ async def close_all_positions(
                         )
 
                         results.append({
-                            "exchange": "binance",
+                            "exchange": PlatformId.BINANCE.key,
                             "position_side": position_side,
                             "quantity": position_amt,
                             "price": price,
@@ -1233,10 +1234,10 @@ async def close_all_positions(
                     await client.close()
             except Exception as e:
                 logger.error(f"Binance close positions error: {str(e)}", exc_info=True)
-                results.append({"exchange": "binance", "error": str(e)})
+                results.append({"exchange": PlatformId.BINANCE.key, "error": str(e)})
 
         # Resolve hedge (B-side) via pair binding
-        bybit_account = await _resolve_manual_target_account(db, current_user.user_id, "bybit", req.pair_code)
+        bybit_account = await _resolve_manual_target_account(db, current_user.user_id, PlatformId.BYBIT.key, req.pair_code)
 
         if bybit_account:
             try:
@@ -1270,7 +1271,7 @@ async def close_all_positions(
                         )
 
                         results.append({
-                            "exchange": "bybit",
+                            "exchange": PlatformId.BYBIT.key,
                             "position_type": "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT",
                             "quantity": volume,
                             "success": result.get("success"),
@@ -1278,7 +1279,7 @@ async def close_all_positions(
                         })
             except Exception as e:
                 logger.error(f"Bybit close positions error: {str(e)}", exc_info=True)
-                results.append({"exchange": "bybit", "error": str(e)})
+                results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
 
         return {
             "success": True,
@@ -1527,7 +1528,7 @@ async def close_short_position(
         spread_data = await market_data_service.get_current_spread(
             binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
-        if req.exchange == "binance":
+        if req.exchange == PlatformId.BINANCE.key:
             price = spread_data.binance_quote.ask_price
             symbol = _sym_a
         else:
@@ -1537,7 +1538,7 @@ async def close_short_position(
         from app.services.order_executor import order_executor
 
         # Place order to close short position (buy to close)
-        if req.exchange == "binance":
+        if req.exchange == PlatformId.BINANCE.key:
             result = await order_executor.place_binance_order(
                 account=target_account,
                 symbol=symbol,
@@ -1609,7 +1610,7 @@ async def close_long_position(
         spread_data = await market_data_service.get_current_spread(
             binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
-        if req.exchange == "binance":
+        if req.exchange == PlatformId.BINANCE.key:
             price = spread_data.binance_quote.bid_price
             symbol = _sym_a
         else:
@@ -1619,7 +1620,7 @@ async def close_long_position(
         from app.services.order_executor import order_executor
 
         # Place order to close long position (sell to close)
-        if req.exchange == "binance":
+        if req.exchange == PlatformId.BINANCE.key:
             result = await order_executor.place_binance_order(
                 account=target_account,
                 symbol=symbol,
@@ -1682,7 +1683,7 @@ async def cancel_all_orders(
         results = []
 
         # Resolve Binance (A-side) via pair binding
-        binance_account = await _resolve_manual_target_account(db, current_user.user_id, "binance", req.pair_code)
+        binance_account = await _resolve_manual_target_account(db, current_user.user_id, PlatformId.BINANCE.key, req.pair_code)
 
         if binance_account:
             try:
@@ -1703,7 +1704,7 @@ async def cancel_all_orders(
                         )
 
                         results.append({
-                            "exchange": "binance",
+                            "exchange": PlatformId.BINANCE.key,
                             "order_id": order_id,
                             "success": result.get("success") if isinstance(result, dict) else True,
                         })
@@ -1711,7 +1712,7 @@ async def cancel_all_orders(
                     await client.close()
             except Exception as e:
                 logger.error(f"Binance cancel orders error: {str(e)}", exc_info=True)
-                results.append({"exchange": "binance", "error": str(e)})
+                results.append({"exchange": PlatformId.BINANCE.key, "error": str(e)})
 
         # Cancel Bybit orders
         bybit_account = None
@@ -1739,13 +1740,13 @@ async def cancel_all_orders(
                         )
 
                         results.append({
-                            "exchange": "bybit",
+                            "exchange": PlatformId.BYBIT.key,
                             "order_id": order_id,
                             "success": result.get("success") if isinstance(result, dict) else True,
                         })
             except Exception as e:
                 logger.error(f"Bybit cancel orders error: {str(e)}", exc_info=True)
-                results.append({"exchange": "bybit", "error": str(e)})
+                results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
 
         return {
             "success": True,

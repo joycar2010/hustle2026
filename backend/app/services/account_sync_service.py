@@ -14,6 +14,7 @@ from app.models.position import Position
 from app.models.account_snapshot import AccountSnapshot
 from app.services.binance_client import BinanceFuturesClient
 from app.services.bybit_client import BybitV5Client
+from app.core.platform import PlatformId
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,9 @@ class AccountSyncService:
 
             for account in accounts:
                 try:
-                    if account.platform == "binance":
+                    if account.platform_id == PlatformId.BINANCE:
                         await self.sync_binance_account(db, account)
-                    elif account.platform == "bybit":
+                    elif account.platform_id == PlatformId.BYBIT:
                         await self.sync_bybit_account(db, account)
                 except Exception as e:
                     logger.error(f"Error syncing account {account.account_id}: {e}")

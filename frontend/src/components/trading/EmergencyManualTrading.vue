@@ -13,8 +13,8 @@
       <div class="form-group">
         <label class="label">交易平台</label>
         <select v-model="exchange" class="select-input">
-          <option value="binance">主账号 ({{ pairConfig.binance }})</option>
-          <option value="bybit">对冲账户 ({{ pairConfig.mt5 }})</option>
+          <option :value="EXCHANGE_BINANCE">主账号 ({{ pairConfig.binance }})</option>
+          <option :value="EXCHANGE_BYBIT">对冲账户 ({{ pairConfig.mt5 }})</option>
         </select>
       </div>
 
@@ -100,12 +100,15 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { useTradingPair } from '@/composables/useTradingPair'
+import { PlatformId, platformKey } from '@/constants/platform'
 
 const emit = defineEmits(['orderExecuted'])
 
 const { currentPair, pairConfig } = useTradingPair()
 
-const exchange = ref('binance')
+const EXCHANGE_BINANCE = platformKey(PlatformId.BINANCE)  // 'binance'
+const EXCHANGE_BYBIT = platformKey(PlatformId.BYBIT)      // 'bybit'
+const exchange = ref(EXCHANGE_BINANCE)
 const quantity = ref(1)
 const loading = ref(false)
 const statusMsg = ref('')

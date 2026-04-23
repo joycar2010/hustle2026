@@ -184,6 +184,14 @@ export const useMarketStore = defineStore('market', () => {
     connected.value = false
   }
 
+  // Force a full reconnect — used on user switch so the new JWT is used.
+  // Token is re-read from localStorage inside connect().
+  function reconnect() {
+    disconnect()
+    token = null  // force getToken() to re-read fresh token
+    connect()
+  }
+
   // Keep fetchMarketData for any legacy callers — returns last known data
   function fetchMarketData() {
     return Promise.resolve(marketData.value)
@@ -213,6 +221,7 @@ export const useMarketStore = defineStore('market', () => {
     positionSnapshot,
     connect,
     disconnect,
+    reconnect,
     fetchMarketData,
     requestSnapshot,
   }

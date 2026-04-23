@@ -256,19 +256,30 @@ class MarketDataService:
         bybit_symbol: str = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
-    ) -> list:
-        """Get historical spread data from PostgreSQL database
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ):
+        """Get historical spread data from PostgreSQL database.
+
+        Two modes:
+        - Legacy (page is None): returns a plain list — backward compatible with
+          existing callers. ``limit`` caps results when no time filter given.
+        - Paginated (page >= 1): returns
+          ``{"data": [...], "pagination": {"page", "page_size", "total", "total_pages"}}``.
+          Always honours time filters and applies OFFSET/LIMIT on the server.
 
         Args:
-            limit: Maximum number of records to return (ignored if time filters are provided)
-            binance_symbol: Binance trading symbol
-            bybit_symbol: Bybit trading symbol
-            start_time: Start time in ISO format (optional)
-            end_time: End time in ISO format (optional)
+            limit: max records in legacy mode (ignored if time filters set or paginated)
+            binance_symbol: Binance trading symbol (default resolved from XAU pair)
+            bybit_symbol: Bybit trading symbol (currently informational only)
+            start_time: ISO timestamp lower bound
+            end_time: ISO timestamp upper bound
+            page: 1-based page index; enables paginated response shape
+            page_size: records per page (1..500, default 50) — only used with page
         """
         from app.core.database import AsyncSessionLocal
         from app.models.market_data import SpreadRecord
-        from sqlalchemy import select
+        from sqlalchemy import select, func
         from datetime import datetime
 
         if binance_symbol is None:
@@ -281,50 +292,56 @@ class MarketDataService:
                 pass
             binance_symbol = binance_symbol or "XAUUSDT"
 
-        async with AsyncSessionLocal() as session:
-            query = select(SpreadRecord).where(SpreadRecord.symbol == binance_symbol)
+        paginated = page is not None
+        if paginated:
+            page = max(1, int(page))
+            page_size = max(1, min(500, int(page_size or 50)))
 
-            # Add time filters if provided
+        def _apply_filters(q):
+            q = q.where(SpreadRecord.symbol == binance_symbol)
             if start_time:
-                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                # Remove timezone info to match database column (TIMESTAMP WITHOUT TIME ZONE)
-                start_dt = start_dt.replace(tzinfo=None)
-                query = query.where(SpreadRecord.timestamp >= start_dt)
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00')).replace(tzinfo=None)
+                q = q.where(SpreadRecord.timestamp >= start_dt)
             if end_time:
-                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                # Remove timezone info to match database column (TIMESTAMP WITHOUT TIME ZONE)
-                end_dt = end_dt.replace(tzinfo=None)
-                query = query.where(SpreadRecord.timestamp <= end_dt)
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00')).replace(tzinfo=None)
+                q = q.where(SpreadRecord.timestamp <= end_dt)
+            return q
 
-            # Order by timestamp descending
-            query = query.order_by(SpreadRecord.timestamp.desc())
+        async with AsyncSessionLocal() as session:
+            base = _apply_filters(select(SpreadRecord))
+            base = base.order_by(SpreadRecord.timestamp.desc())
 
-            # Only apply limit if no time filters are provided
-            # When time filters are provided, return all matching records
-            if not start_time and not end_time:
-                query = query.limit(limit)
-
-            result = await session.execute(query)
-            records = result.scalars().all()
-
-            # Transform to response format
-            return [
-                {
-                    "id": str(record.id),
-                    "timestamp": record.timestamp.isoformat(),
-                    "binance_quote": {
-                        "bid": record.binance_bid,
-                        "ask": record.binance_ask,
+            if paginated:
+                count_q = _apply_filters(select(func.count(SpreadRecord.id)))
+                total = (await session.execute(count_q)).scalar_one() or 0
+                page_q = base.offset((page - 1) * page_size).limit(page_size)
+                records = (await session.execute(page_q)).scalars().all()
+                return {
+                    "data": [self._spread_record_to_dict(r) for r in records],
+                    "pagination": {
+                        "page": page,
+                        "page_size": page_size,
+                        "total": int(total),
+                        "total_pages": max(1, (int(total) + page_size - 1) // page_size),
                     },
-                    "bybit_quote": {
-                        "bid": record.bybit_bid,
-                        "ask": record.bybit_ask,
-                    },
-                    "forward_spread": record.forward_spread,
-                    "reverse_spread": record.reverse_spread,
                 }
-                for record in records
-            ]
+
+            # Legacy mode — list response
+            if not start_time and not end_time:
+                base = base.limit(limit)
+            records = (await session.execute(base)).scalars().all()
+            return [self._spread_record_to_dict(r) for r in records]
+
+    @staticmethod
+    def _spread_record_to_dict(record) -> dict:
+        return {
+            "id": str(record.id),
+            "timestamp": record.timestamp.isoformat(),
+            "binance_quote": {"bid": record.binance_bid, "ask": record.binance_ask},
+            "bybit_quote": {"bid": record.bybit_bid, "ask": record.bybit_ask},
+            "forward_spread": record.forward_spread,
+            "reverse_spread": record.reverse_spread,
+        }
 
     async def store_spread_history(
         self,

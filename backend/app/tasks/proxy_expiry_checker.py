@@ -114,6 +114,22 @@ class ProxyExpiryChecker:
             return
         _notified_today[aid] = today
 
+        # C3: also emit through the template path (so popup + cooldown +
+        # admin-managed copy in notification_templates all take effect).
+        try:
+            from app.services.risk_alert_service import risk_alert_service
+            cfg_ = account.proxy_config or {}
+            await risk_alert_service.check_proxy_expired(
+                user_id=str(account.user_id),
+                account_name=account.account_name or "",
+                ip=cfg_.get("host", "未知"),
+                region=cfg_.get("region", ""),
+                expires_at=cfg_.get("expires_at", "未知"),
+                days_left=days_left,
+            )
+        except Exception as _pe_err:
+            logger.warning(f"[proxy_expiry] template alert failed: {_pe_err}")
+
         # 清理旧日期记录
         for k in list(_notified_today):
             if _notified_today[k] < today:

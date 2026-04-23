@@ -147,12 +147,6 @@
           </div>
         </div>
 
-        <!-- Pair account warning -->
-        <div v-if="pairAccountWarning" class="bg-[#f6465d]/10 border border-[#f6465d]/30 rounded px-3 py-2 text-xs text-[#f6465d] flex items-center gap-2">
-          <span class="text-sm">&#x26A0;</span>
-          <span>{{ pairAccountWarning }}</span>
-        </div>
-
         <!-- Opening/Closing Position Toggles -->
         <div class="grid grid-cols-2 gap-2">
           <!-- Opening Control -->
@@ -160,15 +154,15 @@
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpeningExecution"
-              :disabled="maintenanceActive || strategyStore.isLocked(`${type}_opening`)"
+              :disabled="strategyStore.isLocked(`${type}_opening`)"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                (maintenanceActive || strategyStore.isLocked(`${type}_opening`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                strategyStore.isLocked(`${type}_opening`) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 continuousExecutionEnabled.opening
                   ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                   : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
-              :title="maintenanceActive ? `系统维护中${maintenanceReason ? '（' + maintenanceReason + '）' : ''}，请稍后再试` : (strategyStore.isLocked(`${type}_opening`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : '')"
+              :title="strategyStore.isLocked(`${type}_opening`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
             </button>
@@ -179,35 +173,17 @@
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosingExecution"
-              :disabled="maintenanceActive || strategyStore.isLocked(`${type}_closing`)"
+              :disabled="strategyStore.isLocked(`${type}_closing`)"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                (maintenanceActive || strategyStore.isLocked(`${type}_closing`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                strategyStore.isLocked(`${type}_closing`) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 continuousExecutionEnabled.closing
                   ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                   : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
               ]"
-              :title="maintenanceActive ? `系统维护中${maintenanceReason ? '（' + maintenanceReason + '）' : ''}，请稍后再试` : (strategyStore.isLocked(`${type}_closing`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : '')"
+              :title="strategyStore.isLocked(`${type}_closing`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Hedge Multiplier Control -->
-        <div v-if="showHedgeRatio" class="mt-2 bg-[#1a1d21] rounded p-2">
-          <div class="flex items-center justify-between mb-1.5">
-            <span class="text-[10px] text-gray-400">对冲倍数</span>
-            <span class="text-xs font-mono font-bold" :class="hedgeMultiplier > 1 ? 'text-[#f0b90b]' : 'text-gray-300'">{{ hedgeMultiplier }}x</span>
-          </div>
-          <div class="flex gap-1">
-            <button v-for="m in [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]" :key="m"
-              @click="setHedgeMultiplier(m)"
-              :disabled="continuousExecutionEnabled.opening || continuousExecutionEnabled.closing"
-              :class="['flex-1 py-1 rounded text-[10px] font-bold transition-all',
-                hedgeMultiplier === m ? 'bg-primary text-dark-300' : 'bg-dark-200 text-gray-400 hover:bg-dark-50',
-                (continuousExecutionEnabled.opening || continuousExecutionEnabled.closing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer']">
-              {{ m }}x
             </button>
           </div>
         </div>
@@ -363,7 +339,7 @@
               <button
                 @click="saveConfig"
                 title="保存配置"
-                class="flex-shrink-0 w-[26px] h-[26px] bg-primary text-white rounded font-bold hover:bg-primary-hover transition-colors text-[10px] flex items-center justify-center leading-none"
+                class="flex-shrink-0 w-[26px] h-[26px] bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-[10px] flex items-center justify-center leading-none"
               >
                 保
               </button>
@@ -476,7 +452,7 @@
         <!-- Save Strategy Button -->
         <button
           @click="saveStrategy"
-          class="w-full mt-2 px-3 py-1.5 bg-[#f6465d] text-white rounded font-bold hover:bg-[#e03d52] transition-colors text-xs"
+          class="w-full mt-2 px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
         >
           保存策略
         </button>
@@ -522,7 +498,7 @@
         </div>
         <button
           @click="saveAlertSettings"
-          class="w-full mt-2 px-3 py-1.5 bg-primary text-white rounded font-bold hover:bg-primary-hover transition-colors text-xs"
+          class="w-full mt-2 px-3 py-1.5 bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-xs"
         >
           保存提醒设置（{{ alertPairCode }}）
         </button>
@@ -537,11 +513,12 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useStrategyStore } from '@/stores/strategy'
-import { useMaintenance } from '@/composables/useMaintenance.js'
+import { PlatformId } from '@/constants/platform'
 import api from '@/services/api'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 import { xauToLot } from '@/composables/useQuantityConverter'
 import { useTradingPair } from '@/composables/useTradingPair'
+import { useAuthStore } from '@/stores/auth'
 
 // 防抖函数
 function debounce(fn, delay = 500) {
@@ -567,9 +544,12 @@ const props = defineProps({
 })
 
 // LocalStorage keys for persisting strategy enabled states
-const STORAGE_KEY_OPENING = `strategy_${props.type}_opening_enabled`
-const STORAGE_KEY_CLOSING = `strategy_${props.type}_closing_enabled`
-const STORAGE_KEY_LADDER_PROGRESS = `strategy_${props.type}_ladder_progress`
+// NOTE: user-scoped via authStore so switching users doesn't bleed A's state into B's panel
+const authStore = useAuthStore()
+const userScopeKey = computed(() => authStore.user?.user_id || 'anon')
+const STORAGE_KEY_OPENING = computed(() => `strategy_${userScopeKey.value}_${props.type}_opening_enabled`)
+const STORAGE_KEY_CLOSING = computed(() => `strategy_${userScopeKey.value}_${props.type}_closing_enabled`)
+const STORAGE_KEY_LADDER_PROGRESS = computed(() => `strategy_${userScopeKey.value}_${props.type}_ladder_progress`)
 
 // Helper functions for localStorage
 function loadEnabledState(key, defaultValue = false) {
@@ -592,7 +572,7 @@ function saveEnabledState(key, value) {
 // 阶梯进度持久化函数
 function loadLadderProgress() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_LADDER_PROGRESS)
+    const saved = localStorage.getItem(STORAGE_KEY_LADDER_PROGRESS.value)
     if (saved) {
       return JSON.parse(saved)
     }
@@ -607,7 +587,7 @@ function loadLadderProgress() {
 
 function saveLadderProgress() {
   try {
-    localStorage.setItem(STORAGE_KEY_LADDER_PROGRESS, JSON.stringify(ladderProgress.value))
+    localStorage.setItem(STORAGE_KEY_LADDER_PROGRESS.value, JSON.stringify(ladderProgress.value))
   } catch (error) {
     console.error('Failed to save ladder progress:', error)
   }
@@ -647,7 +627,6 @@ function resetLadderFailures(type) {
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const strategyStore = useStrategyStore()
-const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
 
 // Local position refs — driven directly by marketStore.positionSnapshot (WebSocket position_snapshot)
 // Decoupled from MarketCards computed chain; updates whenever backend pushes a snapshot
@@ -674,16 +653,9 @@ const executing = ref(false)
 const executingAnyStrategy = computed(() => executingOpening.value || executingClosing.value)
 const accountsData = ref(null)
 // 选择用户的默认+启用账户，优先 is_default && is_active，fallback 到第一个 is_active
-function pickAccount(accounts, side = 'A') {
-  // Use pair binding to find the correct account
-  const bindId = side === 'A' ? pairAccountBinding.value.account_a_id : pairAccountBinding.value.account_b_id
-  if (bindId) {
-    const bound = accounts.find(a => a.account_id === bindId && a.is_active !== false)
-    if (bound) return bound
-  }
-  // Fallback: account_role
-  if (side === 'A') return accounts.find(a => a.account_role === 'primary' && a.is_active !== false) || accounts.find(a => a.platform_id === 1 && a.is_active !== false)
-  return accounts.find(a => a.account_role === 'hedge' && a.is_active !== false) || accounts.find(a => (a.platform_id === 2 || a.platform_id === 3) && a.is_mt5_account && a.is_active !== false)
+function pickAccount(accounts, platformId, isMt5 = false) {
+  const filter = acc => acc.platform_id === platformId && acc.is_active !== false && (!isMt5 || acc.is_mt5_account)
+  return accounts.find(acc => filter(acc) && acc.is_default) || accounts.find(filter)
 }
 const orderPlaced = ref({ opening: false, closing: false })
 const triggerCount = ref({ opening: 0, closing: 0 })
@@ -694,28 +666,6 @@ let lastUpdateTime = 0
 const UPDATE_THROTTLE = isMobile.value ? 100 : 500 // 移动端降低更新频率
 
 // Continuous execution state - separate for opening and closing
-const hedgeMultiplier = ref(1.0)
-const showHedgeRatio = ref(true)
-
-async function fetchHedgeMultiplier() {
-  try {
-    const r = await api.get('/api/v1/hedge-ratio', { params: { pair_code: currentPair.value || 'XAU' } })
-    hedgeMultiplier.value = r.data?.hedge_multiplier ?? 1.0
-    showHedgeRatio.value = !!r.data?.enabled
-  } catch { hedgeMultiplier.value = 1.0; showHedgeRatio.value = false }
-}
-
-async function setHedgeMultiplier(m) {
-  if (continuousExecutionEnabled.value?.opening || continuousExecutionEnabled.value?.closing) return
-  if (!confirm(`确定将对冲倍数设为 ${m}x 吗？开仓和平仓都将按此倍数执行。`)) return
-  try {
-    await api.put('/api/v1/hedge-ratio', { hedge_multiplier: m, pair_code: currentPair.value || 'XAU' })
-    hedgeMultiplier.value = m
-  } catch (e) {
-    console.error('Failed to set hedge multiplier:', e)
-  }
-}
-
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
@@ -744,8 +694,8 @@ watch(alertPairCode, () => {
 const config = ref({
   openingMCoin: 5,
   closingMCoin: 5,
-  openingEnabled: loadEnabledState(STORAGE_KEY_OPENING, false),
-  closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING, false),
+  openingEnabled: loadEnabledState(STORAGE_KEY_OPENING.value, false),
+  closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING.value, false),
   openingSyncQty: 3,
   closingSyncQty: 3,
   openingTriggerCheckInterval: 200, // 开仓触发器检测频率（毫秒）
@@ -756,9 +706,6 @@ const config = ref({
     { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3 },
   ]
 })
-
-const pairAccountBinding = ref({})
-const pairAccountWarning = ref('')  // warning if bound account is disabled  // current pair's A/B account binding
 
 const configId = ref(null)
 const validationErrors = ref([])
@@ -794,7 +741,6 @@ async function loadEffectiveTriggerInterval() {
 }
 
 onMounted(async () => {
-  fetchHedgeMultiplier()
   // Load config from database (including enabled states)
   await loadConfigFromDB()
 
@@ -823,11 +769,11 @@ onMounted(async () => {
       console.warn('Disabling strategies due to account validation failure:', accountValidation.message)
       if (config.value.openingEnabled) {
         config.value.openingEnabled = false
-        saveEnabledState(STORAGE_KEY_OPENING, false)
+        saveEnabledState(STORAGE_KEY_OPENING.value, false)
       }
       if (config.value.closingEnabled) {
         config.value.closingEnabled = false
-        saveEnabledState(STORAGE_KEY_CLOSING, false)
+        saveEnabledState(STORAGE_KEY_CLOSING.value, false)
       }
       validationErrors.value = [accountValidation.message]
     }
@@ -880,6 +826,43 @@ async function loadConfigFromDB() {
 
 onUnmounted(() => {
   // No cleanup needed for WebSocket - stays connected for other components
+})
+
+// User-switch refresh: admin impersonation / user change triggers full reload
+// Fixes bug where panel kept showing previous user's config, accounts, and ladder progress.
+watch(() => authStore.user?.user_id, async (newUid, oldUid) => {
+  if (!newUid || newUid === oldUid) return
+  console.log('[StrategyPanel] user switched', oldUid, '→', newUid, '- reloading')
+  // 1. Reset in-memory state that was scoped to previous user
+  configId.value = null
+  accountsData.value = null
+  ladderFailureCounts.value = { opening: {}, closing: {} }
+  triggerCount.value = { opening: 0, closing: 0 }
+  // 2. Re-read new user's persisted state from (now user-scoped) localStorage
+  config.value.openingEnabled = loadEnabledState(STORAGE_KEY_OPENING.value, false)
+  config.value.closingEnabled = loadEnabledState(STORAGE_KEY_CLOSING.value, false)
+  ladderProgress.value = loadLadderProgress()
+  // 3. Reconnect WebSocket with new user's token so pushes target the new user
+  try {
+    if (typeof marketStore.reconnect === 'function') {
+      marketStore.reconnect()
+    } else {
+      marketStore.disconnect()
+      marketStore.connect()
+    }
+  } catch (e) {
+    console.warn('[StrategyPanel] marketStore reconnect failed', e)
+  }
+  // 4. Re-fetch server-side data scoped to new user
+  try {
+    await loadConfigFromDB()
+    await fetchAccountData()
+    loadLadderFailureCounts()
+    fetchAlertSettings()
+    loadEffectiveTriggerInterval()
+  } catch (e) {
+    console.error('[StrategyPanel] reload after user switch failed', e)
+  }
 })
 
 // Watch for market data updates via WebSocket
@@ -1232,82 +1215,43 @@ function handleOrdersFilled(data) {
 
   // 刷新持仓数据
   refreshPositions()
-  // Refresh pair-account binding on pair change
-  api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU')).then(r => {
-    pairAccountBinding.value = r.data || {}
-    fetchAccountData()  // re-check account status for new pair
-  }).catch(() => { pairAccountBinding.value = {} })
 }
 
 function handleAccountBalanceUpdate(data) {
   // Update available assets from WebSocket data
   if (data.accounts && data.accounts.length > 0) {
-    // Resolve A/B accounts based on pair binding
-    const aId = pairAccountBinding.value.account_a_id
-    const bId = pairAccountBinding.value.account_b_id
-    const allAccounts = data.accounts
+    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE) || []
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT) || []
 
-    const binanceAcc = (aId && allAccounts.find(a => a.account_id === aId)) || allAccounts.find(a => a.platform_id === 1)
-    const bybitAcc = (bId && allAccounts.find(a => a.account_id === bId)) || allAccounts.find(a => a.platform_id === 2 || a.platform_id === 3)
+    // Use first account's available balance instead of summing all accounts
+    binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
 
-    if (binanceAcc) binanceAssets.value = binanceAcc.balance?.available_balance || 0
+    // MT5 accounts always report available_balance=0 from the aggregated API/WS broadcast.
+    // Only update bybitAssets from WS if it's a non-MT5 account with real data.
+    const bybitAcc = bybitAccounts[0]
     if (bybitAcc) {
       const wsBal = bybitAcc.balance?.available_balance || 0
       if (!bybitAcc.is_mt5_account || wsBal > 0) {
         bybitAssets.value = wsBal
       }
+      // For MT5: keep the value set by fetchAccountData (from bridge) — don't overwrite with 0
     }
   }
 }
 
 async function fetchAccountData() {
   try {
-    // Fetch pair-account binding for current pair
-    try {
-      const pairR = await api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU'))
-      pairAccountBinding.value = pairR.data || {}
-    } catch { pairAccountBinding.value = {} }
-
     const accountResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
     const accountData = accountResponse.data
 
     accountsData.value = accountData
 
-    // Resolve A/B accounts based on pair binding, fallback to platform_id
-    const aId = pairAccountBinding.value.account_a_id
-    const bId = pairAccountBinding.value.account_b_id
-    const allAccounts = accountData.accounts || []
+    const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === PlatformId.BINANCE) || []
+    const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === PlatformId.BYBIT) || []
 
-    const binanceAcc = (aId && allAccounts.find(a => a.account_id === aId)) || allAccounts.find(a => a.platform_id === 1)
-    const bybitAcc = (bId && allAccounts.find(a => a.account_id === bId)) || allAccounts.find(a => a.platform_id === 2 || a.platform_id === 3)
-
-    binanceAssets.value = binanceAcc?.balance?.available_balance || 0
-    bybitAssets.value = bybitAcc?.balance?.available_balance || 0
-
-    // Check if bound accounts are disabled
-    const warnings = []
-    const warnAId = pairAccountBinding.value.account_a_id
-    const warnBId = pairAccountBinding.value.account_b_id
-    if (warnAId) {
-      const aAcc = allAccounts.find(a => a.account_id === warnAId)
-      if (!aAcc) {
-        const failedA = accountData.failed_accounts?.find(f => f.account_id === aId)
-        if (failedA) warnings.push('主账号(' + (failedA.account_name || warnAId.substring(0,8)) + ')已禁用')
-        else warnings.push('主账号未找到')
-      }
-    }
-    if (warnBId) {
-      const bAcc2 = allAccounts.find(a => a.account_id === warnBId)
-      if (!bAcc2) {
-        const failedB = accountData.failed_accounts?.find(f => f.account_id === bId2)
-        if (failedB) warnings.push('对冲账号(' + (failedB.account_name || warnBId.substring(0,8)) + ')已禁用')
-        else warnings.push('对冲账号未找到')
-      }
-    }
-    if (!warnAId && !warnBId && pairAccountBinding.value.pair_code) {
-      warnings.push('当前产品对未绑定账户')
-    }
-    pairAccountWarning.value = warnings.join(' | ')
+    // Use first account's available balance
+    binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
+    bybitAssets.value = bybitAccounts.length > 0 ? (bybitAccounts[0].balance?.available_balance || 0) : 0
   } catch (error) {
     console.error('Failed to fetch account data:', error)
   }
@@ -1402,7 +1346,7 @@ async function saveConfig() {
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
     }
 
-    const response = await api.post('/api/v1/strategies/configs/upsert', configData)
+    const response = await api.put(`/api/v1/strategies/configs/${props.type}`, configData)
     configId.value = response.data.config_id
     notificationStore.showStrategyNotification('配置保存成功！', 'success')
   } catch (error) {
@@ -1440,8 +1384,8 @@ function validateAccountsForExecution() {
   console.log('accounts:', accounts)
 
   // Find Binance and Bybit MT5 accounts (prefer is_default + is_active)
-  const binanceAccount = pickAccount(accounts, 'A')
-  const bybitMT5Account = pickAccount(accounts, 'B')
+  const binanceAccount = pickAccount(accounts, 1)
+  const bybitMT5Account = pickAccount(accounts, 2, true)
   console.log('binanceAccount:', binanceAccount)
   console.log('bybitMT5Account:', bybitMT5Account)
 
@@ -1661,8 +1605,8 @@ async function executeLadderOpening(ladderIndex, ladder) {
     executingOpening.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 'A')
-    const bybitMT5Account = pickAccount(accounts, 'B')
+    const binanceAccount = pickAccount(accounts, 1)
+    const bybitMT5Account = pickAccount(accounts, 2, true)
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -1679,7 +1623,6 @@ async function executeLadderOpening(ladderIndex, ladder) {
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-            pair_code: currentPair.value || "XAU",
       quantity: batchQty,
       ladder_index: ladderIndex,
       target_spread: ladder.threshold
@@ -1693,8 +1636,6 @@ async function executeLadderOpening(ladderIndex, ladder) {
       if (response.data.success) {
         console.log(`Ladder ${ladderIndex + 1} batch executed successfully`)
         console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
-        // Immediate refresh so 挂N badge doesn't lag behind by up to 2s.
-        try { props.marketCardsRef?.fetchPendingOrderCounts?.() } catch (_) {}
 
         // Phase 3: 成功执行，重置失败计数
         ladderFailureCounts.value.opening[ladderIndex] = 0
@@ -1761,7 +1702,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
         }
 
         config.value.openingEnabled = false
-        saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
+        saveEnabledState(STORAGE_KEY_OPENING.value, false)  // Save to localStorage
       }
     } catch (error) {
       // Phase 3: 异常也算失败
@@ -1776,7 +1717,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
       notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`, 'error')
 
       config.value.openingEnabled = false
-      saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
+      saveEnabledState(STORAGE_KEY_OPENING.value, false)  // Save to localStorage
     }
   } finally {
     executingOpening.value = false
@@ -1818,8 +1759,8 @@ async function executeLadderClosing(ladderIndex, ladder) {
     executingClosing.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 'A')
-    const bybitMT5Account = pickAccount(accounts, 'B')
+    const binanceAccount = pickAccount(accounts, 1)
+    const bybitMT5Account = pickAccount(accounts, 2, true)
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -1836,7 +1777,6 @@ async function executeLadderClosing(ladderIndex, ladder) {
     const executionData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-            pair_code: currentPair.value || "XAU",
       quantity: batchQty,
       ladder_index: ladderIndex
     }
@@ -1913,7 +1853,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
         }
 
         config.value.closingEnabled = false
-        saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
+        saveEnabledState(STORAGE_KEY_CLOSING.value, false)  // Save to localStorage
       }
     } catch (error) {
       // Phase 3: 异常也算失败
@@ -1928,7 +1868,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
       notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`, 'error')
 
       config.value.closingEnabled = false
-      saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
+      saveEnabledState(STORAGE_KEY_CLOSING.value, false)  // Save to localStorage
     }
   } finally {
     executingClosing.value = false
@@ -1942,8 +1882,8 @@ async function executeBatchOpening(ladder) {
     executingOpening.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 'A')
-    const bybitMT5Account = pickAccount(accounts, 'B')
+    const binanceAccount = pickAccount(accounts, 1)
+    const bybitMT5Account = pickAccount(accounts, 2, true)
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -1965,7 +1905,6 @@ async function executeBatchOpening(ladder) {
       const executionData = {
         binance_account_id: binanceAccount.account_id,
         bybit_account_id: bybitMT5Account.account_id,
-            pair_code: currentPair.value || "XAU",
         quantity: batchQuantity,
         target_spread: ladder.threshold
       }
@@ -1976,8 +1915,6 @@ async function executeBatchOpening(ladder) {
         if (response.data.success) {
           console.log(`Batch ${i + 1} executed successfully`)
           remainingQuantity -= batchQuantity
-          // Immediate refresh so 挂N badge updates this tick.
-          try { props.marketCardsRef?.fetchPendingOrderCounts?.() } catch (_) {}
 
           // Wait for order to be filled before next batch
           if (i < numBatches - 1) {
@@ -2042,8 +1979,8 @@ async function executeBatchClosing(ladder) {
     executingClosing.value = true
 
     const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 'A')
-    const bybitMT5Account = pickAccount(accounts, 'B')
+    const binanceAccount = pickAccount(accounts, 1)
+    const bybitMT5Account = pickAccount(accounts, 2, true)
 
     if (!binanceAccount || !bybitMT5Account) {
       notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
@@ -2065,7 +2002,6 @@ async function executeBatchClosing(ladder) {
       const executionData = {
         binance_account_id: binanceAccount.account_id,
         bybit_account_id: bybitMT5Account.account_id,
-            pair_code: currentPair.value || "XAU",
         quantity: batchQuantity
       }
 
@@ -2282,8 +2218,8 @@ async function startContinuousExecution(action) {
       return
     }
 
-    const binanceAccount = pickAccount(accountsData.value.accounts || [], 'A')
-    const bybitMT5Account = pickAccount(accountsData.value.accounts || [], 'B')
+    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === PlatformId.BINANCE)
+    const bybitMT5Account = accountsData.value.accounts.find(a => a.platform_id === PlatformId.BYBIT)
     console.log('[DEBUG] Binance account:', binanceAccount)
     console.log('[DEBUG] Bybit account:', bybitMT5Account)
 
@@ -2311,7 +2247,6 @@ async function startContinuousExecution(action) {
     const requestData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
-            pair_code: currentPair.value || "XAU",
       opening_m_coin: config.value.openingMCoin || 5,
       closing_m_coin: config.value.closingMCoin || 5,
       ladders: ladders,

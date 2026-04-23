@@ -470,6 +470,54 @@ class RiskAlertService:
             },
         )
 
+    async def check_bybit_ip_ban(
+        self, user_id: str, ip: str, ban_until_ms: int, message: str,
+    ) -> bool:
+        """Bybit IP 被封禁 → 立即推送"""
+        from datetime import datetime
+        ban_until_dt = datetime.fromtimestamp(ban_until_ms / 1000)
+        beijing_time = ban_until_dt.strftime('%Y-%m-%d %H:%M:%S')
+        now_ms = int(__import__('time').time() * 1000)
+        remaining_ms = max(0, ban_until_ms - now_ms)
+        rm, rs = remaining_ms // 60000, (remaining_ms % 60000) // 1000
+        remaining_str = f"{rm}分钟{rs}秒" if rm > 0 else f"{rs}秒"
+        return await self._send_alert(
+            user_id=user_id, template_key="bybit_ip_ban_alert",
+            variables={"ip": ip, "ban_until_time": beijing_time, "remaining_time": remaining_str},
+        )
+
+    async def check_gate_ip_ban(
+        self, user_id: str, ip: str, ban_until_ms: int, message: str,
+    ) -> bool:
+        """Gate.io IP 被封禁 → 立即推送"""
+        from datetime import datetime
+        ban_until_dt = datetime.fromtimestamp(ban_until_ms / 1000)
+        beijing_time = ban_until_dt.strftime('%Y-%m-%d %H:%M:%S')
+        now_ms = int(__import__('time').time() * 1000)
+        remaining_ms = max(0, ban_until_ms - now_ms)
+        rm, rs = remaining_ms // 60000, (remaining_ms % 60000) // 1000
+        remaining_str = f"{rm}分钟{rs}秒" if rm > 0 else f"{rs}秒"
+        return await self._send_alert(
+            user_id=user_id, template_key="gate_ip_ban_alert",
+            variables={"ip": ip, "ban_until_time": beijing_time, "remaining_time": remaining_str},
+        )
+
+    async def check_okx_ip_ban(
+        self, user_id: str, ip: str, ban_until_ms: int, message: str,
+    ) -> bool:
+        """OKX IP 被封禁 → 立即推送"""
+        from datetime import datetime
+        ban_until_dt = datetime.fromtimestamp(ban_until_ms / 1000)
+        beijing_time = ban_until_dt.strftime('%Y-%m-%d %H:%M:%S')
+        now_ms = int(__import__('time').time() * 1000)
+        remaining_ms = max(0, ban_until_ms - now_ms)
+        rm, rs = remaining_ms // 60000, (remaining_ms % 60000) // 1000
+        remaining_str = f"{rm}分钟{rs}秒" if rm > 0 else f"{rs}秒"
+        return await self._send_alert(
+            user_id=user_id, template_key="okx_ip_ban_alert",
+            variables={"ip": ip, "ban_until_time": beijing_time, "remaining_time": remaining_str},
+        )
+
     # ========================================================================
     # 净资产监控
     # ========================================================================

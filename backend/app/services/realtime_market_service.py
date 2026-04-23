@@ -14,6 +14,7 @@ from app.services.binance_ws_client import binance_ws
 from app.services.mt5_client import MT5Client
 from app.models.market_data import MarketData, SpreadRecord
 from app.models.account import Account
+from app.core.platform import PlatformId
 from app.models.platform import Platform
 
 logger = logging.getLogger(__name__)
@@ -46,12 +47,12 @@ class RealTimeMarketDataService:
             # Query for enabled accounts grouped by platform
             # Join Account with Platform to filter by platform_name
             binance_enabled = db.query(Account).join(Platform).filter(
-                Platform.platform_name == "binance",
+                Platform.platform_name == PlatformId.BINANCE.key,
                 Account.is_active.is_(True)
             ).first() is not None
 
             bybit_enabled = db.query(Account).join(Platform).filter(
-                Platform.platform_name == "bybit",
+                Platform.platform_name == PlatformId.BYBIT.key,
                 Account.is_active.is_(True)
             ).first() is not None
 
@@ -167,111 +168,86 @@ class RealTimeMarketDataService:
             return None
 
     async def fetch_and_store_market_data(self, symbol: str = "XAUUSDT"):
-        """Fetch market data from both exchanges and store spread data only
+        """Fetch spread via the shared market_data_service (MT5 HTTP bridge path)
+        and persist a ``SpreadRecord`` row.
 
-        Note:
-        - Symbol mapping now reads from hedging_pair_service (DB-driven)
-        - Fallback: Binance XAUUSDT ↔ Bybit MT5 XAUUSD+ for gold
-        - Only spread records (SpreadRecord) are stored
+        Previously this method rolled its own Binance WS + local MT5 DLL calls,
+        which no longer works on the Linux host (no DLL). We now delegate to
+        ``market_service.market_data_service.get_current_spread`` — the same
+        path used by the WebSocket broadcaster, which already routes through
+        the MT5 HTTP bridge with multi-bridge failover. The broadcast stream
+        and the persisted history thus share one data source.
+
+        Scope: only the default (XAU) pair is persisted, matching existing
+        semantics. Other active pairs are broadcast live but not written here.
         """
-        # Resolve symbol pair from hedging config
-        bybit_symbol = "XAUUSD+"  # default fallback
+        bybit_symbol = "XAUUSD+"
         try:
             from app.services.hedging_pair_service import hedging_pair_service
             pair = hedging_pair_service.get_default_pair()
-            if pair:
+            if pair and pair.is_active:
                 symbol = pair.symbol_a.symbol
                 bybit_symbol = pair.symbol_b.symbol
+            elif pair and not pair.is_active:
+                logger.debug("Default XAU pair is disabled; skipping spread persistence")
+                return
             else:
                 bybit_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
         except Exception:
             bybit_symbol = "XAUUSD+" if symbol == "XAUUSDT" else symbol
-        # Create database session for account checking
+
         db = SessionLocal()
         try:
-            # Check which platforms have enabled accounts
             active_accounts = self.check_active_accounts(db)
-
-            # Check if MT5 market is open
             mt5_market_open = self.is_mt5_market_open()
-
-            # Determine which APIs to call
             should_call_binance = active_accounts["binance"]
             should_call_bybit = active_accounts["bybit"] and mt5_market_open
 
-            # Log skipped API calls
-            if not should_call_binance:
-                logger.debug("Skipping Binance API call: no enabled accounts")
-            if active_accounts["bybit"] and not mt5_market_open:
-                logger.debug("Skipping Bybit MT5 API call: market is closed")
-            elif not active_accounts["bybit"]:
-                logger.debug("Skipping Bybit MT5 API call: no enabled accounts")
-
-            # If no APIs should be called, return early
             if not should_call_binance and not should_call_bybit:
                 logger.debug("No API calls needed: no enabled accounts or market closed")
                 return
+            if active_accounts["bybit"] and not mt5_market_open:
+                logger.debug("MT5 market closed; skipping spread persistence")
+                return
+            if not (should_call_binance and should_call_bybit):
+                logger.debug("Only one side enabled; spread cannot be computed, skipping")
+                return
 
-            # Fetch data only from platforms with enabled accounts
-            binance_data = None
-            bybit_data = None
-
-            if should_call_binance and should_call_bybit:
-                # Fetch from both platforms concurrently
-                binance_data, bybit_data = await asyncio.gather(
-                    self.fetch_binance_ticker(symbol),
-                    self.fetch_bybit_ticker(bybit_symbol),
-                    return_exceptions=True
+            from app.services.market_service import market_data_service as _mds
+            try:
+                spread_data = await _mds.get_current_spread(
+                    binance_symbol=symbol,
+                    bybit_symbol=bybit_symbol,
+                    use_cache=False,
                 )
-            elif should_call_binance:
-                # Fetch only from Binance
-                binance_data = await self.fetch_binance_ticker(symbol)
-            elif should_call_bybit:
-                # Fetch only from Bybit
-                bybit_data = await self.fetch_bybit_ticker(bybit_symbol)
+            except Exception as fetch_err:
+                logger.warning(f"Spread fetch failed for {symbol}/{bybit_symbol}: {fetch_err}")
+                return
 
-            # Handle exceptions
-            if isinstance(binance_data, Exception):
-                logger.error(f"Binance fetch error: {binance_data}")
-                binance_data = None
-
-            if isinstance(bybit_data, Exception):
-                logger.error(f"Bybit fetch error: {bybit_data}")
-                bybit_data = None
-
-            # Store spread data ONLY (no market data stored)
+            bq = spread_data.binance_quote
+            yq = spread_data.bybit_quote
+            forward_spread = yq.bid_price - bq.bid_price
+            reverse_spread = bq.ask_price - yq.ask_price
             timestamp = datetime.utcnow()
 
-            # Calculate spreads using new formula
-            # 正向开仓 (binance做多点差): bybit_bid - binance_bid
-            # 反向开仓 (bybit做多点差): binance_ask - bybit_ask
-            if binance_data and bybit_data:
-                # 计算正向开仓点差和反向开仓点差作为主要指标
-                forward_spread = bybit_data["bid_price"] - binance_data["bid_price"]  # 正向开仓
-                reverse_spread = binance_data["ask_price"] - bybit_data["ask_price"]  # 反向开仓
+            db.add(SpreadRecord(
+                symbol=symbol,
+                binance_bid=bq.bid_price,
+                binance_ask=bq.ask_price,
+                bybit_bid=yq.bid_price,
+                bybit_ask=yq.ask_price,
+                forward_spread=forward_spread,
+                reverse_spread=reverse_spread,
+                timestamp=timestamp,
+            ))
 
-                spread_record = SpreadRecord(
-                    symbol=symbol,
-                    binance_bid=binance_data["bid_price"],
-                    binance_ask=binance_data["ask_price"],
-                    bybit_bid=bybit_data["bid_price"],
-                    bybit_ask=bybit_data["ask_price"],
-                    forward_spread=forward_spread,  # 正向开仓点差
-                    reverse_spread=reverse_spread,  # 反向开仓点差
-                    timestamp=timestamp
-                )
-                db.add(spread_record)
-
-                # Clean up old spread records (older than 24 hours)
-                # This runs every time to keep database size small
-                from datetime import timedelta
-                cutoff_time = timestamp - timedelta(days=1)
-                deleted_count = db.query(SpreadRecord).filter(
-                    SpreadRecord.timestamp < cutoff_time
-                ).delete(synchronize_session=False)
-
-                if deleted_count > 0:
-                    logger.info(f"Cleaned up {deleted_count} old spread records (>24h)")
+            from datetime import timedelta
+            cutoff_time = timestamp - timedelta(days=2)
+            deleted_count = db.query(SpreadRecord).filter(
+                SpreadRecord.timestamp < cutoff_time
+            ).delete(synchronize_session=False)
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old spread records (>48h)")
 
             db.commit()
             logger.debug(f"Spread data stored successfully for {symbol}")

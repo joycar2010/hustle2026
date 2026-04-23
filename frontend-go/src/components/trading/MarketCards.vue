@@ -1,15 +1,18 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto overflow-hidden w-full">
-    <!-- Unified System Status + Announcement Marquee -->
+    <!-- System Status Marquee -->
     <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
       <button
         @click="showSystemStatusModal = true"
-        :class="['w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer', unifiedBarBgClass]"
+        :class="[
+          'w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
+          systemHealthy ? 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30' : 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+        ]"
         :title="'点击查看详细系统状态'"
       >
         <div class="marquee-container w-full overflow-hidden">
-          <div class="marquee-content text-xs whitespace-nowrap" :class="unifiedBarTextClass">
-            {{ unifiedBarText }}
+          <div class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ systemStatusText }}
           </div>
         </div>
       </button>
@@ -256,10 +259,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useProxyStore } from '@/stores/proxy'
+import { PlatformId } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
-import { useWsStream } from '@/stores/wsStream.js'
-
-
 import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
 import SpreadDataTable from './SpreadDataTable.vue'
@@ -270,70 +271,6 @@ const notificationStore = useNotificationStore()
 const { currentPair, pairConfig } = useTradingPair()
 const proxyStore = useProxyStore()
 const strategyStore = useStrategyStore()
-
-// ── Site announcements + maintenance (site.status channel) ──
-const wsStream = useWsStream()
-wsStream.subscribe('site.status')
-// Initial snapshot (in case WS hasn't delivered yet)
-api.get('/api/v1/site-status').then(r => { wsStream.channels['site.status'] = r.data }).catch(() => {})
-const siteStatus = computed(() => wsStream.channels['site.status'] || { announcements: [], maintenance: {} })
-const maintenanceActive = computed(() => !!siteStatus.value.maintenance?.is_active)
-const maintReason = computed(() => siteStatus.value.maintenance?.reason || '')
-const maintResumeText = computed(() => {
-  const t = siteStatus.value.maintenance?.scheduled_resume_at
-  if (!t) return ''
-  try { return `预计 ${new Date(t).toLocaleString('zh-CN', { hour12: false })} 恢复` } catch { return '' }
-})
-const announcementText = computed(() => {
-  const arr = siteStatus.value.announcements || []
-  if (!arr.length) return ''
-  return arr.map(a => `[${{info:'公告',warning:'警告',critical:'紧急'}[a.level]||a.level}] ${a.title}${a.content ? '：' + a.content : ''}`).join('  ·  ')
-})
-const annBgClass = computed(() => {
-  const arr = siteStatus.value.announcements || []
-  const has = (lv) => arr.some(a => a.level === lv)
-  if (has('critical')) return 'bg-[#f6465d]/20 border-[#f6465d]/50'
-  if (has('warning')) return 'bg-[#f0b90b]/20 border-[#f0b90b]/50'
-  return 'bg-[#3370ff]/20 border-[#3370ff]/50'
-})
-const annTextClass = computed(() => {
-  const arr = siteStatus.value.announcements || []
-  const has = (lv) => arr.some(a => a.level === lv)
-  if (has('critical')) return 'text-[#f6465d]'
-  if (has('warning')) return 'text-[#f0b90b]'
-  return 'text-[#3370ff]'
-})
-
-// Unified marquee: priority = maintenance > critical ann > warning ann > unhealthy system > info ann > healthy
-const unifiedBarText = computed(() => {
-  if (maintenanceActive.value) {
-    return `⚠ 系统维护中${maintResumeText.value ? ` · ${maintResumeText.value}` : ''}${maintReason.value ? ` — ${maintReason.value}` : ''}`
-  }
-  const parts = []
-  if (announcementText.value) parts.push(`📢 ${announcementText.value}`)
-  parts.push(systemStatusText.value)
-  return parts.join('    ·    ')
-})
-const unifiedBarBgClass = computed(() => {
-  if (maintenanceActive.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-  const arr = siteStatus.value.announcements || []
-  const has = (lv) => arr.some(a => a.level === lv)
-  if (has('critical')) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-  if (has('warning')) return 'bg-[#f0b90b]/20 hover:bg-[#f0b90b]/30'
-  if (!systemHealthy.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-  if (has('info')) return 'bg-[#3370ff]/20 hover:bg-[#3370ff]/30'
-  return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
-})
-const unifiedBarTextClass = computed(() => {
-  if (maintenanceActive.value) return 'text-[#f6465d] font-bold'
-  const arr = siteStatus.value.announcements || []
-  const has = (lv) => arr.some(a => a.level === lv)
-  if (has('critical')) return 'text-[#f6465d]'
-  if (has('warning')) return 'text-[#f0b90b]'
-  if (!systemHealthy.value) return 'text-[#f6465d]'
-  if (has('info')) return 'text-[#3370ff]'
-  return 'text-[#0ecb81]'
-})
 
 // System Status Modal
 const showSystemStatusModal = ref(false)
@@ -440,9 +377,7 @@ const reverseActualPosition = ref(0)
 // 后端已算好的账户余额缓存（含 unrealized_pnl）
 // 由 fetchAccountData / handleAccountBalanceUpdate 更新
 // key: platform_id (1=Binance, 2=MT5)
-const accountsBalanceByPlatform = ref({})  // { 1: balance, 2: balance } (legacy)
-const accountsBalanceById = ref({})  // { account_id: balance } (for pair binding)
-const pairAccountBinding = ref({ account_a_id: null, account_b_id: null })  // current pair binding
+const accountsBalanceByPlatform = ref({})  // { 1: balance, 2: balance }
 
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
@@ -534,9 +469,7 @@ const forwardSpread = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（来自 Binance totalUnrealizedProfit）
 // 后端 balance.unrealized_pnl 即为 Binance 账户当前持仓实时浮动盈亏（USDT）
 const binanceFloatingProfit = computed(() => {
-  // Use pair-bound A-side account if available, fallback to platform 1
-  const aId = pairAccountBinding.value.account_a_id
-  const b = (aId && accountsBalanceById.value[aId]) || accountsBalanceByPlatform.value[1]
+  const b = accountsBalanceByPlatform.value[1]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
   // fallback：用仓位数据估算（仅在后端数据未到达时）
@@ -556,9 +489,7 @@ const binanceFloatingProfit = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（= equity - balance，MT5 终端"盈亏"列）
 // 后端已处理合约乘数和 USD→USDT 汇率换算，直接使用，无需前端重算
 const bybitFloatingProfit = computed(() => {
-  // Use pair-bound B-side account if available, fallback to platform 2
-  const bId = pairAccountBinding.value.account_b_id
-  const b = (bId && accountsBalanceById.value[bId]) || accountsBalanceByPlatform.value[2]
+  const b = accountsBalanceByPlatform.value[2]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
   // fallback：用仓位数据估算（仅在后端数据未到达时，注意汇率可能有偏差）
@@ -626,11 +557,6 @@ watch(() => marketStore.marketData, (data) => {
 
 // Watch global pair selection — refresh all market data when pair changes
 watch(currentPair, () => {
-  // Fetch pair-account binding for current pair
-  api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU')).then(r => {
-    pairAccountBinding.value = r.data || {}
-  }).catch(() => { pairAccountBinding.value = {} })
-
   fetchOrderBook()
   fetchBinanceFundingRate()
   fetchBybitSwapRate()
@@ -653,18 +579,6 @@ watch(() => marketStore.lastMessage, (message) => {
     handlePositionSnapshot(message.data)
   } else if (message.type === 'mt5_position_update') {
     handleMt5PositionUpdate(message.data)
-  } else if (message.type === 'pending_orders' && message.data) {
-    // Real-time pending orders from WS (pushed every 2s by
-    // PendingOrdersStreamer across all REST platforms). Drive both the
-    // raw counter AND the ASK / BID card badges — the latter were
-    // previously only populated by the one-shot onMounted HTTP call, so
-    // the 挂N badge never updated after a new order.
-    if (Array.isArray(message.data)) {
-      pendingOrderCount.value = message.data.length
-      const orders = message.data
-      askOrderCount.value = orders.filter(o => (o?.side || '').toLowerCase() === 'sell').length
-      bidOrderCount.value = orders.filter(o => (o?.side || '').toLowerCase() === 'buy').length
-    }
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
   }
@@ -698,17 +612,12 @@ function handleAccountBalanceUpdate(data) {
   // 每用户一个 Binance(1) + 一个 MT5(2)，直接按 platform_id 存
   if (data.accounts && data.accounts.length > 0) {
     const newBalances = {}
-    const newById = {}
     data.accounts.forEach(acc => {
       if (acc.balance && acc.platform_id) {
         newBalances[acc.platform_id] = acc.balance
       }
-      if (acc.balance && acc.account_id) {
-        newById[acc.account_id] = acc.balance
-      }
     })
     accountsBalanceByPlatform.value = newBalances
-    accountsBalanceById.value = newById
   }
 
   // Extract fee data from accounts
@@ -721,8 +630,8 @@ function handleAccountBalanceUpdate(data) {
     reverseActualPosition.value = 0
 
     // Get first account's positions and aggregate fees from all accounts
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2 || acc.platform_id === 3)
-    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
 
     // Use first account's total_positions instead of aggregating
     if (bybitAccounts.length > 0) {
@@ -734,7 +643,7 @@ function handleAccountBalanceUpdate(data) {
 
     // Aggregate fees from all accounts
     data.accounts.forEach(account => {
-      if (account.platform_id === 2 || account.platform_id === 3) {
+      if (account.platform_id === PlatformId.BYBIT) {
         // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
         // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
       }
@@ -760,10 +669,10 @@ function handleAccountBalanceUpdate(data) {
         mark_price: position.mark_price || 0
       }
 
-      if (account.platform_id === 2 || account.platform_id === 3) {
+      if (account.platform_id === PlatformId.BYBIT) {
         if (position.side === 'Buy') newBybitLong.push(posData)
         else if (position.side === 'Sell') newBybitShort.push(posData)
-      } else if (account.platform_id === 1) {
+      } else if (account.platform_id === PlatformId.BINANCE) {
         if (position.side === 'Buy') newBinanceLong.push(posData)
         else if (position.side === 'Sell') newBinanceShort.push(posData)
       }
@@ -791,10 +700,6 @@ onMounted(() => {
 
   // Fetch initial position data immediately on page load (prevents 0.00 display until WebSocket update)
   fetchAccountData()
-  // Fetch pair-account binding
-  api.get('/api/v1/pair-accounts/' + (currentPair.value || 'XAU')).then(r => {
-    pairAccountBinding.value = r.data || {}
-  }).catch(() => {})
   // Position data is then kept up-to-date via WebSocket (account_balance / position_snapshot)
   fetchPendingOrderCounts()
   fetchOrderBook()
@@ -805,34 +710,39 @@ onMounted(() => {
   fetchBinanceFundingRate()
   checkMarketStatus()
 
-  // Pending orders: WS pending_orders pushed every 2s from backend; no HTTP polling needed
+  // Fetch pending order counts every 3 seconds
+  orderFetchTimer = setInterval(() => {
+    fetchPendingOrderCounts()
+  }, 3000)
 
-  // Order book: removed 500ms polling (WS spread provides bid/ask in real-time)
-  // fetchOrderBook() called once on mount above
+  // Fetch order book every 500ms
+  orderBookFetchTimer = setInterval(() => {
+    fetchOrderBook()
+  }, 500)
 
   // Fetch exchange rate every 10 minutes
   exchangeRateTimer = setInterval(() => {
     fetchExchangeRate()
   }, 600000)
 
-  // Funding rate changes every 8h; poll every 5 minutes as safety fallback
+  // Fetch Binance funding rate every 30 seconds
   fundingRateTimer = setInterval(() => {
     fetchBinanceFundingRate()
-  }, 300000)
+  }, 30000)
 
-  // Swap rate changes daily; poll every 5 minutes
+  // Fetch Bybit swap rate every 60 seconds (changes infrequently)
   fetchBybitSwapRate()
   bybitSwapRateTimer = setInterval(() => {
     fetchBybitSwapRate()
-  }, 300000)
+  }, 60000)
 
   // Check market status every 60 seconds
-  marketStatusTimer = setInterval(checkMarketStatus, 300000) // market open/close changes ~2x/day
+  marketStatusTimer = setInterval(checkMarketStatus, 60000)
 
   // 初始化系统状态并开始轮询
   updateSystemStatus()
-  const statusInterval = setInterval(updateSystemStatus, 60000) // WS redis_status is real-time; HTTP as 60s fallback
-  const proxyHealthInterval = setInterval(fetchProxyHealthStatus, 120000) // proxy health every 2 min
+  const statusInterval = setInterval(updateSystemStatus, 10000)
+  const proxyHealthInterval = setInterval(fetchProxyHealthStatus, 30000) // 每30秒刷新代理健康状态
   onUnmounted(() => {
     clearInterval(statusInterval)
     clearInterval(proxyHealthInterval)
@@ -841,8 +751,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (lagTimer) clearInterval(lagTimer)
-  // orderFetchTimer removed (WS pending_orders handles it)
-  // orderBookFetchTimer removed (polling eliminated)
+  if (orderFetchTimer) clearInterval(orderFetchTimer)
+  if (orderBookFetchTimer) clearInterval(orderBookFetchTimer)
   if (exchangeRateTimer) clearInterval(exchangeRateTimer)
   if (fundingRateTimer) clearInterval(fundingRateTimer)
   if (bybitSwapRateTimer) clearInterval(bybitSwapRateTimer)
@@ -888,25 +798,20 @@ async function fetchAccountData() {
       // 缓存各平台余额 unrealized_pnl，供 totalProfit 计算使用
       // 每个用户只有一个 Binance(1) + 一个 MT5(2)，直接按 platform_id 存
       const newBalances = {}
-      const newById = {}
       data.accounts.forEach(acc => {
         if (acc.balance && acc.platform_id) {
           newBalances[acc.platform_id] = acc.balance
         }
-        if (acc.balance && acc.account_id) {
-          newById[acc.account_id] = acc.balance
-        }
       })
       accountsBalanceByPlatform.value = newBalances
-      accountsBalanceById.value = newById
 
       // Reset position values
       forwardActualPosition.value = 0
       reverseActualPosition.value = 0
 
       // Get first account's positions and aggregate fees from all accounts
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2 || acc.platform_id === 3)
-      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
 
       // Use first account's total_positions instead of aggregating
       if (bybitAccounts.length > 0) {
@@ -918,7 +823,7 @@ async function fetchAccountData() {
 
       // Aggregate fees from all accounts
       data.accounts.forEach(account => {
-        if (account.platform_id === 2 || account.platform_id === 3) {
+        if (account.platform_id === PlatformId.BYBIT) {
           // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
           // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
         }
@@ -947,10 +852,10 @@ async function fetchAccountData() {
           mark_price: position.mark_price || 0
         }
 
-        if (account.platform_id === 2 || account.platform_id === 3) {
+        if (account.platform_id === PlatformId.BYBIT) {
           if (position.side === 'Buy') newBybitLong.push(posData)
           else if (position.side === 'Sell') newBybitShort.push(posData)
-        } else if (account.platform_id === 1) {
+        } else if (account.platform_id === PlatformId.BINANCE) {
           if (position.side === 'Buy') newBinanceLong.push(posData)
           else if (position.side === 'Sell') newBinanceShort.push(posData)
         }
@@ -1233,8 +1138,8 @@ async function fetchExchangeRate() {
   try {
     // Use Binance public API to get USDT price relative to USD
     // We use USDC/USDT as a proxy since USDC ≈ USD
-    const response = await api.get('/api/v1/market/exchange-rate')
-    const data = response.data || {}
+    const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDCUSDT')
+    const data = await response.json()
 
     if (data.price) {
       // USDC/USDT price represents how many USDT = 1 USDC (≈ 1 USD)
@@ -1296,11 +1201,7 @@ defineExpose({
   binanceLongTotal,
   binanceShortTotal,
   bybitLongTotal,
-  bybitShortTotal,
-  // Imperative refresh entrypoint for siblings (StrategyPanel calls this
-  // right after a successful order so the 挂N badge updates without
-  // waiting for the 2s WS tick).
-  fetchPendingOrderCounts,
+  bybitShortTotal
 })
 </script>
 

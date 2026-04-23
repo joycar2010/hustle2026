@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.account import Account
 from app.services.order_executor_v2 import OrderExecutorV2
 from app.services.order_persistence_service import OrderPersistenceService
+from app.core.platform import PlatformId
 import logging
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class OrderExecutorWithPersistence:
         binance_pending = await persistence_service.create_pending_order(
             user_id=user_id,
             strategy_type="reverse_opening",
-            platform="binance",
+            platform=PlatformId.BINANCE.key,
             symbol=sym_a,
             side="SELL",
             quantity=quantity,
@@ -111,7 +112,7 @@ class OrderExecutorWithPersistence:
                 bybit_pending = await persistence_service.create_pending_order(
                     user_id=user_id,
                     strategy_type="reverse_opening",
-                    platform="bybit",
+                    platform=PlatformId.BYBIT.key,
                     symbol=sym_b,
                     quantity=bybit_filled,
                     price=None,
@@ -158,7 +159,7 @@ class OrderExecutorWithPersistence:
         binance_pending = await persistence_service.create_pending_order(
             user_id=user_id,
             strategy_type="reverse_closing",
-            platform="binance",
+            platform=PlatformId.BINANCE.key,
             symbol=sym_a,
             side="BUY",
             quantity=quantity,
@@ -218,7 +219,7 @@ class OrderExecutorWithPersistence:
                 bybit_pending = await persistence_service.create_pending_order(
                     user_id=user_id,
                     strategy_type="reverse_closing",
-                    platform="bybit",
+                    platform=PlatformId.BYBIT.key,
                     symbol=sym_b,
                     side="SELL",
                     quantity=bybit_filled,

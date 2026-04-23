@@ -164,6 +164,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
+import { PlatformId } from '@/constants/platform'
 
 const marketStore = useMarketStore()
 
@@ -281,7 +282,7 @@ async function fetchDashboardData() {
     // Update account breakdown
     if (data.accounts && data.accounts.length > 0) {
       // Find Binance accounts (platform_id === 1)
-      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
       if (binanceAccounts.length > 0) {
         accounts.value.binance.balance = binanceAccounts.reduce((sum, acc) =>
           sum + (acc.balance?.total_assets || 0), 0)
@@ -290,7 +291,7 @@ async function fetchDashboardData() {
       }
 
       // Find Bybit accounts (platform_id === 2)
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2 || acc.platform_id === 3)
+      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
       if (bybitAccounts.length > 0) {
         accounts.value.bybit.balance = bybitAccounts.reduce((sum, acc) =>
           sum + (acc.balance?.total_assets || 0), 0)

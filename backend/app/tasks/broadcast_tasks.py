@@ -11,6 +11,7 @@ from app.models.risk_settings import RiskSettings
 from app.services.account_service import account_data_service
 from app.services.risk_alert_service import RiskAlertService
 from app.services.spread_alert_service import SpreadAlertService, spread_alert_service
+from app.core.platform import PlatformId, HEDGE_SIDE_IDS
 
 async def _is_agent_active(db) -> bool:
     """Check if agent is active (not off/kill_switch). Risk alerts should only fire when agent is running."""
@@ -498,11 +499,12 @@ class RiskMetricsStreamer:
                             # Find Binance account in the aggregated data
                             binance_account = next(
                                 (acc for acc in aggregated_data.get("accounts", [])
-                                 if acc.get("platform_id") == "binance"),
+                                 if PlatformId.from_key(acc.get("platform_id")) == PlatformId.BINANCE),
                                 None
                             )
                             if binance_account:
                                 binance_asset = binance_account["balance"]["net_assets"]
+                                logger.info(f"[BROADCAST] Checking binance net_assets: user_id={user_id}, binance={binance_asset}, threshold={risk_settings.binance_net_asset}")
                                 if binance_asset < risk_settings.binance_net_asset:
                                     await risk_alert_service.check_binance_net_asset(
                                         user_id=user_id,
@@ -510,17 +512,20 @@ class RiskMetricsStreamer:
                                         threshold=risk_settings.binance_net_asset,
                                         is_below=True
                                     )
+                            else:
+                                logger.warning(f"[BROADCAST] user={user_id} binance 阈值已配置(={risk_settings.binance_net_asset}) 但聚合数据中未找到 Binance 账户,告警无法触发")
 
                         # Check Bybit net asset
                         if risk_settings.bybit_mt5_net_asset:
-                            # Find Bybit/MT5 account in the aggregated data
+                            # Find Bybit/MT5-hedge account in the aggregated data
                             bybit_account = next(
                                 (acc for acc in aggregated_data.get("accounts", [])
-                                 if acc.get("platform_id") in ["bybit", "mt5"]),
+                                 if (PlatformId.from_key(acc.get("platform_id")) or 0) in HEDGE_SIDE_IDS),
                                 None
                             )
                             if bybit_account:
                                 bybit_asset = bybit_account["balance"]["net_assets"]
+                                logger.info(f"[BROADCAST] Checking bybit/mt5 net_assets: user_id={user_id}, bybit={bybit_asset}, threshold={risk_settings.bybit_mt5_net_asset}")
                                 if bybit_asset < risk_settings.bybit_mt5_net_asset:
                                     await risk_alert_service.check_bybit_net_asset(
                                         user_id=user_id,
@@ -528,6 +533,8 @@ class RiskMetricsStreamer:
                                         threshold=risk_settings.bybit_mt5_net_asset,
                                         is_below=True
                                     )
+                            else:
+                                logger.warning(f"[BROADCAST] user={user_id} bybit/mt5 阈值已配置(={risk_settings.bybit_mt5_net_asset}) 但聚合数据中未找到对冲账户,告警无法触发")
 
                         # Check total net asset
                         if risk_settings.total_net_asset:

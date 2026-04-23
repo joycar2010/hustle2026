@@ -2,6 +2,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { useNotificationStore } from '@/stores/notification'
 import { useMarketStore } from '@/stores/market'
 import api from '@/services/api'
+import { PlatformId } from '@/constants/platform'
 
 export function useAlertMonitoring() {
   const notificationStore = useNotificationStore()
@@ -86,8 +87,8 @@ export function useAlertMonitoring() {
 
         // Check liquidation prices
         const liquidationData = {
-          binance_account: message.data.accounts?.find(acc => acc.platform_id === 1),
-          bybit_account: message.data.accounts?.find(acc => (acc.platform_id === 2 || acc.platform_id === 3) && acc.is_mt5_account),
+          binance_account: message.data.accounts?.find(acc => acc.platform_id === PlatformId.BINANCE),
+          bybit_account: message.data.accounts?.find(acc => acc.platform_id === PlatformId.BYBIT && acc.is_mt5_account),
           binance_current_price: message.data.market?.binance_price,
           bybit_current_price: message.data.market?.bybit_price
         }

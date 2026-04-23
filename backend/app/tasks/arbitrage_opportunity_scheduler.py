@@ -71,8 +71,8 @@ class ArbitrageOpportunityScheduler:
         """清理旧数据"""
         try:
             async with AsyncSessionLocal() as db:
-                # 清理超过1天的spread_records
-                spread_deleted = await arbitrage_opportunity_service.cleanup_old_spread_records(db, days=1)
+                # 清理超过2天的spread_records
+                spread_deleted = await arbitrage_opportunity_service.cleanup_old_spread_records(db, days=2)
 
                 # 清理超过30天的arbitrage_opportunities
                 opp_deleted = await arbitrage_opportunity_service.cleanup_old_opportunities(db, days=30)

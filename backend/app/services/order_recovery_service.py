@@ -10,6 +10,7 @@ from app.models.account import Account
 from app.services.order_persistence_service import OrderPersistenceService
 from app.services.order_executor import order_executor
 from app.core.database import get_db_context
+from app.core.platform import PlatformId
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +105,9 @@ class OrderRecoveryService:
 
         # 查询订单实际状态
         try:
-            if order.platform == "binance":
+            if order.platform == PlatformId.BINANCE.key:
                 status = await self._check_binance_order_status(db, order)
-            elif order.platform == "bybit":
+            elif order.platform == PlatformId.BYBIT.key:
                 status = await self._check_mt5_order_status(db, order)
             else:
                 logger.error(f"Unknown platform: {order.platform}")
@@ -212,7 +213,7 @@ class OrderRecoveryService:
         persistence_service = OrderPersistenceService(db)
 
         try:
-            if order.platform == "binance":
+            if order.platform == PlatformId.BINANCE.key:
                 # 获取账户
                 result = await db.execute(
                     select(Account).where(

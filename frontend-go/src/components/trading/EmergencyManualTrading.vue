@@ -13,8 +13,8 @@
       <div class="form-group">
         <label class="label">交易平台</label>
         <select v-model="exchange" class="select-input">
-          <option value="binance">主账号 ({{ pairConfig.binance }})</option>
-          <option value="bybit">对冲账户 ({{ pairConfig.mt5 }})</option>
+          <option :value="EXCHANGE_BINANCE">主账号 ({{ pairConfig.binance }})</option>
+          <option :value="EXCHANGE_BYBIT">对冲账户 ({{ pairConfig.mt5 }})</option>
         </select>
       </div>
 
@@ -100,12 +100,15 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { useTradingPair } from '@/composables/useTradingPair'
+import { PlatformId, platformKey } from '@/constants/platform'
 
 const emit = defineEmits(['orderExecuted'])
 
 const { currentPair, pairConfig } = useTradingPair()
 
-const exchange = ref('binance')
+const EXCHANGE_BINANCE = platformKey(PlatformId.BINANCE)  // 'binance'
+const EXCHANGE_BYBIT = platformKey(PlatformId.BYBIT)      // 'bybit'
+const exchange = ref(EXCHANGE_BINANCE)
 const quantity = ref(1)
 const loading = ref(false)
 const statusMsg = ref('')
@@ -139,14 +142,9 @@ function showStatus(msg, ok = true) {
 
 async function executeTrade(side) {
   if (loading.value) return
-  const q = Number(quantity.value)
-  if (!q || q <= 0 || Number.isNaN(q)) {
-    showStatus('请输入有效的下单数量（大于 0）', false)
-    return
-  }
   loading.value = true
   try {
-    const actualQuantity = convertForPlatform(q, exchange.value)
+    const actualQuantity = convertForPlatform(quantity.value, exchange.value)
 
     await api.post('/api/v1/trading/manual/order', {
       exchange: exchange.value,
@@ -165,31 +163,17 @@ async function executeTrade(side) {
 
 async function closePosition(positionType) {
   if (loading.value) return
-  const q = Number(quantity.value)
-  if (!q || q <= 0 || Number.isNaN(q)) {
-    showStatus('请输入有效的平仓数量（大于 0）', false)
-    return
-  }
   loading.value = true
   try {
-    const actualQuantity = convertForPlatform(q, exchange.value)
+    const actualQuantity = convertForPlatform(quantity.value, exchange.value)
     const endpoint = positionType === 'short' ? '/api/v1/trading/manual/close-short' : '/api/v1/trading/manual/close-long'
 
-    const resp = await api.post(endpoint, {
+    await api.post(endpoint, {
       exchange: exchange.value,
       quantity: actualQuantity,
       pair_code: currentPair.value,
     })
-    const label = positionType === 'short' ? '空仓平多' : '多仓平空'
-    const d = resp?.data || {}
-    if (d.filled_volume !== undefined) {
-      const filled = Number(d.filled_volume).toFixed(2)
-      const rem = Number(d.remaining_volume || 0).toFixed(2)
-      const unit = exchange.value === 'bybit' ? (pairConfig.value.unitB || 'Lot') : (pairConfig.value.unitA || 'XAU')
-      showStatus(`${label} 已平 ${filled} ${unit}，剩余 ${rem} ${unit}`, d.success !== false)
-    } else {
-      showStatus(`${label}指令已发送`, d.success !== false)
-    }
+    showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
     emit('orderExecuted')
   } catch (e) {
     showStatus(e.response?.data?.detail || '平仓失败', false)

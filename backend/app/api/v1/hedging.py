@@ -13,6 +13,7 @@ from app.core.security import get_current_user_id
 from app.models.platform import Platform, PlatformSymbol, HedgingPair
 from app.models.mt5_client import MT5Client
 from app.models.account import Account
+from app.core.platform import PlatformId
 
 router = APIRouter()
 
@@ -139,6 +140,7 @@ class PairUpdate(BaseModel):
     min_hedgeable_qty_a: Optional[float] = None
     min_hedgeable_qty_b: Optional[float] = None
     sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────
@@ -373,7 +375,7 @@ async def fetch_symbol_from_platform(
     timeout = httpx.Timeout(15.0, connect=10.0)
     async with httpx.AsyncClient(timeout=timeout, proxy=proxy, follow_redirects=True) as cli:
         try:
-            if name == "binance":
+            if name == PlatformId.BINANCE.key:
                 if pt in ("perpetual", "futures"):
                     r = await cli.get("https://fapi.binance.com/fapi/v1/exchangeInfo")
                     r.raise_for_status()
@@ -429,7 +431,7 @@ async def fetch_symbol_from_platform(
                         "product_type": "spot",
                     }
 
-            if name == "bybit":
+            if name == PlatformId.BYBIT.key:
                 cat = {"perpetual": "linear", "futures": "inverse", "spot": "spot"}.get(pt, "linear")
                 r = await cli.get("https://api.bybit.com/v5/market/instruments-info",
                                   params={"category": cat, "symbol": sym})

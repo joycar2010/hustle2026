@@ -1,10 +1,13 @@
 import uuid
 import enum
+from typing import Optional
 from datetime import datetime
 from sqlalchemy import Column, String, Float, TIMESTAMP, ForeignKey
+from sqlalchemy import inspect as sqla_inspect
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.core.platform import PlatformId
 
 
 class OrderStatus(str, enum.Enum):
@@ -43,6 +46,28 @@ class OrderRecord(Base):
 
     def __repr__(self):
         return f"<OrderRecord(order_id={self.order_id}, symbol={self.symbol}, side={self.order_side}, status={self.status})>"
+
+    @property
+    def platform(self) -> Optional[str]:
+        """Canonical platform key ('binance' / 'bybit' / 'ic_markets' / 'gate') derived from
+        `account.platform_id` via :class:`PlatformId`.
+
+        Returns None when:
+          - the `account` relationship has not been eager-loaded (we refuse to trigger an
+            async lazy-load — that would crash with MissingGreenlet in async callers);
+          - the account exists but its platform_id is unknown to PlatformId.
+
+        Callers MUST eager-load the account:
+            select(Order).options(selectinload(Order.account)).where(...)
+        """
+        state = sqla_inspect(self)
+        if 'account' in state.unloaded:
+            return None
+        acc = self.account
+        if acc is None:
+            return None
+        pid = PlatformId.from_key(acc.platform_id)
+        return pid.key if pid else None
 
 
 # Alias for backward compatibility

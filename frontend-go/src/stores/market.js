@@ -87,44 +87,16 @@ export const useMarketStore = defineStore('market', () => {
         }
 
         if (msg.type === 'position_snapshot' && msg.data) {
-          // Multiple publishers send position_snapshot:
-          //  A) Full multi-pair map (has 'pairs' field) — authoritative, every 1s
-          //  B) Single-pair instant push (has 'pair_code' field) — after trade fills
-          // Only accept B if pair_code matches currentPair (ignore other pairs' updates).
-          const { currentPair: _cp } = useTradingPair()
-          const curPair = _cp.value
-          const incomingPairs = msg.data.pairs
-          const incomingPairCode = msg.data.pair_code
-
-          if (incomingPairs) {
-            // Publisher A: full multi-pair snapshot — replace entire state
-            const _pd = incomingPairs[curPair] || {}
-            positionSnapshot.value = {
-              bybit_long_lots: _pd.mt5_long ?? 0,
-              bybit_short_lots: _pd.mt5_short ?? 0,
-              binance_long_xau: _pd.binance_long ?? 0,
-              binance_short_xau: _pd.binance_short ?? 0,
-              pairs: incomingPairs,
-            }
-          } else if (incomingPairCode && incomingPairCode === curPair) {
-            // Publisher B: single-pair instant push matching current view
-            const prev = positionSnapshot.value || {}
-            const prevPairs = prev.pairs || {}
-            const updatedPairEntry = {
-              mt5_long: msg.data.bybit_long_lots ?? 0,
-              mt5_short: msg.data.bybit_short_lots ?? 0,
-              binance_long: msg.data.binance_long_xau ?? 0,
-              binance_short: msg.data.binance_short_xau ?? 0,
-            }
-            positionSnapshot.value = {
-              bybit_long_lots: updatedPairEntry.mt5_long,
-              bybit_short_lots: updatedPairEntry.mt5_short,
-              binance_long_xau: updatedPairEntry.binance_long,
-              binance_short_xau: updatedPairEntry.binance_short,
-              pairs: { ...prevPairs, [curPair]: updatedPairEntry },
-            }
+          // positionSnapshot 只由 position_snapshot 消息驱动，与 account_balance 完全隔离
+          // 避免 account_balance 的 60s 缓存数据覆盖实时持仓快照
+          positionSnapshot.value = {
+            bybit_long_lots: msg.data.bybit_long_lots ?? 0,
+            bybit_short_lots: msg.data.bybit_short_lots ?? 0,
+            binance_long_xau: msg.data.binance_long_xau ?? 0,
+            binance_short_xau: msg.data.binance_short_xau ?? 0,
+            // 全产品对持仓（新字段）
+            pairs: msg.data.pairs ?? {},
           }
-          // else: single-pair update for a different pair — ignore (don't overwrite)
         }
 
         if (msg.type === 'market_data' && msg.data) {
@@ -212,6 +184,14 @@ export const useMarketStore = defineStore('market', () => {
     connected.value = false
   }
 
+  // Force a full reconnect — used on user switch so the new JWT is used.
+  // Token is re-read from localStorage inside connect().
+  function reconnect() {
+    disconnect()
+    token = null  // force getToken() to re-read fresh token
+    connect()
+  }
+
   // Keep fetchMarketData for any legacy callers — returns last known data
   function fetchMarketData() {
     return Promise.resolve(marketData.value)
@@ -241,6 +221,7 @@ export const useMarketStore = defineStore('market', () => {
     positionSnapshot,
     connect,
     disconnect,
+    reconnect,
     fetchMarketData,
     requestSnapshot,
   }

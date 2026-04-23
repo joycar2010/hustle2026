@@ -149,6 +149,61 @@ class OrderExecutorV2:
         self.partial_fill_threshold = 0.95  # 95%以上算完全成交
         self.base_executor = base_executor
 
+    async def _precheck_dual_margin_for_open(
+        self,
+        binance_account: Account,
+        bybit_account: Account,
+        quantity: float,
+        binance_price: float,
+        bybit_price: float,
+        pair_code: str = "XAU",
+        hedge_multiplier: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Preflight: verify both accounts have enough available margin BEFORE placing any order.
+        Prevents Bybit market-order -2019 (Margin is insufficient) in reverse/forward opening flows.
+        Returns {"ok": bool, "error": str|None, "detail": dict}.
+        On balance-service failure, degrade to ok=True (don't block trading) and log."""
+        try:
+            import math as _math
+            from app.services.account_service import account_data_service
+            from app.services.hedging_pair_service import hedging_pair_service
+
+            pair = hedging_pair_service.get_pair(pair_code)
+            conv_factor = pair.conv_factor if pair and getattr(pair, "conv_factor", None) else 100.0
+
+            # Binance (A-side) — order denominated in ounces
+            bin_bal = await account_data_service.get_account_balance(binance_account)
+            if bin_bal:
+                bin_avail = bin_bal.get("available_balance", 0) or 0
+                bin_lev = binance_account.leverage or 20
+                bin_required = (binance_price or 2700) * quantity / bin_lev
+                if bin_avail < bin_required:
+                    return {
+                        "ok": False,
+                        "error": f"Binance资金不足: 可用 {bin_avail:.2f} USDT < 所需保证金 {bin_required:.2f} USDT (qty={quantity})",
+                        "detail": {"side": "binance", "available": bin_avail, "required": bin_required},
+                    }
+
+            # Bybit (B-side) — ceiling-rounded lot qty matches the live path's amplification
+            byb_bal = await account_data_service.get_account_balance(bybit_account)
+            if byb_bal:
+                byb_avail = byb_bal.get("available_balance", 0) or 0
+                byb_lev = bybit_account.leverage or 100
+                bybit_raw_lot = _a_to_b(quantity, pair_code) * hedge_multiplier
+                bybit_lot_ceil = _math.ceil(round(bybit_raw_lot * 100, 4)) / 100
+                byb_required = (bybit_price or 2700) * bybit_lot_ceil * conv_factor / byb_lev
+                if byb_avail < byb_required:
+                    return {
+                        "ok": False,
+                        "error": f"Bybit资金不足: 可用 {byb_avail:.2f} USDT < 所需保证金 {byb_required:.2f} USDT (lot={bybit_lot_ceil})",
+                        "detail": {"side": "bybit", "available": byb_avail, "required": byb_required, "lot": bybit_lot_ceil},
+                    }
+        except Exception as e:
+            logger.warning(f"[MARGIN_PRECHECK] check skipped due to error: {e}")
+            return {"ok": True, "error": None, "detail": {"degraded": True}}
+
+        return {"ok": True, "error": None, "detail": {}}
+
     async def execute_reverse_opening(
         self,
         binance_account: Account,
@@ -172,6 +227,22 @@ class OrderExecutorV2:
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
         """
+        # Step 0: Preflight margin check — fail fast if either side is underfunded (fixes -2019)
+        precheck = await self._precheck_dual_margin_for_open(
+            binance_account, bybit_account, quantity,
+            binance_price, bybit_price, pair_code, hedge_multiplier,
+        )
+        if not precheck["ok"]:
+            logger.warning(f"[REVERSE_OPENING] margin precheck failed: {precheck['error']}")
+            return {
+                "success": False,
+                "error": precheck["error"],
+                "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "margin_precheck_failed": True,
+                "precheck_detail": precheck["detail"],
+            }
+
         # Step 1: Place A-side SELL order (MAKER/PostOnly) — routes by platform_id
         sym_a, sym_b = _get_pair_symbols(pair_code)
         binance_result = await self._place_a_side_order(
@@ -582,6 +653,22 @@ class OrderExecutorV2:
         4. Monitor Bybit order (0.1s timeout)
         5. Chase Bybit if not fully filled (1 retry)
         """
+        # Step 0: Preflight margin check — fail fast if either side is underfunded (fixes -2019)
+        precheck = await self._precheck_dual_margin_for_open(
+            binance_account, bybit_account, quantity,
+            binance_price, bybit_price, pair_code, hedge_multiplier,
+        )
+        if not precheck["ok"]:
+            logger.warning(f"[FORWARD_OPENING] margin precheck failed: {precheck['error']}")
+            return {
+                "success": False,
+                "error": precheck["error"],
+                "binance_filled_qty": 0,
+                "bybit_filled_qty": 0,
+                "margin_precheck_failed": True,
+                "precheck_detail": precheck["detail"],
+            }
+
         # Step 1: Place A-side BUY order (MAKER/PostOnly) — routes by platform_id
         sym_a, sym_b = _get_pair_symbols(pair_code)
         binance_result = await self._place_a_side_order(

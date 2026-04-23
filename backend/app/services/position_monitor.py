@@ -8,15 +8,25 @@ from typing import Dict, List, Optional
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 
 from app.models.arbitrage import ArbitrageTask, TaskStatus
 from app.models.order import Order, OrderStatus
 from app.services.market_service import MarketDataService
 from app.services.order_executor import OrderExecutor
 from app.core.database import get_db
+from app.core.platform import PlatformId
 import logging
 
 logger = logging.getLogger(__name__)
+
+# NOTE (data-model debt): the queries in this module filter on `Order.task_id`, but the
+# `OrderRecord` table has no such column (see app/models/order.py). Since `_monitor_loop`
+# wraps each iteration in a broad try/except, those queries raise an AttributeError that
+# is silently swallowed every 2s — meaning the close-logic never actually runs. Fixing
+# that requires either adding a `task_id` FK to `order_records` or rewiring the lookup
+# through `accounts.user_id == task.user_id` plus a time window. Out of scope for the
+# PlatformId refactor; flagged here so the next person touching this service knows.
 
 
 class PositionMonitor:
@@ -103,7 +113,7 @@ class PositionMonitor:
         """Calculate current unrealized P&L"""
         # Get entry prices from orders
         result = await db.execute(
-            select(Order).where(
+            select(Order).options(selectinload(Order.account)).where(
                 and_(
                     Order.task_id == task.id,
                     Order.status == OrderStatus.FILLED
@@ -112,8 +122,8 @@ class PositionMonitor:
         )
         orders = result.scalars().all()
 
-        binance_order = next((o for o in orders if o.platform == "binance"), None)
-        bybit_order = next((o for o in orders if o.platform == "bybit"), None)
+        binance_order = next((o for o in orders if o.platform == PlatformId.BINANCE.key), None)
+        bybit_order = next((o for o in orders if o.platform == PlatformId.BYBIT.key), None)
 
         if not binance_order or not bybit_order:
             return 0
@@ -186,7 +196,7 @@ class PositionMonitor:
         try:
             # Get original orders
             result = await db.execute(
-                select(Order).where(
+                select(Order).options(selectinload(Order.account)).where(
                     and_(
                         Order.task_id == task.id,
                         Order.status == OrderStatus.FILLED
@@ -195,8 +205,8 @@ class PositionMonitor:
             )
             orders = result.scalars().all()
 
-            binance_order = next((o for o in orders if o.platform == "binance"), None)
-            bybit_order = next((o for o in orders if o.platform == "bybit"), None)
+            binance_order = next((o for o in orders if o.platform == PlatformId.BINANCE.key), None)
+            bybit_order = next((o for o in orders if o.platform == PlatformId.BYBIT.key), None)
 
             if not binance_order or not bybit_order:
                 logger.error(f"Cannot find orders for task {task.id}")
@@ -245,7 +255,7 @@ class PositionMonitor:
     async def _calculate_realized_pnl(self, task: ArbitrageTask, db: AsyncSession) -> float:
         """Calculate realized P&L from filled orders"""
         result = await db.execute(
-            select(Order).where(
+            select(Order).options(selectinload(Order.account)).where(
                 and_(
                     Order.task_id == task.id,
                     Order.status == OrderStatus.FILLED
@@ -262,10 +272,10 @@ class PositionMonitor:
             return 0
 
         # Calculate P&L
-        binance_entry = next((o for o in entry_orders if o.platform == "binance"), None)
-        bybit_entry = next((o for o in entry_orders if o.platform == "bybit"), None)
-        binance_exit = next((o for o in exit_orders if o.platform == "binance"), None)
-        bybit_exit = next((o for o in exit_orders if o.platform == "bybit"), None)
+        binance_entry = next((o for o in entry_orders if o.platform == PlatformId.BINANCE.key), None)
+        bybit_entry = next((o for o in entry_orders if o.platform == PlatformId.BYBIT.key), None)
+        binance_exit = next((o for o in exit_orders if o.platform == PlatformId.BINANCE.key), None)
+        bybit_exit = next((o for o in exit_orders if o.platform == PlatformId.BYBIT.key), None)
 
         if not all([binance_entry, bybit_entry, binance_exit, bybit_exit]):
             return 0

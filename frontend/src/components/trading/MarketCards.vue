@@ -259,6 +259,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useProxyStore } from '@/stores/proxy'
+import { PlatformId } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
 import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
@@ -629,8 +630,8 @@ function handleAccountBalanceUpdate(data) {
     reverseActualPosition.value = 0
 
     // Get first account's positions and aggregate fees from all accounts
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
-    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
 
     // Use first account's total_positions instead of aggregating
     if (bybitAccounts.length > 0) {
@@ -642,7 +643,7 @@ function handleAccountBalanceUpdate(data) {
 
     // Aggregate fees from all accounts
     data.accounts.forEach(account => {
-      if (account.platform_id === 2) {
+      if (account.platform_id === PlatformId.BYBIT) {
         // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
         // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
       }
@@ -668,10 +669,10 @@ function handleAccountBalanceUpdate(data) {
         mark_price: position.mark_price || 0
       }
 
-      if (account.platform_id === 2) {
+      if (account.platform_id === PlatformId.BYBIT) {
         if (position.side === 'Buy') newBybitLong.push(posData)
         else if (position.side === 'Sell') newBybitShort.push(posData)
-      } else if (account.platform_id === 1) {
+      } else if (account.platform_id === PlatformId.BINANCE) {
         if (position.side === 'Buy') newBinanceLong.push(posData)
         else if (position.side === 'Sell') newBinanceShort.push(posData)
       }
@@ -809,8 +810,8 @@ async function fetchAccountData() {
       reverseActualPosition.value = 0
 
       // Get first account's positions and aggregate fees from all accounts
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2)
-      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1)
+      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+      const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
 
       // Use first account's total_positions instead of aggregating
       if (bybitAccounts.length > 0) {
@@ -822,7 +823,7 @@ async function fetchAccountData() {
 
       // Aggregate fees from all accounts
       data.accounts.forEach(account => {
-        if (account.platform_id === 2) {
+        if (account.platform_id === PlatformId.BYBIT) {
           // Bybit swap rate is now fetched in real-time via fetchBybitSwapRate()
           // Binance funding rate is fetched in real-time via fetchBinanceFundingRate()
         }
@@ -851,10 +852,10 @@ async function fetchAccountData() {
           mark_price: position.mark_price || 0
         }
 
-        if (account.platform_id === 2) {
+        if (account.platform_id === PlatformId.BYBIT) {
           if (position.side === 'Buy') newBybitLong.push(posData)
           else if (position.side === 'Sell') newBybitShort.push(posData)
-        } else if (account.platform_id === 1) {
+        } else if (account.platform_id === PlatformId.BINANCE) {
           if (position.side === 'Buy') newBinanceLong.push(posData)
           else if (position.side === 'Sell') newBinanceShort.push(posData)
         }

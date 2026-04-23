@@ -126,33 +126,33 @@
               {{ getDisplayValue(account, 'risk_ratio', false, true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === 2" class="flex justify-between">
+          <div v-if="account.platform_id === PlatformId.BYBIT" class="flex justify-between">
             <span class="text-gray-400">手续费(佣金)</span>
             <span class="font-mono" :class="getValueColor(account, 'commission_fee')">
               {{ getDisplayValue(account, 'commission_fee', true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === 2" class="flex justify-between">
+          <div v-if="account.platform_id === PlatformId.BYBIT" class="flex justify-between">
             <span class="text-gray-400">MT5过夜费</span>
             <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
               {{ getDisplayValue(account, 'funding_fee', true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === 1" class="flex justify-between">
+          <div v-if="account.platform_id === PlatformId.BINANCE" class="flex justify-between">
             <span class="text-gray-400">BNB持仓</span>
             <span class="font-mono text-[#f0b90b]">{{ getBnbBalance(account) }}</span>
           </div>
-          <div v-if="account.platform_id === 1" class="flex justify-between">
+          <div v-if="account.platform_id === PlatformId.BINANCE" class="flex justify-between">
             <span class="text-gray-400">手续费率(挂/吃)</span>
             <span class="font-mono text-gray-300">{{ getCommissionRate(account) }}</span>
           </div>
-          <div v-if="account.platform_id === 1" class="flex justify-between">
+          <div v-if="account.platform_id === PlatformId.BINANCE" class="flex justify-between">
             <span class="text-gray-400">资金费(多头)</span>
             <span class="font-mono" :class="getValueColor(account, 'long_funding_rate')">
               {{ getDisplayValue(account, 'long_funding_rate', true) }}
             </span>
           </div>
-          <div v-if="account.platform_id === 1" class="flex justify-between">
+          <div v-if="account.platform_id === PlatformId.BINANCE" class="flex justify-between">
             <span class="text-gray-400">资金费(空头)</span>
             <span class="font-mono" :class="getValueColor(account, 'short_funding_rate')">
               {{ getDisplayValue(account, 'short_funding_rate', true) }}
@@ -175,6 +175,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
+import { PlatformId } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
 
 const marketStore = useMarketStore()
@@ -523,7 +524,7 @@ function formatNumber(num) {
 function getRiskColor(account) {
   if (account.error || !account.balance) return 'text-gray-400'
   const ratio = account.balance.risk_ratio || 0
-  if (account.platform_id === 2 && account.is_mt5_account) {
+  if (account.platform_id === PlatformId.BYBIT && account.is_mt5_account) {
     if (ratio === 0) return 'text-gray-400'
     if (ratio < 50) return 'text-[#f6465d]'
     if (ratio < 100) return 'text-[#f0b90b]'
@@ -606,7 +607,7 @@ function syncLiquidationPricesToStore(accounts) {
     if (acc.error || !acc.balance) continue
     const b = acc.balance
 
-    if (acc.platform_id === 1) {
+    if (acc.platform_id === PlatformId.BINANCE) {
       // 主账号 Binance
       let longLiq  = b.long_liquidation_price  > 0 ? b.long_liquidation_price  : null
       let shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null
@@ -622,7 +623,7 @@ function syncLiquidationPricesToStore(accounts) {
       strategyStore.setLiquidationPrices('binance', longLiq, shortLiq)
     }
 
-    if (acc.platform_id === 2 && acc.is_mt5_account) {
+    if (acc.platform_id === PlatformId.BYBIT && acc.is_mt5_account) {
       // 对冲账户 MT5
       const longLiq  = b.long_liquidation_price  > 0 ? b.long_liquidation_price  : null
       const shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null

@@ -513,10 +513,12 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { useStrategyStore } from '@/stores/strategy'
+import { PlatformId } from '@/constants/platform'
 import api from '@/services/api'
 import { calculateAllSpreads } from '@/composables/useSpreadCalculator'
 import { xauToLot } from '@/composables/useQuantityConverter'
 import { useTradingPair } from '@/composables/useTradingPair'
+import { useAuthStore } from '@/stores/auth'
 
 // 防抖函数
 function debounce(fn, delay = 500) {
@@ -542,9 +544,12 @@ const props = defineProps({
 })
 
 // LocalStorage keys for persisting strategy enabled states
-const STORAGE_KEY_OPENING = `strategy_${props.type}_opening_enabled`
-const STORAGE_KEY_CLOSING = `strategy_${props.type}_closing_enabled`
-const STORAGE_KEY_LADDER_PROGRESS = `strategy_${props.type}_ladder_progress`
+// NOTE: user-scoped via authStore so switching users doesn't bleed A's state into B's panel
+const authStore = useAuthStore()
+const userScopeKey = computed(() => authStore.user?.user_id || 'anon')
+const STORAGE_KEY_OPENING = computed(() => `strategy_${userScopeKey.value}_${props.type}_opening_enabled`)
+const STORAGE_KEY_CLOSING = computed(() => `strategy_${userScopeKey.value}_${props.type}_closing_enabled`)
+const STORAGE_KEY_LADDER_PROGRESS = computed(() => `strategy_${userScopeKey.value}_${props.type}_ladder_progress`)
 
 // Helper functions for localStorage
 function loadEnabledState(key, defaultValue = false) {
@@ -567,7 +572,7 @@ function saveEnabledState(key, value) {
 // 阶梯进度持久化函数
 function loadLadderProgress() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_LADDER_PROGRESS)
+    const saved = localStorage.getItem(STORAGE_KEY_LADDER_PROGRESS.value)
     if (saved) {
       return JSON.parse(saved)
     }
@@ -582,7 +587,7 @@ function loadLadderProgress() {
 
 function saveLadderProgress() {
   try {
-    localStorage.setItem(STORAGE_KEY_LADDER_PROGRESS, JSON.stringify(ladderProgress.value))
+    localStorage.setItem(STORAGE_KEY_LADDER_PROGRESS.value, JSON.stringify(ladderProgress.value))
   } catch (error) {
     console.error('Failed to save ladder progress:', error)
   }
@@ -689,8 +694,8 @@ watch(alertPairCode, () => {
 const config = ref({
   openingMCoin: 5,
   closingMCoin: 5,
-  openingEnabled: loadEnabledState(STORAGE_KEY_OPENING, false),
-  closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING, false),
+  openingEnabled: loadEnabledState(STORAGE_KEY_OPENING.value, false),
+  closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING.value, false),
   openingSyncQty: 3,
   closingSyncQty: 3,
   openingTriggerCheckInterval: 200, // 开仓触发器检测频率（毫秒）
@@ -764,11 +769,11 @@ onMounted(async () => {
       console.warn('Disabling strategies due to account validation failure:', accountValidation.message)
       if (config.value.openingEnabled) {
         config.value.openingEnabled = false
-        saveEnabledState(STORAGE_KEY_OPENING, false)
+        saveEnabledState(STORAGE_KEY_OPENING.value, false)
       }
       if (config.value.closingEnabled) {
         config.value.closingEnabled = false
-        saveEnabledState(STORAGE_KEY_CLOSING, false)
+        saveEnabledState(STORAGE_KEY_CLOSING.value, false)
       }
       validationErrors.value = [accountValidation.message]
     }
@@ -821,6 +826,43 @@ async function loadConfigFromDB() {
 
 onUnmounted(() => {
   // No cleanup needed for WebSocket - stays connected for other components
+})
+
+// User-switch refresh: admin impersonation / user change triggers full reload
+// Fixes bug where panel kept showing previous user's config, accounts, and ladder progress.
+watch(() => authStore.user?.user_id, async (newUid, oldUid) => {
+  if (!newUid || newUid === oldUid) return
+  console.log('[StrategyPanel] user switched', oldUid, '→', newUid, '- reloading')
+  // 1. Reset in-memory state that was scoped to previous user
+  configId.value = null
+  accountsData.value = null
+  ladderFailureCounts.value = { opening: {}, closing: {} }
+  triggerCount.value = { opening: 0, closing: 0 }
+  // 2. Re-read new user's persisted state from (now user-scoped) localStorage
+  config.value.openingEnabled = loadEnabledState(STORAGE_KEY_OPENING.value, false)
+  config.value.closingEnabled = loadEnabledState(STORAGE_KEY_CLOSING.value, false)
+  ladderProgress.value = loadLadderProgress()
+  // 3. Reconnect WebSocket with new user's token so pushes target the new user
+  try {
+    if (typeof marketStore.reconnect === 'function') {
+      marketStore.reconnect()
+    } else {
+      marketStore.disconnect()
+      marketStore.connect()
+    }
+  } catch (e) {
+    console.warn('[StrategyPanel] marketStore reconnect failed', e)
+  }
+  // 4. Re-fetch server-side data scoped to new user
+  try {
+    await loadConfigFromDB()
+    await fetchAccountData()
+    loadLadderFailureCounts()
+    fetchAlertSettings()
+    loadEffectiveTriggerInterval()
+  } catch (e) {
+    console.error('[StrategyPanel] reload after user switch failed', e)
+  }
 })
 
 // Watch for market data updates via WebSocket
@@ -1178,8 +1220,8 @@ function handleOrdersFilled(data) {
 function handleAccountBalanceUpdate(data) {
   // Update available assets from WebSocket data
   if (data.accounts && data.accounts.length > 0) {
-    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === 1) || []
-    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === 2) || []
+    const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE) || []
+    const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT) || []
 
     // Use first account's available balance instead of summing all accounts
     binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
@@ -1204,8 +1246,8 @@ async function fetchAccountData() {
 
     accountsData.value = accountData
 
-    const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === 1) || []
-    const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === 2) || []
+    const binanceAccounts = accountData.accounts?.filter(acc => acc.platform_id === PlatformId.BINANCE) || []
+    const bybitAccounts = accountData.accounts?.filter(acc => acc.platform_id === PlatformId.BYBIT) || []
 
     // Use first account's available balance
     binanceAssets.value = binanceAccounts.length > 0 ? (binanceAccounts[0].balance?.available_balance || 0) : 0
@@ -1660,7 +1702,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
         }
 
         config.value.openingEnabled = false
-        saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
+        saveEnabledState(STORAGE_KEY_OPENING.value, false)  // Save to localStorage
       }
     } catch (error) {
       // Phase 3: 异常也算失败
@@ -1675,7 +1717,7 @@ async function executeLadderOpening(ladderIndex, ladder) {
       notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`, 'error')
 
       config.value.openingEnabled = false
-      saveEnabledState(STORAGE_KEY_OPENING, false)  // Save to localStorage
+      saveEnabledState(STORAGE_KEY_OPENING.value, false)  // Save to localStorage
     }
   } finally {
     executingOpening.value = false
@@ -1811,7 +1853,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
         }
 
         config.value.closingEnabled = false
-        saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
+        saveEnabledState(STORAGE_KEY_CLOSING.value, false)  // Save to localStorage
       }
     } catch (error) {
       // Phase 3: 异常也算失败
@@ -1826,7 +1868,7 @@ async function executeLadderClosing(ladderIndex, ladder) {
       notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`, 'error')
 
       config.value.closingEnabled = false
-      saveEnabledState(STORAGE_KEY_CLOSING, false)  // Save to localStorage
+      saveEnabledState(STORAGE_KEY_CLOSING.value, false)  // Save to localStorage
     }
   } finally {
     executingClosing.value = false
@@ -2176,8 +2218,8 @@ async function startContinuousExecution(action) {
       return
     }
 
-    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === 1)
-    const bybitMT5Account = accountsData.value.accounts.find(a => a.platform_id === 2)
+    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === PlatformId.BINANCE)
+    const bybitMT5Account = accountsData.value.accounts.find(a => a.platform_id === PlatformId.BYBIT)
     console.log('[DEBUG] Binance account:', binanceAccount)
     console.log('[DEBUG] Bybit account:', bybitMT5Account)
 

@@ -343,7 +343,6 @@ func main() {
 		opp.GET("/stats", opportunities.Stats)
 		opp.POST("/extract", opportunities.Extract)
 		opp.POST("/cleanup", opportunities.Cleanup)
-		v1.Any("/qingguo/*path", sysops.Wildcard)
 
 		// ── WebSocket ─────────────────────────────────────────────────────
 		v1.GET("/ws", ws.HandleWS)

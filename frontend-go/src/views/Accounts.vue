@@ -22,7 +22,7 @@
                 {{ getPlatformName(account.platform_id, account.is_mt5_account) }}
               </span>
               <span v-if="account.is_default" class="px-2 py-1 bg-yellow-900 text-yellow-300 rounded text-xs">
-                {{ account.platform_id === 1 ? '主账号默认' : '对冲账户默认' }}
+                {{ account.platform_id === PlatformId.BINANCE ? '主账号默认' : '对冲账户默认' }}
               </span>
               <span v-if="!account.is_active" class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">
                 未启用
@@ -136,7 +136,7 @@
             </div>
 
             <!-- MT5 Account Toggle (Only for Bybit) -->
-            <div v-if="accountForm.platform_id === 2" class="flex items-center gap-3">
+            <div v-if="accountForm.platform_id === PlatformId.BYBIT" class="flex items-center gap-3">
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" v-model="accountForm.is_mt5_account" class="sr-only peer">
                 <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
@@ -155,7 +155,7 @@
             <!-- API Configuration Section -->
             <div class="border-t border-gray-700 pt-4">
               <h3 class="text-lg font-semibold mb-3">
-                {{ accountForm.platform_id === 1 ? '主账号' : '对冲账户' }} API 配置
+                {{ accountForm.platform_id === PlatformId.BINANCE ? '主账号' : '对冲账户' }} API 配置
               </h3>
 
               <div class="space-y-3">
@@ -163,7 +163,7 @@
                   <label class="block text-sm text-gray-400 mb-2">API Key *</label>
                   <input type="text" v-model="accountForm.api_key" required
                          class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                         :placeholder="`输入 ${accountForm.platform_id === 1 ? '主账号' : '对冲账户'} API Key`" />
+                         :placeholder="`输入 ${accountForm.platform_id === PlatformId.BINANCE ? '主账号' : '对冲账户'} API Key`" />
                 </div>
 
                 <div>
@@ -173,7 +173,7 @@
                            v-model="accountForm.api_secret"
                            :required="!isEditMode"
                            class="flex-1 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
-                           :placeholder="isEditMode ? '留空表示不修改' : `输入 ${accountForm.platform_id === 1 ? '主账号' : '对冲账户'} API Secret`" />
+                           :placeholder="isEditMode ? '留空表示不修改' : `输入 ${accountForm.platform_id === PlatformId.BINANCE ? '主账号' : '对冲账户'} API Secret`" />
                     <button v-if="isEditMode"
                             type="button"
                             @click="requestViewSecret"
@@ -183,7 +183,7 @@
                   </div>
                 </div>
 
-                <div v-if="accountForm.platform_id === 2">
+                <div v-if="accountForm.platform_id === PlatformId.BYBIT">
                   <label class="block text-sm text-gray-400 mb-2">Passphrase (可选)</label>
                   <input type="password" v-model="accountForm.passphrase"
                          class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary font-mono text-sm"
@@ -197,9 +197,9 @@
               <label class="block text-sm text-gray-400 mb-2">杠杆倍数</label>
               <input type="number" v-model.number="accountForm.leverage" min="1" max="500"
                      class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-                     :placeholder="accountForm.platform_id === 1 ? '默认: 20x' : '默认: 100x'" />
+                     :placeholder="accountForm.platform_id === PlatformId.BINANCE ? '默认: 20x' : '默认: 100x'" />
               <div class="text-xs text-gray-500 mt-1">
-                {{ accountForm.platform_id === 1 ? '主账号 推荐杠杆: 20x' : '对冲账户 推荐杠杆: 100x' }}
+                {{ accountForm.platform_id === PlatformId.BINANCE ? '主账号 推荐杠杆: 20x' : '对冲账户 推荐杠杆: 100x' }}
               </div>
             </div>
 
@@ -214,7 +214,7 @@
                             after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-600">
                 </div>
               </label>
-              <span class="text-sm text-gray-400">设为{{ accountForm.platform_id === 1 ? '主账号' : '对冲账户' }}默认账户</span>
+              <span class="text-sm text-gray-400">设为{{ accountForm.platform_id === PlatformId.BINANCE ? '主账号' : '对冲账户' }}默认账户</span>
             </div>
 
             <!-- Form Actions -->
@@ -335,6 +335,7 @@ import { ref, onMounted } from 'vue'
 import api from '@/services/api'
 import { useProxyStore } from '@/stores/proxy'
 import { useNotificationStore } from '@/stores/notification'
+import { PlatformId } from '@/constants/platform'
 
 const proxyStore = useProxyStore()
 const notificationStore = useNotificationStore()
@@ -353,13 +354,13 @@ const showProxyModal = ref(false)
 const currentAccount = ref(null)
 const currentProxyBinding = ref(null)
 const proxyConfigForm = ref({
-  platform_id: 1,
+  platform_id: PlatformId.BINANCE,
   proxy_id: null
 })
 const accountForm = ref({
   account_id: null,
   account_name: '',
-  platform_id: 2,
+  platform_id: PlatformId.BYBIT,
   api_key: '',
   api_secret: '',
   passphrase: '',
@@ -411,7 +412,7 @@ function openAddModal() {
   accountForm.value = {
     account_id: null,
     account_name: '',
-    platform_id: 2,
+    platform_id: PlatformId.BYBIT,
     api_key: '',
     api_secret: '',
     passphrase: '',
@@ -440,7 +441,7 @@ function openEditModal(account) {
     is_mt5_account: account.is_mt5_account,
     is_default: account.is_default,
     is_active: account.is_active,
-    leverage: account.leverage || (account.platform_id === 1 ? 20 : 100)
+    leverage: account.leverage || (account.platform_id === PlatformId.BINANCE ? 20 : 100)
   }
   showModal.value = true
 }
@@ -451,7 +452,7 @@ function closeModal() {
 
 function onPlatformChange() {
   // Reset MT5 fields when platform changes
-  if (accountForm.value.platform_id === 1) {
+  if (accountForm.value.platform_id === PlatformId.BINANCE) {
     accountForm.value.is_mt5_account = false
     accountForm.value.mt5_id = ''
     accountForm.value.mt5_primary_pwd = ''
@@ -473,7 +474,7 @@ async function saveAccount() {
       passphrase: accountForm.value.passphrase || null,
       is_mt5_account: accountForm.value.is_mt5_account,
       is_default: accountForm.value.is_default,
-      leverage: accountForm.value.leverage || (accountForm.value.platform_id === 1 ? 20 : 100)
+      leverage: accountForm.value.leverage || (accountForm.value.platform_id === PlatformId.BINANCE ? 20 : 100)
     }
 
     if (isEditMode.value) {
@@ -632,7 +633,7 @@ function closeProxyModal() {
   currentAccount.value = null
   currentProxyBinding.value = null
   proxyConfigForm.value = {
-    platform_id: 1,
+    platform_id: PlatformId.BINANCE,
     proxy_id: null
   }
 }

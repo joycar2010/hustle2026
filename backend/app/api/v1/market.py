@@ -107,13 +107,19 @@ async def get_current_spread(
 
 @router.get("/spread/history")
 async def get_spread_history(
-    limit: int = Query(default=100, ge=1, le=1000, description="Number of records"),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max records in legacy (non-paginated) mode"),
     binance_symbol: str = Query(default="XAUUSDT", description="Binance symbol"),
     bybit_symbol: str = Query(default="XAUUSDT", description="Bybit symbol"),
     start_time: str = Query(default=None, description="Start time in ISO format"),
     end_time: str = Query(default=None, description="End time in ISO format"),
+    page: int = Query(default=None, ge=1, description="1-based page index; enables paginated response"),
+    page_size: int = Query(default=50, ge=1, le=500, description="Records per page (paginated mode only)"),
 ):
-    """Get historical spread data"""
+    """Get historical spread data.
+
+    - Without ``page``: returns a plain list (backward compatible).
+    - With ``page``: returns ``{data, pagination: {page, page_size, total, total_pages}}``.
+    """
     try:
         return await market_data_service.get_spread_history(
             limit=limit,
@@ -121,6 +127,8 @@ async def get_spread_history(
             bybit_symbol=bybit_symbol,
             start_time=start_time,
             end_time=end_time,
+            page=page,
+            page_size=page_size,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

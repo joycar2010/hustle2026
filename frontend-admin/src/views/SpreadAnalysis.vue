@@ -53,10 +53,10 @@
       <input type="datetime-local" v-model="startTime" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary" />
       <span class="text-text-tertiary text-xs">至</span>
       <input type="datetime-local" v-model="endTime" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary" />
-      <select v-model="limit" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary">
-        <option v-for="n in [100,300,500,1000]" :key="n" :value="n">{{ n }} 条</option>
+      <select v-model.number="pageSize" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary">
+        <option v-for="n in [20,50,100,200,500]" :key="n" :value="n">{{ n }} 条/页</option>
       </select>
-      <button @click="fetchHistory" :disabled="histLoading" class="px-4 py-1.5 bg-primary hover:bg-primary-hover disabled:opacity-50 text-dark-300 font-semibold rounded-lg text-sm transition-colors">
+      <button @click="fetchHistory(1)" :disabled="histLoading" class="px-4 py-1.5 bg-primary hover:bg-primary-hover disabled:opacity-50 text-dark-300 font-semibold rounded-lg text-sm transition-colors">
         {{ histLoading ? '查询中' : '查询历史' }}
       </button>
       <!-- 阈值 -->
@@ -107,7 +107,8 @@
         <span class="font-semibold text-sm">{{ activePair }} 点差记录</span>
         <div class="flex items-center gap-3 text-xs text-text-tertiary">
           <span>{{ dataSource }}</span>
-          <span>{{ filteredRecords.length }} 条</span>
+          <span v-if="serverPaged">共 {{ totalRecords.toLocaleString() }} 条 · 保留 2 天</span>
+          <span v-else>{{ filteredRecords.length }} 条</span>
           <span>第 {{ currentPage }}/{{ totalPages }} 页</span>
         </div>
       </div>
@@ -148,13 +149,13 @@
       </div>
       <!-- Pagination -->
       <div v-if="totalPages > 1" class="px-4 py-3 border-t border-border-secondary flex items-center justify-between">
-        <span class="text-xs text-text-tertiary">{{ (currentPage-1)*pageSize+1 }}–{{ Math.min(currentPage*pageSize, filteredRecords.length) }} / {{ filteredRecords.length }}</span>
+        <span class="text-xs text-text-tertiary">{{ (currentPage-1)*pageSize+1 }}–{{ Math.min(currentPage*pageSize, totalRecords || filteredRecords.length) }} / {{ totalRecords || filteredRecords.length }}</span>
         <div class="flex gap-1">
-          <button @click="currentPage=1" :disabled="currentPage===1" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">«</button>
-          <button @click="currentPage--" :disabled="currentPage===1" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">‹</button>
+          <button @click="goToPage(1)" :disabled="currentPage===1 || histLoading" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">«</button>
+          <button @click="goToPage(currentPage-1)" :disabled="currentPage===1 || histLoading" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">‹</button>
           <span class="px-3 py-1 text-xs bg-dark-50 rounded font-mono">{{ currentPage }}/{{ totalPages }}</span>
-          <button @click="currentPage++" :disabled="currentPage>=totalPages" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">›</button>
-          <button @click="currentPage=totalPages" :disabled="currentPage>=totalPages" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">»</button>
+          <button @click="goToPage(currentPage+1)" :disabled="currentPage>=totalPages || histLoading" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">›</button>
+          <button @click="goToPage(totalPages)" :disabled="currentPage>=totalPages || histLoading" class="px-2 py-1 text-xs bg-dark-200 rounded disabled:opacity-40">»</button>
         </div>
       </div>
     </div>
@@ -179,7 +180,7 @@ const pairs = ref([])
 const activePair = ref('XAU')
 const liveData = ref({})        // { pair_code: { forwardEntry, reverseEntry, binanceBid, bybitAsk, ts } }
 const wsChartData = ref([])     // rolling window for chart (max 300 points)
-const historyData = ref([])     // from HTTP history API
+const historyData = ref([])     // from HTTP history API (current page only)
 const histLoading = ref(false)
 const activeRange = ref('1h')
 const activeDir = ref('all')
@@ -188,7 +189,10 @@ const oppThreshold = ref(2.0)
 const startTime = ref(dayjs().subtract(1, 'hour').format('YYYY-MM-DDTHH:mm'))
 const endTime = ref(dayjs().format('YYYY-MM-DDTHH:mm'))
 const currentPage = ref(1)
-const pageSize = 50
+const pageSize = ref(50)
+const totalRecords = ref(0)     // server-reported total for current query
+const serverTotalPages = ref(1)
+const serverPaged = ref(false)  // true once fetchHistory has run with pagination
 const lastUpdate = ref('--')
 const chartKey = ref(0)
 let fallbackTimer = null
@@ -281,10 +285,14 @@ const filteredRecords = computed(() => {
   return allRecords.value.filter(r => r.dir === activeDir.value)
 })
 
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredRecords.value.length / pageSize)))
+const totalPages = computed(() => {
+  if (serverPaged.value) return serverTotalPages.value
+  return Math.max(1, Math.ceil(filteredRecords.value.length / pageSize.value))
+})
 const pagedRecords = computed(() => {
+  if (serverPaged.value) return filteredRecords.value
   const p = Math.min(currentPage.value, totalPages.value)
-  return filteredRecords.value.slice((p - 1) * pageSize, p * pageSize)
+  return filteredRecords.value.slice((p - 1) * pageSize.value, p * pageSize.value)
 })
 
 // ── Quant Stats ──
@@ -392,6 +400,9 @@ function selectPair(pc) {
   wsChartData.value = []
   historyData.value = []
   currentPage.value = 1
+  serverPaged.value = false
+  totalRecords.value = 0
+  serverTotalPages.value = 1
   chartKey.value++
 }
 
@@ -401,19 +412,41 @@ function setRange(val) {
   const map = { '15m': 15, '1h': 60, '6h': 360, '1d': 1440, '7d': 10080 }
   startTime.value = dayjs().subtract(map[val], 'minute').format('YYYY-MM-DDTHH:mm')
   endTime.value = dayjs().format('YYYY-MM-DDTHH:mm')
-  fetchHistory()
+  fetchHistory(1)
 }
 
-async function fetchHistory() {
+function goToPage(n) {
+  if (histLoading.value) return
+  const target = Math.max(1, Math.min(totalPages.value, n))
+  if (target === currentPage.value && serverPaged.value) return
+  if (serverPaged.value) {
+    fetchHistory(target)
+  } else {
+    currentPage.value = target
+  }
+}
+
+async function fetchHistory(page = 1) {
   histLoading.value = true
-  currentPage.value = 1
+  currentPage.value = page
   const pairConfig = pairs.value.find(p => p.pair_code === activePair.value)
   const binSymbol = pairConfig?.symbol_a?.symbol || pairConfig?.cex_symbol || 'XAUUSDT'
   try {
     const r = await api.get('/api/v1/market/spread/history', {
-      params: { limit: limit.value, binance_symbol: binSymbol, bybit_symbol: binSymbol, start_time: startTime.value + ':00', end_time: endTime.value + ':00' }
+      params: {
+        binance_symbol: binSymbol,
+        bybit_symbol: binSymbol,
+        start_time: startTime.value + ':00',
+        end_time: endTime.value + ':00',
+        page,
+        page_size: pageSize.value,
+      }
     })
-    const raw = Array.isArray(r.data) ? r.data : r.data?.data ?? r.data?.records ?? []
+    // New contract: { data, pagination }. Fall back to array for legacy.
+    const body = r.data
+    const raw = Array.isArray(body) ? body : (body?.data ?? body?.records ?? [])
+    const pg = !Array.isArray(body) ? body?.pagination : null
+
     historyData.value = raw.map((item, i) => {
       const cexBid = item.binance_quote?.bid ?? item.binance_bid ?? 0
       const mt5Ask = item.bybit_quote?.ask ?? item.bybit_ask ?? 0
@@ -421,20 +454,38 @@ async function fetchHistory() {
       const rev = item.reverse_spread ?? (mt5Ask - cexBid)
       const dir = Math.abs(fwd) >= Math.abs(rev) ? 'forward' : 'reverse'
       return {
-        id: i, time: dayjs(item.timestamp ?? item.created_at).format('MM-DD HH:mm:ss'),
+        id: `${page}-${i}`,
+        time: dayjs(item.timestamp ?? item.created_at).format('MM-DD HH:mm:ss'),
         cexBid: cexBid.toFixed(2), mt5Ask: mt5Ask.toFixed(2),
         fwdSpread: fwd.toFixed(4), revSpread: rev.toFixed(4), dir,
         pct: cexBid > 0 ? ((Math.max(Math.abs(fwd), Math.abs(rev)) / cexBid) * 100).toFixed(4) : '0',
         isOpp: Math.max(Math.abs(fwd), Math.abs(rev)) >= oppThreshold.value,
       }
     })
-    // Also populate chart from history
-    wsChartData.value = raw.map(item => ({
+
+    if (pg) {
+      serverPaged.value = true
+      totalRecords.value = pg.total || 0
+      serverTotalPages.value = pg.total_pages || 1
+      pageSize.value = pg.page_size || pageSize.value
+      currentPage.value = pg.page || page
+    } else {
+      serverPaged.value = false
+      totalRecords.value = raw.length
+      serverTotalPages.value = Math.max(1, Math.ceil(raw.length / pageSize.value))
+    }
+
+    // Rebuild chart from current page (reverse so x-axis is chronological)
+    wsChartData.value = raw.slice().reverse().map(item => ({
       time: dayjs(item.timestamp ?? item.created_at).format('HH:mm:ss'),
       fwd: item.forward_spread ?? 0, rev: item.reverse_spread ?? 0,
     }))
     chartKey.value++
-  } catch { historyData.value = [] }
+  } catch {
+    historyData.value = []
+    totalRecords.value = 0
+    serverTotalPages.value = 1
+  }
   finally { histLoading.value = false }
 }
 

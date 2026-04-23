@@ -649,7 +649,7 @@
               <option :value="2">Bybit</option>
             </select>
           </div>
-          <div v-if="accountForm.platform_id === 2" class="flex items-center gap-3">
+          <div v-if="accountForm.platform_id === PlatformId.BYBIT" class="flex items-center gap-3">
             <div @click="accountForm.is_mt5_account = !accountForm.is_mt5_account"
               :class="['relative w-9 h-5 rounded-full cursor-pointer transition-colors',
                 accountForm.is_mt5_account ? 'bg-blue-500' : 'bg-gray-600']">
@@ -672,7 +672,7 @@
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
               placeholder="输入 API Secret" />
           </div>
-          <div v-if="accountForm.platform_id === 2">
+          <div v-if="accountForm.platform_id === PlatformId.BYBIT">
             <label class="block text-xs text-text-tertiary mb-1">Passphrase（可选）</label>
             <input v-model="accountForm.passphrase" type="password"
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
@@ -682,7 +682,7 @@
             <label class="block text-xs text-text-tertiary mb-1">杠杆倍数</label>
             <input v-model.number="accountForm.leverage" type="number" min="1" max="500"
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
-              :placeholder="accountForm.platform_id === 1 ? '默认 20x' : '默认 100x'" />
+              :placeholder="accountForm.platform_id === PlatformId.BINANCE ? '默认 20x' : '默认 100x'" />
           </div>
           <div class="flex items-center gap-3">
             <div @click="accountForm.is_default = !accountForm.is_default"
@@ -1099,6 +1099,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
+import { PlatformId } from '@/constants/platform'
 
 // ── Tabs ──────────────────────────────────────────────────────
 const tabs = [
@@ -1441,7 +1442,7 @@ const showAccountModal      = ref(false)
 const isEditAccount         = ref(false)
 const currentAccount        = ref(null)
 const accountForm = ref({
-  user_id: '', account_name: '', platform_id: 2,
+  user_id: '', account_name: '', platform_id: PlatformId.BYBIT,
   api_key: '', api_secret: '', passphrase: '',
   is_mt5_account: false, is_default: false, is_active: true, leverage: 100
 })
@@ -1470,7 +1471,7 @@ async function loadUserAccounts() {
 }
 
 function onPlatformChange() {
-  if (accountForm.value.platform_id === 1) {
+  if (accountForm.value.platform_id === PlatformId.BINANCE) {
     accountForm.value.is_mt5_account = false
     accountForm.value.leverage = 20
   } else {
@@ -1483,7 +1484,7 @@ function openAddAccount() {
   currentAccount.value = null
   accountForm.value = {
     user_id: selectedAccountUserId.value || '',
-    account_name: '', platform_id: 2, api_key: '', api_secret: '',
+    account_name: '', platform_id: PlatformId.BYBIT, api_key: '', api_secret: '',
     passphrase: '', is_mt5_account: false, is_default: false, is_active: true, leverage: 100
   }
   showAccountModal.value = true
@@ -1497,7 +1498,7 @@ async function openEditAccount(acc) {
     account_name: acc.account_name, platform_id: acc.platform_id,
     api_key: acc.api_key || '', api_secret: '', passphrase: '',
     is_mt5_account: acc.is_mt5_account, is_default: acc.is_default,
-    is_active: acc.is_active, leverage: acc.leverage || (acc.platform_id === 1 ? 20 : 100)
+    is_active: acc.is_active, leverage: acc.leverage || (acc.platform_id === PlatformId.BINANCE ? 20 : 100)
   }
   showAccountModal.value = true
   // Load actual API secret from backend (stored encrypted, shown on edit)
@@ -1998,7 +1999,7 @@ async function onMt5UserChange() {
     const r = await api.get('/api/v1/accounts', { params: { user_id: mt5SelectedUserId.value } })
     const all = Array.isArray(r.data) ? r.data : (r.data?.accounts ?? [])
     // 只显示 Bybit / MT5 账户
-    mt5Accounts.value = all.filter(a => a.platform_id === 2)
+    mt5Accounts.value = all.filter(a => a.platform_id === PlatformId.BYBIT)
     // 自动选中第一个 MT5 账户并加载客户端
     if (mt5Accounts.value.length) {
       mt5SelectedAccountId.value = mt5Accounts.value[0].account_id
