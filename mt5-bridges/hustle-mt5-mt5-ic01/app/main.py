@@ -82,7 +82,7 @@ class OrderRequest(BaseModel):
     sl:    Optional[float]   = None
     tp:    Optional[float]   = None
     deviation: int           = 10
-    comment:   str           = "hustle2026"
+    comment:   str           = ""
     position_ticket: Optional[int] = None  # 用于平仓
 
 class ClosePositionRequest(BaseModel):
@@ -625,7 +625,7 @@ async def close_position(req: ClosePositionRequest):
         "position":     pos.ticket,
         "deviation":    10,
         "magic":        MT5_LOGIN,
-        "comment":      "hustle2026-close",
+        "comment":      "",
         "type_time":    mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
@@ -674,7 +674,7 @@ async def close_all_positions(req: CloseAllRequest):
             "position":     pos.ticket,
             "deviation":    10,
             "magic":        MT5_LOGIN,
-            "comment":      "hustle2026-close-all",
+            "comment":      "",
             "type_time":    mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }

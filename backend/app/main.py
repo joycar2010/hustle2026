@@ -261,6 +261,8 @@ async def lifespan(app: FastAPI):
         openclaw_fsm.start()
         openclaw_npm.start()
         openclaw_bm.start()
+        from app.services.agent.balance_monitor import start_model_refresh
+        start_model_refresh()
         openclaw_reviewer.start()
         openclaw_legs.start()
         logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer + leg_monitor scheduled')
@@ -283,6 +285,13 @@ async def lifespan(app: FastAPI):
         logger.info('[nav-scheduler] daily snapshot task scheduled')
     except Exception as e:
         logger.error(f'[nav-scheduler] failed to start: {e}')
+
+    # Restore saved push stream intervals from DB
+    try:
+        from app.api.v1.system import restore_push_stream_intervals
+        await restore_push_stream_intervals()
+    except Exception as e:
+        logger.error(f'[push-intervals] restore on startup failed: {e}')
 
     logger.info("FastAPI application started - background services initializing...")
 
@@ -317,6 +326,8 @@ async def lifespan(app: FastAPI):
         await openclaw_reviewer.stop()
         await openclaw_npm.stop()
         await openclaw_bm.stop()
+        from app.services.agent.balance_monitor import stop_model_refresh
+        await stop_model_refresh()
         await openclaw_legs.stop()
         try:
             from app.services import dashboard_stream

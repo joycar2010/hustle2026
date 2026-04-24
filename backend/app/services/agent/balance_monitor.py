@@ -123,8 +123,22 @@ async def compute_balance(db: AsyncSession) -> Dict[str, Any]:
     ls = cfg.get('llm_settings', {}) or {}
     auth = cfg.get('chesspnt_auth', {}) or {}
 
-    threshold_cny = float(ls.get('balance_alert_threshold_cny', 20) or 20)
-    usd_to_cny = float(ls.get('usd_to_cny_rate', 7.3) or 7.3)
+    # Prefer active relay station config
+    _rs = list(cfg.get('relay_stations', []) or [])
+    _active = next((r for r in _rs if r.get('enabled') and r.get('role') == 'primary'), None)
+    if _active:
+        auth = {
+            'api_base': _active.get('api_base', auth.get('api_base', '')),
+            'session_cookie': _active.get('session_cookie', ''),
+            'new_api_user': _active.get('new_api_user', ''),
+            'units_per_usd': _active.get('units_per_usd', 500000),
+            'username': _active.get('chesspnt_username', ''),
+        }
+        threshold_cny = float(_active.get('balance_alert_threshold_cny', 20) or 20)
+        usd_to_cny = float(_active.get('usd_to_cny_rate', 7.3) or 7.3)
+    else:
+        threshold_cny = float(ls.get('balance_alert_threshold_cny', 20) or 20)
+        usd_to_cny = float(ls.get('usd_to_cny_rate', 7.3) or 7.3)
 
     # ── Priority 1: chesspnt real-time quota ──
     cp = await fetch_chesspnt_balance(auth)
@@ -232,3 +246,87 @@ async def stop():
             await asyncio.wait_for(_task, timeout=10)
         except asyncio.TimeoutError:
             _task.cancel()
+
+
+# ── Daily model list auto-refresh (08:00 Asia/Shanghai = 00:00 UTC) ──
+_model_refresh_task: Optional[asyncio.Task] = None
+_MODEL_REFRESH_INTERVAL = 86400  # 24 hours
+
+async def _daily_model_refresh_loop():
+    """Refresh available models from chesspnt API once per day."""
+    import json as _json
+    await asyncio.sleep(300)  # wait 5min after startup
+    while True:
+        try:
+            from app.core.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                cfg = await config_loader.load_config(db, force=True)
+                auth = cfg.get('chesspnt_auth', {}) or {}
+                base = auth.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+                cookie = auth.get('session_cookie', '')
+                user_hdr = auth.get('new_api_user', '')
+                if not cookie:
+                    logger.warning('[model_refresh] no session cookie, skipping')
+                    await asyncio.sleep(_MODEL_REFRESH_INTERVAL)
+                    continue
+
+                headers = {
+                    'accept': 'application/json, text/plain, */*',
+                    'cookie': f'session={cookie}',
+                }
+                if user_hdr:
+                    headers['new-api-user'] = str(user_hdr)
+
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+                    async with s.get(f'{base}/api/user/models', headers=headers) as resp:
+                        if resp.status not in (200, 201):
+                            logger.warning(f'[model_refresh] HTTP {resp.status}')
+                            await asyncio.sleep(_MODEL_REFRESH_INTERVAL)
+                            continue
+                        body = await resp.json()
+                        models = body.get('data') if isinstance(body, dict) else body
+                        if not isinstance(models, list) or not models:
+                            logger.warning(f'[model_refresh] unexpected response')
+                            await asyncio.sleep(_MODEL_REFRESH_INTERVAL)
+                            continue
+                        models = sorted({str(m) for m in models if m})
+
+                ls = dict(cfg.get('llm_settings', {}) or {})
+                old_models = set(ls.get('available_models') or [])
+                new_models = set(models)
+                if old_models != new_models:
+                    ls['available_models'] = models
+                    from sqlalchemy import text
+                    await db.execute(text(
+                        "UPDATE agent_active_config SET value=cast(:v as jsonb), updated_at=NOW() WHERE key='llm_settings'"
+                    ), {'v': _json.dumps(ls)})
+                    await db.commit()
+                    config_loader.invalidate()
+                    from app.services.agent.codex_client import invalidate_model_cache
+                    invalidate_model_cache()
+                    added = new_models - old_models
+                    removed = old_models - new_models
+                    logger.info(f'[model_refresh] updated: {len(models)} models, +{len(added)} -{len(removed)}')
+                else:
+                    logger.info(f'[model_refresh] no changes ({len(models)} models)')
+        except Exception as e:
+            logger.error(f'[model_refresh] error: {e}', exc_info=True)
+        await asyncio.sleep(_MODEL_REFRESH_INTERVAL)
+
+
+def start_model_refresh():
+    global _model_refresh_task
+    if _model_refresh_task is None or _model_refresh_task.done():
+        _model_refresh_task = asyncio.create_task(_daily_model_refresh_loop())
+        logger.info('[model_refresh] daily auto-refresh scheduled')
+
+
+async def stop_model_refresh():
+    global _model_refresh_task
+    if _model_refresh_task and not _model_refresh_task.done():
+        _model_refresh_task.cancel()
+        try:
+            await _model_refresh_task
+        except asyncio.CancelledError:
+            pass
+        _model_refresh_task = None

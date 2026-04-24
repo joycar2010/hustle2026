@@ -733,6 +733,10 @@ const localBinanceLong = ref(0)
 const localBinanceShort = ref(0)
 const localBybitLong = ref(0)
 const localBybitShort = ref(0)
+// Anti-flicker bypass: set by close/execution events so next zero-snapshot is accepted
+let _forceAcceptZero = false
+let _consecutiveZeroCount = 0
+const _ZERO_CONFIRM_THRESHOLD = 2  // accept after N consecutive zero snapshots
 
 const { currentPair } = useTradingPair()
 const alertPairCode = currentPair  // computed alias — reactive ref from global store
@@ -752,15 +756,20 @@ watch(() => marketStore.positionSnapshot, (snap) => {
     bl = snap.binance_long_xau ?? 0
     bs = snap.binance_short_xau ?? 0
   }
-  // Anti-flicker: if incoming data is all-zero but we currently hold non-zero
-  // positions, skip this update — it's likely a transient bridge read failure.
-  // Genuine close-all will arrive as a consistent zero snapshot from the
-  // PositionStreamer (which reads both MT5 and Binance), not from a partial source.
   const incomingAllZero = (ml === 0 && ms === 0 && bl === 0 && bs === 0)
   const currentHasPosition = (localBybitLong.value !== 0 || localBybitShort.value !== 0 ||
                               localBinanceLong.value !== 0 || localBinanceShort.value !== 0)
   if (incomingAllZero && currentHasPosition) {
-    return  // Skip: don't overwrite real positions with transient zeros
+    _consecutiveZeroCount++
+    // Allow zero-update if: close event signaled OR confirmed by consecutive zero snapshots
+    if (!_forceAcceptZero && _consecutiveZeroCount < _ZERO_CONFIRM_THRESHOLD) {
+      return  // Skip: likely transient bridge read failure
+    }
+    // Genuine close — accept the zeros
+    _forceAcceptZero = false
+    _consecutiveZeroCount = 0
+  } else {
+    _consecutiveZeroCount = 0
   }
   localBybitLong.value = ml
   localBybitShort.value = ms
@@ -1286,6 +1295,10 @@ function handlePositionChange(data) {
   // Only handle messages for this strategy
   if (data.strategy_id !== configId.value) return
 
+  // Signal that a position change occurred — bypass anti-flicker guard for next snapshot
+  _forceAcceptZero = true
+  _consecutiveZeroCount = 0
+
   // Refresh position data
   refreshPositions()
 
@@ -1340,6 +1353,10 @@ function handleExecutionCompleted(data) {
     notificationStore.showStrategyNotification(`策略执行完成: ${data.action}`, 'success')
     console.log(`[WebSocket] Execution completed: ${data.action}`)
   }
+  // After any execution completes, positions may have changed — bypass anti-flicker for next snapshot
+  _forceAcceptZero = true
+  _consecutiveZeroCount = 0
+  refreshPositions()
 }
 
 function handleExecutionError(data) {

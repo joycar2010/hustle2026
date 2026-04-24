@@ -122,10 +122,18 @@ async def get_llm_stats(db: AsyncSession = Depends(get_db), user_id: str = Depen
     from app.services.agent.balance_monitor import compute_balance
     balance = await compute_balance(db)
 
+    # Prefer relay_stations active primary
+    _rs = list(cfg.get('relay_stations', []) or [])
+    _active = next((r for r in _rs if r.get('enabled') and r.get('role') == 'primary'), None)
+    _m = _active.get('model') if _active else ls.get('model')
+    _s = _active.get('streaming', True) if _active else ls.get('streaming', True)
+    _am = _active.get('available_models', []) if _active else ls.get('available_models', [])
     return {
-        'model': ls.get('model'),
-        'streaming': ls.get('streaming', True),
-        'available_models': ls.get('available_models', []),
+        'model': _m,
+        'streaming': _s,
+        'available_models': _am,
+        'active_relay_id': _active['id'] if _active else None,
+        'active_relay_name': _active.get('name') if _active else None,
         'tokens_today': {'in': int(rows[0]), 'out': int(rows[1]), 'total': int(rows[0]) + int(rows[1]), 'calls': int(rows[4])},
         'tokens_total': {'in': int(rows[2]), 'out': int(rows[3]), 'total': int(rows[2]) + int(rows[3]), 'calls': int(rows[5])},
         'balance': balance,
@@ -539,8 +547,286 @@ async def set_llm_config(req: LlmConfigReq, db: AsyncSession = Depends(get_db),
     config_loader.invalidate()
     from app.services.agent.codex_client import invalidate_model_cache
     invalidate_model_cache()
+    # Also sync to active primary relay station
+    _rs = list(cfg.get('relay_stations', []) or [])
+    _active = next((r for r in _rs if r.get('enabled') and r.get('role') == 'primary'), None)
+    if _active:
+        if req.model is not None:
+            _active['model'] = req.model
+        if req.streaming is not None:
+            _active['streaming'] = bool(req.streaming)
+        if req.balance_alert_threshold_cny is not None:
+            _active['balance_alert_threshold_cny'] = float(req.balance_alert_threshold_cny)
+        await _save_relay_stations(db, _rs, user_id)
     return {'ok': True, 'llm_settings': ls}
 
+
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Relay Stations CRUD (multi-relay primary/standby)
+# ─────────────────────────────────────────────────────────────────────
+
+async def _load_relay_stations(db) -> list:
+    cfg = await config_loader.load_config(db)
+    return list(cfg.get('relay_stations', []) or [])
+
+async def _save_relay_stations(db, stations: list, user_id: str):
+    import json as _json
+    await db.execute(text("""
+        INSERT INTO agent_active_config (key, value, updated_by)
+        VALUES ('relay_stations', CAST(:v AS JSONB), CAST(:u AS UUID))
+        ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW(), updated_by=EXCLUDED.updated_by
+    """), {'v': _json.dumps(stations), 'u': user_id})
+    await db.commit()
+    config_loader.invalidate()
+
+def _safe_station(s: dict) -> dict:
+    """Strip sensitive fields for API response."""
+    out = dict(s)
+    out.pop('chesspnt_password', None)
+    out.pop('llm_api_key', None)
+    cookie = out.get('session_cookie', '')
+    out['cookie_set'] = bool(cookie)
+    out.pop('session_cookie', None)
+    return out
+
+
+@router.get('/relay-stations')
+async def list_relay_stations(db: AsyncSession = Depends(get_db),
+                              user_id: str = Depends(require_admin)):
+    stations = await _load_relay_stations(db)
+    return {'items': [_safe_station(s) for s in stations]}
+
+
+@router.post('/relay-stations')
+async def add_relay_station(body: Dict[str, Any] = Body(...),
+                            db: AsyncSession = Depends(get_db),
+                            user_id: str = Depends(require_admin)):
+    import uuid
+    stations = await _load_relay_stations(db)
+    new_id = str(uuid.uuid4())[:8]
+    station = {
+        'id': new_id,
+        'name': body.get('name', f'relay-{new_id}'),
+        'api_base': body.get('api_base', 'https://api.chesspnt.com'),
+        'llm_base_url': body.get('llm_base_url', ''),
+        'llm_api_key': body.get('llm_api_key', ''),
+        'chesspnt_username': body.get('chesspnt_username', ''),
+        'chesspnt_password': body.get('chesspnt_password', ''),
+        'session_cookie': '',
+        'new_api_user': body.get('new_api_user', ''),
+        'units_per_usd': body.get('units_per_usd', 500000),
+        'available_models': body.get('available_models', []),
+        'model': body.get('model', ''),
+        'streaming': body.get('streaming', True),
+        'balance_alert_threshold_cny': body.get('balance_alert_threshold_cny', 20),
+        'usd_to_cny_rate': body.get('usd_to_cny_rate', 7.3),
+        'enabled': body.get('enabled', True),
+        'role': body.get('role', 'standby'),
+        'priority': body.get('priority', len(stations)),
+    }
+    stations.append(station)
+    await _save_relay_stations(db, stations, user_id)
+    return {'ok': True, 'station': _safe_station(station)}
+
+
+@router.put('/relay-stations/{station_id}')
+async def update_relay_station(station_id: str,
+                               body: Dict[str, Any] = Body(...),
+                               db: AsyncSession = Depends(get_db),
+                               user_id: str = Depends(require_admin)):
+    stations = await _load_relay_stations(db)
+    found = None
+    for s in stations:
+        if s['id'] == station_id:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail='relay station not found')
+    # Update allowed fields
+    for k in ('name', 'api_base', 'llm_base_url', 'llm_api_key',
+              'chesspnt_username', 'new_api_user', 'units_per_usd',
+              'model', 'streaming', 'balance_alert_threshold_cny',
+              'usd_to_cny_rate', 'priority', 'available_models'):
+        if k in body and body[k] is not None:
+            found[k] = body[k]
+    if 'chesspnt_password' in body and body['chesspnt_password']:
+        found['chesspnt_password'] = body['chesspnt_password']
+    await _save_relay_stations(db, stations, user_id)
+    return {'ok': True, 'station': _safe_station(found)}
+
+
+@router.delete('/relay-stations/{station_id}')
+async def delete_relay_station(station_id: str,
+                               db: AsyncSession = Depends(get_db),
+                               user_id: str = Depends(require_admin)):
+    stations = await _load_relay_stations(db)
+    new_stations = [s for s in stations if s['id'] != station_id]
+    if len(new_stations) == len(stations):
+        raise HTTPException(status_code=404, detail='relay station not found')
+    await _save_relay_stations(db, new_stations, user_id)
+    return {'ok': True}
+
+
+@router.post('/relay-stations/{station_id}/toggle')
+async def toggle_relay_station(station_id: str,
+                               body: Dict[str, Any] = Body(...),
+                               db: AsyncSession = Depends(get_db),
+                               user_id: str = Depends(require_admin)):
+    stations = await _load_relay_stations(db)
+    for s in stations:
+        if s['id'] == station_id:
+            s['enabled'] = bool(body.get('enabled', not s.get('enabled', True)))
+            await _save_relay_stations(db, stations, user_id)
+            return {'ok': True, 'station': _safe_station(s)}
+    raise HTTPException(status_code=404, detail='relay station not found')
+
+
+@router.post('/relay-stations/{station_id}/set-role')
+async def set_relay_role(station_id: str,
+                         body: Dict[str, Any] = Body(...),
+                         db: AsyncSession = Depends(get_db),
+                         user_id: str = Depends(require_admin)):
+    """Set a station as primary (demoting the previous primary to standby)."""
+    role = body.get('role', 'primary')
+    stations = await _load_relay_stations(db)
+    found = False
+    for s in stations:
+        if s['id'] == station_id:
+            s['role'] = role
+            found = True
+        elif role == 'primary' and s.get('role') == 'primary':
+            s['role'] = 'standby'
+    if not found:
+        raise HTTPException(status_code=404, detail='relay station not found')
+    await _save_relay_stations(db, stations, user_id)
+    return {'ok': True, 'items': [_safe_station(s) for s in stations]}
+
+
+@router.post('/relay-stations/{station_id}/refresh-cookie')
+async def refresh_station_cookie(station_id: str,
+                                 db: AsyncSession = Depends(get_db),
+                                 user_id: str = Depends(require_admin)):
+    """Login to chesspnt and update session cookie for a specific station."""
+    import aiohttp, json as _json
+    stations = await _load_relay_stations(db)
+    found = None
+    for s in stations:
+        if s['id'] == station_id:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail='relay station not found')
+    base = found.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+    username = found.get('chesspnt_username', '')
+    password = found.get('chesspnt_password', '')
+    if not username or not password:
+        return {'ok': False, 'error': 'username/password not configured'}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(f'{base}/api/user/login',
+                                    json={'username': username, 'password': password}) as resp:
+                data = await resp.json()
+                if not data.get('success'):
+                    return {'ok': False, 'error': data.get('message', 'login failed')}
+                cookies = resp.headers.getall('Set-Cookie', [])
+                new_cookie = ''
+                for c in cookies:
+                    if 'session=' in c:
+                        new_cookie = c.split('session=')[1].split(';')[0]
+                        break
+                if not new_cookie:
+                    return {'ok': False, 'error': 'no session cookie in response'}
+                found['session_cookie'] = new_cookie
+                await _save_relay_stations(db, stations, user_id)
+                return {'ok': True, 'message': 'cookie updated', 'user': data.get('data', {}).get('username')}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+
+@router.post('/relay-stations/{station_id}/refresh-models')
+async def refresh_station_models(station_id: str,
+                                 db: AsyncSession = Depends(get_db),
+                                 user_id: str = Depends(require_admin)):
+    """Pull live model list from chesspnt for a specific station."""
+    import aiohttp
+    stations = await _load_relay_stations(db)
+    found = None
+    for s in stations:
+        if s['id'] == station_id:
+            found = s
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail='relay station not found')
+    base = found.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+    cookie = found.get('session_cookie', '')
+    user_hdr = found.get('new_api_user', '')
+    if not cookie:
+        return {'ok': False, 'error': 'no session cookie — refresh cookie first'}
+    headers = {'accept': 'application/json', 'cookie': f'session={cookie}'}
+    if user_hdr:
+        headers['new-api-user'] = str(user_hdr)
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(f'{base}/api/user/models', headers=headers) as resp:
+                if resp.status not in (200, 201):
+                    return {'ok': False, 'error': f'HTTP {resp.status}'}
+                body = await resp.json()
+                models = body.get('data') if isinstance(body, dict) else body
+                if not isinstance(models, list):
+                    return {'ok': False, 'error': 'unexpected response'}
+                models = sorted({str(m) for m in models if m})
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+    old = set(found.get('available_models', []))
+    new = set(models)
+    found['available_models'] = models
+    await _save_relay_stations(db, stations, user_id)
+    from app.services.agent.codex_client import invalidate_model_cache
+    invalidate_model_cache()
+    return {
+        'ok': True, 'count': len(models), 'available_models': models,
+        'added': sorted(new - old), 'removed': sorted(old - new),
+    }
+
+
+@router.get('/chesspnt-auth')
+async def get_chesspnt_auth(db: AsyncSession = Depends(get_db),
+                            user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Get chesspnt relay config (masks password/cookie)."""
+    cfg = await config_loader.load_config(db)
+    auth = cfg.get('chesspnt_auth', {}) or {}
+    return {
+        'api_base': auth.get('api_base', 'https://api.chesspnt.com'),
+        'username': auth.get('username', ''),
+        'password_set': bool(auth.get('password')),
+        'new_api_user': auth.get('new_api_user', ''),
+        'units_per_usd': auth.get('units_per_usd', 500000),
+        'cookie_set': bool(auth.get('session_cookie')),
+    }
+
+
+@router.post('/chesspnt-auth')
+async def save_chesspnt_auth(body: Dict[str, Any] = Body(...),
+                             db: AsyncSession = Depends(get_db),
+                             user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Save chesspnt relay config (api_base, username, password, units_per_usd)."""
+    import json as _json
+    cfg = await config_loader.load_config(db, force=True)
+    auth = dict(cfg.get('chesspnt_auth', {}) or {})
+    for k in ('api_base', 'username', 'password', 'units_per_usd', 'new_api_user'):
+        if k in body and body[k] is not None:
+            auth[k] = body[k]
+    await db.execute(text("""
+        INSERT INTO agent_active_config (key, value, updated_by)
+        VALUES ('chesspnt_auth', CAST(:v AS JSONB), CAST(:u AS UUID))
+        ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW(), updated_by=EXCLUDED.updated_by
+    """), {'v': _json.dumps(auth), 'u': user_id})
+    await db.commit()
+    config_loader.invalidate()
+    safe = {k: v for k, v in auth.items() if k not in ('password', 'session_cookie')}
+    return {'ok': True, 'chesspnt_auth': safe}
 
 
 @router.post('/chesspnt-refresh')
@@ -775,22 +1061,46 @@ async def llm_health(db: AsyncSession = Depends(get_db),
         from app.services.agent.codex_client import (
             _is_circuit_open, _circuit_open_until, _failure_log,
             _pick_fallback_model, _CIRCUIT_WINDOW, _CIRCUIT_THRESHOLD,
+            _circuit_consecutive_trips, _CIRCUIT_BASE_COOLDOWN, _CIRCUIT_MAX_COOLDOWN,
             get_runtime_model_and_stream,
         )
         now = _time.time()
         recent_failures = sum(1 for t in _failure_log if now - t < _CIRCUIT_WINDOW)
         model, streaming = await get_runtime_model_and_stream(db)
+        current_cooldown = min(
+            _CIRCUIT_BASE_COOLDOWN * (2 ** max(0, _circuit_consecutive_trips - 1)),
+            _CIRCUIT_MAX_COOLDOWN,
+        ) if _circuit_consecutive_trips > 0 else _CIRCUIT_BASE_COOLDOWN
         return {
             'circuit_open': _is_circuit_open(),
             'circuit_open_until': _circuit_open_until if _is_circuit_open() else None,
             'recent_failures': recent_failures,
             'failure_threshold': _CIRCUIT_THRESHOLD,
             'failure_window_s': _CIRCUIT_WINDOW,
+            'consecutive_trips': _circuit_consecutive_trips,
+            'current_cooldown_s': current_cooldown,
             'primary_model': model,
             'fallback_model': _pick_fallback_model(model),
         }
     except Exception as e:
         return {'error': str(e), 'circuit_open': False}
+
+
+@router.post('/llm-health/reset')
+async def reset_circuit_breaker(user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Manually reset the LLM circuit breaker."""
+    try:
+        from app.services.agent.codex_client import (
+            _failure_log, _is_circuit_open,
+        )
+        import app.services.agent.codex_client as _cc
+        was_open = _is_circuit_open()
+        _cc._circuit_open_until = 0.0
+        _cc._circuit_consecutive_trips = 0
+        _failure_log.clear()
+        return {'ok': True, 'was_open': was_open, 'circuit_open': False}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
 
 
 

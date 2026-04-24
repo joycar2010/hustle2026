@@ -190,7 +190,7 @@ class GateioFuturesClient:
         price: Optional[str] = None,
         tif: str = "poc",  # poc = PostOnly (pending or cancelled)
         reduce_only: bool = False,
-        text: str = "t-hustle2026",
+        text: str = "t-api",
     ) -> Dict:
         """POST /futures/{settle}/orders
 

@@ -22,13 +22,16 @@ _client: Optional[AsyncOpenAI] = None
 _model_cache: Tuple[str, bool, float] = ('', False, 0.0)  # (model, streaming, ts)
 _MODEL_TTL = 5.0
 
-# ── LLM degradation / circuit breaker ──
+# ── LLM degradation / circuit breaker (exponential backoff + auto-probe) ──
 _FALLBACK_MODELS = ['deepseek-v3.2', 'deepseek-r1', 'gpt-4.1-mini']
 _failure_log: deque = deque(maxlen=20)  # timestamps of recent failures
 _CIRCUIT_WINDOW = 300   # 5 minutes
 _CIRCUIT_THRESHOLD = 5  # failures to trip
-_CIRCUIT_COOLDOWN = 120 # 2 minutes open
+_CIRCUIT_BASE_COOLDOWN = 60   # first trip: 60s
+_CIRCUIT_MAX_COOLDOWN = 480   # cap at 480s
 _circuit_open_until: float = 0.0
+_circuit_consecutive_trips: int = 0  # for exponential backoff
+_circuit_probe_task: Optional[asyncio.Task] = None
 _logger = logging.getLogger(__name__)
 
 
@@ -37,16 +40,51 @@ def _is_circuit_open() -> bool:
 
 
 def _record_failure():
-    global _circuit_open_until
+    global _circuit_open_until, _circuit_consecutive_trips, _circuit_probe_task
     now = time.time()
     _failure_log.append(now)
     recent = sum(1 for t in _failure_log if now - t < _CIRCUIT_WINDOW)
     if recent >= _CIRCUIT_THRESHOLD:
-        _circuit_open_until = now + _CIRCUIT_COOLDOWN
-        _logger.warning(
-            '[codex_client] circuit breaker OPEN — %d failures in %ds, cooling down %ds',
-            recent, _CIRCUIT_WINDOW, _CIRCUIT_COOLDOWN
+        _circuit_consecutive_trips += 1
+        cooldown = min(
+            _CIRCUIT_BASE_COOLDOWN * (2 ** (_circuit_consecutive_trips - 1)),
+            _CIRCUIT_MAX_COOLDOWN,
         )
+        _circuit_open_until = now + cooldown
+        _logger.warning(
+            '[codex_client] circuit breaker OPEN — %d failures in %ds, '
+            'trip #%d, cooling down %ds (backoff)',
+            recent, _CIRCUIT_WINDOW, _circuit_consecutive_trips, cooldown,
+        )
+        # Launch auto-probe recovery task
+        if _circuit_probe_task is None or _circuit_probe_task.done():
+            _circuit_probe_task = asyncio.create_task(_auto_probe_recovery(cooldown))
+
+
+async def _auto_probe_recovery(cooldown_s: float):
+    """After cooldown expires, send a lightweight probe to check if LLM is back.
+    On success, reset circuit breaker. On failure, re-trip with next backoff level."""
+    global _circuit_open_until, _circuit_consecutive_trips
+    await asyncio.sleep(cooldown_s + 1)
+    _logger.info('[codex_client] auto-probe: testing LLM availability...')
+    try:
+        client = get_client()
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.4'),
+                messages=[{'role': 'user', 'content': 'ping'}],
+                max_tokens=1,
+            ),
+            timeout=15,
+        )
+        # Success — reset circuit
+        _circuit_open_until = 0.0
+        _circuit_consecutive_trips = 0
+        _failure_log.clear()
+        _logger.info('[codex_client] auto-probe SUCCESS — circuit breaker CLOSED')
+    except Exception as e:
+        _logger.warning('[codex_client] auto-probe FAILED: %s — re-tripping', str(e)[:120])
+        _record_failure()
 
 
 def _pick_fallback_model(primary: str) -> str:
@@ -56,8 +94,18 @@ def _pick_fallback_model(primary: str) -> str:
     return _FALLBACK_MODELS[0]
 
 
+# Multi-relay client pool: {relay_id: (AsyncOpenAI, base_url, api_key)}
+_relay_clients: Dict[str, Tuple[AsyncOpenAI, str, str]] = {}
+_active_relay_id: Optional[str] = None
+_relay_stations_cache: Tuple[list, float] = ([], 0.0)
+_RELAY_CACHE_TTL = 5.0
+
+
 def get_client() -> AsyncOpenAI:
+    """Get client for the currently active relay (env var fallback)."""
     global _client
+    if _active_relay_id and _active_relay_id in _relay_clients:
+        return _relay_clients[_active_relay_id][0]
     if _client is None:
         base_url = os.getenv('OPENCLAW_LLM_BASE_URL', '').rstrip('/')
         api_key = os.getenv('OPENCLAW_LLM_API_KEY', '')
@@ -67,22 +115,73 @@ def get_client() -> AsyncOpenAI:
     return _client
 
 
+def get_client_for_relay(relay: dict) -> AsyncOpenAI:
+    """Get or create client for a specific relay station."""
+    rid = relay['id']
+    base = relay.get('llm_base_url', '').rstrip('/')
+    key = relay.get('llm_api_key', '')
+    if rid in _relay_clients:
+        cached_client, cached_base, cached_key = _relay_clients[rid]
+        if cached_base == base and cached_key == key:
+            return cached_client
+    if not base or not key:
+        return get_client()  # fallback to env var
+    c = AsyncOpenAI(base_url=base + '/v1', api_key=key, timeout=120)
+    _relay_clients[rid] = (c, base, key)
+    return c
+
+
+async def _get_relay_stations(db) -> list:
+    """Cached relay stations from DB."""
+    global _relay_stations_cache
+    stations, ts = _relay_stations_cache
+    if time.time() - ts < _RELAY_CACHE_TTL and stations:
+        return stations
+    try:
+        from app.services.agent import config_loader
+        cfg = await config_loader.load_config(db)
+        stations = list(cfg.get('relay_stations', []) or [])
+        _relay_stations_cache = (stations, time.time())
+        return stations
+    except Exception:
+        return []
+
+
+async def get_active_relay(db) -> Optional[dict]:
+    """Get the highest-priority enabled primary relay, or first enabled standby."""
+    stations = await _get_relay_stations(db)
+    enabled = [s for s in stations if s.get('enabled')]
+    primaries = sorted([s for s in enabled if s.get('role') == 'primary'],
+                       key=lambda x: x.get('priority', 99))
+    if primaries:
+        return primaries[0]
+    standbys = sorted(enabled, key=lambda x: x.get('priority', 99))
+    return standbys[0] if standbys else None
+
+
 async def get_runtime_model_and_stream(db) -> Tuple[str, bool]:
-    """Read model + streaming from agent_active_config (cached 5s)."""
-    global _model_cache
+    """Read model + streaming from active relay station (fallback to llm_settings)."""
+    global _model_cache, _active_relay_id
     cached_model, cached_stream, ts = _model_cache
     if time.time() - ts < _MODEL_TTL and cached_model:
         return cached_model, cached_stream
     try:
+        relay = await get_active_relay(db)
+        if relay:
+            _active_relay_id = relay['id']
+            model = relay.get('model') or os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.4')
+            stream = bool(relay.get('streaming', True))
+            _model_cache = (model, stream, time.time())
+            return model, stream
         from app.services.agent import config_loader
         cfg = await config_loader.load_config(db)
         ls = cfg.get('llm_settings', {}) or {}
-        model = ls.get('model') or os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.2')
+        model = ls.get('model') or os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.4')
         stream = bool(ls.get('streaming', True))
         _model_cache = (model, stream, time.time())
         return model, stream
     except Exception:
-        return os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.2'), True
+        return os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.4'), True
 
 
 def invalidate_model_cache():
@@ -110,14 +209,20 @@ async def call_decider(
     if _is_circuit_open():
         _logger.warning('[codex_client] circuit breaker OPEN, returning noop fallback')
         noop = {"action": "noop", "leg": "both", "qty": 0.0,
-                "reason": "LLM circuit breaker open — service degraded, waiting for recovery",
+                "reason": f"LLM circuit breaker open — trip #{_circuit_consecutive_trips}, auto-probe pending",
                 "trigger": "circuit_breaker", "confidence": 0.0, "is_rebalance_補腿": False}
         return noop, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, 0
 
-    client = get_client()
+    # Use active relay's client if available
     if db is not None:
+        relay = await get_active_relay(db)
+        if relay:
+            client = get_client_for_relay(relay)
+        else:
+            client = get_client()
         model, stream_enabled = await get_runtime_model_and_stream(db)
     else:
+        client = get_client()
         import logging as _logging
         model = os.getenv('OPENCLAW_LLM_MODEL', 'gpt-5.2')
         stream_enabled = True

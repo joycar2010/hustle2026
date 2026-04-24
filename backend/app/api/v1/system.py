@@ -1810,8 +1810,9 @@ class PushStreamUpdate(BaseModel):
 async def update_push_stream(
     data: PushStreamUpdate,
     user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    """更新推送流的频率"""
+    """更新推送流的频率（实时生效 + 持久化到数据库）"""
     try:
         from app.tasks.market_data import market_streamer
         from app.tasks.broadcast_tasks import (
@@ -1823,7 +1824,7 @@ async def update_push_stream(
         mapping = {
             "market_data": (market_streamer, "update_interval", 0.1, 10.0),
             "account_balance": (account_balance_streamer, "update_interval", 5, 60),
-            "position_update": (mt5_bridge, None, 0.1, 30.0),  # special handling
+            "position_update": (mt5_bridge, None, 0.1, 30.0),
             "risk_metrics": (risk_metrics_streamer, "update_interval", 10, 120),
             "order_update": (pending_orders_streamer, "update_interval", 1, 30),
             "mt5_connection_status": (mt5_connection_streamer, "update_interval", 10, 120),
@@ -1836,20 +1837,94 @@ async def update_push_stream(
         if not (min_v <= data.interval <= max_v):
             raise ValueError(f"Interval must be between {min_v} and {max_v}")
 
+        # 1) Apply in-memory
         if data.stream_type == "position_update":
-            # MT5 Bridge uses self.interval directly
             mt5_bridge.interval = data.interval
         elif method and hasattr(obj, method):
             getattr(obj, method)(data.interval)
+
+        # 2) Persist to DB (agent_active_config key='push_stream_intervals')
+        import json as _json
+        row = await db.execute(text(
+            "SELECT value FROM agent_active_config WHERE key='push_stream_intervals'"
+        ))
+        existing = row.scalar()
+        saved = existing if isinstance(existing, dict) else (_json.loads(existing) if existing else {})
+        saved[data.stream_type] = data.interval
+        await db.execute(text(
+            "INSERT INTO agent_active_config (key, value) "
+            "VALUES ('push_stream_intervals', CAST(:v AS JSONB)) "
+            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()"
+        ), {'v': _json.dumps(saved)})
+        await db.commit()
 
         return {
             "success": True,
             "stream_type": data.stream_type,
             "new_interval": data.interval,
+            "persisted": True,
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+async def restore_push_stream_intervals():
+    """启动时从数据库恢复推送频率设置（由 main.py 调用）"""
+    import json as _json
+    import logging
+    _logger = logging.getLogger(__name__)
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.tasks.market_data import market_streamer
+        from app.tasks.broadcast_tasks import (
+            account_balance_streamer, risk_metrics_streamer,
+            mt5_connection_streamer, pending_orders_streamer
+        )
+        from app.services.mt5_bridge import mt5_bridge
+
+        async with AsyncSessionLocal() as db:
+            row = await db.execute(text(
+                "SELECT value FROM agent_active_config WHERE key='push_stream_intervals'"
+            ))
+            raw = row.scalar()
+            if not raw:
+                _logger.info('[push-intervals] no saved intervals, using defaults')
+                return
+
+            saved = raw if isinstance(raw, dict) else _json.loads(raw)
+            if not isinstance(saved, dict) or not saved:
+                return
+
+            restore_map = {
+                "market_data": (market_streamer, "update_interval"),
+                "account_balance": (account_balance_streamer, "update_interval"),
+                "position_update": (mt5_bridge, None),
+                "risk_metrics": (risk_metrics_streamer, "update_interval"),
+                "order_update": (pending_orders_streamer, "update_interval"),
+                "mt5_connection_status": (mt5_connection_streamer, "update_interval"),
+            }
+
+            restored = []
+            for stype, interval in saved.items():
+                if stype not in restore_map:
+                    continue
+                obj, method = restore_map[stype]
+                try:
+                    if stype == "position_update":
+                        obj.interval = float(interval)
+                    elif method and hasattr(obj, method):
+                        getattr(obj, method)(float(interval))
+                    restored.append(f'{stype}={interval}s')
+                except Exception as e:
+                    _logger.warning(f'[push-intervals] failed to restore {stype}: {e}')
+
+            if restored:
+                _logger.info(f'[push-intervals] restored from DB: {", ".join(restored)}')
+            else:
+                _logger.info('[push-intervals] no intervals to restore')
+    except Exception as e:
+        _logger.error(f'[push-intervals] restore failed: {e}', exc_info=True)
 
 
 # Market closure configuration

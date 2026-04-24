@@ -245,7 +245,7 @@ class MT5HttpClient:
         sl: Optional[float] = None,
         tp: Optional[float] = None,
         deviation: int = 10,
-        comment: str = "hustle2026",
+        comment: str = "",
     ) -> Optional[Dict[str, Any]]:
         """下单"""
         try:
