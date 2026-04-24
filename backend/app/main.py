@@ -261,6 +261,8 @@ async def lifespan(app: FastAPI):
         openclaw_fsm.start()
         openclaw_npm.start()
         openclaw_bm.start()
+        from app.services.agent.balance_monitor import start_model_refresh
+        start_model_refresh()
         openclaw_reviewer.start()
         openclaw_legs.start()
         logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer + leg_monitor scheduled')
@@ -317,6 +319,8 @@ async def lifespan(app: FastAPI):
         await openclaw_reviewer.stop()
         await openclaw_npm.stop()
         await openclaw_bm.stop()
+        from app.services.agent.balance_monitor import stop_model_refresh
+        await stop_model_refresh()
         await openclaw_legs.stop()
         try:
             from app.services import dashboard_stream

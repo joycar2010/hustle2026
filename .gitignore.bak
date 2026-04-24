@@ -1,0 +1,32 @@
+# Logs
+backend/backend.log*
+backend/api_debug.log*
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv + deps
+backend/venv/
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# All frontend dist (rebuilt on each push/rollback via _build_frontend)
+frontend-admin/dist/
+frontend-go/dist/
+frontend-www/dist/
+frontend-auto/dist/
+
+# Node
+**/node_modules/
+
+# Build artifacts
+*.bak
+*.bak.*
+
+# IDE
+.vscode/
+.idea/
