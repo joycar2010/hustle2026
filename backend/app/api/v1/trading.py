@@ -878,6 +878,8 @@ class ManualOrderRequest(BaseModel):
     side: str      # "buy" or "sell"
     quantity: float
     account_id: Optional[str] = None
+    price: Optional[float] = None  # custom price; None = auto (bid/ask)
+    order_type: Optional[str] = None  # "maker" or "taker"; None = auto
 
 
 
@@ -898,29 +900,23 @@ async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU")
     """), {"uid": str(user_id), "pc": pair_code})
     binding = result.fetchone()
     
-    if binding:
-        target_id = binding[0] if exchange == PlatformId.BINANCE.key else binding[1]
-        if target_id:
-            from app.models.account import Account as AccModel
-            acc_result = await db.execute(
-                select(AccModel).where(AccModel.account_id == target_id)
-            )
-            acc = acc_result.scalar_one_or_none()
-            if acc:
-                return acc
-    
-    # Fallback: use Binance (platform=1) for A-side; for B-side use account_role=hedge
-    accounts, _ = await _get_user_accounts(db, user_id)
-    if exchange == PlatformId.BINANCE.key:
-        for account in accounts:
-            if account.platform_id == 1:
-                return account
-    else:
-        # B-side: prefer account with role=hedge, then any non-Binance MT5 account
-        for account in sorted(accounts, key=lambda a: (0 if a.account_role == "hedge" else 1)):
-            if account.platform_id != 1:
-                return account
-    return None
+    if not binding:
+        logger.warning(f"[manual] No pair-account binding for user={user_id}, pair={pair_code}, exchange={exchange}")
+        return None
+
+    target_id = binding[0] if exchange == PlatformId.BINANCE.key else binding[1]
+    if not target_id:
+        logger.warning(f"[manual] Binding exists but account is null for pair={pair_code}")
+        return None
+
+    from app.models.account import Account as AccModel
+    acc_result = await db.execute(
+        select(AccModel).where(AccModel.account_id == target_id)
+    )
+    acc = acc_result.scalar_one_or_none()
+    if not acc:
+        logger.warning(f"[manual] Bound account {target_id} not found in accounts table")
+    return acc
 
 async def _close_mt5_hedge_by_ticket_aggregation(
     *,
@@ -1080,7 +1076,10 @@ async def place_manual_order(
         # Find the correct account via pair-account binding
         target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange, req.pair_code)
         if not target_account:
-            raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"交易对 {req.pair_code} 未绑定{'主' if req.exchange == 'binance' else '对冲'}账户，请在设置中配置 pair-account 绑定"
+            )
 
         # Resolve symbols from pair config
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
@@ -1089,21 +1088,41 @@ async def place_manual_order(
         spread_data = await market_data_service.get_current_spread(
             binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
-        # Determine price based on side and exchange
-        if req.exchange == PlatformId.BINANCE.key:
-            if req.side == "buy":
-                price = spread_data.binance_quote.bid_price
+        # P2: Server-side price deviation validation
+        if req.price:
+            if req.exchange == PlatformId.BINANCE.key:
+                _ref_mid = (spread_data.binance_quote.bid_price + spread_data.binance_quote.ask_price) / 2
             else:
-                price = spread_data.binance_quote.ask_price
+                _ref_mid = (spread_data.bybit_quote.bid_price + spread_data.bybit_quote.ask_price) / 2
+            if _ref_mid > 0:
+                _dev = abs(req.price - _ref_mid) / _ref_mid
+                if _dev > 0.05:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"挂单价 {req.price} 偏离市场中间价 {_ref_mid:.2f} 超过5% ({_dev*100:.1f}%)，拒绝下单"
+                    )
+                if _dev > 0.02:
+                    logger.warning(f"[manual/order] price={req.price} deviates {_dev*100:.1f}% from mid={_ref_mid:.2f}")
+
+        # Determine symbol and price logic based on 4 scenarios
+        bid_a = spread_data.binance_quote.bid_price
+        ask_a = spread_data.binance_quote.ask_price
+
+        if req.exchange == PlatformId.BINANCE.key:
             symbol = _sym_a
-        else:  # bybit
+            if req.price:
+                price = req.price
+            elif req.side == "buy":
+                price = bid_a
+            else:
+                price = ask_a
+        else:
             symbol = _sym_b
 
-        # Import order executor
         from app.services.order_executor import order_executor
 
-        # Place order
         if req.exchange == PlatformId.BINANCE.key:
+            # Scenarios 1 & 2: primary account -> maker (PostOnly)
             result = await order_executor.place_binance_order(
                 account=target_account,
                 symbol=symbol,
@@ -1114,17 +1133,31 @@ async def place_manual_order(
                 position_side="LONG" if req.side == "buy" else "SHORT",
                 post_only=True,
             )
-        else:  # bybit — 紧急交易用Market单立即成交，quantity已由前端换算为Lot
+        else:
+            # Scenarios 3 & 4: hedge account
             bybit_qty = round(float(req.quantity), 2)
-            result = await order_executor.place_bybit_order(
-                account=target_account,
-                symbol=symbol,
-                side="Buy" if req.side == "buy" else "Sell",
-                order_type="Market",
-                quantity=str(bybit_qty),
-                price=None,
-                close_position=False,
-            )
+            if req.price:
+                # Scenario 4: fixed price -> limit order
+                result = await order_executor.place_bybit_order(
+                    account=target_account,
+                    symbol=symbol,
+                    side="Buy" if req.side == "buy" else "Sell",
+                    order_type="Limit",
+                    quantity=str(bybit_qty),
+                    price=str(req.price),
+                    close_position=False,
+                )
+            else:
+                # Scenario 3: no price -> taker/market
+                result = await order_executor.place_bybit_order(
+                    account=target_account,
+                    symbol=symbol,
+                    side="Buy" if req.side == "buy" else "Sell",
+                    order_type="Market",
+                    quantity=str(bybit_qty),
+                    price=None,
+                    close_position=False,
+                )
 
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
@@ -1496,6 +1529,8 @@ class ClosePositionRequest(BaseModel):
     exchange: str  # "binance" or "bybit"
     pair_code: str = "XAU"  # current trading pair from frontend
     quantity: float = 0  # quantity to close; 0 = close all of that position type
+    price: Optional[float] = None  # custom price; None = auto
+    order_type: Optional[str] = None  # "maker" or "taker"; None = auto
 
 
 
@@ -1521,23 +1556,35 @@ async def close_short_position(
         # Find the correct account via pair-account binding
         target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange, req.pair_code)
         if not target_account:
-            raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"交易对 {req.pair_code} 未绑定{'主' if req.exchange == 'binance' else '对冲'}账户，请在设置中配置 pair-account 绑定"
+            )
 
         # Get current market prices
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
         spread_data = await market_data_service.get_current_spread(
             binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
+        if req.price:
+            _ref_mid = ((spread_data.binance_quote.bid_price + spread_data.binance_quote.ask_price) / 2
+                        if req.exchange == PlatformId.BINANCE.key else
+                        (spread_data.bybit_quote.bid_price + spread_data.bybit_quote.ask_price) / 2)
+            if _ref_mid > 0:
+                _dev = abs(req.price - _ref_mid) / _ref_mid
+                if _dev > 0.05:
+                    raise HTTPException(status_code=400, detail=f"挂单价偏离市场价超过5% ({_dev*100:.1f}%)，拒绝下单")
+                if _dev > 0.02:
+                    logger.warning(f"[manual/close-short] price={req.price} deviates {_dev*100:.1f}% from mid={_ref_mid:.2f}")
+
         if req.exchange == PlatformId.BINANCE.key:
-            price = spread_data.binance_quote.ask_price
+            price = req.price if req.price else spread_data.binance_quote.ask_price
             symbol = _sym_a
         else:
             symbol = _sym_b
 
-        # Import order executor
         from app.services.order_executor import order_executor
 
-        # Place order to close short position (buy to close)
         if req.exchange == PlatformId.BINANCE.key:
             result = await order_executor.place_binance_order(
                 account=target_account,
@@ -1547,8 +1594,22 @@ async def close_short_position(
                 order_type="LIMIT",
                 quantity=float(req.quantity),
                 price=price,
+                post_only=True,
             )
-        else:  # bybit / MT5 hedge — iterate over tickets to avoid 10014
+        else:
+            if req.price:
+                result = await order_executor.place_bybit_order(
+                    account=target_account,
+                    symbol=symbol,
+                    side="Buy",
+                    order_type="Limit",
+                    quantity=str(round(float(req.quantity), 2)),
+                    price=str(req.price),
+                    close_position=True,
+                )
+                if not result.get("success"):
+                    raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
+                return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
                 symbol=symbol,
@@ -1603,23 +1664,35 @@ async def close_long_position(
         # Find the correct account via pair-account binding
         target_account = await _resolve_manual_target_account(db, current_user.user_id, req.exchange, req.pair_code)
         if not target_account:
-            raise HTTPException(status_code=404, detail=f"No {req.exchange} account found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"交易对 {req.pair_code} 未绑定{'主' if req.exchange == 'binance' else '对冲'}账户，请在设置中配置 pair-account 绑定"
+            )
 
         # Get current market prices
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
         spread_data = await market_data_service.get_current_spread(
             binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
 
+        if req.price:
+            _ref_mid = ((spread_data.binance_quote.bid_price + spread_data.binance_quote.ask_price) / 2
+                        if req.exchange == PlatformId.BINANCE.key else
+                        (spread_data.bybit_quote.bid_price + spread_data.bybit_quote.ask_price) / 2)
+            if _ref_mid > 0:
+                _dev = abs(req.price - _ref_mid) / _ref_mid
+                if _dev > 0.05:
+                    raise HTTPException(status_code=400, detail=f"挂单价偏离市场价超过5% ({_dev*100:.1f}%)，拒绝下单")
+                if _dev > 0.02:
+                    logger.warning(f"[manual/close-long] price={req.price} deviates {_dev*100:.1f}% from mid={_ref_mid:.2f}")
+
         if req.exchange == PlatformId.BINANCE.key:
-            price = spread_data.binance_quote.bid_price
+            price = req.price if req.price else spread_data.binance_quote.bid_price
             symbol = _sym_a
         else:
             symbol = _sym_b
 
-        # Import order executor
         from app.services.order_executor import order_executor
 
-        # Place order to close long position (sell to close)
         if req.exchange == PlatformId.BINANCE.key:
             result = await order_executor.place_binance_order(
                 account=target_account,
@@ -1629,8 +1702,22 @@ async def close_long_position(
                 order_type="LIMIT",
                 quantity=float(req.quantity),
                 price=price,
+                post_only=True,
             )
-        else:  # bybit / MT5 hedge — iterate over tickets to avoid 10014
+        else:
+            if req.price:
+                result = await order_executor.place_bybit_order(
+                    account=target_account,
+                    symbol=symbol,
+                    side="Sell",
+                    order_type="Limit",
+                    quantity=str(round(float(req.quantity), 2)),
+                    price=str(req.price),
+                    close_position=True,
+                )
+                if not result.get("success"):
+                    raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
+                return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
                 symbol=symbol,

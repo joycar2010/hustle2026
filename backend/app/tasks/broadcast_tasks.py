@@ -494,61 +494,80 @@ class RiskMetricsStreamer:
                         # Get account data for this user
                         summary = aggregated_data.get("summary", {})
 
+                        # Detect failed accounts — skip alerts for platforms with fetch failures
+                        _failed_platforms = set()
+                        for _fa in aggregated_data.get("failed_accounts", []):
+                            _fa_pid = _fa.get("platform_id")
+                            if _fa_pid:
+                                _failed_platforms.add(_fa_pid)
+                        if _failed_platforms:
+                            logger.warning(f"[BROADCAST] user={user_id} has failed account fetches on platforms={_failed_platforms}, skipping those alerts")
+
                         # Check Binance net asset
                         if risk_settings.binance_net_asset:
-                            # Find Binance account in the aggregated data
-                            binance_account = next(
-                                (acc for acc in aggregated_data.get("accounts", [])
-                                 if PlatformId.from_key(acc.get("platform_id")) == PlatformId.BINANCE),
-                                None
-                            )
-                            if binance_account:
-                                binance_asset = binance_account["balance"]["net_assets"]
-                                logger.info(f"[BROADCAST] Checking binance net_assets: user_id={user_id}, binance={binance_asset}, threshold={risk_settings.binance_net_asset}")
-                                if binance_asset < risk_settings.binance_net_asset:
-                                    await risk_alert_service.check_binance_net_asset(
-                                        user_id=user_id,
-                                        current_asset=binance_asset,
-                                        threshold=risk_settings.binance_net_asset,
-                                        is_below=True
-                                    )
+                            if 1 in _failed_platforms:
+                                logger.info(f"[BROADCAST] user={user_id} skipping binance_net_asset alert — Binance data fetch failed (proxy/network)")
                             else:
-                                logger.warning(f"[BROADCAST] user={user_id} binance 阈值已配置(={risk_settings.binance_net_asset}) 但聚合数据中未找到 Binance 账户,告警无法触发")
+                                # Find Binance account in the aggregated data
+                                binance_account = next(
+                                    (acc for acc in aggregated_data.get("accounts", [])
+                                     if PlatformId.from_key(acc.get("platform_id")) == PlatformId.BINANCE),
+                                    None
+                                )
+                                if binance_account:
+                                    binance_asset = binance_account["balance"]["net_assets"]
+                                    logger.info(f"[BROADCAST] Checking binance net_assets: user_id={user_id}, binance={binance_asset}, threshold={risk_settings.binance_net_asset}")
+                                    if binance_asset < risk_settings.binance_net_asset:
+                                        await risk_alert_service.check_binance_net_asset(
+                                            user_id=user_id,
+                                            current_asset=binance_asset,
+                                            threshold=risk_settings.binance_net_asset,
+                                            is_below=True
+                                        )
+                                else:
+                                    logger.warning(f"[BROADCAST] user={user_id} binance 阈值已配置(={risk_settings.binance_net_asset}) 但聚合数据中未找到 Binance 账户,告警无法触发")
 
                         # Check Bybit net asset
                         if risk_settings.bybit_mt5_net_asset:
-                            # Find Bybit/MT5-hedge account in the aggregated data
-                            bybit_account = next(
-                                (acc for acc in aggregated_data.get("accounts", [])
-                                 if (PlatformId.from_key(acc.get("platform_id")) or 0) in HEDGE_SIDE_IDS),
-                                None
-                            )
-                            if bybit_account:
-                                bybit_asset = bybit_account["balance"]["net_assets"]
-                                logger.info(f"[BROADCAST] Checking bybit/mt5 net_assets: user_id={user_id}, bybit={bybit_asset}, threshold={risk_settings.bybit_mt5_net_asset}")
-                                if bybit_asset < risk_settings.bybit_mt5_net_asset:
-                                    await risk_alert_service.check_bybit_net_asset(
-                                        user_id=user_id,
-                                        current_asset=bybit_asset,
-                                        threshold=risk_settings.bybit_mt5_net_asset,
-                                        is_below=True
-                                    )
+                            _hedge_failed = any(pid in _failed_platforms for pid in HEDGE_SIDE_IDS)
+                            if _hedge_failed:
+                                logger.info(f"[BROADCAST] user={user_id} skipping bybit_net_asset alert — hedge-side data fetch failed")
                             else:
-                                logger.warning(f"[BROADCAST] user={user_id} bybit/mt5 阈值已配置(={risk_settings.bybit_mt5_net_asset}) 但聚合数据中未找到对冲账户,告警无法触发")
+                                # Find Bybit/MT5-hedge account in the aggregated data
+                                bybit_account = next(
+                                    (acc for acc in aggregated_data.get("accounts", [])
+                                     if (PlatformId.from_key(acc.get("platform_id")) or 0) in HEDGE_SIDE_IDS),
+                                    None
+                                )
+                                if bybit_account:
+                                    bybit_asset = bybit_account["balance"]["net_assets"]
+                                    logger.info(f"[BROADCAST] Checking bybit/mt5 net_assets: user_id={user_id}, bybit={bybit_asset}, threshold={risk_settings.bybit_mt5_net_asset}")
+                                    if bybit_asset < risk_settings.bybit_mt5_net_asset:
+                                        await risk_alert_service.check_bybit_net_asset(
+                                            user_id=user_id,
+                                            current_asset=bybit_asset,
+                                            threshold=risk_settings.bybit_mt5_net_asset,
+                                            is_below=True
+                                        )
+                                else:
+                                    logger.warning(f"[BROADCAST] user={user_id} bybit/mt5 阈值已配置(={risk_settings.bybit_mt5_net_asset}) 但聚合数据中未找到对冲账户,告警无法触发")
 
                         # Check total net asset
                         if risk_settings.total_net_asset:
-                            # Use net_assets from summary (this is the correct key)
-                            total_asset = summary.get("net_assets", 0)
-                            logger.info(f"[BROADCAST] Checking total net_assets: user_id={user_id}, total={total_asset}, threshold={risk_settings.total_net_asset}")
-                            if total_asset < risk_settings.total_net_asset:
-                                logger.info(f"[BROADCAST] Total asset below threshold, triggering alert")
-                                await risk_alert_service.check_total_net_asset(
-                                    user_id=user_id,
-                                    current_asset=total_asset,
-                                    threshold=risk_settings.total_net_asset,
-                                    is_below=True
-                                )
+                            if _failed_platforms:
+                                logger.info(f"[BROADCAST] user={user_id} skipping total_net_asset alert — partial data (failed platforms={_failed_platforms})")
+                            else:
+                                # Use net_assets from summary (this is the correct key)
+                                total_asset = summary.get("net_assets", 0)
+                                logger.info(f"[BROADCAST] Checking total net_assets: user_id={user_id}, total={total_asset}, threshold={risk_settings.total_net_asset}")
+                                if total_asset < risk_settings.total_net_asset:
+                                    logger.info(f"[BROADCAST] Total asset below threshold, triggering alert")
+                                    await risk_alert_service.check_total_net_asset(
+                                        user_id=user_id,
+                                        current_asset=total_asset,
+                                        threshold=risk_settings.total_net_asset,
+                                        is_below=True
+                                    )
 
                         # Check Binance liquidation price
                         if risk_settings.binance_liquidation_price:
@@ -593,6 +612,77 @@ class RiskMetricsStreamer:
                                         distance=distance,
                                         status=status
                                     )
+
+                        # Per-account liquidation proximity alert with per-pair isolation
+                        # Read user-configured threshold from risk_settings (default 1.5%)
+                        _DEFAULT_LIQ_PCT = 0.015
+                        try:
+                            _rs_result = await db.execute(
+                                select(RiskSettings).where(RiskSettings.user_id == uid)
+                            )
+                            _all_rs = {rs.pair_code: rs for rs in _rs_result.scalars().all()}
+                        except Exception:
+                            _all_rs = {}
+
+                        # Check each account's liquidation prices against market
+                        for _acc_data in aggregated_data.get("accounts", []):
+                            _acc_bal = _acc_data.get("balance", {})
+                            _acc_pair = _acc_data.get("pair_code")
+                            if not _acc_pair:
+                                continue
+                            _acc_pid = _acc_data.get("platform_id")
+                            _is_binance = _acc_pid == 1
+                            _is_mt5 = _acc_data.get("is_mt5_account") and _acc_pid in (2, 3)
+                            if not _is_binance and not _is_mt5:
+                                continue
+
+                            _plat_label = f"主账号(Binance)" if _is_binance else f"对冲账号(MT5)"
+                            _market_price = summary.get("binance_current_price" if _is_binance else "bybit_current_price")
+                            if not _market_price or _market_price <= 0:
+                                continue
+
+                            # Get threshold from risk_settings for this pair
+                            _rs = _all_rs.get(_acc_pair)
+                            if _is_binance and _rs and _rs.binance_liquidation_price and _rs.binance_liquidation_price > 0:
+                                _threshold = _rs.binance_liquidation_price / 100.0
+                            elif _is_mt5 and _rs and _rs.bybit_mt5_liquidation_price and _rs.bybit_mt5_liquidation_price > 0:
+                                _threshold = _rs.bybit_mt5_liquidation_price / 100.0
+                            else:
+                                _threshold = _DEFAULT_LIQ_PCT
+
+                            for _dir, _liq_key in [("多头", "long_liquidation_price"), ("空头", "short_liquidation_price")]:
+                                _liq = _acc_bal.get(_liq_key, 0)
+                                if not _liq or _liq <= 0:
+                                    continue
+                                _dist = abs(_market_price - _liq) / _market_price
+                                if _dist < _threshold:
+                                    _pct = round(_dist * 100, 2)
+                                    _thr_pct = round(_threshold * 100, 1)
+                                    logger.critical(
+                                        f"[LIQUIDATION DANGER] user={uid} pair={_acc_pair} {_plat_label} {_dir}: "
+                                        f"price={_market_price:.2f}, liq={_liq:.2f}, distance={_pct}% < {_thr_pct}%"
+                                    )
+                                    try:
+                                        from app.services.agent.feishu_broadcast import broadcast as _fb
+                                        await _fb(
+                                            db,
+                                            level='critical',
+                                            category='liquidation_danger_system',
+                                            message=(
+                                                f"⚠️ 市场接近危险！\n"
+                                                f"产品对: {_acc_pair}\n"
+                                                f"{_plat_label} {_dir}强平价距离仅 {_pct}%\n"
+                                                f"当前价: {_market_price:.2f}\n"
+                                                f"强平价: {_liq:.2f}\n"
+                                                f"阈值设定: {_thr_pct}%\n"
+                                                f"请立即检查仓位风险！"
+                                            ),
+                                            owner_user_id=uid,
+                                            pair_code=_acc_pair,
+                                            cooldown_s=120,
+                                        )
+                                    except Exception as _fe:
+                                        logger.error(f"[LIQUIDATION DANGER] feishu broadcast error: {_fe}")
 
                         # Check spread alerts — pair-code-aware
                         try:
@@ -1265,6 +1355,9 @@ class PositionStreamer:
         # Binance 持仓缓存，按 user_id → symbol 双层隔离
         # 结构: {user_id: {symbol: (long, short)}}
         self._binance_positions: dict = {}
+        # MT5 last-known-good cache: prevents flicker when bridge read times out.
+        # Structure same as _binance_positions: {user_id: {symbol: (long, short)}}
+        self._mt5_lkg: dict = {}
 
     def set_binance_positions(self, long_xau: float, short_xau: float,
                                user_id: str = None, symbol: str = None) -> None:
@@ -1310,7 +1403,18 @@ class PositionStreamer:
                 await asyncio.sleep(self.BROADCAST_INTERVAL)
 
                 # 1. Read MT5 positions per-user: {user_id: {symbol: (long, short)}}
-                mt5_by_user = await self._read_mt5_positions_all()
+                mt5_by_user_raw = await self._read_mt5_positions_all()
+                # Merge with last-known-good: if a user had data before but
+                # this read returned empty (bridge timeout), keep the old values.
+                # This prevents 0-flicker on transient failures.
+                for _uid, _syms in mt5_by_user_raw.items():
+                    if _syms:
+                        self._mt5_lkg[_uid] = dict(_syms)
+                mt5_by_user = {}
+                for _uid in set(list(mt5_by_user_raw.keys()) + list(self._mt5_lkg.keys())):
+                    raw = mt5_by_user_raw.get(_uid, {})
+                    lkg = self._mt5_lkg.get(_uid, {})
+                    mt5_by_user[_uid] = raw if raw else lkg
 
                 # 2. Build pairs_map from active hedging pairs
                 pairs_map = {}

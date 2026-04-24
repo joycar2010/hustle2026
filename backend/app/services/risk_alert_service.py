@@ -122,15 +122,7 @@ class RiskAlertService:
                 'binance_ip_ban_alert',  # IP封禁无论用户在不在线都必须通知
             }
 
-            # 需要用户在线才触发的提醒类型（爆仓价、MT5卡顿、单腿）
-            if template_key not in always_send_templates:
-                # 检查用户是否在线（通过WebSocket连接）
-                if user_id not in manager.active_connections:
-                    logger.debug(
-                        f"Alert {template_key} requires user online, but user {user_id} is not connected"
-                    )
-                    return False
-
+            # 所有风控告警无条件发送（前端连Go WS，Python ws_manager始终为空）
             # 获取用户信息和飞书配置
             from app.models.user import User
             import uuid as uuid_lib

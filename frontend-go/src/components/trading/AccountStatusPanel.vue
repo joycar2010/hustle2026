@@ -176,6 +176,7 @@ import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
 import { useNotificationStore } from '@/stores/notification'
 import { PlatformId, isHedge } from '@/constants/platform'
+console.log('[ASP_DEBUG] AccountStatusPanel script setup executing')
 import { useStrategyStore } from '@/stores/strategy'
 
 const marketStore = useMarketStore()
@@ -276,8 +277,10 @@ function handleAccountBalanceUpdate(data) {
 }
 
 async function fetchAccountData() {
+  console.log('[ASP_DEBUG] fetchAccountData called')
   try {
     const response = await api.get('/api/v1/accounts/dashboard/aggregated')
+    console.log('[ASP_DEBUG] API response accounts:', response.data?.accounts?.length, response.data?.accounts?.map(a => ({name: a.account_name, pair: a.pair_code, pid: a.platform_id, ll: a.balance?.long_liquidation_price, sl: a.balance?.short_liquidation_price})))
     const data = response.data
 
     const allAccounts = []
@@ -591,33 +594,112 @@ function getValueColor(account, field) {
  *
  * 逻辑参考原 getLiquidationPrice，但直接返回数值（null = 暂无）。
  */
+function calcFallbackLiq(positions, balance, isMT5) {
+  let longEntry = 0, longQty = 0, shortEntry = 0, shortQty = 0
+  for (const p of (positions || [])) {
+    const size = Math.abs(parseFloat(p.size || p.volume || 0))
+    const entry = parseFloat(p.entry_price || p.price_open || 0)
+    if (size <= 0 || entry <= 0) continue
+    const side = (p.side || '').toLowerCase()
+    const pType = p.type  // MT5: 0=buy, 1=sell
+    const isLong = side === 'buy' || side === 'long' || pType === 0
+    const isShort = side === 'sell' || side === 'short' || pType === 1
+    if (isLong) { longEntry += entry * size; longQty += size }
+    if (isShort) { shortEntry += entry * size; shortQty += size }
+  }
+
+  let longLiq = null, shortLiq = null
+
+  if (isMT5) {
+    // MT5 cross-margin: liq = avg_entry +/- safety_buffer / (contract_unit * lots)
+    const equity = parseFloat(balance.equity || balance.net_assets || 0)
+    const marginUsed = parseFloat(balance.margin_balance || balance.margin_used || 0)
+    const convFactor = 100  // default for XAU; ideally from pair config
+    const safetyBuffer = equity - marginUsed * 0.5
+    if (longQty > 0) {
+      const avgEntry = longEntry / longQty
+      longLiq = avgEntry - safetyBuffer / (convFactor * longQty)
+      if (longLiq <= 0) longLiq = null
+    }
+    if (shortQty > 0) {
+      const avgEntry = shortEntry / shortQty
+      shortLiq = avgEntry + safetyBuffer / (convFactor * shortQty)
+    }
+  } else {
+    // Binance: prefer cross-margin formula using wallet balance data
+    const wallet = parseFloat(balance.total_wallet_balance || 0)
+    const maint = parseFloat(balance.total_maint_margin || 0)
+    const lev = parseFloat(balance.leverage || 0)
+
+    if (wallet > 0 && (wallet - maint) > 0) {
+      // Cross-margin: liq = avg_entry -/+ (wallet - maint_margin) / qty
+      const buffer = wallet - maint
+      if (longQty > 0) {
+        const avgEntry = longEntry / longQty
+        longLiq = avgEntry - buffer / longQty
+        if (longLiq <= 0) longLiq = null
+      }
+      if (shortQty > 0) {
+        const avgEntry = shortEntry / shortQty
+        shortLiq = avgEntry + buffer / shortQty
+      }
+    } else if (lev > 0) {
+      // Isolated fallback: simplified liq = entry * (1 -/+ 1/lev)
+      if (longQty > 0) {
+        const avgEntry = longEntry / longQty
+        longLiq = avgEntry * (1 - 1 / lev)
+      }
+      if (shortQty > 0) {
+        const avgEntry = shortEntry / shortQty
+        shortLiq = avgEntry * (1 + 1 / lev)
+      }
+    }
+  }
+  return { longLiq, shortLiq }
+}
+
 function syncLiquidationPricesToStore(accounts) {
+  console.log('[LIQ_DEBUG] syncLiq called, accounts:', accounts.length, accounts.map(a => ({name: a.account_name, pid: a.platform_id, pair: a.pair_code, mt5: a.is_mt5_account, ll: a.balance?.long_liquidation_price, sl: a.balance?.short_liquidation_price})))
+  // Group by pair_code, then aggregate per platform within each pair
+  const pairGroups = {}  // { pairCode: { binance: {long, short}, mt5: {long, short} } }
+
   for (const acc of accounts) {
     if (acc.error || !acc.balance) continue
     const b = acc.balance
+    const pairCode = acc.pair_code
+    if (!pairCode) continue
 
-    if (acc.platform_id === PlatformId.BINANCE) {
-      // 主账号 Binance
+    if (!pairGroups[pairCode]) {
+      pairGroups[pairCode] = {
+        binance: { long: null, short: null },
+        mt5:     { long: null, short: null },
+      }
+    }
+    const pg = pairGroups[pairCode]
+
+    const isBinance = acc.platform_id === PlatformId.BINANCE
+    const isMT5 = acc.is_mt5_account && isHedge(acc.platform_id)
+
+    if (isBinance || isMT5) {
       let longLiq  = b.long_liquidation_price  > 0 ? b.long_liquidation_price  : null
       let shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null
-      // fallback 估算
+      // Tier 2: self-calculated fallback
       if (!longLiq || !shortLiq) {
-        const ep  = b.entryPrice || b.entry_price || 0
-        const lev = b.leverage || 0
-        if (ep > 0 && lev > 0) {
-          if (!longLiq)  longLiq  = ep * (1 - 1 / lev)
-          if (!shortLiq) shortLiq = ep * (1 + 1 / lev)
-        }
+        const fb = calcFallbackLiq(acc.positions, b, isMT5)
+        if (!longLiq && fb.longLiq)   longLiq  = fb.longLiq
+        if (!shortLiq && fb.shortLiq) shortLiq = fb.shortLiq
       }
-      strategyStore.setLiquidationPrices('binance', longLiq, shortLiq)
+      const slot = isBinance ? pg.binance : pg.mt5
+      if (longLiq && (!slot.long || longLiq > slot.long)) slot.long = longLiq
+      if (shortLiq && (!slot.short || shortLiq < slot.short)) slot.short = shortLiq
     }
+  }
 
-    if (acc.is_mt5_account && isHedge(acc.platform_id)) {
-      // 对冲账户 MT5
-      const longLiq  = b.long_liquidation_price  > 0 ? b.long_liquidation_price  : null
-      const shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null
-      strategyStore.setLiquidationPrices('mt5', longLiq, shortLiq)
-    }
+  // Write each pair_code to store
+  for (const [pairCode, pg] of Object.entries(pairGroups)) {
+    console.log('[LIQ_DEBUG] writing to store:', pairCode, JSON.stringify(pg))
+    strategyStore.setLiquidationPrices(pairCode, 'binance', pg.binance.long, pg.binance.short)
+    strategyStore.setLiquidationPrices(pairCode, 'mt5', pg.mt5.long, pg.mt5.short)
   }
 }
 </script>

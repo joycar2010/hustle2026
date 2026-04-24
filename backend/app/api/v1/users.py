@@ -314,6 +314,13 @@ async def update_user(
 
     if hasattr(user_update, 'is_active') and user_update.is_active is not None:
         user.is_active = user_update.is_active
+        # Sync sub-account subscription status when toggling user active state
+        if user.is_subaccount:
+            new_sub_status = 'active' if user_update.is_active else 'inactive'
+            await db.execute(
+                text("UPDATE sub_account_subscriptions SET status = :s, updated_at = NOW() WHERE sub_user_id = CAST(:u AS UUID)"),
+                {"s": new_sub_status, "u": str(target_user_id)}
+            )
 
     logger.info(f"Updating user {target_user_id}: feishu_open_id={user_update.feishu_open_id}, "
                 f"feishu_mobile={user_update.feishu_mobile}, feishu_union_id={user_update.feishu_union_id}")

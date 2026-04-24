@@ -100,7 +100,11 @@ class AccountBalance(BaseModel):
     volume: Optional[float] = None  # MT5持仓手数
     equity: Optional[float] = None  # MT5账户权益
 
-    # MT5 native liquidation prices (from Bybit MT5 API)
+    # Binance futures account data for cross-margin liquidation calculation
+    total_wallet_balance: Optional[float] = None   # 合约钱包余额
+    total_maint_margin: Optional[float] = None     # 维持保证金
+
+    # Native liquidation prices (from exchange API)
     long_liquidation_price: Optional[float] = None  # 多头强平价
     short_liquidation_price: Optional[float] = None  # 空头强平价
 

@@ -647,6 +647,9 @@
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary">
               <option :value="1">Binance</option>
               <option :value="2">Bybit</option>
+              <option :value="3">IC Markets</option>
+              <option :value="4">Gate</option>
+              <option :value="5">OKX</option>
             </select>
           </div>
           <div v-if="accountForm.platform_id === PlatformId.BYBIT" class="flex items-center gap-3">
@@ -672,11 +675,11 @@
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
               placeholder="输入 API Secret" />
           </div>
-          <div v-if="accountForm.platform_id === PlatformId.BYBIT">
-            <label class="block text-xs text-text-tertiary mb-1">Passphrase（可选）</label>
+          <div v-if="[PlatformId.BYBIT, PlatformId.OKX, PlatformId.GATE].includes(accountForm.platform_id)">
+            <label class="block text-xs text-text-tertiary mb-1">{{ accountForm.platform_id === PlatformId.OKX ? 'Passphrase *' : 'Passphrase（可选）' }}</label>
             <input v-model="accountForm.passphrase" type="password"
               class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="Bybit API Passphrase" />
+              :placeholder="accountForm.platform_id === PlatformId.OKX ? 'OKX API Passphrase（必填）' : 'API Passphrase'" />
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">杠杆倍数</label>
@@ -1576,7 +1579,7 @@ async function saveAccount() {
       }
       if (accountForm.value.api_key)    data.api_key    = accountForm.value.api_key
       if (accountForm.value.api_secret) data.api_secret = accountForm.value.api_secret
-      if (accountForm.value.passphrase) data.passphrase = accountForm.value.passphrase
+      if (accountForm.value.passphrase !== undefined) data.passphrase = accountForm.value.passphrase
       if (accountForm.value.user_id)    data.user_id    = accountForm.value.user_id
       await api.put(`/api/v1/accounts/${currentAccount.value.account_id}`, data)
       toast('账户已更新')

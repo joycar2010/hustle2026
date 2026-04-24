@@ -136,7 +136,8 @@ class OrderExecutorV2:
         self.bybit_timeout = 1.0  # 0.3→1.0: ICMarkets撮合需要更多等待时间
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
-        self.spread_check_interval = 1.0
+        self.spread_check_interval = 0.5
+        self.spread_cancel_tolerance = 0.5
         self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
         self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
         self.mt5_deal_recheck_wait = 1.0  # 2.0→1.0: 二次确认等待时间缩短
@@ -1216,7 +1217,7 @@ class OrderExecutorV2:
                             'forward_closing': spreads.forward_exit_spread,
                         }
                         current_spread = spread_map.get(strategy_type, 0.0)
-                        tolerance = 0.5
+                        tolerance = self.spread_cancel_tolerance
                         spread_met = (
                             (compare_op == '>=' and current_spread >= spread_threshold - tolerance) or
                             (compare_op == '<=' and current_spread <= spread_threshold + tolerance)
@@ -1471,7 +1472,7 @@ class OrderExecutorV2:
                 if spread_threshold is None or compare_op is None or strategy_type is None:
                     return
                 from app.services.market_service import market_data_service
-                tolerance = 0.5
+                tolerance = self.spread_cancel_tolerance
                 while not fill_event.is_set():
                     await asyncio.sleep(self.spread_check_interval)
                     if fill_event.is_set():
@@ -1698,7 +1699,7 @@ class OrderExecutorV2:
         Returns:
             Total filled quantity
         """
-        logger.info(f"[BYBIT_BUY] Starting: quantity={quantity} Lot, close_position={close_position}")
+        logger.info(f"[BYBIT_BUY] Starting: quantity={quantity} Lot, close_position={close_position}, symbol={symbol}")
         total_filled = 0
         remaining = round(quantity, 2)
 

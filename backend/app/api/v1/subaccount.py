@@ -21,7 +21,7 @@ from typing import Optional, List, Dict, Any
 from uuid import UUID
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -343,6 +343,93 @@ async def delete_sub_account(
     await invalidate_parent_nav(str(row[1]))
     logger.info(f"[subacc] deactivated sub_id={sub_id} sub_user={row[0]} parent={row[1]}")
     return {"ok": True}
+
+
+@router.post("/sub-accounts/{sub_id}/reactivate", status_code=200)
+async def reactivate_sub_account(
+    sub_id: str,
+    operator_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    await _require_admin(db, operator_id)
+    row = (await db.execute(text(
+        "SELECT sub_user_id, parent_user_id, status FROM sub_account_subscriptions WHERE id = CAST(:i AS UUID)"
+    ), {"i": sub_id})).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    if row[2] == 'active':
+        return {"ok": True, "already_active": True}
+
+    await db.execute(text(
+        "UPDATE sub_account_subscriptions SET status='active', updated_at=NOW() WHERE id = CAST(:i AS UUID)"
+    ), {"i": sub_id})
+    await db.execute(text(
+        "UPDATE users SET is_active=true, update_time=NOW() WHERE user_id = CAST(:u AS UUID)"
+    ), {"u": str(row[0])})
+    await db.commit()
+    await invalidate_parent_nav(str(row[1]))
+    logger.info(f"[subacc] reactivated sub_id={sub_id} sub_user={row[0]} parent={row[1]}")
+    return {"ok": True}
+
+
+@router.put("/sub-accounts/{sub_id}", status_code=200)
+async def update_sub_account(
+    sub_id: str,
+    body: Dict[str, Any] = Body(...),
+    operator_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Update sub-account subscription fields (admin only)"""
+    await _require_admin(db, operator_id)
+    row = (await db.execute(text(
+        "SELECT id, sub_user_id, parent_user_id, invested_cny, fx_cny_to_usdt, "
+        "invested_usdt, shares, status FROM sub_account_subscriptions WHERE id = CAST(:i AS UUID)"
+    ), {"i": sub_id})).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+
+    updates = []
+    params = {"i": sub_id}
+    sub_user_id = str(row[1])
+    parent_user_id = str(row[2])
+
+    if "invested_cny" in body and body["invested_cny"] is not None:
+        updates.append("invested_cny = :icny")
+        params["icny"] = float(body["invested_cny"])
+
+    if "invested_usdt" in body and body["invested_usdt"] is not None:
+        updates.append("invested_usdt = :iusdt")
+        params["iusdt"] = float(body["invested_usdt"])
+
+    if "fx_cny_to_usdt" in body and body["fx_cny_to_usdt"] is not None:
+        updates.append("fx_cny_to_usdt = :fx")
+        params["fx"] = float(body["fx_cny_to_usdt"])
+
+    if "shares" in body and body["shares"] is not None:
+        updates.append("shares = :sh")
+        params["sh"] = float(body["shares"])
+
+    if not updates:
+        return {"ok": True, "message": "nothing to update"}
+
+    updates.append("updated_at = NOW()")
+    sql = f"UPDATE sub_account_subscriptions SET {', '.join(updates)} WHERE id = CAST(:i AS UUID)"
+    await db.execute(text(sql), params)
+    await db.commit()
+    await invalidate_parent_nav(parent_user_id)
+
+    logger.info(f"[subacc] updated sub_id={sub_id} fields={list(body.keys())}")
+
+    # Return refreshed record
+    full = (await db.execute(text("""
+        SELECT s.id, s.sub_user_id, s.parent_user_id, s.invested_cny, s.fx_cny_to_usdt,
+               s.invested_usdt, s.parent_total_assets_at_join, s.shares,
+               s.nav_per_share_at_join, s.status, s.created_at, u.username
+        FROM sub_account_subscriptions s
+        JOIN users u ON u.user_id = s.sub_user_id
+        WHERE s.id = CAST(:i AS UUID)
+    """), {"i": sub_id})).first()
+    return await _row_to_sub_response(db, full, full[11])
 
 
 @router.get("/me/subaccount")

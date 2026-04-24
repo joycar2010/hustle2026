@@ -446,6 +446,48 @@ class ContinuousStrategyExecutor:
                     pre_snapshot=pre_snapshot
                 ))
 
+            # ── P1 FIX: Immediate B-side retry when single-leg detected ──
+            # Only when hedge_multiplier==1.0 (standard mode, not amplified hedge)
+            if (exec_result.get('is_single_leg') and self.hedge_multiplier == 1.0
+                    and exec_result.get('binance_filled_qty', 0) > 0
+                    and exec_result.get('bybit_filled_qty', 0) == 0):
+                _retry_binance_filled = exec_result['binance_filled_qty']
+                sym_a_r, sym_b_r, conv_r = _get_pair_config(self.pair_code)
+                _retry_b_qty = quantity_converter.xau_to_lot(_retry_binance_filled)
+                # Determine B-side direction
+                if strategy_type in ('reverse_opening', 'forward_closing'):
+                    _retry_side = "Buy"
+                    _retry_close = strategy_type == 'forward_closing'
+                else:
+                    _retry_side = "Sell"
+                    _retry_close = strategy_type == 'reverse_closing'
+                logger.warning(
+                    f"[SINGLE_LEG_RETRY] B-side=0 with A-side={_retry_binance_filled}, "
+                    f"attempting 3 immediate retries ({_retry_side} {_retry_b_qty} lot {sym_b_r})"
+                )
+                for _retry_i in range(3):
+                    await asyncio.sleep(1.0)  # 1s between retries
+                    try:
+                        _retry_result = await self.order_executor.base_executor.place_bybit_order(
+                            account=bybit_account,
+                            symbol=sym_b_r,
+                            side=_retry_side,
+                            order_type="Market",
+                            quantity=str(round(_retry_b_qty, 2)),
+                            close_position=_retry_close,
+                        )
+                        if _retry_result.get('success'):
+                            logger.warning(f"[SINGLE_LEG_RETRY] B-side SUCCESS on retry #{_retry_i+1}: ticket={_retry_result.get('order_id')}")
+                            exec_result['bybit_filled_qty'] = _retry_b_qty
+                            exec_result['is_single_leg'] = False
+                            exec_result['success'] = True
+                            exec_result['single_leg_retried'] = True
+                            break
+                        else:
+                            logger.error(f"[SINGLE_LEG_RETRY] B-side retry #{_retry_i+1} failed: {_retry_result.get('error')}")
+                    except Exception as _retry_e:
+                        logger.error(f"[SINGLE_LEG_RETRY] B-side retry #{_retry_i+1} exception: {_retry_e}")
+
             if not exec_result['success']:
                 logger.error(f"Execution failed: {exec_result.get('error')}")
 
@@ -607,19 +649,46 @@ class ContinuousStrategyExecutor:
             # Scenario 1: Binance not filled or spread cancelled
             if binance_filled == 0:
                 consecutive_no_fills += 1
+
+                # Safe exit point 1: Binance order cancelled — no single-leg risk
+                if self.stop_requested:
+                    logger.info(f"[GRACEFUL STOP] Stop requested — exiting after Binance cancel (safe, no single-leg)")
+                    self.is_running = False
+                    break
+
+                # Spread chase: if spread still meets threshold, skip trigger re-accumulation
+                # and immediately re-hang Maker order (only wait 0.5s for exchange cooldown)
+                try:
+                    _chase_spread = await self._get_current_spread(strategy_type)
+                    _chase_ok = (
+                        (compare_op == CompareOperator.GREATER_EQUAL and _chase_spread >= spread_threshold) or
+                        (compare_op == CompareOperator.LESS_EQUAL and _chase_spread <= spread_threshold)
+                    )
+                except Exception:
+                    _chase_ok = False
+
+                if _chase_ok and not spread_cancelled:
+                    logger.info(
+                        f"Scenario 1 [SPREAD CHASE]: no-fill #{consecutive_no_fills} but spread "
+                        f"{_chase_spread:.3f} still meets threshold {spread_threshold}, "
+                        f"skipping trigger re-accumulation, immediate re-hang"
+                    )
+                    await asyncio.sleep(0.5)
+                    continue
+
+                # Spread no longer favorable — full reset + backoff
                 logger.info(f"Scenario 1: Binance not filled ({consecutive_no_fills}/{MAX_CONSECUTIVE_NO_FILLS}), resetting triggers")
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
 
                 # After too many consecutive no-fills, pause and reset (don't permanently stop)
-                # The strategy should keep waiting for market conditions to improve
                 if consecutive_no_fills >= MAX_CONSECUTIVE_NO_FILLS:
                     logger.warning(
                         f"[ladder={ladder_idx}] {consecutive_no_fills} consecutive no-fills — "
                         f"pausing {MAX_CONSECUTIVE_NO_FILLS * 2}s then resuming"
                     )
-                    consecutive_no_fills = 0  # Reset counter to allow another round
-                    await asyncio.sleep(MAX_CONSECUTIVE_NO_FILLS * 2)  # 10s pause
+                    consecutive_no_fills = 0
+                    await asyncio.sleep(MAX_CONSECUTIVE_NO_FILLS * 2)
                     self.trigger_mgr.reset()
                     continue
 
@@ -629,11 +698,6 @@ class ContinuousStrategyExecutor:
                              if is_opening else self.order_executor.close_wait_after_cancel_no_trade)
                 wait_time = base_wait * consecutive_no_fills
                 logger.info(f"Waiting {wait_time}s after cancel ({'spread' if spread_cancelled else 'timeout'}, no-fill #{consecutive_no_fills})")
-                # Safe exit point 1: Binance order cancelled — no single-leg risk
-                if self.stop_requested:
-                    logger.info(f"[GRACEFUL STOP] Stop requested — exiting after Binance cancel (safe, no single-leg)")
-                    self.is_running = False
-                    break
                 await asyncio.sleep(wait_time)
                 continue
 
@@ -956,24 +1020,63 @@ class ContinuousStrategyExecutor:
                     logger.warning(f"[POSITION_SNAPSHOT] Binance fetch failed: {be}")
 
             # User-scoped: publish via Redis ws:user_event so only this user's frontend receives it.
-            # Previously called broadcast_position_snapshot which sent to ALL users (data leak across accounts).
+            # Must include `pairs` map to prevent overwriting PositionStreamer's complete snapshot.
             if self.user_id:
                 try:
                     from app.core.redis_client import redis_client as _rc
                     import json as _json
+                    from app.tasks.broadcast_tasks import position_streamer as _ps
+
+                    # Build full pairs map so frontend store stays consistent
+                    _mt5_by_user = await _ps._read_mt5_positions_all()
+                    _mt5_syms = _mt5_by_user.get(self.user_id, {})
+                    _bn_syms = dict(_ps._binance_positions.get(self.user_id, {}))
+                    # Inject freshly-read Binance position
+                    _bn_syms[sym_a] = (binance_long_xau, binance_short_xau)
+                    # Inject freshly-read MT5 position
+                    _mt5_syms[sym_b] = (long_lots, short_lots)
+
+                    _pairs_meta = {}
+                    try:
+                        from app.services.hedging_pair_service import hedging_pair_service
+                        for _pair in (hedging_pair_service.list_active_pairs() or []):
+                            if not _pair.is_active:
+                                continue
+                            _sa = _pair.symbol_a.symbol if _pair.symbol_a else None
+                            _sb = _pair.symbol_b.symbol if _pair.symbol_b else None
+                            if _sa and _sb:
+                                _pairs_meta[_pair.pair_code] = {"sym_a": _sa, "sym_b": _sb}
+                    except Exception:
+                        pass
+
+                    _pairs_out = {}
+                    for _pc, _meta in _pairs_meta.items():
+                        _sa, _sb = _meta["sym_a"], _meta["sym_b"]
+                        _bl, _bs = _bn_syms.get(_sa, (0.0, 0.0))
+                        _ml, _ms = _mt5_syms.get(_sb, (0.0, 0.0))
+                        if _ml == 0.0 and _ms == 0.0:
+                            _alt = _sb.replace("+", ".s")
+                            _ml, _ms = _mt5_syms.get(_alt, (0.0, 0.0))
+                        _pairs_out[_pc] = {
+                            "mt5_long": _ml, "mt5_short": _ms,
+                            "binance_long": _bl, "binance_short": _bs,
+                        }
+
+                    _xau_pd = _pairs_out.get("XAU", {})
                     evt = {
                         "user_id": self.user_id,
                         "type": "position_snapshot",
                         "data": {
                             "pair_code": self.pair_code,
-                            "bybit_long_lots": long_lots,
-                            "bybit_short_lots": short_lots,
-                            "binance_long_xau": binance_long_xau,
-                            "binance_short_xau": binance_short_xau,
+                            "bybit_long_lots": _xau_pd.get("mt5_long", long_lots),
+                            "bybit_short_lots": _xau_pd.get("mt5_short", short_lots),
+                            "binance_long_xau": _xau_pd.get("binance_long", binance_long_xau),
+                            "binance_short_xau": _xau_pd.get("binance_short", binance_short_xau),
+                            "pairs": _pairs_out,
                         }
                     }
                     await _rc.publish("ws:user_event", _json.dumps(evt))
-                    logger.info(f"[POSITION_SNAPSHOT] user={self.user_id} bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
+                    logger.info(f"[POSITION_SNAPSHOT] user={self.user_id} pairs={list(_pairs_out.keys())} bybit long={long_lots} short={short_lots} | binance long={binance_long_xau} short={binance_short_xau}")
                 except Exception as pub_err:
                     logger.warning(f"[POSITION_SNAPSHOT] Redis publish failed: {pub_err}")
             else:
@@ -1162,6 +1265,35 @@ class ContinuousStrategyExecutor:
                         strategy_type=strategy_type,
                         exec_result=exec_result
                     )
+                    # Auto-repair: attempt B-side补单 when hedge_multiplier==1.0
+                    if self.hedge_multiplier == 1.0:
+                        _unfilled_xau = binance_delta - bybit_delta_xau
+                        _repair_lot = _unfilled_xau / conv_factor
+                        if _repair_lot >= 0.01:
+                            logger.warning(f"[SINGLE_LEG_REPAIR] Attempting auto-repair: {_repair_lot:.2f} lot")
+                            if strategy_type in ('reverse_opening', 'forward_closing'):
+                                _repair_side = "Buy"
+                                _repair_close = strategy_type == 'forward_closing'
+                            else:
+                                _repair_side = "Sell"
+                                _repair_close = strategy_type == 'reverse_closing'
+                            for _ri in range(3):
+                                if _ri > 0:
+                                    await asyncio.sleep(1.0)
+                                try:
+                                    from app.services.order_executor import order_executor as _repair_oe
+                                    _rr = await _repair_oe.place_bybit_order(
+                                        account=bybit_account, symbol=sym_b,
+                                        side=_repair_side, order_type="Market",
+                                        quantity=str(round(_repair_lot, 2)),
+                                        close_position=_repair_close,
+                                    )
+                                    if _rr.get('success'):
+                                        logger.warning(f"[SINGLE_LEG_REPAIR] SUCCESS on attempt #{_ri+1}: ticket={_rr.get('order_id')}")
+                                        break
+                                    logger.error(f"[SINGLE_LEG_REPAIR] attempt #{_ri+1} failed: {_rr.get('error')}")
+                                except Exception as _re:
+                                    logger.error(f"[SINGLE_LEG_REPAIR] attempt #{_ri+1} exception: {_re}")
                 else:
                     logger.info(
                         f"[SINGLE_LEG_CHECK] Partial fill but ratio={ratio:.2%} >= 60%, no alert"

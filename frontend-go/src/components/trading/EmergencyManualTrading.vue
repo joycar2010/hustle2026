@@ -18,20 +18,40 @@
         </select>
       </div>
 
-      <!-- Quantity -->
-      <div class="form-group">
-        <label class="label">下单数量 ({{ aUnitLabel }})</label>
-        <input
-          v-model.number="quantity"
-          type="number"
-          step="1"
-          min="1"
-          class="text-input"
-          placeholder="1"
-        />
-        <div class="hint-text">
-          对冲 实际下单量: {{ convertedQty }} {{ bUnitLabel }}
+      <!-- Quantity + Custom Input (two-column, aligned with Buy/Sell buttons) -->
+      <div class="qty-row">
+        <div class="form-group qty-col">
+          <label class="label">下单数量 ({{ aUnitLabel }})</label>
+          <input
+            v-model.number="quantity"
+            type="number"
+            step="1"
+            min="1"
+            class="text-input"
+            placeholder="1"
+          />
+          <div class="hint-text">
+            对冲: {{ convertedQty }} {{ bUnitLabel }}
+          </div>
         </div>
+        <div class="form-group qty-col">
+          <label class="label">自定义价格</label>
+          <input
+            v-model="customParam"
+            type="text"
+            inputmode="decimal"
+            class="text-input"
+            :placeholder="'0.' + '0'.repeat(priceDecimals)"
+            @input="onCustomParamInput"
+          />
+          <div class="hint-text">&nbsp;</div>
+        </div>
+      </div>
+
+      <!-- Mode Hint -->
+      <div class="mode-hint">
+        <span class="mode-dot" :class="exchange === EXCHANGE_BINANCE ? 'dot-maker' : 'dot-taker'"></span>
+        <span class="mode-text">{{ modeHint }}</span>
       </div>
 
       <!-- Action Buttons -->
@@ -110,6 +130,32 @@ const EXCHANGE_BINANCE = platformKey(PlatformId.BINANCE)  // 'binance'
 const EXCHANGE_BYBIT = platformKey(PlatformId.BYBIT)      // 'bybit'
 const exchange = ref(EXCHANGE_BINANCE)
 const quantity = ref(1)
+const customParam = ref('')
+
+const priceDecimals = computed(() => {
+  const code = currentPair.value
+  if (['NG'].includes(code)) return 4
+  if (['BZ', 'CL'].includes(code)) return 3
+  return 2
+})
+
+function onCustomParamInput(e) {
+  let v = e.target.value
+  v = v.replace(/[^0-9.]/g, '')
+  const parts = v.split('.')
+  if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('')
+  const maxDec = priceDecimals.value
+  if (parts.length === 2 && parts[1].length > maxDec) v = parts[0] + '.' + parts[1].slice(0, maxDec)
+  customParam.value = v
+  e.target.value = v
+}
+const modeHint = computed(() => {
+  const isBinance = exchange.value === EXCHANGE_BINANCE
+  const hasPrice = !!customParam.value
+  if (isBinance) return hasPrice ? 'Maker · 固定价' : 'Maker · 自动挂单价'
+  return hasPrice ? 'Limit · 固定价' : 'Market · 即时成交'
+})
+
 const loading = ref(false)
 const statusMsg = ref('')
 const statusOk = ref(true)
@@ -140,19 +186,66 @@ function showStatus(msg, ok = true) {
   setTimeout(() => { statusMsg.value = '' }, 4000)
 }
 
+async function fetchMarketPrice() {
+  const cfg = pairConfig.value
+  const r = await api.get('/api/v1/market/spread', { params: { binance_symbol: cfg.binance, bybit_symbol: cfg.mt5 } })
+  return r.data
+}
+
+function validateCustomPrice(price, side, spreadData) {
+  const isBinance = exchange.value === EXCHANGE_BINANCE
+  const quote = isBinance ? spreadData?.binance_quote : spreadData?.bybit_quote
+  const bid = quote?.bid_price || 0
+  const ask = quote?.ask_price || 0
+  const mid = (bid + ask) / 2
+  if (!mid) return null
+
+  const deviation = Math.abs(price - mid) / mid
+  if (deviation > 0.02) {
+    const platform = isBinance ? '主账号' : '对冲账号'
+    return `挂单价 ${price} 偏离${platform}市场价 ${mid.toFixed(2)} 超过2% (${(deviation * 100).toFixed(1)}%)，请确认价格是否正确`
+  }
+
+  if (isBinance) {
+    if (side === 'buy' && price >= ask) {
+      return `买入价 ${price} >= 卖一价 ${ask.toFixed(2)}，Maker单会被拒绝(会吃单)。请降低价格或改用对冲账号。`
+    }
+    if (side === 'sell' && price <= bid) {
+      return `卖出价 ${price} <= 买一价 ${bid.toFixed(2)}，Maker单会被拒绝(会吃单)。请提高价格或改用对冲账号。`
+    }
+  }
+  return null
+}
+
 async function executeTrade(side) {
   if (loading.value) return
   loading.value = true
   try {
     const actualQuantity = convertForPlatform(quantity.value, exchange.value)
+    const price = customParam.value ? parseFloat(customParam.value) : null
 
-    await api.post('/api/v1/trading/manual/order', {
+    if (price) {
+      const spread = await fetchMarketPrice()
+      const err = validateCustomPrice(price, side, spread)
+      if (err) {
+        if (!confirm(err + '\n\n确定继续下单吗？')) {
+          loading.value = false
+          return
+        }
+      }
+    }
+
+    const payload = {
       exchange: exchange.value,
       side,
       quantity: actualQuantity,
       pair_code: currentPair.value,
-    })
-    showStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送`, true)
+    }
+    if (price) payload.price = price
+    payload.order_type = exchange.value === EXCHANGE_BINANCE ? 'maker' : 'taker'
+
+    await api.post('/api/v1/trading/manual/order', payload)
+    showStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送 (${exchange.value === EXCHANGE_BINANCE ? 'Maker' : price ? 'Limit' : 'Market'})`, true)
     emit('orderExecuted')
   } catch (e) {
     showStatus(e.response?.data?.detail || '下单失败', false)
@@ -167,12 +260,29 @@ async function closePosition(positionType) {
   try {
     const actualQuantity = convertForPlatform(quantity.value, exchange.value)
     const endpoint = positionType === 'short' ? '/api/v1/trading/manual/close-short' : '/api/v1/trading/manual/close-long'
+    const price = customParam.value ? parseFloat(customParam.value) : null
 
-    await api.post(endpoint, {
+    if (price) {
+      const closeSide = positionType === 'short' ? 'buy' : 'sell'
+      const spread = await fetchMarketPrice()
+      const err = validateCustomPrice(price, closeSide, spread)
+      if (err) {
+        if (!confirm(err + '\n\n确定继续下单吗？')) {
+          loading.value = false
+          return
+        }
+      }
+    }
+
+    const payload = {
       exchange: exchange.value,
       quantity: actualQuantity,
       pair_code: currentPair.value,
-    })
+    }
+    if (price) payload.price = price
+    payload.order_type = exchange.value === EXCHANGE_BINANCE ? 'maker' : 'taker'
+
+    await api.post(endpoint, payload)
     showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
     emit('orderExecuted')
   } catch (e) {
@@ -373,6 +483,46 @@ async function cancelAllOrders() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.qty-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.qty-col {
+  min-width: 0;
+}
+
+.mode-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background-color: #252930;
+  border-radius: 4px;
+  margin-top: -4px;
+}
+
+.mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.dot-maker {
+  background-color: #0ecb81;
+}
+
+.dot-taker {
+  background-color: #f0b90b;
+}
+
+.mode-text {
+  font-size: 10px;
+  color: #848e9c;
+  font-weight: 500;
 }
 
 @media (orientation: portrait), (max-width: 750px) {

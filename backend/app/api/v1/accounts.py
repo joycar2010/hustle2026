@@ -21,6 +21,7 @@ router = APIRouter()
 class AccountSecretResponse(BaseModel):
     api_secret: str
     mt5_primary_pwd: Optional[str] = None
+    passphrase: Optional[str] = None
 
 
 @router.get("", response_model=List[AccountResponse])
@@ -166,13 +167,23 @@ async def get_account_secret(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get account API secret (requires password verification first)"""
-    result = await db.execute(
-        select(Account).where(
-            Account.account_id == account_id,
-            Account.user_id == UUID(user_id),
+    """Get account API secret (admin can view any account, regular user only their own)"""
+    ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+    user_result = await db.execute(select(User).where(User.user_id == user_id))
+    caller = user_result.scalar_one_or_none()
+    is_admin = caller is not None and caller.role in ADMIN_ROLES
+
+    if is_admin:
+        result = await db.execute(
+            select(Account).where(Account.account_id == account_id)
         )
-    )
+    else:
+        result = await db.execute(
+            select(Account).where(
+                Account.account_id == account_id,
+                Account.user_id == UUID(user_id),
+            )
+        )
     account = result.scalar_one_or_none()
 
     if not account:
@@ -183,7 +194,8 @@ async def get_account_secret(
 
     return AccountSecretResponse(
         api_secret=account.api_secret,
-        mt5_primary_pwd=account.mt5_primary_pwd
+        mt5_primary_pwd=account.mt5_primary_pwd,
+        passphrase=account.passphrase
     )
 
 

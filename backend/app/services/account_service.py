@@ -34,6 +34,9 @@ def _get_pair_config():
 _commission_rate_cache: Dict[str, Dict] = {}  # api_key[:16] -> {"data": ..., "ts": float}
 
 
+# Cache last-known-good liquidation prices per account (survives proxy blips)
+_liq_price_cache = {}  # key: account_id -> {"long": float, "short": float, "ts": datetime}
+
 class AccountDataService:
     """Service for fetching account data from exchanges"""
 
@@ -141,6 +144,18 @@ class AccountDataService:
             premium_index_data = results[9]
             funding_asset_data = results[10]
 
+            # Guard: if BOTH futures account AND spot account failed, we have no
+            # meaningful balance data (typically proxy/network down). Raise instead
+            # of returning a zero-value AccountBalance that triggers false alerts.
+            _futures_failed = isinstance(futures_account_data, Exception)
+            _spot_failed = isinstance(spot_account_data, Exception)
+            if _futures_failed and _spot_failed:
+                _err_detail = str(futures_account_data)[:200]
+                logger.error(f"[Binance] ALL core APIs failed (proxy down?): futures={_err_detail}")
+                raise ConnectionError(f"Binance data fetch failed (proxy/network): {_err_detail}")
+            if _futures_failed:
+                logger.warning(f"[Binance] Futures API failed but spot OK — net_assets will be spot-only (no contract data)")
+
             # commission_rate 成功返回时写入本地缓存（24h有效，weight=20每天只消耗一次）
             if not isinstance(commission_rate_data, Exception) and commission_rate_data:
                 _commission_rate_cache[_cr_cache_key] = {
@@ -218,6 +233,7 @@ class AccountDataService:
             futures_margin_balance = 0.0
             futures_unrealized_pnl = 0.0
             futures_risk_ratio = 0.0
+            total_maint_margin = 0.0
 
             if not isinstance(futures_account_data, Exception):
                 futures_total_wallet_balance = float(futures_account_data.get("totalWalletBalance", 0))
@@ -322,12 +338,23 @@ class AccountDataService:
                             elif is_short:
                                 short_liquidation_price = liq_price
                         else:
-                            # Fallback: precise isolated-margin formula
-                            # Long:  liq = (entry * qty - isolated_wallet) / (qty * (1 - maint_margin_ratio))
-                            # Short: liq = (entry * qty + isolated_wallet) / (qty * (1 + maint_margin_ratio))
+                            margin_type = pos.get("marginType", "").lower()
                             isolated_wallet = float(pos.get("isolatedWallet", 0))
                             maint_margin_ratio = float(pos.get("maintMarginRatio", 0.005))
-                            if abs_amt > 0 and entry_price > 0:
+
+                            if margin_type == "cross" and abs_amt > 0 and entry_price > 0:
+                                # Cross-margin: liq = entry -/+ (walletBalance - maintMargin) / qty
+                                buffer = futures_total_wallet_balance - total_maint_margin
+                                if buffer > 0:
+                                    if is_long:
+                                        long_liquidation_price = round(entry_price - buffer / abs_amt, 2)
+                                        if long_liquidation_price <= 0:
+                                            long_liquidation_price = 0.0
+                                    elif is_short:
+                                        short_liquidation_price = round(entry_price + buffer / abs_amt, 2)
+                                    logger.info(f"[LIQ_CROSS] margin_type=cross, entry={entry_price}, qty={abs_amt}, wallet={futures_total_wallet_balance}, maint={total_maint_margin}, buffer={buffer}, long_liq={long_liquidation_price}, short_liq={short_liquidation_price}")
+                            elif isolated_wallet > 0 and abs_amt > 0 and entry_price > 0:
+                                # Isolated-margin formula
                                 if is_long:
                                     long_liquidation_price = round(
                                         (entry_price * abs_amt - isolated_wallet) / (abs_amt * (1 - maint_margin_ratio)), 2
@@ -336,11 +363,38 @@ class AccountDataService:
                                     short_liquidation_price = round(
                                         (entry_price * abs_amt + isolated_wallet) / (abs_amt * (1 + maint_margin_ratio)), 2
                                     )
+                            elif abs_amt > 0 and entry_price > 0:
+                                # Last resort: simplified formula using leverage
+                                lev = int(pos.get("leverage", 0))
+                                if lev > 0:
+                                    if is_long:
+                                        long_liquidation_price = round(entry_price * (1 - 1 / lev), 2)
+                                    elif is_short:
+                                        short_liquidation_price = round(entry_price * (1 + 1 / lev), 2)
+                                    logger.info(f"[LIQ_SIMPLE] leverage={lev}, entry={entry_price}, long_liq={long_liquidation_price}, short_liq={short_liquidation_price}")
 
                 if total_positions > 0:
                     avg_entry_price = total_volume_weighted / total_positions
+
+                logger.info(f"[BINANCE_LIQ_DEBUG] total_pos={total_positions}, long_liq={long_liquidation_price}, short_liq={short_liquidation_price}, wallet={futures_total_wallet_balance}, maint={total_maint_margin}, leverage={leverage}, entry={avg_entry_price}")
+
+                # Cache successful liquidation prices
+                if long_liquidation_price > 0 or short_liquidation_price > 0:
+                    _liq_price_cache[api_key[:16]] = {
+                        "long": long_liquidation_price,
+                        "short": short_liquidation_price,
+                        "ts": datetime.utcnow(),
+                    }
             else:
                 logger.warning(f"Failed to fetch position risk data: {position_risk_data}")
+                # Use cached liquidation prices if available (proxy failure recovery)
+                _cached_liq = _liq_price_cache.get(api_key[:16])
+                if _cached_liq:
+                    _age = (datetime.utcnow() - _cached_liq["ts"]).total_seconds()
+                    if _age < 300:  # accept up to 5 min stale
+                        long_liquidation_price = _cached_liq["long"]
+                        short_liquidation_price = _cached_liq["short"]
+                        logger.info(f"[LIQ_CACHE] Using {_age:.0f}s stale liq prices: long={long_liquidation_price}, short={short_liquidation_price}")
 
             # Calculate daily P&L (realized + unrealized)
             daily_pnl = 0.0
@@ -453,6 +507,8 @@ class AccountDataService:
                 # Binance native liquidation prices from positionRisk API
                 long_liquidation_price=long_liquidation_price,
                 short_liquidation_price=short_liquidation_price,
+                total_wallet_balance=futures_total_wallet_balance,
+                total_maint_margin=total_maint_margin,
             )
         except Exception as e:
             from app.services.binance_client import BinanceIPBanError
@@ -1468,6 +1524,9 @@ class AccountDataService:
                 finally:
                     await _gclient.close()
             elif platform_id == 5:  # OKX
+                def _sf(v, d=0.0):
+                    try: return float(v) if v != '' and v is not None else d
+                    except (ValueError, TypeError): return d
                 from app.services.okx_client import OKXClient
                 _okx = OKXClient(
                     api_key=account.api_key or "",
@@ -1489,11 +1548,11 @@ class AccountDataService:
                         _okx_pos_raw = []
 
                     _details = _okx_bal_raw.get("details", [])
-                    _total_eq = float(_okx_bal_raw.get("totalEq", 0))
+                    _total_eq = _sf(_okx_bal_raw.get("totalEq"))
                     _avail = 0.0
                     for d in _details:
-                        _avail += float(d.get("availBal", 0))
-                    _upnl = float(_okx_bal_raw.get("upl", 0))
+                        _avail += _sf(d.get("availBal"))
+                    _upnl = _sf(_okx_bal_raw.get("upl"))
                     _frozen = _total_eq - _avail if _total_eq > _avail else 0.0
 
                     balance = AccountBalance(
@@ -1510,15 +1569,15 @@ class AccountDataService:
                     )
                     positions = []
                     for p in _okx_pos_raw:
-                        _pos_amt = float(p.get("pos", 0))
+                        _pos_amt = _sf(p.get("pos"))
                         positions.append(AccountPosition(
                             symbol=p.get("instId", ""),
                             side="buy" if p.get("posSide") == "long" else "sell",
                             size=abs(_pos_amt),
-                            entry_price=float(p.get("avgPx", 0)),
-                            mark_price=float(p.get("markPx", 0)),
-                            unrealized_pnl=float(p.get("upl", 0)),
-                            leverage=int(float(p.get("lever", 0))),
+                            entry_price=_sf(p.get("avgPx")),
+                            mark_price=_sf(p.get("markPx")),
+                            unrealized_pnl=_sf(p.get("upl")),
+                            leverage=int(_sf(p.get("lever"))),
                         ))
                     daily_pnl = _upnl
                 except Exception as _oe:
@@ -1594,6 +1653,29 @@ class AccountDataService:
             else:
                 logger.warning(f"Skipping duplicate account: {account.account_name} (ID: {account.account_id})")
 
+        # Build account_id → pair_code mapping from user_pair_accounts
+        _account_pair_map = {}  # account_id_str -> [(pair_code, side)]
+        try:
+            _acc_ids = [str(a.account_id) for a in unique_accounts]
+            if _acc_ids:
+                from sqlalchemy import text as _text
+                # Need a db session — get one from the account objects
+                _user_ids = list(set(str(a.user_id) for a in unique_accounts))
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as _pair_db:
+                    _pair_rows = await _pair_db.execute(_text(
+                        "SELECT pair_code, account_a_id, account_b_id FROM user_pair_accounts "
+                        "WHERE account_a_id = ANY(:ids) OR account_b_id = ANY(:ids)"
+                    ), {"ids": _acc_ids})
+                    for _pr in _pair_rows.fetchall():
+                        _pc, _aid_a, _aid_b = _pr
+                        if _aid_a:
+                            _account_pair_map.setdefault(str(_aid_a), []).append((_pc, "a"))
+                        if _aid_b:
+                            _account_pair_map.setdefault(str(_aid_b), []).append((_pc, "b"))
+        except Exception as _pair_err:
+            logger.warning(f"[PAIR_MAP] Failed to build pair_code mapping: {_pair_err}")
+
         # Fetch data from all unique accounts concurrently
         account_data_list = await asyncio.gather(
             *[self.get_account_data(account) for account in unique_accounts],
@@ -1612,6 +1694,25 @@ class AccountDataService:
                     ban_until_ms = error_msg.split(":")[1]
                     error_msg = f"RATE_LIMIT:{ban_until_ms}"
 
+                # Stale-cache fallback: if we have a previous good result for this
+                # account (even if TTL expired), use it instead of reporting failure.
+                # This prevents proxy flickers from pushing zero-value data to
+                # the frontend and triggering false risk alerts.
+                _stale_key = self._get_cache_key(str(unique_accounts[i].account_id), "account_data")
+                _stale = self._cache.get(_stale_key)
+                if _stale and not error_msg.startswith("RATE_LIMIT"):
+                    _stale_data, _stale_ts = _stale
+                    _stale_age = (datetime.utcnow() - _stale_ts).total_seconds()
+                    if _stale_age < 300:  # accept stale data up to 5 minutes
+                        logger.warning(
+                            f"[STALE_CACHE] Account {unique_accounts[i].account_name} fetch failed "
+                            f"({error_msg[:80]}), using {_stale_age:.0f}s stale cache"
+                        )
+                        _stale_data["_stale"] = True
+                        _stale_data["_stale_age_s"] = round(_stale_age)
+                        successful_accounts.append(_stale_data)
+                        continue
+
                 failed_accounts.append({
                     "account_id": str(unique_accounts[i].account_id),
                     "account_name": unique_accounts[i].account_name,
@@ -1623,6 +1724,17 @@ class AccountDataService:
                     "error": error_msg,
                 })
             else:
+                # Attach pair_code(s) from binding
+                _aid = str(unique_accounts[i].account_id)
+                _pairs = _account_pair_map.get(_aid, [])
+                if _pairs:
+                    data["pair_code"] = _pairs[0][0]  # primary pair
+                    data["binding_side"] = _pairs[0][1]  # 'a'=main, 'b'=hedge
+                    data["all_pair_codes"] = [p[0] for p in _pairs]
+                else:
+                    data["pair_code"] = None
+                    data["binding_side"] = None
+                    data["all_pair_codes"] = []
                 successful_accounts.append(data)
 
         # Aggregate balances
@@ -1680,6 +1792,69 @@ class AccountDataService:
 
         avg_risk_ratio = (total_risk_weighted / total_margin_for_risk) if total_margin_for_risk > 0 else None
 
+        # Extract liquidation prices and current market prices for risk alerts
+        _binance_long_liq = None
+        _binance_short_liq = None
+        _bybit_long_liq = None
+        _bybit_short_liq = None
+        _binance_entry = None
+        _bybit_entry = None
+
+        for acc in successful_accounts:
+            bal = acc.get("balance", {})
+            pid = acc.get("platform_id")
+            if pid == 1:  # Binance
+                ll = bal.get("long_liquidation_price")
+                sl = bal.get("short_liquidation_price")
+                if ll and ll > 0:
+                    _binance_long_liq = ll
+                if sl and sl > 0:
+                    _binance_short_liq = sl
+                ep = bal.get("entry_price")
+                if ep and ep > 0:
+                    _binance_entry = ep
+            elif pid in (2, 3):  # Bybit / IC Markets (hedge side)
+                ll = bal.get("long_liquidation_price")
+                sl = bal.get("short_liquidation_price")
+                if ll and ll > 0:
+                    _bybit_long_liq = ll
+                if sl and sl > 0:
+                    _bybit_short_liq = sl
+                ep = bal.get("entry_price")
+                if ep and ep > 0:
+                    _bybit_entry = ep
+
+        # Fetch current market prices for liquidation distance calculation
+        _binance_current = None
+        _bybit_current = None
+        try:
+            from app.services.market_service import market_data_service
+            _pair_sym_a, _pair_sym_b = _get_pair_config()[:2] if callable(_get_pair_config) else ("XAUUSDT", "XAUUSD+")
+            _spread = await market_data_service.get_current_spread(
+                binance_symbol=_pair_sym_a, bybit_symbol=_pair_sym_b, use_cache=True)
+            if _spread:
+                _binance_current = (_spread.binance_quote.bid_price + _spread.binance_quote.ask_price) / 2
+                _bybit_current = (_spread.bybit_quote.bid_price + _spread.bybit_quote.ask_price) / 2
+        except Exception as _me:
+            logger.debug(f"Failed to get market prices for summary: {_me}")
+
+        # Pick the closest liquidation price per platform for risk alert
+        _binance_liq_closest = None
+        if _binance_long_liq and _binance_short_liq and _binance_current:
+            _binance_liq_closest = _binance_long_liq if abs(_binance_current - _binance_long_liq) < abs(_binance_current - _binance_short_liq) else _binance_short_liq
+        elif _binance_long_liq:
+            _binance_liq_closest = _binance_long_liq
+        elif _binance_short_liq:
+            _binance_liq_closest = _binance_short_liq
+
+        _bybit_liq_closest = None
+        if _bybit_long_liq and _bybit_short_liq and _bybit_current:
+            _bybit_liq_closest = _bybit_long_liq if abs(_bybit_current - _bybit_long_liq) < abs(_bybit_current - _bybit_short_liq) else _bybit_short_liq
+        elif _bybit_long_liq:
+            _bybit_liq_closest = _bybit_long_liq
+        elif _bybit_short_liq:
+            _bybit_liq_closest = _bybit_short_liq
+
         return {
             "summary": {
                 "total_assets": total_assets,
@@ -1692,6 +1867,14 @@ class AccountDataService:
                 "risk_ratio": avg_risk_ratio,
                 "account_count": len(successful_accounts),
                 "position_count": len(all_positions),
+                "binance_liquidation_price": _binance_liq_closest,
+                "bybit_liquidation_price": _bybit_liq_closest,
+                "binance_long_liquidation": _binance_long_liq,
+                "binance_short_liquidation": _binance_short_liq,
+                "bybit_long_liquidation": _bybit_long_liq,
+                "bybit_short_liquidation": _bybit_short_liq,
+                "binance_current_price": _binance_current,
+                "bybit_current_price": _bybit_current,
             },
             "accounts": successful_accounts,
             "positions": all_positions,

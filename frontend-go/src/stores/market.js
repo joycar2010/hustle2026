@@ -87,16 +87,23 @@ export const useMarketStore = defineStore('market', () => {
         }
 
         if (msg.type === 'position_snapshot' && msg.data) {
-          // positionSnapshot 只由 position_snapshot 消息驱动，与 account_balance 完全隔离
-          // 避免 account_balance 的 60s 缓存数据覆盖实时持仓快照
-          positionSnapshot.value = {
+          const prev = positionSnapshot.value
+          const incomingPairs = msg.data.pairs
+          const hasPairs = incomingPairs && Object.keys(incomingPairs).length > 0
+          const next = {
             bybit_long_lots: msg.data.bybit_long_lots ?? 0,
             bybit_short_lots: msg.data.bybit_short_lots ?? 0,
             binance_long_xau: msg.data.binance_long_xau ?? 0,
             binance_short_xau: msg.data.binance_short_xau ?? 0,
-            // 全产品对持仓（新字段）
-            pairs: msg.data.pairs ?? {},
+            pairs: hasPairs ? incomingPairs : (prev.pairs ?? {}),
           }
+          // Dedup: skip update if flat fields unchanged and pairs values identical
+          const flatSame = (next.bybit_long_lots === prev.bybit_long_lots &&
+                            next.bybit_short_lots === prev.bybit_short_lots &&
+                            next.binance_long_xau === prev.binance_long_xau &&
+                            next.binance_short_xau === prev.binance_short_xau)
+          const pairsSame = flatSame && JSON.stringify(next.pairs) === JSON.stringify(prev.pairs)
+          if (!pairsSame) positionSnapshot.value = next
         }
 
         if (msg.type === 'market_data' && msg.data) {

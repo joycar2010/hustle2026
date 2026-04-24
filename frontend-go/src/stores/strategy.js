@@ -67,34 +67,53 @@ export const useStrategyStore = defineStore('strategy', () => {
 
   // ── 强平价（Liquidation Prices）────────────────────────────────────────────
   // 由 AccountStatusPanel 在 account_balance WS 更新时写入
-  // MarketCards 订阅读取，展示在行情卡片实时价格两侧
-  //
-  // 数据格式：
-  //   binance  → platform_id === 1  (主账号 Binance Futures)
-  //   mt5      → platform_id === 2  (对冲账户 MT5/Bybit)
-  const liquidationPrices = ref({
-    binance: { long: null, short: null },   // 主账号
-    mt5:     { long: null, short: null },   // 对冲账户
-  })
+  // 按产品对(pair_code)隔离的强平价
+  // 结构: { XAU: { binance: {long, short}, mt5: {long, short} }, BZ: {...} }
+  const liquidationPrices = ref({})
+
+  function _ensurePair(pairCode) {
+    if (!liquidationPrices.value[pairCode]) {
+      liquidationPrices.value[pairCode] = {
+        binance: { long: null, short: null },
+        mt5:     { long: null, short: null },
+      }
+    }
+  }
 
   /**
-   * 更新强平价
+   * 更新指定产品对的强平价
+   * @param {string} pairCode - 产品对代码 (如 'XAU', 'BZ')
    * @param {'binance'|'mt5'} platform
    * @param {number|null} longPrice
    * @param {number|null} shortPrice
    */
-  function setLiquidationPrices(platform, longPrice, shortPrice) {
-    liquidationPrices.value[platform] = {
+  function setLiquidationPrices(pairCode, platform, longPrice, shortPrice) {
+    _ensurePair(pairCode)
+    liquidationPrices.value[pairCode][platform] = {
       long:  longPrice  > 0 ? longPrice  : null,
       short: shortPrice > 0 ? shortPrice : null,
+    }
+    // Force reactivity trigger by replacing the top-level object
+    liquidationPrices.value = { ...liquidationPrices.value }
+  }
+
+  /**
+   * 获取指定产品对的强平价
+   * @param {string} pairCode
+   * @returns {{ binance: {long, short}, mt5: {long, short} }}
+   */
+  function getLiquidationPrices(pairCode) {
+    return liquidationPrices.value[pairCode] || {
+      binance: { long: null, short: null },
+      mt5:     { long: null, short: null },
     }
   }
 
   return {
     // 策略锁
     activeStrategy, isAnyRunning, acquire, release, isActive, isLocked,
-    // 强平价
-    liquidationPrices, setLiquidationPrices,
+    // 强平价 (按产品对隔离)
+    liquidationPrices, setLiquidationPrices, getLiquidationPrices,
   }
 })
 

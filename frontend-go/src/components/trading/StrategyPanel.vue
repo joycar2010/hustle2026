@@ -116,7 +116,6 @@
 
       <!-- Configuration Area -->
       <div class="bg-[#252930] rounded p-2 space-y-2">
-        <div class="text-xs font-bold mb-1">策略配置</div>
 
         <!-- M Coin Settings -->
         <div class="grid grid-cols-2 gap-2">
@@ -184,6 +183,84 @@
               :title="strategyStore.isLocked(`${type}_closing`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Hedge Order Records -->
+        <div v-if="hedgeMultiplier > 1 && hedgeRecords.length > 0" class="mt-2 bg-[#1a1d21] rounded p-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[10px] text-gray-400">对冲下单记录</span>
+            <button @click="showHedgeHistory = true" class="text-[10px] text-primary hover:underline">查看历史</button>
+          </div>
+          <div class="max-h-32 overflow-y-auto">
+            <table class="w-full text-[10px]">
+              <thead class="text-gray-500">
+                <tr><th class="text-left py-0.5">时间</th><th>批次</th><th>价格</th><th>手数</th><th>方向</th></tr>
+              </thead>
+              <tbody class="text-gray-300">
+                <tr v-for="r in hedgeRecords" :key="r.id" class="border-t border-dark-200">
+                  <td class="py-0.5">{{ formatTime(r.order_time) }}</td>
+                  <td class="text-center">#{{ r.batch_no }}</td>
+                  <td class="text-right font-mono">{{ Number(r.hedge_price).toFixed(2) }}</td>
+                  <td class="text-right font-mono">{{ Number(r.hedge_qty).toFixed(2) }}</td>
+                  <td class="text-center" :class="r.direction === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                    {{ r.direction === 'buy' ? '做多' : '做空' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Hedge History Modal -->
+        <Teleport to="body">
+          <div v-if="showHedgeHistory" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60" @click.self="showHedgeHistory = false">
+            <div class="bg-[#1a1d21] rounded-lg p-4 w-[400px] max-h-[60vh] overflow-y-auto border border-dark-50">
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-sm font-bold text-white">对冲下单历史 ({{ currentPair }})</span>
+                <button @click="showHedgeHistory = false" class="text-gray-400 hover:text-white text-lg">&times;</button>
+              </div>
+              <table class="w-full text-[10px]">
+                <thead class="text-gray-500">
+                  <tr><th class="text-left py-1">时间</th><th>批次</th><th>价格</th><th>手数</th><th>方向</th><th>状态</th></tr>
+                </thead>
+                <tbody class="text-gray-300">
+                  <tr v-for="r in hedgeHistoryRecords" :key="r.id" class="border-t border-dark-200">
+                    <td class="py-1">{{ formatTime(r.order_time) }}</td>
+                    <td class="text-center">#{{ r.batch_no }}</td>
+                    <td class="text-right font-mono">{{ Number(r.hedge_price).toFixed(2) }}</td>
+                    <td class="text-right font-mono">{{ Number(r.hedge_qty).toFixed(2) }}</td>
+                    <td class="text-center" :class="r.direction === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+                      {{ r.direction === 'buy' ? '做多' : '做空' }}
+                    </td>
+                    <td class="text-center">
+                      <span :class="r.status === 'open' ? 'text-[#f0b90b]' : 'text-gray-500'">{{ r.status === 'open' ? '持仓中' : '已平仓' }}</span>
+                    </td>
+                  </tr>
+                  <tr v-if="hedgeHistoryRecords.length === 0">
+                    <td colspan="6" class="text-center text-gray-500 py-3">暂无记录</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Teleport>
+
+        <!-- Hedge Multiplier Control -->
+        <div v-if="showHedgeRatio" class="mt-2 bg-[#1a1d21] rounded p-2">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] text-gray-400">对冲倍数</span>
+            <span class="text-xs font-mono font-bold" :class="hedgeMultiplier > 1 ? 'text-[#f0b90b]' : 'text-gray-300'">{{ hedgeMultiplier }}x</span>
+          </div>
+          <div class="flex gap-1">
+            <button v-for="m in [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]" :key="m"
+              @click="setHedgeMultiplier(m)"
+              :disabled="continuousExecutionEnabled.opening || continuousExecutionEnabled.closing"
+              :class="['flex-1 py-1 rounded text-[10px] font-bold transition-all',
+                hedgeMultiplier === m ? 'bg-primary text-dark-300' : 'bg-dark-200 text-gray-400 hover:bg-dark-50',
+                (continuousExecutionEnabled.opening || continuousExecutionEnabled.closing) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer']">
+              {{ m }}x
             </button>
           </div>
         </div>
@@ -275,7 +352,11 @@
           </div>
 
         <!-- Data Sync Quantities and Trigger Intervals -->
-        <div class="grid grid-cols-4 gap-2">
+        <div v-if="configHidden" class="flex items-center justify-between bg-[#1a1d21] rounded px-2 py-1.5 cursor-pointer hover:bg-[#2b3139] transition-colors" @click="configHidden = false; saveConfigHidden()">
+          <span class="text-xs text-gray-500">{{ type === 'forward' ? '正开/正平 次数频率' : '反开/反平 次数频率' }}</span>
+          <span class="text-xs text-[#f0b90b] font-bold">▶ 展开</span>
+        </div>
+        <div v-show="!configHidden" class="grid grid-cols-4 gap-2">
           <div>
             <label :for="`openingSyncQty-${type}`" class="text-xs text-gray-400 mb-1 block">
               {{ type === 'forward' ? '正开次数' : '反开次数' }}
@@ -342,6 +423,13 @@
                 class="flex-shrink-0 w-[26px] h-[26px] bg-[#f0b90b] text-[#1a1d21] rounded font-bold hover:bg-[#e0a800] transition-colors text-[10px] flex items-center justify-center leading-none"
               >
                 保
+              </button>
+              <button
+                @click="configHidden = true; saveConfigHidden()"
+                title="收起配置"
+                class="flex-shrink-0 w-[26px] h-[26px] bg-[#2b3139] text-gray-400 rounded font-bold hover:bg-[#3b4149] hover:text-gray-200 transition-colors text-[10px] flex items-center justify-center leading-none"
+              >
+                隐
               </button>
             </div>
             <div class="text-xs text-[#f6465d] mt-1 text-center">
@@ -548,6 +636,12 @@ const props = defineProps({
   }
 })
 
+// Config section hide/show toggle (persisted per type)
+const configHidden = ref(localStorage.getItem(`configHidden_${props.type}`) === 'true')
+function saveConfigHidden() {
+  localStorage.setItem(`configHidden_${props.type}`, configHidden.value)
+}
+
 // LocalStorage keys for persisting strategy enabled states
 // NOTE: user-scoped via authStore so switching users doesn't bleed A's state into B's panel
 const authStore = useAuthStore()
@@ -640,20 +734,38 @@ const localBinanceShort = ref(0)
 const localBybitLong = ref(0)
 const localBybitShort = ref(0)
 
+const { currentPair } = useTradingPair()
+const alertPairCode = currentPair  // computed alias — reactive ref from global store
+
 watch(() => marketStore.positionSnapshot, (snap) => {
   if (!snap) return
   const pairData = snap.pairs?.[alertPairCode.value]
+  let ml, ms, bl, bs
   if (pairData) {
-    localBybitLong.value = pairData.mt5_long ?? 0
-    localBybitShort.value = pairData.mt5_short ?? 0
-    localBinanceLong.value = pairData.binance_long ?? 0
-    localBinanceShort.value = pairData.binance_short ?? 0
+    ml = pairData.mt5_long ?? 0
+    ms = pairData.mt5_short ?? 0
+    bl = pairData.binance_long ?? 0
+    bs = pairData.binance_short ?? 0
   } else {
-    localBybitLong.value = snap.bybit_long_lots ?? 0
-    localBybitShort.value = snap.bybit_short_lots ?? 0
-    localBinanceLong.value = snap.binance_long_xau ?? 0
-    localBinanceShort.value = snap.binance_short_xau ?? 0
+    ml = snap.bybit_long_lots ?? 0
+    ms = snap.bybit_short_lots ?? 0
+    bl = snap.binance_long_xau ?? 0
+    bs = snap.binance_short_xau ?? 0
   }
+  // Anti-flicker: if incoming data is all-zero but we currently hold non-zero
+  // positions, skip this update — it's likely a transient bridge read failure.
+  // Genuine close-all will arrive as a consistent zero snapshot from the
+  // PositionStreamer (which reads both MT5 and Binance), not from a partial source.
+  const incomingAllZero = (ml === 0 && ms === 0 && bl === 0 && bs === 0)
+  const currentHasPosition = (localBybitLong.value !== 0 || localBybitShort.value !== 0 ||
+                              localBinanceLong.value !== 0 || localBinanceShort.value !== 0)
+  if (incomingAllZero && currentHasPosition) {
+    return  // Skip: don't overwrite real positions with transient zeros
+  }
+  localBybitLong.value = ml
+  localBybitShort.value = ms
+  localBinanceLong.value = bl
+  localBinanceShort.value = bs
 }, { immediate: true })
 const currentSpread = ref(0)
 const closingSpread = ref(0)
@@ -689,6 +801,29 @@ let lastUpdateTime = 0
 const UPDATE_THROTTLE = isMobile.value ? 100 : 500 // 移动端降低更新频率
 
 // Continuous execution state - separate for opening and closing
+const hedgeMultiplier = ref(1.0)
+
+const showHedgeRatio = ref(false)
+
+async function fetchHedgeMultiplier() {
+  try {
+    const r = await api.get('/api/v1/hedge-ratio', { params: { pair_code: currentPair.value || 'XAU' } })
+    hedgeMultiplier.value = r.data?.hedge_multiplier ?? 1.0
+    showHedgeRatio.value = !!r.data?.enabled
+  } catch { hedgeMultiplier.value = 1.0; showHedgeRatio.value = false }
+}
+
+async function setHedgeMultiplier(m) {
+  if (continuousExecutionEnabled.value?.opening || continuousExecutionEnabled.value?.closing) return
+  if (!confirm(`确定将对冲倍数设为 ${m}x 吗？开仓和平仓都将按此倍数执行。`)) return
+  try {
+    await api.put('/api/v1/hedge-ratio', { hedge_multiplier: m, pair_code: currentPair.value || 'XAU' })
+    hedgeMultiplier.value = m
+  } catch (e) {
+    console.error('Failed to set hedge multiplier:', e)
+  }
+}
+
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
@@ -706,13 +841,47 @@ const alertSettings = ref({
 })
 
 // 产品对提醒设置（跟随全局产品对选择器，不再有独立下拉）
-const { currentPair } = useTradingPair()
-const alertPairCode = currentPair  // computed alias — reactive ref from global store
+
+
+// Hedge order records (placed after currentPair is declared)
+const hedgeRecords = ref([])
+const hedgeHistoryRecords = ref([])
+const showHedgeHistory = ref(false)
+
+function formatTime(t) {
+  if (!t) return ''
+  const d = new Date(t)
+  return d.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+async function fetchHedgeRecords() {
+  try {
+    const r = await api.get('/api/v1/trading/hedge-records', {
+      params: { pair_code: currentPair.value || 'XAU', strategy_type: props.type, status: 'open' }
+    })
+    hedgeRecords.value = r.data || []
+  } catch { hedgeRecords.value = [] }
+}
+
+async function fetchHedgeHistory() {
+  try {
+    const r = await api.get('/api/v1/trading/hedge-records', {
+      params: { pair_code: currentPair.value || 'XAU', strategy_type: props.type, days: 2 }
+    })
+    hedgeHistoryRecords.value = r.data || []
+  } catch { hedgeHistoryRecords.value = [] }
+}
+
+watch(showHedgeHistory, (v) => { if (v) fetchHedgeHistory() })
+
+// Fetch hedge records on mount
+fetchHedgeRecords()
 
 // 切换产品对时重新加载对应阈值
 watch(alertPairCode, () => {
   fetchAlertSettings()
   fetchPairBinding()
+  fetchHedgeMultiplier()
 })
 
 async function fetchPairBinding() {
@@ -782,6 +951,7 @@ onMounted(async () => {
   // Load alert settings (spread thresholds) from Risk API
   fetchAlertSettings()
   fetchPairBinding()
+  fetchHedgeMultiplier()
 
   // Load ladder failure counts after configId is set
   loadLadderFailureCounts()
@@ -2286,6 +2456,7 @@ async function startContinuousExecution(action) {
     const requestData = {
       binance_account_id: binanceAccount.account_id,
       bybit_account_id: bybitMT5Account.account_id,
+      pair_code: currentPair.value,
       opening_m_coin: config.value.openingMCoin || 5,
       closing_m_coin: config.value.closingMCoin || 5,
       ladders: ladders,

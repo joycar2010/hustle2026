@@ -518,6 +518,18 @@ async def execute_reverse_arbitrage(
 
         if not binance_account or not bybit_account:
             raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
+        # --- Pre-order validation: account ↔ pair platform consistency ---
+        from app.services.hedging_pair_service import hedging_pair_service as _hps_val
+        _val_pair = _hps_val.get_pair(request.pair_code or "XAU")
+        if _val_pair:
+            _expected_a_platform = _val_pair.symbol_a.platform_id
+            if binance_account.platform_id != _expected_a_platform:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A-side account platform mismatch: account platform_id={binance_account.platform_id}, "
+                           f"pair {request.pair_code} requires platform_id={_expected_a_platform}"
+                )
+
 
         # 2. Check position limits
         strategy_id = f"{user_id}_reverse"
@@ -574,6 +586,28 @@ async def execute_reverse_arbitrage(
                 strategy_type="reverse",
                 quantity=result.get("binance_filled_qty", 0)
             )
+            # Write hedge batch record
+            try:
+                from app.models.hedge_batch_record import HedgeBatchRecord
+                import uuid, datetime as _dt
+                _bybit_qty = result.get("bybit_filled_qty", 0)
+                if _bybit_qty and float(_bybit_qty) > 0:
+                    db.add(HedgeBatchRecord(
+                        id=uuid.uuid4(),
+                        user_id=uuid.UUID(user_id) if isinstance(user_id, str) else user_id,
+                        pair_code=request.pair_code or "XAU",
+                        strategy_type="reverse",
+                        batch_no=request.ladder_index or 1,
+                        order_time=_dt.datetime.utcnow(),
+                        hedge_price=float(bybit_price),
+                        hedge_qty=float(_bybit_qty),
+                        direction="sell",
+                        status="open",
+                        create_time=_dt.datetime.utcnow(),
+                    ))
+                    await db.commit()
+            except Exception as _hre:
+                logger.warning(f"[HEDGE_RECORD] Failed to write hedge record: {_hre}")
 
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
@@ -612,6 +646,18 @@ async def execute_forward_arbitrage(
 
         if not binance_account or not bybit_account:
             raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
+        # --- Pre-order validation: account ↔ pair platform consistency ---
+        from app.services.hedging_pair_service import hedging_pair_service as _hps_val
+        _val_pair = _hps_val.get_pair(request.pair_code or "XAU")
+        if _val_pair:
+            _expected_a_platform = _val_pair.symbol_a.platform_id
+            if binance_account.platform_id != _expected_a_platform:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A-side account platform mismatch: account platform_id={binance_account.platform_id}, "
+                           f"pair {request.pair_code} requires platform_id={_expected_a_platform}"
+                )
+
 
         # 2. Check position limits
         strategy_id = f"{user_id}_forward"
@@ -668,6 +714,28 @@ async def execute_forward_arbitrage(
                 strategy_type="forward",
                 quantity=result.get("binance_filled_qty", 0)
             )
+            # Write hedge batch record
+            try:
+                from app.models.hedge_batch_record import HedgeBatchRecord
+                import uuid, datetime as _dt
+                _bybit_qty = result.get("bybit_filled_qty", 0)
+                if _bybit_qty and float(_bybit_qty) > 0:
+                    db.add(HedgeBatchRecord(
+                        id=uuid.uuid4(),
+                        user_id=uuid.UUID(user_id) if isinstance(user_id, str) else user_id,
+                        pair_code=request.pair_code or "XAU",
+                        strategy_type="forward",
+                        batch_no=request.ladder_index or 1,
+                        order_time=_dt.datetime.utcnow(),
+                        hedge_price=float(bybit_price),
+                        hedge_qty=float(_bybit_qty),
+                        direction="buy",
+                        status="open",
+                        create_time=_dt.datetime.utcnow(),
+                    ))
+                    await db.commit()
+            except Exception as _hre:
+                logger.warning(f"[HEDGE_RECORD] Failed to write hedge record: {_hre}")
 
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
@@ -706,6 +774,18 @@ async def close_reverse_position(
 
         if not binance_account or not bybit_account:
             raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
+        # --- Pre-order validation: account ↔ pair platform consistency ---
+        from app.services.hedging_pair_service import hedging_pair_service as _hps_val
+        _val_pair = _hps_val.get_pair(request.pair_code or "XAU")
+        if _val_pair:
+            _expected_a_platform = _val_pair.symbol_a.platform_id
+            if binance_account.platform_id != _expected_a_platform:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A-side account platform mismatch: account platform_id={binance_account.platform_id}, "
+                           f"pair {request.pair_code} requires platform_id={_expected_a_platform}"
+                )
+
 
         # 2. Check if can close
         strategy_id = f"{user_id}_reverse"
@@ -761,6 +841,21 @@ async def close_reverse_position(
                 strategy_type="reverse",
                 quantity=result.get("binance_filled_qty", 0)
             )
+            try:
+                from app.models.hedge_batch_record import HedgeBatchRecord
+                import datetime as _dt
+                from sqlalchemy import update
+                await db.execute(
+                    update(HedgeBatchRecord)
+                    .where(HedgeBatchRecord.user_id == user_id)
+                    .where(HedgeBatchRecord.pair_code == (request.pair_code or "XAU"))
+                    .where(HedgeBatchRecord.strategy_type == "reverse")
+                    .where(HedgeBatchRecord.status == "open")
+                    .values(status="closed", closed_at=_dt.datetime.utcnow())
+                )
+                await db.commit()
+            except Exception as _hre:
+                logger.warning(f"[HEDGE_RECORD] Failed to close hedge records: {_hre}")
 
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
@@ -799,6 +894,18 @@ async def close_forward_position(
 
         if not binance_account or not bybit_account:
             raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
+        # --- Pre-order validation: account ↔ pair platform consistency ---
+        from app.services.hedging_pair_service import hedging_pair_service as _hps_val
+        _val_pair = _hps_val.get_pair(request.pair_code or "XAU")
+        if _val_pair:
+            _expected_a_platform = _val_pair.symbol_a.platform_id
+            if binance_account.platform_id != _expected_a_platform:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A-side account platform mismatch: account platform_id={binance_account.platform_id}, "
+                           f"pair {request.pair_code} requires platform_id={_expected_a_platform}"
+                )
+
 
         # 2. Check if can close
         strategy_id = f"{user_id}_forward"
@@ -854,6 +961,21 @@ async def close_forward_position(
                 strategy_type="forward",
                 quantity=result.get("binance_filled_qty", 0)
             )
+            try:
+                from app.models.hedge_batch_record import HedgeBatchRecord
+                import datetime as _dt
+                from sqlalchemy import update
+                await db.execute(
+                    update(HedgeBatchRecord)
+                    .where(HedgeBatchRecord.user_id == user_id)
+                    .where(HedgeBatchRecord.pair_code == (request.pair_code or "XAU"))
+                    .where(HedgeBatchRecord.strategy_type == "forward")
+                    .where(HedgeBatchRecord.status == "open")
+                    .values(status="closed", closed_at=_dt.datetime.utcnow())
+                )
+                await db.commit()
+            except Exception as _hre:
+                logger.warning(f"[HEDGE_RECORD] Failed to close hedge records: {_hre}")
 
         # 6. Check for single-leg trade and send alert (regardless of success status)
         if result.get("is_single_leg"):
@@ -1131,6 +1253,18 @@ async def execute_continuous_opening(
 
         if not binance_account or not bybit_account:
             raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
+        # --- Pre-order validation: account ↔ pair platform consistency ---
+        from app.services.hedging_pair_service import hedging_pair_service as _hps_val
+        _val_pair = _hps_val.get_pair(request.pair_code or "XAU")
+        if _val_pair:
+            _expected_a_platform = _val_pair.symbol_a.platform_id
+            if binance_account.platform_id != _expected_a_platform:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A-side account platform mismatch: account platform_id={binance_account.platform_id}, "
+                           f"pair {request.pair_code} requires platform_id={_expected_a_platform}"
+                )
+
 
         # 2. Convert ladder schemas to LadderConfig objects
         ladders = [
@@ -1159,7 +1293,7 @@ async def execute_continuous_opening(
         binance_timeout = timing_config.get('binance_timeout', 2.0)
         bybit_timeout = timing_config.get('bybit_timeout', 0.1)
         order_check_interval = timing_config.get('order_check_interval', 0.2)
-        spread_check_interval = timing_config.get('spread_check_interval', 2.0)
+        spread_check_interval = timing_config.get('spread_check_interval', 0.5)
         mt5_deal_sync_wait = timing_config.get('mt5_deal_sync_wait', 3.0)
         api_retry_times = timing_config.get('api_retry_times', 1)
         api_retry_delay = timing_config.get('api_retry_delay', 0.5)
@@ -1173,6 +1307,8 @@ async def execute_continuous_opening(
         order_executor_v2.max_retries = api_retry_times
         order_executor_v2.order_check_interval = order_check_interval
         order_executor_v2.spread_check_interval = spread_check_interval
+        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.5)
+        order_executor_v2.spread_cancel_tolerance = _spread_cancel_tolerance
         order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
         order_executor_v2.api_retry_delay = api_retry_delay
         order_executor_v2.max_binance_limit_retries = max_binance_limit_retries
@@ -1305,6 +1441,18 @@ async def execute_continuous_closing(
 
         if not binance_account or not bybit_account:
             raise HTTPException(status_code=404, detail="Account not found. Please configure pair-account binding.")
+        # --- Pre-order validation: account ↔ pair platform consistency ---
+        from app.services.hedging_pair_service import hedging_pair_service as _hps_val
+        _val_pair = _hps_val.get_pair(request.pair_code or "XAU")
+        if _val_pair:
+            _expected_a_platform = _val_pair.symbol_a.platform_id
+            if binance_account.platform_id != _expected_a_platform:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A-side account platform mismatch: account platform_id={binance_account.platform_id}, "
+                           f"pair {request.pair_code} requires platform_id={_expected_a_platform}"
+                )
+
 
         # 2. Convert ladder schemas to LadderConfig objects
         # For closing, we don't need opening_spread and opening_trigger_count
@@ -1334,7 +1482,7 @@ async def execute_continuous_closing(
         binance_timeout = timing_config.get('binance_timeout', 2.0)
         bybit_timeout = timing_config.get('bybit_timeout', 0.1)
         order_check_interval = timing_config.get('order_check_interval', 0.2)
-        spread_check_interval = timing_config.get('spread_check_interval', 2.0)
+        spread_check_interval = timing_config.get('spread_check_interval', 0.5)
         mt5_deal_sync_wait = timing_config.get('mt5_deal_sync_wait', 3.0)
         api_retry_times = timing_config.get('api_retry_times', 1)
         api_retry_delay = timing_config.get('api_retry_delay', 0.5)
@@ -1348,6 +1496,8 @@ async def execute_continuous_closing(
         order_executor_v2.max_retries = api_retry_times
         order_executor_v2.order_check_interval = order_check_interval
         order_executor_v2.spread_check_interval = spread_check_interval
+        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.5)
+        order_executor_v2.spread_cancel_tolerance = _spread_cancel_tolerance
         order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
         order_executor_v2.api_retry_delay = api_retry_delay
         order_executor_v2.max_binance_limit_retries = max_binance_limit_retries

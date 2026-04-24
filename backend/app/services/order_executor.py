@@ -843,27 +843,29 @@ async def close_bybit_position_aggregated(
                     f"[close_aggregated] {bridge_url}/mt5/position/close "
                     f"ticket={ticket} vol={close_vol} (pos_vol={pos_vol})"
                 )
-                r = await client.post(
-                    f"{bridge_url}/mt5/position/close", json=payload, headers=headers,
-                )
-                ok = r.status_code == 200
-                if ok:
-                    filled = round(filled + close_vol, 4)
-                    remaining_to_close = round(max(0.0, remaining_to_close - close_vol), 2)
-                    details.append({"ticket": ticket, "volume": close_vol, "ok": True})
-                else:
-                    try:
-                        err_msg = r.json().get("detail", r.text)
-                    except Exception:
-                        err_msg = r.text[:120]
-                    logger.warning(
-                        f"[close_aggregated] ticket {ticket} vol={close_vol} "
-                        f"failed: {r.status_code} {err_msg}"
+                _ticket_ok = False
+                _last_err = ""
+                for _ta in range(3):
+                    if _ta > 0:
+                        import asyncio as _aio
+                        await _aio.sleep(0.5)
+                        logger.info(f"[close_aggregated] ticket {ticket} retry #{_ta+1}/3")
+                    r = await client.post(
+                        f"{bridge_url}/mt5/position/close", json=payload, headers=headers,
                     )
-                    details.append({
-                        "ticket": ticket, "volume": close_vol,
-                        "ok": False, "error": str(err_msg)[:120],
-                    })
+                    if r.status_code == 200:
+                        filled = round(filled + close_vol, 4)
+                        remaining_to_close = round(max(0.0, remaining_to_close - close_vol), 2)
+                        details.append({"ticket": ticket, "volume": close_vol, "ok": True, "attempts": _ta+1})
+                        _ticket_ok = True
+                        break
+                    try:
+                        _last_err = r.json().get("detail", r.text)
+                    except Exception:
+                        _last_err = r.text[:120]
+                    logger.warning(f"[close_aggregated] ticket {ticket} vol={close_vol} attempt {_ta+1}/3 failed: {r.status_code} {_last_err}")
+                if not _ticket_ok:
+                    details.append({"ticket": ticket, "volume": close_vol, "ok": False, "error": str(_last_err)[:120]})
 
             post_remaining = round(max(0.0, total_side_volume - filled), 2)
             return {

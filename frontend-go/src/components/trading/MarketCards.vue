@@ -11,7 +11,12 @@
         :title="'点击查看详细系统状态'"
       >
         <div class="marquee-container w-full overflow-hidden">
-          <div class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+          <div v-if="liqDangerActive"
+            class="marquee-content text-xs whitespace-nowrap text-[#ff0000] liq-flash font-bold">
+            {{ liqDangerText }} | {{ systemStatusText }}
+          </div>
+          <div v-else
+            class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
             {{ systemStatusText }}
           </div>
         </div>
@@ -58,8 +63,9 @@
               <!-- 多头强平价（左侧）-->
               <div class="flex flex-col items-start min-w-0 shrink-0">
                 <span class="text-[18px] lg:text-[16px] text-gray-500 leading-none">多强平</span>
-                <span class="text-[20px] lg:text-[18px] font-mono font-bold text-[#0ecb81] leading-tight">
-                  {{ strategyStore.liquidationPrices.mt5.long != null ? formatPrice(strategyStore.liquidationPrices.mt5.long) : '暂无' }}
+                <span :class="['text-[20px] lg:text-[18px] font-mono font-bold leading-tight', liqDanger.mt5Long ? 'liq-flash text-[#ff0000]' : 'text-[#0ecb81]']">
+                  {{ currentLiq.mt5.long != null ? formatPrice(currentLiq.mt5.long) : '暂无' }}
+                  <span v-if="liqDanger.mt5Long" class="text-[10px]">{{ liqDistPct(currentLiq.mt5.long, bybit.mid) }}%</span>
                 </span>
               </div>
               <!-- 实时价格（中间）-->
@@ -69,8 +75,9 @@
               <!-- 空头强平价（右侧）-->
               <div class="flex flex-col items-end min-w-0 shrink-0">
                 <span class="text-[18px] lg:text-[16px] text-gray-500 leading-none">空强平</span>
-                <span class="text-[20px] lg:text-[18px] font-mono font-bold text-[#f6465d] leading-tight">
-                  {{ strategyStore.liquidationPrices.mt5.short != null ? formatPrice(strategyStore.liquidationPrices.mt5.short) : '暂无' }}
+                <span :class="['text-[20px] lg:text-[18px] font-mono font-bold leading-tight', liqDanger.mt5Short ? 'liq-flash text-[#ff0000]' : 'text-[#f6465d]']">
+                  {{ currentLiq.mt5.short != null ? formatPrice(currentLiq.mt5.short) : '暂无' }}
+                  <span v-if="liqDanger.mt5Short" class="text-[10px]">{{ liqDistPct(currentLiq.mt5.short, bybit.mid) }}%</span>
                 </span>
               </div>
             </div>
@@ -131,8 +138,9 @@
               <!-- 多头强平价（左侧）-->
               <div class="flex flex-col items-start min-w-0 shrink-0">
                 <span class="text-[18px] lg:text-[16px] text-gray-500 leading-none">多强平</span>
-                <span class="text-[20px] lg:text-[18px] font-mono font-bold text-[#0ecb81] leading-tight">
-                  {{ strategyStore.liquidationPrices.binance.long != null ? formatPrice(strategyStore.liquidationPrices.binance.long) : '暂无' }}
+                <span :class="['text-[20px] lg:text-[18px] font-mono font-bold leading-tight', liqDanger.binanceLong ? 'liq-flash text-[#ff0000]' : 'text-[#0ecb81]']">
+                  {{ currentLiq.binance.long != null ? formatPrice(currentLiq.binance.long) : '暂无' }}
+                  <span v-if="liqDanger.binanceLong" class="text-[10px]">{{ liqDistPct(currentLiq.binance.long, binance.mid) }}%</span>
                 </span>
               </div>
               <!-- 实时价格（中间）-->
@@ -142,8 +150,9 @@
               <!-- 空头强平价（右侧）-->
               <div class="flex flex-col items-end min-w-0 shrink-0">
                 <span class="text-[18px] lg:text-[16px] text-gray-500 leading-none">空强平</span>
-                <span class="text-[20px] lg:text-[18px] font-mono font-bold text-[#f6465d] leading-tight">
-                  {{ strategyStore.liquidationPrices.binance.short != null ? formatPrice(strategyStore.liquidationPrices.binance.short) : '暂无' }}
+                <span :class="['text-[20px] lg:text-[18px] font-mono font-bold leading-tight', liqDanger.binanceShort ? 'liq-flash text-[#ff0000]' : 'text-[#f6465d]']">
+                  {{ currentLiq.binance.short != null ? formatPrice(currentLiq.binance.short) : '暂无' }}
+                  <span v-if="liqDanger.binanceShort" class="text-[10px]">{{ liqDistPct(currentLiq.binance.short, binance.mid) }}%</span>
                 </span>
               </div>
             </div>
@@ -252,7 +261,23 @@
     <!-- System Status Modal -->
     <SystemStatusModal :isOpen="showSystemStatusModal" @close="showSystemStatusModal = false" />
   </div>
-</template>
+
+    <!-- Liquidation Danger Notification Overlay (non-blocking) -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="liqNotification"
+          class="fixed top-4 right-4 z-[9999] bg-[#ff0000]/95 text-white rounded-lg shadow-2xl p-4 max-w-sm cursor-pointer border-2 border-[#ff4444] liq-flash"
+          @click="liqNotification = null">
+          <div class="font-bold text-sm mb-1">⚠️ 市场接近危险！</div>
+          <div class="text-xs space-y-0.5">
+            <div>{{ liqNotification.label }}距离市场价仅 {{ liqNotification.pct }}%</div>
+            <div>当前价: {{ liqNotification.price }} | 强平价: {{ liqNotification.liq }}</div>
+            <div class="text-[10px] text-white/70 mt-1">点击关闭 | 10秒后自动消失</div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+  </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
@@ -301,6 +326,129 @@ const binanceConnected = ref(false)
 
 const bybit = ref({ bid: 0, ask: 0, mid: 0, prevBid: 0, prevAsk: 0, prevMid: 0 })
 const binance = ref({ bid: 0, ask: 0, mid: 0, prevBid: 0, prevAsk: 0, prevMid: 0 })
+
+// 当前产品对的强平价（按 pair_code 隔离）
+const currentLiq = computed(() => {
+  const v = strategyStore.getLiquidationPrices(currentPair.value)
+  return v
+})
+
+// Fallback: fetch liq prices directly if store is empty after 3s
+const _liqFallbackDone = ref(false)
+async function _fetchLiqDirect() {
+  try {
+    const resp = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const accounts = resp.data?.accounts || []
+    console.log('[LIQ_FALLBACK] fetched', accounts.length, 'accounts')
+    // Group by pair_code and populate store
+    const { PlatformId, isHedge } = await import('@/constants/platform')
+    const pairGroups = {}
+    for (const acc of accounts) {
+      if (acc.error || !acc.balance) continue
+      const b = acc.balance
+      const pairCode = acc.pair_code
+      if (!pairCode) continue
+      if (!pairGroups[pairCode]) {
+        pairGroups[pairCode] = { binance: { long: null, short: null }, mt5: { long: null, short: null } }
+      }
+      const pg = pairGroups[pairCode]
+      const isBinance = acc.platform_id === PlatformId.BINANCE
+      const isMT5 = acc.is_mt5_account && isHedge(acc.platform_id)
+      if (isBinance || isMT5) {
+        const longLiq = b.long_liquidation_price > 0 ? b.long_liquidation_price : null
+        const shortLiq = b.short_liquidation_price > 0 ? b.short_liquidation_price : null
+        const slot = isBinance ? pg.binance : pg.mt5
+        if (longLiq && (!slot.long || longLiq > slot.long)) slot.long = longLiq
+        if (shortLiq && (!slot.short || shortLiq < slot.short)) slot.short = shortLiq
+      }
+    }
+    for (const [pairCode, pg] of Object.entries(pairGroups)) {
+      console.log('[LIQ_FALLBACK] writing', pairCode, JSON.stringify(pg))
+      strategyStore.setLiquidationPrices(pairCode, 'binance', pg.binance.long, pg.binance.short)
+      strategyStore.setLiquidationPrices(pairCode, 'mt5', pg.mt5.long, pg.mt5.short)
+    }
+    _liqFallbackDone.value = true
+  } catch (e) {
+    console.error('[LIQ_FALLBACK] error:', e)
+  }
+}
+
+// If store is empty after 3 seconds, fetch directly
+setTimeout(() => {
+  const keys = Object.keys(strategyStore.liquidationPrices)
+  if (keys.length === 0 && !_liqFallbackDone.value) {
+    console.log('[LIQ_FALLBACK] store empty after 3s, fetching directly')
+    _fetchLiqDirect()
+  }
+}, 3000)
+
+// Liquidation proximity danger detection (默认 1.5%, 可通过 risk_settings 自定义)
+const LIQ_DANGER_PCT = 0.015
+const liqAlertShown = ref({})
+
+function isLiqDanger(liqPrice, marketPrice) {
+  if (!liqPrice || !marketPrice || liqPrice <= 0 || marketPrice <= 0) return false
+  return Math.abs(marketPrice - liqPrice) / marketPrice < LIQ_DANGER_PCT
+}
+
+const liqDanger = computed(() => ({
+  binanceLong:  isLiqDanger(currentLiq.value.binance.long, binance.value.mid),
+  binanceShort: isLiqDanger(currentLiq.value.binance.short, binance.value.mid),
+  mt5Long:      isLiqDanger(currentLiq.value.mt5.long, bybit.value.mid),
+  mt5Short:     isLiqDanger(currentLiq.value.mt5.short, bybit.value.mid),
+}))
+
+function liqDistPct(liqPrice, marketPrice) {
+  if (!liqPrice || !marketPrice || marketPrice <= 0) return null
+  return ((Math.abs(marketPrice - liqPrice) / marketPrice) * 100).toFixed(2)
+}
+
+// 强平危险时：跑马灯闪烁 + 非阻塞通知
+const liqDangerActive = computed(() =>
+  liqDanger.value.binanceLong || liqDanger.value.binanceShort ||
+  liqDanger.value.mt5Long || liqDanger.value.mt5Short
+)
+
+const liqDangerText = computed(() => {
+  const parts = []
+  const liq = currentLiq.value
+  if (liqDanger.value.binanceLong)
+    parts.push('主账号多强平距离 ' + liqDistPct(liq.binance.long, binance.value.mid) + '%')
+  if (liqDanger.value.binanceShort)
+    parts.push('主账号空强平距离 ' + liqDistPct(liq.binance.short, binance.value.mid) + '%')
+  if (liqDanger.value.mt5Long)
+    parts.push('对冲多强平距离 ' + liqDistPct(liq.mt5.long, bybit.value.mid) + '%')
+  if (liqDanger.value.mt5Short)
+    parts.push('对冲空强平距离 ' + liqDistPct(liq.mt5.short, bybit.value.mid) + '%')
+  return parts.length ? '⚠ ' + currentPair.value + ' ' + parts.join(' | ') : ''
+})
+
+// Non-blocking notification overlay for liq danger
+const liqNotification = ref(null)
+
+watch(liqDanger, (d) => {
+  const checks = [
+    { key: 'binanceLong',  danger: d.binanceLong,  label: '主账号多头强平价', liq: currentLiq.value.binance.long, price: binance.value.mid },
+    { key: 'binanceShort', danger: d.binanceShort, label: '主账号空头强平价', liq: currentLiq.value.binance.short, price: binance.value.mid },
+    { key: 'mt5Long',      danger: d.mt5Long,      label: '对冲账号多头强平价', liq: currentLiq.value.mt5.long, price: bybit.value.mid },
+    { key: 'mt5Short',     danger: d.mt5Short,     label: '对冲账号空头强平价', liq: currentLiq.value.mt5.short, price: bybit.value.mid },
+  ]
+  for (const c of checks) {
+    if (c.danger && !liqAlertShown.value[c.key]) {
+      liqAlertShown.value[c.key] = true
+      const pct = liqDistPct(c.liq, c.price)
+      liqNotification.value = {
+        label: c.label,
+        pct: pct,
+        price: c.price?.toFixed(2),
+        liq: c.liq?.toFixed(2),
+      }
+      setTimeout(() => { liqNotification.value = null }, 10000)
+    } else if (!c.danger) {
+      liqAlertShown.value[c.key] = false
+    }
+  }
+}, { deep: true })
 
 // Lag detection with sliding window (last 60 seconds)
 const SLIDING_WINDOW_SIZE = 60 // 60 seconds
@@ -569,19 +717,19 @@ watch(() => marketStore.connected, (val) => {
   }
 }, { deep: false })
 
-// Watch for account balance updates via WebSocket
-// Optimized: Only trigger when message type is account_balance
+// Watch for account balance and misc WebSocket messages (NOT position_snapshot)
 watch(() => marketStore.lastMessage, (message) => {
   if (!message) return
   if (message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
-  } else if (message.type === 'position_snapshot') {
-    handlePositionSnapshot(message.data)
-  } else if (message.type === 'mt5_position_update') {
-    handleMt5PositionUpdate(message.data)
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
   }
+}, { deep: false })
+
+// Position data: watch the deduped positionSnapshot (same source as StrategyPanel)
+watch(() => marketStore.positionSnapshot, (snap) => {
+  if (snap) handlePositionSnapshot(snap)
 }, { deep: false })
 
 // position_snapshot: real-time data pushed immediately after a trade fill.
@@ -593,13 +741,22 @@ function handlePositionSnapshot(data) {
   const shortLots = pairData ? (pairData.mt5_short ?? 0) : (data.bybit_short_lots ?? 0)
   const binanceLong = pairData ? (pairData.binance_long ?? 0) : (data.binance_long_xau ?? 0)
   const binanceShort = pairData ? (pairData.binance_short ?? 0) : (data.binance_short_xau ?? 0)
-  // Atomic swap: replace all arrays in one tick
-  bybitLongPositions.value = longLots > 0 ? [{ size: longLots }] : []
-  bybitShortPositions.value = shortLots > 0 ? [{ size: shortLots }] : []
-  if (binanceLong > 0 || binanceShort > 0) {
-    binanceLongPositions.value = binanceLong > 0 ? [{ size: binanceLong }] : []
-    binanceShortPositions.value = binanceShort > 0 ? [{ size: binanceShort }] : []
-  }
+
+  // Anti-flicker: skip all-zero if we currently hold positions
+  const incomingAllZero = (longLots === 0 && shortLots === 0 && binanceLong === 0 && binanceShort === 0)
+  const currentHasPosition = (bybitLongTotal.value !== 0 || bybitShortTotal.value !== 0 ||
+                              binanceLongTotal.value !== 0 || binanceShortTotal.value !== 0)
+  if (incomingAllZero && currentHasPosition) return
+
+  // Dedup: only update refs when values actually change (prevents unnecessary re-renders)
+  const newBL = longLots > 0 ? longLots : 0
+  const newBS = shortLots > 0 ? shortLots : 0
+  const newCL = binanceLong > 0 ? binanceLong : 0
+  const newCS = binanceShort > 0 ? binanceShort : 0
+  if (bybitLongTotal.value !== newBL) bybitLongPositions.value = newBL > 0 ? [{ size: newBL }] : []
+  if (bybitShortTotal.value !== newBS) bybitShortPositions.value = newBS > 0 ? [{ size: newBS }] : []
+  if (binanceLongTotal.value !== newCL) binanceLongPositions.value = newCL > 0 ? [{ size: newCL }] : []
+  if (binanceShortTotal.value !== newCS) binanceShortPositions.value = newCS > 0 ? [{ size: newCS }] : []
 }
 
 function handleAccountBalanceUpdate(data) {
@@ -1366,4 +1523,13 @@ defineExpose({
 
 /* ========== 移除单独的2K屏幕媒体查询 ========== */
 
+
+@keyframes liqFlash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.liq-flash {
+  animation: liqFlash 0.5s ease-in-out infinite;
+}
 </style>

@@ -602,9 +602,18 @@
             <label class="block text-xs text-text-tertiary mb-1">
               {{ isEditUser ? '密码（留空表示不修改）' : '密码 *' }}
             </label>
-            <input v-model="userForm.password" type="password" :required="!isEditUser" autocomplete="new-password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
-              placeholder="至少8个字符" />
+            <div class="relative">
+              <input v-model="userForm.password" :type="secretVisible.user_password ? 'text' : 'password'" :required="!isEditUser" autocomplete="new-password"
+                class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary"
+                :placeholder="isEditUser ? '留空表示不修改' : '至少8个字符'" />
+              <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <span v-if="isEditUser && !userForm.password" class="text-[10px] text-green-500">已设置</span>
+                <button type="button" v-if="userForm.password" @click="secretVisible.user_password = !secretVisible.user_password"
+                  class="text-text-tertiary hover:text-text-primary text-xs px-1" :title="secretVisible.user_password ? '隐藏' : '查看'">
+                  {{ secretVisible.user_password ? '🙈' : '👁' }}
+                </button>
+              </div>
+            </div>
           </div>
           <div class="flex items-center gap-3">
             <div @click="userForm.is_active = !userForm.is_active"
@@ -751,15 +760,33 @@
             <label class="block text-xs text-text-tertiary mb-1">
               {{ isEditAccount ? 'API Secret（留空不修改）' : 'API Secret *' }}
             </label>
-            <input v-model="accountForm.api_secret" type="password" :required="!isEditAccount" autocomplete="new-password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="输入 API Secret" />
+            <div class="relative">
+              <input v-model="accountForm.api_secret" :type="secretVisible.api_secret ? 'text' : 'password'" :required="!isEditAccount" autocomplete="new-password"
+                class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                :placeholder="isEditAccount && secretHasData.api_secret ? '••••••••（已设置）' : '输入 API Secret'" />
+              <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <span v-if="isEditAccount && secretHasData.api_secret && !accountForm.api_secret" class="text-[10px] text-green-500">已设置</span>
+                <button type="button" v-if="accountForm.api_secret" @click="secretVisible.api_secret = !secretVisible.api_secret"
+                  class="text-text-tertiary hover:text-text-primary text-xs px-1" :title="secretVisible.api_secret ? '隐藏' : '查看'">
+                  {{ secretVisible.api_secret ? '🙈' : '👁' }}
+                </button>
+              </div>
+            </div>
           </div>
-          <div v-if="platformSupportsMT5(accountForm.platform_id)">
-            <label class="block text-xs text-text-tertiary mb-1">Passphrase（可选）</label>
-            <input v-model="accountForm.passphrase" type="password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="Bybit API Passphrase" />
+          <div v-if="accountForm.platform_id !== 1">
+            <label class="block text-xs text-text-tertiary mb-1">{{ accountForm.platform_id === 5 ? 'Passphrase *' : 'Passphrase（可选）' }}</label>
+            <div class="relative">
+              <input v-model="accountForm.passphrase" :type="secretVisible.passphrase ? 'text' : 'password'" :required="accountForm.platform_id === 5"
+                class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                :placeholder="isEditAccount && secretHasData.passphrase ? '••••••••（已设置）' : (accountForm.platform_id === 5 ? 'OKX API Passphrase（必填）' : 'API Passphrase')" />
+              <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <span v-if="isEditAccount && secretHasData.passphrase && !accountForm.passphrase" class="text-[10px] text-green-500">已设置</span>
+                <button type="button" v-if="accountForm.passphrase" @click="secretVisible.passphrase = !secretVisible.passphrase"
+                  class="text-text-tertiary hover:text-text-primary text-xs px-1" :title="secretVisible.passphrase ? '隐藏' : '查看'">
+                  {{ secretVisible.passphrase ? '🙈' : '👁' }}
+                </button>
+              </div>
+            </div>
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">杠杆倍数</label>
@@ -820,10 +847,19 @@
             <label class="block text-xs text-text-tertiary mb-1">
               MT5 密码{{ isEditMT5 ? '（留空不修改）' : ' *' }}
             </label>
-            <input v-model="mt5Form.mt5_password" type="password" :required="!isEditMT5"
-              autocomplete="new-password"
-              class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-              placeholder="输入MT5登录密码" />
+            <div class="relative">
+              <input v-model="mt5Form.mt5_password" :type="secretVisible.mt5_password ? 'text' : 'password'" :required="!isEditMT5"
+                autocomplete="new-password"
+                class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                :placeholder="isEditMT5 && secretHasData.mt5_password ? '••••••••（已设置）' : '输入MT5登录密码'" />
+              <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <span v-if="isEditMT5 && secretHasData.mt5_password && !mt5Form.mt5_password" class="text-[10px] text-green-500">已设置</span>
+                <button type="button" v-if="mt5Form.mt5_password" @click="secretVisible.mt5_password = !secretVisible.mt5_password"
+                  class="text-text-tertiary hover:text-text-primary text-xs px-1" :title="secretVisible.mt5_password ? '隐藏' : '查看'">
+                  {{ secretVisible.mt5_password ? '🙈' : '👁' }}
+                </button>
+              </div>
+            </div>
           </div>
           <div>
             <label class="block text-xs text-text-tertiary mb-1">密码类型 *</label>
@@ -925,9 +961,18 @@
             </div>
             <div>
               <label class="block text-xs text-text-tertiary mb-1">密码</label>
-              <input v-model="proxyForm.password" type="password"
-                class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-                placeholder="IPIPGO 密码" />
+              <div class="relative">
+                <input v-model="proxyForm.password" :type="secretVisible.proxy_password ? 'text' : 'password'"
+                  class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
+                  :placeholder="secretHasData.proxy_password && !proxyForm.password ? '••••••••（已设置）' : 'IPIPGO 密码'" />
+                <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <span v-if="secretHasData.proxy_password && !proxyForm.password" class="text-[10px] text-green-500">已设置</span>
+                  <button type="button" v-if="proxyForm.password" @click="secretVisible.proxy_password = !secretVisible.proxy_password"
+                    class="text-text-tertiary hover:text-text-primary text-xs px-1" :title="secretVisible.proxy_password ? '隐藏' : '查看'">
+                    {{ secretVisible.proxy_password ? '🙈' : '👁' }}
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="col-span-2">
               <label class="block text-xs text-text-tertiary mb-1">地区备注（可选）</label>
@@ -1227,7 +1272,8 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in subList" :key="row.id" class="border-b border-border-secondary/50">
+              <template v-for="row in subList" :key="row.id">
+              <tr class="border-b border-border-secondary/50">
                 <td class="py-1.5 font-mono text-text-primary">{{ row.sub_username }}</td>
                 <td class="py-1.5 text-right font-mono">{{ Number(row.invested_cny).toLocaleString() }}</td>
                 <td class="py-1.5 text-right font-mono">{{ Number(row.invested_usdt).toFixed(2) }}</td>
@@ -1244,11 +1290,77 @@
                     {{ row.status === 'active' ? '启用' : '停用' }}
                   </span>
                 </td>
-                <td class="py-1.5 text-center">
-                  <button v-if="row.status === 'active'" @click="deactivateSub(row)"
+                <td class="py-1.5 text-center space-x-1">
+                  <button @click.stop="startEditSub(row)"
+                    class="text-[10px] text-primary hover:opacity-80">编辑</button>
+                  <button v-if="row.status === 'active'" @click.stop="deactivateSub(row)"
                     class="text-[10px] text-danger hover:opacity-80">停用</button>
+                  <button v-if="row.status !== 'active'" @click.stop="reactivateSub(row)"
+                    class="text-[10px] text-success hover:opacity-80">启用</button>
                 </td>
               </tr>
+              <!-- Inline edit row -->
+              <tr v-if="editingSub && editingSub.id === row.id" class="bg-dark-100/50">
+                <td colspan="8" class="py-3 px-3">
+                  <div class="space-y-2">
+                    <div class="grid grid-cols-4 gap-2 text-[10px] bg-dark-200/50 rounded p-2">
+                      <div>
+                        <span class="text-text-tertiary">投入(¥)</span>
+                        <input v-model.number="editSubForm.invested_cny" type="number" step="100" min="0"
+                          class="w-full bg-dark-200 border border-border-primary rounded px-1.5 py-0.5 text-xs font-mono mt-0.5" />
+                      </div>
+                      <div>
+                        <span class="text-text-tertiary">折合(USDT)</span>
+                        <input v-model.number="editSubForm.invested_usdt" type="number" step="0.01" min="0"
+                          class="w-full bg-dark-200 border border-border-primary rounded px-1.5 py-0.5 text-xs font-mono mt-0.5" />
+                      </div>
+                      <div>
+                        <span class="text-text-tertiary">份额</span>
+                        <input v-model.number="editSubForm.shares" type="number" step="0.0001" min="0"
+                          class="w-full bg-dark-200 border border-border-primary rounded px-1.5 py-0.5 text-xs font-mono mt-0.5" />
+                      </div>
+                      <div>
+                        <span class="text-text-tertiary">当前估值</span>
+                        <div class="font-mono text-xs mt-1" :class="row.sub_current_value_usdt >= row.invested_usdt ? 'text-success' : 'text-danger'">
+                          {{ Number(row.sub_current_value_usdt).toFixed(2) }} USDT
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-3 flex-wrap">
+                      <div class="flex items-center gap-1">
+                        <span class="text-[10px] text-text-tertiary">用户名:</span>
+                        <span class="text-xs font-mono text-text-primary">{{ row.sub_username }}</span>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <span class="text-[10px] text-text-tertiary">新密码:</span>
+                        <div class="relative">
+                          <input v-model="editSubForm.password" :type="editSubForm.showPw ? 'text' : 'password'"
+                            placeholder="留空不修改" autocomplete="new-password"
+                            class="bg-dark-200 border border-border-primary rounded px-2 py-1 text-xs font-mono w-36 pr-8" />
+                          <button type="button" v-if="editSubForm.password" @click="editSubForm.showPw = !editSubForm.showPw"
+                            class="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary text-[10px]">
+                            {{ editSubForm.showPw ? '🙈' : '👁' }}
+                          </button>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <span class="text-[10px] text-text-tertiary">状态:</span>
+                        <select v-model="editSubForm.is_active"
+                          class="bg-dark-200 border border-border-primary rounded px-1.5 py-1 text-[10px]">
+                          <option :value="true">启用</option>
+                          <option :value="false">停用</option>
+                        </select>
+                      </div>
+                      <button @click="saveEditSub" :disabled="editSubSaving"
+                        class="px-2.5 py-1 bg-primary hover:bg-primary-hover text-dark-300 rounded text-[10px] font-medium disabled:opacity-50">
+                        {{ editSubSaving ? '保存中…' : '保存' }}
+                      </button>
+                      <button @click="editingSub = null" class="px-2 py-1 text-[10px] text-text-tertiary hover:text-text-primary">取消</button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -1318,13 +1430,19 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="text-xs text-text-tertiary">用户名</label>
-              <input v-model="subForm.username" placeholder="如 sub_alice"
+              <input v-model="subForm.username" placeholder="如 sub_alice" autocomplete="off"
                 class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
               <label class="text-xs text-text-tertiary">登录密码</label>
-              <input v-model="subForm.password" type="password" placeholder="至少 6 位"
-                class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
+              <div class="relative">
+                <input v-model="subForm.password" :type="secretVisible.sub_password ? 'text' : 'password'" placeholder="至少 6 位" autocomplete="new-password"
+                  class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm pr-10" />
+                <button type="button" v-if="subForm.password" @click="secretVisible.sub_password = !secretVisible.sub_password"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary text-xs px-1">
+                  {{ secretVisible.sub_password ? '🙈' : '👁' }}
+                </button>
+              </div>
             </div>
             <div>
               <label class="text-xs text-text-tertiary">投入金额（人民币 ¥）</label>
@@ -1690,7 +1808,8 @@ async function createSub() {
 }
 
 async function deactivateSub(row) {
-  if (!confirm(`停用子账号 ${row.sub_username}？停用后该用户无法登录，订阅记录保留。`)) return
+  const ok = window.confirm(`停用子账号 ${row.sub_username}？停用后该用户无法登录，订阅记录保留。`)
+  if (!ok) return
   try {
     await api.delete(`/api/v1/sub-accounts/${row.id}`)
     showToast('已停用')
@@ -1698,6 +1817,69 @@ async function deactivateSub(row) {
     await loadUsers()
   } catch (e) {
     showToast('停用失败：' + (e.response?.data?.detail || e.message), 'error')
+  }
+}
+
+async function reactivateSub(row) {
+  const ok = window.confirm(`启用子账号 ${row.sub_username}？启用后该用户可重新登录。`)
+  if (!ok) return
+  try {
+    await api.post(`/api/v1/sub-accounts/${row.id}/reactivate`)
+    showToast('已启用')
+    await reloadSubs()
+    await loadUsers()
+  } catch (e) {
+    showToast('启用失败：' + (e.response?.data?.detail || e.message), 'error')
+  }
+}
+
+const editingSub = ref(null)
+const editSubForm = ref({ password: '', is_active: true, showPw: false, invested_cny: 0, invested_usdt: 0, shares: 0 })
+const editSubSaving = ref(false)
+
+function startEditSub(row) {
+  editingSub.value = row
+  editSubForm.value = {
+    password: '', is_active: row.status === 'active', showPw: false,
+    invested_cny: Number(row.invested_cny),
+    invested_usdt: Number(row.invested_usdt),
+    shares: Number(row.shares),
+  }
+}
+
+async function saveEditSub() {
+  if (!editingSub.value) return
+  const f = editSubForm.value
+  const row = editingSub.value
+
+  if (f.password && f.password.length < 6) {
+    showToast('密码至少 6 位', 'error'); return
+  }
+
+  editSubSaving.value = true
+  try {
+    // 1. Update user password/status if needed
+    const userData = { is_active: f.is_active }
+    if (f.password) userData.password = f.password
+    await api.put(`/api/v1/users/${row.sub_user_id}`, userData)
+
+    // 2. Update subscription share data if changed
+    const shareData = {}
+    if (f.invested_cny !== Number(row.invested_cny)) shareData.invested_cny = f.invested_cny
+    if (f.invested_usdt !== Number(row.invested_usdt)) shareData.invested_usdt = f.invested_usdt
+    if (f.shares !== Number(row.shares)) shareData.shares = f.shares
+    if (Object.keys(shareData).length > 0) {
+      await api.put(`/api/v1/sub-accounts/${row.id}`, shareData)
+    }
+
+    showToast(`子账号 ${row.sub_username} 已更新`)
+    editingSub.value = null
+    await reloadSubs()
+    await loadUsers()
+  } catch (e) {
+    showToast('更新失败：' + (e.response?.data?.detail || e.message), 'error')
+  } finally {
+    editSubSaving.value = false
   }
 }
 
@@ -1785,6 +1967,7 @@ async function loadUsers() {
 
 function openAddUser() {
   isEditUser.value = false
+  secretVisible.value.user_password = false
   currentUser.value = null
   userForm.value = { username: '', email: '', password: '', role: '交易员', is_active: true, feishu_open_id: '', feishu_mobile: '', feishu_union_id: '' }
   showUserModal.value = true
@@ -1792,6 +1975,7 @@ function openAddUser() {
 
 function openEditUser(u) {
   isEditUser.value = true
+  secretVisible.value.user_password = false
   currentUser.value = u
   userForm.value = {
     username: u.username, email: u.email || '', password: '', role: u.role || '交易员',
@@ -2053,6 +2237,8 @@ const accounts              = ref([])
 const accountsLoading       = ref(false)
 const selectedAccountUserId = ref('')
 const showAccountModal      = ref(false)
+const secretVisible = ref({ api_secret: false, passphrase: false, mt5_password: false, proxy_password: false, user_password: false, sub_password: false })
+const secretHasData = ref({ api_secret: false, passphrase: false, mt5_password: false, proxy_password: false, user_password: false, sub_password: false })
 const isEditAccount         = ref(false)
 const currentAccount        = ref(null)
 const accountForm = ref({
@@ -2103,6 +2289,8 @@ function openAddAccount() {
     passphrase: '', is_mt5_account: false, is_active: true,
     leverage: defaultLeverage(firstPid)
   }
+  secretVisible.value = { api_secret: false, passphrase: false }
+  secretHasData.value = { api_secret: false, passphrase: false }
   showAccountModal.value = true
 }
 
@@ -2117,12 +2305,18 @@ async function openEditAccount(acc) {
     is_active: acc.is_active, leverage: acc.leverage || defaultLeverage(acc.platform_id),
     account_role: acc.account_role || ''
   }
+  secretVisible.value = { api_secret: false, passphrase: false }
+  secretHasData.value = { api_secret: false, passphrase: false }
   showAccountModal.value = true
   // Load actual API secret from backend (stored encrypted, shown on edit)
   try {
     const r = await api.get(`/api/v1/accounts/${acc.account_id}/secret`)
-    accountForm.value.api_secret  = r.data.api_secret  || ''
-    accountForm.value.passphrase  = r.data.passphrase  || ''
+    const _sec = r.data.api_secret || ''
+    const _pp = r.data.passphrase || ''
+    secretHasData.value = { api_secret: !!_sec, passphrase: !!_pp }
+    // Don't pre-fill — show placeholder instead so user knows it's set
+    accountForm.value.api_secret = ''
+    accountForm.value.passphrase = ''
   } catch { /* admin may not have bypass yet — user can re-enter manually */ }
 }
 
@@ -2130,6 +2324,14 @@ async function openEditAccount(acc) {
 const showProxyModal  = ref(false)
 const proxyTargetAcc  = ref(null)
 const proxyForm = ref({ proxy_type: 'socks5', host: '', port: null, username: '', password: '', region: '' })
+
+async function fetchIpRegion(ip) {
+  if (!ip) return ''
+  try {
+    const r = await api.get('/api/v1/users/ip-location', { params: { ip } })
+    return r.data?.location || r.data?.region || ''
+  } catch { return '' }
+}
 
 function openProxyConfig(acc) {
   proxyTargetAcc.value = acc
@@ -2148,19 +2350,28 @@ function openProxyConfig(acc) {
     password:   cfg.password   || '',
     region:     region,
   }
+  secretVisible.value.proxy_password = false
+  secretHasData.value.proxy_password = !!proxyForm.value.password
+  proxyForm.value.password = ''
   showProxyModal.value = true
+  // Auto-fetch region from IP if not set
+  if (!proxyForm.value.region && proxyForm.value.host) {
+    fetchIpRegion(proxyForm.value.host).then(r => { if (r) proxyForm.value.region = r })
+  }
 }
 
 async function saveProxyConfig() {
   const acc = proxyTargetAcc.value
   if (!acc) return
-  const cfg = proxyForm.value.host ? {
-    proxy_type: proxyForm.value.proxy_type,
-    host:       proxyForm.value.host,
-    port:       proxyForm.value.port,
-    username:   proxyForm.value.username || null,
-    password:   proxyForm.value.password || null,
-    region:     proxyForm.value.region   || null,
+  const _pf = { ...proxyForm.value }
+  if (!_pf.password && secretHasData.value.proxy_password) delete _pf.password
+    const cfg = _pf.host ? {
+    proxy_type: _pf.proxy_type,
+    host:       _pf.host,
+    port:       _pf.port,
+    username:   _pf.username || null,
+    password:   _pf.password || null,
+    region:     _pf.region   || null,
   } : null
   try {
     await api.put(`/api/v1/accounts/${acc.account_id}`, { proxy_config: cfg })
@@ -2820,6 +3031,8 @@ function openAddMT5() {
 
 function openEditMT5(client) {
   isEditMT5.value = true
+  secretVisible.value.mt5_password = false
+  secretHasData.value.mt5_password = !!client.mt5_password
   currentMT5.value = client
   mt5Form.value = {
     client_name:   client.client_name,
