@@ -1,5 +1,6 @@
 """AgentState helpers — single-row table with mode/kill switch/global enable."""
 from typing import Optional
+import json as _json
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -29,6 +30,14 @@ async def _publish_status(db: AsyncSession) -> None:
             'last_decision_at': st['last_decision_at'].isoformat() if st.get('last_decision_at') else None,
         }
         await stream_hub.publish('agent.status', safe)
+        # Bridge to Go WS hub via Redis for admin frontend
+        try:
+            from app.core.redis import get_redis
+            rc = await get_redis()
+            if rc:
+                await rc.publish('ws:broadcast', _json.dumps({'type': 'agent_status', 'data': safe}))
+        except Exception:
+            pass
     except Exception:
         # Never let pub errors break a state setter
         pass

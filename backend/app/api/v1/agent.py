@@ -378,6 +378,194 @@ async def create_proposal(req: ProposalCreateReq, db: AsyncSession = Depends(get
     return {'ok': True, 'proposal_id': new_id}
 
 
+class AiDraftReq(BaseModel):
+    message: str
+    target_id: Optional[int] = None
+    history: Optional[List[Dict[str, str]]] = None
+
+
+CONFIG_SCHEMA_PROMPT = """你是 OpenCLAW 量化交易系统的配置助手。用户会用中文自然语言描述配置变更需求，你需要将其转化为精确的 config_diff JSON。
+
+## 系统配置结构
+
+当前系统有以下配置键（agent_active_config 表）：
+
+1. **position_caps** — 持仓限额
+   - single_trade_pct (float, 0~1): 单笔交易占总资金比例，如 0.10 = 10%
+   - total_position_pct (float, 0~1): 总持仓占总资金比例上限
+   - daily_volume_pct (float, 0~100): 日交易量占比上限
+
+2. **rate_limits** — 频次限制
+   - max_decisions_per_min (int): 每分钟最大决策数
+   - max_trades_per_hour (int): 每小时最大交易数
+   - cooldown_after_loss_s (int): 亏损后冷却秒数
+
+3. **symbols** — 交易标的列表
+   - (array of strings): 如 ["GBXAU", "XAUUSD"]
+
+4. **spread_modes** — 点差模式
+   - (object): 键为标的名，值为模式配置
+
+5. **equity_guard** — 净资产守卫
+   - warn_ratio (float, 0~1): 警告阈值
+   - critical_ratio (float, 0~1): 危险阈值
+   - force_reduce_ratio (float, 0~1): 强制减仓阈值
+   - force_reduce_pct (float, 0~1): 强制减仓比例
+
+6. **llm_settings** — LLM 设置
+   - model (string): 模型名称
+   - streaming (bool): 是否流式
+   - balance_alert_threshold_cny (float): 余额告警阈值(元)
+
+7. **rate_limits** — 频次限制（同上）
+
+8. **time_windows** — 时间窗口
+   - (object): 交易时段配置
+
+9. **no_profit_alert** — 无盈利告警
+   - (object): 告警相关阈值
+
+10. **relay_stations** — 中转站配置（数组，不建议通过提案修改）
+
+11. **chesspnt_auth** — 认证凭据（敏感，不建议通过提案修改）
+
+12. **agent_scope** — 智能体作用域（不建议通过提案修改）
+
+## 当前配置值
+
+{current_config}
+
+## 目标级覆盖
+
+如果用户指定了特定目标（target），config_diff 会写入 agent_target_config 而非全局。
+可用目标列表：
+{targets_info}
+
+## 输出要求
+
+返回严格的 JSON（无注释，无 markdown 包裹）：
+{{
+  "title": "简短标题，20字以内",
+  "rationale": "业务推理：为什么要改、预期收益、风险点",
+  "config_diff": {{ ... }},
+  "target_id": null 或目标ID数字,
+  "warnings": ["可选的风险提示"],
+  "est_position_pct": null 或 0~1 的浮点数
+}}
+
+config_diff 只包含需要变更的键和字段，不要包含未变更的部分。
+如果用户描述不清或不合理，在 warnings 中说明，仍然尽量给出最接近的 diff。
+如果涉及敏感配置（chesspnt_auth, relay_stations），在 warnings 中提示建议走专门管理界面。
+"""
+
+
+@router.post('/proposals/ai-draft')
+async def ai_draft_proposal(req: AiDraftReq, db: AsyncSession = Depends(get_db),
+                            user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Use LLM to convert natural language into a structured proposal draft."""
+    import os, aiohttp, json as _json, logging
+    log = logging.getLogger(__name__)
+
+    cfg = await config_loader.load_config(db, force=True)
+    ls = cfg.get('llm_settings', {}) or {}
+    base = (os.getenv('OPENCLAW_LLM_BASE_URL') or '').rstrip('/')
+    key = os.getenv('OPENCLAW_LLM_API_KEY', '')
+    model = ls.get('model', '')
+
+    if not base or not key or not model:
+        raise HTTPException(status_code=400, detail='LLM 未配置（需要 OPENCLAW_LLM_BASE_URL, OPENCLAW_LLM_API_KEY 和 llm_settings.model）')
+
+    # Build current config context (mask sensitive values)
+    config_lines = []
+    rows = (await db.execute(text("SELECT key, value FROM agent_active_config ORDER BY key"))).all()
+    SENSITIVE_KEYS = {'chesspnt_auth', 'relay_sessions'}
+    for row in rows:
+        k, v = row[0], row[1]
+        if k in SENSITIVE_KEYS:
+            config_lines.append(f"- {k}: (敏感，已隐藏)")
+        else:
+            config_lines.append(f"- {k}: {_json.dumps(v, ensure_ascii=False)}")
+
+    # Build targets info
+    targets_rows = (await db.execute(text(
+        "SELECT id, username, pair_code FROM agent_scope_targets WHERE enabled=true ORDER BY id"
+    ))).all()
+    targets_info = '\n'.join(f"  - ID {r[0]}: {r[1]}/{r[2]}" for r in targets_rows) or '(无目标)'
+
+    system_prompt = CONFIG_SCHEMA_PROMPT.format(
+        current_config='\n'.join(config_lines),
+        targets_info=targets_info,
+    )
+
+    messages = [{'role': 'system', 'content': system_prompt}]
+    if req.history:
+        for h in req.history[-6:]:
+            messages.append({'role': h.get('role', 'user'), 'content': h.get('content', '')})
+    messages.append({'role': 'user', 'content': req.message})
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.post(
+                f'{base}/v1/chat/completions',
+                headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+                json={
+                    'model': model,
+                    'messages': messages,
+                    'max_tokens': 2000,
+                    'temperature': 0.3,
+                },
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    log.error(f'AI draft LLM error {resp.status}: {body[:500]}')
+                    raise HTTPException(status_code=502, detail=f'LLM 调用失败: HTTP {resp.status}')
+                data = await resp.json()
+                content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=502, detail=f'LLM 网络错误: {e}')
+
+    # Parse LLM response — try to extract JSON
+    content = content.strip()
+    if content.startswith('```'):
+        lines = content.split('\n')
+        lines = [l for l in lines if not l.startswith('```')]
+        content = '\n'.join(lines).strip()
+
+    try:
+        draft = _json.loads(content)
+    except _json.JSONDecodeError:
+        import re as _re
+        m = _re.search(r'\{[\s\S]*\}', content)
+        if m:
+            try:
+                draft = _json.loads(m.group())
+            except _json.JSONDecodeError:
+                return {'ok': False, 'error': 'AI 返回的内容无法解析为 JSON', 'raw': content}
+        else:
+            return {'ok': False, 'error': 'AI 返回的内容无法解析为 JSON', 'raw': content}
+
+    # Validate config_diff keys
+    valid_keys = {r[0] for r in rows}
+    warnings = list(draft.get('warnings', []) or [])
+    if draft.get('config_diff'):
+        bad_keys = [k for k in draft['config_diff'] if k not in valid_keys]
+        if bad_keys:
+            warnings.append(f'以下键不在当前配置中，可能无效: {", ".join(bad_keys)}')
+
+    return {
+        'ok': True,
+        'draft': {
+            'title': draft.get('title', ''),
+            'rationale': draft.get('rationale', ''),
+            'config_diff': draft.get('config_diff', {}),
+            'target_id': draft.get('target_id') if draft.get('target_id') else req.target_id,
+            'est_position_pct': draft.get('est_position_pct'),
+            'warnings': warnings,
+        },
+        'ai_message': content,
+    }
+
+
 @router.get('/config')
 async def get_config(db: AsyncSession = Depends(get_db), user_id: str = Depends(require_admin)) -> Dict[str, Any]:
     return await config_loader.load_config(db, force=True)
@@ -1610,3 +1798,43 @@ async def reject_strategy(pid: int, reason: Optional[str] = Body(None, embed=Tru
     except Exception:
         pass
     return {'ok': True}
+
+
+@router.get('/config-audit')
+async def get_config_audit(db: AsyncSession = Depends(get_db),
+                           user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Returns config with audit metadata (source_proposal_id, updated_at, updated_by)."""
+    global_rows = (await db.execute(text(
+        'SELECT key, value, source_proposal_id, updated_at, updated_by '
+        'FROM agent_active_config ORDER BY key'
+    ))).all()
+    target_rows = (await db.execute(text(
+        'SELECT target_id, key, value, source_proposal_id, updated_at, updated_by '
+        'FROM agent_target_config ORDER BY target_id, key'
+    ))).all()
+    # Resolve target labels
+    target_ids = list(set(r[0] for r in target_rows))
+    target_labels = {}
+    if target_ids:
+        label_rows = (await db.execute(text(
+            'SELECT st.id, u.username, st.pair_code '
+            'FROM agent_scope_targets st JOIN users u ON st.user_id = u.user_id '
+            'WHERE st.id = ANY(:ids)'
+        ), {'ids': target_ids})).all()
+        for lr in label_rows:
+            target_labels[lr[0]] = f'{lr[1]}/{lr[2]}'
+    return {
+        'global': [{
+            'key': r[0], 'value': r[1],
+            'source_proposal_id': r[2],
+            'updated_at': r[3].isoformat() if r[3] else None,
+            'updated_by': str(r[4]) if r[4] else None,
+        } for r in global_rows],
+        'targets': [{
+            'target_id': r[0], 'target_label': target_labels.get(r[0], f'#{r[0]}'),
+            'key': r[1], 'value': r[2],
+            'source_proposal_id': r[3],
+            'updated_at': r[4].isoformat() if r[4] else None,
+            'updated_by': str(r[5]) if r[5] else None,
+        } for r in target_rows],
+    }

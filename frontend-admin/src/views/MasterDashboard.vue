@@ -36,6 +36,12 @@
           <span class="text-text-tertiary">风险</span>
           <span class="px-1.5 py-0.5 rounded text-xs font-bold" :class="globalRiskBadge">{{ globalRiskText }}</span>
         </div>
+        <div v-if="agentHasAlert" class="flex items-center gap-1.5">
+          <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+          <span class="text-[10px] text-red-400 font-bold">
+            {{ agentStatus.kill_switch ? 'KILL开启' : agentLlm.circuit_state === 'open' ? 'LLM熔断' : 'LLM异常' }}
+          </span>
+        </div>
         <DataStaleBadge :lastUpdateAt="lastUpdateTs" :thresholdMs="35000" />
         <span class="text-text-tertiary">{{ lastUpdate }}</span>
         <button @click="refreshAll" :disabled="refreshing" class="px-2.5 py-1 bg-dark-200 hover:bg-dark-50 rounded-lg text-xs transition-colors disabled:opacity-50">
@@ -420,6 +426,164 @@
       </div>
     </div>
 
+    <!-- ===== Layer 3b: OpenCLAW 智能体 ===== -->
+    <div class="space-y-2">
+      <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">OpenCLAW 智能体</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+
+        <!-- Card A: 智能体总览 -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="agentStatus.kill_switch ? 'border-red-800/50' : agentStatus.mode === 'live' ? 'border-green-800/30' : 'border-yellow-800/30'">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">智能体总览</span>
+            <div class="flex items-center gap-2">
+              <span v-if="agentStatus.kill_switch" class="text-[10px] px-1.5 py-0.5 rounded-full bg-red-900/60 text-red-400 font-bold animate-pulse">KILL</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="agentModeClass">{{ agentModeLabel }}</span>
+            </div>
+          </div>
+          <div class="text-xs text-text-tertiary space-y-1.5">
+            <div class="flex justify-between">
+              <span>活跃 Scope</span>
+              <button @click="showScopePanel = !showScopePanel" class="font-mono text-primary hover:underline cursor-pointer">{{ agentActiveTargets }} 个目标</button>
+            </div>
+            <div class="flex justify-between">
+              <span>LLM 熔断器</span>
+              <span class="font-mono" :class="circuitClass">{{ circuitLabel }}</span>
+            </div>
+            <div class="flex justify-between"><span>LLM 模型</span><span class="font-mono text-text-secondary truncate ml-4 max-w-[120px]" :title="agentLlm.model">{{ agentLlm.model }}</span></div>
+            <div class="flex justify-between"><span>持仓比率</span><span class="font-mono text-text-secondary">{{ agentStatus.position_ratio != null ? (agentStatus.position_ratio * 100).toFixed(1) + '%' : '--' }}</span></div>
+            <div class="flex justify-between"><span>当前点差</span><span class="font-mono text-text-secondary">{{ agentStatus.spread != null ? agentStatus.spread.toFixed(1) : '--' }}</span></div>
+          </div>
+        </div>
+
+        <!-- Card B: 决策动态 (1h) + 24h timeline -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">决策动态 <span class="text-[10px] text-text-tertiary font-normal">(1h)</span></span>
+            <span class="text-[10px] text-text-tertiary font-mono">{{ agentDecisionStats.total }} 次</span>
+          </div>
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2 text-xs">
+              <span class="text-text-tertiary w-8">执行</span>
+              <div class="flex-1 h-1.5 bg-dark-300 rounded-full overflow-hidden">
+                <div class="h-full bg-green-500 rounded-full transition-all" :style="{ width: agentDecisionPcts.executed + '%' }"></div>
+              </div>
+              <span class="font-mono text-green-400 w-8 text-right text-[10px]">{{ agentDecisionStats.executed }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="text-text-tertiary w-8">影子</span>
+              <div class="flex-1 h-1.5 bg-dark-300 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full transition-all" :style="{ width: agentDecisionPcts.shadow + '%' }"></div>
+              </div>
+              <span class="font-mono text-blue-400 w-8 text-right text-[10px]">{{ agentDecisionStats.shadow }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="text-text-tertiary w-8">拒绝</span>
+              <div class="flex-1 h-1.5 bg-dark-300 rounded-full overflow-hidden">
+                <div class="h-full bg-red-500 rounded-full transition-all" :style="{ width: agentDecisionPcts.rejected + '%' }"></div>
+              </div>
+              <span class="font-mono text-red-400 w-8 text-right text-[10px]">{{ agentDecisionStats.rejected }}</span>
+            </div>
+          </div>
+          <!-- 24h decision timeline mini bars -->
+          <div class="mt-2 pt-2 border-t border-border-secondary">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] text-text-tertiary">24h 决策频率</span>
+              <span class="text-[10px] text-text-tertiary font-mono">{{ agentTimelineBars.reduce((s, b) => s + b.total, 0) }} 总计</span>
+            </div>
+            <div class="flex items-end gap-px h-8" v-if="agentTimelineBars.length">
+              <div v-for="(bar, i) in agentTimelineBars" :key="i"
+                class="flex-1 rounded-t transition-all relative group cursor-default"
+                :style="{ height: Math.max(bar.total / timelineMax * 100, bar.total > 0 ? 3 : 0) + '%' }"
+                :class="bar.rejected > bar.executed ? 'bg-red-500' : bar.shadow > bar.executed ? 'bg-blue-500' : 'bg-green-500'">
+                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-dark-300 text-text-primary text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-10">
+                  {{ bar.hour?.slice(11,16) || '' }}: {{ bar.total }}次 (执{{ bar.executed }}/影{{ bar.shadow }}/拒{{ bar.rejected }})
+                </div>
+              </div>
+            </div>
+            <div v-else class="h-8 flex items-center justify-center text-[10px] text-text-tertiary">暂无决策数据</div>
+          </div>
+        </div>
+
+        <!-- Card C: LLM Token 成本 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">LLM 成本</span>
+            <span class="text-[10px] font-mono" :class="agentLlm.fail_rate > 0.1 ? 'text-red-400' : 'text-green-400'">失败率 {{ (agentLlm.fail_rate * 100).toFixed(1) }}%</span>
+          </div>
+          <div class="text-xs text-text-tertiary space-y-1.5">
+            <div class="flex justify-between"><span>今日 Token</span><span class="font-mono text-text-secondary">{{ fmtTokens(agentLlmStats.tokens_today.total) }}</span></div>
+            <div class="flex justify-between"><span>今日调用</span><span class="font-mono text-text-secondary">{{ agentLlmStats.tokens_today.calls }} 次</span></div>
+            <div class="flex justify-between"><span>累计 Token</span><span class="font-mono text-text-secondary">{{ fmtTokens(agentLlmStats.tokens_total.total) }}</span></div>
+            <div class="flex justify-between"><span>累计调用</span><span class="font-mono text-text-secondary">{{ agentLlmStats.tokens_total.calls }} 次</span></div>
+            <div v-if="agentLlmStats.balance != null" class="flex justify-between">
+              <span>中继余额</span>
+              <span class="font-mono" :class="agentLlmStats.balance < 1 ? 'text-red-400 font-bold' : agentLlmStats.balance < 10 ? 'text-yellow-400' : 'text-green-400'">${{ typeof agentLlmStats.balance === 'number' ? agentLlmStats.balance.toFixed(2) : '--' }}</span>
+            </div>
+          </div>
+          <div class="border-t border-border-secondary mt-2 pt-2 text-xs text-text-tertiary space-y-1">
+            <div class="flex justify-between"><span>平均延迟</span><span class="font-mono" :class="agentLlm.avg_latency_ms > 5000 ? 'text-red-400' : agentLlm.avg_latency_ms > 2000 ? 'text-yellow-400' : 'text-text-secondary'">{{ agentLlm.avg_latency_ms.toFixed(0) }}ms</span></div>
+            <div class="flex justify-between"><span>熔断器</span><span class="font-mono" :class="circuitClass">{{ circuitLabel }}</span></div>
+          </div>
+        </div>
+
+        <!-- Card D: Scope 目标矩阵 -->
+        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">Scope 目标</span>
+            <span class="text-[10px] text-text-tertiary">{{ agentActiveTargets }}/{{ Array.isArray(agentTargets) ? agentTargets.length : 0 }}</span>
+          </div>
+          <div v-if="Array.isArray(agentTargets) && agentTargets.length" class="space-y-1 max-h-[160px] overflow-y-auto custom-scrollbar">
+            <div v-for="t in agentTargets" :key="t.id" class="flex items-center justify-between text-[10px] py-0.5">
+              <div class="flex items-center gap-1.5 truncate">
+                <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', t.enabled ? 'bg-green-500' : 'bg-gray-500']"></div>
+                <span class="text-text-secondary truncate" :title="t.username">{{ t.username }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-text-tertiary">{{ t.pair_code }}</span>
+                <span class="text-[9px] px-1 rounded" :class="t.enabled ? 'bg-green-900/30 text-green-400' : 'bg-gray-700 text-gray-500'">{{ t.enabled ? 'ON' : 'OFF' }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-xs text-text-tertiary text-center py-4">暂无目标</div>
+        </div>
+
+      </div>
+
+      <!-- Scope 展开浮层 -->
+      <div v-if="showScopePanel && Array.isArray(agentTargets) && agentTargets.length" class="bg-dark-100 rounded-xl border border-border-primary p-4 transition-all">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-semibold">Scope 目标详情</span>
+          <button @click="showScopePanel = false" class="text-xs text-text-tertiary hover:text-text-primary">收起</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-text-tertiary border-b border-border-secondary">
+                <th class="text-left py-1.5 px-2">ID</th>
+                <th class="text-left py-1.5 px-2">用户</th>
+                <th class="text-left py-1.5 px-2">交易对</th>
+                <th class="text-center py-1.5 px-2">状态</th>
+                <th class="text-center py-1.5 px-2">优先级</th>
+                <th class="text-right py-1.5 px-2">创建时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in agentTargets" :key="t.id" class="border-b border-dark-300 hover:bg-dark-200/50">
+                <td class="py-1.5 px-2 font-mono text-text-tertiary">#{{ t.id }}</td>
+                <td class="py-1.5 px-2 text-text-secondary">{{ t.username }}</td>
+                <td class="py-1.5 px-2 font-mono text-primary">{{ t.pair_code }}</td>
+                <td class="py-1.5 px-2 text-center">
+                  <span class="px-1.5 py-0.5 rounded text-[10px]" :class="t.enabled ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'">{{ t.enabled ? '启用' : '禁用' }}</span>
+                </td>
+                <td class="py-1.5 px-2 text-center font-mono">{{ t.priority }}</td>
+                <td class="py-1.5 px-2 text-right text-text-tertiary font-mono">{{ t.created_at?.slice(0, 10) || '--' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== Layer 4: IP Proxy ===== -->
     <div v-if="proxyAccounts.length" class="space-y-2">
       <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">IP 代理状态</h2>
@@ -488,6 +652,15 @@ const sparklineData = ref([])
 const pnlHistory = ref([])
 const platformDist = ref([])
 const lastUpdateTs = ref(0)
+
+// OpenCLAW Agent state
+const agentStatus = ref({ mode: '--', kill_switch: false, position_ratio: null, spread: null })
+const agentLlm = ref({ circuit_state: 'unknown', model: '--', total_calls: 0, fail_rate: 0, avg_latency_ms: 0 })
+const agentTargets = ref([])
+const agentDecisionStats = ref({ total: 0, executed: 0, shadow: 0, rejected: 0, avg_latency_ms: 0 })
+const agentHeatmap = ref([])
+const agentLlmStats = ref({ tokens_today: { total: 0, calls: 0 }, tokens_total: { total: 0, calls: 0 }, balance: null })
+const showScopePanel = ref(false)
 const agentHeartbeats = ref([])
 const mt5Heartbeats = ref([])
 let lastAgentPingAt = 0
@@ -507,6 +680,24 @@ watch(lastMessage, (msg) => {
   if (msg.type === 'position_update' && msg.data) {
     // Refresh positions count
     stats.value.totalPositions = msg.data.total_positions ?? stats.value.totalPositions
+  }
+  // OpenCLAW agent real-time updates
+  if (msg.type === 'agent_status' && msg.data) {
+    const s = msg.data
+    agentStatus.value = {
+      mode: s.mode || agentStatus.value.mode,
+      kill_switch: s.kill_switch ?? agentStatus.value.kill_switch,
+      position_ratio: agentStatus.value.position_ratio,
+      spread: agentStatus.value.spread,
+    }
+  }
+  if (msg.type === 'agent_decision' && msg.data) {
+    const d = msg.data
+    const v = d.verdict || d.decision_type
+    if (v === 'execute' || v === 'executed') agentDecisionStats.value.executed++
+    else if (v === 'shadow') agentDecisionStats.value.shadow++
+    else if (v === 'reject' || v === 'rejected') agentDecisionStats.value.rejected++
+    agentDecisionStats.value.total++
   }
 })
 
@@ -568,6 +759,65 @@ const totals = computed(() => ({
 const sslOverallOk = computed(() =>
   (monitorData.value.ssl_certificate || []).every(c => c.status !== 'expired' && c.status !== 'critical')
 )
+
+const agentActiveTargets = computed(() => {
+  const arr = Array.isArray(agentTargets.value) ? agentTargets.value : []
+  return arr.filter(t => t.enabled !== false && t.active !== false).length
+})
+
+const agentDecisionPcts = computed(() => {
+  const s = agentDecisionStats.value
+  const t = s.total || 1
+  return { executed: (s.executed / t * 100).toFixed(0), shadow: (s.shadow / t * 100).toFixed(0), rejected: (s.rejected / t * 100).toFixed(0) }
+})
+
+const agentModeLabel = computed(() => {
+  const m = agentStatus.value.mode
+  if (m === 'live') return '实盘'
+  if (m === 'shadow') return '影子'
+  if (m === 'paused') return '暂停'
+  return m
+})
+
+const agentModeClass = computed(() => {
+  const m = agentStatus.value.mode
+  if (m === 'live') return 'bg-green-900/40 text-green-400'
+  if (m === 'shadow') return 'bg-blue-900/40 text-blue-400'
+  if (m === 'paused') return 'bg-yellow-900/40 text-yellow-400'
+  return 'bg-gray-700 text-gray-400'
+})
+
+const circuitClass = computed(() => {
+  const s = agentLlm.value.circuit_state
+  if (s === 'closed') return 'text-green-400'
+  if (s === 'half_open' || s === 'half-open') return 'text-yellow-400'
+  return 'text-red-400'
+})
+
+const agentTimelineBars = computed(() => {
+  const hm = agentHeatmap.value
+  if (!Array.isArray(hm) || !hm.length) return []
+  return hm.map(row => {
+    const total = (row.executed || 0) + (row.shadow || 0) + (row.rejected || 0) + (row.noop || 0)
+    return { hour: row.hour || row.h, total, executed: row.executed || 0, shadow: row.shadow || 0, rejected: row.rejected || 0 }
+  }).slice(-24)
+})
+
+const timelineMax = computed(() => Math.max(1, ...agentTimelineBars.value.map(b => b.total)))
+
+const agentHasAlert = computed(() => {
+  return agentStatus.value.kill_switch ||
+    agentLlm.value.circuit_state === 'open' ||
+    agentLlm.value.fail_rate > 0.2
+})
+
+const circuitLabel = computed(() => {
+  const s = agentLlm.value.circuit_state
+  if (s === 'closed') return '正常'
+  if (s === 'half_open' || s === 'half-open') return '半开'
+  if (s === 'open') return '熔断'
+  return '未知'
+})
 
 const dbPoolUsagePct = computed(() => {
   return dbPool.value.max > 0 ? (dbPool.value.active / dbPool.value.max) * 100 : 0
@@ -687,6 +937,13 @@ async function fetchMT5Infra() {
   } catch { mt5Infra.value = { ...mt5Infra.value, reachable: false } }
 }
 
+function fmtTokens(n) {
+  if (n == null) return '--'
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n)
+}
+
 function fmtUptime(sec) {
   if (!sec || sec < 1) return '--'
   const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60)
@@ -764,10 +1021,56 @@ async function fetchProxyAccounts() {
   } catch {}
 }
 
+async function fetchAgentOverview() {
+  try {
+    const [statusR, llmR, targetsR, statsR, heatmapR, llmStatsR] = await Promise.all([
+      api.get('/api/v1/agent/status').catch(() => ({ data: {} })),
+      api.get('/api/v1/agent/llm-health').catch(() => ({ data: {} })),
+      api.get('/api/v1/agent/scope/targets').catch(() => ({ data: { targets: [] } })),
+      api.get('/api/v1/agent/decisions/stats?window=1h').catch(() => ({ data: {} })),
+      api.get('/api/v1/agent/decisions/heatmap?window=24h').catch(() => ({ data: { rows: [] } })),
+      api.get('/api/v1/agent/llm-stats').catch(() => ({ data: {} })),
+    ])
+    const s = statusR.data || {}
+    agentStatus.value = {
+      mode: s.mode || s.run_mode || '--',
+      kill_switch: s.kill_switch ?? false,
+      position_ratio: s.position_ratio ?? null,
+      spread: s.spread ?? null,
+    }
+    const llm = llmR.data || {}
+    const circuitState = llm.circuit_state || (llm.circuit_open === true ? 'open' : llm.circuit_open === false ? 'closed' : 'unknown')
+    agentLlm.value = {
+      circuit_state: circuitState,
+      model: llm.model || llm.primary_model || '--',
+      total_calls: llm.total_calls ?? llm.call_count ?? 0,
+      fail_rate: llm.fail_rate ?? (llm.recent_failures != null && llm.failure_threshold ? llm.recent_failures / llm.failure_threshold : 0),
+      avg_latency_ms: llm.avg_latency_ms ?? llm.avg_response_ms ?? 0,
+    }
+    agentTargets.value = targetsR.data?.items || targetsR.data?.targets || targetsR.data || []
+    const ds = statsR.data || {}
+    const bv = ds.by_verdict || {}
+    agentDecisionStats.value = {
+      total: ds.total ?? ds.count ?? 0,
+      executed: ds.executed ?? bv.executed ?? 0,
+      shadow: ds.shadow ?? bv.shadow ?? 0,
+      rejected: ds.rejected ?? bv.rejected ?? 0,
+      avg_latency_ms: ds.latency?.avg_ms ?? ds.avg_latency_ms ?? 0,
+    }
+    agentHeatmap.value = heatmapR.data?.buckets || heatmapR.data?.rows || heatmapR.data?.data || []
+    const ls = llmStatsR.data || {}
+    agentLlmStats.value = {
+      tokens_today: ls.tokens_today || { total: 0, calls: 0 },
+      tokens_total: ls.tokens_total || { total: 0, calls: 0 },
+      balance: ls.balance != null ? (typeof ls.balance === 'object' ? ls.balance.balance_usd ?? ls.balance.balance ?? null : ls.balance) : null,
+    }
+  } catch {}
+}
+
 async function fetchHedgingPairs() {
   try {
     const r = await api.get('/api/v1/hedging/pairs')
-    hedgingPairs.value = Array.isArray(r.data) ? r.data : []
+    hedgingPairs.value = (Array.isArray(r.data) ? r.data : []).filter(p => p.enabled !== false && p.is_active !== false)
   } catch { hedgingPairs.value = [] }
 }
 
@@ -808,7 +1111,7 @@ function getHedgePosition(pair, side) {
 
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist(), fetchAgentOverview()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   lastUpdateTs.value = Date.now()
 

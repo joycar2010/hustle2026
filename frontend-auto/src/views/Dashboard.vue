@@ -1,25 +1,130 @@
 <template>
   <div class="space-y-4">
-    <!-- Target picker + window selector (merged compact row) -->
-    <div class="bg-dark-100 rounded-xl px-3 py-2 border border-border-primary flex items-center gap-2 text-xs flex-wrap">
-      <span class="text-text-tertiary">作用域:</span>
-      <button @click="selectedTarget = null"
-        class="px-2 py-0.5 rounded"
-        :class="selectedTarget === null ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary hover:bg-dark-300'">全部</button>
-      <button v-for="t in targets" :key="t.id" @click="selectedTarget = t.id"
-        class="px-2 py-0.5 rounded"
-        :class="selectedTarget === t.id ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary hover:bg-dark-300'">
-        <span class="font-semibold">{{ t.username }}</span>/<span class="font-mono">{{ t.pair_code }}</span>
-      </button>
-      <span v-if="targets.length === 0" class="text-text-tertiary">尚无目标</span>
-      <span class="mx-2 text-text-tertiary">|</span>
-      <span class="text-text-tertiary">窗口:</span>
-      <button v-for="w in WINDOWS" :key="w.key" @click="windowKey = w.key"
-        class="px-2 py-0.5 rounded"
-        :class="windowKey === w.key ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">{{ w.label }}</button>
-      <button @click="showCharts = !showCharts" class="ml-auto px-2 py-0.5 rounded bg-dark-200 text-text-secondary hover:bg-dark-300">
-        {{ showCharts ? '隐藏图表' : '显示图表' }}
-      </button>
+    <!-- Agent Matrix Grid -->
+    <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-sm flex items-center gap-2">
+          智能体矩阵
+          <span class="text-[10px] text-text-tertiary font-normal">{{ targets.length }} 个目标</span>
+        </h3>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-text-tertiary">窗口:</span>
+          <button v-for="w in WINDOWS" :key="w.key" @click="windowKey = w.key"
+            class="px-2 py-0.5 rounded"
+            :class="windowKey === w.key ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">{{ w.label }}</button>
+          <span class="mx-1 text-text-tertiary">|</span>
+          <button @click="showCharts = !showCharts" class="px-2 py-0.5 rounded bg-dark-200 text-text-secondary hover:bg-dark-300">
+            {{ showCharts ? '隐藏图表' : '显示图表' }}
+          </button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+        <!-- "All" aggregate card -->
+        <div @click="selectedTarget = null"
+          class="rounded-lg p-3 border-2 cursor-pointer transition hover:shadow-lg"
+          :class="selectedTarget === null ? 'border-primary bg-primary/5' : 'border-border-primary bg-dark-200 hover:border-primary/40'">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-semibold text-sm">📊 全局汇总</div>
+            <span class="px-1.5 py-0.5 rounded text-[10px]" :class="modeColor + ' bg-dark-300'">{{ modeLabel }}</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1 text-[10px]">
+            <div><span class="text-text-tertiary">权益</span><div class="font-mono font-bold">{{ fmt(status?.total_equity) }}</div></div>
+            <div><span class="text-text-tertiary">持仓比</span><div class="font-mono font-bold" :class="ratioColor(status?.position_ratio, 0.5)">{{ pct(status?.position_ratio) }}</div></div>
+            <div><span class="text-text-tertiary">决策</span><div class="font-mono font-bold">{{ stats?.total ?? '--' }}</div></div>
+          </div>
+          <div class="mt-1.5 h-1 bg-dark-300 rounded-full overflow-hidden flex">
+            <div class="bg-success h-full" :style="{width: verdictPctBar('executed') + '%'}"></div>
+            <div class="bg-yellow-500 h-full" :style="{width: verdictPctBar('shadow') + '%'}"></div>
+            <div class="bg-danger h-full" :style="{width: verdictPctBar('rejected') + '%'}"></div>
+          </div>
+        </div>
+        <!-- Per-target cards -->
+        <div v-for="t in targets" :key="t.id" @click="selectedTarget = t.id"
+          class="rounded-lg p-3 border-2 cursor-pointer transition hover:shadow-lg"
+          :class="selectedTarget === t.id ? 'border-primary bg-primary/5' : 'border-border-primary bg-dark-200 hover:border-primary/40'">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="font-semibold text-sm">{{ t.username }}</span>
+              <span class="font-mono text-primary text-xs ml-1">{{ t.pair_code }}</span>
+            </div>
+            <span class="text-[10px] text-text-tertiary">#{{ t.id }}</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1 text-[10px]">
+            <div><span class="text-text-tertiary">优先级</span><div class="font-mono font-bold">{{ t.priority }}</div></div>
+            <div><span class="text-text-tertiary">24h决策</span><div class="font-mono font-bold">{{ targetMeta[t.id]?.count_24h ?? '--' }}</div></div>
+            <div><span class="text-text-tertiary">最近</span><div class="font-mono text-text-tertiary">{{ targetMeta[t.id]?.last_ts ? dayjs(targetMeta[t.id].last_ts).fromNow() : '--' }}</div></div>
+          </div>
+          <div class="mt-1.5 h-1 bg-dark-300 rounded-full overflow-hidden flex">
+            <div class="bg-success h-full" :style="{width: targetMeta[t.id]?.exec_pct || 0 + '%'}"></div>
+            <div class="bg-yellow-500 h-full" :style="{width: targetMeta[t.id]?.shadow_pct || 0 + '%'}"></div>
+            <div class="bg-danger h-full" :style="{width: targetMeta[t.id]?.reject_pct || 0 + '%'}"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Detail Panel (shown when a specific target is selected) -->
+    <div v-if="selectedTarget !== null && selectedTargetData" class="bg-dark-100 rounded-xl p-4 border border-primary/30 transition-all">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-sm flex items-center gap-2">
+          <span class="text-primary">▸</span>
+          <span>{{ selectedTargetData.username }}</span>
+          <span class="font-mono text-primary">{{ selectedTargetData.pair_code }}</span>
+          <span class="text-[10px] text-text-tertiary">#{{ selectedTargetData.id }}</span>
+        </h3>
+        <button @click="selectedTarget = null" class="text-xs text-text-tertiary hover:text-text-primary px-2 py-1 rounded hover:bg-dark-200">✕ 返回全局</button>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <!-- Target KPIs -->
+        <div class="space-y-2">
+          <div class="text-xs text-text-tertiary font-semibold mb-1">目标指标</div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="bg-dark-200 rounded p-2">
+              <div class="text-[10px] text-text-tertiary">24h决策</div>
+              <div class="font-mono font-bold text-lg">{{ targetMeta[selectedTarget]?.count_24h ?? 0 }}</div>
+            </div>
+            <div class="bg-dark-200 rounded p-2">
+              <div class="text-[10px] text-text-tertiary">执行/拦截</div>
+              <div class="font-mono font-bold text-sm">
+                <span class="text-success">{{ targetMeta[selectedTarget]?.exec_pct || 0 }}%</span>
+                <span class="text-text-tertiary mx-0.5">/</span>
+                <span class="text-danger">{{ targetMeta[selectedTarget]?.reject_pct || 0 }}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Risk caps -->
+        <div class="space-y-2">
+          <div class="text-xs text-text-tertiary font-semibold mb-1">风控参数</div>
+          <div v-if="targetCaps" class="space-y-1.5">
+            <div v-for="cap in capFieldsDash" :key="cap.key">
+              <div class="flex justify-between text-[10px]">
+                <span class="text-text-tertiary">{{ cap.label }}</span>
+                <span class="font-mono">{{ ((targetCaps[cap.key] || cap.default) * 100).toFixed(0) }}%</span>
+              </div>
+              <div class="h-1.5 bg-dark-300 rounded-full overflow-hidden">
+                <div class="h-full rounded-full" :class="capBarColor(targetCaps[cap.key], cap.default)" :style="{width: Math.min(100, ((targetCaps[cap.key] || cap.default) / cap.default) * 100) + '%'}"></div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-text-tertiary text-[10px]">加载中…</div>
+          <router-link :to="'/risk'" class="text-[10px] text-primary hover:underline block mt-1">编辑风控参数 →</router-link>
+        </div>
+        <!-- Recent decisions for this target -->
+        <div class="space-y-2">
+          <div class="text-xs text-text-tertiary font-semibold mb-1">最近决策</div>
+          <div v-if="targetDecisions.length === 0" class="text-text-tertiary text-[10px] py-2 text-center">暂无</div>
+          <div v-else class="space-y-1 max-h-32 overflow-y-auto">
+            <div v-for="d in targetDecisions.slice(0, 5)" :key="d.id" class="bg-dark-200 rounded px-2 py-1 flex items-center justify-between text-[10px]">
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-text-tertiary">{{ dayjs(d.created_at).format('HH:mm') }}</span>
+                <span :class="actionColor(d.action)">{{ d.action }}</span>
+              </div>
+              <span class="px-1 py-0.5 rounded" :class="verdictBadge(d.verdict)">{{ d.verdict }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Single unified KPI strip (10 metrics, collapsed padding) -->
@@ -265,6 +370,10 @@ import {
   Chart, BarElement, LineElement, PointElement, ArcElement,
   CategoryScale, LinearScale, Tooltip, Legend, Filler, Title,
 } from 'chart.js'
+import relativeTime from 'dayjs/plugin/relativeTime'
+import 'dayjs/locale/zh-cn'
+dayjs.extend(relativeTime)
+dayjs.locale('zh-cn')
 Chart.register(BarElement, LineElement, PointElement, ArcElement,
   CategoryScale, LinearScale, Tooltip, Legend, Filler, Title)
 
@@ -280,12 +389,33 @@ const balance = ref(null)
 const rate = ref(null)
 const decisions = ref([])
 const targets = ref([])
+const targetMeta = ref({})
 const selectedTarget = ref(null)
 const windowKey = ref('24h')
 const stats = ref(null)
 const heatmap = ref(null)
 const costSeries = ref(null)
 const showCharts = ref(true)
+const targetCaps = ref(null)
+const targetDecisions = ref([])
+
+const capFieldsDash = [
+  { key: 'single_trade_pct', label: '单笔上限', default: 0.1 },
+  { key: 'total_position_pct', label: '总持仓上限', default: 0.5 },
+  { key: 'daily_volume_pct', label: '日内累计上限', default: 5.0 },
+]
+
+const selectedTargetData = computed(() => {
+  if (selectedTarget.value === null) return null
+  return targets.value.find(t => t.id === selectedTarget.value) || null
+})
+
+function capBarColor(val, def) {
+  const ratio = (val || def) / def
+  if (ratio > 1.2) return 'bg-danger'
+  if (ratio > 0.8) return 'bg-warning'
+  return 'bg-primary/60'
+}
 
 const modeLabel = computed(() => ({ shadow: 'Shadow', semi: '半自动', auto: '全自动', off: '已停机' })[status.value?.mode] || '--')
 const modeColor = computed(() => ({ shadow: 'text-yellow-400', semi: 'text-blue-400', auto: 'text-success', off: 'text-text-tertiary' })[status.value?.mode] || 'text-text-primary')
@@ -455,7 +585,23 @@ async function refreshCore() {
       api.get('/api/v1/agent/decisions?limit=10' + (tid != null ? '&target_id=' + tid : '')).catch(() => null),
       targets.value.length === 0 ? api.get('/api/v1/agent/scope/targets').catch(() => null) : Promise.resolve(null),
     ])
-    if (ts) targets.value = ts.data?.items?.filter(t => t.enabled) || []
+    if (ts) {
+      targets.value = ts.data?.items?.filter(t => t.enabled) || []
+      for (const t of targets.value) {
+        try {
+          const sr = await api.get('/api/v1/agent/decisions/stats?window=24h&target_id=' + t.id)
+          const bv = sr.data?.by_verdict || {}
+          const total = sr.data?.total || 0
+          targetMeta.value[t.id] = {
+            count_24h: total,
+            last_ts: sr.data?.last_decision_at || null,
+            exec_pct: total ? ((bv.executed || 0) / total * 100).toFixed(0) : 0,
+            shadow_pct: total ? ((bv.shadow || 0) / total * 100).toFixed(0) : 0,
+            reject_pct: total ? ((bv.rejected || 0) / total * 100).toFixed(0) : 0,
+          }
+        } catch { targetMeta.value[t.id] = { count_24h: 0, last_ts: null, exec_pct: 0, shadow_pct: 0, reject_pct: 0 } }
+      }
+    }
     if (s) status.value = s.data
     if (b) balance.value = b.data
     if (r) rate.value = r.data
@@ -485,7 +631,21 @@ async function refreshAnalytics() {
 // decision shows up instantly instead of on the next 5s tick.
 const ws = useWsStream()
 let coreTimer, analyticsTimer, wsStopDecisions, wsStopProposals
-watch(selectedTarget, () => { refreshCore(); refreshAnalytics() })
+watch(selectedTarget, async (tid) => {
+  refreshCore(); refreshAnalytics()
+  if (tid !== null) {
+    try {
+      const [capsR, decR] = await Promise.all([
+        api.get('/api/v1/agent/scope/targets/' + tid + '/caps').catch(() => null),
+        api.get('/api/v1/agent/decisions?limit=5&target_id=' + tid).catch(() => null),
+      ])
+      targetCaps.value = capsR?.data?.caps || null
+      targetDecisions.value = decR?.data?.items || []
+    } catch { targetCaps.value = null; targetDecisions.value = [] }
+  } else {
+    targetCaps.value = null; targetDecisions.value = []
+  }
+})
 watch(windowKey, () => refreshAnalytics())
 onMounted(() => {
   refreshCore(); refreshAnalytics()

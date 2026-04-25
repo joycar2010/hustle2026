@@ -75,7 +75,8 @@ const nav = [
   { path: '/dashboard', label: '实时监控' },
   { path: '/decisions', label: '决策流' },
   { path: '/proposals', label: '提议中心' },
-  { path: '/settings', label: '配置 / Kill' },
+  { path: '/risk', label: '风控中心' },
+  { path: '/infra', label: '基础设施' },
 ]
 const me = ref(null)
 const authChecked = ref(false)

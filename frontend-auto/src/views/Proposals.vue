@@ -44,46 +44,226 @@
       </div>
     </div>
 
-    <!-- Create form -->
-    <div v-if="showCreate" class="bg-dark-100 rounded-xl p-5 border border-border-primary space-y-3">
-      <h3 class="font-semibold">新建策略提议</h3>
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div class="lg:col-span-2">
-          <div class="text-xs text-text-tertiary mb-1">标题</div>
-          <input v-model="newProp.title" placeholder="例如: 提高 GBXAU 极端模式下单笔上限至 15%"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none">
+    <!-- Strategy Evolution Overview -->
+    <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-xs font-semibold text-text-tertiary">策略演化趋势</h3>
+        <div class="flex gap-2 text-[10px]">
+          <button v-for="w in evoWindows" :key="w.key" @click="evoWindow = w.key; loadEvolution()"
+            class="px-2 py-0.5 rounded"
+            :class="evoWindow === w.key ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">{{ w.label }}</button>
         </div>
-        <div>
-          <div class="text-xs text-text-tertiary mb-1">作用范围</div>
-          <select v-model="newProp.target_id"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none">
-            <option :value="null">全局（所有目标）</option>
-            <option v-for="t in targets" :key="t.id" :value="t.id">
-              {{ t.username }} / {{ t.pair_code }} · #{{ t.id }}
-            </option>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+        <div class="bg-dark-200 rounded-lg p-2.5 text-center">
+          <div class="text-[10px] text-text-tertiary">提议总数</div>
+          <div class="font-mono font-bold text-lg">{{ evoStats.total }}</div>
+        </div>
+        <div class="bg-dark-200 rounded-lg p-2.5 text-center">
+          <div class="text-[10px] text-text-tertiary">批准率</div>
+          <div class="font-mono font-bold text-lg" :class="evoStats.approveRate > 50 ? 'text-success' : 'text-warning'">{{ evoStats.approveRate }}%</div>
+        </div>
+        <div class="bg-dark-200 rounded-lg p-2.5 text-center">
+          <div class="text-[10px] text-text-tertiary">平均审批耗时</div>
+          <div class="font-mono font-bold text-lg">{{ evoStats.avgReviewTime }}</div>
+        </div>
+        <div class="bg-dark-200 rounded-lg p-2.5 text-center">
+          <div class="text-[10px] text-text-tertiary">回滚次数</div>
+          <div class="font-mono font-bold text-lg" :class="evoStats.rollbacks > 0 ? 'text-warning' : 'text-text-tertiary'">{{ evoStats.rollbacks }}</div>
+        </div>
+        <div class="bg-dark-200 rounded-lg p-2.5 text-center">
+          <div class="text-[10px] text-text-tertiary">最常变更键</div>
+          <div class="font-mono text-sm text-primary truncate">{{ evoStats.topKey || '--' }}</div>
+        </div>
+      </div>
+      <!-- Approval funnel bar -->
+      <div class="flex items-center gap-1 text-[9px]">
+        <span class="text-text-tertiary">状态分布:</span>
+        <div class="flex-1 h-2 bg-dark-200 rounded-full overflow-hidden flex">
+          <div class="bg-success h-full" :style="{width: evoStats.approvedPct + '%'}" title="approved"></div>
+          <div class="bg-blue-500 h-full" :style="{width: evoStats.pendingPct + '%'}" title="pending"></div>
+          <div class="bg-danger h-full" :style="{width: evoStats.rejectedPct + '%'}" title="rejected"></div>
+          <div class="bg-warning h-full" :style="{width: evoStats.rolledBackPct + '%'}" title="rolled_back"></div>
+        </div>
+        <span class="text-success">批准</span>
+        <span class="text-blue-400">待审</span>
+        <span class="text-danger">拒绝</span>
+        <span class="text-warning">回滚</span>
+      </div>
+    </div>
+
+    <!-- AI 对话式创建提议 -->
+    <div v-if="showCreate" class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
+      <!-- Mode tabs -->
+      <div class="flex border-b border-border-primary">
+        <button @click="createMode = 'ai'"
+          class="px-4 py-2.5 text-xs font-semibold transition"
+          :class="createMode === 'ai' ? 'text-primary border-b-2 border-primary bg-dark-200' : 'text-text-tertiary hover:text-text-secondary'">
+          AI 对话生成
+        </button>
+        <button @click="createMode = 'manual'"
+          class="px-4 py-2.5 text-xs font-semibold transition"
+          :class="createMode === 'manual' ? 'text-primary border-b-2 border-primary bg-dark-200' : 'text-text-tertiary hover:text-text-secondary'">
+          手动 JSON
+        </button>
+        <div class="flex-1"></div>
+        <button @click="showCreate = false" class="px-3 text-text-tertiary hover:text-text-primary text-sm">✕</button>
+      </div>
+
+      <!-- AI mode -->
+      <div v-if="createMode === 'ai'" class="p-4 space-y-3">
+        <!-- Chat history -->
+        <div v-if="aiChat.length" class="space-y-2 max-h-80 overflow-y-auto">
+          <div v-for="(msg, i) in aiChat" :key="i"
+            class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+            <div class="max-w-[80%] rounded-lg px-3 py-2 text-xs"
+              :class="msg.role === 'user' ? 'bg-primary/20 text-primary' : 'bg-dark-200 text-text-primary'">
+              <div class="whitespace-pre-wrap">{{ msg.content }}</div>
+            </div>
+          </div>
+          <div v-if="aiLoading" class="flex justify-start">
+            <div class="bg-dark-200 rounded-lg px-3 py-2 text-xs text-text-tertiary animate-pulse">AI 思考中…</div>
+          </div>
+        </div>
+        <div v-else class="text-xs text-text-tertiary py-4 text-center space-y-2">
+          <div>用自然语言描述你的配置变更需求，AI 会生成对应的提议草稿</div>
+          <div class="flex flex-wrap justify-center gap-2">
+            <button v-for="eg in aiExamples" :key="eg" @click="aiInput = eg"
+              class="px-2.5 py-1 bg-dark-200 rounded text-[10px] text-text-secondary hover:bg-dark-300 hover:text-text-primary transition">
+              {{ eg }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div class="flex gap-2">
+          <select v-model="aiTargetId" class="bg-dark-200 border border-border-primary rounded px-2 py-2 text-xs w-36 shrink-0">
+            <option :value="null">全局</option>
+            <option v-for="t in targets" :key="t.id" :value="t.id">{{ t.username }}/{{ t.pair_code }}</option>
           </select>
+          <input v-model="aiInput" @keyup.enter="sendAiDraft" :disabled="aiLoading"
+            placeholder="例如：把单笔交易上限从 10% 提高到 15%"
+            class="flex-1 bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none">
+          <button @click="sendAiDraft" :disabled="aiLoading || !aiInput.trim()"
+            class="px-4 py-2 bg-primary text-dark-300 font-semibold rounded text-xs hover:bg-primary-hover disabled:opacity-40 shrink-0">
+            {{ aiLoading ? '生成中…' : '发送' }}
+          </button>
         </div>
-        <div class="lg:col-span-3">
-          <div class="text-xs text-text-tertiary mb-1">业务推理</div>
-          <textarea v-model="newProp.rationale" rows="2"
-            placeholder="为什么要改、预期收益、风险点"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none font-mono"></textarea>
+
+        <!-- AI Draft preview -->
+        <div v-if="aiDraft" class="border border-primary/30 rounded-lg p-4 space-y-3 bg-dark-200/50">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-primary">AI 生成的提议草稿</div>
+            <div class="flex gap-2">
+              <button @click="aiDraft = null; aiChat = []" class="text-[10px] text-text-tertiary hover:text-text-secondary">重置</button>
+            </div>
+          </div>
+
+          <!-- Warnings -->
+          <div v-if="aiDraft.warnings && aiDraft.warnings.length" class="space-y-1">
+            <div v-for="(w, i) in aiDraft.warnings" :key="i"
+              class="text-[10px] text-warning bg-warning/10 rounded px-2 py-1">⚠ {{ w }}</div>
+          </div>
+
+          <!-- Draft fields -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div class="lg:col-span-2">
+              <div class="text-[10px] text-text-tertiary mb-1">标题</div>
+              <input v-model="aiDraft.title" class="w-full bg-dark-300 border border-border-primary rounded px-3 py-1.5 text-xs focus:border-primary outline-none">
+            </div>
+            <div>
+              <div class="text-[10px] text-text-tertiary mb-1">作用范围</div>
+              <select v-model="aiDraft.target_id" class="w-full bg-dark-300 border border-border-primary rounded px-3 py-1.5 text-xs">
+                <option :value="null">全局</option>
+                <option v-for="t in targets" :key="t.id" :value="t.id">{{ t.username }}/{{ t.pair_code }}</option>
+              </select>
+            </div>
+            <div class="lg:col-span-3">
+              <div class="text-[10px] text-text-tertiary mb-1">业务推理</div>
+              <textarea v-model="aiDraft.rationale" rows="2"
+                class="w-full bg-dark-300 border border-border-primary rounded px-3 py-1.5 text-xs focus:border-primary outline-none"></textarea>
+            </div>
+          </div>
+
+          <!-- Config diff display -->
+          <div>
+            <div class="text-[10px] text-text-tertiary mb-1">config_diff (可编辑)</div>
+            <div v-if="!aiDraftJsonMode" class="space-y-2">
+              <div v-for="(val, key) in aiDraft.config_diff" :key="key"
+                class="bg-dark-300 rounded p-2.5 border border-border-primary">
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="font-mono text-[11px] text-primary font-semibold">{{ key }}</span>
+                </div>
+                <div v-if="typeof val === 'object' && val !== null && !Array.isArray(val)" class="space-y-0.5">
+                  <div v-for="(sv, sk) in val" :key="sk" class="flex justify-between text-[11px] gap-3">
+                    <span class="text-text-secondary font-mono">{{ sk }}</span>
+                    <span class="text-text-primary font-mono text-right">{{ sv }}</span>
+                  </div>
+                </div>
+                <div v-else class="text-[11px] font-mono text-text-primary">{{ JSON.stringify(val) }}</div>
+              </div>
+            </div>
+            <textarea v-else v-model="aiDraftJsonText" rows="4"
+              class="w-full bg-dark-300 border border-border-primary rounded px-3 py-1.5 text-xs font-mono focus:border-primary outline-none"></textarea>
+            <div class="flex items-center justify-between mt-1">
+              <button @click="toggleDraftJson" class="text-[10px] text-primary hover:underline">
+                {{ aiDraftJsonMode ? '切换可视化' : '切换 JSON 编辑' }}
+              </button>
+              <div v-if="aiDraftJsonErr" class="text-danger text-[10px]">{{ aiDraftJsonErr }}</div>
+            </div>
+          </div>
+
+          <!-- Submit buttons -->
+          <div class="flex items-center gap-2 pt-1">
+            <button @click="submitAiDraft" class="px-4 py-2 bg-primary text-dark-300 font-semibold rounded text-xs hover:bg-primary-hover">确认提交待审批</button>
+            <button @click="showCreate = false" class="px-4 py-2 bg-dark-300 text-text-secondary rounded text-xs">取消</button>
+          </div>
         </div>
-        <div class="lg:col-span-3">
-          <div class="text-xs text-text-tertiary mb-1">config_diff (JSON)</div>
-          <textarea v-model="newProp.config_diff_text" rows="5"
-            placeholder='{"position_caps":{"single_trade_pct":0.15,"total_position_pct":0.5,"daily_volume_pct":5.0}}'
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none font-mono"></textarea>
-          <div v-if="newProp.json_err" class="text-danger text-xs mt-1">JSON 解析失败: {{ newProp.json_err }}</div>
-        </div>
-        <div>
-          <div class="text-xs text-text-tertiary mb-1">预计仓位占比 (可选)</div>
-          <input v-model.number="newProp.est_position_pct" type="number" step="0.01" min="0" max="1"
-            class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
-        </div>
-        <div class="lg:col-span-2 flex items-end gap-2">
-          <button @click="submitCreate" class="px-4 py-2 bg-primary text-dark-300 font-semibold rounded hover:bg-primary-hover text-sm">提交待审批</button>
-          <button @click="showCreate = false" class="px-4 py-2 bg-dark-200 text-text-secondary rounded text-sm">取消</button>
+
+        <!-- Error -->
+        <div v-if="aiError" class="text-danger text-xs bg-danger/10 rounded px-3 py-2">{{ aiError }}</div>
+      </div>
+
+      <!-- Manual mode (original) -->
+      <div v-if="createMode === 'manual'" class="p-4">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div class="lg:col-span-2">
+            <div class="text-xs text-text-tertiary mb-1">标题</div>
+            <input v-model="newProp.title" placeholder="例如: 提高 GBXAU 极端模式下单笔上限至 15%"
+              class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none">
+          </div>
+          <div>
+            <div class="text-xs text-text-tertiary mb-1">作用范围</div>
+            <select v-model="newProp.target_id"
+              class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none">
+              <option :value="null">全局（所有目标）</option>
+              <option v-for="t in targets" :key="t.id" :value="t.id">
+                {{ t.username }} / {{ t.pair_code }} · #{{ t.id }}
+              </option>
+            </select>
+          </div>
+          <div class="lg:col-span-3">
+            <div class="text-xs text-text-tertiary mb-1">业务推理</div>
+            <textarea v-model="newProp.rationale" rows="2"
+              placeholder="为什么要改、预期收益、风险点"
+              class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none font-mono"></textarea>
+          </div>
+          <div class="lg:col-span-3">
+            <div class="text-xs text-text-tertiary mb-1">config_diff (JSON)</div>
+            <textarea v-model="newProp.config_diff_text" rows="5"
+              placeholder='{"position_caps":{"single_trade_pct":0.15,"total_position_pct":0.5,"daily_volume_pct":5.0}}'
+              class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm focus:border-primary outline-none font-mono"></textarea>
+            <div v-if="newProp.json_err" class="text-danger text-xs mt-1">JSON 解析失败: {{ newProp.json_err }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-text-tertiary mb-1">预计仓位占比 (可选)</div>
+            <input v-model.number="newProp.est_position_pct" type="number" step="0.01" min="0" max="1"
+              class="w-full bg-dark-200 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+          </div>
+          <div class="lg:col-span-2 flex items-end gap-2">
+            <button @click="submitCreate" class="px-4 py-2 bg-primary text-dark-300 font-semibold rounded hover:bg-primary-hover text-sm">提交待审批</button>
+            <button @click="showCreate = false" class="px-4 py-2 bg-dark-200 text-text-secondary rounded text-sm">取消</button>
+          </div>
         </div>
       </div>
     </div>
@@ -241,6 +421,55 @@ import dayjs from 'dayjs'
 import { useWsStream } from '@/stores/wsStream.js'
 
 const PAGE = 50
+const evoWindows = [
+  { key: '7d', label: '7天' },
+  { key: '30d', label: '30天' },
+  { key: 'all', label: '全部' },
+]
+const evoWindow = ref('7d')
+const evoStats = ref({ total: 0, approveRate: 0, avgReviewTime: '--', rollbacks: 0, topKey: '', approvedPct: 0, pendingPct: 0, rejectedPct: 0, rolledBackPct: 0 })
+
+async function loadEvolution() {
+  try {
+    const w = evoWindow.value
+    const wq = w !== 'all' ? '?window=' + w : ''
+    const r = await api.get('/api/v1/agent/proposals/stats' + wq)
+    const d = r.data || {}
+    const bs = d.by_status || {}
+    const total = d.total || 0
+    const approved = bs.approved || 0
+    const pending = bs.pending || 0
+    const rejected = bs.rejected || 0
+    const rolledBack = bs.rolled_back || 0
+    evoStats.value = {
+      total,
+      approveRate: total ? (approved / total * 100).toFixed(0) : 0,
+      avgReviewTime: d.avg_review_hours != null ? d.avg_review_hours.toFixed(1) + 'h' : '--',
+      rollbacks: rolledBack,
+      topKey: d.top_changed_key || '--',
+      approvedPct: total ? (approved / total * 100).toFixed(1) : 0,
+      pendingPct: total ? (pending / total * 100).toFixed(1) : 0,
+      rejectedPct: total ? (rejected / total * 100).toFixed(1) : 0,
+      rolledBackPct: total ? (rolledBack / total * 100).toFixed(1) : 0,
+    }
+  } catch {
+    // Fallback: compute from loaded items
+    const all = items.value
+    const total = all.length || 1
+    const approved = all.filter(p => p.status === 'approved').length
+    const pending = all.filter(p => p.status === 'pending').length
+    const rejected = all.filter(p => p.status === 'rejected').length
+    const rolledBack = all.filter(p => p.status === 'rolled_back').length
+    evoStats.value = {
+      total: all.length, approveRate: (approved / total * 100).toFixed(0),
+      avgReviewTime: '--', rollbacks: rolledBack, topKey: '--',
+      approvedPct: (approved / total * 100).toFixed(1),
+      pendingPct: (pending / total * 100).toFixed(1),
+      rejectedPct: (rejected / total * 100).toFixed(1),
+      rolledBackPct: (rolledBack / total * 100).toFixed(1),
+    }
+  }
+}
 const filters = [
   { key: '全部', label: '全部' },
   { key: 'pending', label: 'pending' },
@@ -268,6 +497,100 @@ const newProp = ref({
   title: '', rationale: '', config_diff_text: '', target_id: null,
   est_position_pct: null, json_err: null,
 })
+
+const createMode = ref('ai')
+const aiInput = ref('')
+const aiTargetId = ref(null)
+const aiChat = ref([])
+const aiDraft = ref(null)
+const aiLoading = ref(false)
+const aiError = ref('')
+const aiDraftJsonMode = ref(false)
+const aiDraftJsonText = ref('')
+const aiDraftJsonErr = ref('')
+
+const aiExamples = [
+  '把单笔交易上限提高到 15%',
+  '净资产守卫警告阈值调到 0.85',
+  '每分钟最大决策数改为 5',
+  'LLM 余额告警阈值设为 50 元',
+]
+
+async function sendAiDraft() {
+  const msg = aiInput.value.trim()
+  if (!msg || aiLoading.value) return
+  aiError.value = ''
+  aiChat.value.push({ role: 'user', content: msg })
+  aiInput.value = ''
+  aiLoading.value = true
+  try {
+    const history = aiChat.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+    const r = await api.post('/api/v1/agent/proposals/ai-draft', {
+      message: msg,
+      target_id: aiTargetId.value,
+      history: history.length ? history : undefined,
+    })
+    if (r.data?.ok && r.data.draft) {
+      const d = r.data.draft
+      aiDraft.value = { ...d }
+      aiDraftJsonText.value = JSON.stringify(d.config_diff, null, 2)
+      aiDraftJsonMode.value = false
+      aiDraftJsonErr.value = ''
+      const summary = '已生成提议草稿：「' + d.title + '」\n变更键: ' + Object.keys(d.config_diff || {}).join(', ')
+        + (d.warnings?.length ? '\n⚠ ' + d.warnings.join('\n⚠ ') : '')
+      aiChat.value.push({ role: 'assistant', content: summary })
+    } else {
+      const errMsg = r.data?.error || '生成失败'
+      aiError.value = errMsg
+      aiChat.value.push({ role: 'assistant', content: '抱歉，' + errMsg + (r.data?.raw ? '\n原始返回: ' + r.data.raw.slice(0, 200) : '') })
+    }
+  } catch (e) {
+    const msg2 = e.response?.data?.detail || e.message
+    aiError.value = msg2
+    aiChat.value.push({ role: 'assistant', content: '请求失败: ' + msg2 })
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+function toggleDraftJson() {
+  if (aiDraftJsonMode.value) {
+    try {
+      aiDraft.value.config_diff = JSON.parse(aiDraftJsonText.value)
+      aiDraftJsonErr.value = ''
+      aiDraftJsonMode.value = false
+    } catch (e) {
+      aiDraftJsonErr.value = 'JSON 格式错误: ' + e.message
+    }
+  } else {
+    aiDraftJsonText.value = JSON.stringify(aiDraft.value.config_diff, null, 2)
+    aiDraftJsonMode.value = true
+  }
+}
+
+async function submitAiDraft() {
+  if (!aiDraft.value) return
+  const d = aiDraft.value
+  if (!d.title || !d.rationale) { alert('请填写标题和推理'); return }
+  if (aiDraftJsonMode.value) {
+    try { d.config_diff = JSON.parse(aiDraftJsonText.value) }
+    catch (e) { aiDraftJsonErr.value = 'JSON 格式错误'; return }
+  }
+  try {
+    await api.post('/api/v1/agent/proposals', {
+      title: d.title,
+      rationale: d.rationale,
+      config_diff: d.config_diff,
+      target_id: d.target_id,
+      est_position_pct: d.est_position_pct,
+    })
+    aiDraft.value = null
+    aiChat.value = []
+    aiInput.value = ''
+    showCreate.value = false
+    await reload()
+  } catch (e) { alert('创建失败: ' + (e.response?.data?.detail || e.message)) }
+}
 
 const proposalStats = ref({ pending: 0, approved: 0, rejected: 0, rolled_back: 0 })
 function updateStats() {
@@ -434,7 +757,8 @@ onMounted(async () => {
     targets.value = ts.data?.items?.filter(t => t.enabled) || []
   } catch {}
   await reload()
-  timer = setInterval(reload, 30000)  // slower HTTP safety poll; WS is primary
+  loadEvolution()
+  timer = setInterval(() => { reload(); loadEvolution() }, 30000)  // slower HTTP safety poll; WS is primary
   ws.connect()
   ws.subscribe('agent.proposals')
   wsStop = watch(() => ws.channels['agent.proposals'], (payload) => {

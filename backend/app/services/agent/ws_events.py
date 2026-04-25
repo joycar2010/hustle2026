@@ -17,10 +17,17 @@ async def push_decision_event(payload: Dict[str, Any]) -> None:
     """Publish a single new-decision envelope to agent.decisions channel."""
     try:
         from app.websocket.stream_hub import stream_hub
-        await stream_hub.publish(AGENT_DECISIONS_CH, {
-            'event': 'decision_new',
-            **payload,
-        })
+        envelope = {'event': 'decision_new', **payload}
+        await stream_hub.publish(AGENT_DECISIONS_CH, envelope)
+        # Bridge to Go WS hub for admin frontend
+        try:
+            import json as _json
+            from app.core.redis import get_redis
+            rc = await get_redis()
+            if rc:
+                await rc.publish('ws:broadcast', _json.dumps({'type': 'agent_decision', 'data': envelope}))
+        except Exception:
+            pass
     except Exception as e:
         logger.debug(f'[ws_events] push_decision_event swallowed: {e}')
 

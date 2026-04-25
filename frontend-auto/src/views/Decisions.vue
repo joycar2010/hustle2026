@@ -21,6 +21,71 @@
       </div>
     </div>
 
+    <!-- Decision Pipeline Visualization -->
+    <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-xs font-semibold text-text-tertiary">决策管线 · {{ windowKey }}</h3>
+        <span class="text-[10px] text-text-tertiary">{{ pipelineStats.total }} 条决策</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <!-- Stage: Signal -->
+        <div class="flex-1 text-center">
+          <div class="bg-blue-900/30 rounded-lg px-3 py-2 border border-blue-500/30">
+            <div class="text-[10px] text-blue-400 mb-0.5">信号触发</div>
+            <div class="font-mono font-bold text-lg text-blue-400">{{ pipelineStats.total }}</div>
+            <div class="text-[9px] text-text-tertiary mt-0.5">
+              <span v-for="(cnt, trig) in pipelineStats.topTriggers" :key="trig" class="inline-block mr-1">{{ trig }}:{{ cnt }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="text-text-tertiary text-lg">→</div>
+        <!-- Stage: LLM -->
+        <div class="flex-1 text-center">
+          <div class="bg-purple-900/30 rounded-lg px-3 py-2 border border-purple-500/30">
+            <div class="text-[10px] text-purple-400 mb-0.5">LLM 分析</div>
+            <div class="font-mono font-bold text-lg text-purple-400">{{ pipelineStats.llmProcessed }}</div>
+            <div class="text-[9px] text-text-tertiary mt-0.5">
+              avg conf: {{ pipelineStats.avgConf }}% · {{ pipelineStats.avgLatency }}ms
+            </div>
+          </div>
+        </div>
+        <div class="text-text-tertiary text-lg">→</div>
+        <!-- Stage: Guard -->
+        <div class="flex-1 text-center">
+          <div class="bg-yellow-900/30 rounded-lg px-3 py-2 border border-yellow-500/30">
+            <div class="text-[10px] text-yellow-400 mb-0.5">风控守卫</div>
+            <div class="font-mono font-bold text-lg text-yellow-400">{{ pipelineStats.guardPassed }}</div>
+            <div class="text-[9px] text-text-tertiary mt-0.5">
+              拦截: <span class="text-danger">{{ pipelineStats.guardRejected }}</span> · 通过率: {{ pipelineStats.guardPassRate }}%
+            </div>
+          </div>
+        </div>
+        <div class="text-text-tertiary text-lg">→</div>
+        <!-- Stage: Verdict -->
+        <div class="flex-1 text-center">
+          <div class="rounded-lg px-3 py-2 border" :class="pipelineStats.executed > 0 ? 'bg-green-900/30 border-green-500/30' : 'bg-dark-200 border-border-primary'">
+            <div class="text-[10px] text-success mb-0.5">最终执行</div>
+            <div class="font-mono font-bold text-lg text-success">{{ pipelineStats.executed }}</div>
+            <div class="text-[9px] text-text-tertiary mt-0.5">
+              shadow: {{ pipelineStats.shadow }} · pending: {{ pipelineStats.pending }}
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Funnel conversion bar -->
+      <div class="mt-2 flex items-center gap-1 text-[9px]">
+        <span class="text-text-tertiary">转化漏斗:</span>
+        <div class="flex-1 h-2 bg-dark-200 rounded-full overflow-hidden flex">
+          <div class="bg-success h-full transition-all" :style="{width: pipelineStats.execPct + '%'}" title="executed"></div>
+          <div class="bg-yellow-500 h-full transition-all" :style="{width: pipelineStats.shadowPct + '%'}" title="shadow"></div>
+          <div class="bg-blue-500 h-full transition-all" :style="{width: pipelineStats.pendingPct + '%'}" title="pending"></div>
+          <div class="bg-danger h-full transition-all" :style="{width: pipelineStats.rejPct + '%'}" title="rejected"></div>
+        </div>
+        <span class="text-success">{{ pipelineStats.execPct }}%执行</span>
+        <span class="text-danger">{{ pipelineStats.rejPct }}%拦截</span>
+      </div>
+    </div>
+
     <!-- Filter row -->
     <div class="bg-dark-100 rounded-xl p-3 border border-border-primary flex flex-wrap items-center gap-3 text-xs">
       <div class="flex items-center gap-1">
@@ -175,7 +240,7 @@
   </div>
 </template>
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/api'
 import dayjs from 'dayjs'
 import { useWsStream } from '@/stores/wsStream.js'
@@ -202,6 +267,35 @@ const hasMore = ref(false)
 const nextCursor = ref(null)
 const totalApprox = ref(null)
 const loading = ref(false)
+
+const pipelineStatsData = ref(null)
+
+const pipelineStats = computed(() => {
+  const s = pipelineStatsData.value || {}
+  const bv = s.by_verdict || {}
+  const total = s.total || 0
+  const executed = bv.executed || 0
+  const shadow = bv.shadow || 0
+  const pending = bv.pending || 0
+  const rejected = bv.rejected || 0
+  const topTriggers = {}
+  for (const t of (s.by_trigger || []).slice(0, 3)) topTriggers[t.trigger] = t.count
+  return {
+    total,
+    llmProcessed: total,
+    guardPassed: executed + shadow + pending,
+    guardRejected: rejected,
+    guardPassRate: total ? ((total - rejected) / total * 100).toFixed(0) : 0,
+    executed, shadow, pending,
+    avgConf: ((s.avg_conf || 0) * 100).toFixed(0),
+    avgLatency: s.latency?.avg_ms?.toFixed(0) || s.avg_latency_ms?.toFixed(0) || '--',
+    topTriggers,
+    execPct: total ? (executed / total * 100).toFixed(1) : 0,
+    shadowPct: total ? (shadow / total * 100).toFixed(1) : 0,
+    pendingPct: total ? (pending / total * 100).toFixed(1) : 0,
+    rejPct: total ? (rejected / total * 100).toFixed(1) : 0,
+  }
+})
 
 function fmtTime(t) { return dayjs(t).format('MM-DD HH:mm:ss') }
 function toggle(id) { expanded.value = expanded.value === id ? null : id }
@@ -271,8 +365,20 @@ function _buildParams({ cursor } = {}) {
   return p
 }
 
+async function loadPipelineStats() {
+  try {
+    const tid = selectedTarget.value
+    const w = windowKey.value
+    const tq = tid != null ? '&target_id=' + tid : ''
+    const wq = w && w !== 'all' ? '&window=' + w : ''
+    const r = await api.get('/api/v1/agent/decisions/stats?' + 'x=1' + wq + tq)
+    pipelineStatsData.value = r.data || {}
+  } catch {}
+}
+
 async function reload() {
   loading.value = true
+  loadPipelineStats()
   try {
     const r = await api.get('/api/v1/agent/decisions', { params: _buildParams() })
     items.value = r.data?.items || []
