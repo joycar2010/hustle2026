@@ -24,7 +24,7 @@
               :title="item.dblClickHint"
               @dblclick.prevent="item.onDblClick && item.onDblClick()"
             >
-              <span class="text-base">{{ item.icon }}</span>
+              <FlatIcon :name="item.icon" />
               <span>{{ item.label }}</span>
               <span v-if="item.dblClickHint" class="text-xs text-text-tertiary hidden xl:inline ml-1" title="双击在新标签页打开">⧉</span>
             </router-link>
@@ -79,7 +79,7 @@
             @click="mobileOpen = false"
             class="flex items-center gap-3 px-4 py-3 rounded-lg text-text-secondary hover:text-text-primary hover:bg-dark-50 transition-colors"
           >
-            <span>{{ item.icon }}</span>
+            <FlatIcon :name="item.icon" />
             <span>{{ item.label }}</span>
           </router-link>
         </div>
@@ -90,6 +90,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import FlatIcon from '@/components/FlatIcon.vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
 
@@ -106,20 +107,19 @@ const userInitial = computed(() => {
   return n ? n.charAt(0).toUpperCase() : '?'
 })
 
+function openDetached(path) {
+  window.open(window.location.origin + path + '?mode=detached', '_blank', 'noopener')
+}
+
 const navItems = [
-  {
-    path: '/', label: '总控面板', icon: '🖥️',
-  },
-  {
-    path: '/ws-monitor', label: 'WebSocket监控', icon: '📡',
-    dblClickHint: '双击在新标签页打开',
-    onDblClick: () => window.open(window.location.origin + '/ws-monitor', '_blank')
-  },
-  { path: '/spread',     label: '点差记录分析', icon: '📊' },
-  { path: '/strategies', label: '策略配置',     icon: '⚙️' },
-  { path: '/hedging',    label: '对冲平台管理', icon: '🔄' },
-  { path: '/users',      label: '用户管理',     icon: '👥' },
-  { path: '/system',     label: '系统管理',     icon: '🔧' },
+  { path: '/', label: '总控面板', icon: 'dashboard', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/') },
+  { path: '/ws-monitor', label: 'WS监控', icon: 'signal', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/ws-monitor') },
+  { path: '/spread', label: '点差分析', icon: 'chart', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/spread') },
+  { path: '/strategies', label: '策略配置', icon: 'gear', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/strategies') },
+  { path: '/hedging', label: '对冲管理', icon: 'exchange', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/hedging') },
+  { path: '/users', label: '用户管理', icon: 'users', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/users') },
+  { path: '/risk', label: '风控面板', icon: 'chart', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/risk') },
+  { path: '/system', label: '系统管理', icon: 'cog', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/system') },
 ]
 
 function handleLogout() {

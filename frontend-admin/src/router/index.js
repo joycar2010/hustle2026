@@ -51,6 +51,12 @@ const routes = [
     name: 'SystemAdmin',
     component: () => import('@/views/SystemAdmin.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/risk',
+    name: 'RiskPanel',
+    component: () => import('@/views/RiskPanel.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 

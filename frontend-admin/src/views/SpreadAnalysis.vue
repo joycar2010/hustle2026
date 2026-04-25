@@ -74,8 +74,9 @@
       </div>
     </div>
 
-    <!-- ===== 实时点差图表 ===== -->
-    <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+    <!-- ===== 实时点差图表 + 分布 ===== -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+    <div class="lg:col-span-3 bg-dark-100 rounded-2xl border border-border-primary p-4">
       <div class="flex items-center justify-between mb-3">
         <div class="text-sm font-bold">{{ activePair }} 点差趋势</div>
         <div class="flex items-center gap-4 text-xs">
@@ -89,6 +90,22 @@
         <Line :data="chartData" :options="chartOptions" v-if="chartData.labels.length" :key="chartKey" />
         <div v-else class="h-full flex items-center justify-center text-text-tertiary text-sm">等待数据...</div>
       </div>
+    </div>
+
+    <!-- Spread Distribution Histogram -->
+    <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 flex flex-col">
+      <div class="text-sm font-bold mb-2">点差分布</div>
+      <div class="flex-1 flex flex-col justify-end gap-px min-h-[200px]">
+        <div v-for="(bin, i) in spreadHistogram" :key="i" class="flex items-center gap-1.5 text-[10px]">
+          <span class="w-14 text-right font-mono text-text-tertiary truncate">{{ bin.label }}</span>
+          <div class="flex-1 h-3 bg-dark-300 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300" :style="{ width: bin.pct + '%' }" :class="bin.isHot ? 'bg-primary' : 'bg-text-tertiary/30'"></div>
+          </div>
+          <span class="w-6 text-right font-mono text-text-tertiary">{{ bin.count }}</span>
+        </div>
+      </div>
+      <div class="text-[10px] text-text-tertiary mt-2 text-center">基于当前 {{ wsChartData.length || allRecords.length }} 条数据</div>
+    </div>
     </div>
 
     <!-- ===== 方向筛选 ===== -->
@@ -341,6 +358,31 @@ const statCards = computed(() => {
   ]
 })
 
+const spreadHistogram = computed(() => {
+  const source = wsChartData.value.length ? wsChartData.value.map(d => Math.abs(d.fwd)) : allRecords.value.map(r => Math.abs(parseFloat(r.fwdSpread || 0)))
+  if (!source.length) return []
+  const min = Math.min(...source), max = Math.max(...source)
+  const range = max - min || 1
+  const binCount = 10
+  const binSize = range / binCount
+  const bins = Array.from({ length: binCount }, (_, i) => ({
+    lo: min + i * binSize,
+    hi: min + (i + 1) * binSize,
+    count: 0,
+  }))
+  for (const v of source) {
+    const idx = Math.min(Math.floor((v - min) / binSize), binCount - 1)
+    bins[idx].count++
+  }
+  const maxCount = Math.max(...bins.map(b => b.count), 1)
+  return bins.map(b => ({
+    label: b.lo.toFixed(2) + '-' + b.hi.toFixed(2),
+    count: b.count,
+    pct: (b.count / maxCount * 100).toFixed(0),
+    isHot: b.count === maxCount,
+  }))
+})
+
 function defaultStats() {
   return [
     { label: '记录数', value: '0', color: 'text-text-primary' },
@@ -360,13 +402,30 @@ function percentile(sorted, p) {
 }
 
 // ── Chart ──
+function bollingerBands(arr, win = 20, k = 2) {
+  const sma = [], upper = [], lower = []
+  for (let i = 0; i < arr.length; i++) {
+    if (i < win - 1) { sma.push(null); upper.push(null); lower.push(null); continue }
+    const slice = arr.slice(i - win + 1, i + 1)
+    const mean = slice.reduce((a, b) => a + b, 0) / win
+    const std = Math.sqrt(slice.reduce((a, b) => a + (b - mean) ** 2, 0) / win)
+    sma.push(mean); upper.push(mean + k * std); lower.push(mean - k * std)
+  }
+  return { sma, upper, lower }
+}
+
 const chartData = computed(() => {
   const source = wsChartData.value.length ? wsChartData.value : []
+  const fwdArr = source.map(d => d.fwd)
+  const bb = bollingerBands(fwdArr)
   return {
     labels: source.map(d => d.time),
     datasets: [
-      { label: '正套开仓', data: source.map(d => d.fwd), borderColor: '#0ecb81', backgroundColor: 'rgba(14,203,129,0.06)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5 },
+      { label: '正套开仓', data: fwdArr, borderColor: '#0ecb81', backgroundColor: 'rgba(14,203,129,0.06)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5 },
       { label: '反套开仓', data: source.map(d => d.rev), borderColor: '#f0b90b', backgroundColor: 'rgba(240,185,11,0.06)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5 },
+      { label: 'BB上轨', data: bb.upper, borderColor: 'rgba(99,102,241,0.5)', borderDash: [4, 2], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1 },
+      { label: 'SMA(20)', data: bb.sma, borderColor: 'rgba(99,102,241,0.8)', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1 },
+      { label: 'BB下轨', data: bb.lower, borderColor: 'rgba(99,102,241,0.5)', borderDash: [4, 2], fill: '-1', backgroundColor: 'rgba(99,102,241,0.04)', tension: 0.3, pointRadius: 0, borderWidth: 1 },
     ]
   }
 })

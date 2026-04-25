@@ -257,19 +257,30 @@
                         <button @click="toggleMonitor('proxy')" :class="['relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none', monitors.proxy ? 'bg-primary' : 'bg-gray-600']" :title="monitors.proxy ? '点击关闭监控' : '点击开启监控'"><span :class="['inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform', monitors.proxy ? 'translate-x-5' : 'translate-x-1']" /></button>
                       </div>
                     </div>
-                    <div v-if="monitors.proxy && systemMonitor.ipipgo" class="space-y-1 text-xs text-text-tertiary">
-                      <div class="flex justify-between"><span>IP地址</span><span class="font-mono">{{ systemMonitor.ipipgo.host }}:{{ systemMonitor.ipipgo.port }}</span></div>
-                      <div class="flex justify-between"><span>地区</span><span>{{ systemMonitor.ipipgo.region || '-' }}</span></div>
-                      <div class="flex justify-between"><span>协议</span><span>{{ systemMonitor.ipipgo.proxy_type || '-' }}</span></div>
-                      <div class="flex justify-between"><span>状态</span><span :class="systemMonitor.ipipgo.ip_status === 'active' ? 'text-success' : 'text-danger'">{{ systemMonitor.ipipgo.ip_status === 'active' ? '活跃' : systemMonitor.ipipgo.ip_status || '未知' }}</span></div>
-                      <div class="flex justify-between"><span>分配日期</span><span>{{ systemMonitor.ipipgo.allocated_at || '-' }}</span></div>
-                      <div class="flex justify-between">
-                        <span>到期日期</span>
-                        <span :class="getIpipgoExpiryClass()">{{ systemMonitor.ipipgo.expires_at || '-' }}</span>
+                    <div v-if="monitors.proxy && systemMonitor.ipipgo_orders?.length" class="space-y-2">
+                      <div v-for="order in systemMonitor.ipipgo_orders" :key="order.order_no" class="space-y-1 text-xs text-text-tertiary">
+                        <div class="flex justify-between"><span>订单号</span><span class="font-mono">{{ order.order_no }}</span></div>
+                        <div class="flex justify-between"><span>地区</span><span>{{ order.country || '-' }}</span></div>
+                        <div class="flex justify-between"><span>IP数量</span><span class="font-mono">{{ order.ip_count }}</span></div>
+                        <div class="flex justify-between"><span>购买时长</span><span>{{ order.buy_time }}</span></div>
+                        <div class="flex justify-between">
+                          <span>状态</span>
+                          <span :class="order.ip_status === 'active' ? 'text-success' : order.ip_status === 'expired' ? 'text-danger' : 'text-warning'">
+                            {{ order.ip_status === 'active' ? '活跃' : order.ip_status === 'expired' ? '已过期' : order.ip_status === 'pending' ? '待生效' : order.ip_status }}
+                          </span>
+                        </div>
+                        <div class="flex justify-between"><span>分配日期</span><span>{{ order.allocated_at || '-' }}</span></div>
+                        <div class="flex justify-between">
+                          <span>到期日期</span>
+                          <span :class="order.days_left <= 7 ? 'text-danger font-bold' : order.days_left <= 14 ? 'text-warning font-bold' : 'text-success'">
+                            {{ order.expires_at || '-' }}
+                            <span v-if="order.days_left != null"> ({{ order.days_left }}天)</span>
+                          </span>
+                        </div>
+                        <div v-if="systemMonitor.ipipgo_orders.length > 1" class="border-b border-dark-400 pb-1"></div>
                       </div>
-                      <div class="flex justify-between"><span>绑定账户</span><span>{{ systemMonitor.ipipgo.account_count }}个</span></div>
                     </div>
-                    <div v-else-if="monitors.proxy" class="text-xs text-text-tertiary mt-1">未配置 IPIPGO 代理</div>
+                    <div v-else-if="monitors.proxy" class="text-xs text-text-tertiary mt-1">未查询到 IPIPGO 订单</div>
                   </div>
 
                 </div>
@@ -364,7 +375,8 @@ const systemMonitor = ref({
   feishu: null,
   ssl_certificate: null,
   ssl_all_certs: null,
-  ipipgo: null
+  ipipgo: null,
+  ipipgo_orders: []
 })
 
 let refreshInterval = null
@@ -402,29 +414,28 @@ async function fetchStatus() {
     }
 
     if (monitors.proxy) {
-      // Load IPIPGO static IP info from account proxy_config (not the empty proxy_pool table)
       try {
-        const aggResponse = await api.get('/api/v1/accounts/dashboard/aggregated')
-        const accounts = aggResponse.data?.accounts || []
-        // Find the first account with a proxy_config that has a host
-        const proxyAccounts = accounts.filter(a => a.proxy_config?.host)
-        if (proxyAccounts.length > 0) {
-          const pc = proxyAccounts[0].proxy_config
+        const ipipRes = await api.get('/api/v1/users/ipipgo-orders')
+        const orders = ipipRes.data?.orders || []
+        systemMonitor.value.ipipgo_orders = orders
+        if (orders.length > 0) {
+          const active = orders.find(o => o.ip_status === 'active') || orders[0]
           systemMonitor.value.ipipgo = {
-            host: pc.host,
-            port: pc.port,
-            region: pc.region,
-            proxy_type: pc.proxy_type,
-            ip_status: pc.ip_status,
-            allocated_at: pc.allocated_at,
-            expires_at: pc.expires_at,
-            account_count: proxyAccounts.length,
+            ip_count: active.ip_count,
+            country: active.country,
+            ip_status: active.ip_status,
+            allocated_at: active.allocated_at,
+            expires_at: active.expires_at,
+            days_left: active.days_left,
+            order_count: orders.length,
           }
         } else {
           systemMonitor.value.ipipgo = null
+          systemMonitor.value.ipipgo_orders = []
         }
       } catch {
         systemMonitor.value.ipipgo = null
+        systemMonitor.value.ipipgo_orders = []
       }
     }
   } catch (error) {
@@ -541,26 +552,24 @@ function getSSLDaysClass() {
 }
 
 function getProxyStatusClass() {
-  if (!systemMonitor.value.ipipgo) return 'bg-gray-500'
-  return systemMonitor.value.ipipgo.ip_status === 'active' ? 'bg-success' : 'bg-danger'
+  const orders = systemMonitor.value.ipipgo_orders || []
+  if (!orders.length) return 'bg-gray-500'
+  const hasActive = orders.some(o => o.ip_status === 'active')
+  return hasActive ? 'bg-success' : 'bg-danger'
 }
 
 function getProxyStatusTextClass() {
-  if (!systemMonitor.value.ipipgo) return 'text-gray-500'
-  return systemMonitor.value.ipipgo.ip_status === 'active' ? 'text-success' : 'text-danger'
+  const orders = systemMonitor.value.ipipgo_orders || []
+  if (!orders.length) return 'text-gray-500'
+  const hasActive = orders.some(o => o.ip_status === 'active')
+  return hasActive ? 'text-success' : 'text-danger'
 }
 
 function getProxyStatusText() {
-  if (!systemMonitor.value.ipipgo) return '未配置'
-  return systemMonitor.value.ipipgo.ip_status === 'active' ? '活跃' : '异常'
-}
-
-function getIpipgoExpiryClass() {
-  if (!systemMonitor.value.ipipgo?.expires_at) return ''
-  const daysLeft = Math.ceil((new Date(systemMonitor.value.ipipgo.expires_at) - new Date()) / 86400000)
-  if (daysLeft <= 7) return 'text-danger font-bold'
-  if (daysLeft <= 14) return 'text-warning font-bold'
-  return 'text-success'
+  const orders = systemMonitor.value.ipipgo_orders || []
+  if (!orders.length) return '无订单'
+  const active = orders.filter(o => o.ip_status === 'active').length
+  return active + '/' + orders.length + ' 活跃'
 }
 
 watch(() => props.isOpen, (newVal) => {

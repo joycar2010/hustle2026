@@ -178,6 +178,25 @@
           <div class="h-52">
             <Line :data="latencyChartData" :options="chartOptions('#f0b90b', '平均延迟 (ms)')" />
           </div>
+
+          <!-- Heartbeat Interval Monitor -->
+          <div class="bg-dark-100 rounded-xl border border-border-primary p-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-semibold text-text-primary">心跳间隔</span>
+              <span v-if="streamerStaleWarning" class="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/40 text-yellow-400 animate-pulse">数据推送延迟</span>
+            </div>
+            <div class="flex items-end gap-px h-8">
+              <div v-for="(hb, i) in heartbeatIntervals.slice(-40)" :key="i"
+                class="flex-1 rounded-t transition-all" :style="{ height: Math.min(hb.interval / 50, 100) + '%' }"
+                :class="hb.interval > 3000 ? 'bg-red-500' : hb.interval > 1500 ? 'bg-yellow-500' : 'bg-green-500'"
+                :title="hb.interval + 'ms'">
+              </div>
+            </div>
+            <div class="flex justify-between text-[10px] text-text-tertiary mt-1">
+              <span>正常 &lt;1.5s</span>
+              <span>当前: {{ heartbeatIntervals.length ? heartbeatIntervals[heartbeatIntervals.length-1].interval + 'ms' : '--' }}</span>
+            </div>
+          </div>
         </div>
 
         <!-- 服务端连接信息（Go Hub） -->
@@ -320,6 +339,9 @@ const streamerIntervals = ref({
 
 const rateHistory    = ref([])
 const latencyHistory = ref([])
+const heartbeatIntervals = ref([])
+let lastHeartbeatAt = 0
+const streamerStaleWarning = ref(false)
 const MAX_POINTS = 300
 
 let connectionStartTime = null
@@ -338,16 +360,34 @@ const healthStatusText = computed(() =>
 
 const rateChartData = computed(() => ({
   labels: rateHistory.value.map(d => dayjs(d.time).format('HH:mm:ss')),
-  datasets: [{ label: '消息速率', data: rateHistory.value.map(d => d.rate),
-    borderColor: '#0ecb81', backgroundColor: 'rgba(14,203,129,0.1)',
-    fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }]
+  datasets: [
+    { label: '消息速率', data: rateHistory.value.map(d => d.rate),
+      borderColor: '#0ecb81', backgroundColor: 'rgba(14,203,129,0.1)',
+      fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2,
+      segment: { borderColor: ctx => ctx.p0.parsed.y === 0 ? '#ef4444' : '#0ecb81' } },
+  ]
 }))
+
+const latencySMA = computed(() => {
+  const raw = latencyHistory.value.map(d => d.latency)
+  const win = 5
+  return raw.map((_, i) => {
+    if (i < win - 1) return null
+    const slice = raw.slice(i - win + 1, i + 1)
+    return slice.reduce((a, b) => a + b, 0) / win
+  })
+})
 
 const latencyChartData = computed(() => ({
   labels: latencyHistory.value.map(d => dayjs(d.time).format('HH:mm:ss')),
-  datasets: [{ label: '平均延迟', data: latencyHistory.value.map(d => d.latency),
-    borderColor: '#f0b90b', backgroundColor: 'rgba(240,185,11,0.1)',
-    fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }]
+  datasets: [
+    { label: '平均延迟', data: latencyHistory.value.map(d => d.latency),
+      borderColor: '#f0b90b', backgroundColor: 'rgba(240,185,11,0.1)',
+      fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+    { label: 'SMA(5)', data: latencySMA.value,
+      borderColor: '#ef4444', borderDash: [4, 2],
+      fill: false, tension: 0.4, pointRadius: 0, borderWidth: 1.5 }
+  ]
 }))
 
 function chartOptions(color, label) {
@@ -398,6 +438,15 @@ function connect() {
 
       const type = msg.type || 'unknown'
       stats.value.messageTypes[type] = (stats.value.messageTypes[type] || 0) + 1
+
+      // Heartbeat interval tracking
+      const now2 = Date.now()
+      if (lastHeartbeatAt > 0) {
+        const interval = now2 - lastHeartbeatAt
+        heartbeatIntervals.value.push({ time: now2, interval })
+        if (heartbeatIntervals.value.length > 60) heartbeatIntervals.value.shift()
+      }
+      lastHeartbeatAt = now2
 
       recentMessages.value = [
         { id: Date.now() + Math.random(), type, timestamp: Date.now(), size: event.data.length },
@@ -470,6 +519,7 @@ function startTimers() {
     stats.value.messageRate = msgCountLastSec
     rateHistory.value.push({ time: now, rate: msgCountLastSec })
     latencyHistory.value.push({ time: now, latency: perf.value.avgLatency })
+    streamerStaleWarning.value = lastHeartbeatAt > 0 && (now - lastHeartbeatAt) > 5000
     const cutoff = now - 5 * 60 * 1000
     rateHistory.value    = rateHistory.value.filter(d => d.time > cutoff).slice(-MAX_POINTS)
     latencyHistory.value = latencyHistory.value.filter(d => d.time > cutoff).slice(-MAX_POINTS)

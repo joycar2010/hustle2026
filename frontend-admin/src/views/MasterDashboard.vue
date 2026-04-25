@@ -24,6 +24,7 @@
         <div class="flex items-center gap-1.5">
           <span class="text-text-tertiary">总净值</span>
           <span class="font-mono font-bold text-text-primary">{{ fmtNum(totals.net_assets) }}</span>
+          <SparklineChart v-if="sparklineData.length > 1" :data="sparklineData" color="#22d3ee" width="80px" height="20px" />
         </div>
         <div class="flex items-center gap-1.5">
           <span class="text-text-tertiary">日PnL</span>
@@ -35,6 +36,7 @@
           <span class="text-text-tertiary">风险</span>
           <span class="px-1.5 py-0.5 rounded text-xs font-bold" :class="globalRiskBadge">{{ globalRiskText }}</span>
         </div>
+        <DataStaleBadge :lastUpdateAt="lastUpdateTs" :thresholdMs="35000" />
         <span class="text-text-tertiary">{{ lastUpdate }}</span>
         <button @click="refreshAll" :disabled="refreshing" class="px-2.5 py-1 bg-dark-200 hover:bg-dark-50 rounded-lg text-xs transition-colors disabled:opacity-50">
           <span :class="refreshing && 'animate-spin inline-block'">⟳</span> 刷新
@@ -61,33 +63,122 @@
     <div class="space-y-2">
       <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">资金与风控</h2>
 
-      <!-- Fund summary cards -->
+      <!-- Fund summary cards with embedded visualizations -->
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
           <div class="text-xs text-text-tertiary mb-1">总资产 (USDT)</div>
-          <div class="font-mono font-bold text-lg text-text-primary">{{ fmtNum(totals.total_assets) }}</div>
+          <div class="flex items-center justify-between">
+            <div class="font-mono font-bold text-lg text-text-primary">{{ fmtNum(totals.total_assets) }}</div>
+            <MiniDonut v-if="platformDist.length" :segments="platformDist" size="48px" />
+          </div>
         </div>
         <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
           <div class="text-xs text-text-tertiary mb-1">可用资产</div>
-          <div class="font-mono font-bold text-lg text-text-secondary">{{ fmtNum(totals.available_assets) }}</div>
+          <div class="font-mono font-bold text-lg text-text-secondary mb-1.5">{{ fmtNum(totals.available_assets) }}</div>
+          <div class="h-1.5 bg-dark-300 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500" :style="{ width: availableRate + '%' }" :class="availableRate > 50 ? 'bg-green-500' : availableRate > 25 ? 'bg-yellow-500' : 'bg-red-500'"></div>
+          </div>
+          <div class="text-[10px] text-text-tertiary mt-0.5 text-right">{{ availableRate.toFixed(0) }}%</div>
         </div>
         <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
           <div class="text-xs text-text-tertiary mb-1">净资产</div>
           <div class="font-mono font-bold text-lg text-text-secondary">{{ fmtNum(totals.net_assets) }}</div>
+          <SparklineChart v-if="sparklineData.length > 1" :data="sparklineData" color="#22d3ee" width="100%" height="28px" />
         </div>
         <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
           <div class="text-xs text-text-tertiary mb-1">当日盈亏</div>
           <div class="font-mono font-bold text-lg" :class="pnlClass(totals.daily_pnl)">
             {{ totals.daily_pnl >= 0 ? '+' : '' }}{{ fmtNum(totals.daily_pnl) }}
           </div>
+          <MiniBarChart v-if="pnlHistory.length > 1" :data="pnlHistory.map(d => d.pnl)" :labels="pnlHistory.map(d => d.date)" width="100%" height="32px" />
         </div>
         <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
-          <div class="text-xs text-text-tertiary mb-1">持仓数 / 用户数</div>
-          <div class="font-mono font-bold text-lg text-primary">{{ stats.totalPositions ?? 0 }} / {{ stats.totalUsers ?? 0 }}</div>
+          <div class="text-xs text-text-tertiary mb-1">持仓 / 用户</div>
+          <div class="font-mono font-bold text-lg text-primary mb-1">{{ stats.totalPositions ?? 0 }} / {{ stats.totalUsers ?? 0 }}</div>
+          <div class="flex items-center gap-2 text-[10px]">
+            <div class="flex-1">
+              <div class="flex justify-between text-text-tertiary"><span>Long</span><span class="font-mono">{{ positionSummary.long }}</span></div>
+              <div class="h-1 bg-dark-300 rounded-full mt-0.5"><div class="h-full bg-green-500 rounded-full" :style="{ width: positionSummary.longPct + '%' }"></div></div>
+            </div>
+            <div class="flex-1">
+              <div class="flex justify-between text-text-tertiary"><span>Short</span><span class="font-mono">{{ positionSummary.short }}</span></div>
+              <div class="h-1 bg-dark-300 rounded-full mt-0.5"><div class="h-full bg-red-500 rounded-full" :style="{ width: positionSummary.shortPct + '%' }"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Layer 5: User Fund Table ===== -->
+      <div class="bg-dark-100 rounded-xl border border-border-primary">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-border-secondary">
+          <h2 class="text-sm font-semibold text-text-primary">用户实时资金状态</h2>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-text-tertiary">{{ wsConnected ? 'WS实时' : '10s轮询' }}</span>
+            <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-yellow-500'"></div>
+          </div>
+        </div>
+        <!-- Desktop -->
+        <div class="hidden md:block overflow-x-auto">
+          <table class="w-full text-sm min-w-[800px]">
+            <thead><tr class="border-b border-border-secondary text-text-tertiary text-xs">
+              <th class="text-left px-5 py-2.5">用户名</th>
+              <th class="text-left px-3 py-2.5">角色</th>
+              <th class="text-right px-3 py-2.5">账户数</th>
+              <th class="text-right px-3 py-2.5">总资产</th>
+              <th class="text-right px-3 py-2.5">净资产</th>
+              <th class="text-right px-3 py-2.5">当日PnL</th>
+              <th class="text-right px-5 py-2.5">风险率</th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="usersLoading"><td colspan="7" class="text-center py-10 text-text-tertiary">加载中...</td></tr>
+              <tr v-else-if="!userFinancials.length"><td colspan="7" class="text-center py-10 text-text-tertiary">暂无数据</td></tr>
+              <tr v-for="u in userFinancials" :key="u.user_id" class="border-b border-border-secondary hover:bg-dark-50 transition-colors">
+                <td class="px-5 py-2.5 font-medium text-text-primary">{{ u.username }}</td>
+                <td class="px-3 py-2.5"><span class="px-1.5 py-0.5 rounded text-xs" :class="roleBadgeClass(u.role)">{{ u.role || '--' }}</span></td>
+                <td class="px-3 py-2.5 text-right text-text-secondary">{{ u.account_count ?? '--' }}</td>
+                <td class="px-3 py-2.5 text-right font-mono font-semibold relative">
+                  <div class="absolute inset-0 flex items-center"><div class="h-full bg-primary/10 rounded" :style="{ width: assetBarWidth(u.total_assets) + '%' }"></div></div>
+                  <span class="relative">{{ fmtNum(u.total_assets) }}</span>
+                </td>
+                <td class="px-3 py-2.5 text-right font-mono text-text-secondary">{{ fmtNum(u.net_assets) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono font-semibold" :class="pnlClass(u.daily_pnl)">
+                  {{ u.daily_pnl != null ? (u.daily_pnl >= 0 ? '+' : '') + fmtNum(u.daily_pnl) : '--' }}
+                </td>
+                <td class="px-5 py-2.5 text-right"><span class="px-1.5 py-0.5 rounded text-xs font-bold" :class="riskBadgeClass(u.risk_rate)">{{ u.risk_rate != null ? u.risk_rate.toFixed(1) + '%' : '--' }}</span></td>
+              </tr>
+            </tbody>
+            <tfoot v-if="userFinancials.length" class="border-t-2 border-border-primary">
+              <tr class="bg-dark-50 text-sm font-semibold">
+                <td class="px-5 py-2.5 text-text-secondary" colspan="3">合计</td>
+                <td class="px-3 py-2.5 text-right font-mono">{{ fmtNum(totals.total_assets) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-text-secondary">{{ fmtNum(totals.net_assets) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono" :class="pnlClass(totals.daily_pnl)">{{ totals.daily_pnl >= 0 ? '+' : '' }}{{ fmtNum(totals.daily_pnl) }}</td>
+                <td class="px-5 py-2.5"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <!-- Mobile -->
+        <div class="md:hidden space-y-2 p-3">
+          <div v-if="usersLoading" class="text-center py-8 text-text-tertiary text-sm">加载中...</div>
+          <div v-for="u in userFinancials" :key="u.user_id" class="bg-dark-200 rounded-xl p-3 space-y-2 border border-border-secondary">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-sm">{{ u.username }}</span>
+                <span class="px-1.5 py-0.5 rounded text-xs" :class="roleBadgeClass(u.role)">{{ u.role }}</span>
+              </div>
+              <span class="font-mono font-bold text-sm" :class="pnlClass(u.daily_pnl)">{{ u.daily_pnl != null ? (u.daily_pnl >= 0 ? '+' : '') + fmtNum(u.daily_pnl) : '--' }}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="bg-dark-300 rounded p-2"><div class="text-text-tertiary mb-0.5">总资产</div><div class="font-mono font-bold">{{ fmtNum(u.total_assets) }}</div></div>
+              <div class="bg-dark-300 rounded p-2"><div class="text-text-tertiary mb-0.5">净资产</div><div class="font-mono">{{ fmtNum(u.net_assets) }}</div></div>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- Per-account health matrix -->
+
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
         <div v-for="acc in sortedAccounts" :key="acc.account_id"
           class="bg-dark-100 rounded-xl p-4 border transition-all"
@@ -116,14 +207,17 @@
           <div v-if="acc._error" class="text-[10px] text-red-400 bg-red-900/20 rounded px-2 py-0.5 mb-2 truncate">{{ acc._error }}</div>
           <div v-if="accRiskLevel(acc) === 'danger'" class="text-[10px] text-red-400 bg-red-900/20 rounded px-2 py-0.5 mb-2">保证金率过高</div>
           <!-- Data grid -->
-          <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-            <div class="flex justify-between"><span class="text-text-tertiary">净资产</span><span class="font-mono text-text-primary">{{ fmtNum(getBal(acc, 'net_assets')) }}</span></div>
-            <div class="flex justify-between"><span class="text-text-tertiary">可用</span><span class="font-mono text-text-secondary">{{ fmtNum(getBal(acc, 'available_balance')) }}</span></div>
-            <div class="flex justify-between"><span class="text-text-tertiary">浮盈亏</span><span class="font-mono" :class="pnlClass(getBal(acc, 'unrealized_pnl'))">{{ pnlStr(getBal(acc, 'unrealized_pnl')) }}</span></div>
-            <div class="flex justify-between">
-              <span class="text-text-tertiary">保证金率</span>
-              <span class="font-mono" :class="riskClass(getBal(acc, 'risk_ratio'))">{{ getBal(acc, 'risk_ratio') != null ? getBal(acc, 'risk_ratio').toFixed(1) + '%' : '--' }}</span>
+          <div class="flex items-start gap-2">
+            <div class="flex-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              <div class="flex justify-between"><span class="text-text-tertiary">净资产</span><span class="font-mono text-text-primary">{{ fmtNum(getBal(acc, 'net_assets')) }}</span></div>
+              <div class="flex justify-between"><span class="text-text-tertiary">可用</span><span class="font-mono text-text-secondary">{{ fmtNum(getBal(acc, 'available_balance')) }}</span></div>
+              <div class="flex justify-between"><span class="text-text-tertiary">浮盈亏</span><span class="font-mono" :class="pnlClass(getBal(acc, 'unrealized_pnl'))">{{ pnlStr(getBal(acc, 'unrealized_pnl')) }}</span></div>
+              <div class="flex justify-between">
+                <span class="text-text-tertiary">保证金率</span>
+                <span class="font-mono" :class="riskClass(getBal(acc, 'risk_ratio'))">{{ getBal(acc, 'risk_ratio') != null ? getBal(acc, 'risk_ratio').toFixed(1) + '%' : '--' }}</span>
+              </div>
             </div>
+            <RiskGauge v-if="getBal(acc, 'risk_ratio') != null" :value="Math.min(getBal(acc, 'risk_ratio'), 100)" width="72px" height="44px" />
           </div>
           <!-- Position count -->
           <div class="mt-2 pt-1.5 border-t border-border-secondary flex justify-between text-xs">
@@ -148,11 +242,17 @@
               {{ pair.is_active ? '活跃' : '停用' }}
             </span>
           </div>
+          <HedgeBalance
+            :valueA="getHedgePosition(pair, 'a')"
+            :valueB="getHedgePosition(pair, 'b')"
+            :labelA="pair.platform_a?.platform_name || 'CEX'"
+            :labelB="pair.platform_b?.platform_name || 'MT5'"
+            class="mb-2"
+          />
           <div class="text-xs text-text-tertiary space-y-1">
             <div class="flex justify-between"><span>CEX</span><span class="font-mono text-text-secondary">{{ pair.symbol_a?.symbol || '--' }}</span></div>
             <div class="flex justify-between"><span>MT5</span><span class="font-mono text-text-secondary">{{ pair.symbol_b?.symbol || '--' }}</span></div>
             <div class="flex justify-between"><span>转换因子</span><span class="font-mono text-primary font-bold">{{ pair.conversion_factor || '--' }}</span></div>
-            <div class="flex justify-between"><span>平台</span><span class="text-text-secondary">{{ pair.platform_a?.platform_name || 'Binance' }} / {{ pair.platform_b?.platform_name || 'MT5' }}</span></div>
           </div>
         </div>
       </div>
@@ -163,103 +263,74 @@
       <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">基础设施</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
 
-        <!-- API Service -->
-        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online ? 'border-green-800/30' : 'border-red-800/30'">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2 h-2 rounded-full', goStatus.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-              <span class="text-sm font-semibold">后端 API 服务器</span>
-            </div>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="goStatus.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-              {{ goStatus.online ? '在线' : '离线' }}
+        <!-- Card A: 服务集群 (API + MT5 Bridge) -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online && mt5System.online ? 'border-green-800/30' : 'border-red-800/30'">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">服务集群</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="goStatus.online && mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+              {{ goStatus.online && mt5System.online ? '全部在线' : '部分异常' }}
             </span>
           </div>
-          <div class="text-xs text-text-tertiary space-y-0.5">
-            <div class="flex justify-between"><span>端口</span><span class="font-mono text-text-secondary">:8000 / :8080</span></div>
-            <div class="flex justify-between"><span>运行</span><span class="font-mono text-text-secondary">{{ goStatus.uptime || '--' }}</span></div>
-            <div class="flex justify-between"><span>内存</span><span class="font-mono text-text-secondary">{{ goStatus.memory || '--' }}</span></div>
-          </div>
-        </div>
-
-        <!-- MT5 Bridge + Clients merged -->
-        <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5System.online ? 'border-green-800/30' : 'border-red-800/30'">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2 h-2 rounded-full', mt5System.online ? 'bg-green-500 animate-pulse' : 'bg-red-500']"></div>
-              <span class="text-sm font-semibold">MT5 Bridge 服务器</span>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2 text-xs">
+              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', goStatus.online ? 'bg-green-500' : 'bg-red-500']"></div>
+              <span class="text-text-tertiary w-16">Python API</span>
+              <span class="font-mono text-text-secondary flex-1 text-right">:8000</span>
+              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ goStatus.uptime || '--' }}</span>
             </div>
-            <span class="text-[10px]" :class="mt5System.online ? 'text-green-400' : 'text-red-400'">
-              {{ mt5ClientsOnline }}/{{ mt5ClientsTotal }} 在线
-            </span>
-          </div>
-          <div class="text-xs text-text-tertiary space-y-0.5">
-            <div class="flex justify-between"><span>运行</span><span class="font-mono text-text-secondary">{{ mt5System.uptime || '--' }}</span></div>
-            <div class="flex justify-between"><span>内存</span><span class="font-mono text-text-secondary">{{ mt5System.memory || '--' }}</span></div>
-            <div class="flex justify-between"><span>实例</span><span class="font-mono text-text-secondary">{{ mt5System.instances ?? '--' }}</span></div>
-          </div>
-          <!-- Agent + Bridges (mt5-infra) -->
-          <div v-if="mt5Infra.bridges?.total" class="mt-2 pt-1.5 border-t border-border-secondary text-[10px]">
-            <div class="flex justify-between text-text-tertiary mb-1">
-              <span>Agent</span>
-              <span>
-                <span :class="mt5Infra.reachable ? 'text-green-400' : 'text-red-400'">{{ mt5Infra.reachable ? (mt5Infra.status === 'ok' ? '正常' : '降级') : '不可达' }}</span>
-                <span class="text-text-tertiary ml-1.5 font-mono">{{ fmtUptime(mt5Infra.uptime_seconds) }}</span>
-              </span>
+            <div class="flex items-center gap-2 text-xs">
+              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', goStatus.online ? 'bg-green-500' : 'bg-red-500']"></div>
+              <span class="text-text-tertiary w-16">Go API</span>
+              <span class="font-mono text-text-secondary flex-1 text-right">:8080</span>
+              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ goStatus.memory || '--' }}</span>
             </div>
-            <div class="flex justify-between text-text-tertiary mb-1">
-              <span>Bridges</span>
-              <span :class="mt5Infra.bridges.alive === mt5Infra.bridges.total ? 'text-green-400' : 'text-red-400'">{{ mt5Infra.bridges.alive }}/{{ mt5Infra.bridges.total }} 活跃</span>
+            <div class="border-t border-border-secondary my-1"></div>
+            <div class="flex items-center gap-2 text-xs">
+              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', mt5System.online ? 'bg-green-500' : 'bg-red-500']"></div>
+              <span class="text-text-tertiary w-16">MT5 Bridge</span>
+              <span class="font-mono text-text-secondary flex-1 text-right">{{ mt5System.instances ?? '--' }} 实例</span>
+              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ mt5System.uptime || '--' }}</span>
             </div>
-            <div class="grid grid-cols-2 gap-x-2 gap-y-0.5">
-              <div v-for="b in mt5Infra.bridges.detail" :key="b.service" class="flex items-center justify-between">
-                <span class="truncate text-text-tertiary" :title="b.service">:{{ b.port }}</span>
-                <div :class="['w-1.5', 'h-1.5', 'rounded-full', b.state === 'running' || b.state === 'paused' ? 'bg-green-500' : 'bg-red-500']"></div>
-              </div>
-            </div>
-          </div>
-          <!-- MT5 client list -->
-          <div v-if="monitorData.mt5_clients?.length" class="mt-2 pt-1.5 border-t border-border-secondary space-y-1">
-            <div v-for="c in monitorData.mt5_clients" :key="c.mt5_login" class="flex items-center justify-between text-[10px]">
-              <div class="flex items-center gap-1 truncate">
-                <span class="text-text-secondary">{{ c.client_name }}</span>
-                <span v-if="c.is_system_service" class="px-0.5 text-purple-400">SYS</span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-text-tertiary font-mono">{{ c.mt5_login }}</span>
-                <div :class="['w-1.5 h-1.5 rounded-full', isMT5Online(c) ? 'bg-green-500' : 'bg-red-500']"></div>
-              </div>
+            <div class="flex items-center gap-2 text-xs">
+              <div class="w-1.5 h-1.5 flex-shrink-0"></div>
+              <span class="text-text-tertiary w-16">内存</span>
+              <span class="font-mono text-text-secondary flex-1 text-right">API {{ goStatus.memory || '--' }} / MT5 {{ mt5System.memory || '--' }}</span>
             </div>
           </div>
         </div>
 
-        <!-- Redis + DB + WS merged -->
+        <!-- Card B: 数据与服务 (Redis/DB Pool/WS + 后端服务状态) -->
         <div class="bg-dark-100 rounded-xl p-4 border" :class="monitorData.redis?.connected ? 'border-green-800/30' : 'border-red-800/30'">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <div :class="['w-2 h-2 rounded-full', monitorData.redis?.connected ? 'bg-green-500' : 'bg-red-500']"></div>
-              <span class="text-sm font-semibold">数据层</span>
-            </div>
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">数据与服务</span>
             <span class="text-[10px]" :class="monitorData.redis?.connected ? 'text-green-400' : 'text-red-400'">
               {{ monitorData.redis?.connected ? '正常' : '异常' }}
             </span>
           </div>
-          <div class="text-xs text-text-tertiary space-y-0.5">
+          <div class="text-xs text-text-tertiary space-y-1">
             <div class="flex justify-between"><span>Redis</span><span class="font-mono text-text-secondary">v{{ monitorData.redis?.version || '--' }} / {{ monitorData.redis?.used_memory_human || '--' }}</span></div>
-            <div class="flex justify-between"><span>客户端</span><span class="font-mono text-text-secondary">{{ monitorData.redis?.connected_clients || '--' }}</span></div>
-            <div class="flex justify-between"><span>WS连接</span><span class="font-mono text-primary font-bold">{{ stats.wsConnections ?? 0 }}</span></div>
-            <div class="flex justify-between"><span>数据库</span><span :class="monitorData.redis?.connected ? 'text-green-400' : 'text-yellow-400'">正常</span></div>
+            <div class="flex justify-between"><span>Redis 客户端</span><span class="font-mono text-text-secondary">{{ monitorData.redis?.connected_clients || '--' }}</span></div>
+            <div class="flex justify-between"><span>WS 连接</span><span class="font-mono text-primary font-bold">{{ stats.wsConnections ?? 0 }}</span></div>
           </div>
-        </div>
-
-        <!-- Backend Services -->
-        <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
-          <div class="flex items-center gap-2 mb-2">
-            <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span class="text-sm font-semibold">后端服务</span>
+          <div class="border-t border-border-secondary mt-2 pt-2">
+            <div class="flex items-center justify-between text-xs mb-1.5">
+              <span class="text-text-tertiary">数据库连接池</span>
+              <span class="font-mono" :class="dbPoolUsagePct > 80 ? 'text-red-400' : dbPoolUsagePct > 60 ? 'text-yellow-400' : 'text-green-400'">
+                {{ dbPool.active }}/{{ dbPool.max }}
+              </span>
+            </div>
+            <div class="h-1.5 bg-dark-300 rounded-full overflow-hidden mb-1">
+              <div class="h-full rounded-full transition-all duration-500"
+                :style="{ width: dbPoolUsagePct + '%' }"
+                :class="dbPoolUsagePct > 80 ? 'bg-red-500' : dbPoolUsagePct > 60 ? 'bg-yellow-500' : 'bg-green-500'">
+              </div>
+            </div>
+            <div class="flex justify-between text-[10px] text-text-tertiary">
+              <span>活跃 {{ dbPool.active }} · 空闲 {{ dbPool.idle }}</span>
+              <span>{{ dbPoolUsagePct.toFixed(0) }}%</span>
+            </div>
           </div>
-          <div class="text-xs text-text-tertiary space-y-0.5">
-            <div class="flex justify-between"><span>API 服务</span><span :class="goStatus.online ? 'text-green-400' : 'text-red-400'">{{ goStatus.online ? '运行中' : '异常' }}</span></div>
-            <div class="flex justify-between"><span>MT5 Bridge</span><span :class="mt5System.online ? 'text-green-400' : 'text-red-400'">{{ mt5System.online ? '运行中' : '异常' }}</span></div>
+          <div class="border-t border-border-secondary mt-2 pt-2 text-xs text-text-tertiary space-y-1">
             <div class="flex justify-between"><span>持仓监控</span><span class="text-green-400">运行中</span></div>
             <div class="flex justify-between"><span>飞书通知</span>
               <span :class="monitorData.feishu?.status === 'healthy' ? 'text-green-400' : monitorData.feishu?.status === 'disabled' ? 'text-yellow-400' : 'text-text-tertiary'">
@@ -268,6 +339,84 @@
             </div>
           </div>
         </div>
+
+        <!-- Card C: Agent & Bridges (独立 + 心跳线) -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5Infra.reachable ? 'border-green-800/30' : 'border-red-800/30'">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">Agent & Bridges</span>
+            <span class="text-[10px]" :class="mt5Infra.reachable ? 'text-green-400' : 'text-red-400'">
+              {{ mt5Infra.reachable ? (mt5Infra.status === 'ok' ? '正常' : '降级') : '不可达' }}
+            </span>
+          </div>
+          <div class="text-xs text-text-tertiary space-y-1">
+            <div class="flex justify-between">
+              <span>Agent 运行</span>
+              <span class="font-mono text-text-secondary">{{ fmtUptime(mt5Infra.uptime_seconds) }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Bridges</span>
+              <span :class="mt5Infra.bridges?.alive === mt5Infra.bridges?.total ? 'text-green-400' : 'text-red-400'" class="font-mono">
+                {{ mt5Infra.bridges?.alive || 0 }}/{{ mt5Infra.bridges?.total || 0 }} 活跃
+              </span>
+            </div>
+            <div v-if="mt5Infra.bridges?.detail" class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1">
+              <div v-for="b in mt5Infra.bridges.detail" :key="b.service" class="flex items-center justify-between text-[10px]">
+                <span class="truncate text-text-tertiary" :title="b.service">:{{ b.port }}</span>
+                <div :class="['w-1.5 h-1.5 rounded-full', b.state === 'running' || b.state === 'paused' ? 'bg-green-500' : 'bg-red-500']"></div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-2 pt-2 border-t border-border-secondary">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] text-text-tertiary">心跳</span>
+              <span class="text-[10px] font-mono" :class="agentHbColor">{{ agentHeartbeats.length ? agentHeartbeats[agentHeartbeats.length-1].ms + 'ms' : '--' }}</span>
+            </div>
+            <div class="flex items-end gap-px h-6">
+              <div v-for="(hb, i) in agentHeartbeats.slice(-40)" :key="i"
+                class="flex-1 rounded-t transition-all"
+                :style="{ height: Math.min(hb.ms / 30, 100) + '%' }"
+                :class="hb.ms > 5000 ? 'bg-red-500' : hb.ms > 2000 ? 'bg-yellow-500' : 'bg-green-500'"
+                :title="hb.ms + 'ms'">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card D: MT5 客户端 (独立 + 心跳线) -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="mt5ClientsOnline > 0 ? 'border-green-800/30' : 'border-red-800/30'">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-semibold">MT5 客户端</span>
+            <span class="text-[10px]" :class="mt5ClientsOnline > 0 ? 'text-green-400' : 'text-red-400'">
+              {{ mt5ClientsOnline }}/{{ mt5ClientsTotal }} 在线
+            </span>
+          </div>
+          <div v-if="monitorData.mt5_clients?.length" class="space-y-1">
+            <div v-for="cl in monitorData.mt5_clients" :key="cl.mt5_login" class="flex items-center justify-between text-[10px]">
+              <div class="flex items-center gap-1.5 truncate">
+                <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', isMT5Online(cl) ? 'bg-green-500' : 'bg-red-500']"></div>
+                <span class="text-text-secondary truncate">{{ cl.client_name }}</span>
+                <span v-if="cl.is_system_service" class="px-0.5 text-purple-400 flex-shrink-0">SYS</span>
+              </div>
+              <span class="text-text-tertiary font-mono ml-1">{{ cl.mt5_login }}</span>
+            </div>
+          </div>
+          <div v-else class="text-xs text-text-tertiary text-center py-2">暂无客户端</div>
+          <div class="mt-2 pt-2 border-t border-border-secondary">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] text-text-tertiary">心跳</span>
+              <span class="text-[10px] font-mono" :class="mt5HbColor">{{ mt5Heartbeats.length ? mt5Heartbeats[mt5Heartbeats.length-1].ms + 'ms' : '--' }}</span>
+            </div>
+            <div class="flex items-end gap-px h-6">
+              <div v-for="(hb, i) in mt5Heartbeats.slice(-40)" :key="i"
+                class="flex-1 rounded-t transition-all"
+                :style="{ height: Math.min(hb.ms / 30, 100) + '%' }"
+                :class="hb.ms > 5000 ? 'bg-red-500' : hb.ms > 2000 ? 'bg-yellow-500' : 'bg-green-500'"
+                :title="hb.ms + 'ms'">
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -299,79 +448,21 @@
       </div>
     </div>
 
-    <!-- ===== Layer 5: User Fund Table ===== -->
-    <div class="bg-dark-100 rounded-xl border border-border-primary">
-      <div class="flex items-center justify-between px-5 py-3 border-b border-border-secondary">
-        <h2 class="text-sm font-semibold text-text-primary">用户实时资金状态</h2>
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-text-tertiary">{{ wsConnected ? 'WS实时' : '10s轮询' }}</span>
-          <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-yellow-500'"></div>
-        </div>
-      </div>
-      <!-- Desktop -->
-      <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm min-w-[800px]">
-          <thead><tr class="border-b border-border-secondary text-text-tertiary text-xs">
-            <th class="text-left px-5 py-2.5">用户名</th>
-            <th class="text-left px-3 py-2.5">角色</th>
-            <th class="text-right px-3 py-2.5">账户数</th>
-            <th class="text-right px-3 py-2.5">总资产</th>
-            <th class="text-right px-3 py-2.5">净资产</th>
-            <th class="text-right px-3 py-2.5">当日PnL</th>
-            <th class="text-right px-5 py-2.5">风险率</th>
-          </tr></thead>
-          <tbody>
-            <tr v-if="usersLoading"><td colspan="7" class="text-center py-10 text-text-tertiary">加载中...</td></tr>
-            <tr v-else-if="!userFinancials.length"><td colspan="7" class="text-center py-10 text-text-tertiary">暂无数据</td></tr>
-            <tr v-for="u in userFinancials" :key="u.user_id" class="border-b border-border-secondary hover:bg-dark-50 transition-colors">
-              <td class="px-5 py-2.5 font-medium text-text-primary">{{ u.username }}</td>
-              <td class="px-3 py-2.5"><span class="px-1.5 py-0.5 rounded text-xs" :class="roleBadgeClass(u.role)">{{ u.role || '--' }}</span></td>
-              <td class="px-3 py-2.5 text-right text-text-secondary">{{ u.account_count ?? '--' }}</td>
-              <td class="px-3 py-2.5 text-right font-mono font-semibold">{{ fmtNum(u.total_assets) }}</td>
-              <td class="px-3 py-2.5 text-right font-mono text-text-secondary">{{ fmtNum(u.net_assets) }}</td>
-              <td class="px-3 py-2.5 text-right font-mono font-semibold" :class="pnlClass(u.daily_pnl)">
-                {{ u.daily_pnl != null ? (u.daily_pnl >= 0 ? '+' : '') + fmtNum(u.daily_pnl) : '--' }}
-              </td>
-              <td class="px-5 py-2.5 text-right"><span :class="riskClass(u.risk_rate)">{{ u.risk_rate != null ? u.risk_rate.toFixed(1) + '%' : '--' }}</span></td>
-            </tr>
-          </tbody>
-          <tfoot v-if="userFinancials.length" class="border-t-2 border-border-primary">
-            <tr class="bg-dark-50 text-sm font-semibold">
-              <td class="px-5 py-2.5 text-text-secondary" colspan="3">合计</td>
-              <td class="px-3 py-2.5 text-right font-mono">{{ fmtNum(totals.total_assets) }}</td>
-              <td class="px-3 py-2.5 text-right font-mono text-text-secondary">{{ fmtNum(totals.net_assets) }}</td>
-              <td class="px-3 py-2.5 text-right font-mono" :class="pnlClass(totals.daily_pnl)">{{ totals.daily_pnl >= 0 ? '+' : '' }}{{ fmtNum(totals.daily_pnl) }}</td>
-              <td class="px-5 py-2.5"></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <!-- Mobile -->
-      <div class="md:hidden space-y-2 p-3">
-        <div v-if="usersLoading" class="text-center py-8 text-text-tertiary text-sm">加载中...</div>
-        <div v-for="u in userFinancials" :key="u.user_id" class="bg-dark-200 rounded-xl p-3 space-y-2 border border-border-secondary">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="font-bold text-sm">{{ u.username }}</span>
-              <span class="px-1.5 py-0.5 rounded text-xs" :class="roleBadgeClass(u.role)">{{ u.role }}</span>
-            </div>
-            <span class="font-mono font-bold text-sm" :class="pnlClass(u.daily_pnl)">{{ u.daily_pnl != null ? (u.daily_pnl >= 0 ? '+' : '') + fmtNum(u.daily_pnl) : '--' }}</span>
-          </div>
-          <div class="grid grid-cols-2 gap-2 text-xs">
-            <div class="bg-dark-300 rounded p-2"><div class="text-text-tertiary mb-0.5">总资产</div><div class="font-mono font-bold">{{ fmtNum(u.total_assets) }}</div></div>
-            <div class="bg-dark-300 rounded p-2"><div class="text-text-tertiary mb-0.5">净资产</div><div class="font-mono">{{ fmtNum(u.net_assets) }}</div></div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useWebSocket } from '@/composables/useWebSocket.js'
+import { useBroadcastChannel } from '@/composables/useBroadcastChannel.js'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
+import SparklineChart from '@/components/SparklineChart.vue'
+import MiniDonut from '@/components/MiniDonut.vue'
+import RiskGauge from '@/components/RiskGauge.vue'
+import MiniBarChart from '@/components/MiniBarChart.vue'
+import HedgeBalance from '@/components/HedgeBalance.vue'
+import DataStaleBadge from '@/components/DataStaleBadge.vue'
 
 // --- WebSocket ---
 const { connected: wsConnected, lastMessage, connect: wsConnect, disconnect: wsDisconnect } = useWebSocket()
@@ -383,6 +474,7 @@ const usersLoading = ref(true)
 const lastUpdate = ref('--')
 
 const goStatus = ref({ online: false, uptime: '', memory: '', redis: false })
+const dbPool = ref({ active: 0, idle: 0, max: 0 })
 const mt5System = ref({ online: false })
 const mt5Infra = ref({ reachable: false, status: null, uptime_seconds: 0, instances: { running: 0, total: 0 }, bridges: { alive: 0, total: 0, detail: [] } })
 const stats = ref({ wsConnections: 0, totalUsers: 0, activeAccounts: 0, totalPositions: 0 })
@@ -392,6 +484,16 @@ const monitorData = ref({ redis: null, ssl_certificate: [], feishu: null, mt5_cl
 const proxyAccounts = ref([])
 const hedgingPairs = ref([])
 const usersMap = ref({})
+const sparklineData = ref([])
+const pnlHistory = ref([])
+const platformDist = ref([])
+const lastUpdateTs = ref(0)
+const agentHeartbeats = ref([])
+const mt5Heartbeats = ref([])
+let lastAgentPingAt = 0
+let lastMt5PingAt = 0
+
+const { broadcast: bcBroadcast, init: bcInit } = useBroadcastChannel()
 
 // --- WS message handler ---
 watch(lastMessage, (msg) => {
@@ -432,6 +534,7 @@ function applyAccountBalance(d) {
     rebuildUserFinancials()
   }
   lastUpdate.value = dayjs().format('HH:mm:ss')
+  lastUpdateTs.value = Date.now()
 }
 
 function rebuildUserFinancials() {
@@ -465,6 +568,40 @@ const totals = computed(() => ({
 const sslOverallOk = computed(() =>
   (monitorData.value.ssl_certificate || []).every(c => c.status !== 'expired' && c.status !== 'critical')
 )
+
+const dbPoolUsagePct = computed(() => {
+  return dbPool.value.max > 0 ? (dbPool.value.active / dbPool.value.max) * 100 : 0
+})
+
+const agentHbColor = computed(() => {
+  if (!agentHeartbeats.value.length) return 'text-text-tertiary'
+  const last = agentHeartbeats.value[agentHeartbeats.value.length - 1].ms
+  return last > 5000 ? 'text-red-400' : last > 2000 ? 'text-yellow-400' : 'text-green-400'
+})
+
+const mt5HbColor = computed(() => {
+  if (!mt5Heartbeats.value.length) return 'text-text-tertiary'
+  const last = mt5Heartbeats.value[mt5Heartbeats.value.length - 1].ms
+  return last > 5000 ? 'text-red-400' : last > 2000 ? 'text-yellow-400' : 'text-green-400'
+})
+
+const availableRate = computed(() => {
+  const total = totals.value.total_assets
+  const avail = totals.value.available_assets
+  return total > 0 ? (avail / total) * 100 : 0
+})
+
+const positionSummary = computed(() => {
+  let long = 0, short = 0
+  for (const acc of allAccounts.value) {
+    for (const p of (acc.positions || [])) {
+      if (p.type === 0 || p.side === 'long' || p.side === 'LONG') long++
+      else short++
+    }
+  }
+  const total = long + short || 1
+  return { long, short, longPct: (long / total * 100).toFixed(0), shortPct: (short / total * 100).toFixed(0) }
+})
 
 const sortedAccounts = computed(() => {
   return [...allAccounts.value].filter(a => a.is_active !== false).sort((a, b) => {
@@ -500,30 +637,46 @@ const globalRiskBadge = computed(() => {
 // --- Data fetch ---
 async function fetchMonitorStatus() {
   try {
-    const r = await api.get('/api/v1/monitor/status')
-    const d = r.data
+    const [monitorR, sysR] = await Promise.all([
+      api.get('/api/v1/monitor/status'),
+      api.get('/api/v1/system/status').catch(() => ({ data: {} })),
+    ])
+    const d = monitorR.data
     monitorData.value = d
     const uptimeSec = parseInt(d.redis?.uptime_seconds || '0')
     const h = Math.floor(uptimeSec / 3600)
     const m = Math.floor((uptimeSec % 3600) / 60)
     goStatus.value = {
       online: true,
-      uptime: uptimeSec > 86400 ? `${Math.floor(uptimeSec / 86400)}天${h % 24}时` : `${h}时${m}分`,
+      uptime: sysR.data?.uptime || (uptimeSec > 86400 ? `${Math.floor(uptimeSec / 86400)}天${h % 24}时` : `${h}时${m}分`),
       memory: d.redis?.used_memory_human || '--',
       redis: d.redis?.connected ?? false,
+    }
+    if (sysR.data?.dbPool) {
+      dbPool.value = sysR.data.dbPool
+    }
+    // Use system/status MT5 field to supplement mt5System
+    if (sysR.data?.mt5 !== undefined) {
+      mt5System.value = {
+        ...mt5System.value,
+        online: sysR.data.mt5,
+        uptime: sysR.data.uptime || mt5System.value.uptime,
+      }
     }
   } catch { goStatus.value.online = false }
 }
 
 async function fetchMT5Status() {
   try {
-    const [serverR, statusR] = await Promise.all([
-      api.get('/api/v1/mt5-server/status').catch(() => ({ data: {} })),
-      api.get('/api/v1/mt5/connection/status').catch(() => ({ data: {} })),
-    ])
-    const srv = serverR.data || {}
-    const s = statusR.data || {}
-    mt5System.value = { online: srv.online ?? (Object.keys(srv).length > 0) ?? !s.error, uptime: srv.uptime || srv.run_time || '--', memory: srv.memory || srv.mem_usage || '--', cpu: srv.cpu || srv.cpu_usage || '--', instances: srv.instances ?? srv.bridge_count ?? '--', connected: s.connected ?? false }
+    const r = await api.get('/api/v1/mt5-infra/status').catch(() => ({ data: {} }))
+    const d = r.data || {}
+    mt5System.value = {
+      online: d.reachable ?? false,
+      uptime: fmtUptime(d.uptime_seconds) || '--',
+      memory: '--',
+      instances: d.bridges?.total ?? '--',
+      connected: d.reachable ?? false,
+    }
   } catch { mt5System.value = { online: false } }
 }
 
@@ -618,11 +771,65 @@ async function fetchHedgingPairs() {
   } catch { hedgingPairs.value = [] }
 }
 
+async function fetchSparkline() {
+  try {
+    const r = await api.get('/api/v1/accounts/dashboard/sparkline?hours=24&interval=1h')
+    sparklineData.value = (r.data?.data || []).map(d => d.equity)
+  } catch {}
+}
+
+async function fetchPnlHistory() {
+  try {
+    const r = await api.get('/api/v1/accounts/dashboard/pnl-history?days=7')
+    pnlHistory.value = r.data?.data || []
+  } catch {}
+}
+
+async function fetchPlatformDist() {
+  try {
+    const r = await api.get('/api/v1/accounts/dashboard/platform-distribution')
+    const COLORS = ['#3b82f6', '#a855f7', '#f59e0b', '#10b981', '#ef4444', '#6366f1']
+    platformDist.value = (r.data?.data || []).filter(d => d.total_equity > 0).map((d, i) => ({
+      name: d.platform_name, value: d.total_equity, color: COLORS[i % COLORS.length]
+    }))
+  } catch {}
+}
+
+function getHedgePosition(pair, side) {
+  for (const acc of allAccounts.value) {
+    for (const p of (acc.positions || [])) {
+      const sym = p.symbol || ''
+      if (side === 'a' && acc.platform_id === (pair.platform_a_id || pair.platform_a?.platform_id) && sym.includes('XAU')) return p.volume || 0
+      if (side === 'b' && acc.platform_id === (pair.platform_b_id || pair.platform_b?.platform_id) && sym.includes('XAU')) return p.volume || 0
+    }
+  }
+  return 0
+}
+
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
+  lastUpdateTs.value = Date.now()
+
+  // Sample heartbeats from infra status
+  const now = Date.now()
+  if (mt5Infra.value.reachable && lastAgentPingAt > 0) {
+    const interval = now - lastAgentPingAt
+    agentHeartbeats.value.push({ time: now, ms: interval })
+    if (agentHeartbeats.value.length > 60) agentHeartbeats.value.shift()
+  }
+  lastAgentPingAt = now
+
+  if (mt5ClientsOnline.value > 0 && lastMt5PingAt > 0) {
+    const interval = now - lastMt5PingAt
+    mt5Heartbeats.value.push({ time: now, ms: interval })
+    if (mt5Heartbeats.value.length > 60) mt5Heartbeats.value.shift()
+  }
+  lastMt5PingAt = now
+
   refreshing.value = false
+  bcBroadcast({ type: 'dashboard_refresh', ts: Date.now() })
 }
 
 // --- Helpers ---
@@ -672,6 +879,19 @@ function riskClass(v) {
   if (v < 80) return 'text-warning'
   return 'text-danger font-bold'
 }
+function assetBarWidth(v) {
+  const max = Math.max(...userFinancials.value.map(u => u.total_assets || 0), 1)
+  return v > 0 ? (v / max * 100).toFixed(0) : 0
+}
+
+function riskBadgeClass(v) {
+  if (v == null) return 'bg-dark-300 text-text-tertiary'
+  if (v < 30) return 'bg-green-900/40 text-green-400'
+  if (v < 60) return 'bg-yellow-900/40 text-yellow-400'
+  if (v < 80) return 'bg-orange-900/40 text-orange-400'
+  return 'bg-red-900/40 text-red-400'
+}
+
 function roleBadgeClass(role) {
   return { '超级管理员': 'bg-red-900/40 text-red-300', '系统管理员': 'bg-orange-900/40 text-orange-300', '安全管理员': 'bg-yellow-900/40 text-yellow-300', '交易员': 'bg-blue-900/40 text-blue-300', '观察员': 'bg-gray-700 text-gray-300' }[role] || 'bg-dark-200 text-text-secondary'
 }
@@ -687,6 +907,7 @@ function proxyStatusText(s) { return { active: '正常', expired: '已过期', p
 
 // --- Lifecycle ---
 onMounted(async () => {
+  bcInit()
   await refreshAll()
   wsConnect()
 })
