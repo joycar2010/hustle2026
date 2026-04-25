@@ -2500,6 +2500,7 @@ const mt5Form = ref({
 // ── Bridge 实例管理 ──────────────────────────────────────────
 const clientInstances = ref({})  // { client_id: [instances] }
 const clientTerminals = ref({})  // { client_id: [terminal info from Agent] }
+const platformSymbolsMap = ref({})  // { platform_id: [symbol strings] }
 const showDeployModal = ref(false)
 const deployClient    = ref(null)
 const deployInstances = ref([])
@@ -2657,10 +2658,10 @@ function getInstanceStatusClass(instances) {
 }
 
 function getClientSymbols(client) {
-  // 从已部署实例的 symbols 字段获取交易品种
-  const instances = clientInstances.value[client.client_id] || []
-  for (const inst of instances) {
-    if (inst.symbols?.length) return inst.symbols.join(', ')
+  // 从 platform_symbols 表按 platform_id 读取品种
+  const pid = client.platform_id
+  if (pid && platformSymbolsMap.value[pid]?.length) {
+    return platformSymbolsMap.value[pid].join(', ')
   }
   return '未配置'
 }
@@ -2949,6 +2950,16 @@ async function autoLoadMT5Tab() {
     const r = await api.get('/api/v1/mt5-clients/dashboard')
     mt5Clients.value = r.data.clients || []
     clientInstances.value = r.data.instances_by_client || {}
+    // Load platform symbols for all platforms used by these clients
+    const pids = [...new Set((r.data.clients || []).map(c => c.platform_id).filter(Boolean))]
+    const symMap = {}
+    await Promise.all(pids.map(async pid => {
+      try {
+        const sr = await api.get('/api/v1/hedging/symbols', { params: { platform_id: pid } })
+        symMap[pid] = (sr.data || []).map(s => s.symbol).filter(Boolean)
+      } catch {}
+    }))
+    platformSymbolsMap.value = symMap
   } catch (e) { apiErr('加载MT5客户端失败', e) }
   finally { mt5Loading.value = false }
   loadTerminalsLazy()

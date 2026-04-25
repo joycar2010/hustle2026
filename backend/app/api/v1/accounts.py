@@ -90,16 +90,27 @@ async def create_account(
         for acc in existing_defaults:
             acc.is_default = False
 
-    # Handle account_role uniqueness (one primary and one hedge per user)
-    if account_data.account_role in ('primary', 'hedge'):
+    # Handle account_role uniqueness:
+    # primary: one per user globally
+    # hedge: one per user per platform
+    if account_data.account_role == 'primary':
         result = await db.execute(
             select(Account).where(
                 Account.user_id == UUID(target_user_id),
-                Account.account_role == account_data.account_role,
+                Account.account_role == 'primary',
             )
         )
-        existing_role = result.scalars().all()
-        for acc in existing_role:
+        for acc in result.scalars().all():
+            acc.account_role = None
+    elif account_data.account_role == 'hedge':
+        result = await db.execute(
+            select(Account).where(
+                Account.user_id == UUID(target_user_id),
+                Account.account_role == 'hedge',
+                Account.platform_id == account_data.platform_id,
+            )
+        )
+        for acc in result.scalars().all():
             acc.account_role = None
 
     # Create new account
@@ -284,17 +295,24 @@ async def update_account(
     if 'account_role' in account_update.model_fields_set:
         new_role = account_update.account_role if account_update.account_role in ('primary', 'hedge') else None
         if new_role:
-            # Unset other accounts with the same role for this user
-            result = await db.execute(
-                select(Account).where(
+            # primary: one per user globally; hedge: one per user per platform
+            if new_role == 'primary':
+                role_q = select(Account).where(
                     Account.user_id == account.user_id,
-                    Account.account_role == new_role,
+                    Account.account_role == 'primary',
                     Account.account_id != account_id,
                 )
-            )
-            existing_role_accounts = result.scalars().all()
+            else:  # hedge
+                role_q = select(Account).where(
+                    Account.user_id == account.user_id,
+                    Account.account_role == 'hedge',
+                    Account.platform_id == account.platform_id,
+                    Account.account_id != account_id,
+                )
+            existing_role_accounts = (await db.execute(role_q)).scalars().all()
             for acc in existing_role_accounts:
                 acc.account_role = None
+            await db.flush()  # flush NULL before setting new role to satisfy partial unique index
         account.account_role = new_role
 
     if account_update.is_active is not None:
@@ -713,6 +731,23 @@ async def get_account_dashboard(
 # ─────────────────────────────────────────────────────────────────────────────
 # Fund flow aggregator (transfer / deposit / withdrawal)
 # ─────────────────────────────────────────────────────────────────────────────
+# ── fund-flow 内存缓存（300s TTL，按 user_id+days 分 key）──
+_ff_cache: dict = {}
+_ff_cache_ts: dict = {}
+_FF_CACHE_TTL = 300
+
+def _ff_cache_get(key: str):
+    import time as _t
+    if key in _ff_cache and _t.time() - _ff_cache_ts.get(key, 0) < _FF_CACHE_TTL:
+        return _ff_cache[key]
+    return None
+
+def _ff_cache_set(key: str, val):
+    import time as _t
+    _ff_cache[key] = val
+    _ff_cache_ts[key] = _t.time()
+
+
 @router.get("/me/fund-flow")
 async def get_user_fund_flow(
     days: int = 30,
@@ -725,6 +760,13 @@ async def get_user_fund_flow(
     import logging as _logging
     from app.core.proxy_utils import build_proxy_url
     _log = _logging.getLogger(__name__)
+
+    # ── Cache check ──
+    _days_norm = max(1, min(int(days or 30), 90))
+    _ck = f"ff:{user_id}:{_days_norm}"
+    _hit = _ff_cache_get(_ck)
+    if _hit is not None:
+        return _hit
 
     # ── Permission gate: fund_view_enabled or admin role ──
     _perm = (await db.execute(text(
@@ -865,10 +907,12 @@ async def get_user_fund_flow(
             _log.warning(f"[fund-flow] account {acc.account_id} failed: {e}")
 
     flows.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-    return {
+    result = {
         "ok": True,
-        "days": days,
+        "days": _days_norm,
         "total": len(flows),
         "flows": flows,
         "errors": errors,
     }
+    _ff_cache_set(_ck, result)
+    return result

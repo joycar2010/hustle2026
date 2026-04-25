@@ -97,7 +97,7 @@
               <div class="font-semibold text-sm text-text-primary truncate">{{ acc.account_name }}</div>
               <div class="flex items-center gap-1.5 mt-0.5">
                 <span class="px-1.5 py-0.5 rounded text-[10px]" :class="acc.is_mt5_account ? 'bg-purple-900/40 text-purple-300' : 'bg-blue-900/40 text-blue-300'">
-                  {{ acc.is_mt5_account ? 'MT5' : platformName(acc.platform_id) }}
+                  {{ acc.is_mt5_account ? ('MT5·' + platformName(acc.platform_id)) : platformName(acc.platform_id) }}
                 </span>
                 <span v-if="acc.account_role" class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-900/40 text-yellow-300">
                   {{ acc.account_role === 'primary' ? '主' : '对冲' }}
@@ -653,7 +653,7 @@ function accBorderClass(acc) {
   return 'border-border-primary'
 }
 
-function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets', 4: 'Gate.io', 5: 'OKX' }[id] || 'Unknown' }
+function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX' }[id] || 'Unknown' }
 function isMT5Online(c) { return c.online || c.connection_status === 'connected' }
 
 function fmtNum(v) {

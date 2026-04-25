@@ -95,10 +95,11 @@ import { useMaintenance } from '@/composables/useMaintenance.js'
 const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
 import { useAuthStore } from '@/stores/auth.js'
 const auth = useAuthStore()
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Bar, Line } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Filler } from 'chart.js'
-import { fetchDailyPnl, aggregateMonthly, fmtPnl, pnlColor } from '@/utils/pnlUtils.js'
+import { fetchDailyPnl, aggregateMonthly, fmtPnl, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
+import { useWebSocket } from '@/composables/useWebSocket.js'
 import dayjs from 'dayjs'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Filler)
@@ -108,6 +109,7 @@ const dailyList = ref([])
 const monthlyData = ref([])
 const summary = ref({})
 const ck = ref(0)
+const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
 const profitMonths = computed(() => monthlyData.value.filter(m => m.net_pnl > 0).length)
 
@@ -198,7 +200,10 @@ const rollingChart = computed(() => {
 
 const lineOpts = { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', maxTicksLimit: 8, font: { size: 9 } } }, y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 10 } } } } }
 
+onUnmounted(() => wsDisconnect())
 onMounted(async () => {
+  wsConnect()
+  setWsInstance({ connected: wsConnected, requestData })
   loading.value = true
   try {
     const start = dayjs().startOf('year').format('YYYY-MM-DD')

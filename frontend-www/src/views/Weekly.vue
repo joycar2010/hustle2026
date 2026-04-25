@@ -75,10 +75,11 @@ import { useMaintenance } from '@/composables/useMaintenance.js'
 const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
 import { useAuthStore } from '@/stores/auth.js'
 const auth = useAuthStore()
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Bar } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip } from 'chart.js'
-import { fetchDailyPnl, aggregateWeekly, fmtPnl, pnlColor } from '@/utils/pnlUtils.js'
+import { fetchDailyPnl, aggregateWeekly, fmtPnl, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
+import { useWebSocket } from '@/composables/useWebSocket.js'
 import dayjs from 'dayjs'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip)
@@ -88,6 +89,7 @@ const dailyList = ref([])
 const weeklyData = ref([])
 const summary = ref({})
 const ck = ref(0)
+const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
 const thisWeekPnl = computed(() => {
   const ws = dayjs().startOf('week').format('YYYY-MM-DD')
@@ -121,7 +123,10 @@ function heatColor(v) {
   return 'bg-dark-200 text-text-tertiary'
 }
 
+onUnmounted(() => wsDisconnect())
 onMounted(async () => {
+  wsConnect()
+  setWsInstance({ connected: wsConnected, requestData })
   loading.value = true
   try {
     const start = dayjs().subtract(365, 'day').format('YYYY-MM-DD')

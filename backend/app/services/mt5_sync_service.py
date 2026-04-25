@@ -54,14 +54,14 @@ class MT5SyncService:
 
                     if not instance:
                         # 无实例，标记为未连接
-                        if client.connection_status != "disconnected":
-                            client.connection_status = "disconnected"
+                        if client.bridge_health_status != "disconnected":
+                            client.bridge_health_status = "disconnected"
                             logger.debug(f"Client {client.client_id} marked as disconnected (no instance)")
                         continue
 
                     # 检查桥接服务健康
                     try:
-                        async with httpx.AsyncClient(timeout=2.0) as http_client:
+                        async with httpx.AsyncClient(timeout=2.0, headers={"Connection": "close"}) as http_client:
                             # 先检查桥接服务是否运行
                             health_resp = await http_client.get(
                                 f"http://{instance.server_ip}:{instance.service_port}/health"
@@ -72,24 +72,24 @@ class MT5SyncService:
                                 mt5_connected = health_data.get("mt5", False)
 
                                 if mt5_connected:
-                                    client.connection_status = "connected"
+                                    client.bridge_health_status = "connected"
                                     client.last_connected_at = datetime.utcnow()
                                     logger.debug(f"Client {client.client_id} connected")
                                 else:
-                                    client.connection_status = "disconnected"
+                                    client.bridge_health_status = "disconnected"
                                     logger.debug(f"Client {client.client_id} bridge running but MT5 not connected")
                             else:
-                                client.connection_status = "error"
+                                client.bridge_health_status = "error"
                                 logger.debug(f"Client {client.client_id} bridge returned status {health_resp.status_code}")
 
                     except httpx.TimeoutException:
-                        client.connection_status = "error"
+                        client.bridge_health_status = "error"
                         logger.debug(f"Client {client.client_id} health check timeout")
                     except httpx.ConnectError:
-                        client.connection_status = "disconnected"
+                        client.bridge_health_status = "disconnected"
                         logger.debug(f"Client {client.client_id} bridge not reachable")
                     except Exception as e:
-                        client.connection_status = "error"
+                        client.bridge_health_status = "error"
                         logger.debug(f"Client {client.client_id} health check error: {e}")
 
                 except Exception as e:

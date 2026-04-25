@@ -29,7 +29,7 @@ router = APIRouter()
 # ── 简易内存缓存（60 秒 TTL）──────────────────────────
 _cache: Dict[str, Any] = {}
 _cache_ts: Dict[str, float] = {}
-CACHE_TTL = 60
+CACHE_TTL = 300
 
 
 def _cache_get(key: str):

@@ -37,7 +37,8 @@ class MT5Client(Base):
     proxy_id = Column(Integer, ForeignKey('proxy_pool.id', ondelete='SET NULL'), nullable=True, comment='绑定的代理')
 
     # 连接状态
-    connection_status = Column(String(20), nullable=False, default='disconnected', comment='连接状态')
+    connection_status = Column(String(20), nullable=False, default='disconnected', comment='连接状态(用户手动控制)')
+    bridge_health_status = Column(String(20), nullable=False, default='unknown', comment='Bridge探测状态(自动同步)')
     is_active = Column(Boolean, nullable=False, default=True, comment='是否启用')
     is_system_service = Column(Boolean, nullable=False, default=False, comment='是否为系统服务账号')
     role = Column(String(20), default="trading", comment="角色: quote_source/trading/user")

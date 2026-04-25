@@ -109,10 +109,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useMaintenance } from '@/composables/useMaintenance.js'
 import { useAuthStore } from '@/stores/auth.js'
 import api from '@/services/api.js'
+import { fetchFundFlow, setWsInstance } from '@/utils/pnlUtils.js'
+import { useWebSocket } from '@/composables/useWebSocket.js'
 import dayjs from 'dayjs'
 
 const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
@@ -123,13 +125,14 @@ const fundFlows = ref([])
 const fundFlowLoading = ref(false)
 const fundFlowDays = ref(30)
 const fundFlowErrors = ref('')
+const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
 async function loadFundFlow() {
   fundFlowLoading.value = true
   try {
-    const r = await api.get('/api/v1/accounts/me/fund-flow', { params: { days: fundFlowDays.value } })
-    fundFlows.value = r.data?.flows || []
-    const errs = r.data?.errors || {}
+    const r = await fetchFundFlow(fundFlowDays.value)
+    fundFlows.value = r?.flows || []
+    const errs = r?.errors || {}
     const errKeys = Object.keys(errs)
     fundFlowErrors.value = errKeys.length ? errKeys.map(k => errs[k]).join('; ') : ''
     permAllowed.value = true
@@ -164,5 +167,10 @@ function fmtFlowTime(ts) {
   return dayjs(ts).format('MM-DD HH:mm')
 }
 
-onMounted(() => { loadFundFlow() })
+onUnmounted(() => wsDisconnect())
+onMounted(() => {
+  wsConnect()
+  setWsInstance({ connected: wsConnected, requestData })
+  loadFundFlow()
+})
 </script>

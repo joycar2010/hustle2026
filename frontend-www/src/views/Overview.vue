@@ -76,7 +76,7 @@
       <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
         <div class="flex items-center justify-between mb-3">
           <span class="text-sm font-bold">账户资金概览</span>
-          <span class="text-xs text-text-tertiary">{{ wsConnected ? 'WS实时' : '定时刷新' }}</span>
+          <span class="text-xs" :class="wsConnected ? 'text-[#0ecb81]' : 'text-text-tertiary'">{{ wsConnected ? '⚡ WS推送' : '📡 REST轮询' }}</span>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="bg-dark-200 rounded-xl p-3">
@@ -110,7 +110,7 @@ import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from 'chart.js'
 import { useAuthStore } from '@/stores/auth.js'
 import { useWebSocket } from '@/composables/useWebSocket.js'
-import { fetchDailyPnl, fmtPnl, fmtNum, pnlColor } from '@/utils/pnlUtils.js'
+import { fetchDailyPnl, fmtPnl, fmtNum, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
 
@@ -118,7 +118,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip,
 
 const router = useRouter()
 const auth = useAuthStore()
-const { connected: wsConnected, lastMessage, connect: wsConnect, disconnect: wsDisconnect } = useWebSocket()
+const { connected: wsConnected, lastMessage, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
 const loading = ref(true)
 const lastUpdate = ref('--')
@@ -219,9 +219,10 @@ async function fetchFund() {
 function doLogout() { wsDisconnect(); clearInterval(fallbackTimer); auth.logout(); router.push('/login') }
 
 onMounted(async () => {
-  await auth.fetchUser()
-  await Promise.all([setRange('90d'), fetchFund()])
+  auth.fetchUser()
   wsConnect()
+  setWsInstance({ connected: wsConnected, requestData })
+  await Promise.all([setRange('90d'), fetchFund()])
 })
 onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer) })
 </script>

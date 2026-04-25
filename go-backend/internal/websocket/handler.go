@@ -125,6 +125,12 @@ func HandleWS(c *gin.Context) {
 				pc, _ := cmd["pair_code"].(string)
 				requestSnapshot(userID, pc)
 				log.Printf("[WS] user=%s requested snapshot", userID)
+			case "request_data":
+				channel, _ := cmd["channel"].(string)
+				params, _ := cmd["params"].(map[string]interface{})
+				if channel != "" {
+					requestData(userID, channel, params)
+				}
 			}
 		}
 	}

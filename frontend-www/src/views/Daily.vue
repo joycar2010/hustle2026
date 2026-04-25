@@ -80,14 +80,16 @@ import { useMaintenance } from '@/composables/useMaintenance.js'
 const { maintenanceActive, maintenanceReason, maintenanceResume } = useMaintenance()
 import { useAuthStore } from '@/stores/auth.js'
 const auth = useAuthStore()
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Line, Bar } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Filler } from 'chart.js'
-import { fetchDailyPnl, fmtPnl, pnlColor } from '@/utils/pnlUtils.js'
+import { fetchDailyPnl, fmtPnl, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
+import { useWebSocket } from '@/composables/useWebSocket.js'
 import dayjs from 'dayjs'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Filler)
 
+const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 const loading = ref(true)
 const dailyList = ref([])
 const summary = ref({})
@@ -186,5 +188,10 @@ async function setRange(val) {
   } catch {} finally { loading.value = false }
 }
 
-onMounted(() => setRange('30d'))
+onMounted(() => {
+  wsConnect()
+  setWsInstance({ connected: wsConnected, requestData })
+  setRange('30d')
+})
+onUnmounted(() => wsDisconnect())
 </script>

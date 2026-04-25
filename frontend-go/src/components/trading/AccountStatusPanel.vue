@@ -12,6 +12,7 @@
               account.is_active ? 'bg-[#0ecb81]' : 'bg-[#f6465d]'
             "></div>
             <span class="text-sm font-bold text-[#D4B106] truncate">{{ account.account_name }}</span>
+            <span class="shrink-0 px-1.5 py-0.5 rounded text-[10px]" :class="account.is_mt5_account ? 'bg-purple-900/40 text-purple-300' : 'bg-blue-900/40 text-blue-300'">{{ getPlatformDisplayName(account) }}</span>
           </div>
           <!-- Row 2: 平台名/角色 + 连接状态 + 断开/禁用按钮 -->
           <div class="flex items-center justify-between">
@@ -473,6 +474,13 @@ function getPlatformName(platformId, isMt5Account) {
   if (platformId === 4) return 'Gate.io'
   if (platformId === 5) return 'OKX'
   return '无角色'
+}
+
+function getPlatformDisplayName(account) {
+  // 显示真实平台名（含 MT5 前缀），与 admin 总控保持一致
+  const map = { 1: '币安', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX' }
+  const pname = map[account.platform_id] || '未知'
+  return account.is_mt5_account ? ('MT5·' + pname) : pname
 }
 
 // 角色标签：有角色显示角色名，无角色显示"无配置"

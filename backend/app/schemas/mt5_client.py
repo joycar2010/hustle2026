@@ -72,6 +72,7 @@ class MT5ClientResponse(MT5ClientBase):
     account_id: UUID
     mt5_path: Optional[str] = None  # Override base: DB may have NULL
     connection_status: str
+    bridge_health_status: Optional[str] = 'unknown'
     is_system_service: Optional[bool] = False
     agent_instance_name: Optional[str] = None
     bridge_service_name: Optional[str] = None
