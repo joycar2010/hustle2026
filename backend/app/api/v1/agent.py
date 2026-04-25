@@ -488,7 +488,7 @@ async def ai_draft_proposal(req: AiDraftReq, db: AsyncSession = Depends(get_db),
 
     # Build targets info
     targets_rows = (await db.execute(text(
-        "SELECT id, username, pair_code FROM agent_scope_targets WHERE enabled=true ORDER BY id"
+        "SELECT st.id, u.username, st.pair_code FROM agent_scope_targets st JOIN users u ON st.user_id = u.user_id WHERE st.enabled=true ORDER BY st.id"
     ))).all()
     targets_info = '\n'.join(f"  - ID {r[0]}: {r[1]}/{r[2]}" for r in targets_rows) or '(无目标)'
 
@@ -1837,4 +1837,1032 @@ async def get_config_audit(db: AsyncSession = Depends(get_db),
             'updated_at': r[4].isoformat() if r[4] else None,
             'updated_by': str(r[5]) if r[5] else None,
         } for r in target_rows],
+    }
+
+
+# ─── Phase B: Dashboard aggregation APIs ─────────────────────────────
+
+@router.get('/targets/comparison')
+async def targets_comparison(db: AsyncSession = Depends(get_db),
+                             user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Aggregate per-target KPIs for the comparison table and matrix cards."""
+    targets = (await db.execute(text("""
+        SELECT t.id, t.user_id, t.pair_code, t.enabled, t.priority,
+               u.username,
+               upa.account_a_id, upa.account_b_id
+        FROM agent_scope_targets t
+        JOIN users u ON u.user_id = t.user_id
+        LEFT JOIN user_pair_accounts upa ON upa.user_id = t.user_id AND upa.pair_code = t.pair_code
+        WHERE t.enabled = true
+        ORDER BY t.priority DESC, t.id
+    """))).all()
+
+    result = []
+    for t in targets:
+        tid, uid, pair, enabled, priority, username, acc_a, acc_b = t
+
+        # Decision stats 24h
+        dstats = (await db.execute(text("""
+            SELECT count(*) as total,
+                   count(*) FILTER (WHERE verdict='executed') as executed,
+                   count(*) FILTER (WHERE verdict='shadow') as shadow,
+                   count(*) FILTER (WHERE verdict='rejected') as rejected,
+                   avg((proposal->>'confidence')::float) as avg_conf,
+                   max(created_at) as last_decision,
+                   min(created_at) as first_decision
+            FROM agent_decisions
+            WHERE scope_target_id = :tid AND created_at > NOW() - INTERVAL '24 hours'
+        """), {'tid': tid})).first()
+
+        total = dstats[0] or 0
+        executed = dstats[1] or 0
+        shadow = dstats[2] or 0
+        rejected = dstats[3] or 0
+        avg_conf = float(dstats[4] or 0)
+        last_decision = dstats[5].isoformat() if dstats[5] else None
+
+        # Latest market snapshot for balance
+        latest_snap = (await db.execute(text("""
+            SELECT market_snapshot FROM agent_decisions
+            WHERE scope_target_id = :tid AND market_snapshot IS NOT NULL
+            ORDER BY id DESC LIMIT 1
+        """), {'tid': tid})).scalar()
+
+        a_size = 0
+        b_size = 0
+        conversion_factor = 1
+        a_equity = 0
+        b_equity = 0
+        total_equity = 0
+        if latest_snap and isinstance(latest_snap, dict):
+            a_size = latest_snap.get('a_size', 0) or 0
+            b_size = latest_snap.get('b_size', 0) or 0
+            conversion_factor = latest_snap.get('conversion_factor', 1) or 1
+            a_equity = latest_snap.get('a_equity', 0) or 0
+            b_equity = latest_snap.get('b_equity', 0) or 0
+            total_equity = latest_snap.get('total_equity', 0) or 0
+
+        b_normalized = b_size * conversion_factor
+        delta = abs(a_size - b_normalized)
+        match_ratio = 0
+        if a_size + b_normalized > 0:
+            match_ratio = delta / ((a_size + b_normalized) / 2) if (a_size + b_normalized) > 0 else 0
+
+        # Latest account snapshots for net assets
+        net_a = 0
+        net_b = 0
+        margin_used_a = 0
+        margin_avail_a = 0
+        if acc_a:
+            sa = (await db.execute(text("""
+                SELECT net_assets, margin_used, margin_available FROM account_snapshots
+                WHERE account_id = :aid ORDER BY timestamp DESC LIMIT 1
+            """), {'aid': str(acc_a)})).first()
+            if sa:
+                net_a = float(sa[0] or 0)
+                margin_used_a = float(sa[1] or 0)
+                margin_avail_a = float(sa[2] or 0)
+        if acc_b:
+            sb = (await db.execute(text("""
+                SELECT net_assets, margin_used, margin_available FROM account_snapshots
+                WHERE account_id = :aid ORDER BY timestamp DESC LIMIT 1
+            """), {'aid': str(acc_b)})).first()
+            if sb:
+                net_b = float(sb[0] or 0)
+
+        # Daily PnL estimate from account_snapshots
+        daily_pnl_est = 0
+        margin_usage_pct = 0
+        acc_ids_str = [str(a) for a in [acc_a, acc_b] if a]
+        if acc_ids_str:
+            dpnl = (await db.execute(text("""
+                SELECT COALESCE(avg(daily_pnl), 0) FROM account_snapshots
+                WHERE account_id = ANY(:aids) AND timestamp > NOW() - INTERVAL '24 hours'
+            """), {'aids': acc_ids_str})).scalar()
+            daily_pnl_est = round(float(dpnl or 0), 2)
+
+            # Max drawdown 24h from net_assets series
+            snap_rows = (await db.execute(text("""
+                SELECT net_assets FROM account_snapshots
+                WHERE account_id = ANY(:aids) AND timestamp > NOW() - INTERVAL '24 hours'
+                ORDER BY timestamp
+            """), {'aids': acc_ids_str})).all()
+            peak = 0
+            max_dd = 0
+            for sr in snap_rows:
+                val = float(sr[0] or 0)
+                if val > peak:
+                    peak = val
+                if peak > 0:
+                    dd = (peak - val) / peak * 100
+                    if dd > max_dd:
+                        max_dd = dd
+
+            # Margin usage %
+            total_margin = margin_used_a + margin_avail_a
+            if total_margin > 0:
+                margin_usage_pct = round(margin_used_a / total_margin * 100, 1)
+        else:
+            max_dd = 0
+
+        # Decisions per hour
+        freq_per_hour = round(total / 24, 2) if total else 0
+
+        # Health score (0-100): composite of win rate, balance, latency
+        exec_rate = (executed + shadow) / total * 100 if total else 50
+        balance_score = max(0, 100 - match_ratio * 500)  # 20% mismatch = 0
+        health = min(100, round((exec_rate * 0.5 + balance_score * 0.3 + avg_conf * 100 * 0.2)))
+
+        # Alert level (enhanced)
+        alert_level = 'normal'
+        alert_reasons = []
+        if match_ratio > 0.10:
+            alert_level = 'critical'
+            alert_reasons.append('持仓偏离>10%')
+        elif match_ratio > 0.05:
+            alert_level = 'warning'
+            alert_reasons.append('持仓偏离>5%')
+        if rejected / max(total, 1) > 0.7:
+            if alert_level == 'normal':
+                alert_level = 'warning'
+            alert_reasons.append('拦截率>70%')
+        if margin_usage_pct > 80:
+            if alert_level == 'normal':
+                alert_level = 'warning'
+            alert_reasons.append('保证金使用>80%')
+        if max_dd > 5:
+            if alert_level != 'critical':
+                alert_level = 'warning' if max_dd <= 10 else 'critical'
+            alert_reasons.append(f'回撤{max_dd:.1f}%')
+
+        result.append({
+            'target_id': tid, 'user_id': str(uid), 'username': username,
+            'pair_code': pair, 'priority': priority, 'enabled': enabled,
+            'total_24h': total, 'executed_24h': executed, 'shadow_24h': shadow,
+            'rejected_24h': rejected, 'avg_confidence': round(avg_conf, 3),
+            'last_decision_at': last_decision,
+            'freq_per_hour': freq_per_hour,
+            'a_size': a_size, 'b_size': b_size, 'conversion_factor': conversion_factor,
+            'match_deviation_pct': round(match_ratio * 100, 2),
+            'a_equity': round(a_equity, 2), 'b_equity': round(b_equity, 2),
+            'total_equity': round(total_equity, 2),
+            'net_assets_a': round(net_a, 2), 'net_assets_b': round(net_b, 2),
+            'net_assets_total': round(net_a + net_b, 2),
+            'margin_used_a': round(margin_used_a, 2),
+            'margin_available_a': round(margin_avail_a, 2),
+            'health_score': health,
+            'alert_level': alert_level,
+            'account_a_id': str(acc_a) if acc_a else None,
+            'account_b_id': str(acc_b) if acc_b else None,
+            'daily_pnl_est': daily_pnl_est,
+            'max_drawdown_24h': round(max_dd, 2),
+            'margin_usage_pct': margin_usage_pct,
+            'alert_reasons': alert_reasons,
+        })
+
+    # Sort: critical first, then warning, then by health ascending
+    level_order = {'critical': 0, 'warning': 1, 'normal': 2}
+    result.sort(key=lambda x: (level_order.get(x['alert_level'], 9), -x.get('net_assets_total', 0)))
+
+    return {'items': result}
+
+
+@router.get('/targets/{target_id}/equity-series')
+async def target_equity_series(target_id: int,
+                               window: str = Query('24h'),
+                               db: AsyncSession = Depends(get_db),
+                               user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Net asset time series for a target (A + B accounts combined)."""
+    intervals = {'1h': '1 hour', '24h': '24 hours', '7d': '7 days', '30d': '30 days'}
+    interval = intervals.get(window, '24 hours')
+    bucket = '5 minutes' if window in ('1h', '24h') else '1 hour'
+
+    # Get account IDs
+    accs = (await db.execute(text("""
+        SELECT upa.account_a_id, upa.account_b_id
+        FROM agent_scope_targets t
+        JOIN user_pair_accounts upa ON upa.user_id = t.user_id AND upa.pair_code = t.pair_code
+        WHERE t.id = :tid
+    """), {'tid': target_id})).first()
+    if not accs:
+        return {'series': [], 'max_drawdown_pct': 0}
+
+    acc_a, acc_b = str(accs[0]) if accs[0] else None, str(accs[1]) if accs[1] else None
+    acc_ids = [a for a in [acc_a, acc_b] if a]
+    if not acc_ids:
+        return {'series': [], 'max_drawdown_pct': 0}
+
+    rows = (await db.execute(text(f"""
+        SELECT date_trunc(:bucket, timestamp) as t,
+               sum(net_assets) as combined_net,
+               sum(margin_used) as combined_margin,
+               sum(unrealized_pnl) as combined_pnl
+        FROM account_snapshots
+        WHERE account_id = ANY(:aids)
+          AND timestamp > NOW() - INTERVAL '{interval}'
+        GROUP BY t
+        ORDER BY t
+    """), {'bucket': bucket, 'aids': acc_ids})).all()
+
+    series = []
+    peak = 0
+    max_dd = 0
+    for r in rows:
+        net = float(r[1] or 0)
+        if net > peak:
+            peak = net
+        dd = (peak - net) / peak * 100 if peak > 0 else 0
+        if dd > max_dd:
+            max_dd = dd
+        series.append({
+            'time': r[0].isoformat(),
+            'net_assets': round(net, 2),
+            'margin_used': round(float(r[2] or 0), 2),
+            'unrealized_pnl': round(float(r[3] or 0), 2),
+            'drawdown_pct': round(dd, 2),
+        })
+
+    return {'series': series, 'max_drawdown_pct': round(max_dd, 2), 'peak_net': round(peak, 2)}
+
+
+@router.get('/targets/{target_id}/balance-series')
+async def target_balance_series(target_id: int,
+                                window: str = Query('24h'),
+                                db: AsyncSession = Depends(get_db),
+                                user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Position balance (A leg vs B leg) time series extracted from decision snapshots."""
+    intervals = {'1h': '1 hour', '24h': '24 hours', '7d': '7 days', '30d': '30 days'}
+    interval = intervals.get(window, '24 hours')
+
+    rows = (await db.execute(text(f"""
+        SELECT created_at,
+               market_snapshot->>'a_size' as a_size,
+               market_snapshot->>'b_size' as b_size,
+               market_snapshot->>'conversion_factor' as cf,
+               market_snapshot->>'a_equity' as a_eq,
+               market_snapshot->>'b_equity' as b_eq
+        FROM agent_decisions
+        WHERE scope_target_id = :tid
+          AND market_snapshot IS NOT NULL
+          AND created_at > NOW() - INTERVAL '{interval}'
+        ORDER BY created_at
+    """), {'tid': target_id})).all()
+
+    series = []
+    for r in rows:
+        a = float(r[1] or 0)
+        b = float(r[2] or 0)
+        cf = float(r[3] or 1) or 1
+        b_norm = b * cf
+        delta = a - b_norm
+        series.append({
+            'time': r[0].isoformat(),
+            'a_size': a,
+            'b_size': b,
+            'b_normalized': round(b_norm, 4),
+            'delta': round(delta, 4),
+            'a_equity': round(float(r[4] or 0), 2),
+            'b_equity': round(float(r[5] or 0), 2),
+        })
+
+    return {'series': series}
+
+
+@router.get('/targets/{target_id}/fund-allocation')
+async def target_fund_allocation(target_id: int,
+                                 db: AsyncSession = Depends(get_db),
+                                 user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Cross-platform fund allocation for a target."""
+    accs = (await db.execute(text("""
+        SELECT upa.account_a_id, upa.account_b_id
+        FROM agent_scope_targets t
+        JOIN user_pair_accounts upa ON upa.user_id = t.user_id AND upa.pair_code = t.pair_code
+        WHERE t.id = :tid
+    """), {'tid': target_id})).first()
+    if not accs:
+        return {'platforms': [], 'total_net': 0}
+
+    platforms = []
+    total_net = 0
+    for acc_id, leg in [(accs[0], 'A'), (accs[1], 'B')]:
+        if not acc_id:
+            continue
+        info = (await db.execute(text("""
+            SELECT a.account_id, a.platform_id, p.platform_name, p.display_name, a.account_name, a.is_mt5_account
+            FROM accounts a
+            LEFT JOIN platforms p ON a.platform_id = p.platform_id
+            WHERE a.account_id = :aid
+        """), {'aid': str(acc_id)})).first()
+        snap = (await db.execute(text("""
+            SELECT net_assets, margin_used, margin_available, unrealized_pnl, total_assets
+            FROM account_snapshots WHERE account_id = :aid ORDER BY timestamp DESC LIMIT 1
+        """), {'aid': str(acc_id)})).first()
+        if info and snap:
+            net = float(snap[0] or 0)
+            margin_used = float(snap[1] or 0)
+            margin_avail = float(snap[2] or 0)
+            total_net += net
+            margin_total = margin_used + margin_avail
+            platforms.append({
+                'leg': leg,
+                'platform': info[2] or f'platform_{info[1]}',
+                'display_name': info[3] or info[2] or '',
+                'account_name': info[4],
+                'is_mt5': info[5],
+                'net_assets': round(net, 2),
+                'margin_used': round(margin_used, 2),
+                'margin_available': round(margin_avail, 2),
+                'margin_usage_pct': round(margin_used / margin_total * 100, 1) if margin_total > 0 else 0,
+                'unrealized_pnl': round(float(snap[3] or 0), 2),
+                'total_assets': round(float(snap[4] or 0), 2),
+            })
+
+    return {'platforms': platforms, 'total_net': round(total_net, 2)}
+
+
+@router.get('/targets/{target_id}/pnl-series')
+async def target_pnl_series(target_id: int,
+                            window: str = Query('7d'),
+                            db: AsyncSession = Depends(get_db),
+                            user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Phase C scaffold: daily PnL series from account_snapshots daily_pnl + trades when available."""
+    intervals = {'1h': '1 hour', '24h': '24 hours', '7d': '7 days', '30d': '30 days'}
+    interval = intervals.get(window, '7 days')
+
+    accs = (await db.execute(text("""
+        SELECT upa.account_a_id, upa.account_b_id
+        FROM agent_scope_targets t
+        JOIN user_pair_accounts upa ON upa.user_id = t.user_id AND upa.pair_code = t.pair_code
+        WHERE t.id = :tid
+    """), {'tid': target_id})).first()
+    if not accs:
+        return {'series': [], 'total_pnl': 0, 'source': 'no_accounts'}
+
+    acc_ids = [str(a) for a in [accs[0], accs[1]] if a]
+
+    # Try trades table first (Phase C: will have data when system goes live)
+    trade_count = (await db.execute(text("""
+        SELECT count(*) FROM trades WHERE account_id = ANY(:aids)
+    """), {'aids': acc_ids})).scalar()
+
+    if trade_count and trade_count > 0:
+        rows = (await db.execute(text(f"""
+            SELECT date_trunc('day', timestamp) as d,
+                   sum(realized_pnl) as day_pnl,
+                   sum(fee) as day_fee,
+                   count(*) as trade_count,
+                   count(*) FILTER (WHERE realized_pnl > 0) as wins,
+                   count(*) FILTER (WHERE realized_pnl <= 0) as losses
+            FROM trades
+            WHERE account_id = ANY(:aids) AND timestamp > NOW() - INTERVAL '{interval}'
+            GROUP BY d ORDER BY d
+        """), {'aids': acc_ids})).all()
+        series = [{
+            'date': r[0].isoformat()[:10],
+            'pnl': round(float(r[1] or 0), 2),
+            'fee': round(float(r[2] or 0), 2),
+            'net_pnl': round(float(r[1] or 0) - float(r[2] or 0), 2),
+            'trade_count': r[3],
+            'win_rate': round(r[4] / max(r[3], 1) * 100, 1),
+        } for r in rows]
+        total_pnl = sum(s['net_pnl'] for s in series)
+        return {'series': series, 'total_pnl': round(total_pnl, 2), 'source': 'trades'}
+
+    # Fallback: daily_pnl from account_snapshots (less accurate but available)
+    rows = (await db.execute(text(f"""
+        SELECT date_trunc('day', timestamp) as d,
+               avg(daily_pnl) as avg_daily_pnl,
+               count(*) as snap_count
+        FROM account_snapshots
+        WHERE account_id = ANY(:aids) AND timestamp > NOW() - INTERVAL '{interval}'
+        GROUP BY d ORDER BY d
+    """), {'aids': acc_ids})).all()
+    series = [{
+        'date': r[0].isoformat()[:10],
+        'pnl': round(float(r[1] or 0), 2),
+        'fee': 0,
+        'net_pnl': round(float(r[1] or 0), 2),
+        'trade_count': 0,
+        'win_rate': 0,
+        'snap_count': r[2],
+    } for r in rows]
+    total_pnl = sum(s['net_pnl'] for s in series)
+    return {'series': series, 'total_pnl': round(total_pnl, 2), 'source': 'snapshots_fallback'}
+
+
+@router.get('/targets/{target_id}/confidence-trend')
+async def target_confidence_trend(target_id: int,
+                                  window: str = Query('7d'),
+                                  db: AsyncSession = Depends(get_db),
+                                  user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Daily confidence and verdict distribution trend for decision quality charts."""
+    intervals = {'1h': '1 hour', '24h': '24 hours', '7d': '7 days', '30d': '30 days'}
+    interval = intervals.get(window, '7 days')
+    rows = (await db.execute(text(f"""
+        SELECT date_trunc('day', created_at) as d,
+               avg((proposal->>'confidence')::float) as avg_conf,
+               count(*) as total,
+               count(*) FILTER (WHERE verdict='executed') as executed,
+               count(*) FILTER (WHERE verdict='shadow') as shadow,
+               count(*) FILTER (WHERE verdict='rejected') as rejected,
+               avg(llm_latency_ms) as avg_latency
+        FROM agent_decisions
+        WHERE scope_target_id = :tid AND created_at > NOW() - INTERVAL '{interval}'
+        GROUP BY d ORDER BY d
+    """), {'tid': target_id})).all()
+
+    series = [{
+        'date': r[0].isoformat()[:10],
+        'avg_confidence': round(float(r[1] or 0), 3),
+        'total': r[2],
+        'executed': r[3], 'shadow': r[4], 'rejected': r[5],
+        'exec_rate': round((r[3] + r[4]) / max(r[2], 1) * 100, 1),
+        'avg_latency_ms': round(float(r[6] or 0), 0),
+    } for r in rows]
+    return {'series': series}
+
+
+@router.get('/alerts/active')
+async def active_alerts(db: AsyncSession = Depends(get_db),
+                        user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Recent alerts for dashboard badges."""
+    rows = (await db.execute(text("""
+        SELECT id, level, category, message, created_at, ack_at
+        FROM agent_alerts
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY id DESC LIMIT 100
+    """))).all()
+    items = [{
+        'id': r[0], 'level': r[1], 'category': r[2], 'message': r[3],
+        'created_at': r[4].isoformat() if r[4] else None,
+        'acked': r[5] is not None,
+    } for r in rows]
+    unacked = len([i for i in items if not i['acked']])
+    by_level = {}
+    for i in items:
+        by_level[i['level']] = by_level.get(i['level'], 0) + 1
+    return {'items': items, 'unacked_count': unacked, 'by_level': by_level}
+
+
+# ───── Infrastructure Monitoring APIs (Batch 2) ─────
+
+
+@router.get("/llm-latency-series")
+async def llm_latency_series(
+    window: str = Query("7d"),
+    bucket: str = Query("hour", description="hour | day"),
+    target_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """LLM latency time series for infrastructure chart."""
+    secs = _resolve_window_seconds(window)
+    bucket_unit = "hour" if bucket == "hour" else "day"
+
+    where = ["d.created_at >= NOW() - make_interval(secs => :secs)", "d.llm_latency_ms IS NOT NULL"]
+    params: Dict[str, Any] = {"secs": secs}
+    if target_id is not None:
+        where.append("d.scope_target_id = :tid")
+        params["tid"] = target_id
+    where_sql = " AND ".join(where)
+
+    rows = (await db.execute(text(f"""
+        WITH bucket AS (
+            SELECT date_trunc(:bunit, d.created_at) AS t,
+                   AVG(d.llm_latency_ms)::int AS avg_ms,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY d.llm_latency_ms)::int AS p50,
+                   PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY d.llm_latency_ms)::int AS p95,
+                   PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY d.llm_latency_ms)::int AS p99,
+                   MIN(d.llm_latency_ms)::int AS min_ms,
+                   MAX(d.llm_latency_ms)::int AS max_ms,
+                   COUNT(*) AS calls
+            FROM agent_decisions d
+            WHERE {where_sql}
+            GROUP BY 1
+        ),
+        spine AS (
+            SELECT generate_series(
+                date_trunc(:bunit, NOW() - make_interval(secs => :secs)),
+                date_trunc(:bunit, NOW()),
+                ('1 ' || :bunit)::interval
+            ) AS t
+        )
+        SELECT s.t,
+               COALESCE(b.avg_ms, 0), COALESCE(b.p50, 0), COALESCE(b.p95, 0),
+               COALESCE(b.p99, 0), COALESCE(b.min_ms, 0), COALESCE(b.max_ms, 0),
+               COALESCE(b.calls, 0)
+        FROM spine s LEFT JOIN bucket b ON b.t = s.t
+        ORDER BY s.t
+    """), {**params, "bunit": bucket_unit})).all()
+
+    return {
+        "window": window,
+        "bucket": bucket_unit,
+        "series": [
+            {
+                "time": r[0].isoformat(),
+                "avg_ms": int(r[1]), "p50": int(r[2]), "p95": int(r[3]),
+                "p99": int(r[4]), "min_ms": int(r[5]), "max_ms": int(r[6]),
+                "calls": int(r[7]),
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/token-usage-series")
+async def token_usage_series(
+    window: str = Query("7d"),
+    bucket: str = Query("hour", description="hour | day"),
+    target_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Token consumption trend (in/out/cost) for infrastructure chart."""
+    secs = _resolve_window_seconds(window)
+    bucket_unit = "hour" if bucket == "hour" else "day"
+
+    ls_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'llm_settings'"
+    ))).first()
+    ls = (ls_row[0] if ls_row else None) or {}
+    rate = float(ls.get("usd_to_cny_rate") or 7.3)
+
+    where = ["d.created_at >= NOW() - make_interval(secs => :secs)"]
+    params: Dict[str, Any] = {"secs": secs}
+    if target_id is not None:
+        where.append("d.scope_target_id = :tid")
+        params["tid"] = target_id
+    where_sql = " AND ".join(where)
+
+    rows = (await db.execute(text(f"""
+        WITH bucket AS (
+            SELECT date_trunc(:bunit, d.created_at) AS t,
+                   COALESCE(SUM(d.llm_tokens_in), 0) AS tin,
+                   COALESCE(SUM(d.llm_tokens_out), 0) AS tout,
+                   COUNT(*) AS calls,
+                   COALESCE(AVG(d.llm_latency_ms), 0)::int AS avg_latency
+            FROM agent_decisions d
+            WHERE {where_sql}
+            GROUP BY 1
+        ),
+        spine AS (
+            SELECT generate_series(
+                date_trunc(:bunit, NOW() - make_interval(secs => :secs)),
+                date_trunc(:bunit, NOW()),
+                ('1 ' || :bunit)::interval
+            ) AS t
+        )
+        SELECT s.t,
+               COALESCE(b.tin, 0), COALESCE(b.tout, 0),
+               COALESCE(b.calls, 0), COALESCE(b.avg_latency, 0)
+        FROM spine s LEFT JOIN bucket b ON b.t = s.t
+        ORDER BY s.t
+    """), {**params, "bunit": bucket_unit})).all()
+
+    PRICE_IN_PER_M = 0.5
+    PRICE_OUT_PER_M = 1.5
+    series = []
+    cumulative_in = 0
+    cumulative_out = 0
+    for r in rows:
+        tin, tout = int(r[1]), int(r[2])
+        cumulative_in += tin
+        cumulative_out += tout
+        usd = (tin / 1e6) * PRICE_IN_PER_M + (tout / 1e6) * PRICE_OUT_PER_M
+        series.append({
+            "time": r[0].isoformat(),
+            "tokens_in": tin,
+            "tokens_out": tout,
+            "tokens_total": tin + tout,
+            "cumulative_in": cumulative_in,
+            "cumulative_out": cumulative_out,
+            "calls": int(r[3]),
+            "avg_latency_ms": int(r[4]),
+            "cost_usd": round(usd, 4),
+            "cost_cny": round(usd * rate, 4),
+        })
+    return {
+        "window": window,
+        "bucket": bucket_unit,
+        "usd_to_cny_rate": rate,
+        "totals": {
+            "tokens_in": cumulative_in,
+            "tokens_out": cumulative_out,
+            "cost_usd": round((cumulative_in / 1e6) * PRICE_IN_PER_M + (cumulative_out / 1e6) * PRICE_OUT_PER_M, 4),
+        },
+        "series": series,
+    }
+
+
+@router.get("/alerts/circuit-breaker-timeline")
+async def circuit_breaker_timeline(
+    window: str = Query("30d"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Circuit breaker event timeline filtered from agent_alerts."""
+    secs = _resolve_window_seconds(window)
+    rows = (await db.execute(text("""
+        SELECT id, level, message, created_at, ack_at
+        FROM agent_alerts
+        WHERE category = 'circuit_breaker'
+          AND created_at >= NOW() - make_interval(secs => :secs)
+        ORDER BY id DESC
+        LIMIT 200
+    """), {"secs": secs})).all()
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r[0],
+            "level": r[1],
+            "message": r[2],
+            "created_at": r[3].isoformat() if r[3] else None,
+            "acked": r[4] is not None,
+            "ack_at": r[4].isoformat() if r[4] else None,
+        })
+
+    by_level = {}
+    for i in items:
+        by_level[i["level"]] = by_level.get(i["level"], 0) + 1
+
+    return {
+        "window": window,
+        "total": len(items),
+        "by_level": by_level,
+        "items": items,
+    }
+
+
+@router.get("/intervention-stats")
+async def intervention_stats(
+    window: str = Query("30d"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """30-day aggregated intervention statistics."""
+    secs = _resolve_window_seconds(window)
+
+    summary = (await db.execute(text("""
+        SELECT
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE state = 'RESOLVED') AS resolved,
+          COUNT(*) FILTER (WHERE state = 'FORCED_REDUCE') AS forced_reduce,
+          COUNT(*) FILTER (WHERE state = 'ESCALATING') AS escalating,
+          COUNT(*) FILTER (WHERE state = 'WARNING') AS warning,
+          COUNT(*) FILTER (WHERE resolved_at IS NULL) AS active,
+          AVG(EXTRACT(EPOCH FROM (COALESCE(resolved_at, NOW()) - triggered_at)))::int AS avg_duration_s,
+          AVG(equity_ratio) AS avg_equity_ratio,
+          MIN(equity_ratio) AS min_equity_ratio
+        FROM equity_intervention_log
+        WHERE triggered_at >= NOW() - make_interval(secs => :secs)
+    """), {"secs": secs})).first()
+
+    daily = (await db.execute(text("""
+        SELECT date_trunc('day', triggered_at)::date AS day,
+               COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE state = 'FORCED_REDUCE') AS forced,
+               AVG(equity_ratio) AS avg_ratio
+        FROM equity_intervention_log
+        WHERE triggered_at >= NOW() - make_interval(secs => :secs)
+        GROUP BY 1 ORDER BY 1
+    """), {"secs": secs})).all()
+
+    return {
+        "window": window,
+        "summary": {
+            "total": int(summary[0] or 0),
+            "resolved": int(summary[1] or 0),
+            "forced_reduce": int(summary[2] or 0),
+            "escalating": int(summary[3] or 0),
+            "warning": int(summary[4] or 0),
+            "active": int(summary[5] or 0),
+            "avg_duration_s": int(summary[6] or 0),
+            "avg_equity_ratio": round(float(summary[7] or 0), 4),
+            "min_equity_ratio": round(float(summary[8] or 0), 4),
+        },
+        "daily": [
+            {
+                "date": str(r[0]),
+                "total": int(r[1]),
+                "forced_reduce": int(r[2]),
+                "avg_equity_ratio": round(float(r[3] or 0), 4),
+            }
+            for r in daily
+        ],
+    }
+
+
+# ───── Batch 3: Equity / Exposure / Confidence APIs ─────
+
+
+@router.get("/equity/snapshot-series")
+async def equity_snapshot_series(
+    window: str = Query("7d"),
+    bucket: str = Query("hour", description="hour | day"),
+    account_id: Optional[str] = Query(None),
+    platform_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Historical net-asset time series from account_snapshots,
+    grouped by platform for cross-platform overlay."""
+    secs = _resolve_window_seconds(window)
+    bucket_unit = "hour" if bucket == "hour" else "day"
+
+    where = ["s.timestamp >= NOW() - make_interval(secs => :secs)"]
+    params: Dict[str, Any] = {"secs": secs}
+    if account_id:
+        where.append("s.account_id = :aid::uuid")
+        params["aid"] = account_id
+    if platform_id is not None:
+        where.append("a.platform_id = :pid")
+        params["pid"] = platform_id
+    where_sql = " AND ".join(where)
+
+    sql = """
+        SELECT date_trunc(:bunit, s.timestamp) AS t,
+               p.platform_name,
+               a.platform_id,
+               AVG(s.net_assets)        AS avg_net,
+               AVG(s.total_assets)      AS avg_total,
+               AVG(s.unrealized_pnl)    AS avg_upnl,
+               AVG(s.daily_pnl)         AS avg_daily_pnl,
+               AVG(s.margin_used)       AS avg_margin,
+               COUNT(*)                 AS samples
+        FROM account_snapshots s
+        JOIN accounts a ON s.account_id = a.account_id
+        JOIN platforms p ON a.platform_id = p.platform_id
+        WHERE """ + where_sql + """
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 3
+    """
+    rows = (await db.execute(text(sql), {**params, "bunit": bucket_unit})).all()
+
+    by_platform = {}
+    for r in rows:
+        pname = r[1]
+        if pname not in by_platform:
+            by_platform[pname] = {"platform_id": int(r[2]), "series": []}
+        by_platform[pname]["series"].append({
+            "time": r[0].isoformat(),
+            "net_assets": round(float(r[3] or 0), 2),
+            "total_assets": round(float(r[4] or 0), 2),
+            "unrealized_pnl": round(float(r[5] or 0), 2),
+            "daily_pnl": round(float(r[6] or 0), 2),
+            "margin_used": round(float(r[7] or 0), 2),
+            "samples": int(r[8]),
+        })
+
+    # Combined cross-platform total
+    agg_sql = """
+        SELECT t, SUM(avg_net) AS total_net, SUM(avg_upnl) AS total_upnl
+        FROM (
+            SELECT date_trunc(:bunit, s.timestamp) AS t,
+                   s.account_id,
+                   AVG(s.net_assets) AS avg_net,
+                   AVG(s.unrealized_pnl) AS avg_upnl
+            FROM account_snapshots s
+            JOIN accounts a ON s.account_id = a.account_id
+            WHERE """ + where_sql + """
+            GROUP BY 1, s.account_id
+        ) sub
+        GROUP BY 1 ORDER BY 1
+    """
+    agg_rows = (await db.execute(text(agg_sql), {**params, "bunit": bucket_unit})).all()
+    combined = [{
+        "time": r[0].isoformat(),
+        "total_net_assets": round(float(r[1] or 0), 2),
+        "total_unrealized_pnl": round(float(r[2] or 0), 2),
+    } for r in agg_rows]
+
+    return {
+        "window": window,
+        "bucket": bucket_unit,
+        "platforms": by_platform,
+        "combined": combined,
+    }
+
+
+@router.get("/equity/realtime")
+async def equity_realtime(
+    target_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Realtime cross-platform equity via collect_xau_positions_and_equity.
+    Designed for frontend polling (15-30s interval)."""
+    from app.services.agent.market_snapshot import collect_xau_positions_and_equity, fetch_conversion_factor
+    from app.services.agent.scope import list_active_contexts
+    import time
+
+    t0 = time.time()
+    contexts = await list_active_contexts(db)
+    results = []
+
+    if target_id is not None:
+        ctx = next((c for c in contexts if c.target_id == target_id), None)
+        if not ctx:
+            raise HTTPException(404, "target not found")
+        eq = await collect_xau_positions_and_equity(db, ctx)
+        conv = await fetch_conversion_factor(db, ctx)
+        results.append({
+            "target_id": ctx.target_id,
+            "pair_code": ctx.pair_code,
+            "label": ctx.label,
+            "a_size": eq["a_size"], "b_size": eq["b_size"],
+            "a_equity": eq.get("a_equity", 0), "b_equity": eq.get("b_equity", 0),
+            "total_equity": eq.get("total_equity", 0),
+            "delta": eq["a_size"] - eq["b_size"] * conv,
+            "conversion_factor": conv,
+        })
+    else:
+        for ctx in contexts:
+            try:
+                eq = await collect_xau_positions_and_equity(db, ctx)
+                conv = await fetch_conversion_factor(db, ctx)
+                results.append({
+                    "target_id": ctx.target_id,
+                    "pair_code": ctx.pair_code,
+                    "label": ctx.label,
+                    "a_size": eq["a_size"], "b_size": eq["b_size"],
+                    "a_equity": eq.get("a_equity", 0), "b_equity": eq.get("b_equity", 0),
+                    "total_equity": eq.get("total_equity", 0),
+                    "delta": eq["a_size"] - eq["b_size"] * conv,
+                    "conversion_factor": conv,
+                })
+            except Exception as e:
+                results.append({
+                    "target_id": ctx.target_id,
+                    "pair_code": ctx.pair_code,
+                    "label": ctx.label,
+                    "error": str(e),
+                })
+
+    total_equity = sum(r.get("total_equity", 0) for r in results if "error" not in r)
+    total_delta = sum(r.get("delta", 0) for r in results if "error" not in r)
+
+    return {
+        "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "elapsed_ms": int((time.time() - t0) * 1000),
+        "targets": results,
+        "aggregated": {
+            "total_equity": total_equity,
+            "total_delta": total_delta,
+            "target_count": len([r for r in results if "error" not in r]),
+        },
+    }
+
+
+@router.get("/equity/exposure")
+async def equity_exposure(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Cross-platform exposure breakdown — latest snapshot per account
+    grouped by platform, for the exposure pie/bar chart."""
+    rows = (await db.execute(text("""
+        WITH latest AS (
+            SELECT DISTINCT ON (s.account_id)
+                   s.account_id, s.net_assets, s.total_assets,
+                   s.unrealized_pnl, s.margin_used, s.total_position,
+                   s.timestamp,
+                   a.platform_id, a.account_name,
+                   p.platform_name
+            FROM account_snapshots s
+            JOIN accounts a ON s.account_id = a.account_id
+            JOIN platforms p ON a.platform_id = p.platform_id
+            WHERE s.timestamp >= NOW() - INTERVAL '2 hours'
+            ORDER BY s.account_id, s.timestamp DESC
+        )
+        SELECT * FROM latest ORDER BY platform_id, account_name
+    """))).all()
+
+    accounts = []
+    by_platform = {}
+    for r in rows:
+        entry = {
+            "account_id": str(r[0]),
+            "net_assets": round(float(r[1] or 0), 2),
+            "total_assets": round(float(r[2] or 0), 2),
+            "unrealized_pnl": round(float(r[3] or 0), 2),
+            "margin_used": round(float(r[4] or 0), 2),
+            "total_position": round(float(r[5] or 0), 4),
+            "snapshot_at": r[6].isoformat() if r[6] else None,
+            "platform_id": int(r[7]),
+            "account_name": r[8],
+            "platform_name": r[9],
+        }
+        accounts.append(entry)
+        pname = r[9]
+        if pname not in by_platform:
+            by_platform[pname] = {"platform_id": int(r[7]), "net_assets": 0, "margin_used": 0, "accounts": 0}
+        by_platform[pname]["net_assets"] += entry["net_assets"]
+        by_platform[pname]["margin_used"] += entry["margin_used"]
+        by_platform[pname]["accounts"] += 1
+
+    total_net = sum(a["net_assets"] for a in accounts)
+    for p in by_platform.values():
+        p["net_assets"] = round(p["net_assets"], 2)
+        p["margin_used"] = round(p["margin_used"], 2)
+        p["pct"] = round(p["net_assets"] / total_net * 100, 1) if total_net else 0
+
+    return {
+        "total_net_assets": round(total_net, 2),
+        "total_accounts": len(accounts),
+        "by_platform": by_platform,
+        "accounts": accounts,
+    }
+
+
+@router.get("/decisions/confidence-distribution")
+async def confidence_distribution(
+    window: str = Query("7d"),
+    target_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Confidence score distribution histogram + stats per target."""
+    secs = _resolve_window_seconds(window)
+
+    where = ["d.created_at >= NOW() - make_interval(secs => :secs)",
+             "d.proposal IS NOT NULL"]
+    params: Dict[str, Any] = {"secs": secs}
+    if target_id is not None:
+        where.append("d.scope_target_id = :tid")
+        params["tid"] = target_id
+    where_sql = " AND ".join(where)
+
+    # Histogram: 10 bins from 0.0 to 1.0
+    hist_sql = """
+        SELECT
+            width_bucket((d.proposal->>'confidence')::float, 0, 1.001, 10) AS bin,
+            COUNT(*) AS cnt,
+            d.verdict
+        FROM agent_decisions d
+        WHERE """ + where_sql + """
+          AND d.proposal->>'confidence' IS NOT NULL
+        GROUP BY 1, 3
+        ORDER BY 1
+    """
+    hist_rows = (await db.execute(text(hist_sql), params)).all()
+
+    bins = []
+    for b in range(1, 11):
+        lo = round((b - 1) * 0.1, 1)
+        hi = round(b * 0.1, 1)
+        label = f"{lo:.1f}-{hi:.1f}"
+        row_data = {"bin": b, "range": label, "total": 0}
+        for r in hist_rows:
+            if r[0] == b:
+                row_data["total"] += int(r[1])
+                row_data[r[2] or "unknown"] = int(r[1])
+        bins.append(row_data)
+
+    # Per-target stats
+    target_sql = """
+        SELECT d.scope_target_id,
+               COUNT(*) AS total,
+               AVG((d.proposal->>'confidence')::float) AS avg_conf,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY (d.proposal->>'confidence')::float) AS median_conf,
+               MIN((d.proposal->>'confidence')::float) AS min_conf,
+               MAX((d.proposal->>'confidence')::float) AS max_conf,
+               STDDEV((d.proposal->>'confidence')::float) AS stddev_conf
+        FROM agent_decisions d
+        WHERE """ + where_sql + """
+          AND d.proposal->>'confidence' IS NOT NULL
+        GROUP BY 1
+        ORDER BY 1
+    """
+    target_rows = (await db.execute(text(target_sql), params)).all()
+    by_target = [{
+        "target_id": r[0],
+        "total": int(r[1]),
+        "avg": round(float(r[2] or 0), 3),
+        "median": round(float(r[3] or 0), 3),
+        "min": round(float(r[4] or 0), 3),
+        "max": round(float(r[5] or 0), 3),
+        "stddev": round(float(r[6] or 0), 3),
+    } for r in target_rows]
+
+    # Confidence vs verdict correlation
+    corr_sql = """
+        SELECT d.verdict,
+               COUNT(*) AS cnt,
+               AVG((d.proposal->>'confidence')::float) AS avg_conf
+        FROM agent_decisions d
+        WHERE """ + where_sql + """
+          AND d.proposal->>'confidence' IS NOT NULL
+        GROUP BY 1
+    """
+    corr_rows = (await db.execute(text(corr_sql), params)).all()
+    by_verdict = {r[0]: {"count": int(r[1]), "avg_confidence": round(float(r[2] or 0), 3)} for r in corr_rows}
+
+    return {
+        "window": window,
+        "target_id": target_id,
+        "histogram": bins,
+        "by_target": by_target,
+        "by_verdict": by_verdict,
     }

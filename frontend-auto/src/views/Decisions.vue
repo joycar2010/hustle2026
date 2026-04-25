@@ -21,16 +21,15 @@
       </div>
     </div>
 
-    <!-- Decision Pipeline Visualization -->
+    <!-- 5-Stage Decision Pipeline -->
     <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-xs font-semibold text-text-tertiary">决策管线 · {{ windowKey }}</h3>
         <span class="text-[10px] text-text-tertiary">{{ pipelineStats.total }} 条决策</span>
       </div>
       <div class="flex items-center gap-1">
-        <!-- Stage: Signal -->
         <div class="flex-1 text-center">
-          <div class="bg-blue-900/30 rounded-lg px-3 py-2 border border-blue-500/30">
+          <div class="bg-blue-900/30 rounded-lg px-2 py-2 border border-blue-500/30">
             <div class="text-[10px] text-blue-400 mb-0.5">信号触发</div>
             <div class="font-mono font-bold text-lg text-blue-400">{{ pipelineStats.total }}</div>
             <div class="text-[9px] text-text-tertiary mt-0.5">
@@ -38,48 +37,52 @@
             </div>
           </div>
         </div>
-        <div class="text-text-tertiary text-lg">→</div>
-        <!-- Stage: LLM -->
+        <div class="text-text-tertiary">→</div>
         <div class="flex-1 text-center">
-          <div class="bg-purple-900/30 rounded-lg px-3 py-2 border border-purple-500/30">
+          <div class="bg-cyan-900/30 rounded-lg px-2 py-2 border border-cyan-500/30">
+            <div class="text-[10px] text-cyan-400 mb-0.5">数据采集</div>
+            <div class="font-mono font-bold text-lg text-cyan-400">{{ pipelineStats.total }}</div>
+            <div class="text-[9px] text-text-tertiary mt-0.5">市场快照</div>
+          </div>
+        </div>
+        <div class="text-text-tertiary">→</div>
+        <div class="flex-1 text-center">
+          <div class="bg-purple-900/30 rounded-lg px-2 py-2 border border-purple-500/30">
             <div class="text-[10px] text-purple-400 mb-0.5">LLM 分析</div>
             <div class="font-mono font-bold text-lg text-purple-400">{{ pipelineStats.llmProcessed }}</div>
             <div class="text-[9px] text-text-tertiary mt-0.5">
-              avg conf: {{ pipelineStats.avgConf }}% · {{ pipelineStats.avgLatency }}ms
+              conf {{ pipelineStats.avgConf }}% · {{ pipelineStats.avgLatency }}ms
             </div>
           </div>
         </div>
-        <div class="text-text-tertiary text-lg">→</div>
-        <!-- Stage: Guard -->
+        <div class="text-text-tertiary">→</div>
         <div class="flex-1 text-center">
-          <div class="bg-yellow-900/30 rounded-lg px-3 py-2 border border-yellow-500/30">
+          <div class="bg-yellow-900/30 rounded-lg px-2 py-2 border border-yellow-500/30">
             <div class="text-[10px] text-yellow-400 mb-0.5">风控守卫</div>
             <div class="font-mono font-bold text-lg text-yellow-400">{{ pipelineStats.guardPassed }}</div>
             <div class="text-[9px] text-text-tertiary mt-0.5">
-              拦截: <span class="text-danger">{{ pipelineStats.guardRejected }}</span> · 通过率: {{ pipelineStats.guardPassRate }}%
+              拦截 <span class="text-danger">{{ pipelineStats.guardRejected }}</span> · {{ pipelineStats.guardPassRate }}%
             </div>
           </div>
         </div>
-        <div class="text-text-tertiary text-lg">→</div>
-        <!-- Stage: Verdict -->
+        <div class="text-text-tertiary">→</div>
         <div class="flex-1 text-center">
-          <div class="rounded-lg px-3 py-2 border" :class="pipelineStats.executed > 0 ? 'bg-green-900/30 border-green-500/30' : 'bg-dark-200 border-border-primary'">
+          <div class="rounded-lg px-2 py-2 border" :class="pipelineStats.executed > 0 ? 'bg-green-900/30 border-green-500/30' : 'bg-dark-200 border-border-primary'">
             <div class="text-[10px] text-success mb-0.5">最终执行</div>
             <div class="font-mono font-bold text-lg text-success">{{ pipelineStats.executed }}</div>
             <div class="text-[9px] text-text-tertiary mt-0.5">
-              shadow: {{ pipelineStats.shadow }} · pending: {{ pipelineStats.pending }}
+              shadow {{ pipelineStats.shadow }} · pending {{ pipelineStats.pending }}
             </div>
           </div>
         </div>
       </div>
-      <!-- Funnel conversion bar -->
       <div class="mt-2 flex items-center gap-1 text-[9px]">
         <span class="text-text-tertiary">转化漏斗:</span>
         <div class="flex-1 h-2 bg-dark-200 rounded-full overflow-hidden flex">
-          <div class="bg-success h-full transition-all" :style="{width: pipelineStats.execPct + '%'}" title="executed"></div>
-          <div class="bg-yellow-500 h-full transition-all" :style="{width: pipelineStats.shadowPct + '%'}" title="shadow"></div>
-          <div class="bg-blue-500 h-full transition-all" :style="{width: pipelineStats.pendingPct + '%'}" title="pending"></div>
-          <div class="bg-danger h-full transition-all" :style="{width: pipelineStats.rejPct + '%'}" title="rejected"></div>
+          <div class="bg-success h-full transition-all" :style="{width: pipelineStats.execPct + '%'}"></div>
+          <div class="bg-yellow-500 h-full transition-all" :style="{width: pipelineStats.shadowPct + '%'}"></div>
+          <div class="bg-blue-500 h-full transition-all" :style="{width: pipelineStats.pendingPct + '%'}"></div>
+          <div class="bg-danger h-full transition-all" :style="{width: pipelineStats.rejPct + '%'}"></div>
         </div>
         <span class="text-success">{{ pipelineStats.execPct }}%执行</span>
         <span class="text-danger">{{ pipelineStats.rejPct }}%拦截</span>
@@ -115,127 +118,194 @@
       </div>
     </div>
 
-    <!-- Table -->
-    <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
-      <table class="w-full text-xs">
-        <thead class="bg-dark-200 text-text-tertiary">
-          <tr class="text-left">
-            <th class="px-3 py-2">#</th>
-            <th>时间</th>
-            <th>目标</th>
-            <th>触发</th>
-            <th>动作</th>
-            <th>腿</th>
-            <th>数量</th>
-            <th>conf</th>
-            <th>判决</th>
-            <th>tokens</th>
-            <th>ms</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template v-for="d in items" :key="d.id">
-            <tr class="border-t border-border-primary hover:bg-dark-200 cursor-pointer" @click="toggle(d.id)">
-              <td class="px-3 py-2 font-mono text-text-tertiary">{{ d.id }}</td>
-              <td class="font-mono text-text-tertiary" :title="d.created_at">{{ fmtTime(d.created_at) }}</td>
-              <td class="text-text-tertiary text-[11px]">
-                <span v-if="d.username" class="font-semibold text-text-secondary">{{ d.username }}</span>
-                <span v-if="d.pair_code" class="font-mono text-primary">/{{ d.pair_code }}</span>
-                <span v-if="!d.username" class="text-text-tertiary">—</span>
-              </td>
-              <td class="text-text-secondary">
-                <span class="mr-1">{{ triggerIcon(d.trigger) }}</span>{{ d.trigger }}
-              </td>
-              <td><span class="font-mono" :class="actionColor(d.action)">{{ d.action }}</span></td>
-              <td class="font-mono text-text-tertiary">{{ d.leg }}</td>
-              <td class="font-mono">{{ d.qty }}</td>
-              <td class="font-mono text-text-tertiary">{{ Number(d.confidence||0).toFixed(2) }}</td>
-              <td><span class="px-1.5 py-0.5 rounded text-[10px]" :class="verdictBadge(d.verdict)">{{ d.verdict }}</span></td>
-              <td class="font-mono text-text-tertiary">{{ (d.tokens_in||0)+(d.tokens_out||0) }}</td>
-              <td class="font-mono text-text-tertiary">{{ d.latency_ms }}</td>
+    <!-- Main content: Table + Right Stats Panel -->
+    <div class="flex gap-4">
+      <!-- Table (flex-1) -->
+      <div class="flex-1 bg-dark-100 rounded-xl border border-border-primary overflow-hidden min-w-0">
+        <table class="w-full text-xs">
+          <thead class="bg-dark-200 text-text-tertiary">
+            <tr class="text-left">
+              <th class="px-3 py-2">#</th>
+              <th>时间</th>
+              <th>目标</th>
+              <th>触发</th>
+              <th>动作</th>
+              <th>腿</th>
+              <th>数量</th>
+              <th>conf</th>
+              <th>判决</th>
+              <th>tokens</th>
+              <th>ms</th>
             </tr>
-            <tr v-if="expanded === d.id" class="bg-dark-200">
-              <td colspan="11" class="p-3 space-y-2">
-                <div>
-                  <div class="text-text-tertiary text-[10px] mb-1">REASON</div>
-                  <div class="text-text-primary text-xs whitespace-pre-wrap">{{ d.reason || '(空)' }}</div>
-                </div>
-                <div v-if="d.reject_reason">
-                  <div class="text-danger text-[10px] mb-1">REJECT_REASON</div>
-                  <div class="text-danger text-xs font-mono">{{ d.reject_reason }}</div>
-                </div>
-                <!-- Market Snapshot -->
-                <div v-if="d.market_snapshot">
-                  <div class="text-text-tertiary text-[10px] mb-1">MARKET_SNAPSHOT</div>
-                  <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">即时点差:</span>
-                      <span class="font-mono ml-1" :class="Math.abs(d.market_snapshot.spread_now) > 5 ? 'text-danger' : ''">{{ d.market_snapshot.spread_now?.toFixed(2) }}</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">30m均值:</span>
-                      <span class="font-mono ml-1">{{ d.market_snapshot.spread_30m_avg?.toFixed(2) }}</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">总权益:</span>
-                      <span class="font-mono ml-1">${{ d.market_snapshot.total_equity?.toFixed(2) }}</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">资金费:</span>
-                      <span class="font-mono ml-1">{{ (d.market_snapshot.funding_rate * 100)?.toFixed(4) }}%</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">A权益:</span>
-                      <span class="font-mono ml-1">${{ d.market_snapshot.a_equity?.toFixed(2) }}</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">B权益:</span>
-                      <span class="font-mono ml-1">${{ d.market_snapshot.b_equity?.toFixed(2) }}</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">A仓位:</span>
-                      <span class="font-mono ml-1">{{ d.market_snapshot.a_size }}</span>
-                    </div>
-                    <div class="bg-dark-300 rounded px-2 py-1">
-                      <span class="text-text-tertiary">B仓位:</span>
-                      <span class="font-mono ml-1">{{ d.market_snapshot.b_size }} × {{ d.market_snapshot.conversion_factor }}</span>
+          </thead>
+          <tbody>
+            <template v-for="d in items" :key="d.id">
+              <tr class="border-t border-border-primary hover:bg-dark-200 cursor-pointer" @click="toggle(d.id)">
+                <td class="px-3 py-2 font-mono text-text-tertiary">{{ d.id }}</td>
+                <td class="font-mono text-text-tertiary" :title="d.created_at">{{ fmtTime(d.created_at) }}</td>
+                <td class="text-text-tertiary text-[11px]">
+                  <span v-if="d.username" class="font-semibold text-text-secondary">{{ d.username }}</span>
+                  <span v-if="d.pair_code" class="font-mono text-primary">/{{ d.pair_code }}</span>
+                  <span v-if="!d.username" class="text-text-tertiary">—</span>
+                </td>
+                <td class="text-text-secondary">
+                  <span class="mr-1">{{ triggerIcon(d.trigger) }}</span>{{ d.trigger }}
+                </td>
+                <td><span class="font-mono" :class="actionColor(d.action)">{{ d.action }}</span></td>
+                <td class="font-mono text-text-tertiary">{{ d.leg }}</td>
+                <td class="font-mono">{{ d.qty }}</td>
+                <td class="font-mono text-text-tertiary">{{ Number(d.confidence||0).toFixed(2) }}</td>
+                <td><span class="px-1.5 py-0.5 rounded text-[10px]" :class="verdictBadge(d.verdict)">{{ d.verdict }}</span></td>
+                <td class="font-mono text-text-tertiary">{{ (d.tokens_in||0)+(d.tokens_out||0) }}</td>
+                <td class="font-mono text-text-tertiary">{{ d.latency_ms }}</td>
+              </tr>
+              <tr v-if="expanded === d.id" class="bg-dark-200">
+                <td colspan="11" class="p-3 space-y-3">
+                  <!-- Per-decision 5-stage stepper -->
+                  <div class="bg-dark-300 rounded-lg p-3 border border-border-primary">
+                    <div class="text-[10px] text-text-tertiary mb-2">决策管线追踪</div>
+                    <div class="flex items-start gap-0">
+                      <div v-for="(step, si) in decisionSteps(d)" :key="si" class="flex items-start flex-1 min-w-0">
+                        <div class="flex flex-col items-center flex-1">
+                          <div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-all"
+                            :class="step.active ? step.colorClass : 'border-dark-100 bg-dark-200 text-text-tertiary'">
+                            {{ step.active ? step.icon : (si + 1) }}
+                          </div>
+                          <div class="text-[9px] mt-1 text-center leading-tight" :class="step.active ? step.textClass : 'text-text-tertiary'">{{ step.label }}</div>
+                          <div class="text-[8px] mt-0.5 text-text-tertiary text-center max-w-[90px] truncate">{{ step.detail }}</div>
+                        </div>
+                        <div v-if="si < 4" class="w-6 mt-3.5 border-t border-dashed"
+                          :class="step.active && decisionSteps(d)[si+1]?.active ? 'border-text-secondary' : 'border-dark-100'"></div>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <!-- Confidence gauge -->
-                <div v-if="d.confidence">
-                  <div class="text-text-tertiary text-[10px] mb-1">LLM CONFIDENCE</div>
-                  <div class="flex items-center gap-2">
-                    <div class="flex-1 h-2 bg-dark-300 rounded-full overflow-hidden max-w-[200px]">
-                      <div class="h-full rounded-full"
-                        :class="d.confidence > 0.7 ? 'bg-success' : d.confidence > 0.4 ? 'bg-warning' : 'bg-danger'"
-                        :style="{width: (d.confidence * 100) + '%'}"></div>
+                  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div>
+                      <div class="text-text-tertiary text-[10px] mb-1">REASON</div>
+                      <div class="text-text-primary text-xs whitespace-pre-wrap">{{ d.reason || '(空)' }}</div>
                     </div>
-                    <span class="font-mono text-[11px]">{{ (d.confidence * 100).toFixed(0) }}%</span>
-                    <span class="text-[10px] text-text-tertiary">{{ d.confidence > 0.7 ? '高置信' : d.confidence > 0.4 ? '中等' : '低置信' }}</span>
+                    <div v-if="d.reject_reason">
+                      <div class="text-danger text-[10px] mb-1">REJECT_REASON</div>
+                      <div class="text-danger text-xs font-mono">{{ d.reject_reason }}</div>
+                    </div>
                   </div>
-                </div>
 
-                <div v-if="d.execution_result">
-                  <div class="text-success text-[10px] mb-1">EXECUTION_RESULT</div>
-                  <pre class="text-[10px] text-text-secondary bg-dark-300 p-2 rounded overflow-x-auto">{{ JSON.stringify(d.execution_result, null, 2) }}</pre>
-                </div>
-                <div v-if="d.verdict==='pending'" class="flex gap-2 pt-2 border-t border-border-primary">
-                  <button @click.stop="approve(d.id)" class="px-3 py-1.5 bg-success text-dark-300 rounded font-semibold text-xs hover:opacity-90">批准并执行</button>
-                  <button @click.stop="reject(d.id)" class="px-3 py-1.5 bg-danger text-white rounded font-semibold text-xs hover:opacity-90">拒绝</button>
-                </div>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-      <div v-if="items.length===0 && !loading" class="p-6 text-center text-text-tertiary text-sm">无符合条件决策</div>
-      <div v-if="loading" class="p-4 text-center text-text-tertiary text-sm">加载中…</div>
-      <div v-if="hasMore && !loading" class="p-3 text-center">
-        <button @click="loadMore()" class="px-4 py-1.5 bg-dark-200 hover:bg-dark-300 text-text-secondary rounded text-xs">加载更多</button>
+                  <div v-if="d.market_snapshot">
+                    <div class="text-text-tertiary text-[10px] mb-1">MARKET_SNAPSHOT</div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">即时点差:</span>
+                        <span class="font-mono ml-1" :class="Math.abs(d.market_snapshot.spread_now) > 5 ? 'text-danger' : ''">{{ d.market_snapshot.spread_now?.toFixed(2) }}</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">30m均值:</span>
+                        <span class="font-mono ml-1">{{ d.market_snapshot.spread_30m_avg?.toFixed(2) }}</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">总权益:</span>
+                        <span class="font-mono ml-1">${{ d.market_snapshot.total_equity?.toFixed(2) }}</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">资金费:</span>
+                        <span class="font-mono ml-1">{{ (d.market_snapshot.funding_rate * 100)?.toFixed(4) }}%</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">A权益:</span>
+                        <span class="font-mono ml-1">${{ d.market_snapshot.a_equity?.toFixed(2) }}</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">B权益:</span>
+                        <span class="font-mono ml-1">${{ d.market_snapshot.b_equity?.toFixed(2) }}</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">A仓位:</span>
+                        <span class="font-mono ml-1">{{ d.market_snapshot.a_size }}</span>
+                      </div>
+                      <div class="bg-dark-300 rounded px-2 py-1">
+                        <span class="text-text-tertiary">B仓位:</span>
+                        <span class="font-mono ml-1">{{ d.market_snapshot.b_size }} × {{ d.market_snapshot.conversion_factor }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="d.confidence">
+                    <div class="text-text-tertiary text-[10px] mb-1">LLM CONFIDENCE</div>
+                    <div class="flex items-center gap-2">
+                      <div class="flex-1 h-2 bg-dark-300 rounded-full overflow-hidden max-w-[200px]">
+                        <div class="h-full rounded-full"
+                          :class="d.confidence > 0.7 ? 'bg-success' : d.confidence > 0.4 ? 'bg-warning' : 'bg-danger'"
+                          :style="{width: (d.confidence * 100) + '%'}"></div>
+                      </div>
+                      <span class="font-mono text-[11px]">{{ (d.confidence * 100).toFixed(0) }}%</span>
+                      <span class="text-[10px] text-text-tertiary">{{ d.confidence > 0.7 ? '高置信' : d.confidence > 0.4 ? '中等' : '低置信' }}</span>
+                    </div>
+                  </div>
+                  <div v-if="d.execution_result">
+                    <div class="text-success text-[10px] mb-1">EXECUTION_RESULT</div>
+                    <pre class="text-[10px] text-text-secondary bg-dark-300 p-2 rounded overflow-x-auto">{{ JSON.stringify(d.execution_result, null, 2) }}</pre>
+                  </div>
+                  <div v-if="d.verdict==='pending'" class="flex gap-2 pt-2 border-t border-border-primary">
+                    <button @click.stop="approve(d.id)" class="px-3 py-1.5 bg-success text-dark-300 rounded font-semibold text-xs hover:opacity-90">批准并执行</button>
+                    <button @click.stop="reject(d.id)" class="px-3 py-1.5 bg-danger text-white rounded font-semibold text-xs hover:opacity-90">拒绝</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div v-if="items.length===0 && !loading" class="p-6 text-center text-text-tertiary text-sm">无符合条件决策</div>
+        <div v-if="loading" class="p-4 text-center text-text-tertiary text-sm">加载中…</div>
+        <div v-if="hasMore && !loading" class="p-3 text-center">
+          <button @click="loadMore()" class="px-4 py-1.5 bg-dark-200 hover:bg-dark-300 text-text-secondary rounded text-xs">加载更多</button>
+        </div>
+        <div v-if="!hasMore && items.length > 0" class="p-3 text-center text-text-tertiary text-[10px]">已到末尾</div>
       </div>
-      <div v-if="!hasMore && items.length > 0" class="p-3 text-center text-text-tertiary text-[10px]">已到末尾</div>
+
+      <!-- Right Fixed Stats Panel -->
+      <div class="w-64 shrink-0 space-y-3 hidden xl:block">
+        <div class="bg-dark-100 rounded-xl p-3 border border-border-primary sticky top-6">
+          <h4 class="text-xs font-semibold text-text-tertiary mb-2">窗口统计 · {{ windowKey }}</h4>
+          <div class="space-y-2">
+            <div class="flex justify-between text-xs">
+              <span class="text-text-tertiary">总决策数</span>
+              <span class="font-mono font-bold">{{ pipelineStats.total }}</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-text-tertiary">执行率</span>
+              <span class="font-mono text-success">{{ pipelineStats.execPct }}%</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-text-tertiary">拦截率</span>
+              <span class="font-mono text-danger">{{ pipelineStats.rejPct }}%</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-text-tertiary">平均置信度</span>
+              <span class="font-mono">{{ pipelineStats.avgConf }}%</span>
+            </div>
+            <div class="flex justify-between text-xs">
+              <span class="text-text-tertiary">平均延迟</span>
+              <span class="font-mono">{{ pipelineStats.avgLatency }}ms</span>
+            </div>
+            <div class="border-t border-border-primary pt-2 mt-2">
+              <div class="text-[10px] text-text-tertiary mb-1">判决分布</div>
+              <div class="space-y-1">
+                <div v-for="v in VERDICTS" :key="v" class="flex items-center gap-2 text-[11px]">
+                  <span class="w-2 h-2 rounded-full" :class="verdictDot(v)"></span>
+                  <span class="text-text-secondary flex-1">{{ v }}</span>
+                  <span class="font-mono">{{ pipelineStatsData?.by_verdict?.[v] || 0 }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="border-t border-border-primary pt-2 mt-2">
+              <div class="text-[10px] text-text-tertiary mb-1">热门触发</div>
+              <div v-for="(cnt, trig) in pipelineStats.topTriggers" :key="trig" class="flex justify-between text-[11px]">
+                <span class="text-text-secondary truncate">{{ trig }}</span>
+                <span class="font-mono">{{ cnt }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -267,8 +337,60 @@ const hasMore = ref(false)
 const nextCursor = ref(null)
 const totalApprox = ref(null)
 const loading = ref(false)
-
 const pipelineStatsData = ref(null)
+
+function decisionSteps(d) {
+  const hasSnapshot = !!d.market_snapshot
+  const hasConf = d.confidence != null && d.confidence > 0
+  const isRejected = d.verdict === 'rejected'
+  const isExecuted = d.verdict === 'executed'
+  const isShadow = d.verdict === 'shadow'
+  const isPending = d.verdict === 'pending'
+  const passedGuard = isExecuted || isShadow || isPending
+
+  return [
+    {
+      label: '信号触发',
+      icon: '⚡',
+      active: true,
+      colorClass: 'border-blue-500 bg-blue-900/40 text-blue-400',
+      textClass: 'text-blue-400',
+      detail: d.trigger || '--',
+    },
+    {
+      label: '数据采集',
+      icon: '📊',
+      active: true,
+      colorClass: 'border-cyan-500 bg-cyan-900/40 text-cyan-400',
+      textClass: 'text-cyan-400',
+      detail: hasSnapshot ? '快照完成' : '无快照',
+    },
+    {
+      label: 'LLM 分析',
+      icon: '🧠',
+      active: hasConf,
+      colorClass: 'border-purple-500 bg-purple-900/40 text-purple-400',
+      textClass: 'text-purple-400',
+      detail: hasConf ? `${(d.confidence * 100).toFixed(0)}% · ${d.latency_ms || '--'}ms` : '跳过',
+    },
+    {
+      label: '风控守卫',
+      icon: isRejected ? '✕' : '✓',
+      active: hasConf,
+      colorClass: isRejected ? 'border-danger bg-danger/20 text-danger' : 'border-yellow-500 bg-yellow-900/40 text-yellow-400',
+      textClass: isRejected ? 'text-danger' : 'text-yellow-400',
+      detail: isRejected ? (d.reject_reason || '已拦截').slice(0, 20) : passedGuard ? '通过' : '--',
+    },
+    {
+      label: '最终结果',
+      icon: isExecuted ? '✓' : isShadow ? 'S' : isPending ? '…' : '✕',
+      active: hasConf,
+      colorClass: isExecuted ? 'border-success bg-success/20 text-success' : isShadow ? 'border-yellow-500 bg-yellow-900/40 text-yellow-400' : isPending ? 'border-blue-500 bg-blue-900/40 text-blue-400' : 'border-danger bg-danger/20 text-danger',
+      textClass: isExecuted ? 'text-success' : isShadow ? 'text-yellow-400' : isPending ? 'text-blue-400' : 'text-danger',
+      detail: d.verdict || '--',
+    },
+  ]
+}
 
 const pipelineStats = computed(() => {
   const s = pipelineStatsData.value || {}
@@ -279,12 +401,10 @@ const pipelineStats = computed(() => {
   const pending = bv.pending || 0
   const rejected = bv.rejected || 0
   const topTriggers = {}
-  for (const t of (s.by_trigger || []).slice(0, 3)) topTriggers[t.trigger] = t.count
+  for (const t of (s.by_trigger || []).slice(0, 5)) topTriggers[t.trigger] = t.count
   return {
-    total,
-    llmProcessed: total,
-    guardPassed: executed + shadow + pending,
-    guardRejected: rejected,
+    total, llmProcessed: total,
+    guardPassed: executed + shadow + pending, guardRejected: rejected,
     guardPassRate: total ? ((total - rejected) / total * 100).toFixed(0) : 0,
     executed, shadow, pending,
     avgConf: ((s.avg_conf || 0) * 100).toFixed(0),
@@ -317,21 +437,13 @@ function actionColor(a) {
   return 'text-text-primary'
 }
 function verdictBadge(v) {
-  return ({
-    executed: 'bg-success/20 text-success',
-    shadow: 'bg-yellow-900/30 text-yellow-400',
-    pending: 'bg-blue-900/30 text-blue-400',
-    rejected: 'bg-danger/20 text-danger',
-    skipped: 'bg-dark-200 text-text-tertiary',
-  })[v] || 'bg-dark-200 text-text-tertiary'
+  return ({ executed: 'bg-success/20 text-success', shadow: 'bg-yellow-900/30 text-yellow-400', pending: 'bg-blue-900/30 text-blue-400', rejected: 'bg-danger/20 text-danger' })[v] || 'bg-dark-200 text-text-tertiary'
+}
+function verdictDot(v) {
+  return ({ executed: 'bg-success', shadow: 'bg-yellow-500', pending: 'bg-blue-500', rejected: 'bg-danger' })[v] || 'bg-text-tertiary'
 }
 function verdictActiveClass(v) {
-  return ({
-    executed: 'bg-success/30 text-success font-semibold',
-    shadow:   'bg-yellow-900/40 text-yellow-400 font-semibold',
-    pending:  'bg-blue-900/40 text-blue-400 font-semibold',
-    rejected: 'bg-danger/30 text-danger font-semibold',
-  })[v] || 'bg-primary text-dark-300 font-semibold'
+  return ({ executed: 'bg-success/30 text-success font-semibold', shadow: 'bg-yellow-900/40 text-yellow-400 font-semibold', pending: 'bg-blue-900/40 text-blue-400 font-semibold', rejected: 'bg-danger/30 text-danger font-semibold' })[v] || 'bg-primary text-dark-300 font-semibold'
 }
 
 function toggleVerdict(v) {
@@ -342,11 +454,7 @@ function toggleVerdict(v) {
 }
 function setTarget(tid) { selectedTarget.value = tid; reload() }
 function resetFilters() {
-  selectedVerdicts.value = []
-  windowKey.value = '24h'
-  minConfidence.value = null
-  searchText.value = ''
-  reload()
+  selectedVerdicts.value = []; windowKey.value = '24h'; minConfidence.value = null; searchText.value = ''; reload()
 }
 
 function _buildParams({ cursor } = {}) {
@@ -357,10 +465,8 @@ function _buildParams({ cursor } = {}) {
   if (minConfidence.value != null && minConfidence.value !== '') p.min_confidence = minConfidence.value
   if (searchText.value) p.q = searchText.value
   if (windowKey.value && windowKey.value !== 'all') {
-    const now = new Date()
     const secs = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 }[windowKey.value]
-    const from = new Date(now.getTime() - secs * 1000)
-    p.from = from.toISOString()
+    p.from = new Date(Date.now() - secs * 1000).toISOString()
   }
   return p
 }
@@ -388,13 +494,13 @@ async function reload() {
   } catch (e) { console.error(e) }
   finally { loading.value = false }
 }
+
 async function loadMore() {
   if (!hasMore.value || loading.value || nextCursor.value == null) return
   loading.value = true
   try {
     const r = await api.get('/api/v1/agent/decisions', { params: _buildParams({ cursor: nextCursor.value }) })
     const newItems = r.data?.items || []
-    // Avoid dupes on slow networks
     const seen = new Set(items.value.map(x => x.id))
     for (const it of newItems) if (!seen.has(it.id)) items.value.push(it)
     nextCursor.value = r.data?.next_cursor ?? null
@@ -404,23 +510,18 @@ async function loadMore() {
 }
 
 async function refreshHead() {
-  // Tail-poll: only fetch rows newer than items[0]; prepend them.
-  // Cheapest: refetch page 1 with current filters, merge on id.
   try {
     const r = await api.get('/api/v1/agent/decisions', { params: _buildParams() })
     const fresh = r.data?.items || []
     if (!fresh.length || !items.value.length) {
-      items.value = fresh
-      nextCursor.value = r.data?.next_cursor ?? null
-      hasMore.value = !!r.data?.has_more
-      totalApprox.value = r.data?.total_approx ?? null
-      return
+      items.value = fresh; nextCursor.value = r.data?.next_cursor ?? null
+      hasMore.value = !!r.data?.has_more; totalApprox.value = r.data?.total_approx ?? null; return
     }
     const topId = items.value[0].id
     const added = fresh.filter(x => x.id > topId)
     if (added.length) items.value = [...added, ...items.value]
     totalApprox.value = r.data?.total_approx ?? totalApprox.value
-  } catch (e) { /* swallow for background refresh */ }
+  } catch {}
 }
 
 async function approve(id) {
@@ -434,17 +535,12 @@ async function reject(id) {
   catch (e) { alert('拒绝失败: ' + (e.response?.data?.detail || e.message)) }
 }
 
-// Use the WS stream_hub channel agent.decisions for live head updates.
-// Falls back to a 30s safety poll in case the socket is down (reconnect is
-// handled by wsStream but during backoff we still want fresh data).
 const ws = useWsStream()
-let safetyTimer
-let wsWatchStop = null
+let safetyTimer, wsWatchStop
 
 function _prependIfNew(d) {
   if (!d || d.id == null) return
   if (items.value.find(x => x.id === d.id)) return
-  // Respect currently-applied filters — drop events that wouldn't match.
   if (selectedTarget.value != null && d.target_id !== selectedTarget.value) return
   if (selectedVerdicts.value.length && !selectedVerdicts.value.includes(d.verdict)) return
   items.value = [d, ...items.value]
@@ -458,12 +554,10 @@ onMounted(async () => {
   await reload()
   ws.connect()
   ws.subscribe('agent.decisions')
-  // Whenever the channel payload updates, prepend the new decision
-  const { watch } = await import('vue')
-  wsWatchStop = watch(() => ws.channels['agent.decisions'], (payload) => {
+  const { watch: w2 } = await import('vue')
+  wsWatchStop = w2(() => ws.channels['agent.decisions'], (payload) => {
     if (payload && payload.event === 'decision_new') _prependIfNew(payload)
   })
-  // 30s safety poll in case WS is flapping
   safetyTimer = setInterval(refreshHead, 30000)
 })
 onUnmounted(() => {

@@ -21,8 +21,14 @@
         </div>
         <nav class="flex gap-1 text-sm">
           <router-link v-for="n in nav" :key="n.path" :to="n.path"
-            class="px-3 py-1.5 rounded hover:bg-dark-100 transition"
-            active-class="bg-dark-100 text-primary">{{ n.label }}</router-link>
+            class="px-3 py-1.5 rounded hover:bg-dark-100 transition relative"
+            active-class="bg-dark-100 text-primary">
+            {{ n.label }}
+            <span v-if="n.path === '/dashboard' && targetStore.alerts.unacked_count"
+              class="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-danger text-white text-[9px] font-bold">
+              {{ targetStore.alerts.unacked_count > 99 ? '99+' : targetStore.alerts.unacked_count }}
+            </span>
+          </router-link>
         </nav>
       </div>
 
@@ -68,9 +74,11 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '@/api'
 import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
+import { useTargetStore } from '@/stores/targetStore.js'
 
 const router = useRouter()
 const route = useRoute()
+const targetStore = useTargetStore()
 const nav = [
   { path: '/dashboard', label: '实时监控' },
   { path: '/decisions', label: '决策流' },
@@ -102,8 +110,8 @@ async function checkAuth() {
     me.value = r.data
     authChecked.value = true
     if (!r.data.is_admin) return
-    // admin — start polling
     await refresh()
+    targetStore.refresh()
   } catch (e) {
     if (e.response?.status === 401) { logout(); return }
     me.value = { is_admin: false, role: (e.response?.status === 401 ? '会话已过期, 请重新登录' : (e.response?.data?.detail || '--')) }
@@ -127,14 +135,14 @@ function logout() {
   router.push('/login')
 }
 
-let timer
+let timer, alertTimer
 onMounted(() => {
   if (route.name !== 'login') checkAuth()
   timer = setInterval(() => { if (isAdmin.value) refresh() }, 15000)
+  alertTimer = setInterval(() => { if (isAdmin.value) targetStore.loadAlerts() }, 30000)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => { clearInterval(timer); clearInterval(alertTimer) })
 
-// Re-run auth check whenever we navigate AWAY from /login (handles post-login push)
 watch(() => route.name, (n, o) => {
   if (o === 'login' && n !== 'login') {
     authChecked.value = false

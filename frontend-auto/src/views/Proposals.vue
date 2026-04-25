@@ -328,9 +328,13 @@
                   </div>
                 </div>
 
-                <!-- Config diff card grid -->
+                <!-- Config diff card grid — old→new comparison -->
                 <div>
-                  <div class="text-text-tertiary text-[10px] mb-2">CONFIG_DIFF (顶层 key 即将写入 active config)</div>
+                  <div class="text-text-tertiary text-[10px] mb-2 flex items-center gap-2">
+                    CONFIG_DIFF (顶层 key 即将写入 active config)
+                    <span v-if="activeConfigCache[p.id]" class="text-success text-[9px]">✓ 已加载当前值</span>
+                    <span v-else class="text-text-tertiary text-[9px] animate-pulse">加载当前配置…</span>
+                  </div>
                   <div v-if="!p.config_diff || !Object.keys(p.config_diff).length" class="text-text-tertiary text-[11px]">(空 diff)</div>
                   <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div v-for="(val, key) in p.config_diff" :key="key"
@@ -339,11 +343,27 @@
                         <span class="font-mono text-[11px] text-primary font-semibold">{{ key }}</span>
                         <span class="text-[10px] text-text-tertiary">{{ summarizeType(val) }}</span>
                       </div>
-                      <div v-if="isLeaf(val)" class="font-mono text-xs text-text-primary">{{ formatLeaf(val) }}</div>
+                      <div v-if="isLeaf(val)" class="space-y-0.5">
+                        <div class="flex items-center gap-2 text-xs font-mono">
+                          <template v-if="activeConfigCache[p.id]">
+                            <span class="line-through text-danger/70">{{ formatLeaf(getActiveVal(p.id, key)) }}</span>
+                            <span class="text-text-tertiary">→</span>
+                            <span class="text-success font-semibold">{{ formatLeaf(val) }}</span>
+                          </template>
+                          <span v-else class="text-text-primary">{{ formatLeaf(val) }}</span>
+                        </div>
+                      </div>
                       <div v-else class="space-y-0.5">
                         <div v-for="(sv, sk) in val" :key="sk" class="flex justify-between text-[11px] gap-3">
                           <span class="text-text-secondary font-mono">{{ sk }}</span>
-                          <span class="text-text-primary font-mono text-right">{{ formatLeaf(sv) }}</span>
+                          <div class="flex items-center gap-1.5 font-mono text-right">
+                            <template v-if="activeConfigCache[p.id]">
+                              <span class="line-through text-danger/70 text-[10px]">{{ formatLeaf(getActiveSubVal(p.id, key, sk)) }}</span>
+                              <span class="text-text-tertiary text-[10px]">→</span>
+                              <span class="text-success font-semibold">{{ formatLeaf(sv) }}</span>
+                            </template>
+                            <span v-else class="text-text-primary">{{ formatLeaf(sv) }}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -489,6 +509,7 @@ const hasMore = ref(false)
 const nextCursor = ref(null)
 const loading = ref(false)
 const sourceMap = ref({})
+const activeConfigCache = ref({})
 const sourceLoading = ref({})
 const auditMap = ref({})
 const auditLoading = ref({})
@@ -604,7 +625,25 @@ function updateStats() {
 }
 
 function fmtTime(t) { return dayjs(t).format('MM-DD HH:mm') }
-function toggle(id) { expanded.value = expanded.value === id ? null : id }
+function toggle(id) {
+  if (expanded.value === id) { expanded.value = null; return }
+  expanded.value = id
+  const p = items.value.find(x => x.id === id)
+  if (p && p.config_diff && Object.keys(p.config_diff).length && !activeConfigCache.value[id]) {
+    const tid = p.target_id
+    const url = tid ? '/api/v1/agent/config?target_id=' + tid : '/api/v1/agent/config'
+    api.get(url).then(r => { activeConfigCache.value[id] = r.data || {} }).catch(() => {})
+  }
+}
+function getActiveVal(pid, key) {
+  const cfg = activeConfigCache.value[pid]
+  return cfg ? cfg[key] : undefined
+}
+function getActiveSubVal(pid, key, subKey) {
+  const cfg = activeConfigCache.value[pid]
+  const block = cfg ? cfg[key] : undefined
+  return block && typeof block === 'object' ? block[subKey] : undefined
+}
 function statusBadge(s) {
   return ({
     pending: 'bg-blue-900/30 text-blue-400',

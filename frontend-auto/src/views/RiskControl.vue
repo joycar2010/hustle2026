@@ -27,9 +27,8 @@
           <div class="font-bold text-sm" :class="riskRate.textClass">{{ riskRate.label }}</div>
         </div>
       </div>
-      <!-- Active alerts -->
-      <div v-if="alerts.length" class="space-y-1">
-        <div v-for="(a, i) in alerts" :key="i" class="flex items-center gap-2 px-3 py-1.5 rounded text-xs"
+      <div v-if="riskAlerts.length" class="space-y-1">
+        <div v-for="(a, i) in riskAlerts" :key="i" class="flex items-center gap-2 px-3 py-1.5 rounded text-xs"
           :class="a.level === 'critical' ? 'bg-danger/10 text-danger' : a.level === 'warning' ? 'bg-warning/10 text-warning' : 'bg-blue-900/20 text-blue-400'">
           <span class="font-bold text-[10px] uppercase">{{ a.level }}</span>
           <span>{{ a.message }}</span>
@@ -37,6 +36,47 @@
         </div>
       </div>
       <div v-else class="text-[10px] text-success text-center py-1">✓ 无活跃告警</div>
+    </div>
+
+    <!-- Per-Target Health Dashboard -->
+    <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
+      <h3 class="font-semibold mb-3">目标健康一览</h3>
+      <div v-if="!targetStore.comparison.length" class="text-text-tertiary text-sm text-center py-4">加载中…</div>
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div v-for="t in targetStore.comparison" :key="t.target_id"
+          class="bg-dark-200 rounded-lg p-3 border-l-4"
+          :class="healthBorder(t.alert_level)">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="font-semibold text-sm">{{ t.username }}</span>
+              <span class="font-mono text-primary text-xs ml-1">{{ t.pair_code }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="font-mono font-bold text-lg" :class="healthColor(t.health_score)">{{ t.health_score }}</span>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold" :class="alertBadge(t.alert_level)">{{ alertLbl(t.alert_level) }}</span>
+            </div>
+          </div>
+          <div class="h-2 bg-dark-300 rounded-full overflow-hidden mb-2">
+            <div class="h-full rounded-full transition-all" :class="healthBarColor(t.health_score)" :style="{width: t.health_score + '%'}"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-[10px]">
+            <div>
+              <span class="text-text-tertiary">偏差</span>
+              <div class="font-mono font-bold" :class="t.match_deviation_pct > 10 ? 'text-danger' : t.match_deviation_pct > 5 ? 'text-warning' : 'text-text-primary'">{{ t.match_deviation_pct }}%</div>
+            </div>
+            <div>
+              <span class="text-text-tertiary">频率/h</span>
+              <div class="font-mono font-bold">{{ t.freq_per_hour }}</div>
+            </div>
+            <div>
+              <span class="text-text-tertiary">拦截率</span>
+              <div class="font-mono font-bold" :class="t.total_24h && t.rejected_24h / t.total_24h > 0.7 ? 'text-danger' : ''">
+                {{ t.total_24h ? ((t.rejected_24h / t.total_24h) * 100).toFixed(0) + '%' : '--' }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Global Control Bar -->
@@ -74,7 +114,6 @@
         <h3 class="font-semibold">智能体作用域矩阵</h3>
         <span class="text-xs text-text-tertiary">每行 = 独立执行目标</span>
       </div>
-      <!-- Add target form -->
       <div class="bg-dark-200 rounded p-3 mb-3 grid grid-cols-1 lg:grid-cols-4 gap-3">
         <div>
           <div class="text-xs text-text-tertiary mb-1">用户</div>
@@ -104,7 +143,7 @@
       <table v-else class="w-full text-xs">
         <thead class="text-text-tertiary">
           <tr class="text-left border-b border-border-primary">
-            <th class="py-2">ID</th><th>用户</th><th>产品对</th><th>优先级</th><th>启用</th><th>24h决策</th><th>最后决策</th><th>创建</th><th>操作</th>
+            <th class="py-2">ID</th><th>用户</th><th>产品对</th><th>优先级</th><th>启用</th><th>健康</th><th>24h决策</th><th>最后决策</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -119,9 +158,9 @@
                 <span :class="t.enabled ? 'text-success' : 'text-text-tertiary'">{{ t.enabled ? '启用' : '停用' }}</span>
               </label>
             </td>
+            <td><span class="font-mono font-bold" :class="healthColor(compMap[t.id]?.health_score)">{{ compMap[t.id]?.health_score ?? '--' }}</span></td>
             <td class="font-mono text-text-tertiary">{{ targetMeta[t.id]?.count_24h ?? '--' }}</td>
             <td class="font-mono text-text-tertiary text-[10px]">{{ targetMeta[t.id]?.last_decision ? dayjs(targetMeta[t.id].last_decision).fromNow() : '--' }}</td>
-            <td class="font-mono text-text-tertiary">{{ fmtTime(t.created_at) }}</td>
             <td>
               <button @click="editCaps(t)" class="px-2 py-0.5 bg-primary/20 text-primary rounded text-[10px] hover:bg-primary/30 mr-1">风控</button>
               <button @click="removeTarget(t)" class="px-2 py-0.5 bg-danger/20 text-danger rounded text-[10px] hover:bg-danger/30">删除</button>
@@ -130,23 +169,73 @@
         </tbody>
       </table>
 
-      <!-- Per-target risk cap editor -->
+      <!-- Enhanced editingCaps panel -->
       <div v-if="editingCaps" class="mt-3 bg-dark-200 rounded-lg p-4 border border-border-primary">
         <div class="flex items-center justify-between mb-3">
           <h4 class="text-sm font-semibold">风控参数 · #{{ editingCaps.target_id }} <span class="text-primary font-mono">{{ editingCaps.pair_code }}</span></h4>
           <button @click="editingCaps = null" class="text-xs text-text-tertiary hover:text-text-primary">✕</button>
         </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div v-for="cap in capFields" :key="cap.key">
-            <div class="text-xs text-text-tertiary mb-1">{{ cap.label }} <span class="ml-1">(全局: {{ ((editingCaps.global_caps?.[cap.key] || cap.default) * 100).toFixed(0) }}%)</span></div>
-            <input v-model.number="editingCaps[cap.key]" :type="'number'" :step="cap.step" :min="cap.min" :max="cap.max"
-              class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
-            <div class="h-1.5 bg-dark-300 rounded-full mt-1 overflow-hidden">
-              <div class="h-full bg-primary/60 rounded-full" :style="{ width: Math.min(100, (editingCaps[cap.key] / (editingCaps.global_caps?.[cap.key] || cap.default)) * 100) + '%' }"></div>
+
+        <!-- Section 1: Position Caps -->
+        <div class="mb-4">
+          <div class="text-[10px] text-text-tertiary uppercase tracking-wider mb-2 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-primary"></span>
+            仓位限制
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div v-for="cap in capFields" :key="cap.key">
+              <div class="text-xs text-text-tertiary mb-1">{{ cap.label }} <span class="ml-1">(全局: {{ ((editingCaps.global_caps?.[cap.key] || cap.default) * 100).toFixed(0) }}%)</span></div>
+              <input v-model.number="editingCaps[cap.key]" :type="'number'" :step="cap.step" :min="cap.min" :max="cap.max"
+                class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+              <div class="h-1.5 bg-dark-300 rounded-full mt-1 overflow-hidden">
+                <div class="h-full bg-primary/60 rounded-full" :style="{ width: Math.min(100, (editingCaps[cap.key] / (editingCaps.global_caps?.[cap.key] || cap.default)) * 100) + '%' }"></div>
+              </div>
+              <div class="text-[9px] text-text-tertiary mt-0.5">覆盖比: {{ ((editingCaps[cap.key] / (editingCaps.global_caps?.[cap.key] || cap.default)) * 100).toFixed(0) }}%</div>
             </div>
-            <div class="text-[9px] text-text-tertiary mt-0.5">覆盖比: {{ ((editingCaps[cap.key] / (editingCaps.global_caps?.[cap.key] || cap.default)) * 100).toFixed(0) }}%</div>
           </div>
         </div>
+
+        <!-- Section 2: Rate Limits -->
+        <div class="mb-4 pt-3 border-t border-border-primary">
+          <div class="text-[10px] text-text-tertiary uppercase tracking-wider mb-2 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-warning"></span>
+            频次限制
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div v-for="rl in rateLimitFields" :key="rl.key">
+              <div class="text-xs text-text-tertiary mb-1">{{ rl.label }} <span class="ml-1">(全局: {{ editingCaps.global_caps?.[rl.key] ?? rl.default }}{{ rl.unit }})</span></div>
+              <input v-model.number="editingCaps[rl.key]" :type="'number'" :step="rl.step" :min="rl.min" :max="rl.max"
+                class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+              <div class="h-1.5 bg-dark-300 rounded-full mt-1 overflow-hidden">
+                <div class="h-full bg-warning/60 rounded-full" :style="{ width: Math.min(100, (editingCaps[rl.key] / (editingCaps.global_caps?.[rl.key] || rl.default)) * 100) + '%' }"></div>
+              </div>
+              <div class="text-[9px] text-text-tertiary mt-0.5">覆盖比: {{ ((editingCaps[rl.key] / (editingCaps.global_caps?.[rl.key] || rl.default)) * 100).toFixed(0) }}%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Equity Guard -->
+        <div class="mb-4 pt-3 border-t border-border-primary">
+          <div class="text-[10px] text-text-tertiary uppercase tracking-wider mb-2 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-danger"></span>
+            净资产守卫
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div v-for="eg in equityGuardFields" :key="eg.key">
+              <div class="text-xs text-text-tertiary mb-1">{{ eg.label }} <span class="ml-1">(全局: {{ ((editingCaps.global_caps?.[eg.key] || eg.default) * 100).toFixed(0) }}%)</span></div>
+              <input v-model.number="editingCaps[eg.key]" :type="'number'" :step="eg.step" :min="eg.min" :max="eg.max"
+                class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+              <div class="h-1.5 bg-dark-300 rounded-full mt-1 overflow-hidden">
+                <div class="h-full rounded-full" :class="eg.barClass" :style="{ width: Math.min(100, (editingCaps[eg.key] / (editingCaps.global_caps?.[eg.key] || eg.default)) * 100) + '%' }"></div>
+              </div>
+              <div class="text-[9px] text-text-tertiary mt-0.5">
+                覆盖比: {{ ((editingCaps[eg.key] / (editingCaps.global_caps?.[eg.key] || eg.default)) * 100).toFixed(0) }}%
+                <span v-if="eg.hint" class="ml-1 text-text-tertiary">· {{ eg.hint }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <button @click="saveTargetCaps" class="mt-3 px-4 py-2 bg-primary text-dark-300 font-semibold rounded hover:bg-primary-hover text-sm">保存风控参数</button>
         <span class="text-[10px] text-text-tertiary ml-2">5 秒内热加载生效</span>
       </div>
@@ -184,12 +273,14 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { useWsStream } from '@/stores/wsStream.js'
+import { useTargetStore } from '@/stores/targetStore.js'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
 const wsStore = useWsStream()
 wsStore.subscribe('agent.status')
+const targetStore = useTargetStore()
 const status = ref(null)
 watch(() => wsStore.channels['agent.status'], (v) => { if (v) status.value = { ...(status.value || {}), ...v } }, { deep: true })
 
@@ -202,6 +293,12 @@ const editingCaps = ref(null)
 const modeCooldown = ref(0)
 const killCooldown = ref(0)
 let modeTimer = null, killTimer = null
+
+const compMap = computed(() => {
+  const m = {}
+  for (const t of targetStore.comparison) m[t.target_id] = t
+  return m
+})
 
 const modes = [
   { key: 'shadow', label: 'Shadow', desc: '只观察记录，不下单。' },
@@ -216,9 +313,41 @@ const capFields = [
   { key: 'daily_volume_pct', label: '日内累计上限 %', step: 0.5, min: 0.5, max: 20, default: 5.0 },
 ]
 
+const rateLimitFields = [
+  { key: 'max_decisions_per_min', label: '每分钟最大决策数', step: 1, min: 1, max: 60, default: 10, unit: '' },
+  { key: 'max_trades_per_hour', label: '每小时最大交易数', step: 1, min: 1, max: 200, default: 30, unit: '' },
+  { key: 'cooldown_after_loss_s', label: '亏损后冷却 (秒)', step: 5, min: 0, max: 3600, default: 120, unit: 's' },
+]
+
+const equityGuardFields = [
+  { key: 'warn_ratio', label: '警告阈值', step: 0.01, min: 0.5, max: 1, default: 0.90, barClass: 'bg-warning/60', hint: '低于此值触发告警' },
+  { key: 'critical_ratio', label: '危险阈值', step: 0.01, min: 0.3, max: 1, default: 0.80, barClass: 'bg-orange-500/60', hint: '低于此值升级干预' },
+  { key: 'force_reduce_ratio', label: '强减阈值', step: 0.01, min: 0.1, max: 1, default: 0.70, barClass: 'bg-danger/60', hint: '低于此值自动强减' },
+]
+
 function fmtTime(t) { return dayjs(t).format('MM-DD HH:mm:ss') }
 function stateBadge(s) {
   return ({ NORMAL: 'bg-success/20 text-success', WARNING: 'bg-warning/20 text-warning', ESCALATING: 'bg-orange-900/30 text-orange-300', FORCED_REDUCE: 'bg-danger/20 text-danger', RESOLVED: 'bg-dark-200 text-text-tertiary' })[s] || 'bg-dark-200 text-text-tertiary'
+}
+function healthColor(score) {
+  if (score == null) return 'text-text-tertiary'
+  if (score >= 80) return 'text-success'
+  if (score >= 50) return 'text-warning'
+  return 'text-danger'
+}
+function healthBarColor(score) {
+  if (score >= 80) return 'bg-success'
+  if (score >= 50) return 'bg-warning'
+  return 'bg-danger'
+}
+function healthBorder(level) {
+  return ({ critical: 'border-danger', warning: 'border-warning', normal: 'border-success' })[level] || 'border-border-primary'
+}
+function alertBadge(level) {
+  return ({ critical: 'bg-danger/20 text-danger', warning: 'bg-warning/20 text-warning', normal: 'bg-success/20 text-success' })[level] || ''
+}
+function alertLbl(level) {
+  return ({ critical: '危险', warning: '警告', normal: '正常' })[level] || level
 }
 
 function startCooldown(type) {
@@ -275,19 +404,42 @@ async function toggleTarget(t, enabled) {
 async function editCaps(t) {
   try {
     const r = await api.get('/api/v1/agent/scope/targets/' + t.id + '/caps')
-    editingCaps.value = { target_id: t.id, pair_code: t.pair_code, single_trade_pct: r.data.caps?.single_trade_pct ?? 0.10, total_position_pct: r.data.caps?.total_position_pct ?? 0.50, daily_volume_pct: r.data.caps?.daily_volume_pct ?? 5.0, global_caps: r.data.global_caps || {} }
+    editingCaps.value = {
+      target_id: t.id,
+      pair_code: t.pair_code,
+      single_trade_pct: r.data.caps?.single_trade_pct ?? 0.10,
+      total_position_pct: r.data.caps?.total_position_pct ?? 0.50,
+      daily_volume_pct: r.data.caps?.daily_volume_pct ?? 5.0,
+      max_decisions_per_min: r.data.caps?.max_decisions_per_min ?? 10,
+      max_trades_per_hour: r.data.caps?.max_trades_per_hour ?? 30,
+      cooldown_after_loss_s: r.data.caps?.cooldown_after_loss_s ?? 120,
+      warn_ratio: r.data.caps?.warn_ratio ?? 0.90,
+      critical_ratio: r.data.caps?.critical_ratio ?? 0.80,
+      force_reduce_ratio: r.data.caps?.force_reduce_ratio ?? 0.70,
+      global_caps: r.data.global_caps || {},
+    }
   } catch (e) { alert('加载失败: ' + (e.response?.data?.detail || e.message)) }
 }
 async function saveTargetCaps() {
   if (!editingCaps.value) return
   try {
-    await api.post('/api/v1/agent/scope/targets/' + editingCaps.value.target_id + '/caps', { single_trade_pct: editingCaps.value.single_trade_pct, total_position_pct: editingCaps.value.total_position_pct, daily_volume_pct: editingCaps.value.daily_volume_pct })
+    await api.post('/api/v1/agent/scope/targets/' + editingCaps.value.target_id + '/caps', {
+      single_trade_pct: editingCaps.value.single_trade_pct,
+      total_position_pct: editingCaps.value.total_position_pct,
+      daily_volume_pct: editingCaps.value.daily_volume_pct,
+      max_decisions_per_min: editingCaps.value.max_decisions_per_min,
+      max_trades_per_hour: editingCaps.value.max_trades_per_hour,
+      cooldown_after_loss_s: editingCaps.value.cooldown_after_loss_s,
+      warn_ratio: editingCaps.value.warn_ratio,
+      critical_ratio: editingCaps.value.critical_ratio,
+      force_reduce_ratio: editingCaps.value.force_reduce_ratio,
+    })
     alert('已保存，5秒内热加载生效')
     editingCaps.value = null
   } catch (e) { alert('保存失败: ' + (e.response?.data?.detail || e.message)) }
 }
 async function ackIntervention(aid) {
-  if (!confirm('确认取消自动强减？')) return
+  if (!confirm('确认取消自动强减？') ) return
   try { await api.post('/api/v1/agent/equity-ack', { account_id: aid }); await refresh() }
   catch (e) { alert('确认失败: ' + (e.response?.data?.detail || e.message)) }
 }
@@ -305,6 +457,17 @@ async function refresh() {
   } catch {}
 }
 
+const riskData = ref({})
+async function loadRiskData() {
+  try {
+    const [llm, rate] = await Promise.all([
+      api.get('/api/v1/agent/llm-health').catch(() => null),
+      api.get('/api/v1/agent/rate-buckets').catch(() => null),
+    ])
+    riskData.value = { llm: llm?.data, rate: rate?.data }
+  } catch {}
+}
+
 const riskLlm = computed(() => {
   const s = riskData.value?.llm
   if (!s) return { label: '--', borderClass: 'border-dark-300', textClass: 'text-text-tertiary' }
@@ -313,7 +476,6 @@ const riskLlm = computed(() => {
   if ((s.fail_rate || 0) > 0.1) return { label: '异常', borderClass: 'border-warning', textClass: 'text-warning' }
   return { label: '正常', borderClass: 'border-success', textClass: 'text-success' }
 })
-
 const riskEquity = computed(() => {
   const active = interventions.value.filter(i => !i.resolved_at)
   if (active.some(i => i.state === 'FORCED_REDUCE')) return { label: '强减中', borderClass: 'border-danger', textClass: 'text-danger animate-pulse' }
@@ -321,7 +483,6 @@ const riskEquity = computed(() => {
   if (active.length) return { label: '告警', borderClass: 'border-warning', textClass: 'text-warning' }
   return { label: '正常', borderClass: 'border-success', textClass: 'text-success' }
 })
-
 const riskRate = computed(() => {
   const r = riskData.value?.rate
   if (!r?.buckets) return { label: '--', borderClass: 'border-dark-300', textClass: 'text-text-tertiary' }
@@ -330,7 +491,6 @@ const riskRate = computed(() => {
   if (maxRatio > 0.6) return { label: '中等', borderClass: 'border-warning', textClass: 'text-warning' }
   return { label: '正常', borderClass: 'border-success', textClass: 'text-success' }
 })
-
 const overallRiskClass = computed(() => {
   if (status.value?.kill_switch) return 'bg-danger/20 text-danger'
   if (riskLlm.value.textClass.includes('danger') || riskEquity.value.textClass.includes('danger')) return 'bg-danger/20 text-danger'
@@ -343,8 +503,7 @@ const overallRiskLabel = computed(() => {
   if (riskLlm.value.textClass.includes('warning') || riskEquity.value.textClass.includes('warning') || riskRate.value.textClass.includes('warning')) return 'MEDIUM'
   return 'LOW'
 })
-
-const alerts = computed(() => {
+const riskAlerts = computed(() => {
   const list = []
   if (status.value?.kill_switch) list.push({ level: 'critical', message: '紧急停机已激活，所有决策被拒绝', source: 'kill_switch' })
   if (riskLlm.value.label === '已熔断') list.push({ level: 'critical', message: 'LLM 熔断器打开，无法生成决策', source: 'circuit_breaker' })
@@ -358,19 +517,10 @@ const alerts = computed(() => {
   return list
 })
 
-const riskData = ref({})
-
-async function loadRiskData() {
-  try {
-    const [llm, rate] = await Promise.all([
-      api.get('/api/v1/agent/llm-health').catch(() => null),
-      api.get('/api/v1/agent/rate-buckets').catch(() => null),
-    ])
-    riskData.value = { llm: llm?.data, rate: rate?.data }
-  } catch {}
-}
-
 let timer
-onMounted(() => { refresh(); loadTargets(); loadRiskData(); timer = setInterval(() => { refresh(); loadTargets(); loadRiskData() }, 15000) })
+onMounted(() => {
+  refresh(); loadTargets(); loadRiskData(); targetStore.loadComparison()
+  timer = setInterval(() => { refresh(); loadRiskData(); targetStore.loadComparison() }, 15000)
+})
 onUnmounted(() => { clearInterval(timer); clearInterval(modeTimer); clearInterval(killTimer) })
 </script>
