@@ -23,6 +23,7 @@ export const useMarketStore = defineStore('market', () => {
     // 全产品对持仓: { pair_code: { mt5_long, mt5_short, binance_long, binance_short } }
     pairs: {},
   })
+  let _snapshotDedupBypassUntil = 0
 
   let ws = null
   let reconnectTimer = null
@@ -103,7 +104,7 @@ export const useMarketStore = defineStore('market', () => {
                             next.binance_long_xau === prev.binance_long_xau &&
                             next.binance_short_xau === prev.binance_short_xau)
           const pairsSame = flatSame && JSON.stringify(next.pairs) === JSON.stringify(prev.pairs)
-          if (!pairsSame) positionSnapshot.value = next
+          if (!pairsSame || Date.now() < _snapshotDedupBypassUntil) positionSnapshot.value = next
         }
 
         if (msg.type === 'market_data' && msg.data) {
@@ -207,6 +208,7 @@ export const useMarketStore = defineStore('market', () => {
   // Request an immediate position snapshot from the backend (bypasses 30s broadcast cycle)
   function requestSnapshot() {
     if (ws && ws.readyState === WebSocket.OPEN) {
+      _snapshotDedupBypassUntil = Date.now() + 10000
       ws.send(JSON.stringify({ type: 'request_snapshot' }))
     }
   }

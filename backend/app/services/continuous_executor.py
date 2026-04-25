@@ -1116,6 +1116,19 @@ class ContinuousStrategyExecutor:
                 },
                 self.user_id
             )
+            if 'closing' in strategy_type:
+                asyncio.ensure_future(self._delayed_zero_snapshot_push())
+
+    async def _delayed_zero_snapshot_push(self):
+        try:
+            await asyncio.sleep(1.5)
+            from app.tasks.broadcast_tasks import position_streamer as _ps
+            await _ps.push_snapshot_for_user(self.user_id)
+            await asyncio.sleep(2.0)
+            await _ps.push_snapshot_for_user(self.user_id)
+        except Exception as e:
+            logger.debug(f"[DelayedZeroSnapshot] error: {e}")
+
 
     async def _snapshot_positions(
         self,

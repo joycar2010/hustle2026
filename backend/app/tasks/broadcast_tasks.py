@@ -1408,13 +1408,13 @@ class PositionStreamer:
                 # this read returned empty (bridge timeout), keep the old values.
                 # This prevents 0-flicker on transient failures.
                 for _uid, _syms in mt5_by_user_raw.items():
-                    if _syms:
+                    if _syms is not None:
                         self._mt5_lkg[_uid] = dict(_syms)
                 mt5_by_user = {}
                 for _uid in set(list(mt5_by_user_raw.keys()) + list(self._mt5_lkg.keys())):
-                    raw = mt5_by_user_raw.get(_uid, {})
+                    raw = mt5_by_user_raw.get(_uid)
                     lkg = self._mt5_lkg.get(_uid, {})
-                    mt5_by_user[_uid] = raw if raw else lkg
+                    mt5_by_user[_uid] = raw if raw is not None else lkg
 
                 # 2. Build pairs_map from active hedging pairs
                 pairs_map = {}
@@ -1587,11 +1587,11 @@ class PositionStreamer:
                     async with httpx.AsyncClient(timeout=3.0) as cli:
                         resp = await cli.get(f"{url}/mt5/positions", headers=headers)
                         if resp.status_code != 200:
-                            return uid, {}
+                            return uid, None  # bridge error → signal LKG fallback
                         positions = resp.json().get("positions", [])
                 except Exception as e:
                     logger.debug(f"[PositionStreamer] Bridge {url} (user {uid}) error: {e}")
-                    return uid, {}
+                    return uid, None
                 acc: dict = {}
                 for p in positions:
                     sym = p.get("symbol", "")
@@ -1616,6 +1616,13 @@ class PositionStreamer:
                 if isinstance(r, Exception):
                     continue
                 uid, syms = r
+                if syms is None:
+                    # Bridge error — mark uid present but with None so LKG logic can distinguish
+                    if uid not in result:
+                        result[uid] = None
+                    continue
+                if result.get(uid) is None:
+                    result[uid] = {}
                 if uid not in result:
                     result[uid] = {}
                 # Merge — a user may own multiple bridges (multiple MT5 accounts)

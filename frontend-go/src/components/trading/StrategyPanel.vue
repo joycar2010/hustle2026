@@ -734,9 +734,10 @@ const localBinanceShort = ref(0)
 const localBybitLong = ref(0)
 const localBybitShort = ref(0)
 // Anti-flicker bypass: set by close/execution events so next zero-snapshot is accepted
-let _forceAcceptZero = false
+let _forceAcceptZeroUntil = 0
 let _consecutiveZeroCount = 0
 const _ZERO_CONFIRM_THRESHOLD = 2  // accept after N consecutive zero snapshots
+const _FORCE_ZERO_WINDOW_MS = 8000  // accept zero snapshots within 8s after close
 
 const { currentPair } = useTradingPair()
 const alertPairCode = currentPair  // computed alias — reactive ref from global store
@@ -762,11 +763,11 @@ watch(() => marketStore.positionSnapshot, (snap) => {
   if (incomingAllZero && currentHasPosition) {
     _consecutiveZeroCount++
     // Allow zero-update if: close event signaled OR confirmed by consecutive zero snapshots
-    if (!_forceAcceptZero && _consecutiveZeroCount < _ZERO_CONFIRM_THRESHOLD) {
+    if (Date.now() < _forceAcceptZeroUntil) {
+      // Within close window — accept zeros immediately
+    } else if (_consecutiveZeroCount < _ZERO_CONFIRM_THRESHOLD) {
       return  // Skip: likely transient bridge read failure
     }
-    // Genuine close — accept the zeros
-    _forceAcceptZero = false
     _consecutiveZeroCount = 0
   } else {
     _consecutiveZeroCount = 0
@@ -1296,7 +1297,7 @@ function handlePositionChange(data) {
   if (data.strategy_id !== configId.value) return
 
   // Signal that a position change occurred — bypass anti-flicker guard for next snapshot
-  _forceAcceptZero = true
+  _forceAcceptZeroUntil = Date.now() + _FORCE_ZERO_WINDOW_MS
   _consecutiveZeroCount = 0
 
   // Refresh position data
@@ -1354,7 +1355,7 @@ function handleExecutionCompleted(data) {
     console.log(`[WebSocket] Execution completed: ${data.action}`)
   }
   // After any execution completes, positions may have changed — bypass anti-flicker for next snapshot
-  _forceAcceptZero = true
+  _forceAcceptZeroUntil = Date.now() + _FORCE_ZERO_WINDOW_MS
   _consecutiveZeroCount = 0
   refreshPositions()
 }
