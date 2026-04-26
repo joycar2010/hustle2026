@@ -1,5 +1,5 @@
 <template>
-  <div class="container mx-auto px-4 py-6 space-y-5">
+  <div class="container mx-auto px-2 sm:px-4 py-4 sm:py-6 space-y-5 overflow-x-hidden">
 
     <!-- 页头 -->
     <div class="flex items-center justify-between flex-wrap gap-3">
@@ -165,7 +165,7 @@
       <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center gap-3 flex-wrap">
         <span class="text-sm text-text-tertiary whitespace-nowrap">选择用户：</span>
         <select v-model="selectedAccountUserId" @change="loadUserAccounts"
-          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[180px]">
+          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-0 w-full sm:w-auto sm:min-w-[180px]">
           <option value="">-- 全部用户 --</option>
           <option v-for="u in users" :key="u.user_id" :value="u.user_id">
             {{ u.username }} ({{ u.rbac_roles?.[0]?.role_name || u.role || '未分配' }})
@@ -301,14 +301,14 @@
       <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 flex items-center gap-3 flex-wrap">
         <span class="text-sm text-text-tertiary whitespace-nowrap">选择用户：</span>
         <select v-model="mt5SelectedUserId" @change="onMt5UserChange"
-          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[160px]">
+          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-0 w-full sm:w-auto sm:min-w-[160px]">
           <option value="">全部用户</option>
           <option v-for="u in users" :key="u.user_id" :value="u.user_id">{{ u.username }}</option>
         </select>
         <span class="text-sm text-text-tertiary whitespace-nowrap">选择账户：</span>
         <select v-model="mt5SelectedAccountId" @change="loadMT5Clients"
           :disabled="!mt5SelectedUserId"
-          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-[200px] disabled:opacity-40">
+          class="px-3 py-1.5 bg-dark-200 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary min-w-0 w-full sm:w-auto sm:min-w-[200px] disabled:opacity-40">
           <option value="">-- 选择MT5账户 --</option>
           <option v-for="acc in mt5Accounts" :key="acc.account_id" :value="acc.account_id">
             {{ acc.account_name }} (ID: {{ acc.account_id }})

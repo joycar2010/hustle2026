@@ -524,8 +524,8 @@ const reverseActualPosition = ref(0)
 
 // 后端已算好的账户余额缓存（含 unrealized_pnl）
 // 由 fetchAccountData / handleAccountBalanceUpdate 更新
-// key: platform_id (1=Binance, 2=MT5)
-const accountsBalanceByPlatform = ref({})  // { 1: balance, 2: balance }
+// key: platform_id，同平台多账户的 unrealized_pnl 会累加
+const accountsBalanceByPlatform = ref({})  // { 1: {unrealized_pnl: sum}, 2: ..., 4: ..., 5: ... }
 
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
@@ -653,11 +653,15 @@ const bybitFloatingProfit = computed(() => {
   return profitUSD * usdToUsdtRate.value
 })
 
-// 总盈利 = Binance 实时浮动盈亏 + MT5 实时浮动盈亏
-// Binance: totalUnrealizedProfit（当前所有仓位的未实现盈亏）
-// MT5:     equity - balance（当前所有仓位的浮动盈亏，MT5 终端"盈亏"列之和）
+// 总盈利 = 全平台实时浮动盈亏之和
+// 包含 Binance(1) + Bybit/MT5(2) + IC Markets(3) + Gate.io(4) + OKX(5)
 const totalProfit = computed(() => {
-  return binanceFloatingProfit.value + bybitFloatingProfit.value
+  let sum = binanceFloatingProfit.value + bybitFloatingProfit.value
+  for (const pid of [3, 4, 5]) {
+    const b = accountsBalanceByPlatform.value[pid]
+    if (b && b.unrealized_pnl != null) sum += parseFloat(b.unrealized_pnl)
+  }
+  return sum
 })
 
 watch(() => marketStore.marketData, (data) => {
@@ -767,12 +771,17 @@ function handleAccountBalanceUpdate(data) {
   })
 
   // 缓存各平台余额 unrealized_pnl，供 totalProfit 计算使用
-  // 每用户一个 Binance(1) + 一个 MT5(2)，直接按 platform_id 存
+  // 同平台多账户的 unrealized_pnl 累加，确保 Gate/OKX 等也计入
   if (data.accounts && data.accounts.length > 0) {
     const newBalances = {}
     data.accounts.forEach(acc => {
       if (acc.balance && acc.platform_id) {
-        newBalances[acc.platform_id] = acc.balance
+        const pid = acc.platform_id
+        if (!newBalances[pid]) {
+          newBalances[pid] = { ...acc.balance }
+        } else {
+          newBalances[pid].unrealized_pnl = (newBalances[pid].unrealized_pnl || 0) + (acc.balance.unrealized_pnl || 0)
+        }
       }
     })
     accountsBalanceByPlatform.value = newBalances
@@ -954,11 +963,16 @@ async function fetchAccountData() {
       // via fetchBybitSwapRate() polling — do NOT overwrite them here.
 
       // 缓存各平台余额 unrealized_pnl，供 totalProfit 计算使用
-      // 每个用户只有一个 Binance(1) + 一个 MT5(2)，直接按 platform_id 存
+      // 同平台多账户的 unrealized_pnl 累加
       const newBalances = {}
       data.accounts.forEach(acc => {
         if (acc.balance && acc.platform_id) {
-          newBalances[acc.platform_id] = acc.balance
+          const pid = acc.platform_id
+          if (!newBalances[pid]) {
+            newBalances[pid] = { ...acc.balance }
+          } else {
+            newBalances[pid].unrealized_pnl = (newBalances[pid].unrealized_pnl || 0) + (acc.balance.unrealized_pnl || 0)
+          }
         }
       })
       accountsBalanceByPlatform.value = newBalances

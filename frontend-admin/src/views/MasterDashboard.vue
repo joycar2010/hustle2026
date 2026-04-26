@@ -1,5 +1,5 @@
 <template>
-  <div class="container mx-auto px-4 py-6 space-y-5">
+  <div class="container mx-auto px-2 sm:px-4 py-4 sm:py-6 space-y-5 overflow-x-hidden">
 
     <!-- ===== Layer 0: Global Health Bar ===== -->
     <div class="bg-dark-100 rounded-xl border border-border-primary px-5 py-3 flex items-center justify-between flex-wrap gap-3">
@@ -56,7 +56,7 @@
         <div :class="['w-2 h-2 rounded-full', sslOverallOk ? 'bg-green-500' : 'bg-yellow-500']"></div>
         <span class="text-sm font-semibold">SSL 证书</span>
       </div>
-      <div class="flex gap-4">
+      <div class="flex flex-wrap gap-2 sm:gap-4">
         <div v-for="cert in (monitorData.ssl_certificate || [])" :key="cert.cert_path" class="flex items-center gap-2 text-xs">
           <span class="font-mono text-text-secondary">{{ cert.domain_names?.[0] || '--' }}</span>
           <span :class="sslDaysClass(cert.days_remaining)" class="font-bold">{{ cert.exists ? cert.days_remaining + '天' : '未找到' }}</span>
@@ -70,7 +70,7 @@
       <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">资金与风控</h2>
 
       <!-- Fund summary cards with embedded visualizations -->
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
         <div class="bg-dark-100 rounded-xl p-4 border border-border-primary">
           <div class="text-xs text-text-tertiary mb-1">总资产 (USDT)</div>
           <div class="flex items-center justify-between">

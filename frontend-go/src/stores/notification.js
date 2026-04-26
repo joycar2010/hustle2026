@@ -43,71 +43,10 @@ export const useNotificationStore = defineStore('notification', () => {
   }
 
   // Check market data against alert thresholds
-  function checkMarketAlerts(marketData) {
-    // Spread alerts are produced server-side by spread_alert_service and
-    // delivered via the  WebSocket event. The duplicated client
-    // checks below are intentionally disabled to keep a single source of truth.
-    return
-    // eslint-disable-next-line no-unreachable
-    if (!alertSettings.value || !marketData) return
-
-    const newAlerts = []
-
-    // Check forward spread (Long Binance)
-    if (marketData.forward_spread &&
-        Math.abs(marketData.forward_spread) >= alertSettings.value.forwardOpenPrice) {
-      newAlerts.push({
-        id: Date.now() + '_forward_open',
-        type: 'forward_open',
-        level: 'warning',
-        title: '正向套利开仓机会',
-        message: `当前点差: ${marketData.forward_spread.toFixed(2)} USDT，达到开仓阈值 ${alertSettings.value.forwardOpenPrice} USDT`,
-        timestamp: new Date().toISOString()
-      })
-    }
-
-    if (marketData.forward_spread &&
-        Math.abs(marketData.forward_spread) <= alertSettings.value.forwardClosePrice) {
-      newAlerts.push({
-        id: Date.now() + '_forward_close',
-        type: 'forward_close',
-        level: 'info',
-        title: '正向套利平仓机会',
-        message: `当前点差: ${marketData.forward_spread.toFixed(2)} USDT，达到平仓阈值 ${alertSettings.value.forwardClosePrice} USDT`,
-        timestamp: new Date().toISOString()
-      })
-    }
-
-    // Check reverse spread (Long Bybit)
-    if (marketData.reverse_spread &&
-        Math.abs(marketData.reverse_spread) >= alertSettings.value.reverseOpenPrice) {
-      newAlerts.push({
-        id: Date.now() + '_reverse_open',
-        type: 'reverse_open',
-        level: 'warning',
-        title: '反向套利开仓机会',
-        message: `当前点差: ${marketData.reverse_spread.toFixed(2)} USDT，达到开仓阈值 ${alertSettings.value.reverseOpenPrice} USDT`,
-        timestamp: new Date().toISOString()
-      })
-    }
-
-    if (marketData.reverse_spread &&
-        Math.abs(marketData.reverse_spread) <= alertSettings.value.reverseClosePrice) {
-      newAlerts.push({
-        id: Date.now() + '_reverse_close',
-        type: 'reverse_close',
-        level: 'info',
-        title: '反向套利平仓机会',
-        message: `当前点差: ${marketData.reverse_spread.toFixed(2)} USDT，达到平仓阈值 ${alertSettings.value.reverseClosePrice} USDT`,
-        timestamp: new Date().toISOString()
-      })
-    }
-
-    // Add new alerts and trigger popup
-    if (newAlerts.length > 0) {
-      alerts.value.push(...newAlerts)
-      triggerPopup(newAlerts[0])
-    }
+  // Spread alerts are handled server-side by spread_alert_service →
+  // Redis → Go WebSocket → frontend risk_alert event. No client-side check needed.
+  function checkMarketAlerts(_marketData) {
+    // noop: single source of truth is backend spread_alert_service
   }
 
   // Check account data against alert thresholds

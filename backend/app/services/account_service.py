@@ -403,8 +403,8 @@ class AccountDataService:
             else:
                 logger.warning(f"Failed to fetch daily P&L data: {daily_pnl_data}")
 
-            # Add unrealized PnL to daily PnL as per Binance documentation
-            daily_pnl += futures_unrealized_pnl
+            # daily_pnl 只保留已实现收入，浮盈由 unrealized_pnl 独立展示
+            # daily_pnl += futures_unrealized_pnl  # removed: 不再混入浮盈
 
             # Today's total realized funding fee (all symbols, for reporting only)
             funding_fee = 0.0
@@ -466,14 +466,14 @@ class AccountDataService:
                 logger.warning(f"Failed to fetch commission rate: {commission_rate_data}")
 
             # Calculate final metrics according to Binance API documentation
-            # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalMarginBalance (含未实现盈亏) + 资金账户
-            total_assets = spot_total_usdt + margin_total_usdt + futures_total_margin_balance + funding_total_usdt
+            # 账户总资产 = 现货 + 杠杆(净资产) + 合约totalWalletBalance (不含浮盈) + 资金账户
+            total_assets = spot_total_usdt + margin_total_usdt + futures_total_wallet_balance + funding_total_usdt
 
             # 可用总资产 = 现货free + 杠杆free + 合约availableBalance + 资金账户
             available_balance = spot_free_usdt + margin_free_usdt + futures_available_balance + funding_total_usdt
 
-            # 净资产 = 合约totalWalletBalance (钱包余额，不含未实现盈亏)
-            net_assets = futures_total_wallet_balance
+            # 净资产 = 全部资产含浮盈 (equity)
+            net_assets = spot_total_usdt + margin_total_usdt + futures_total_margin_balance + funding_total_usdt
 
             # 冻结资产 = 现货locked + 杠杆locked + (合约totalWalletBalance - availableBalance)
             frozen_assets = spot_locked_usdt + margin_locked_usdt + (futures_total_wallet_balance - futures_available_balance)
@@ -874,9 +874,9 @@ class AccountDataService:
                 pnl_list = pnl_data.get("list", [])
                 for pnl in pnl_list:
                     daily_pnl += float(pnl.get("closedPnl", 0))
-            # Add unrealized PnL to daily PnL as per requirements
-            daily_pnl += total_unrealized_pnl
-            logger.info(f"Daily P&L calculated: {daily_pnl} (closed: {daily_pnl - total_unrealized_pnl}, unrealized: {total_unrealized_pnl})")
+            # daily_pnl 只保留已实现，浮盈由 unrealized_pnl 独立展示
+            # daily_pnl += total_unrealized_pnl  # removed: 不再混入浮盈
+            logger.info(f"Daily PDaily P&L calculated: {daily_pnl} (closed: {daily_pnl - total_unrealized_pnl}, unrealized: {total_unrealized_pnl})L calculated: {daily_pnl} (realized only)")
         except Exception as e:
             logger.error(f"Failed to fetch Bybit daily P&L: {str(e)}")
 
@@ -912,15 +912,15 @@ class AccountDataService:
             funding_fee = 0
 
         balance = AccountBalance(
-            total_assets=total_equity,  # 总资产 = totalEquity
+            total_assets=total_wallet_balance,  # 总资产 = totalWalletBalance（不含浮盈）
             available_balance=total_available_balance,  # 可用资产 = totalAvailableBalance
-            net_assets=total_wallet_balance,  # 净资产 = totalWalletBalance
+            net_assets=total_equity,  # 净资产 = totalEquity（含浮盈）
             frozen_assets=total_initial_margin,  # 冻结资产 = totalInitialMargin
             margin_balance=total_margin_balance,  # 保证金余额 = totalMarginBalance
             unrealized_pnl=unrealized_pnl,  # 未实现盈亏
             risk_ratio=risk_ratio,  # 风险率 = (totalMaintenanceMargin / totalMarginBalance) × 100
             total_positions=total_positions,  # 总持仓
-            daily_pnl=daily_pnl,  # 当日盈亏 (closedPnl + unrealizedPnl)
+            daily_pnl=daily_pnl,  # 当日盈亏 (仅已实现 closedPnl)
             funding_fee=funding_fee,  # 资金费
             long_swap_fee=long_swap_fee,  # 做多掉期费
             short_swap_fee=short_swap_fee,  # 做空掉期费
@@ -1304,7 +1304,7 @@ class AccountDataService:
                             unrealized_pnl=_floating_pnl,                   # equity - balance
                             risk_ratio=_margin_level,
                             total_positions=_total_positions,                # 总持仓手数
-                            daily_pnl=_realized_pnl + _floating_pnl,        # 当日盈亏 = 已实现平仓盈亏 + 未实现浮动盈亏
+                            daily_pnl=_realized_pnl,                          # 当日盈亏 = 仅已实现平仓盈亏
                             funding_fee=float(mt5_info.get('swap', 0)),      # 累计过夜费（持仓+历史）
                             commission_fee=0.0,                              # HTTP bridge 路径暂无 deals 历史，默认0
                             long_liquidation_price=_long_liq,               # 多头强平价
@@ -1428,7 +1428,7 @@ class AccountDataService:
                         unrealized_pnl=_floating_pnl,
                         risk_ratio=_margin_level,
                         total_positions=_total_positions,
-                        daily_pnl=_realized_pnl + _floating_pnl,
+                        daily_pnl=_realized_pnl,  # 仅已实现盈亏
                         funding_fee=float(mt5_info.get('swap', 0)),
                         commission_fee=0.0,
                         long_liquidation_price=_long_liq,
@@ -1488,14 +1488,14 @@ class AccountDataService:
                         _margin = _classic_margin
                         _upnl = _classic_upnl
                     balance = AccountBalance(
-                        total_assets=_equity,
+                        total_assets=_equity - _upnl,  # 钱包余额（不含浮盈）
                         available_balance=_avail,
-                        net_assets=_equity,
+                        net_assets=_equity,  # equity（含浮盈）
                         frozen_assets=_margin,
                         margin_balance=_equity,
                         unrealized_pnl=_upnl,
                         total_positions=len(positions_raw),
-                        daily_pnl=_upnl,
+                        daily_pnl=0.0,  # Gate 暂无当日已实现盈亏 API
                         funding_fee=0.0,
                         commission_fee=0.0,
                     )
@@ -1556,14 +1556,14 @@ class AccountDataService:
                     _frozen = _total_eq - _avail if _total_eq > _avail else 0.0
 
                     balance = AccountBalance(
-                        total_assets=_total_eq,
+                        total_assets=_total_eq - _upnl,  # 钱包余额（不含浮盈）
                         available_balance=_avail,
-                        net_assets=_total_eq,
+                        net_assets=_total_eq,  # equity（含浮盈）
                         frozen_assets=_frozen,
                         margin_balance=_total_eq,
                         unrealized_pnl=_upnl,
                         total_positions=len(_okx_pos_raw),
-                        daily_pnl=_upnl,
+                        daily_pnl=0.0,  # OKX 暂无当日已实现盈亏 API
                         funding_fee=0.0,
                         commission_fee=0.0,
                     )

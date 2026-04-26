@@ -1583,6 +1583,190 @@
         </div>
       </div>
     </transition>
+
+    <!-- ===== AI客服管理 ===== -->
+    <div v-if="activeTab==='ai_chat'" class="space-y-4">
+
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="card">
+          <div class="text-xs text-text-tertiary mb-1">总消息数</div>
+          <div class="text-2xl font-bold">{{ aiStats.total_messages != null ? aiStats.total_messages : '-' }}</div>
+        </div>
+        <div class="card">
+          <div class="text-xs text-text-tertiary mb-1">今日消息</div>
+          <div class="text-2xl font-bold">{{ aiStats.today_messages != null ? aiStats.today_messages : '-' }}</div>
+        </div>
+        <div class="card">
+          <div class="text-xs text-text-tertiary mb-1">活跃用户</div>
+          <div class="text-2xl font-bold">{{ aiStats.unique_users != null ? aiStats.unique_users : '-' }}</div>
+        </div>
+        <div class="card">
+          <div class="text-xs text-text-tertiary mb-1">Token 消耗 (USD)</div>
+          <div class="text-2xl font-bold text-primary">{{ aiStats.estimated_cost ? ('$' + aiStats.estimated_cost.cost_usd.toFixed(4)) : '-' }}</div>
+          <div class="text-[10px] text-text-tertiary mt-0.5">{{ aiStats.estimated_cost ? aiStats.estimated_cost.model : '' }}</div>
+        </div>
+      </div>
+
+      <!-- Daily Trend -->
+      <div class="card" v-if="aiStats.daily_trend && aiStats.daily_trend.length">
+        <h3 class="text-sm font-semibold mb-3">近14天消息量趋势</h3>
+        <div class="flex items-end gap-1 h-28">
+          <div v-for="d in aiStats.daily_trend" :key="d.date" class="flex-1 flex flex-col items-center gap-1">
+            <div class="w-full bg-primary/80 rounded-t" :style="{ height: (d.count / aiTrendMax * 100) + '%', minHeight: d.count ? '4px' : '0' }"></div>
+            <span class="text-[8px] text-text-tertiary">{{ d.date.slice(5) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Token Cost Detail -->
+      <div class="card" v-if="aiStats.estimated_cost">
+        <h3 class="text-sm font-semibold mb-3">Token 消耗明细</h3>
+        <div class="grid grid-cols-3 gap-4 text-xs">
+          <div>
+            <span class="text-text-tertiary">输入 Tokens (估)</span>
+            <div class="font-mono font-semibold mt-0.5">{{ aiStats.estimated_cost.input_tokens ? aiStats.estimated_cost.input_tokens.toLocaleString() : '0' }}</div>
+          </div>
+          <div>
+            <span class="text-text-tertiary">输出 Tokens (估)</span>
+            <div class="font-mono font-semibold mt-0.5">{{ aiStats.estimated_cost.output_tokens ? aiStats.estimated_cost.output_tokens.toLocaleString() : '0' }}</div>
+          </div>
+          <div>
+            <span class="text-text-tertiary">总 Quota Units</span>
+            <div class="font-mono font-semibold mt-0.5">{{ aiStats.estimated_cost.total_quota_units ? aiStats.estimated_cost.total_quota_units.toLocaleString() : '0' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 站点选择器 -->
+      <div class="flex gap-0 border-b border-border-primary">
+        <button v-for="s in aiAllSites" :key="s" @click="switchAiSite(s)"
+          :class="['px-4 py-2 text-xs font-medium transition-colors relative',
+            aiSite===s ? 'text-text-primary' : 'text-text-tertiary hover:text-text-secondary']">
+          {{ s === 'auto' ? 'Auto (OpenCLAW)' : s === 'admin' ? 'Admin (总控)' : 'Go (交易)' }}
+          <div v-if="aiSite===s" class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"></div>
+        </button>
+      </div>
+
+      <!-- 开关控制 + 限频配置 -->
+      <div class="card">
+        <h3 class="text-sm font-semibold mb-3">服务配置</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- 站点开关 -->
+          <div>
+            <div class="text-xs text-text-tertiary mb-2">站点开关</div>
+            <div class="flex items-center gap-4">
+              <label v-for="s in aiAllSites" :key="s" class="flex items-center gap-2 text-xs">
+                <input type="checkbox" :checked="aiCfg.enabled_sites && aiCfg.enabled_sites.includes(s)"
+                  @change="toggleAiSite(s, $event.target.checked)"
+                  class="w-4 h-4 rounded accent-primary">
+                <span>{{ s }}</span>
+              </label>
+            </div>
+          </div>
+          <!-- 限频 -->
+          <div>
+            <div class="text-xs text-text-tertiary mb-2">每小时提问上限</div>
+            <div class="flex items-center gap-2">
+              <input v-model.number="aiCfgRateLimit" type="number" min="1" max="100"
+                class="w-20 bg-dark-100 border border-border-primary rounded px-2 py-1 text-xs text-text-primary outline-none focus:border-primary">
+              <span class="text-xs text-text-tertiary">次/小时/用户</span>
+              <button @click="saveAiRateLimit" class="px-3 py-1 bg-primary text-dark-300 rounded text-xs font-semibold hover:bg-primary-hover">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 知识库编辑 (System Prompt) -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold">知识库 (System Prompt) — {{ aiSite }}</h3>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-text-tertiary">{{ aiPromptChars }} 字</span>
+            <button @click="saveAiPrompt" :disabled="aiPromptSaving"
+              class="px-3 py-1 bg-primary text-dark-300 rounded text-xs font-semibold hover:bg-primary-hover disabled:opacity-40">
+              {{ aiPromptSaving ? '保存中…' : '保存' }}
+            </button>
+            <button @click="resetAiPrompt"
+              class="px-3 py-1 bg-dark-200 text-text-tertiary rounded text-xs hover:text-text-primary">
+              恢复默认
+            </button>
+          </div>
+        </div>
+        <textarea v-model="aiPromptText" rows="12"
+          class="w-full bg-dark-200 border border-border-primary rounded-lg px-3 py-2 text-xs text-text-primary font-mono leading-relaxed outline-none focus:border-primary resize-y"
+          placeholder="输入 AI 客服的 system prompt…"></textarea>
+      </div>
+
+      <!-- 热门问题 -->
+      <div class="card">
+        <h3 class="text-sm font-semibold mb-3">热门问题 Top 10 — {{ aiSite }}</h3>
+        <div v-if="aiHotQuestions.length" class="space-y-1">
+          <div v-for="(q, i) in aiHotQuestions" :key="i" class="flex items-center gap-3 text-xs py-1.5 border-b border-border-primary/30 last:border-0">
+            <span class="w-5 text-right text-text-tertiary font-mono">{{ i + 1 }}</span>
+            <span class="flex-1 truncate">{{ q.content }}</span>
+            <span class="text-text-tertiary font-mono">{{ q.count }}次</span>
+          </div>
+        </div>
+        <div v-else class="text-center text-text-tertiary text-xs py-4">暂无数据</div>
+      </div>
+
+      <!-- Conversations Table -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold">对话记录 — {{ aiSite }}</h3>
+          <div class="text-xs text-text-tertiary">共 {{ aiConvTotal }} 位用户</div>
+        </div>
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-text-tertiary border-b border-border-primary">
+              <th class="text-left py-2">用户</th>
+              <th class="text-right py-2">用户消息</th>
+              <th class="text-right py-2">总消息</th>
+              <th class="text-right py-2">最后活跃</th>
+              <th class="text-right py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in aiConversations" :key="c.user_id" class="border-b border-border-primary/50 hover:bg-dark-200/50">
+              <td class="py-2">{{ c.username }}</td>
+              <td class="text-right py-2">{{ c.user_messages }}</td>
+              <td class="text-right py-2">{{ c.total_messages }}</td>
+              <td class="text-right py-2 text-text-tertiary">{{ c.last_active ? c.last_active.slice(0,16).replace('T',' ') : '-' }}</td>
+              <td class="text-right py-2">
+                <button @click="viewAiMessages(c.user_id, c.username)" class="text-primary hover:underline">查看</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!aiConversations.length" class="text-center text-text-tertiary text-xs py-6">暂无对话记录</div>
+        <div v-if="aiConvPages > 1" class="flex justify-center gap-2 mt-3">
+          <button v-for="p in aiConvPages" :key="p" @click="loadAiConversations(p)"
+            :class="['px-2.5 py-1 rounded text-xs', aiConvPage===p ? 'bg-primary text-dark-300' : 'bg-dark-200 text-text-tertiary hover:text-text-primary']">{{ p }}</button>
+        </div>
+      </div>
+
+      <!-- Message Viewer Modal -->
+      <transition name="fade">
+        <div v-if="aiMsgUser" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" @click.self="aiMsgUser=null">
+          <div class="bg-dark-100 rounded-2xl border border-border-primary w-[600px] max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-border-primary">
+              <span class="font-semibold text-sm">{{ aiMsgUsername }} 的对话</span>
+              <button @click="aiMsgUser=null" class="text-text-tertiary hover:text-text-primary text-lg">&times;</button>
+            </div>
+            <div class="flex-1 overflow-y-auto px-5 py-4 space-y-2">
+              <div v-for="m in aiMessages" :key="m.id"
+                :class="m.role==='user' ? 'flex justify-end' : 'flex justify-start'">
+                <div :class="['max-w-[80%] px-3 py-2 rounded-lg text-xs leading-relaxed whitespace-pre-wrap',
+                  m.role==='user' ? 'bg-primary/15 text-text-primary border border-primary/30' : 'bg-dark-200 text-text-primary border border-border-primary']">{{ m.content }}</div>
+              </div>
+              <div v-if="!aiMessages.length" class="text-center text-text-tertiary text-xs py-6">暂无消息</div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </div>
+
 </template>
 
 <script setup>
@@ -1609,6 +1793,7 @@ const tabs = [
   { id: 'logs',     label: '系统日志' },
   { id: 'version',  label: '系统版本管理' },
   { id: 'database', label: '数据库管理' },
+  { id: 'ai_chat', label: 'AI客服管理' },
 ]
 
 // ── OpenCLAW 全局开关状态 ──────────────────────────────────
@@ -2671,6 +2856,7 @@ onMounted(() => {
 })
 
 watch(activeTab, (tab) => {
+  if (tab === 'ai_chat') { loadAiStats(); loadAiConversations(); loadAiConfig(); loadAiHotQuestions(); }
   if (tab === 'notify') initNotifyTab()
   if (tab === 'push') {
     loadPushStreamStats()  // Load real stats first
@@ -2680,6 +2866,119 @@ watch(activeTab, (tab) => {
     disconnectPushWs()
   }
 })
+
+// ── AI客服管理 ─────────────────────────────────────────────
+const aiStats = ref({})
+const aiConversations = ref([])
+const aiConvTotal = ref(0)
+const aiConvPage = ref(1)
+const aiConvPages = ref(1)
+const aiMsgUser = ref(null)
+const aiMsgUsername = ref('')
+const aiMessages = ref([])
+
+const aiTrendMax = computed(() => {
+  const trend = aiStats.value.daily_trend || []
+  return Math.max(1, ...trend.map(d => d.count))
+})
+
+async function loadAiStats() {
+  try {
+    const r = await api.get('/api/v1/agent/chat/admin/stats')
+    aiStats.value = r.data
+  } catch (e) { console.error('loadAiStats', e) }
+}
+
+async function loadAiConversations(page = 1) {
+  try {
+    const r = await api.get('/api/v1/agent/chat/admin/conversations', { params: { page, page_size: 20, site: aiSite.value } })
+    aiConversations.value = r.data.conversations || []
+    aiConvTotal.value = r.data.total || 0
+    aiConvPage.value = r.data.page || 1
+    aiConvPages.value = r.data.total_pages || 1
+  } catch (e) { console.error('loadAiConversations', e) }
+}
+
+async function viewAiMessages(userId, username) {
+  aiMsgUser.value = userId
+  aiMsgUsername.value = username
+  try {
+    const r = await api.get('/api/v1/agent/chat/admin/messages', { params: { target_user_id: userId, site: aiSite.value } })
+    aiMessages.value = r.data.messages || []
+  } catch (e) { console.error('viewAiMessages', e) }
+}
+
+
+// ── AI客服 Config / Prompt / Hot Questions ─────────────────
+const aiSite = ref('auto')
+const aiAllSites = ['auto', 'admin', 'go']
+const aiCfg = ref({})
+const aiCfgRateLimit = ref(20)
+const aiPromptText = ref('')
+const aiPromptSaving = ref(false)
+const aiHotQuestions = ref([])
+
+const aiPromptChars = computed(() => (aiPromptText.value || '').length)
+
+async function loadAiConfig() {
+  try {
+    const r = await api.get('/api/v1/agent/chat/admin/config')
+    aiCfg.value = r.data
+    aiCfgRateLimit.value = r.data.rate_limit || 20
+    const prompts = r.data.system_prompts || {}
+    aiPromptText.value = prompts[aiSite.value] || ''
+  } catch (e) { console.error('loadAiConfig', e) }
+}
+
+async function toggleAiSite(site, enabled) {
+  const sites = [...(aiCfg.value.enabled_sites || [])]
+  if (enabled && !sites.includes(site)) sites.push(site)
+  if (!enabled) { const i = sites.indexOf(site); if (i >= 0) sites.splice(i, 1) }
+  try {
+    await api.put('/api/v1/agent/chat/admin/config', { enabled_sites: sites })
+    aiCfg.value.enabled_sites = sites
+    toast(enabled ? site + ' AI客服已开启' : site + ' AI客服已关闭')
+  } catch (e) { toast('保存失败', 'error') }
+}
+
+async function saveAiRateLimit() {
+  try {
+    await api.put('/api/v1/agent/chat/admin/config', { rate_limit: aiCfgRateLimit.value })
+    toast('限频已更新: ' + aiCfgRateLimit.value + ' 次/小时')
+  } catch (e) { toast('保存失败', 'error') }
+}
+
+async function saveAiPrompt() {
+  aiPromptSaving.value = true
+  try {
+    const prompts = { ...(aiCfg.value.system_prompts || {}), [aiSite.value]: aiPromptText.value }
+    await api.put('/api/v1/agent/chat/admin/config', { system_prompts: prompts })
+    aiCfg.value.system_prompts = prompts
+    toast('知识库已保存')
+  } catch (e) { toast('保存失败', 'error') }
+  finally { aiPromptSaving.value = false }
+}
+
+function resetAiPrompt() {
+  aiPromptText.value = ''
+  toast('已清空，保存后将使用内置默认 prompt', 'warning')
+}
+
+async function loadAiHotQuestions() {
+  try {
+    const r = await api.get('/api/v1/agent/chat/admin/hot-questions', { params: { site: aiSite.value } })
+    aiHotQuestions.value = r.data.questions || []
+  } catch (e) { console.error('loadAiHotQuestions', e) }
+}
+
+function switchAiSite(s) {
+  aiSite.value = s
+  const prompts = aiCfg.value.system_prompts || {}
+  aiPromptText.value = prompts[s] || ''
+  loadAiConversations(1)
+  loadAiHotQuestions()
+}
+
 </script>
 
 <style scoped>

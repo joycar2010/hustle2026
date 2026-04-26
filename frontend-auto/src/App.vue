@@ -10,7 +10,7 @@
   </div>
   <div v-else class="min-h-screen flex flex-col">
     <AnnouncementBanner />
-    <header class="bg-dark-200 border-b border-border-primary px-6 py-3 flex items-center justify-between">
+    <header class="bg-dark-200 border-b border-border-primary px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden">
       <div class="flex items-center gap-6">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 rounded bg-primary flex items-center justify-center font-bold text-dark-300">C</div>
@@ -19,9 +19,9 @@
             <div class="text-[10px] text-text-tertiary leading-tight">量化智能体控制台</div>
           </div>
         </div>
-        <nav class="flex gap-1 text-sm">
+        <nav class="flex gap-1 text-sm overflow-x-auto scrollbar-hide">
           <router-link v-for="n in nav" :key="n.path" :to="n.path"
-            class="px-3 py-1.5 rounded hover:bg-dark-100 transition relative"
+            class="px-3 py-1.5 rounded hover:bg-dark-100 transition relative whitespace-nowrap"
             active-class="bg-dark-100 text-primary">
             {{ n.label }}
             <span v-if="n.path === '/dashboard' && targetStore.alerts.unacked_count"
@@ -34,7 +34,7 @@
 
       <!-- LLM stats widget + user -->
       <div class="flex items-center gap-4">
-        <div class="flex items-center gap-3 px-3 py-1.5 bg-dark-100 rounded border border-border-primary text-xs">
+        <div class="hidden sm:flex items-center gap-3 px-3 py-1.5 bg-dark-100 rounded border border-border-primary text-xs">
           <div class="flex flex-col leading-tight">
             <span class="text-text-tertiary text-[10px]">模型</span>
             <span class="font-mono font-semibold text-primary">{{ llm?.model || '--' }}</span>
@@ -44,6 +44,13 @@
             <span class="text-text-tertiary text-[10px]">今日 tokens</span>
             <span class="font-mono">{{ fmtInt(llm?.tokens_today?.total) }}
               <span class="text-text-tertiary">({{ llm?.tokens_today?.calls || 0 }}次)</span>
+            </span>
+          </div>
+          <div class="w-px h-6 bg-border-primary"></div>
+          <div class="flex flex-col leading-tight">
+            <span class="text-text-tertiary text-[10px]">今日消费</span>
+            <span class="font-mono font-semibold text-warning">
+              {{ relayCost?.today?.cost_usd != null ? '$' + relayCost.today.cost_usd.toFixed(2) : '--' }}
             </span>
           </div>
           <div class="w-px h-6 bg-border-primary"></div>
@@ -66,7 +73,8 @@
         <button @click="logout" class="text-xs text-text-tertiary hover:text-text-primary">退出</button>
       </div>
     </header>
-    <main class="flex-1 p-6"><router-view/></main>
+    <main class="flex-1 p-3 sm:p-6"><router-view/></main>
+    <HustleChat v-if="isAdmin" />
   </div>
 </template>
 <script setup>
@@ -74,6 +82,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '@/api'
 import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
+import HustleChat from '@/components/HustleChat.vue'
 import { useTargetStore } from '@/stores/targetStore.js'
 
 const router = useRouter()
@@ -89,6 +98,7 @@ const nav = [
 const me = ref(null)
 const authChecked = ref(false)
 const llm = ref(null)
+const relayCost = ref(null)
 const status = ref(null)
 
 const isAdmin = computed(() => me.value?.is_admin === true)
@@ -121,12 +131,14 @@ async function checkAuth() {
 
 async function refresh() {
   try {
-    const [l, s] = await Promise.all([
+    const [l, s, rc] = await Promise.all([
       api.get('/api/v1/agent/llm-stats').catch(() => null),
       api.get('/api/v1/agent/status').catch(() => null),
+      api.get('/api/v1/agent/relay/cost-summary').catch(() => null),
     ])
     if (l) llm.value = l.data
     if (s) status.value = s.data
+    if (rc) relayCost.value = rc.data
   } catch (e) { console.error(e) }
 }
 

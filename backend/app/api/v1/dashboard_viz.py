@@ -27,7 +27,7 @@ async def get_dashboard_sparkline(
                 SELECT
                     date_trunc('hour', s.timestamp) + 
                     (EXTRACT(minute FROM s.timestamp)::int / :bucket * interval '1 minute' * :bucket) AS bucket_time,
-                    SUM(s.equity) AS total_equity,
+                    SUM(s.net_assets) AS total_equity,
                     SUM(s.balance) AS total_balance,
                     SUM(s.daily_pnl) AS total_pnl
                 FROM account_snapshots s
@@ -105,10 +105,10 @@ async def get_platform_distribution(
                         END, 'Unknown'
                     ) AS platform_name,
                     COUNT(*) AS account_count,
-                    SUM(s.equity) AS total_equity
+                    SUM(s.net_assets) AS total_equity
                 FROM accounts a
                 LEFT JOIN LATERAL (
-                    SELECT equity FROM account_snapshots
+                    SELECT net_assets FROM account_snapshots
                     WHERE account_id = a.account_id
                     ORDER BY timestamp DESC LIMIT 1
                 ) s ON true

@@ -440,3 +440,41 @@
 }
 
 /* ========== 移除单独的2K屏幕媒体查询，统一使用上面的样式 ========== */
+
+/* ========== Hustle Chat Widget 保护 — 防止全局移动端样式覆盖 ========== */
+#hustle-chat-btn,
+#hustle-chat-btn *,
+#hustle-chat-panel,
+#hustle-chat-panel * {
+  min-height: unset !important;
+  padding: unset !important;
+  font-size: unset !important;
+  max-width: unset !important;
+  box-sizing: content-box !important;
+}
+
+#hustle-chat-btn {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 640px) {
+  #hustle-chat-btn {
+    width: 42px !important;
+    height: 42px !important;
+    min-width: 42px !important;
+    min-height: 42px !important;
+    max-width: 42px !important;
+    max-height: 42px !important;
+  }
+}

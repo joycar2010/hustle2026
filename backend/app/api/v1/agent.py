@@ -2866,3 +2866,730 @@ async def confidence_distribution(
         "by_target": by_target,
         "by_verdict": by_verdict,
     }
+
+
+# ───── Batch 4: Daily Cost Paginated + CSV Export ─────
+
+
+
+@router.get("/decisions/cost-daily")
+async def decision_cost_daily(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    window: str = Query("30d"),
+    fmt: str = Query("json", description="json | csv"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+):
+    """Daily token cost from chesspnt relay logs, grouped by date.
+    Fetches ALL models used on the primary relay."""
+    import aiohttp, datetime as _dt
+    from collections import defaultdict
+
+    cfg_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'relay_stations'"
+    ))).scalar()
+    stations = cfg_row if isinstance(cfg_row, list) else []
+    active = next((r for r in stations if r.get('enabled') and r.get('role') == 'primary'), None)
+    if not active:
+        raise HTTPException(400, "no active primary relay station")
+
+    base = active.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+    cookie = active.get('session_cookie', '')
+    new_api_user = str(active.get('new_api_user', ''))
+    units_per_usd = float(active.get('units_per_usd', 500000))
+
+    headers = {
+        'accept': 'application/json, text/plain, */*',
+        'cookie': f'session={cookie}',
+    }
+    if new_api_user:
+        headers['new-api-user'] = new_api_user
+
+    secs = _resolve_window_seconds(window)
+    start_ts = int((_dt.datetime.utcnow() - _dt.timedelta(seconds=secs)).timestamp())
+    now_ts = int(_time_mod.time())
+
+    daily: Dict[str, Dict] = defaultdict(lambda: {
+        'calls': 0, 'tokens_in': 0, 'tokens_out': 0, 'quota': 0,
+    })
+
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=120)
+        ) as session:
+            pg = 0
+            while pg < 200:
+                params = {
+                    'p': str(pg), 'page_size': '100',
+                    'start_timestamp': str(start_ts),
+                    'end_timestamp': str(now_ts),
+                }
+                async with session.get(
+                    f'{base}/api/log/self', headers=headers, params=params
+                ) as resp:
+                    if resp.status != 200:
+                        break
+                    data = await resp.json()
+                    if not data.get('success'):
+                        break
+                    items = data.get('data', {}).get('items', [])
+                    total_records = data.get('data', {}).get('total', 0)
+                    for item in items:
+                        ts = item.get('created_at', 0)
+                        day = _dt.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d') if ts else 'unknown'
+                        d = daily[day]
+                        d['calls'] += 1
+                        d['tokens_in'] += item.get('prompt_tokens', 0)
+                        d['tokens_out'] += item.get('completion_tokens', 0)
+                        d['quota'] += item.get('quota', 0)
+                    if not items or (pg + 1) * 100 >= total_records:
+                        break
+                    pg += 1
+    except Exception:
+        pass
+
+    all_items = []
+    for day in sorted(daily.keys(), reverse=True):
+        d = daily[day]
+        usd = d['quota'] / units_per_usd if units_per_usd else 0
+        all_items.append({
+            'date': day,
+            'calls': d['calls'],
+            'tokens_in': d['tokens_in'],
+            'tokens_out': d['tokens_out'],
+            'tokens_total': d['tokens_in'] + d['tokens_out'],
+            'cost_usd': round(usd, 4),
+        })
+
+    total_days = len(all_items)
+    total_pages = max(1, -(-total_days // page_size))
+
+    if fmt == "csv":
+        import io, csv as _csv
+        from fastapi.responses import StreamingResponse
+        buf = io.StringIO()
+        buf.write('﻿')
+        w = _csv.writer(buf)
+        w.writerow(["日期", "调用次数", "Tokens_In", "Tokens_Out", "Tokens_Total", "费用USD"])
+        for it in all_items:
+            w.writerow([it["date"], it["calls"], it["tokens_in"], it["tokens_out"],
+                        it["tokens_total"], it["cost_usd"]])
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=token_cost_daily.csv"},
+        )
+
+    offset = (page - 1) * page_size
+    paged = all_items[offset:offset + page_size]
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "total_days": total_days,
+        "items": paged,
+    }
+
+
+# ───── Relay Cost Summary (chesspnt real-time, model-filtered) ─────
+
+import time as _time_mod
+
+_relay_cost_cache: Dict[str, Any] = {}
+_relay_cost_cache_ts: float = 0
+
+
+@router.get("/relay/cost-summary")
+async def relay_cost_summary(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Real-time token cost for the active primary relay model only.
+    Aggregates quota from chesspnt /api/log/self filtered by model_name.
+    Cached 120s."""
+    import aiohttp, datetime as _dt
+
+    global _relay_cost_cache, _relay_cost_cache_ts
+    now = _time_mod.time()
+    if _relay_cost_cache and now - _relay_cost_cache_ts < 120:
+        return _relay_cost_cache
+
+    cfg_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'relay_stations'"
+    ))).scalar()
+    stations = cfg_row if isinstance(cfg_row, list) else []
+    active = next((r for r in stations if r.get('enabled') and r.get('role') == 'primary'), None)
+    if not active:
+        return {"error": "no active primary relay station"}
+
+    base = active.get('api_base', 'https://api.chesspnt.com').rstrip('/')
+    cookie = active.get('session_cookie', '')
+    new_api_user = str(active.get('new_api_user', ''))
+    units_per_usd = float(active.get('units_per_usd', 500000))
+    usd_to_cny = float(active.get('usd_to_cny_rate', 7.3))
+    model_name = active.get('model', '')
+
+    if not cookie:
+        return {"error": "no session cookie configured"}
+    if not model_name:
+        return {"error": "no model configured on primary relay"}
+
+    headers = {
+        'accept': 'application/json, text/plain, */*',
+        'cookie': f'session={cookie}',
+    }
+    if new_api_user:
+        headers['new-api-user'] = new_api_user
+
+    utc_today = _dt.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_ts = int(utc_today.timestamp())
+    now_ts = int(_time_mod.time())
+
+    async def sum_pages(session, start_ts, end_ts, max_pages=100):
+        total_quota = 0
+        total_calls = 0
+        total_records = 0
+        page = 0
+        while page < max_pages:
+            p = {'p': str(page), 'page_size': '100', 'model_name': model_name}
+            if start_ts:
+                p['start_timestamp'] = str(start_ts)
+            if end_ts:
+                p['end_timestamp'] = str(end_ts)
+            async with session.get(f'{base}/api/log/self', headers=headers, params=p) as resp:
+                if resp.status != 200:
+                    break
+                data = await resp.json()
+                if not data.get('success'):
+                    break
+                items = data.get('data', {}).get('items', [])
+                total_records = data.get('data', {}).get('total', 0)
+                for item in items:
+                    total_quota += item.get('quota', 0)
+                    total_calls += 1
+                if not items or (page + 1) * 100 >= total_records:
+                    break
+                page += 1
+        usd = total_quota / units_per_usd if units_per_usd else 0
+        return {
+            'quota_units': total_quota,
+            'cost_usd': round(usd, 4),
+            'cost_cny': round(usd * usd_to_cny, 2),
+            'calls': total_calls,
+            'total_records': total_records,
+            'complete': total_calls >= total_records,
+        }
+
+    today = {"quota_units": 0, "cost_usd": 0, "cost_cny": 0, "calls": 0}
+    cumulative = {"quota_units": 0, "cost_usd": 0, "cost_cny": 0, "calls": 0}
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=120)
+        ) as session:
+            import asyncio as _aio
+            today, cumulative = await _aio.gather(
+                sum_pages(session, today_ts, now_ts, max_pages=50),
+                sum_pages(session, 0, now_ts, max_pages=100),
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f'[relay-cost] error: {e}')
+
+    result = {
+        "today": today,
+        "cumulative": cumulative,
+        "units_per_usd": units_per_usd,
+        "usd_to_cny_rate": usd_to_cny,
+        "relay_name": active.get('name', ''),
+        "model": model_name,
+        "cached_at": _dt.datetime.utcnow().isoformat() + "Z",
+    }
+    _relay_cost_cache = result
+    _relay_cost_cache_ts = now
+    return result
+
+
+# ───── Hustle AI Chat Assistant ─────
+
+HUSTLE_SYSTEM_PROMPT_AUTO = """你是 Hustle，OpenCLAW 量化智能体控制台的 AI 客服助手。你的任务是用简洁、准确的中文回答用户关于控制台使用操作的问题。
+
+## 控制台概览
+OpenCLAW 是一个量化交易智能体管理平台，包含以下模块：
+
+### 1. 实时监控 (Dashboard)
+- 顶部导航栏：显示当前模型、今日tokens消耗、今日消费金额、钱包余额、运行模式(Shadow/半自动/全自动)
+- 目标卡片：每个交易目标显示实时净值、持仓大小、Delta差值、最近决策
+- 持仓对比：A端/B端持仓对比，展示跨平台仓位差异
+- 警报区域：未确认警报会在导航栏显示红色角标，点击可查看和确认
+
+### 2. 决策流 (Decisions)
+- 展示智能体的每一次决策记录，包含时间、目标、verdict(判定)、置信度
+- Verdict 类型：execute(执行交易)、skip(跳过)、shadow(影子模式记录)、rejected(被风控拒绝)
+- 可按目标、verdict类型、时间范围筛选
+- 每条决策可展开查看详细的 proposal(提议)内容和 reasoning(推理过程)
+- 置信度分布图表帮助分析决策质量
+
+### 3. 提议中心 (Proposals)
+- 用于修改智能体配置的提案审批系统
+- 新建提议：可手动填写 JSON config_diff，或使用 AI 对话生成
+- AI 对话生成：用自然语言描述想修改的配置，AI 自动生成结构化提案
+- 提议状态：pending(待审批) → approved(已批准)/rejected(已拒绝)
+- 审批后自动写入 agent_active_config，config_loader 5秒 TTL 热加载生效
+- config_diff 展示旧值→新值对比（红色删除线→绿色新值）
+- 支持全局配置和目标级配置的修改
+
+### 4. 风控中心 (RiskControl)
+- 目标管理：启用/禁用交易目标，配置交易对
+- 持仓限额(position_caps)：设置各目标的最大持仓量
+- 频次限制(rate_limits)：max_decisions_per_min(默认10)、max_trades_per_hour(默认30)、cooldown_after_loss_s(默认120秒)
+- 权益保护(equity_guard)：warn_ratio(0.90)、critical_ratio(0.80)、force_reduce_ratio(0.70)
+- 干预日志：查看权益保护触发的历史记录
+
+### 5. 基础设施 (Infrastructure)
+- 中转站管理：配置 LLM API 中转站(chesspnt等)，主站/备用站切换
+- LLM 健康状态：模型名称、延迟、熔断器状态
+- Token 消费统计：今日/累计 tokens、今日/累计消费金额
+- 每日消费明细表：按天统计消费，支持分页和 CSV 导出
+- 生效配置审计：只读查看当前所有生效的配置项，修改需走提案流程
+
+### 6. 登录与权限
+- 需要超级管理员或系统管理员角色才能访问
+- 具有 openclaw_enabled 权限的用户也可访问
+- JWT token 认证，存储在 localStorage
+
+## 回答规则
+1. 只回答控制台使用操作相关的问题
+2. 不透露任何 API key、密码、session cookie 等敏感信息
+3. 如果用户问非操作相关的问题，礼貌告知你只负责使用操作指导
+4. 回答简洁明了，必要时用列表或步骤说明
+5. 使用中文回答"""
+
+
+class ChatReq(BaseModel):
+    message: str
+    site: str = "auto"
+
+
+@router.post("/chat")
+async def hustle_chat(req: ChatReq, request: Request,
+                      db: AsyncSession = Depends(get_db),
+                      user_id: str = Depends(require_admin)):
+    """Hustle AI chat — SSE streaming response."""
+    import aiohttp, json as _json, logging
+    from starlette.responses import StreamingResponse
+    log = logging.getLogger(__name__)
+
+    # Load chat config from DB
+    _chat_cfg_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'hustle_chat_config'"
+    ))).scalar()
+    _chat_cfg = _chat_cfg_row if isinstance(_chat_cfg_row, dict) else {}
+    _enabled_sites = _chat_cfg.get('enabled_sites', ['auto'])
+    _rate_limit = _chat_cfg.get('rate_limit', 20)
+
+    if req.site not in _enabled_sites:
+        raise HTTPException(403, "AI 客服已关闭")
+
+    # Rate limit from DB config
+    cnt = (await db.execute(text("""
+        SELECT COUNT(*) FROM hustle_chat_messages
+        WHERE user_id = CAST(:uid AS UUID) AND site = :site AND role = 'user'
+          AND created_at >= NOW() - INTERVAL '1 hour'
+    """), {"uid": user_id, "site": req.site})).scalar()
+    if cnt >= _rate_limit:
+        raise HTTPException(429, f"每小时最多提问 {_rate_limit} 次，请稍后再试")
+
+    # Load recent history (last 10 messages)
+    history_rows = (await db.execute(text("""
+        SELECT role, content FROM (
+            SELECT role, content, created_at FROM hustle_chat_messages
+            WHERE user_id = CAST(:uid AS UUID) AND site = :site
+            ORDER BY created_at DESC LIMIT 10
+        ) sub ORDER BY created_at ASC
+    """), {"uid": user_id, "site": req.site})).all()
+
+    # Get relay config
+    cfg_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'relay_stations'"
+    ))).scalar()
+    stations = cfg_row if isinstance(cfg_row, list) else []
+    active = next((r for r in stations if r.get('enabled') and r.get('role') == 'primary'), None)
+    if not active:
+        raise HTTPException(503, "LLM 未配置")
+
+    base = (active.get('llm_base_url') or '').rstrip('/')
+    key = active.get('llm_api_key', '')
+    model = active.get('model', 'gpt-5.4')
+    if not base or not key:
+        raise HTTPException(503, "LLM 未配置")
+
+    # Build messages
+    _db_prompts = _chat_cfg.get('system_prompts', {})
+    _site_prompt = _db_prompts.get(req.site, '') if _db_prompts.get(req.site) else HUSTLE_SYSTEM_PROMPT_AUTO
+    messages = [{"role": "system", "content": _site_prompt}]
+    for row in history_rows:
+        messages.append({"role": row[0], "content": row[1]})
+    messages.append({"role": "user", "content": req.message})
+
+    # Save user message first
+    await db.execute(text("""
+        INSERT INTO hustle_chat_messages (user_id, site, role, content)
+        VALUES (CAST(:uid AS UUID), :site, 'user', :content)
+    """), {"uid": user_id, "site": req.site, "content": req.message})
+    await db.commit()
+
+    async def event_stream():
+        full_response = []
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as session:
+                async with session.post(
+                    f'{base}/v1/chat/completions',
+                    headers={
+                        'Authorization': f'Bearer {key}',
+                        'Content-Type': 'application/json',
+                    },
+                    json={
+                        'model': model,
+                        'messages': messages,
+                        'stream': True,
+                        'max_tokens': 1500,
+                        'temperature': 0.5,
+                    },
+                ) as resp:
+                    if resp.status != 200:
+                        err = await resp.text()
+                        log.error(f'[hustle-chat] LLM {resp.status}: {err[:300]}')
+                        yield f"data: {_json.dumps({'error': f'LLM 调用失败: HTTP {resp.status}'})}\n\n"
+                        return
+
+                    buffer = ""
+                    async for chunk in resp.content.iter_any():
+                        buffer += chunk.decode('utf-8', errors='ignore')
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+                            line = line.strip()
+                            if not line or not line.startswith('data:'):
+                                continue
+                            payload = line[5:].strip()
+                            if payload == '[DONE]':
+                                yield "data: [DONE]\n\n"
+                                break
+                            try:
+                                obj = _json.loads(payload)
+                                delta = obj.get('choices', [{}])[0].get('delta', {})
+                                content = delta.get('content', '')
+                                if content:
+                                    full_response.append(content)
+                                    yield f"data: {_json.dumps({'content': content})}\n\n"
+                            except _json.JSONDecodeError:
+                                continue
+        except Exception as e:
+            log.error(f'[hustle-chat] stream error: {e}')
+            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # Save assistant response
+            if full_response:
+                try:
+                    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession as _AS
+                    from sqlalchemy.orm import sessionmaker
+                    engine = create_async_engine('postgresql+asyncpg://postgres:postgres@localhost:5432/postgres')
+                    _Session = sessionmaker(engine, class_=_AS)
+                    async with _Session() as db2:
+                        await db2.execute(text("""
+                            INSERT INTO hustle_chat_messages (user_id, site, role, content)
+                            VALUES (CAST(:uid AS UUID), :site, 'assistant', :content)
+                        """), {"uid": user_id, "site": req.site, "content": ''.join(full_response)})
+                        await db2.commit()
+                    await engine.dispose()
+                except Exception as e2:
+                    log.error(f'[hustle-chat] save response error: {e2}')
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/chat/history")
+async def chat_history(
+    site: str = Query("auto"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Load chat history for the Hustle assistant."""
+    rows = (await db.execute(text("""
+        SELECT id, role, content, created_at FROM hustle_chat_messages
+        WHERE user_id = CAST(:uid AS UUID) AND site = :site
+        ORDER BY created_at DESC LIMIT 50
+    """), {"uid": user_id, "site": site})).all()
+
+    # Count remaining quota
+    cnt = (await db.execute(text("""
+        SELECT COUNT(*) FROM hustle_chat_messages
+        WHERE user_id = CAST(:uid AS UUID) AND site = :site AND role = 'user'
+          AND created_at >= NOW() - INTERVAL '1 hour'
+    """), {"uid": user_id, "site": site})).scalar()
+
+    messages = [
+        {"id": r[0], "role": r[1], "content": r[2], "time": r[3].isoformat() if r[3] else None}
+        for r in reversed(rows)
+    ]
+    _hcfg = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'hustle_chat_config'"
+    ))).scalar()
+    _hlimit = _hcfg.get('rate_limit', 20) if isinstance(_hcfg, dict) else 20
+    return {"messages": messages, "remaining": max(0, _hlimit - int(cnt or 0))}
+
+
+# ───── Hustle AI Chat Admin APIs ─────
+
+
+@router.get("/chat/admin/stats")
+async def chat_admin_stats(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """AI chat admin stats: usage, users, cost."""
+    import aiohttp, datetime as _dt
+
+    # Message counts
+    total = (await db.execute(text(
+        "SELECT COUNT(*) FROM hustle_chat_messages WHERE role='user'"
+    ))).scalar() or 0
+
+    today_start = _dt.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_count = (await db.execute(text(
+        "SELECT COUNT(*) FROM hustle_chat_messages WHERE role='user' AND created_at >= :ts"
+    ), {"ts": today_start})).scalar() or 0
+
+    # Unique users
+    unique_users = (await db.execute(text(
+        "SELECT COUNT(DISTINCT user_id) FROM hustle_chat_messages"
+    ))).scalar() or 0
+
+    # Messages by site
+    by_site = (await db.execute(text(
+        "SELECT site, COUNT(*) FROM hustle_chat_messages WHERE role='user' GROUP BY site"
+    ))).all()
+    sites = {r[0]: int(r[1]) for r in by_site}
+
+    # Daily trend (last 14 days)
+    daily = (await db.execute(text("""
+        SELECT date_trunc('day', created_at)::date AS day, COUNT(*) AS cnt
+        FROM hustle_chat_messages WHERE role='user'
+          AND created_at >= NOW() - INTERVAL '14 days'
+        GROUP BY 1 ORDER BY 1
+    """))).all()
+    daily_trend = [{"date": str(r[0]), "count": int(r[1])} for r in daily]
+
+    # Token cost from chesspnt: filter by token_name containing chat or all
+    # We track chat cost by counting tokens in/out from chat messages
+    total_tokens = (await db.execute(text(
+        "SELECT COUNT(*) FROM hustle_chat_messages"
+    ))).scalar() or 0
+
+    # Estimate cost: count assistant messages tokens (rough: 1 char ≈ 1.5 tokens for Chinese)
+    assistant_chars = (await db.execute(text(
+        "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM hustle_chat_messages WHERE role='assistant'"
+    ))).scalar() or 0
+    user_chars = (await db.execute(text(
+        "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM hustle_chat_messages WHERE role='user'"
+    ))).scalar() or 0
+
+    # Real cost: use chesspnt relay pricing
+    # system_prompt ~1500 chars × 1.5 = ~2250 tokens input per call
+    # user history ~500 chars avg = ~750 tokens
+    # total input per call ≈ 3000 tokens + user message
+    # output ≈ assistant chars × 1.5 tokens
+    est_input_tokens = int(user_chars * 1.5) + int(total * 3000)  # system prompt overhead
+    est_output_tokens = int(assistant_chars * 1.5)
+
+    # Get relay pricing
+    cfg_row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'relay_stations'"
+    ))).scalar()
+    stations = cfg_row if isinstance(cfg_row, list) else []
+    active = next((r for r in stations if r.get('enabled') and r.get('role') == 'primary'), None)
+    units_per_usd = float(active.get('units_per_usd', 500000)) if active else 500000
+    model = active.get('model', 'gpt-5.4') if active else 'gpt-5.4'
+
+    # gpt-5.4 pricing from chesspnt: model_ratio=1.25, group_ratio=0.3, completion_ratio=6
+    model_ratio = 1.25
+    group_ratio = 0.3
+    comp_ratio = 6
+    input_quota = est_input_tokens * model_ratio * group_ratio
+    output_quota = est_output_tokens * model_ratio * group_ratio * comp_ratio
+    total_quota = input_quota + output_quota
+    cost_usd = total_quota / units_per_usd
+
+    return {
+        "total_messages": int(total),
+        "today_messages": int(today_count),
+        "unique_users": int(unique_users),
+        "by_site": sites,
+        "daily_trend": daily_trend,
+        "total_messages_all": int(total_tokens),
+        "estimated_cost": {
+            "input_tokens": est_input_tokens,
+            "output_tokens": est_output_tokens,
+            "total_quota_units": round(total_quota),
+            "cost_usd": round(cost_usd, 4),
+            "model": model,
+        },
+    }
+
+
+@router.get("/chat/admin/conversations")
+async def chat_admin_conversations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    site: str = Query("auto"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """List all chat conversations grouped by user."""
+    # Get unique users with message counts
+    rows = (await db.execute(text("""
+        SELECT m.user_id, u.username,
+               COUNT(*) FILTER (WHERE m.role = 'user') AS user_msgs,
+               COUNT(*) AS total_msgs,
+               MAX(m.created_at) AS last_active
+        FROM hustle_chat_messages m
+        JOIN users u ON m.user_id = u.user_id
+        WHERE m.site = :site
+        GROUP BY m.user_id, u.username
+        ORDER BY last_active DESC
+        LIMIT :lim OFFSET :off
+    """), {"site": site, "lim": page_size, "off": (page - 1) * page_size})).all()
+
+    cnt = (await db.execute(text(
+        "SELECT COUNT(DISTINCT user_id) FROM hustle_chat_messages WHERE site = :site"
+    ), {"site": site})).scalar() or 0
+
+    return {
+        "page": page,
+        "total": int(cnt),
+        "total_pages": max(1, -(-int(cnt) // page_size)),
+        "conversations": [{
+            "user_id": str(r[0]),
+            "username": r[1],
+            "user_messages": int(r[2]),
+            "total_messages": int(r[3]),
+            "last_active": r[4].isoformat() if r[4] else None,
+        } for r in rows],
+    }
+
+
+@router.get("/chat/admin/messages")
+async def chat_admin_messages(
+    target_user_id: str = Query(...),
+    site: str = Query("auto"),
+    page: int = Query(1, ge=1),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """View a specific user's chat messages."""
+    rows = (await db.execute(text("""
+        SELECT id, role, content, created_at FROM hustle_chat_messages
+        WHERE user_id = CAST(:uid AS UUID) AND site = :site
+        ORDER BY created_at DESC LIMIT 100
+    """), {"uid": target_user_id, "site": site})).all()
+
+    return {
+        "messages": [{
+            "id": r[0], "role": r[1], "content": r[2],
+            "time": r[3].isoformat() if r[3] else None,
+        } for r in reversed(rows)],
+    }
+
+
+
+# ───── Hustle AI Chat Admin: Config + Hot Questions ─────
+
+
+@router.get("/chat/admin/config")
+async def chat_admin_config(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Get AI chat config: system prompt, enabled sites, rate limit."""
+    row = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'hustle_chat_config'"
+    ))).scalar()
+    if row and isinstance(row, dict):
+        return row
+    # defaults
+    return {
+        "enabled_sites": ["auto"],
+        "rate_limit": 20,
+        "system_prompts": {"auto": ""},
+    }
+
+
+@router.put("/chat/admin/config")
+async def chat_admin_config_update(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Update AI chat config."""
+    import json as _json
+    body = await request.json()
+
+    # Validate
+    allowed_keys = {"enabled_sites", "rate_limit", "system_prompts"}
+    cfg = {}
+    if "enabled_sites" in body:
+        cfg["enabled_sites"] = body["enabled_sites"]
+    if "rate_limit" in body:
+        cfg["rate_limit"] = max(1, min(100, int(body["rate_limit"])))
+    if "system_prompts" in body:
+        cfg["system_prompts"] = body["system_prompts"]
+
+    # Merge with existing
+    existing = (await db.execute(text(
+        "SELECT value FROM agent_active_config WHERE key = 'hustle_chat_config'"
+    ))).scalar()
+    if existing and isinstance(existing, dict):
+        existing.update(cfg)
+        cfg = existing
+    else:
+        cfg.setdefault("enabled_sites", ["auto"])
+        cfg.setdefault("rate_limit", 20)
+        cfg.setdefault("system_prompts", {"auto": ""})
+
+    # Upsert
+    await db.execute(text("""
+        INSERT INTO agent_active_config (key, value)
+        VALUES ('hustle_chat_config', :val::jsonb)
+        ON CONFLICT (key) DO UPDATE SET value = :val::jsonb
+    """), {"val": _json.dumps(cfg)})
+    await db.commit()
+
+    return {"ok": True, "config": cfg}
+
+
+@router.get("/chat/admin/hot-questions")
+async def chat_admin_hot_questions(
+    site: str = Query("auto"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Top 10 most asked questions (by content similarity — simple exact match)."""
+    rows = (await db.execute(text("""
+        SELECT content, COUNT(*) AS cnt
+        FROM hustle_chat_messages
+        WHERE role = 'user' AND site = :site
+        GROUP BY content
+        ORDER BY cnt DESC, MAX(created_at) DESC
+        LIMIT 10
+    """), {"site": site})).all()
+    return {
+        "questions": [{"content": r[0], "count": int(r[1])} for r in rows],
+    }

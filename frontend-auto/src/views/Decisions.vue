@@ -27,7 +27,7 @@
         <h3 class="text-xs font-semibold text-text-tertiary">决策管线 · {{ windowKey }}</h3>
         <span class="text-[10px] text-text-tertiary">{{ pipelineStats.total }} 条决策</span>
       </div>
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1 overflow-x-auto">
         <div class="flex-1 text-center">
           <div class="bg-blue-900/30 rounded-lg px-2 py-2 border border-blue-500/30">
             <div class="text-[10px] text-blue-400 mb-0.5">信号触发</div>
@@ -91,19 +91,19 @@
 
     <!-- Filter row -->
     <div class="bg-dark-100 rounded-xl p-3 border border-border-primary flex flex-wrap items-center gap-3 text-xs">
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1 overflow-x-auto">
         <span class="text-text-tertiary">判决:</span>
         <button v-for="v in VERDICTS" :key="v" @click="toggleVerdict(v)"
           class="px-2 py-1 rounded"
           :class="selectedVerdicts.includes(v) ? verdictActiveClass(v) : 'bg-dark-200 text-text-secondary'">{{ v }}</button>
       </div>
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1 overflow-x-auto">
         <span class="text-text-tertiary">时间:</span>
         <button v-for="w in WINDOWS" :key="w.key" @click="windowKey = w.key; reload()"
           class="px-2 py-1 rounded"
           :class="windowKey === w.key ? 'bg-primary text-dark-300 font-semibold' : 'bg-dark-200 text-text-secondary'">{{ w.label }}</button>
       </div>
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1 overflow-x-auto">
         <span class="text-text-tertiary">最低置信度:</span>
         <input v-model.number="minConfidence" type="number" step="0.05" min="0" max="1"
           @change="reload()"
@@ -119,7 +119,7 @@
     </div>
 
     <!-- Main content: Table + Right Stats Panel -->
-    <div class="flex gap-4">
+    <div class="flex flex-col xl:flex-row gap-4">
       <!-- Table (flex-1) -->
       <div class="flex-1 bg-dark-100 rounded-xl border border-border-primary overflow-hidden min-w-0">
         <table class="w-full text-xs">

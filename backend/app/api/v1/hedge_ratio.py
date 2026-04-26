@@ -56,9 +56,17 @@ async def update_hedge_ratio(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update hedge multiplier. Only works if user has hedge_ratio_enabled=true."""
+    """Update hedge multiplier. Only works if user has hedge_ratio_enabled=true and no strategy is running."""
     if body.hedge_multiplier not in VALID_MULTIPLIERS:
         raise HTTPException(status_code=400, detail=f"Invalid multiplier. Valid: {VALID_MULTIPLIERS}")
+
+    # Block modification while any continuous strategy is running for this user
+    from app.services.execution_task_manager import execution_task_manager
+    for suffix in ['forward_opening_continuous', 'forward_closing_continuous',
+                   'reverse_opening_continuous', 'reverse_closing_continuous']:
+        sid = f"{user_id}_{suffix}"
+        if execution_task_manager.get_running_task_id_for_strategy(sid):
+            raise HTTPException(status_code=409, detail="策略执行中，无法修改对冲倍数。请先停止策略。")
 
     # Check if user is enabled
     enabled_result = await db.execute(

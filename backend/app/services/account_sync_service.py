@@ -128,9 +128,9 @@ class AccountSyncService:
                 # Create account snapshot
                 snapshot = AccountSnapshot(
                     account_id=account.account_id,
-                    total_assets=total_equity,
+                    total_assets=float(wallet.get('totalWalletBalance', 0)),  # 钱包余额（不含浮盈）
                     available_assets=total_available,
-                    net_assets=total_equity,
+                    net_assets=total_equity,  # equity（含浮盈）
                     total_position=0.0,  # Will be calculated from positions
                     frozen_assets=margin_used,
                     margin_balance=total_equity,

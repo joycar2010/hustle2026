@@ -248,7 +248,7 @@
       </div>
 
       <!-- Token stats (from active primary) -->
-      <div v-if="stats" class="grid grid-cols-2 lg:grid-cols-5 gap-3 text-xs border-t border-border-primary pt-3 mt-3">
+      <div v-if="stats" class="grid grid-cols-2 lg:grid-cols-7 gap-3 text-xs border-t border-border-primary pt-3 mt-3">
         <div>
           <div class="text-text-tertiary">今日 tokens</div>
           <div class="font-mono font-bold text-base">{{ fmtInt(stats.tokens_today?.total) }}</div>
@@ -262,6 +262,20 @@
           <div class="text-text-tertiary">累计 tokens</div>
           <div class="font-mono font-bold text-base">{{ fmtInt(stats.tokens_total?.total) }}</div>
           <div class="text-[10px] text-text-tertiary">{{ stats.tokens_total?.calls }} 次</div>
+        </div>
+        <div>
+          <div class="text-text-tertiary">今日消费金额</div>
+          <div class="font-mono font-bold text-base text-warning">
+            {{ relayCost?.today?.cost_usd != null ? '$' + relayCost.today.cost_usd.toFixed(4) : '--' }}
+          </div>
+          <div class="text-[10px] text-text-tertiary">{{ relayCost?.model || '' }}</div>
+        </div>
+        <div>
+          <div class="text-text-tertiary">累计消费金额</div>
+          <div class="font-mono font-bold text-base text-warning">
+            {{ relayCost?.cumulative?.cost_usd != null ? '$' + relayCost.cumulative.cost_usd.toFixed(4) : '--' }}
+          </div>
+          <div class="text-[10px] text-text-tertiary">{{ relayCost?.cumulative?.calls || 0 }} 次</div>
         </div>
         <div>
           <div class="text-text-tertiary">
@@ -278,6 +292,48 @@
           <div class="font-mono text-primary text-sm">{{ stats.active_relay_name || '--' }}</div>
           <div class="text-[10px] text-text-tertiary">{{ stats.balance?.source === 'chesspnt_self' ? '直连' : 'relay' }}</div>
         </div>
+      </div>
+    </div>
+
+    <!-- 每日 tokens 消费明细 -->
+    <div class="bg-dark-100 rounded-xl p-5 border border-border-primary">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold flex items-center gap-2">
+          每日消费明细
+          <span class="text-[10px] text-text-tertiary font-normal px-1.5 py-0.5 bg-dark-200 rounded">{{ relayCost?.model || '--' }}</span>
+        </h3>
+        <button @click="exportCostCsv" class="px-3 py-1 bg-primary text-dark-300 rounded text-xs hover:bg-primary-hover font-semibold">导出 CSV</button>
+      </div>
+      <div v-if="costLoading" class="text-text-tertiary text-sm py-6 text-center">加载中…</div>
+      <table v-else-if="costDaily?.items?.length" class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-border-primary text-text-tertiary">
+            <th class="py-2 text-left">日期</th>
+            <th class="py-2 text-right">调用次数</th>
+            <th class="py-2 text-right">Tokens In</th>
+            <th class="py-2 text-right">Tokens Out</th>
+            <th class="py-2 text-right">Tokens Total</th>
+            <th class="py-2 text-right font-semibold">费用 USD</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in costDaily.items" :key="row.date" class="border-b border-dark-300 hover:bg-dark-200/50">
+            <td class="py-1.5 font-mono">{{ row.date }}</td>
+            <td class="py-1.5 font-mono text-right">{{ fmtInt(row.calls) }}</td>
+            <td class="py-1.5 font-mono text-right">{{ fmtInt(row.tokens_in) }}</td>
+            <td class="py-1.5 font-mono text-right">{{ fmtInt(row.tokens_out) }}</td>
+            <td class="py-1.5 font-mono text-right">{{ fmtInt(row.tokens_total) }}</td>
+            <td class="py-1.5 font-mono text-right font-semibold text-warning">${{ row.cost_usd }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="text-text-tertiary text-sm py-4 text-center">暂无数据</div>
+      <div v-if="costDaily?.total_pages > 1" class="flex items-center justify-center gap-2 mt-3 text-xs">
+        <button @click="loadCostDaily(costPage - 1)" :disabled="costPage <= 1"
+          class="px-2 py-1 bg-dark-200 rounded disabled:opacity-30">上一页</button>
+        <span class="text-text-tertiary">{{ costPage }} / {{ costDaily.total_pages }}</span>
+        <button @click="loadCostDaily(costPage + 1)" :disabled="costPage >= costDaily.total_pages"
+          class="px-2 py-1 bg-dark-200 rounded disabled:opacity-30">下一页</button>
       </div>
     </div>
 
@@ -416,6 +472,10 @@ wsStore.subscribe('agent.llm-stats')
 
 const llmHealth = ref(null)
 const stats = ref(null)
+const relayCost = ref(null)
+const costDaily = ref(null)
+const costPage = ref(1)
+const costLoading = ref(false)
 const relayStations = ref([])
 const expandedRelay = ref(null)
 const showAddRelay = ref(false)
@@ -589,6 +649,33 @@ async function loadStats() {
   } catch {}
 }
 
+async function loadRelayCost() {
+  try {
+    const r = await api.get('/api/v1/agent/relay/cost-summary')
+    relayCost.value = r.data
+  } catch {}
+}
+
+async function loadCostDaily(page = 1) {
+  costLoading.value = true
+  try {
+    const r = await api.get('/api/v1/agent/decisions/cost-daily', { params: { page, page_size: 10, window: '90d' } })
+    costDaily.value = r.data
+    costPage.value = page
+  } catch {} finally { costLoading.value = false }
+}
+
+function exportCostCsv() {
+  const token = localStorage.getItem('access_token')
+  const url = '/api/v1/agent/decisions/cost-daily?fmt=csv&window=90d'
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'token_cost_daily.csv'
+  fetch(url, { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(r => r.blob())
+    .then(b => { a.href = URL.createObjectURL(b); a.click() })
+}
+
 const expandedConfigKeys = ref({})
 
 const SENSITIVE_FIELDS = ['cookie', 'token', 'api_key', 'llm_api_key', 'password', 'secret', 'chesspnt_password', 'session_id', 'access_token', 'auth']
@@ -688,8 +775,8 @@ async function loadConfigAudit() {
 
 let timer
 onMounted(() => {
-  loadLlmHealth(); loadRelayStations(); loadStats(); loadConfigAudit()
-  timer = setInterval(() => { loadLlmHealth(); loadRelayStations(); loadStats() }, 15000)
+  loadLlmHealth(); loadRelayStations(); loadStats(); loadRelayCost(); loadCostDaily(); loadConfigAudit()
+  timer = setInterval(() => { loadLlmHealth(); loadRelayStations(); loadStats(); loadRelayCost() }, 15000)
 })
 onUnmounted(() => clearInterval(timer))
 </script>
