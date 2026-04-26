@@ -697,32 +697,86 @@ BRIDGE_PORTS = list(BRIDGE_SERVICE_PORTS.values())
 
 
 def _query_bridge_services_status():
-    """Query SCM state for each bridge service via sc.exe — runs in parallel."""
+    """Detect bridge status via TCP port probe + PID lookup from netstat.
+    Works regardless of whether bridges were started as Windows services
+    (nssm/sc) or as plain processes (subprocess.Popen / Task Scheduler)."""
+    import socket as _socket
     from concurrent.futures import ThreadPoolExecutor
 
+    # One netstat call to build port→PID mapping for all bridge ports
+    port_to_pid = {}
+    try:
+        r = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        for line in (r.stdout or "").splitlines():
+            if "LISTENING" not in line:
+                continue
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            try:
+                addr_part = parts[1]
+                port = int(addr_part.rsplit(":", 1)[1])
+                if port in BRIDGE_SERVICE_PORTS.values():
+                    port_to_pid[port] = int(parts[-1])
+            except (ValueError, IndexError):
+                continue
+    except Exception as e:
+        logger.debug(f"netstat failed: {e}")
+
     def _one(svc):
-        entry = {"service": svc, "state": "unknown", "pid": None}
+        port = BRIDGE_SERVICE_PORTS.get(svc)
+        entry = {"service": svc, "state": "stopped", "pid": None}
+        if not port:
+            return entry
+
+        # TCP probe — the definitive liveness check
+        alive = False
         try:
-            proc = subprocess.run(
-                ["sc.exe", "query", svc],
-                capture_output=True, text=True, timeout=1.5,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            for line in (proc.stdout or "").splitlines():
-                line_s = line.strip()
-                if line_s.startswith("STATE"):
-                    parts = line_s.split()
-                    if len(parts) >= 4:
-                        entry["state"] = parts[3].lower()
-                elif line_s.startswith("PID"):
-                    parts = line_s.split()
-                    if len(parts) >= 3:
-                        try:
-                            entry["pid"] = int(parts[2])
-                        except ValueError:
-                            pass
-        except Exception as e:
-            entry["error"] = str(e)
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect(("127.0.0.1", port))
+            alive = True
+        except Exception:
+            pass
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+        if alive:
+            entry["state"] = "running"
+            entry["pid"] = port_to_pid.get(port)
+        else:
+            # Fallback: check SCM in case it's a Windows service
+            try:
+                proc = subprocess.run(
+                    ["sc.exe", "query", svc],
+                    capture_output=True, text=True, timeout=1.5,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                for line in (proc.stdout or "").splitlines():
+                    line_s = line.strip()
+                    if line_s.startswith("STATE"):
+                        parts = line_s.split()
+                        if len(parts) >= 4:
+                            scm_state = parts[3].lower()
+                            if scm_state in ("running", "paused"):
+                                entry["state"] = scm_state
+                    elif line_s.startswith("PID"):
+                        parts = line_s.split()
+                        if len(parts) >= 3:
+                            try:
+                                entry["pid"] = int(parts[2])
+                            except ValueError:
+                                pass
+            except Exception:
+                pass
+
         return entry
 
     with ThreadPoolExecutor(max_workers=len(BRIDGE_SERVICES)) as ex:
@@ -793,6 +847,8 @@ def health_check():
     for b in bridges:
         port = BRIDGE_SERVICE_PORTS.get(b["service"])
         b["port"] = port
+        if b["state"] == "running" and port:
+            listening.append(port)
 
     agent_ok = True  # reached here → process alive
     overall_ok = agent_ok and bridge_alive == len(BRIDGE_SERVICES)
@@ -1158,6 +1214,18 @@ def deploy_bridge(request: BridgeDeployRequest):
     import configparser
 
     try:
+        # ==================== 0. 端口冲突检测 ====================
+        import socket as _socket
+        try:
+            with _socket.create_connection(("127.0.0.1", request.service_port), timeout=1):
+                raise HTTPException(status_code=409, detail=f"端口 {request.service_port} 已被占用（正在监听）")
+        except (ConnectionRefusedError, OSError):
+            pass
+
+        if (request.service_port in BRIDGE_SERVICE_PORTS.values()
+                and request.service_name not in BRIDGE_SERVICE_PORTS):
+            raise HTTPException(status_code=409, detail=f"端口 {request.service_port} 已分配给其他 Bridge 实例")
+
         # ==================== 1. 部署 MT5 客户端 ====================
         # 生成新的 MT5 客户端目录名
         mt5_client_dir = Path(f"D:/MetaTrader 5-{request.service_port}")
@@ -1484,6 +1552,33 @@ $Shortcut.Save()
         except Exception as e:
             logger.warning(f"Failed to add firewall rule: {e}")
 
+        # ==================== 6. 创建 BootTrigger 计划任务（开机自启） ====================
+        try:
+            task_name = f"Bridge-{request.service_name}"
+            task_exe = str(deploy_dir / "venv" / "Scripts" / "python.exe")
+            task_args = f"-m uvicorn main:app --host 0.0.0.0 --port {request.service_port}"
+            task_dir = str(deploy_dir / "app")
+
+            subprocess.run(['schtasks', '/delete', '/tn', task_name, '/f'],
+                           capture_output=True, text=True, timeout=5)
+
+            schtasks_cmd = [
+                'schtasks', '/create',
+                '/tn', task_name,
+                '/tr', f'"{task_exe}" {task_args}',
+                '/sc', 'onstart',
+                '/ru', 'SYSTEM',
+                '/rl', 'HIGHEST',
+                '/f',
+            ]
+            result = subprocess.run(schtasks_cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                logger.info(f"Created BootTrigger scheduled task: {task_name}")
+            else:
+                logger.warning(f"Failed to create scheduled task: {result.stderr}")
+        except Exception as e:
+            logger.warning(f"Failed to create scheduled task: {e}")
+
         return {
             "success": True,
             "service_name": request.service_name,
@@ -1685,6 +1780,16 @@ def delete_bridge(service_name: str, mt5_client_port: int = None, mt5_login: str
             except Exception as e:
                 logger.warning(f"Failed to remove firewall rule: {e}")
 
+        # 7. 删除 BootTrigger 计划任务
+        try:
+            task_name = f"Bridge-{service_name}"
+            result = subprocess.run(['schtasks', '/delete', '/tn', task_name, '/f'],
+                                    capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                logger.info(f"Removed scheduled task: {task_name}")
+        except Exception as e:
+            logger.warning(f"Failed to remove scheduled task: {e}")
+
         return {
             "success": True,
             "service_name": service_name,
@@ -1761,8 +1866,57 @@ async def startup_event():
     # 启动后台监控任务
     asyncio.create_task(monitoring_task())
 
-    # 延迟启动 Bridge 服务（等待 MT5 终端启动）
-    asyncio.create_task(_auto_start_bridges())
+    # 先自动启动所有 MT5 客户端，再启动 Bridge 服务
+    asyncio.create_task(_auto_start_mt5_then_bridges())
+
+
+async def _auto_start_mt5_then_bridges():
+    """开机后自动启动所有 MT5 客户端（从数据库加载配置），然后启动 Bridge 服务"""
+    await asyncio.sleep(5)
+
+    logger.info("[AutoStartMT5] Loading instances from database...")
+    instances = load_instances()
+    if not instances:
+        logger.warning("[AutoStartMT5] No instances found, skipping MT5 auto-start")
+        await _auto_start_bridges()
+        return
+
+    started = 0
+    skipped = 0
+    failed = 0
+
+    for name, cfg in instances.items():
+        mt5_path = cfg.get("path", "")
+        account = cfg.get("account", "")
+
+        if MT5Controller.is_instance_running(mt5_path, account):
+            logger.info(f"[AutoStartMT5] {cfg.get('name', name)} (account: {account}) already running, skip")
+            skipped += 1
+            continue
+
+        logger.info(f"[AutoStartMT5] Starting {cfg.get('name', name)} (account: {account})...")
+        try:
+            success = MT5Controller.start_instance(cfg, wait_seconds=8)
+            if success:
+                started += 1
+                logger.info(f"[AutoStartMT5] {cfg.get('name', name)} started successfully")
+            else:
+                failed += 1
+                logger.error(f"[AutoStartMT5] {cfg.get('name', name)} failed to start")
+        except Exception as e:
+            failed += 1
+            logger.error(f"[AutoStartMT5] {cfg.get('name', name)} error: {e}")
+
+        await asyncio.sleep(3)
+
+    logger.info(f"[AutoStartMT5] Done: started={started}, skipped={skipped}, failed={failed}")
+
+    # MT5 客户端启动完成后，等待一段时间让它们完成登录，再启动 Bridge
+    if started > 0:
+        logger.info("[AutoStartMT5] Waiting 20s for MT5 clients to finish login before starting bridges...")
+        await asyncio.sleep(20)
+
+    await _auto_start_bridges()
 
 
 async def _auto_start_bridges():

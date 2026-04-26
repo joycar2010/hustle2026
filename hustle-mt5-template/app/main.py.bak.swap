@@ -82,7 +82,7 @@ class OrderRequest(BaseModel):
     sl:    Optional[float]   = None
     tp:    Optional[float]   = None
     deviation: int           = 10
-    comment:   str           = ""
+    comment:   str           = "hustle2026"
     position_ticket: Optional[int] = None  # 用于平仓
 
 class ClosePositionRequest(BaseModel):
@@ -390,40 +390,6 @@ async def get_symbols():
     }
 
 # ── 8. Tick ───────────────────────────────────────────────────────────────
-@app.get("/mt5/symbol_info/{symbol}", dependencies=[Depends(verify_api_key)])
-async def get_symbol_info(symbol: str):
-    """
-    Return full MT5 symbol_info including swap_long/swap_short for overnight fee display.
-
-    Critical for the StrategyPanel "Bybit 过夜费 多/空" widget — these values come from
-    the broker's MT5 terminal symbol properties (NOT from any REST funding-rate API).
-    """
-    if not mgr.ensure():
-        raise HTTPException(503, "MT5 not connected")
-    info = mt5.symbol_info(symbol)
-    if info is None:
-        raise HTTPException(404, f"Symbol {symbol} not found: {mt5.last_error()}")
-    mgr.ping()
-    return {
-        "symbol":              info.name,
-        "description":         info.description,
-        "digits":              info.digits,
-        "point":               info.point,
-        "volume_min":          info.volume_min,
-        "volume_max":          info.volume_max,
-        "volume_step":         info.volume_step,
-        "trade_contract_size": info.trade_contract_size,
-        "swap_long":           info.swap_long,
-        "swap_short":          info.swap_short,
-        "swap_mode":           info.swap_mode,
-        "swap_rollover3days":  info.swap_rollover3days,
-        "currency_base":       info.currency_base,
-        "currency_profit":     info.currency_profit,
-        "currency_margin":     info.currency_margin,
-        "visible":             info.visible,
-    }
-
-
 @app.get("/mt5/tick/{symbol}", dependencies=[Depends(verify_api_key)])
 async def get_tick(symbol: str):
     if not mgr.ensure():
@@ -462,7 +428,6 @@ async def history_deals(
             "order":      d.order,
             "symbol":     d.symbol,
             "type":       d.type,
-            "entry":      d.entry,
             "volume":     d.volume,
             "price":      d.price,
             "profit":     d.profit,
@@ -622,7 +587,7 @@ async def close_position(req: ClosePositionRequest):
         "position":     pos.ticket,
         "deviation":    10,
         "magic":        MT5_LOGIN,
-        "comment":      "",
+        "comment":      "hustle2026-close",
         "type_time":    mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
@@ -671,7 +636,7 @@ async def close_all_positions(req: CloseAllRequest):
             "position":     pos.ticket,
             "deviation":    10,
             "magic":        MT5_LOGIN,
-            "comment":      "",
+            "comment":      "hustle2026-close-all",
             "type_time":    mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }

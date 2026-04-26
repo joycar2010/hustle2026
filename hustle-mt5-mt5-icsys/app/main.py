@@ -428,6 +428,9 @@ async def get_symbol_info(symbol: str):
 async def get_tick(symbol: str):
     if not mgr.ensure():
         raise HTTPException(503, "MT5 not connected")
+    # Ensure symbol is active in Market Watch (required for symbol_info_tick)
+    if not mt5.symbol_select(symbol, True):
+        raise HTTPException(404, f"Symbol not available: {symbol}: {mt5.last_error()}")
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         raise HTTPException(404, f"No tick for symbol {symbol}: {mt5.last_error()}")
