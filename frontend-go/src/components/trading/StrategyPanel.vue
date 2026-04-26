@@ -998,7 +998,7 @@ onMounted(async () => {
 
 async function loadConfigFromDB() {
   try {
-    const response = await api.get(`/api/v1/strategies/configs/by-type/${props.type}`)
+    const response = await api.get(`/api/v1/strategies/configs/by-type/${props.type}`, { params: { pair_code: currentPair.value } })
     const data = response.data
     configId.value = data.config_id
     config.value.openingMCoin = data.opening_m_coin || data.m_coin || 5
@@ -1079,6 +1079,14 @@ watch(() => authStore.user?.user_id, async (newUid, oldUid) => {
   } catch (e) {
     console.error('[StrategyPanel] reload after user switch failed', e)
   }
+})
+
+// Watch for pair change: reload strategy config when user switches trading pair
+watch(currentPair, async (newPair, oldPair) => {
+  if (!newPair || newPair === oldPair) return
+  console.log('[StrategyPanel] pair switched', oldPair, '→', newPair, '- reloading config')
+  configId.value = null
+  await loadConfigFromDB()
 })
 
 // Watch for market data updates via WebSocket

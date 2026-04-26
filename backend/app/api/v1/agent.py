@@ -3281,12 +3281,15 @@ async def hustle_chat(req: ChatReq, request: Request,
                                 break
                             try:
                                 obj = _json.loads(payload)
-                                delta = obj.get('choices', [{}])[0].get('delta', {})
+                                choices = obj.get('choices') or []
+                                if not choices:
+                                    continue
+                                delta = choices[0].get('delta', {})
                                 content = delta.get('content', '')
                                 if content:
                                     full_response.append(content)
                                     yield f"data: {_json.dumps({'content': content})}\n\n"
-                            except _json.JSONDecodeError:
+                            except (ValueError, KeyError, IndexError):
                                 continue
         except Exception as e:
             log.error(f'[hustle-chat] stream error: {e}')
@@ -3295,17 +3298,13 @@ async def hustle_chat(req: ChatReq, request: Request,
             # Save assistant response
             if full_response:
                 try:
-                    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession as _AS
-                    from sqlalchemy.orm import sessionmaker
-                    engine = create_async_engine('postgresql+asyncpg://postgres:postgres@localhost:5432/postgres')
-                    _Session = sessionmaker(engine, class_=_AS)
-                    async with _Session() as db2:
+                    from app.core.database import AsyncSessionLocal
+                    async with AsyncSessionLocal() as db2:
                         await db2.execute(text("""
                             INSERT INTO hustle_chat_messages (user_id, site, role, content)
                             VALUES (CAST(:uid AS UUID), :site, 'assistant', :content)
                         """), {"uid": user_id, "site": req.site, "content": ''.join(full_response)})
                         await db2.commit()
-                    await engine.dispose()
                 except Exception as e2:
                     log.error(f'[hustle-chat] save response error: {e2}')
 
@@ -3345,6 +3344,41 @@ async def chat_history(
     ))).scalar()
     _hlimit = _hcfg.get('rate_limit', 20) if isinstance(_hcfg, dict) else 20
     return {"messages": messages, "remaining": max(0, _hlimit - int(cnt or 0))}
+
+
+
+@router.delete("/chat/messages/{message_id}")
+async def delete_chat_message(
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Delete a single chat message (user can only delete own messages)."""
+    result = await db.execute(text("""
+        DELETE FROM hustle_chat_messages
+        WHERE id = :mid AND user_id = CAST(:uid AS UUID)
+        RETURNING id
+    """), {"mid": message_id, "uid": user_id})
+    deleted = result.scalar()
+    if not deleted:
+        raise HTTPException(404, "\u6d88\u606f\u4e0d\u5b58\u5728\u6216\u65e0\u6743\u5220\u9664")
+    await db.commit()
+    return {"ok": True, "deleted_id": deleted}
+
+
+@router.delete("/chat/history")
+async def clear_chat_history(
+    site: str = Query("auto"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Clear all chat history for the current user on this site."""
+    result = await db.execute(text("""
+        DELETE FROM hustle_chat_messages
+        WHERE user_id = CAST(:uid AS UUID) AND site = :site
+    """), {"uid": user_id, "site": site})
+    await db.commit()
+    return {"ok": True, "deleted_count": result.rowcount}
 
 
 # ───── Hustle AI Chat Admin APIs ─────

@@ -16,8 +16,8 @@
     return { 'Authorization': 'Bearer ' + getToken(), 'Content-Type': 'application/json' };
   }
 
-  var btnBottom = SITE === 'go' ? '160px' : '24px';
-  var btnBottomMobile = SITE === 'go' ? '140px' : '16px';
+  var btnBottom = SITE === 'go' ? '24px' : '24px';
+  var btnBottomMobile = SITE === 'go' ? '16px' : '16px';
 
   // ── Host element with Shadow DOM ──
   const host = document.createElement('div');
@@ -61,17 +61,25 @@
     .badge{font-size:10px;padding:2px 6px;background:#181a20;border-radius:4px;color:#848e9c}
     .hdr-r{display:flex;align-items:center;gap:8px}
     .remain{font-size:10px;color:#848e9c}
+    .clear-btn{background:none;border:none;color:#848e9c;font-size:14px;cursor:pointer;padding:2px 4px;display:flex;align-items:center;border-radius:4px;transition:color .2s,background .2s}
+    .clear-btn:hover{color:#f6465d;background:rgba(246,70,93,.1)}
+    .clear-btn svg{width:16px;height:16px}
     .close-btn{background:none;border:none;color:#848e9c;font-size:22px;cursor:pointer;line-height:1;padding:0 2px;display:flex;align-items:center}
     .close-btn:hover{color:#eaecef}
 
     .msgs{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-height:0}
     .empty{text-align:center;color:#848e9c;font-size:12px;padding:32px 0;line-height:1.8}
-    .msg{display:flex}
+    .msg{display:flex;position:relative}
     .msg.user{justify-content:flex-end}
     .msg.assistant{justify-content:flex-start}
     .bubble{max-width:85%;padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
     .msg.user .bubble{background:rgba(240,185,11,.15);color:#eaecef;border:1px solid rgba(240,185,11,.3)}
     .msg.assistant .bubble{background:#1e2329;color:#eaecef;border:1px solid #2b3139}
+    .del-btn{display:none;position:absolute;top:-6px;background:#2b3139;border:1px solid #363c46;color:#848e9c;width:18px;height:18px;border-radius:50%;font-size:11px;line-height:1;cursor:pointer;align-items:center;justify-content:center;padding:0;transition:color .15s,border-color .15s}
+    .msg.user .del-btn{left:-6px}
+    .msg.assistant .del-btn{right:-6px}
+    .msg:hover .del-btn{display:flex}
+    .del-btn:hover{color:#f6465d;border-color:#f6465d}
     .cursor{display:inline-block;width:6px;height:14px;background:rgba(240,185,11,.6);margin-left:2px;vertical-align:middle;animation:blink 1s infinite}
     @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
@@ -84,8 +92,8 @@
     .send-btn:disabled{opacity:.4;cursor:default}
 
     @media(max-width:640px){
-      #btn{width:42px;height:42px;right:16px;bottom:${btnBottomMobile}}
-      #btn svg{width:20px;height:20px}
+      #btn{width:${SITE === 'go' ? '56px' : '42px'};height:${SITE === 'go' ? '56px' : '42px'};right:16px;bottom:${btnBottomMobile}}
+      #btn svg{width:${SITE === 'go' ? '26px' : '20px'};height:${SITE === 'go' ? '26px' : '20px'}}
       #panel{top:0;left:0;right:0;bottom:0;width:100%;height:100%;border-radius:0;border:none}
     }
   `;
@@ -108,6 +116,7 @@
       </div>
       <div class="hdr-r">
         <span class="remain" id="remain"></span>
+        <button class="clear-btn" id="clear-btn" title="清空对话"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
         <button class="close-btn" id="close-btn">&times;</button>
       </div>
     </div>
@@ -125,6 +134,7 @@
   const inputEl = shadow.getElementById('inp');
   const sendBtn = shadow.getElementById('send-btn');
   const remainEl = shadow.getElementById('remain');
+  const clearBtn = shadow.getElementById('clear-btn');
 
   function updateRemaining() { remainEl.textContent = remaining + '/20'; }
   updateRemaining();
@@ -142,21 +152,22 @@
       msgsEl.innerHTML = '<div class="empty">你好！我是 Hustle，AI 助手。<br>有任何使用问题都可以问我。</div>';
       return;
     }
-    msgsEl.innerHTML = messages.map(m => {
-      const streaming = m._streaming ? '<span class="cursor"></span>' : '';
-      return `<div class="msg ${m.role}"><div class="bubble">${escHtml(m.content)}${streaming}</div></div>`;
+    msgsEl.innerHTML = messages.map(function(m) {
+      var streaming = m._streaming ? '<span class="cursor"></span>' : '';
+      var delBtn = (m.id && !m._streaming) ? '<button class="del-btn" data-id="' + m.id + '">×</button>' : '';
+      return '<div class="msg ' + m.role + '"><div class="bubble">' + escHtml(m.content) + streaming + '</div>' + delBtn + '</div>';
     }).join('');
     scrollBottom();
   }
 
   // ── Toggle ──
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', function() {
     open = true;
     btn.style.display = 'none';
     panel.classList.add('open');
     loadHistory();
   });
-  shadow.getElementById('close-btn').addEventListener('click', () => {
+  shadow.getElementById('close-btn').addEventListener('click', function() {
     open = false;
     btn.style.display = 'flex';
     panel.classList.remove('open');
@@ -166,20 +177,56 @@
   async function loadHistory() {
     if (loaded) return;
     try {
-      const r = await fetch(API_BASE + '/chat/history?site=' + SITE, { headers: authHeaders() });
+      var r = await fetch(API_BASE + '/chat/history?site=' + SITE, { headers: authHeaders() });
       if (!r.ok) return;
-      const d = await r.json();
-      messages = d.messages || [];
-      remaining = d.remaining ?? 20;
+      var d = await r.json();
+      messages = (d.messages || []).map(function(m) {
+        return { id: m.id, role: m.role, content: m.content };
+      });
+      remaining = d.remaining != null ? d.remaining : 20;
       loaded = true;
       updateRemaining();
       renderMessages();
     } catch (e) { console.error('hustle-chat history', e); }
   }
 
+  // ── Delete single message ──
+  msgsEl.addEventListener('click', async function(e) {
+    var target = e.target.closest('.del-btn');
+    if (!target) return;
+    var msgId = target.getAttribute('data-id');
+    if (!msgId) return;
+    try {
+      var r = await fetch(API_BASE + '/chat/messages/' + msgId, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (r.ok) {
+        messages = messages.filter(function(m) { return String(m.id) !== String(msgId); });
+        renderMessages();
+      }
+    } catch (e) { console.error('hustle-chat delete', e); }
+  });
+
+  // ── Clear all ──
+  clearBtn.addEventListener('click', async function() {
+    if (!messages.length) return;
+    if (!confirm('确定清空所有对话记录？此操作不可撤销。')) return;
+    try {
+      var r = await fetch(API_BASE + '/chat/history?site=' + SITE, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (r.ok) {
+        messages = [];
+        renderMessages();
+      }
+    } catch (e) { console.error('hustle-chat clear', e); }
+  });
+
   // ── Send ──
   async function send() {
-    const msg = inputEl.value.trim();
+    var msg = inputEl.value.trim();
     if (!msg || sending) return;
     if (remaining <= 0) { alert('每小时最多提问 20 次，请稍后再试'); return; }
 
@@ -189,44 +236,44 @@
     sendBtn.textContent = '…';
 
     messages.push({ role: 'user', content: msg });
-    const assistantMsg = { role: 'assistant', content: '', _streaming: true };
+    var assistantMsg = { role: 'assistant', content: '', _streaming: true };
     messages.push(assistantMsg);
     remaining = Math.max(0, remaining - 1);
     updateRemaining();
     renderMessages();
 
     try {
-      const resp = await fetch(API_BASE + '/chat', {
+      var resp = await fetch(API_BASE + '/chat', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ message: msg, site: SITE }),
       });
 
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
+        var err = await resp.json().catch(function() { return {}; });
         assistantMsg.content = err.detail || '请求失败，请重试';
         assistantMsg._streaming = false;
         renderMessages();
         return;
       }
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
 
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
         while (buffer.includes('\n')) {
-          const idx = buffer.indexOf('\n');
-          const line = buffer.slice(0, idx).trim();
+          var idx = buffer.indexOf('\n');
+          var line = buffer.slice(0, idx).trim();
           buffer = buffer.slice(idx + 1);
           if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
+          var payload = line.slice(5).trim();
           if (payload === '[DONE]') break;
           try {
-            const obj = JSON.parse(payload);
+            var obj = JSON.parse(payload);
             if (obj.content) { assistantMsg.content += obj.content; renderMessages(); }
             if (obj.error) { assistantMsg.content += '\n⚠ ' + obj.error; }
           } catch (e) {}
@@ -240,9 +287,10 @@
       sendBtn.disabled = false;
       sendBtn.textContent = '发送';
       renderMessages();
+      setTimeout(function() { loaded = false; loadHistory(); }, 800);
     }
   }
 
   sendBtn.addEventListener('click', send);
-  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+  inputEl.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); send(); } });
 })();

@@ -249,7 +249,7 @@ function closeRisk() {
 /* 移动端优化 */
 @media (orientation: portrait), (max-width: 750px) {
   .floating-buttons-container {
-    bottom: 16px;
+    bottom: 80px; /* 上移，为AI客服浮动球腾出空间 */
     right: 16px;
   }
 

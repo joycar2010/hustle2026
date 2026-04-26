@@ -21,6 +21,9 @@
         </div>
         <div class="flex items-center gap-2">
           <span class="text-[10px] text-text-tertiary">{{ remaining }}/20</span>
+          <button @click="clearAll" class="text-text-tertiary hover:text-red-500 transition-colors p-0.5 rounded hover:bg-red-500/10" title="清空对话">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
           <button @click="toggle" class="text-text-tertiary hover:text-text-primary text-lg leading-none">&times;</button>
         </div>
       </div>
@@ -30,14 +33,20 @@
         <div v-if="!messages.length" class="text-center text-text-tertiary text-xs py-8">
           你好！我是 Hustle，OpenCLAW 控制台 AI 助手。<br>有任何使用问题都可以问我。
         </div>
-        <div v-for="msg in messages" :key="msg.id || msg._id"
-          :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+        <div v-for="(msg, idx) in messages" :key="msg.id || msg._id"
+          :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
+          class="group relative">
           <div :class="[
-            'max-w-[85%] px-3 py-2 rounded-lg text-xs leading-relaxed whitespace-pre-wrap',
+            'max-w-[85%] px-3 py-2 rounded-lg text-xs leading-relaxed whitespace-pre-wrap break-words',
             msg.role === 'user'
               ? 'bg-primary/15 text-text-primary border border-primary/30'
               : 'bg-dark-200 text-text-primary border border-border-primary'
           ]">{{ msg.content }}<span v-if="msg._streaming" class="inline-block w-1.5 h-3.5 bg-primary/60 ml-0.5 animate-pulse align-middle"></span></div>
+          <button v-if="msg.id && !msg._streaming" @click="deleteMsg(msg.id)"
+            :class="[
+              'hidden group-hover:flex absolute -top-1.5 w-[18px] h-[18px] rounded-full bg-dark-200 border border-border-primary text-text-tertiary text-[11px] items-center justify-center cursor-pointer hover:text-red-500 hover:border-red-500 transition-colors',
+              msg.role === 'user' ? '-left-1.5' : '-right-1.5'
+            ]">×</button>
         </div>
       </div>
 
@@ -58,9 +67,10 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick } from 'vue'
 import api from '@/api'
 
+const SITE = 'auto'
 const open = ref(false)
 const input = ref('')
 const messages = ref([])
@@ -79,8 +89,8 @@ function scrollBottom() {
 async function loadHistory() {
   if (loaded) return
   try {
-    const r = await api.get('/api/v1/agent/chat/history', { params: { site: 'auto' } })
-    messages.value = r.data.messages || []
+    const r = await api.get('/api/v1/agent/chat/history', { params: { site: SITE } })
+    messages.value = (r.data.messages || []).map(m => ({ id: m.id, role: m.role, content: m.content }))
     remaining.value = r.data.remaining ?? 20
     loaded = true
     scrollBottom()
@@ -90,6 +100,26 @@ async function loadHistory() {
 function toggle() {
   open.value = !open.value
   if (open.value) { loadHistory() }
+}
+
+async function deleteMsg(msgId) {
+  try {
+    const r = await api.delete(`/api/v1/agent/chat/messages/${msgId}`)
+    if (r.status === 200) {
+      messages.value = messages.value.filter(m => String(m.id) !== String(msgId))
+    }
+  } catch (e) { console.error('hustle-chat delete', e) }
+}
+
+async function clearAll() {
+  if (!messages.value.length) return
+  if (!confirm('确定清空所有对话记录？此操作不可撤销。')) return
+  try {
+    const r = await api.delete('/api/v1/agent/chat/history', { params: { site: SITE } })
+    if (r.status === 200) {
+      messages.value = []
+    }
+  } catch (e) { console.error('hustle-chat clear', e) }
 }
 
 async function send() {
@@ -118,7 +148,7 @@ async function send() {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + token,
       },
-      body: JSON.stringify({ message: msg, site: 'auto' }),
+      body: JSON.stringify({ message: msg, site: SITE }),
     })
 
     if (!resp.ok) {
@@ -165,6 +195,7 @@ async function send() {
     assistantMsg._streaming = false
     sending.value = false
     scrollBottom()
+    setTimeout(() => { loaded = false; loadHistory() }, 800)
   }
 }
 </script>
