@@ -541,6 +541,61 @@ async def fetch_symbol_from_platform(
                     "product_type": "perpetual" if inst_type == "SWAP" else ("futures" if inst_type == "FUTURES" else "spot"),
                 }
 
+            if name == "bitget":
+                if pt in ("perpetual", "futures"):
+                    r = await cli.get("https://api.bitget.com/api/v2/mix/market/contracts",
+                                      params={"productType": "USDT-FUTURES"})
+                    r.raise_for_status()
+                    arr = r.json().get("data", []) or []
+                    it = next((x for x in arr if x.get("symbol") == sym), None)
+                    if not it:
+                        raise HTTPException(status_code=404, detail=f"Bitget USDT-FUTURES 未找到 {sym}")
+                    qty_step = float(it.get("minTradeNum") or 0.01)
+                    price_step = float(it.get("priceEndStep") or 0.01)
+                    contract_unit = float(it.get("sizeMultiplier") or 1)
+                    return {
+                        "base_asset": it.get("baseCoin") or "",
+                        "quote_asset": it.get("quoteCoin") or "USDT",
+                        "contract_unit": contract_unit,
+                        "qty_unit": it.get("baseCoin") or "Cont",
+                        "qty_precision": _num_precision(qty_step),
+                        "qty_step": qty_step,
+                        "min_qty": float(it.get("minTradeNum") or qty_step),
+                        "price_precision": _num_precision(price_step),
+                        "price_step": price_step,
+                        "maker_fee_rate": float(it.get("makerFeeRate") or 0.0002),
+                        "taker_fee_rate": float(it.get("takerFeeRate") or 0.0006),
+                        "margin_rate_initial": 1.0 / float(it.get("maxLeverage") or 50),
+                        "product_type": "perpetual",
+                    }
+                elif pt == "spot":
+                    r = await cli.get("https://api.bitget.com/api/v2/spot/public/symbols",
+                                      params={"symbol": sym_raw})
+                    r.raise_for_status()
+                    arr = r.json().get("data", []) or []
+                    it = next((x for x in arr if x.get("symbol") == sym_raw or x.get("symbol") == sym), None)
+                    if not it:
+                        raise HTTPException(status_code=404, detail=f"Bitget Spot 未找到 {sym_raw}")
+                    qty_prec = int(it.get("quantityPrecision", 4))
+                    price_prec = int(it.get("pricePrecision", 2))
+                    qty_step = 10 ** (-qty_prec)
+                    price_step = 10 ** (-price_prec)
+                    return {
+                        "base_asset": it.get("baseCoin") or "",
+                        "quote_asset": it.get("quoteCoin") or "USDT",
+                        "contract_unit": 1,
+                        "qty_unit": it.get("baseCoin") or "",
+                        "qty_precision": qty_prec,
+                        "qty_step": qty_step,
+                        "min_qty": float(it.get("minTradeAmount") or qty_step),
+                        "price_precision": price_prec,
+                        "price_step": price_step,
+                        "maker_fee_rate": 0.001,
+                        "taker_fee_rate": 0.001,
+                        "margin_rate_initial": 1.0,
+                        "product_type": "spot",
+                    }
+
             raise HTTPException(status_code=400, detail=f"平台 {plat.platform_name} 暂不支持自动拉取，请手动填写（MT5/IC Markets 可在 MT5 终端查询）")
 
         except httpx.HTTPStatusError as e:

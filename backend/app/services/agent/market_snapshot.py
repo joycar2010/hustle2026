@@ -27,15 +27,20 @@ _spread_windows: Dict[int, deque] = {}
 _spread_window: deque = deque(maxlen=360)
 
 GO_SPREAD_URL_TMPL = 'http://127.0.0.1:8080/api/v1/market/spread?pair={pair}'
-BINANCE_PREMIUM_URL = 'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=XAUUSDT'
+BINANCE_PREMIUM_URL_TMPL = 'https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}'
+OKX_FUNDING_URL_TMPL = 'https://www.okx.com/api/v5/public/funding-rate?instId={inst_id}'
 
 A_PLATFORM_ID = 1
 A_SYMBOL_PREFIXES = ('XAUUSDT',)
 B_PLATFORM_ID = 2
 B_SYMBOL_PREFIXES = ('XAUUSD+', 'XAUUSD')
 
+_PLATFORM_DISPLAY = {1: 'Binance', 2: 'Bybit', 3: 'IC Markets', 4: 'Gate.io', 5: 'OKX', 6: 'Bitget'}
+
 _funding_cache: Tuple[float, float] = (0.0, 0.0)
+_funding_cache_by_target: Dict[int, Tuple[float, float]] = {}
 _funding_history: deque = deque(maxlen=3)
+_funding_history_by_target: Dict[int, deque] = {}
 _swap_cache: Tuple[float, float, float] = (0.0, 0.0, 0.0)
 _conversion_cache: Tuple[float, float] = (100.0, 0.0)
 FUNDING_TTL = 60
@@ -74,30 +79,68 @@ def spread_30m_avg(target_id: Optional[int] = None) -> float:
     return sum(_spread_window) / len(_spread_window)
 
 
-async def fetch_funding_rate() -> float:
+async def fetch_funding_rate(ctx=None) -> float:
     global _funding_cache
-    val, ts = _funding_cache
-    if time.time() - ts < FUNDING_TTL:
-        return val
+    tid = ctx.target_id if ctx else 0
+    if tid and tid in _funding_cache_by_target:
+        val, ts = _funding_cache_by_target[tid]
+        if time.time() - ts < FUNDING_TTL:
+            return val
+    elif not tid:
+        val, ts = _funding_cache
+        if time.time() - ts < FUNDING_TTL:
+            return val
+
+    prev_val = (_funding_cache_by_target.get(tid, (0.0, 0.0))[0] if tid
+                else _funding_cache[0])
+    hist = _funding_history_by_target.setdefault(tid, deque(maxlen=3)) if tid else _funding_history
+
+    platform_id = ctx.a_platform_id if ctx else 1
+    a_symbol = ctx.a_symbol if ctx else 'XAUUSDT'
+    new_val = prev_val
+
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as s:
-            async with s.get(BINANCE_PREMIUM_URL) as r:
-                if r.status == 200:
-                    data = await r.json()
-                    new_val = float(data.get('lastFundingRate', 0) or 0)
-                    if not _funding_history or abs(new_val - (_funding_history[-1] if _funding_history else 0)) > 1e-8:
-                        _funding_history.append(new_val)
-                    _funding_cache = (new_val, time.time())
-                    return new_val
+        if platform_id == 6:
+            from app.services.bitget_client import BitgetClient
+            async with BitgetClient() as bg:
+                r = await bg.get_funding_rate(a_symbol)
+                if bg._ok(r) and r.get('data'):
+                    new_val = float(r['data'][0].get('fundingRate', 0) or 0)
+        elif platform_id == 5:
+            inst_id = a_symbol.replace('USDT', '-USDT-SWAP')
+            url = OKX_FUNDING_URL_TMPL.format(inst_id=inst_id)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as s:
+                async with s.get(url) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        if data.get('data'):
+                            new_val = float(data['data'][0].get('fundingRate', 0) or 0)
+        else:
+            url = BINANCE_PREMIUM_URL_TMPL.format(symbol=a_symbol)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as s:
+                async with s.get(url) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        new_val = float(data.get('lastFundingRate', 0) or 0)
     except Exception as e:
-        logger.warning(f'[snapshot] funding fetch failed: {e}')
-    return val
+        logger.warning(f'[snapshot] funding fetch failed (platform={platform_id}): {e}')
+
+    if not hist or abs(new_val - (hist[-1] if hist else 0)) > 1e-8:
+        hist.append(new_val)
+
+    if tid:
+        _funding_cache_by_target[tid] = (new_val, time.time())
+    else:
+        _funding_cache = (new_val, time.time())
+    return new_val
 
 
-def funding_rate_trend() -> str:
-    if len(_funding_history) < 2:
+def funding_rate_trend(ctx=None) -> str:
+    tid = ctx.target_id if ctx else 0
+    hist = _funding_history_by_target.get(tid, _funding_history) if tid else _funding_history
+    if len(hist) < 2:
         return 'insufficient_data'
-    vals = list(_funding_history)
+    vals = list(hist)
     if all(vals[i] < vals[i + 1] for i in range(len(vals) - 1)):
         return 'rising'
     if all(vals[i] > vals[i + 1] for i in range(len(vals) - 1)):
@@ -238,7 +281,7 @@ async def build_snapshot(db: AsyncSession, ctx=None) -> Optional[MarketState]:
         return None
     push_spread_sample(spread.get('forward_entry_spread', 0.0), target_id=tid)
 
-    funding = await fetch_funding_rate()
+    funding = await fetch_funding_rate(ctx)
     swap_long, swap_short = await fetch_mt5_swap()
     conv = await fetch_conversion_factor(db, ctx)
     pos_eq = await collect_xau_positions_and_equity(db, ctx)
@@ -265,7 +308,12 @@ async def build_snapshot(db: AsyncSession, ctx=None) -> Optional[MarketState]:
     )
 
 
-def snapshot_to_user_prompt(s: MarketState) -> str:
+def snapshot_to_user_prompt(s: MarketState, ctx=None) -> str:
+    a_name = _PLATFORM_DISPLAY.get(ctx.a_platform_id, 'A腿') if ctx else 'Binance'
+    b_name = _PLATFORM_DISPLAY.get(ctx.b_platform_id, 'B腿') if ctx else 'MT5'
+    a_sym = ctx.a_symbol if ctx else 'XAUUSDT'
+    b_sym = ctx.b_symbol if ctx else 'XAUUSD+'
+
     from datetime import timedelta, timezone as tz
     bjt = tz(timedelta(hours=8))
     bjt_str = datetime.fromtimestamp(s.now_utc_ms / 1000, tz=tz.utc).astimezone(bjt).strftime('%Y-%m-%d %H:%M:%S BJT')
@@ -280,7 +328,7 @@ def snapshot_to_user_prompt(s: MarketState) -> str:
         'mixed': '混合/异常',
     }.get(s.position_direction, '未知')
 
-    fr_trend = funding_rate_trend()
+    fr_trend = funding_rate_trend(ctx)
     fr_trend_label = {'rising': '上升', 'falling': '下降', 'stable': '稳定',
                       'insufficient_data': '数据不足'}.get(fr_trend, fr_trend)
     fr_history_str = ', '.join(f'{v * 100:.4f}%' for v in s.funding_rate_history) if s.funding_rate_history else '无'
@@ -299,13 +347,13 @@ def snapshot_to_user_prompt(s: MarketState) -> str:
         f'当前市场快照({bjt_str} {weekday_str}):\n'
         f'- 实时点差(forward_entry): {s.spread_now:.3f}\n'
         f'- 半小时均值点差: {s.spread_30m_avg:.3f}\n'
-        f'- Binance XAUUSDT 资金费率(本期): {s.funding_rate * 100:.4f}%\n'
+        f'- {a_name} {a_sym} 资金费率(本期): {s.funding_rate * 100:.4f}%\n'
         f'- 资金费率趋势: {fr_trend_label} (近3期: {fr_history_str})\n'
-        f'- MT5 XAUUSD+ 多头掉期: {s.swap_fee_long} USD/lot/day  空头掉期: {s.swap_fee_short} USD/lot/day'
+        f'- {b_name} {b_sym} 多头掉期: {s.swap_fee_long} USD/lot/day  空头掉期: {s.swap_fee_short} USD/lot/day'
         f'{triple_swap_note}\n'
         f'- 当前持仓方向: {direction_label}\n'
-        f'- A 腿 Binance 净仓位: {s.a_size} 张(per oz)\n'
-        f'- B 腿 MT5 净仓位: {s.b_size} 手(每手 {s.conversion_factor} oz)\n'
+        f'- A 腿 {a_name} 净仓位: {s.a_size} 张(per oz)\n'
+        f'- B 腿 {b_name} 净仓位: {s.b_size} 手(每手 {s.conversion_factor} oz)\n'
         f'- 双腿偏差(oz 折算): {abs(s.a_size - s.b_size * s.conversion_factor):.2f}\n'
         f'- 总权益: {s.total_equity:.2f} USDT  A 腿: {s.a_equity:.2f}  B 腿: {s.b_equity:.2f}\n'
         f'- 今日累计交易量(agent 已执行): {s.daily_traded_volume:.2f}\n\n'

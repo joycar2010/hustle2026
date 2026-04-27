@@ -58,7 +58,7 @@
             <div v-if="pair.platform_a" class="space-y-1">
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">平台</span><span class="text-xs font-medium">{{ pair.platform_a.display_name }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">产品</span><span class="text-xs font-mono text-primary">{{ pair.symbol_a?.symbol }}</span></div>
-              <div class="flex justify-between items-center"><span class="text-xs text-text-tertiary">产品类型</span><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="{ 'perpetual': 'bg-blue-900/40 text-blue-300', 'futures': 'bg-orange-900/40 text-orange-300', 'mt5': 'bg-purple-900/40 text-purple-300', 'spot': 'bg-green-900/40 text-green-300' }[pair.symbol_a?.product_type] || 'bg-gray-900/40 text-gray-300'">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货'})[pair.symbol_a?.product_type] || (pair.symbol_a?.product_type || '--') }}</span></div>
+              <div class="flex justify-between items-center"><span class="text-xs text-text-tertiary">产品类型</span><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="{ 'perpetual': 'bg-blue-900/40 text-blue-300', 'futures': 'bg-orange-900/40 text-orange-300', 'mt5': 'bg-purple-900/40 text-purple-300', 'spot': 'bg-green-900/40 text-green-300', 'margin_isolated': 'bg-violet-900/40 text-violet-300', 'margin_cross': 'bg-violet-900/40 text-violet-300' }[pair.symbol_a?.product_type] || 'bg-gray-900/40 text-gray-300'">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货',margin_isolated:'逐仓杠杆',margin_cross:'全仓杠杆'})[pair.symbol_a?.product_type] || (pair.symbol_a?.product_type || '--') }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">合约面值</span><span class="text-xs font-mono">{{ pair.symbol_a?.contract_unit }} {{ pair.symbol_a?.qty_unit }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">数量精度</span><span class="text-xs font-mono">{{ pair.symbol_a?.qty_precision }}位 / 步长{{ pair.symbol_a?.qty_step }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">价格精度</span><span class="text-xs font-mono">{{ pair.symbol_a?.price_precision }}位 / tick {{ pair.symbol_a?.price_step }}</span></div>
@@ -71,7 +71,7 @@
             <div v-if="pair.platform_b" class="space-y-1">
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">平台</span><span class="text-xs font-medium">{{ pair.platform_b.display_name }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">产品</span><span class="text-xs font-mono text-primary">{{ pair.symbol_b?.symbol }}</span></div>
-              <div class="flex justify-between items-center"><span class="text-xs text-text-tertiary">产品类型</span><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="{ 'perpetual': 'bg-blue-900/40 text-blue-300', 'futures': 'bg-orange-900/40 text-orange-300', 'mt5': 'bg-purple-900/40 text-purple-300', 'spot': 'bg-green-900/40 text-green-300' }[pair.symbol_b?.product_type] || 'bg-gray-900/40 text-gray-300'">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货'})[pair.symbol_b?.product_type] || (pair.symbol_b?.product_type || '--') }}</span></div>
+              <div class="flex justify-between items-center"><span class="text-xs text-text-tertiary">产品类型</span><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="{ 'perpetual': 'bg-blue-900/40 text-blue-300', 'futures': 'bg-orange-900/40 text-orange-300', 'mt5': 'bg-purple-900/40 text-purple-300', 'spot': 'bg-green-900/40 text-green-300', 'margin_isolated': 'bg-violet-900/40 text-violet-300', 'margin_cross': 'bg-violet-900/40 text-violet-300' }[pair.symbol_b?.product_type] || 'bg-gray-900/40 text-gray-300'">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货',margin_isolated:'逐仓杠杆',margin_cross:'全仓杠杆'})[pair.symbol_b?.product_type] || (pair.symbol_b?.product_type || '--') }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">合约面值</span><span class="text-xs font-mono">{{ pair.symbol_b?.contract_unit }} {{ pair.symbol_b?.qty_unit }}/手</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">数量精度</span><span class="text-xs font-mono">{{ pair.symbol_b?.qty_precision }}位 / 步长{{ pair.symbol_b?.qty_step }}</span></div>
               <div class="flex justify-between"><span class="text-xs text-text-tertiary">价格精度</span><span class="text-xs font-mono">{{ pair.symbol_b?.price_precision }}位 / tick {{ pair.symbol_b?.price_step }}</span></div>
@@ -120,7 +120,7 @@
         <div class="bg-dark-100 rounded-lg border border-border-primary p-3">
           <div class="text-[10px] text-text-tertiary">类型分布</div>
           <div class="text-xs font-mono mt-0.5 text-text-secondary truncate">
-            <span v-for="(n,k) in symbolStats.byType" :key="k" class="mr-2">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货'})[k] || k }}:{{ n }}</span>
+            <span v-for="(n,k) in symbolStats.byType" :key="k" class="mr-2">{{ ({perpetual:'永续',futures:'交割',mt5:'MT5',spot:'现货',margin_isolated:'逐仓杠杆',margin_cross:'全仓杠杆'})[k] || k }}:{{ n }}</span>
             <span v-if="!Object.keys(symbolStats.byType).length">--</span>
           </div>
         </div>
@@ -165,7 +165,7 @@
               <td class="py-2 px-3 text-right font-mono text-xs">{{ s.min_qty }}</td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ s.price_precision }}位</td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ (s.maker_fee_rate*100).toFixed(2) }}%/{{ (s.taker_fee_rate*100).toFixed(2) }}%</td>
-              <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-xs" :class="s.product_type === 'perpetual' ? 'bg-blue-900/40 text-blue-300' : s.product_type === 'futures' ? 'bg-orange-900/40 text-orange-300' : s.product_type === 'mt5' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-900/40 text-gray-300'">{{ {perpetual: '永续', futures: '交割', mt5: 'MT5', spot: '现货'}[s.product_type] || s.product_type || '--' }}</span></td>
+              <td class="py-2 px-3 text-center"><span class="px-1.5 py-0.5 rounded text-xs" :class="s.product_type === 'perpetual' ? 'bg-blue-900/40 text-blue-300' : s.product_type === 'futures' ? 'bg-orange-900/40 text-orange-300' : s.product_type === 'mt5' ? 'bg-purple-900/40 text-purple-300' : (s.product_type === 'margin_isolated' || s.product_type === 'margin_cross') ? 'bg-violet-900/40 text-violet-300' : s.product_type === 'spot' ? 'bg-green-900/40 text-green-300' : 'bg-gray-900/40 text-gray-300'">{{ {perpetual: '永续', futures: '交割', mt5: 'MT5', spot: '现货', margin_isolated: '逐仓杠杆', margin_cross: '全仓杠杆'}[s.product_type] || s.product_type || '--' }}</span></td>
               <td class="py-2 px-3 text-right font-mono text-xs">{{ (s.margin_rate_initial*100).toFixed(1) }}%</td>
               <td class="py-2 px-3 text-center">
                 <button @click="toggleSymbolActive(s)" :class="s.is_active ? 'text-success hover:text-red-400' : 'text-text-tertiary hover:text-success'" class="text-xs">{{ s.is_active ? '● 启用' : '○ 禁用' }}</button>
@@ -282,6 +282,7 @@
               <option value="perpetual">永续合约 (perpetual)</option>
               <option value="futures">交割合约 (futures)</option>
               <option value="spot">现货 (spot)</option>
+              <option value="margin_isolated">逐仓杠杆 (margin_isolated)</option>
             </select>
             <div class="text-[10px] text-text-tertiary mt-1">MT5/IC Markets 暂不支持自动拉取，需在编辑器里手动添加（编辑现有同平台品种作为模板）</div>
           </div>
@@ -338,6 +339,8 @@
               <option value="futures">交割合约</option>
               <option value="mt5">MT5</option>
               <option value="spot">现货</option>
+              <option value="margin_isolated">逐仓杠杆</option>
+              <option value="margin_cross">全仓杠杆</option>
             </select></div>
         </div>
         <div class="flex justify-end gap-2 mt-4">

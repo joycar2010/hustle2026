@@ -15,6 +15,7 @@ export const PlatformId = Object.freeze({
   IC_MARKETS: 3,
   GATE: 4,
   OKX: 5,
+  BITGET: 6,
 });
 
 const _ID_TO_KEY = Object.freeze({
@@ -23,6 +24,7 @@ const _ID_TO_KEY = Object.freeze({
   [PlatformId.IC_MARKETS]: 'ic_markets',
   [PlatformId.GATE]: 'gate',
   [PlatformId.OKX]: 'okx',
+  [PlatformId.BITGET]: 'bitget',
 });
 
 const _KEY_TO_ID = Object.freeze({
@@ -36,6 +38,8 @@ const _KEY_TO_ID = Object.freeze({
   gate_io: PlatformId.GATE,
   gateio: PlatformId.GATE,
   okx: PlatformId.OKX,
+  bitget: PlatformId.BITGET,
+  bg: PlatformId.BITGET,
 });
 
 export function platformKey(pid) {
@@ -62,6 +66,7 @@ export const PLATFORM_DISPLAY = Object.freeze({
   [PlatformId.IC_MARKETS]: '对冲账户',
   [PlatformId.GATE]: 'Gate',
   [PlatformId.OKX]: 'OKX',
+  [PlatformId.BITGET]: 'Bitget',
 });
 
 export const isBinance = (pid) => pid === PlatformId.BINANCE;

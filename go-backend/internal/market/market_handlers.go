@@ -35,7 +35,7 @@ func GetBinanceQuote(c *gin.Context) {
 		return
 	}
 
-	bid, ask, ts := GlobalTicks.Get(pair.ASymbol)
+	bid, ask, ts := GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 	if bid == 0 || ask == 0 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("No data for %s", pair.ASymbol)})
 		return

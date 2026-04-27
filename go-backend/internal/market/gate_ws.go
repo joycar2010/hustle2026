@@ -91,7 +91,7 @@ func connectGateWS(symbols []string) {
 				}
 			}
 			if bid > 0 && ask > 0 {
-				GlobalTicks.Update(contract, bid, ask)
+				GlobalTicks.Update(4, contract, bid, ask)
 				count++
 				if count <= 10 {
 					log.Printf("[GateWS] tick #%d: %s bid=%.4f ask=%.4f", count, contract, bid, ask)

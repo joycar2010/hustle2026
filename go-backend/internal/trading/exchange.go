@@ -24,6 +24,7 @@ const (
 	PlatformBinance = 1
 	PlatformBybit   = 2
 	PlatformOKX     = 5
+	PlatformBitget  = 6
 )
 
 // AccountCreds holds exchange credentials loaded from DB.
@@ -115,7 +116,7 @@ func loadCredsByPlatform(ctx context.Context, userID string, platformID int) (*A
 		 WHERE user_id=$1::uuid AND platform_id=$2 AND is_active=true
 		 LIMIT 1`,
 		userID, platformID,
-	).Scan(&c.AccountID, &c.PlatformID, &c.APIKey, &c.APISecret, &c.IsMT5, &pcRaw)
+	).Scan(&c.AccountID, &c.PlatformID, &c.APIKey, &c.APISecret, &c.IsMT5, &c.Passphrase, &pcRaw)
 	if len(pcRaw) > 0 && string(pcRaw) != "" {
 		c.ProxyConfig = pcRaw
 	}
@@ -136,7 +137,7 @@ func loadAllCreds(ctx context.Context, userID string) ([]*AccountCreds, error) {
 	for rows.Next() {
 		c := &AccountCreds{}
 		var pcRaw []byte
-		rows.Scan(&c.AccountID, &c.PlatformID, &c.APIKey, &c.APISecret, &c.IsMT5, &pcRaw)
+		rows.Scan(&c.AccountID, &c.PlatformID, &c.APIKey, &c.APISecret, &c.IsMT5, &c.Passphrase, &pcRaw)
 		if len(pcRaw) > 0 && string(pcRaw) != "" {
 			c.ProxyConfig = pcRaw
 		}

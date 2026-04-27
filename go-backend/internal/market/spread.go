@@ -12,18 +12,18 @@ import (
 // SpreadData is the arbitrage spread payload
 type SpreadData struct {
 	PairCode     string `json:"pair_code,omitempty"`
-	BinanceQuote struct {
+	AQuote struct {
 		Symbol string  `json:"symbol"`
 		Bid    float64 `json:"bid_price"`
 		Ask    float64 `json:"ask_price"`
 		Ts     int64   `json:"timestamp"`
-	} `json:"binance_quote"`
-	BybitQuote struct {
+	} `json:"a_quote"`
+	BQuote struct {
 		Symbol string  `json:"symbol"`
 		Bid    float64 `json:"bid_price"`
 		Ask    float64 `json:"ask_price"`
 		Ts     int64   `json:"timestamp"`
-	} `json:"bybit_quote"`
+	} `json:"b_quote"`
 	ForwardEntrySpread float64 `json:"forward_entry_spread"`
 	ForwardExitSpread  float64 `json:"forward_exit_spread"`
 	ReverseEntrySpread float64 `json:"reverse_entry_spread"`
@@ -48,13 +48,13 @@ func GetSpread(c *gin.Context) {
 	var aBid, aAsk float64
 	switch pair.APlatformID {
 	case 1, 0: // Binance WS ticker (0 = legacy default)
-		aBid, aAsk, _ = GlobalTicks.Get(pair.ASymbol)
+		aBid, aAsk, _ = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 		if aBid == 0 || aAsk == 0 {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("Binance data not ready for %s", pair.ASymbol)})
 			return
 		}
 	case 4: // Gate — WS ticker with REST fallback
-		aBid, aAsk, _ = GlobalTicks.Get(pair.ASymbol)
+		aBid, aAsk, _ = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 		if aBid == 0 || aAsk == 0 {
 			gt, err := GetGateTick(pair.ASymbol)
 			if err != nil || gt.Bid == 0 || gt.Ask == 0 {
@@ -64,9 +64,15 @@ func GetSpread(c *gin.Context) {
 			aBid, aAsk = gt.Bid, gt.Ask
 		}
 	case 5: // OKX — WS ticker
-		aBid, aAsk, _ = GlobalTicks.Get(pair.ASymbol)
+		aBid, aAsk, _ = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 		if aBid == 0 || aAsk == 0 {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("OKX data not ready for %s", pair.ASymbol)})
+			return
+		}
+	case 6: // Bitget WS ticker
+		aBid, aAsk, _ = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
+		if aBid == 0 || aAsk == 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("Bitget data not ready for %s", pair.ASymbol)})
 			return
 		}
 	default:
@@ -83,14 +89,14 @@ func GetSpread(c *gin.Context) {
 
 	now := time.Now().UnixMilli()
 	sd := SpreadData{PairCode: pairCode, Timestamp: now}
-	sd.BinanceQuote.Symbol = pair.ASymbol
-	sd.BinanceQuote.Bid = binanceBid
-	sd.BinanceQuote.Ask = binanceAsk
-	sd.BinanceQuote.Ts = now
-	sd.BybitQuote.Symbol = pair.MT5Symbol
-	sd.BybitQuote.Bid = bybit.Bid
-	sd.BybitQuote.Ask = bybit.Ask
-	sd.BybitQuote.Ts = bybit.Ts
+	sd.AQuote.Symbol = pair.ASymbol
+	sd.AQuote.Bid = binanceBid
+	sd.AQuote.Ask = binanceAsk
+	sd.AQuote.Ts = now
+	sd.BQuote.Symbol = pair.MT5Symbol
+	sd.BQuote.Bid = bybit.Bid
+	sd.BQuote.Ask = bybit.Ask
+	sd.BQuote.Ts = bybit.Ts
 
 	sd.ForwardEntrySpread = bybit.Bid - binanceBid
 	sd.ForwardExitSpread = bybit.Ask - binanceAsk
@@ -107,9 +113,9 @@ func ComputeSpreadForPair(pair pairs.PairConfig) map[string]interface{} {
 	var ts int64
 	switch pair.APlatformID {
 	case 1, 0:
-		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.ASymbol)
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 	case 4: // Gate WS with REST fallback
-		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.ASymbol)
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 		if binanceBid == 0 || binanceAsk == 0 {
 			gt, err := GetGateTick(pair.ASymbol)
 			if err != nil {
@@ -118,7 +124,9 @@ func ComputeSpreadForPair(pair pairs.PairConfig) map[string]interface{} {
 			binanceBid, binanceAsk, ts = gt.Bid, gt.Ask, gt.Ts
 		}
 	case 5: // OKX WS
-		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.ASymbol)
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
+	case 6: // Bitget WS
+		binanceBid, binanceAsk, ts = GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 	default:
 		return nil
 	}

@@ -30,50 +30,72 @@ logger = logging.getLogger(__name__)
 NO_PROFIT_THRESHOLD_HOURS = 12
 TICK_INTERVAL_S = 60
 
-A_PLATFORM_ID = 1
-B_PLATFORM_ID = 2
+
 
 _last_alert_ts: float = 0.0
 _last_fingerprint: str = ''
 
 
 async def _aggregate_oldest_pos_and_pnl(db: AsyncSession) -> Tuple[Optional[datetime], float, float, float]:
-    """Return (oldest_open_time, combined_unrealized_pnl, a_size, b_size)."""
+    """Return (oldest_open_time, combined_unrealized_pnl, a_size, b_size) across all active targets."""
     from app.services.account_service import account_data_service
     from app.models.account import Account
+    from app.services.agent.scope import list_active_contexts
 
+    contexts = await list_active_contexts(db)
     accs = (await db.execute(select(Account).where(Account.is_active == True))).scalars().all()
-    if not accs:
+    if not accs or not contexts:
         return None, 0.0, 0.0, 0.0
 
     agg = await account_data_service.get_aggregated_account_data(list(accs))
+
+    in_scope_aids = set()
+    for ctx in contexts:
+        for a in accs:
+            if ctx.is_scope_match_account(a):
+                in_scope_aids.add(str(a.account_id))
+
     oldest_ms: Optional[int] = None
     combined_pnl = 0.0
     a_size = b_size = 0.0
 
-    for acc in agg.get('accounts', []):
-        pid = acc.get('platform_id')
-        if pid not in (A_PLATFORM_ID, B_PLATFORM_ID):
+    for acc_data in agg.get('accounts', []):
+        pid = acc_data.get('platform_id')
+        aid = str(acc_data.get('account_id', ''))
+        if aid not in in_scope_aids:
             continue
-        for pos in acc.get('positions', []):
+
+        for pos in acc_data.get('positions', []):
             sym = (pos.get('symbol') or '').upper()
-            if pid == A_PLATFORM_ID and not sym.startswith('XAUUSDT'):
+            matched = False
+            is_a_leg = False
+            for ctx in contexts:
+                a_prefix = ctx.a_symbol.upper()[:6]
+                b_prefix = ctx.b_symbol.upper()[:6]
+                if pid == ctx.a_platform_id and sym.startswith(a_prefix):
+                    matched = True
+                    is_a_leg = True
+                    break
+                if pid == ctx.b_platform_id and (sym.startswith(b_prefix) or sym.startswith(a_prefix)):
+                    matched = True
+                    is_a_leg = False
+                    break
+            if not matched:
                 continue
-            if pid == B_PLATFORM_ID and not sym.startswith('XAUUSD'):
-                continue
+
             size = float(pos.get('size', 0) or 0)
             upnl = float(pos.get('unrealized_pnl', 0) or 0)
             combined_pnl += upnl
-            if pid == A_PLATFORM_ID:
+            if is_a_leg:
                 a_size += size if pos.get('side', '').upper() in ('LONG', 'BUY') else -size
             else:
                 b_size += size if pos.get('side', '').upper() in ('LONG', 'BUY') else -size
-            # open_time: Binance uses 'updateTime' or 'open_time' ms; MT5 uses 'time' (seconds)
+
             ot = pos.get('open_time') or pos.get('updateTime') or pos.get('time')
             if ot:
                 try:
                     ot_ms = int(ot)
-                    if ot_ms < 1e12:  # seconds → ms
+                    if ot_ms < 1e12:
                         ot_ms *= 1000
                     if oldest_ms is None or ot_ms < oldest_ms:
                         oldest_ms = ot_ms
@@ -106,7 +128,7 @@ async def _tick():
         _last_fingerprint = fingerprint
         await broadcast(
             db, level='warn', category='no_profit_12h',
-            message=f'XAU 持仓 {age_h:.1f}h 未盈利 | A={a} B={b} | 合并浮亏 {pnl:.2f} USDT — 请评估是否离场',
+            message=f'持仓 {age_h:.1f}h 未盈利 | A={a} B={b} | 合并浮亏 {pnl:.2f} USDT — 请评估是否离场',
             payload={'age_h': age_h, 'combined_pnl': pnl, 'a_size': a, 'b_size': b,
                      'oldest_open_time': oldest.isoformat()},
         )

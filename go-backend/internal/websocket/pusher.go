@@ -52,7 +52,7 @@ func RunMultiPairTickPusher(registry *pairs.Registry, interval time.Duration) {
 	defer ticker.Stop()
 	for range ticker.C {
 		for _, pair := range registry.All() {
-			bid, ask, ts := market.GlobalTicks.Get(pair.ASymbol)
+			bid, ask, ts := market.GlobalTicks.Get(pair.APlatformID, pair.ASymbol)
 			if bid == 0 || ask == 0 {
 				continue
 			}

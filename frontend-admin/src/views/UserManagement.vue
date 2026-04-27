@@ -774,11 +774,11 @@
             </div>
           </div>
           <div v-if="accountForm.platform_id !== 1">
-            <label class="block text-xs text-text-tertiary mb-1">{{ accountForm.platform_id === 5 ? 'Passphrase *' : 'Passphrase（可选）' }}</label>
+            <label class="block text-xs text-text-tertiary mb-1">{{ (accountForm.platform_id === 5 || accountForm.platform_id === 6) ? 'Passphrase *' : 'Passphrase（可选）' }}</label>
             <div class="relative">
-              <input v-model="accountForm.passphrase" :type="secretVisible.passphrase ? 'text' : 'password'" :required="accountForm.platform_id === 5"
+              <input v-model="accountForm.passphrase" :type="secretVisible.passphrase ? 'text' : 'password'" :required="accountForm.platform_id === 5 || accountForm.platform_id === 6"
                 class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
-                :placeholder="isEditAccount && secretHasData.passphrase ? '••••••••（已设置）' : (accountForm.platform_id === 5 ? 'OKX API Passphrase（必填）' : 'API Passphrase')" />
+                :placeholder="isEditAccount && secretHasData.passphrase ? '••••••••（已设置）' : ((accountForm.platform_id === 5 || accountForm.platform_id === 6) ? 'API Passphrase（必填）' : 'API Passphrase')" />
               <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 <span v-if="isEditAccount && secretHasData.passphrase && !accountForm.passphrase" class="text-[10px] text-green-500">已设置</span>
                 <button type="button" v-if="accountForm.passphrase" @click="secretVisible.passphrase = !secretVisible.passphrase"

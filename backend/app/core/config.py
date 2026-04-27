@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     BYBIT_API_SECRET: str = ""
     BYBIT_TESTNET: bool = False
     BYBIT_API_BASE: str = "https://api.bybit.com"
+    BITGET_API_BASE: str = "https://api.bitget.com"
+    BITGET_WS_PUBLIC: str = "wss://ws.bitget.com/v2/ws/public"
+    BITGET_WS_PRIVATE: str = "wss://ws.bitget.com/v2/ws/private"
     BYBIT_WS_BASE: str = "wss://stream.bybit.com"
 
     # Proxy settings (optional, for accessing blocked APIs)

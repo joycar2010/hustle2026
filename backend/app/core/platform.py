@@ -19,6 +19,8 @@ class PlatformId(IntEnum):
     BYBIT = 2
     IC_MARKETS = 3
     GATE = 4
+    OKX = 5
+    BITGET = 6
 
     @property
     def key(self) -> str:
@@ -54,6 +56,8 @@ _ID_TO_KEY = {
     2: "bybit",
     3: "ic_markets",
     4: "gate",
+    5: "okx",
+    6: "bitget",
 }
 # 所有已知别名 → 规范枚举值。覆盖历史数据里可能出现的变体
 _KEY_TO_ID = {
@@ -66,6 +70,9 @@ _KEY_TO_ID = {
     "gate": PlatformId.GATE,
     "gate_io": PlatformId.GATE,
     "gateio": PlatformId.GATE,
+    "okx": PlatformId.OKX,
+    "bitget": PlatformId.BITGET,
+    "bg": PlatformId.BITGET,
 }
 
 # 常用跨平台集合

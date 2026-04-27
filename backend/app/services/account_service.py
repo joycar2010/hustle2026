@@ -1591,6 +1591,82 @@ class AccountDataService:
                     daily_pnl = 0.0
                 finally:
                     await _okx.close()
+            elif platform_id == 6:  # Bitget
+                def _bgf(v, d=0.0):
+                    try: return float(v) if v != '' and v is not None else d
+                    except (ValueError, TypeError): return d
+                from app.services.bitget_client import BitgetClient
+                _bg = BitgetClient(
+                    api_key=account.api_key or "",
+                    api_secret=account.api_secret or "",
+                    passphrase=account.passphrase or "",
+                    proxy_url=proxy_url,
+                )
+                try:
+                    _bg_accts_raw, _bg_pos_raw = await asyncio.gather(
+                        _bg.get_accounts(),
+                        _bg.get_positions(),
+                        return_exceptions=True,
+                    )
+                    if isinstance(_bg_accts_raw, Exception):
+                        logger.error(f"Bitget accounts failed for {account_id_str}: {_bg_accts_raw}")
+                        _bg_accts_raw = {}
+                    if isinstance(_bg_pos_raw, Exception):
+                        logger.error(f"Bitget positions failed for {account_id_str}: {_bg_pos_raw}")
+                        _bg_pos_raw = {}
+
+                    _bg_acct_list = _bg_accts_raw.get("data", []) if isinstance(_bg_accts_raw, dict) else []
+                    _total_eq = 0.0
+                    _avail = 0.0
+                    _upnl = 0.0
+                    for a in (_bg_acct_list if isinstance(_bg_acct_list, list) else []):
+                        _total_eq += _bgf(a.get("accountEquity"))
+                        _avail += _bgf(a.get("available"))
+                        _upnl += _bgf(a.get("unrealizedPL"))
+                    _frozen = _total_eq - _avail if _total_eq > _avail else 0.0
+
+                    balance = AccountBalance(
+                        total_assets=_total_eq - _upnl,
+                        available_balance=_avail,
+                        net_assets=_total_eq,
+                        frozen_assets=_frozen,
+                        margin_balance=_total_eq,
+                        unrealized_pnl=_upnl,
+                        total_positions=0,
+                        daily_pnl=0.0,
+                        funding_fee=0.0,
+                        commission_fee=0.0,
+                    )
+
+                    _bg_pos_list = _bg_pos_raw.get("data", []) if isinstance(_bg_pos_raw, dict) else []
+                    positions = []
+                    for p in (_bg_pos_list if isinstance(_bg_pos_list, list) else []):
+                        _sz = _bgf(p.get("total"))
+                        if _sz == 0:
+                            continue
+                        positions.append(AccountPosition(
+                            symbol=p.get("symbol", ""),
+                            side=p.get("holdSide", "long"),
+                            size=abs(_sz),
+                            entry_price=_bgf(p.get("openPriceAvg")),
+                            mark_price=_bgf(p.get("markPrice")),
+                            unrealized_pnl=_bgf(p.get("unrealizedPL")),
+                            leverage=int(_bgf(p.get("leverage"))),
+                        ))
+                    balance.total_positions = len(positions)
+                    daily_pnl = _upnl
+                except Exception as _bge:
+                    logger.error(f"Bitget account data failed for {account_id_str}: {_bge}")
+                    balance = AccountBalance(
+                        total_assets=0, available_balance=0, net_assets=0,
+                        frozen_assets=0, margin_balance=0, unrealized_pnl=0,
+                        total_positions=0, daily_pnl=0, funding_fee=0, commission_fee=0,
+                    )
+                    positions = []
+                    daily_pnl = 0.0
+                finally:
+                    await _bg.close()
+
             else:
                 raise ValueError(f"Unknown platform_id: {platform_id}")
 

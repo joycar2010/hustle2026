@@ -2,6 +2,7 @@ package market
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -30,16 +31,16 @@ var GlobalTicks = &MultiTick{
 }
 
 // Update stores a new tick for the given symbol (case-insensitive key).
-func (mt *MultiTick) Update(symbol string, bid, ask float64) {
-	key := strings.ToLower(symbol)
+func (mt *MultiTick) Update(platformID int, symbol string, bid, ask float64) {
+	key := fmt.Sprintf("%d:%s", platformID, strings.ToLower(symbol))
 	mt.mu.Lock()
 	mt.ticks[key] = &BinanceTick{Bid: bid, Ask: ask, Timestamp: time.Now().UnixMilli()}
 	mt.mu.Unlock()
 }
 
 // Get returns bid/ask/ts for a symbol. Returns zeros if not found.
-func (mt *MultiTick) Get(symbol string) (bid, ask float64, ts int64) {
-	key := strings.ToLower(symbol)
+func (mt *MultiTick) Get(platformID int, symbol string) (bid, ask float64, ts int64) {
+	key := fmt.Sprintf("%d:%s", platformID, strings.ToLower(symbol))
 	mt.mu.RLock()
 	defer mt.mu.RUnlock()
 	t := mt.ticks[key]
@@ -144,7 +145,7 @@ func connectBinanceWS(wsURL string) {
 		symbol := strings.ToUpper(tick.Symbol)
 
 		// Store in multi-symbol map
-		GlobalTicks.Update(symbol, bid, ask)
+		GlobalTicks.Update(1, symbol, bid, ask)
 
 		// Mirror to legacy GlobalTick for backward compat (XAUUSDT only)
 		if symbol == "XAUUSDT" {

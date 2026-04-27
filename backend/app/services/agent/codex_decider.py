@@ -45,7 +45,7 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
     kill = state['kill_switch']
     openclaw_on = state.get('openclaw_enabled', True)
 
-    user_prompt = snapshot_to_user_prompt(snap)
+    user_prompt = snapshot_to_user_prompt(snap, ctx)
     proposal_json: Optional[Dict[str, Any]] = None
     usage = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
     latency_ms = 0

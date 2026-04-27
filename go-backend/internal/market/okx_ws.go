@@ -83,7 +83,7 @@ func connectOKXWS(symbols []string) {
 		bid := parseFloat(toString(d["bidPx"]))
 		ask := parseFloat(toString(d["askPx"]))
 		if bid > 0 && ask > 0 {
-			GlobalTicks.Update(instId, bid, ask)
+			GlobalTicks.Update(5, instId, bid, ask)
 			count++
 			if count <= 10 {
 				log.Printf("[OKXWS] tick #%d: %s bid=%.4f ask=%.4f", count, instId, bid, ask)

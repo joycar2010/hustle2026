@@ -507,8 +507,8 @@ async function fetchHistory(page = 1) {
     const pg = !Array.isArray(body) ? body?.pagination : null
 
     historyData.value = raw.map((item, i) => {
-      const cexBid = item.binance_quote?.bid ?? item.binance_bid ?? 0
-      const mt5Ask = item.bybit_quote?.ask ?? item.bybit_ask ?? 0
+      const cexBid = item.a_quote?.bid ?? item.binance_quote?.bid ?? item.binance_bid ?? 0
+      const mt5Ask = item.b_quote?.ask ?? item.bybit_quote?.ask ?? item.bybit_ask ?? 0
       const fwd = item.forward_spread ?? (cexBid - mt5Ask)
       const rev = item.reverse_spread ?? (mt5Ask - cexBid)
       const dir = Math.abs(fwd) >= Math.abs(rev) ? 'forward' : 'reverse'
@@ -555,7 +555,7 @@ async function pollSpread() {
     if (d) {
       liveData.value[activePair.value] = {
         forwardEntry: d.forward_entry_spread ?? 0, reverseEntry: d.reverse_entry_spread ?? 0,
-        binanceBid: d.binance_quote?.bid_price ?? 0, bybitAsk: d.bybit_quote?.ask_price ?? 0,
+        binanceBid: d.a_quote?.bid_price ?? d.binance_quote?.bid_price ?? 0, bybitAsk: d.b_quote?.ask_price ?? d.bybit_quote?.ask_price ?? 0,
         ts: d.timestamp, hasData: true,
       }
     }

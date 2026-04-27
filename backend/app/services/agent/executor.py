@@ -285,6 +285,57 @@ async def _open_a_gate(a_acc, a_sym, a_side, a_qty, a_price,
             pass
 
 
+async def _open_a_bitget(a_acc, a_sym, a_side, a_qty, a_price,
+                       settle_timeout: float = 2.0, poll_interval: float = 0.5):
+    '''Bitget A-leg open: post_only limit → R2 market fallback.'''
+    from app.services.bitget_client import BitgetClient
+    from app.core.proxy_utils import build_proxy_url
+    client = BitgetClient(
+        api_key=a_acc.api_key, api_secret=a_acc.api_secret,
+        passphrase=getattr(a_acc, 'passphrase', '') or '',
+        proxy_url=build_proxy_url(getattr(a_acc, 'proxy_config', None)),
+    )
+    try:
+        bg_side = 'buy' if a_side.upper() in ('BUY', 'LONG') else 'sell'
+        trade_side = 'open'
+        r = await client.place_order(
+            symbol=a_sym, side=bg_side, trade_side=trade_side,
+            order_type='limit', size=str(a_qty), price=str(a_price),
+            force='post_only',
+        )
+        if not client._ok(r):
+            return {'success': False, 'error': f'bitget_place_failed:{r.get("msg")}', '_r2_action': 'none'}
+        order_id = (r.get('data') or {}).get('orderId')
+        if not order_id:
+            return {'success': False, 'error': 'bitget_no_order_id', '_r2_action': 'none'}
+
+        import time as _time
+        _start = _time.time()
+        while _time.time() - _start < settle_timeout:
+            await asyncio.sleep(poll_interval)
+            detail = await client.get_order(symbol=a_sym, order_id=order_id)
+            status = (detail.get('data') or {}).get('state', '')
+            if status in ('filled', 'partially_filled'):
+                return {'success': True, 'platform': 'bitget', 'orderId': order_id,
+                        'data': detail.get('data'), '_r2_action': 'limit_filled'}
+
+        # R2: cancel + market fallback
+        await client.cancel_order(symbol=a_sym, order_id=order_id)
+        await asyncio.sleep(0.2)
+        mr = await client.place_order(
+            symbol=a_sym, side=bg_side, trade_side=trade_side,
+            order_type='market', size=str(a_qty), force='ioc',
+        )
+        if client._ok(mr):
+            return {'success': True, 'platform': 'bitget',
+                    'orderId': (mr.get('data') or {}).get('orderId'),
+                    'data': mr.get('data'), '_r2_action': 'market_fallback'}
+        return {'success': False, 'error': f'bitget_market_fallback_failed:{mr.get("msg")}',
+                '_r2_action': 'market_fallback_failed'}
+    finally:
+        await client.close()
+
+
 async def _dispatch_a_open(a_acc, a_sym, a_side, a_pos, a_qty, a_price):
     '''Platform-dispatched A-leg open with R2 settler. Returns {success, _r2_action, ...}.'''
     if a_acc.platform_id == 1:
@@ -293,6 +344,8 @@ async def _dispatch_a_open(a_acc, a_sym, a_side, a_pos, a_qty, a_price):
         return await _open_a_bybit_perp(a_acc, a_sym, a_side, a_qty, a_price)
     if a_acc.platform_id == 4:
         return await _open_a_gate(a_acc, a_sym, a_side, a_qty, a_price)
+    if a_acc.platform_id == 6:
+        return await _open_a_bitget(a_acc, a_sym, a_side, a_qty, a_price)
     return {'success': False, 'error': f'unsupported a_platform:{a_acc.platform_id} is_mt5={getattr(a_acc, "is_mt5_account", None)}'}
 
 
@@ -342,6 +395,23 @@ async def _dispatch_a_reduce(a_acc, a_sym, side_indicator: str, qty: float):
                 await client.close()
             except Exception:
                 pass
+    if a_acc.platform_id == 6:
+        from app.services.bitget_client import BitgetClient
+        from app.core.proxy_utils import build_proxy_url
+        client = BitgetClient(
+            api_key=a_acc.api_key, api_secret=a_acc.api_secret,
+            passphrase=getattr(a_acc, 'passphrase', '') or '',
+            proxy_url=build_proxy_url(getattr(a_acc, 'proxy_config', None)),
+        )
+        try:
+            bg_side = 'sell' if side_indicator == 'sell_long' else 'buy'
+            r = await client.place_order(
+                symbol=a_sym, side=bg_side, trade_side='close',
+                order_type='market', size=str(qty), force='ioc',
+            )
+            return {'success': client._ok(r), 'platform': 'bitget', 'data': r.get('data')}
+        finally:
+            await client.close()
     return {'success': False, 'error': f'unsupported a_platform:{a_acc.platform_id}'}
 
 
@@ -476,6 +546,37 @@ async def _close_a_leg(account: Account, symbol: str, side_to_close: str) -> Dic
             except Exception:
                 pass
 
+    if account.platform_id == 6:
+        from app.services.bitget_client import BitgetClient
+        from app.core.proxy_utils import build_proxy_url
+        client = BitgetClient(
+            api_key=account.api_key, api_secret=account.api_secret,
+            passphrase=getattr(account, 'passphrase', '') or '',
+            proxy_url=build_proxy_url(getattr(account, 'proxy_config', None)),
+        )
+        try:
+            pos_resp = await client.get_positions()
+            for pos in (pos_resp.get('data') or []):
+                sym = (pos.get('symbol') or '').upper()
+                hold = (pos.get('holdSide') or '').lower()
+                total = float(pos.get('total', 0) or 0)
+                if sym != symbol.upper() or total == 0:
+                    continue
+                if (side_to_close == 'long' and hold == 'long') or                    (side_to_close == 'short' and hold == 'short'):
+                    bg_side = 'sell' if side_to_close == 'long' else 'buy'
+                    r = await client.place_order(
+                        symbol=symbol, side=bg_side, trade_side='close',
+                        order_type='market', size=str(total), force='ioc',
+                    )
+                    return {'success': client._ok(r), 'status': 'closed',
+                            'platform': 'bitget', 'data': r.get('data')}
+            return {'success': True, 'status': 'no_position', 'platform': 'bitget'}
+        finally:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
     return {'success': False, 'error': f'unsupported a_platform:{account.platform_id} is_mt5={getattr(account, "is_mt5_account", None)}',
             'platform': 'unknown'}
 
@@ -523,14 +624,51 @@ async def _emergency_unwind(
 
     try:
         if succeeded_leg == 'a':
-            # Binance: opposite side MARKET close
-            opposite = 'SELL' if original_side.upper() == 'BUY' else 'BUY'
-            pos_side = 'LONG' if original_side.upper() == 'BUY' else 'SHORT'
-            r = await order_executor.place_binance_order(
-                account=account, symbol=symbol, side=opposite,
-                order_type='MARKET', quantity=filled_qty, position_side=pos_side,
-            )
-            return {'unwound': True, 'leg': 'a', 'result': str(r)[:400]}
+            pid = getattr(account, 'platform_id', 1)
+            if pid == 6:
+                from app.services.bitget_client import BitgetClient
+                from app.core.proxy_utils import build_proxy_url
+                client = BitgetClient(
+                    api_key=account.api_key, api_secret=account.api_secret,
+                    passphrase=getattr(account, 'passphrase', '') or '',
+                    proxy_url=build_proxy_url(getattr(account, 'proxy_config', None)),
+                )
+                try:
+                    bg_side = 'sell' if original_side.upper() == 'BUY' else 'buy'
+                    r = await client.place_order(
+                        symbol=symbol, side=bg_side, trade_side='close',
+                        order_type='market', size=str(filled_qty), force='ioc',
+                    )
+                    return {'unwound': True, 'leg': 'a', 'platform': 'bitget', 'result': str(r)[:400]}
+                finally:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
+            elif pid == 4:
+                from app.services.gateio_client import GateioFuturesClient
+                from app.core.proxy_utils import build_proxy_url
+                client = GateioFuturesClient(
+                    api_key=account.api_key, api_secret=account.api_secret,
+                    proxy_url=build_proxy_url(getattr(account, 'proxy_config', None)),
+                )
+                try:
+                    opposite = 'ask' if original_side.upper() == 'BUY' else 'bid'
+                    r = await client.close_position(symbol=symbol, size=int(filled_qty))
+                    return {'unwound': True, 'leg': 'a', 'platform': 'gate', 'result': str(r)[:400]}
+                finally:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
+            else:
+                opposite = 'SELL' if original_side.upper() == 'BUY' else 'BUY'
+                pos_side = 'LONG' if original_side.upper() == 'BUY' else 'SHORT'
+                r = await order_executor.place_binance_order(
+                    account=account, symbol=symbol, side=opposite,
+                    order_type='MARKET', quantity=filled_qty, position_side=pos_side,
+                )
+                return {'unwound': True, 'leg': 'a', 'platform': 'binance', 'result': str(r)[:400]}
         else:  # b
             opposite = 'Sell' if original_side.lower() == 'buy' else 'Buy'
             r = await order_executor.place_bybit_order(
@@ -598,7 +736,7 @@ async def execute_proposal(db: AsyncSession, decision_id: int, proposal: Proposa
         pair_code = ctx.pair_code if ctx else 'XAU'
         spread = await fetch_spread(pair_code)
         # Take A-side quote from whichever exchange the pair routes to
-        a_price = (spread or {}).get('binance_quote', {}).get('ask_price')
+        a_price = (spread or {}).get('a_quote', (spread or {}).get('binance_quote', {})).get('ask_price')
         if not a_price:
             return {'ok': False, 'reason': f'cannot_fetch_a_price for {pair_code}'}
 

@@ -73,7 +73,14 @@ func main() {
 		go market.RunGateWS(gateSymbols)
 	}
 
-	log.Printf("[Server] Exchange WS started: Binance=%d OKX=%d Gate=%d", len(binanceSymbols), len(okxSymbols), len(gateSymbols))
+	// Bitget WS (platform 6)
+	bitgetSymbols := pairs.Global.SymbolsByPlatform(6)
+	if len(bitgetSymbols) > 0 {
+		log.Printf("[Server] Bitget WS: %d symbols %v", len(bitgetSymbols), bitgetSymbols)
+		go market.RunBitgetWS(bitgetSymbols)
+	}
+
+	log.Printf("[Server] Exchange WS started: Binance=%d OKX=%d Gate=%d Bitget=%d", len(binanceSymbols), len(okxSymbols), len(gateSymbols), len(bitgetSymbols))
 
 	go ws.GlobalHub.Run()
 	log.Println("[Server] WebSocket Hub started")

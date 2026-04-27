@@ -1163,7 +1163,7 @@ function accBorderClass(acc) {
   return 'border-border-primary'
 }
 
-function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX' }[id] || 'Unknown' }
+function platformName(id) { return { 1: 'Binance', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX', 6: 'Bitget' }[id] || 'Unknown' }
 function isMT5Online(c) { return c.online || c.connection_status === 'connected' }
 
 function fmtNum(v) {

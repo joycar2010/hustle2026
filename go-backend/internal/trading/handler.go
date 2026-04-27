@@ -371,8 +371,17 @@ func ManualOrder(c *gin.Context) {
 		body, status, err := PlaceOKXOrder(ctx, okxC, instId, req.Side, "limit", FormatQty(req.Quantity), FormatPrice(req.Price))
 		if err != nil { c.JSON(http.StatusBadGateway, gin.H{"detail": err.Error()}); return }
 		c.Data(status, "application/json", body)
+	case "bitget":
+		symbol := "XAUUSDT"
+		if pair != nil && pair.APlatformID == PlatformBitget { symbol = pair.ASymbol }
+		creds, err := loadCredsByPlatform(ctx, userID, PlatformBitget)
+		if err != nil { c.JSON(http.StatusNotFound, gin.H{"detail": "no Bitget account"}); return }
+		bgC := &BitgetCreds{APIKey: creds.APIKey, Secret: creds.APISecret, Passphrase: creds.Passphrase}
+		body, status, err := PlaceBitgetOrder(ctx, bgC, symbol, req.Side, "limit", FormatQty(req.Quantity), FormatPrice(req.Price))
+		if err != nil { c.JSON(http.StatusBadGateway, gin.H{"detail": err.Error()}); return }
+		c.Data(status, "application/json", body)
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "exchange must be binance, bybit, or okx"})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "exchange must be binance, bybit, okx, or bitget"})
 	}
 }
 
@@ -445,6 +454,35 @@ func ManualCloseAll(c *gin.Context) {
 				"status": st, "response": json.RawMessage(rb),
 			})
 		}
+	case PlatformBitget:
+		creds, err := loadCredsByPlatform(ctx, userID, PlatformBitget)
+		if err == nil {
+			bgC := &BitgetCreds{APIKey: creds.APIKey, Secret: creds.APISecret, Passphrase: creds.Passphrase}
+			posBody, _, err := GetBitgetPositions(ctx, bgC, "USDT-FUTURES")
+			if err == nil {
+				var posResp struct {
+					Data []struct {
+						Symbol  string `json:"symbol"`
+						Total   string `json:"total"`
+						HoldSide string `json:"holdSide"`
+					} `json:"data"`
+				}
+				if json.Unmarshal(posBody, &posResp) == nil {
+					for _, pos := range posResp.Data {
+						if pos.Total == "" || pos.Total == "0" { continue }
+						if pos.Symbol != pair.ASymbol { continue }
+						closeSide := "buy"
+						if pos.HoldSide == "short" { closeSide = "sell" }
+						rb, st, _ := PlaceBitgetOrder(ctx, bgC, pos.Symbol, closeSide, "market", pos.Total, "")
+						results = append(results, gin.H{
+							"exchange": "bitget", "symbol": pos.Symbol,
+							"hold_side": pos.HoldSide, "quantity": pos.Total,
+							"status": st, "response": json.RawMessage(rb),
+						})
+					}
+				}
+			}
+		}
 	}
 
 	// ── B-side: close all positions via MT5 bridge (taker mode) ──
@@ -513,8 +551,17 @@ func ManualCloseLong(c *gin.Context) {
 			if err != nil { c.JSON(502, gin.H{"detail": err.Error()}); return }
 			c.Data(st, "application/json", rb)
 		}
+	case "bitget":
+		symbol := "XAUUSDT"
+		if pair != nil && pair.APlatformID == PlatformBitget { symbol = pair.ASymbol }
+		creds, err := loadCredsByPlatform(ctx, userID, PlatformBitget)
+		if err != nil { c.JSON(404, gin.H{"detail": "no Bitget account"}); return }
+		bgC := &BitgetCreds{APIKey: creds.APIKey, Secret: creds.APISecret, Passphrase: creds.Passphrase}
+		body, st, err := PlaceBitgetOrder(ctx, bgC, symbol, "sell", "market", FormatQty(req.Quantity), "")
+		if err != nil { c.JSON(502, gin.H{"detail": err.Error()}); return }
+		c.Data(st, "application/json", body)
 	default:
-		c.JSON(400, gin.H{"detail": "exchange must be binance or bybit"})
+		c.JSON(400, gin.H{"detail": "exchange must be binance, bybit, or bitget"})
 	}
 }
 
@@ -549,8 +596,17 @@ func ManualCloseShort(c *gin.Context) {
 			if err != nil { c.JSON(502, gin.H{"detail": err.Error()}); return }
 			c.Data(st, "application/json", rb)
 		}
+	case "bitget":
+		symbol := "XAUUSDT"
+		if pair != nil && pair.APlatformID == PlatformBitget { symbol = pair.ASymbol }
+		creds, err := loadCredsByPlatform(ctx, userID, PlatformBitget)
+		if err != nil { c.JSON(404, gin.H{"detail": "no Bitget account"}); return }
+		bgC := &BitgetCreds{APIKey: creds.APIKey, Secret: creds.APISecret, Passphrase: creds.Passphrase}
+		body, st, err := PlaceBitgetOrder(ctx, bgC, symbol, "buy", "market", FormatQty(req.Quantity), "")
+		if err != nil { c.JSON(502, gin.H{"detail": err.Error()}); return }
+		c.Data(st, "application/json", body)
 	default:
-		c.JSON(400, gin.H{"detail": "exchange must be binance or bybit"})
+		c.JSON(400, gin.H{"detail": "exchange must be binance, bybit, or bitget"})
 	}
 }
 
@@ -570,6 +626,12 @@ func ManualCancelAll(c *gin.Context) {
 			okxC := &OKXCreds{APIKey: creds.APIKey, Secret: creds.APISecret, Passphrase: creds.Passphrase}
 			rb, st, _ := CancelAllOKXOrders(ctx, okxC, pair.ASymbol)
 			results = append(results, gin.H{"exchange": "okx", "symbol": pair.ASymbol, "status": st, "response": json.RawMessage(rb)})
+		}
+	} else if pair != nil && pair.APlatformID == PlatformBitget {
+		if creds, err := loadCredsByPlatform(ctx, userID, PlatformBitget); err == nil {
+			bgC := &BitgetCreds{APIKey: creds.APIKey, Secret: creds.APISecret, Passphrase: creds.Passphrase}
+			rb, st, _ := CancelAllBitgetOrders(ctx, bgC, pair.ASymbol)
+			results = append(results, gin.H{"exchange": "bitget", "symbol": pair.ASymbol, "status": st, "response": json.RawMessage(rb)})
 		}
 	} else {
 		symbol := "XAUUSDT"
