@@ -4,6 +4,7 @@ P1.5 implementation - all data sources wired:
   - Spread        : Go market /api/v1/market/spread?pair=XAU
   - 30m avg       : in-process deque (5s x 360 samples)
   - Funding rate  : Binance /fapi/v1/premiumIndex?symbol=XAUUSDT (60s cache)
+  - Funding history: last 3 distinct funding rate values for trend analysis
   - MT5 swap fees : direct mt5.symbol_info('XAUUSD+') (5 min cache)
   - Positions     : account_data_service singleton (60s shared cache)
   - Equity        : same source as positions
@@ -34,6 +35,7 @@ B_PLATFORM_ID = 2
 B_SYMBOL_PREFIXES = ('XAUUSD+', 'XAUUSD')
 
 _funding_cache: Tuple[float, float] = (0.0, 0.0)
+_funding_history: deque = deque(maxlen=3)
 _swap_cache: Tuple[float, float, float] = (0.0, 0.0, 0.0)
 _conversion_cache: Tuple[float, float] = (100.0, 0.0)
 FUNDING_TTL = 60
@@ -42,9 +44,6 @@ CONV_TTL = 600
 
 
 async def fetch_spread(pair_code: str = 'XAU') -> Optional[Dict[str, Any]]:
-    """Fetch spread for given pair. NOTE current Go service returns the same
-    (Binance XAUUSDT vs Bybit XAUUSD+) regardless of pair arg — future Go upgrade
-    needed for true per-pair routing (e.g. Gate vs Bybit for GBXAU)."""
     url = GO_SPREAD_URL_TMPL.format(pair=pair_code)
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as s:
@@ -85,12 +84,25 @@ async def fetch_funding_rate() -> float:
             async with s.get(BINANCE_PREMIUM_URL) as r:
                 if r.status == 200:
                     data = await r.json()
-                    val = float(data.get('lastFundingRate', 0) or 0)
-                    _funding_cache = (val, time.time())
-                    return val
+                    new_val = float(data.get('lastFundingRate', 0) or 0)
+                    if not _funding_history or abs(new_val - (_funding_history[-1] if _funding_history else 0)) > 1e-8:
+                        _funding_history.append(new_val)
+                    _funding_cache = (new_val, time.time())
+                    return new_val
     except Exception as e:
         logger.warning(f'[snapshot] funding fetch failed: {e}')
     return val
+
+
+def funding_rate_trend() -> str:
+    if len(_funding_history) < 2:
+        return 'insufficient_data'
+    vals = list(_funding_history)
+    if all(vals[i] < vals[i + 1] for i in range(len(vals) - 1)):
+        return 'rising'
+    if all(vals[i] > vals[i + 1] for i in range(len(vals) - 1)):
+        return 'falling'
+    return 'stable'
 
 
 MT5_BRIDGE_URL = 'http://172.31.14.113:8001'
@@ -121,7 +133,6 @@ async def fetch_mt5_swap() -> Tuple[float, float]:
 
 
 async def fetch_conversion_factor(db: AsyncSession, ctx=None) -> float:
-    """Returns conversion_factor of the target's pair, or 100 if no target."""
     if ctx is not None:
         return ctx.conversion_factor
     from app.services.agent.scope import list_active_contexts
@@ -130,11 +141,6 @@ async def fetch_conversion_factor(db: AsyncSession, ctx=None) -> float:
 
 
 async def collect_xau_positions_and_equity(db: AsyncSession, ctx=None) -> Dict[str, float]:
-    """Target-scoped aggregation: filter accounts by ScopeContext (user + pinned accounts)
-    and match positions by the target's actual A/B symbol names.
-
-    If ctx is None, aggregates across ALL enabled targets (used by /status overview).
-    """
     try:
         from app.services.account_service import account_data_service
         from app.models.account import Account
@@ -212,6 +218,18 @@ async def daily_traded_volume(db: AsyncSession, ctx=None) -> float:
     return float(row[0]) if row else 0.0
 
 
+def _compute_position_direction(a_size: float, b_size: float, conv: float) -> str:
+    a_net = a_size
+    b_net_oz = b_size * conv
+    if abs(a_net) < 0.01 and abs(b_net_oz) < 0.01:
+        return 'flat'
+    if a_net > 0.01 and b_net_oz < -0.01:
+        return 'forward'
+    if a_net < -0.01 and b_net_oz > 0.01:
+        return 'reverse'
+    return 'mixed'
+
+
 async def build_snapshot(db: AsyncSession, ctx=None) -> Optional[MarketState]:
     pair_code = ctx.pair_code if ctx else 'XAU'
     tid = ctx.target_id if ctx else None
@@ -225,6 +243,8 @@ async def build_snapshot(db: AsyncSession, ctx=None) -> Optional[MarketState]:
     conv = await fetch_conversion_factor(db, ctx)
     pos_eq = await collect_xau_positions_and_equity(db, ctx)
     vol = await daily_traded_volume(db, ctx)
+
+    direction = _compute_position_direction(pos_eq['a_size'], pos_eq['b_size'], conv)
 
     return MarketState(
         spread_now=spread.get('forward_entry_spread', 0.0),
@@ -240,17 +260,50 @@ async def build_snapshot(db: AsyncSession, ctx=None) -> Optional[MarketState]:
         b_equity=pos_eq['b_equity'],
         daily_traded_volume=vol,
         now_utc_ms=int(time.time() * 1000),
+        funding_rate_history=list(_funding_history),
+        position_direction=direction,
     )
 
 
 def snapshot_to_user_prompt(s: MarketState) -> str:
-    bjt_str = datetime.fromtimestamp(s.now_utc_ms/1000, tz=timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
+    from datetime import timedelta, timezone as tz
+    bjt = tz(timedelta(hours=8))
+    bjt_str = datetime.fromtimestamp(s.now_utc_ms / 1000, tz=tz.utc).astimezone(bjt).strftime('%Y-%m-%d %H:%M:%S BJT')
+    weekday_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+    bjt_dt = datetime.fromtimestamp(s.now_utc_ms / 1000, tz=tz.utc).astimezone(bjt)
+    weekday_str = weekday_names[bjt_dt.weekday()]
+
+    direction_label = {
+        'forward': '正向套利(A多B空)',
+        'reverse': '反向套利(A空B多)',
+        'flat': '无持仓',
+        'mixed': '混合/异常',
+    }.get(s.position_direction, '未知')
+
+    fr_trend = funding_rate_trend()
+    fr_trend_label = {'rising': '上升', 'falling': '下降', 'stable': '稳定',
+                      'insufficient_data': '数据不足'}.get(fr_trend, fr_trend)
+    fr_history_str = ', '.join(f'{v * 100:.4f}%' for v in s.funding_rate_history) if s.funding_rate_history else '无'
+
+    is_wed = bjt_dt.weekday() == 2
+    triple_swap_note = ''
+    if is_wed and bjt_dt.hour >= 20:
+        triple_cost_short = abs(s.swap_fee_short) * 3
+        triple_cost_long = abs(s.swap_fee_long) * 3
+        triple_swap_note = (
+            f'\n- [周三三倍过夜费提醒] 正向持仓隔夜掉期成本: {triple_cost_short:.4f} USD/lot '
+            f'| 反向持仓隔夜掉期成本: {triple_cost_long:.4f} USD/lot'
+        )
+
     return (
-        f'当前市场快照(北京时间 {bjt_str}):\n'
+        f'当前市场快照({bjt_str} {weekday_str}):\n'
         f'- 实时点差(forward_entry): {s.spread_now:.3f}\n'
         f'- 半小时均值点差: {s.spread_30m_avg:.3f}\n'
-        f'- Binance XAUUSDT 资金费率(本期): {s.funding_rate*100:.4f}% (绝对值: {s.funding_rate:.6f})\n'
-        f'- MT5 XAUUSD+ 多头掉期: {s.swap_fee_long} USD/lot/day  空头掉期: {s.swap_fee_short} USD/lot/day\n'
+        f'- Binance XAUUSDT 资金费率(本期): {s.funding_rate * 100:.4f}%\n'
+        f'- 资金费率趋势: {fr_trend_label} (近3期: {fr_history_str})\n'
+        f'- MT5 XAUUSD+ 多头掉期: {s.swap_fee_long} USD/lot/day  空头掉期: {s.swap_fee_short} USD/lot/day'
+        f'{triple_swap_note}\n'
+        f'- 当前持仓方向: {direction_label}\n'
         f'- A 腿 Binance 净仓位: {s.a_size} 张(per oz)\n'
         f'- B 腿 MT5 净仓位: {s.b_size} 手(每手 {s.conversion_factor} oz)\n'
         f'- 双腿偏差(oz 折算): {abs(s.a_size - s.b_size * s.conversion_factor):.2f}\n'

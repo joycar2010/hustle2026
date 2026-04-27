@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 from typing import Dict
+from datetime import datetime, timezone, timedelta
 from app.core.database import AsyncSessionLocal
 from app.services.agent.market_snapshot import fetch_spread, push_spread_sample, spread_30m_avg
 from app.services.agent.codex_decider import decide
@@ -25,6 +26,78 @@ COOLDOWN_S = 30
 HEARTBEAT_S = 60
 SPREAD_THRESHOLDS = [1.5, 1.8, 5.0]
 _last_avg = 0.0
+_BJT = timezone(timedelta(hours=8))
+_funding_cutoff_fired_today: float = 0.0
+
+
+async def _funding_rate_cutoff_tick(db) -> None:
+    """Monday 08:10 BJT: trigger forced re-evaluation for funding rate capture close."""
+    global _funding_cutoff_fired_today
+    bjt = datetime.now(_BJT)
+    if bjt.weekday() != 0:
+        return
+    if not (bjt.hour == 8 and 10 <= bjt.minute <= 15):
+        return
+    today_key = bjt.date().toordinal()
+    if _funding_cutoff_fired_today == today_key:
+        return
+    _funding_cutoff_fired_today = today_key
+    from app.services.agent.scope import list_active_contexts
+    targets = await list_active_contexts(db)
+    if not targets:
+        if _can_trigger('funding_cutoff:global'):
+            await decide(db, trigger='funding_rate_cutoff')
+        return
+    for ctx in targets:
+        key = f'funding_cutoff:t{ctx.target_id}'
+        if _can_trigger(key):
+            logger.info(f'[agent_loop] firing funding_rate_cutoff for {ctx.label}')
+            await decide(db, trigger='funding_rate_cutoff', ctx=ctx)
+
+
+_last_expiry_check: float = 0.0
+
+
+async def _pending_decision_expiry_tick(db) -> None:
+    """Auto-expire pending decisions older than 15 minutes."""
+    global _last_expiry_check
+    now = time.time()
+    if now - _last_expiry_check < 30:
+        return
+    _last_expiry_check = now
+    try:
+        from sqlalchemy import text as _text
+        rows = (await db.execute(_text(
+            "UPDATE agent_decisions "
+            "SET verdict='rejected', reject_reason='auto_expired_15min' "
+            "WHERE verdict='pending' AND created_at < NOW() - INTERVAL '15 minutes' "
+            "RETURNING id, scope_target_id"
+        ))).fetchall()
+        if rows:
+            await db.commit()
+            logger.info(f'[agent_loop] expired {len(rows)} pending decisions: {[r[0] for r in rows]}')
+            for row in rows:
+                try:
+                    from app.services.agent.ws_events import push_decision_event
+                    await push_decision_event({
+                        'id': row[0], 'verdict': 'rejected',
+                        'reject_reason': 'auto_expired_15min',
+                        'target_id': row[1],
+                    })
+                except Exception:
+                    pass
+            try:
+                from app.services.agent.feishu_broadcast import broadcast
+                expired_ids = ', '.join(str(r[0]) for r in rows)
+                await broadcast(
+                    db, level='info', category='decision_expired',
+                    message=f'[审批过期] 决策 #{expired_ids} 超过15分钟未操作，已自动拒绝',
+                    cooldown_s=0,
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f'[agent_loop] expiry tick error: {e}')
 
 
 def _can_trigger(name: str) -> bool:
@@ -113,6 +186,14 @@ async def agent_loop_main(stop_event: asyncio.Event):
                     if time.time() - last_heartbeat > HEARTBEAT_S:
                         last_heartbeat = time.time()
                         await _heartbeat_tick(db)
+                    try:
+                        await _funding_rate_cutoff_tick(db)
+                    except Exception as _frc_err:
+                        logger.warning(f'[agent_loop] funding cutoff tick error: {_frc_err}')
+                    try:
+                        await _pending_decision_expiry_tick(db)
+                    except Exception as _exp_err:
+                        logger.warning(f'[agent_loop] expiry tick error: {_exp_err}')
         except Exception as e:
             logger.error(f'[agent_loop] tick error: {e}')
         try:

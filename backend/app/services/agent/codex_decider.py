@@ -77,6 +77,21 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
             reject_reason = f'bad_proposal_format:{e}'
             proposal_dict = proposal_json
         else:
+            # Override: funding_rate_cutoff trigger forces close when LLM returns noop
+            if trigger == 'funding_rate_cutoff' and p.action == 'noop':
+                from app.services.agent.guard import _position_direction
+                _dir = _position_direction(snap)
+                if _dir == 'forward':
+                    p = Proposal(action='close_long', leg='both', qty=0,
+                                 reason='funding_rate_cutoff_08:10_auto_close',
+                                 trigger=trigger, confidence=1.0)
+                    logger.info('[decider] funding_rate_cutoff override: noop -> close_long')
+                elif _dir == 'reverse':
+                    p = Proposal(action='close_short', leg='both', qty=0,
+                                 reason='funding_rate_cutoff_08:10_auto_close',
+                                 trigger=trigger, confidence=1.0)
+                    logger.info('[decider] funding_rate_cutoff override: noop -> close_short')
+
             proposal_dict = asdict(p)
             guard_result: GuardResult = run_guard(p, snap, cfg)
 
@@ -90,8 +105,16 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
                 verdict = 'rejected'
                 reject_reason = 'mode_off'
             elif not guard_result.ok:
-                verdict = 'rejected'
-                reject_reason = 'guard:' + ';'.join(guard_result.violations)
+                has_hard = bool(guard_result.violations)
+                has_soft = bool(guard_result.escalatable_violations)
+                approval_enabled = cfg.get('time_rules', {}).get('auto_approval_flow', False)
+                if not has_hard and has_soft and approval_enabled:
+                    verdict = 'pending'
+                    reject_reason = 'escalated:' + ';'.join(guard_result.escalatable_violations)
+                else:
+                    verdict = 'rejected'
+                    reject_reason = 'guard:' + ';'.join(
+                        guard_result.violations + guard_result.escalatable_violations)
             elif p.action == 'noop':
                 verdict = 'shadow' if mode == 'shadow' else 'executed'
                 reject_reason = None
@@ -155,6 +178,22 @@ async def decide(db: AsyncSession, trigger: str, ctx=None, force_log: bool = Tru
         except Exception as _pe:
             logger.warning(f'[decider] auto-proposal insert failed: {_pe}')
     await db.commit()
+    # Feishu approval card for escalated decisions
+    if verdict == 'pending' and reject_reason and reject_reason.startswith('escalated:'):
+        try:
+            from app.services.agent.feishu_broadcast import broadcast_approval_request
+            await broadcast_approval_request(
+                db,
+                decision_id=decision_id,
+                proposal=proposal_dict,
+                snapshot=snapshot_dict,
+                violations=guard_result.escalatable_violations if 'guard_result' in dir() else [],
+                target_label=ctx.label if ctx else 'global',
+                owner_user_id=str(ctx.user_id) if ctx else None,
+            )
+        except Exception as _esc_err:
+            logger.warning(f'[decider] escalation broadcast failed: {_esc_err}')
+
     # Live-push to admins subscribed to agent.decisions
     try:
         from app.services.agent.ws_events import push_decision_event

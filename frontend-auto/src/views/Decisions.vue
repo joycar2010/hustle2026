@@ -311,6 +311,7 @@
 </template>
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/api'
 import dayjs from 'dayjs'
 import { useWsStream } from '@/stores/wsStream.js'
@@ -558,6 +559,33 @@ onMounted(async () => {
   wsWatchStop = w2(() => ws.channels['agent.decisions'], (payload) => {
     if (payload && payload.event === 'decision_new') _prependIfNew(payload)
   })
+
+  // Deep-link handling: ?action=approve&id=N or ?action=reject&id=N
+  const route = useRoute()
+  const router = useRouter()
+  const dlAction = route.query.action
+  const dlId = route.query.id ? Number(route.query.id) : null
+  if (dlId && (dlAction === 'approve' || dlAction === 'reject')) {
+    setTimeout(async () => {
+      try {
+        if (dlAction === 'approve') {
+          if (confirm(`确认批准决策 #${dlId} 并立即执行？`)) {
+            await api.post(`/api/v1/agent/decisions/${dlId}/approve`)
+            alert(`决策 #${dlId} 已批准并执行`)
+          }
+        } else {
+          if (confirm(`确认拒绝决策 #${dlId}？`)) {
+            await api.post(`/api/v1/agent/decisions/${dlId}/reject`, { reason: '操作员通过链接拒绝' })
+            alert(`决策 #${dlId} 已拒绝`)
+          }
+        }
+      } catch (e) {
+        alert(`操作失败: ${e.response?.data?.detail || e.message}`)
+      }
+      router.replace({ query: {} })
+      await reload()
+    }, 500)
+  }
   safetyTimer = setInterval(refreshHead, 30000)
 })
 onUnmounted(() => {

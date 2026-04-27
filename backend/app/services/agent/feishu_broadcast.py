@@ -93,3 +93,67 @@ async def broadcast(
         return int(row[0]) if row else 0
     except Exception:
         return 0
+
+
+async def broadcast_approval_request(
+    db,
+    *,
+    decision_id: int,
+    proposal: dict,
+    snapshot: dict,
+    violations: list,
+    target_label: str = 'global',
+    owner_user_id: str = None,
+) -> int:
+    """Send a Feishu card for an escalated (pending) Guard decision.
+
+    The card contains decision details, market context, violation list,
+    and deep-link URLs for one-click approve / reject in the auto frontend.
+    """
+    action = proposal.get('action', '?')
+    leg = proposal.get('leg', '?')
+    qty = proposal.get('qty', 0)
+    reason = proposal.get('reason', '')
+    conf = proposal.get('confidence', 0)
+
+    spread = snapshot.get('spread_30m_avg', '?')
+    funding = snapshot.get('funding_rate', '?')
+    equity = snapshot.get('equity_usdt', '?')
+    pos_dir = snapshot.get('position_direction', '?')
+
+    viol_text = '\n'.join(f'  • {v}' for v in violations) or '无'
+
+    base_url = 'https://auto.hustle2026.xyz/decisions'
+    approve_url = f'{base_url}?action=approve&id={decision_id}'
+    reject_url = f'{base_url}?action=reject&id={decision_id}'
+
+    msg = (
+        f'**🔔 Guard 升级审批 · 决策 #{decision_id}**\n'
+        f'目标: {target_label}\n'
+        f'---\n'
+        f'**提议**: {action} | leg={leg} | qty={qty}\n'
+        f'置信度: {conf} | 原因: {reason}\n'
+        f'---\n'
+        f'**市场快照**: 点差={spread} | 资金费={funding} | 权益={equity} | 方向={pos_dir}\n'
+        f'---\n'
+        f'**Guard 软违规**:\n{viol_text}\n'
+        f'---\n'
+        f'⏱ **15分钟内未操作将自动拒绝**\n\n'
+        f'✅ [点击批准]({approve_url})\n'
+        f'❌ [点击拒绝]({reject_url})'
+    )
+
+    return await broadcast(
+        db,
+        level='warn',
+        category='guard_escalation',
+        message=msg,
+        payload={
+            'decision_id': decision_id,
+            'action': action,
+            'violations': violations,
+        },
+        ack_required=True,
+        owner_user_id=owner_user_id,
+        cooldown_s=0,
+    )
