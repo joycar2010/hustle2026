@@ -343,6 +343,8 @@ def check_friday_weekend(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Op
 
 
 ESCALATABLE_PREFIXES = (
+    'single_leg_detected_delta=',
+    'must_open_both_legs_simultaneously:',
     'monday_open_volatility:',
     'monday_funding_window:',
     'wed_overnight_forward_cap:',

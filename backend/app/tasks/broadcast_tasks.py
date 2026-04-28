@@ -1453,14 +1453,20 @@ class PositionStreamer:
                             "mt5_long": mt5_l, "mt5_short": mt5_s,
                             "binance_long": bn_l, "binance_short": bn_s,
                         }
-                    xau_pd = pairs_out.get("XAU", {})
+                    _primary_pd = {}
+                    for _pc, _pd in pairs_out.items():
+                        if _pd.get("binance_long", 0) != 0 or _pd.get("binance_short", 0) != 0:
+                            _primary_pd = _pd
+                            break
+                    if not _primary_pd and pairs_out:
+                        _primary_pd = next(iter(pairs_out.values()))
                     evt = {
                         "user_id": uid, "type": "position_snapshot",
                         "data": {
-                            "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
-                            "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
-                            "binance_long_xau": xau_pd.get("binance_long", 0.0),
-                            "binance_short_xau": xau_pd.get("binance_short", 0.0),
+                            "bybit_long_lots":  _primary_pd.get("mt5_long", 0.0),
+                            "bybit_short_lots": _primary_pd.get("mt5_short", 0.0),
+                            "binance_long_xau": _primary_pd.get("binance_long", 0.0),
+                            "binance_short_xau": _primary_pd.get("binance_short", 0.0),
                             "pairs": pairs_out,
                         }
                     }
@@ -1516,14 +1522,20 @@ class PositionStreamer:
                     "binance_long": bn_l, "binance_short": bn_s,
                 }
 
-            xau_pd = pairs_out.get("XAU", {})
+            _primary_pd = {}
+            for _pc, _pd in pairs_out.items():
+                if _pd.get("binance_long", 0) != 0 or _pd.get("binance_short", 0) != 0:
+                    _primary_pd = _pd
+                    break
+            if not _primary_pd and pairs_out:
+                _primary_pd = next(iter(pairs_out.values()))
             evt = {
                 "user_id": user_id, "type": "position_snapshot",
                 "data": {
-                    "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
-                    "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
-                    "binance_long_xau": xau_pd.get("binance_long", 0.0),
-                    "binance_short_xau": xau_pd.get("binance_short", 0.0),
+                    "bybit_long_lots":  _primary_pd.get("mt5_long", 0.0),
+                    "bybit_short_lots": _primary_pd.get("mt5_short", 0.0),
+                    "binance_long_xau": _primary_pd.get("binance_long", 0.0),
+                    "binance_short_xau": _primary_pd.get("binance_short", 0.0),
                     "pairs": pairs_out,
                 }
             }
@@ -1951,33 +1963,33 @@ class BinancePositionPusher:
         if event_type != "ACCOUNT_UPDATE":
             return
 
-        # ACCOUNT_UPDATE.a.P 是仓位数组
+        # ACCOUNT_UPDATE.a.P 是仓位数组 — 处理所有 symbol，不再过滤单一品种
         positions = data.get("a", {}).get("P", [])
 
-        long_xau = 0.0
-        short_xau = 0.0
-        updated   = False
+        updated_symbols = {}
 
         for pos in positions:
-            if pos.get("s") != self._symbol():
+            sym = pos.get("s")
+            if not sym:
                 continue
 
-            updated  = True
-            ps       = pos.get("ps", "BOTH")    # positionSide: LONG / SHORT / BOTH
-            pa       = float(pos.get("pa", 0))  # positionAmt（有符号）
+            ps  = pos.get("ps", "BOTH")
+            pa  = float(pos.get("pa", 0))
+            long_v, short_v = updated_symbols.get(sym, (0.0, 0.0))
 
             if ps == "LONG":
-                long_xau  = round(max(0.0, pa), 3)
+                long_v = round(max(0.0, pa), 3)
             elif ps == "SHORT":
-                # SHORT side: pa 为负值，取绝对值
-                short_xau = round(max(0.0, abs(pa)), 3)
-            else:  # BOTH（单向持仓模式）
+                short_v = round(max(0.0, abs(pa)), 3)
+            else:  # BOTH
                 if pa > 0:
-                    long_xau, short_xau = round(pa, 3), 0.0
+                    long_v, short_v = round(pa, 3), 0.0
                 elif pa < 0:
-                    long_xau, short_xau = 0.0, round(abs(pa), 3)
+                    long_v, short_v = 0.0, round(abs(pa), 3)
                 else:
-                    long_xau, short_xau = 0.0, 0.0
+                    long_v, short_v = 0.0, 0.0
+
+            updated_symbols[sym] = (long_v, short_v)
 
         # ── Parse B[] wallet balance (also in ACCOUNT_UPDATE) ──────────────
         # Binance pushes USDT wallet balance changes here in real-time,
@@ -1998,10 +2010,9 @@ class BinancePositionPusher:
                     pass
                 break
 
-        if updated:
-            # Update PositionStreamer cache with user_id+symbol
-            sym = self._symbol()
-            position_streamer.set_binance_positions(long_xau, short_xau, user_id=user_id, symbol=sym)
+        if updated_symbols:
+            for sym, (long_v, short_v) in updated_symbols.items():
+                position_streamer.set_binance_positions(long_v, short_v, user_id=user_id, symbol=sym)
 
             # Invalidate account_data_service cache so the NEXT AccountBalanceStreamer
             # cycle reads fresh data from Binance REST — prevents stale cache from
@@ -2014,7 +2025,7 @@ class BinancePositionPusher:
 
             logger.info(
                 f"[BinancePositionPusher] ACCOUNT_UPDATE → "
-                f"long={long_xau} short={short_xau} user={user_id}"
+                f"{updated_symbols} user={user_id}"
             )
 
             # Immediately push a full per-user position_snapshot via Redis → Go Hub → frontend.
@@ -2029,11 +2040,9 @@ class BinancePositionPusher:
 
                     mt5_by_user = await position_streamer._read_mt5_positions_all()
                     mt5_syms = mt5_by_user.get(user_id, {})
-                    # Inject the just-updated Binance position into the cache so the
-                    # snapshot we publish includes it without waiting for the 1s loop.
-                    sym = self._symbol()
                     bn_syms = dict(position_streamer._binance_positions.get(user_id, {}))
-                    bn_syms[sym] = (long_xau, short_xau)
+                    for sym, (long_v, short_v) in updated_symbols.items():
+                        bn_syms[sym] = (long_v, short_v)
 
                     # Build pairs map from active hedging pairs
                     pairs_meta = {}
@@ -2062,15 +2071,21 @@ class BinancePositionPusher:
                             "binance_long": bn_l, "binance_short": bn_s,
                         }
 
-                    xau_pd = pairs_out.get("XAU", {})
+                    primary_pd = {}
+                    for _pc, _pd in pairs_out.items():
+                        if _pd.get("binance_long", 0) != 0 or _pd.get("binance_short", 0) != 0:
+                            primary_pd = _pd
+                            break
+                    if not primary_pd and pairs_out:
+                        primary_pd = next(iter(pairs_out.values()))
                     evt = {
                         "user_id": user_id,
                         "type": "position_snapshot",
                         "data": {
-                            "bybit_long_lots":  xau_pd.get("mt5_long", 0.0),
-                            "bybit_short_lots": xau_pd.get("mt5_short", 0.0),
-                            "binance_long_xau": xau_pd.get("binance_long", long_xau),
-                            "binance_short_xau": xau_pd.get("binance_short", short_xau),
+                            "bybit_long_lots":  primary_pd.get("mt5_long", 0.0),
+                            "bybit_short_lots": primary_pd.get("mt5_short", 0.0),
+                            "binance_long_xau": primary_pd.get("binance_long", 0.0),
+                            "binance_short_xau": primary_pd.get("binance_short", 0.0),
                             "pairs": pairs_out,
                         }
                     }

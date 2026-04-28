@@ -1641,7 +1641,7 @@ async def approve_decision(decision_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=503, detail='市场快照构建失败（Go 行情不可达？）')
     cfg = await config_loader.load_config(db, target_id=ctx.target_id if ctx else None)
     g = run_guard(proposal, fresh_snap, cfg)
-    if not g.ok:
+    if g.violations:
         reason = 'approve_revalidate_failed: ' + ';'.join(g.violations)
         await db.execute(text(
             "UPDATE agent_decisions SET verdict='rejected', reject_reason=:rr WHERE id=:id"
