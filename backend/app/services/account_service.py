@@ -15,8 +15,45 @@ from app.services.mt5_http_client import MT5HttpClient
 from app.models.account import Account
 from app.schemas.account import AccountBalance, AccountPosition
 from app.core.proxy_utils import build_proxy_url
+from app.utils.time_utils import mt5_server_ts_to_utc
 
 logger = logging.getLogger(__name__)
+
+
+def _beijing_today_start_utc():
+    """返回北京时间今日 00:00:00 对应的 UTC datetime（即 UTC 前一天 16:00）"""
+    now_utc = datetime.utcnow()
+    beijing_now = now_utc + timedelta(hours=8)
+    beijing_midnight = beijing_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return beijing_midnight - timedelta(hours=8)
+
+
+_mt5_swap_cache = {"data": None, "ts": 0}
+
+async def _get_mt5_swap_per_lot():
+    now = _time_module.monotonic()
+    if _mt5_swap_cache["data"] and now - _mt5_swap_cache["ts"] < 60:
+        return _mt5_swap_cache["data"]
+    try:
+        import MetaTrader5 as _mt5_lib
+        from app.services.realtime_market_service import market_data_service
+        mt5_client = market_data_service.mt5_client
+        if not mt5_client or not mt5_client.ensure_connection():
+            return _mt5_swap_cache.get("data")
+        info = _mt5_lib.symbol_info("XAUUSD+")
+        if info is None:
+            return _mt5_swap_cache.get("data")
+        contract = info.trade_contract_size
+        result = {
+            "long": round(info.swap_long * contract / 365, 4) if info.swap_long else 0,
+            "short": round(info.swap_short * contract / 365, 4) if info.swap_short else 0,
+        }
+        _mt5_swap_cache.update({"data": result, "ts": now})
+        logger.debug(f"[SWAP_RATE] fetched: long={result['long']}, short={result['short']}")
+        return result
+    except Exception as e:
+        logger.debug(f"[SWAP_RATE] _get_mt5_swap_per_lot failed: {e}")
+        return _mt5_swap_cache.get("data")
 
 
 def _get_pair_config():
@@ -79,7 +116,7 @@ class AccountDataService:
 
         try:
             # Get today's start timestamp for daily calculations
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = _beijing_today_start_utc()
             start_time = int(today_start.timestamp() * 1000)
 
             # First, fetch spot account to see which assets we need prices for
@@ -598,7 +635,7 @@ class AccountDataService:
                 if mt5_info:
                     mt5_positions = mt5.get_positions()
                     # Get today's deals history for fees
-                    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                    today_start = _beijing_today_start_utc()
                     mt5_deals = mt5.get_deals_history(date_from=today_start)
                     logger.info(f"Got {len(mt5_deals)} deals from MT5 history")
                 else:
@@ -618,7 +655,7 @@ class AccountDataService:
                     if mt5_info:
                         mt5_positions = temp_mt5.get_positions()
                         # Get today's deals history for fees
-                        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                        today_start = _beijing_today_start_utc()
                         mt5_deals = temp_mt5.get_deals_history(date_from=today_start)
                         logger.info(f"Got {len(mt5_deals)} deals from MT5 history")
                     else:
@@ -759,11 +796,9 @@ class AccountDataService:
                 if deal_entry == 1 or (deal_entry is None and deal_profit != 0):
                     realized_pnl_from_deals += deal_profit
 
-            # Daily P&L = 当日已实现平仓盈亏 + 当日未实现盈亏（浮动盈亏）
-            # account_profit = mt5_info.profit = 当前所有持仓浮动盈亏之和（未实现盈亏）
-            # realized_pnl_from_deals = 今日所有平仓交易的已实现盈亏之和
-            # unrealized_pnl = equity - balance = 当前浮动盈亏
-            daily_pnl = realized_pnl_from_deals + unrealized_pnl
+            # Daily P&L = 当日已实现平仓盈亏（与 Binance 口径一致，不含浮动盈亏）
+            # unrealized_pnl 由 AccountBalance.unrealized_pnl 独立展示
+            daily_pnl = realized_pnl_from_deals
 
             logger.info(f"MT5 balance: balance={balance}, equity={equity}, free_margin={free_margin}, "
                        f"margin_used={margin_used}, positions={total_positions}, "
@@ -771,6 +806,14 @@ class AccountDataService:
                        f"account_total_swap={account_total_swap}, "
                        f"realized_pnl={realized_pnl_from_deals}, unrealized_pnl={unrealized_pnl}, daily_pnl={daily_pnl}, "
                        f"long_liquidation={long_liquidation_price}, short_liquidation={short_liquidation_price}")
+
+            # 预估下次过夜费 = 当前持仓手数 × 每手每晚掉期费率
+            predicted_overnight_fee = 0.0
+            _swap_rates = await _get_mt5_swap_per_lot()
+            if _swap_rates:
+                predicted_overnight_fee = round(
+                    long_volume_total * _swap_rates['long'] + short_volume_total * _swap_rates['short'], 4
+                )
 
             return AccountBalance(
                 total_assets=balance,  # 账户总资产
@@ -782,7 +825,7 @@ class AccountDataService:
                 risk_ratio=margin_level,  # 风险率
                 total_positions=total_positions,  # 总持仓 (数量)
                 daily_pnl=daily_pnl,  # 当日盈亏
-                funding_fee=account_total_swap,  # MT5过夜费：使用账户累计总过夜费（包含已平仓+未平仓）
+                funding_fee=predicted_overnight_fee,  # MT5过夜费：预估下次结算费用（持仓手数×每手每晚费率）
                 long_swap_fee=long_swap_fee,  # 做多掉期费（今日）
                 short_swap_fee=short_swap_fee,  # 做空掉期费（今日）
                 commission_fee=commission_fee,  # 手续费
@@ -858,7 +901,7 @@ class AccountDataService:
 
         # 3. Get daily P&L from /v5/position/closed-pnl?settleCoin=USDT (today)
         daily_pnl = 0
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = _beijing_today_start_utc()
         start_time = int(today_start.timestamp() * 1000)
         end_time = int(datetime.utcnow().timestamp() * 1000)
 
@@ -1079,7 +1122,7 @@ class AccountDataService:
 
         try:
             # Get today's start timestamp
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = _beijing_today_start_utc()
             start_time = int(today_start.timestamp() * 1000)
 
             # Fetch realized P&L for today
@@ -1110,7 +1153,7 @@ class AccountDataService:
 
         try:
             # Get today's start timestamp
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = _beijing_today_start_utc()
             start_time = int(today_start.timestamp() * 1000)
 
             # Fetch transaction log for today
@@ -1220,8 +1263,13 @@ class AccountDataService:
                         # 计算当日已实现盈亏（从 deals history 中平仓交易的 profit 字段）
                         # HTTP Bridge 返回的 deals 中 entry 字段可能为 None
                         # 开仓 deal 的 profit 始终为 0，平仓 deal 的 profit 为实现盈亏
+                        # deal.time 是 EET/EEST，需转 UTC 后按北京日期过滤
+                        _today_start_ts = int(_beijing_today_start_utc().timestamp())
                         _realized_pnl = 0.0
                         for _deal in (mt5_deals_raw or []):
+                            _deal_utc_ts = mt5_server_ts_to_utc(int(_deal.get('time', 0)))
+                            if _deal_utc_ts < _today_start_ts:
+                                continue
                             _deal_entry = _deal.get('entry')
                             _deal_profit = float(_deal.get('profit', 0))
                             if _deal_entry == 1 or (_deal_entry is None and _deal_profit != 0):
@@ -1295,6 +1343,21 @@ class AccountDataService:
                             f"long_vol={_long_vol} long_liq={_long_liq}"
                         )
 
+                        # 预估下次过夜费（通过 HTTP bridge 获取 swap 率）
+                        _predicted_overnight = 0.0
+                        try:
+                            _sym_info = await mt5_http.client.get(f"{mt5_http.base_url}/mt5/symbol_info/XAUUSD+", headers=mt5_http.headers, timeout=5)
+                            if _sym_info.status_code == 200:
+                                _si = _sym_info.json()
+                                _contract = _si.get("trade_contract_size", 100)
+                                _sl = _si.get("swap_long", 0) or 0
+                                _ss = _si.get("swap_short", 0) or 0
+                                _predicted_overnight = round(
+                                    _long_vol * (_sl * _contract / 365) + _short_vol * (_ss * _contract / 365), 4
+                                )
+                        except Exception:
+                            pass
+
                         balance = AccountBalance(
                             total_assets=float(mt5_info.get('balance', 0)),  # 账户余额（不含浮动）
                             available_balance=float(mt5_info.get('margin_free', 0)),
@@ -1305,7 +1368,7 @@ class AccountDataService:
                             risk_ratio=_margin_level,
                             total_positions=_total_positions,                # 总持仓手数
                             daily_pnl=_realized_pnl,                          # 当日盈亏 = 仅已实现平仓盈亏
-                            funding_fee=float(mt5_info.get('swap', 0)),      # 累计过夜费（持仓+历史）
+                            funding_fee=_predicted_overnight,                # 预估下次过夜费
                             commission_fee=0.0,                              # HTTP bridge 路径暂无 deals 历史，默认0
                             long_liquidation_price=_long_liq,               # 多头强平价
                             short_liquidation_price=_short_liq,             # 空头强平价
@@ -1377,9 +1440,13 @@ class AccountDataService:
                     _total_positions = sum(abs(float(p.get('volume', 0))) for p in _positions_raw)
                     _floating_pnl = float(mt5_info.get('profit', 0))
 
-                    # 已实现盈亏
+                    # 已实现盈亏（deal.time 是 EET/EEST，需转 UTC 后按北京日期过滤）
+                    _today_start_ts = int(_beijing_today_start_utc().timestamp())
                     _realized_pnl = 0.0
                     for _deal in (mt5_deals_raw or []):
+                        _deal_utc_ts = mt5_server_ts_to_utc(int(_deal.get('time', 0)))
+                        if _deal_utc_ts < _today_start_ts:
+                            continue
                         _deal_entry = _deal.get('entry')
                         _deal_profit = float(_deal.get('profit', 0))
                         if _deal_entry == 1 or (_deal_entry is None and _deal_profit != 0):
@@ -1419,6 +1486,21 @@ class AccountDataService:
                         _raw_liq = _short_avg + _safety_buffer / (_short_vol * _CONTRACT_SIZE)
                         _short_liq = round(_raw_liq, 2) if _raw_liq > _short_avg else 0.0
 
+                    # 预估下次过夜费（通过 HTTP bridge 获取 swap 率）
+                    _predicted_overnight_2 = 0.0
+                    try:
+                        _sym_info2 = await mt5_http.client.get(f"{mt5_http.base_url}/mt5/symbol_info/XAUUSD+", headers=mt5_http.headers, timeout=5)
+                        if _sym_info2.status_code == 200:
+                            _si2 = _sym_info2.json()
+                            _contract2 = _si2.get("trade_contract_size", 100)
+                            _sl2 = _si2.get("swap_long", 0) or 0
+                            _ss2 = _si2.get("swap_short", 0) or 0
+                            _predicted_overnight_2 = round(
+                                _long_vol * (_sl2 * _contract2 / 365) + _short_vol * (_ss2 * _contract2 / 365), 4
+                            )
+                    except Exception:
+                        pass
+
                     balance = AccountBalance(
                         total_assets=float(mt5_info.get('balance', 0)),
                         available_balance=float(mt5_info.get('margin_free', 0)),
@@ -1429,7 +1511,7 @@ class AccountDataService:
                         risk_ratio=_margin_level,
                         total_positions=_total_positions,
                         daily_pnl=_realized_pnl,  # 仅已实现盈亏
-                        funding_fee=float(mt5_info.get('swap', 0)),
+                        funding_fee=_predicted_overnight_2,
                         commission_fee=0.0,
                         long_liquidation_price=_long_liq,
                         short_liquidation_price=_short_liq,

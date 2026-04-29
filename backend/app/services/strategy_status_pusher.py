@@ -240,7 +240,8 @@ class StrategyExecutionStatusPusher:
         current_position: float,
         total_opened: float,
         total_closed: float,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        total_qty: float = 0
     ):
         """
         Push position change event.
@@ -265,6 +266,7 @@ class StrategyExecutionStatusPusher:
                 'current_position': current_position,
                 'total_opened': total_opened,
                 'total_closed': total_closed,
+                'total_qty': total_qty,
                 'timestamp': datetime.utcnow().isoformat()
             },
             'user_id': user_id

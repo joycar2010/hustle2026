@@ -45,6 +45,8 @@ class AlertSettings(BaseModel):
     mt5AlertRepeatCount: Optional[int] = None
     liquidationAlertSound: Optional[str] = None
     liquidationAlertRepeatCount: Optional[int] = None
+    fundingRateThreshold: Optional[float] = None
+    overnightFeeThreshold: Optional[float] = None
     pair_code: Optional[str] = None  # Product pair code for multi-pair support
 
 
@@ -112,6 +114,8 @@ async def get_alert_settings(
                 mt5AlertRepeatCount=settings.mt5_alert_repeat_count,
                 liquidationAlertSound=settings.liquidation_alert_sound,
                 liquidationAlertRepeatCount=settings.liquidation_alert_repeat_count,
+                fundingRateThreshold=settings.funding_rate_threshold,
+                overnightFeeThreshold=settings.overnight_fee_threshold,
             )
 
         # Return default settings if none exist
@@ -167,6 +171,8 @@ async def save_alert_settings(
             existing_settings.mt5_alert_repeat_count = settings.mt5AlertRepeatCount
             existing_settings.liquidation_alert_sound = settings.liquidationAlertSound
             existing_settings.liquidation_alert_repeat_count = settings.liquidationAlertRepeatCount
+            existing_settings.funding_rate_threshold = settings.fundingRateThreshold
+            existing_settings.overnight_fee_threshold = settings.overnightFeeThreshold
             existing_settings.update_time = datetime.utcnow()
         else:
             # Create new settings
@@ -197,6 +203,8 @@ async def save_alert_settings(
                 mt5_alert_repeat_count=settings.mt5AlertRepeatCount,
                 liquidation_alert_sound=settings.liquidationAlertSound,
                 liquidation_alert_repeat_count=settings.liquidationAlertRepeatCount,
+                funding_rate_threshold=settings.fundingRateThreshold,
+                overnight_fee_threshold=settings.overnightFeeThreshold,
             )
             db.add(new_settings)
 

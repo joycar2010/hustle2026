@@ -86,6 +86,10 @@ import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement
 import { fetchDailyPnl, fmtPnl, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
 import { useWebSocket } from '@/composables/useWebSocket.js'
 import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
+dayjs.extend(utc)
+dayjs.extend(timezone)
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Filler)
 
@@ -114,7 +118,7 @@ const kpis = computed(() => {
 })
 
 const todayPnl = computed(() => {
-  const d = dailyList.value.find(x => x.date === dayjs().format('YYYY-MM-DD'))
+  const d = dailyList.value.find(x => x.date === dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD'))
   return d ? d.net_pnl : 0
 })
 
@@ -183,7 +187,7 @@ async function setRange(val) {
   activeRange.value = val
   loading.value = true
   try {
-    const data = await fetchDailyPnl(dayjs().subtract(parseInt(val), 'day').format('YYYY-MM-DD'), dayjs().format('YYYY-MM-DD'))
+    const data = await fetchDailyPnl(dayjs().subtract(parseInt(val), 'day').format('YYYY-MM-DD'), dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD'))
     dailyList.value = data.daily_pnl || []; summary.value = data.summary || {}; ck.value++
   } catch {} finally { loading.value = false }
 }

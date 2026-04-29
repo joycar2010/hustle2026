@@ -113,6 +113,10 @@ import { useWebSocket } from '@/composables/useWebSocket.js'
 import { fetchDailyPnl, fmtPnl, fmtNum, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
+dayjs.extend(utc)
+dayjs.extend(timezone)
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler)
 
@@ -135,7 +139,7 @@ const ranges = [
 ]
 
 const todayPnl = computed(() => {
-  const today = dayjs().format('YYYY-MM-DD')
+  const today = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
   const d = dailyList.value.find(x => x.date === today)
   return d ? d.net_pnl : 0
 })
@@ -195,8 +199,8 @@ watch(wsConnected, (val) => {
 async function setRange(val) {
   activeRange.value = val
   const days = parseInt(val)
-  const start = dayjs().subtract(days, 'day').format('YYYY-MM-DD')
-  const end = dayjs().format('YYYY-MM-DD')
+  const start = dayjs().tz('Asia/Shanghai').subtract(days, 'day').format('YYYY-MM-DD')
+  const end = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
   loading.value = true
   try {
     const data = await fetchDailyPnl(start, end)

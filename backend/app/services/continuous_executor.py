@@ -751,7 +751,7 @@ class ContinuousStrategyExecutor:
             logger.info(f"Position updated: {'+'if is_opening else '-'}{filled_qty}")
 
             # Step 11: Push status updates
-            await self._push_position_change(ladder_idx, filled_qty, position_info)
+            await self._push_position_change(ladder_idx, filled_qty, position_info, ladder.total_qty)
             await self._push_order_executed(ladder_idx, exec_result, current_spread)
 
             # Step 12: Reset triggers after successful execution
@@ -964,7 +964,8 @@ class ContinuousStrategyExecutor:
         self,
         ladder_idx: int,
         filled_qty: float,
-        position_info: Dict
+        position_info: Dict,
+        total_qty: float = 0
     ):
         """Push position change notification and broadcast real-time MT5 position snapshot."""
         if self.user_id:
@@ -976,7 +977,8 @@ class ContinuousStrategyExecutor:
                 position_info['current_position'],
                 position_info['total_opened'],
                 position_info['total_closed'],
-                self.user_id
+                self.user_id,
+                total_qty=total_qty
             )
 
         # Read MT5 + Binance positions directly (bypasses 60s cache) and push to frontend immediately
@@ -1006,6 +1008,7 @@ class ContinuousStrategyExecutor:
             # Binance: read from REST API directly
             if binance_account and binance_account.api_key and binance_account.api_secret:
                 try:
+                    from app.core.proxy_utils import build_proxy_url
                     _proxy = build_proxy_url(getattr(binance_account, 'proxy_config', None))
                     client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret, proxy_url=_proxy)
                     pos_data = await client.get_position_risk(sym_a)
@@ -1033,6 +1036,8 @@ class ContinuousStrategyExecutor:
                     _bn_syms = dict(_ps._binance_positions.get(self.user_id, {}))
                     # Inject freshly-read Binance position
                     _bn_syms[sym_a] = (binance_long_xau, binance_short_xau)
+                    # Also update the shared position_streamer cache for 1s broadcast
+                    _ps.set_binance_positions(binance_long_xau, binance_short_xau, user_id=self.user_id, symbol=sym_a)
                     # Inject freshly-read MT5 position
                     _mt5_syms[sym_b] = (long_lots, short_lots)
 

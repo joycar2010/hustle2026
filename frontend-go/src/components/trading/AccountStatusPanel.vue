@@ -134,7 +134,7 @@
             </span>
           </div>
           <div v-if="isHedge(account.platform_id)" class="flex justify-between">
-            <span class="text-gray-400">MT5过夜费</span>
+            <span class="text-gray-400">过夜费/下期</span>
             <span class="font-mono" :class="getValueColor(account, 'funding_fee')">
               {{ getDisplayValue(account, 'funding_fee', true) }}
             </span>
@@ -148,13 +148,13 @@
             <span class="font-mono text-gray-300">{{ getCommissionRate(account) }}</span>
           </div>
           <div v-if="account.platform_id === PlatformId.BINANCE" class="flex justify-between">
-            <span class="text-gray-400">资金费(多头)</span>
+            <span class="text-gray-400">资金费/下期(多)</span>
             <span class="font-mono" :class="getValueColor(account, 'long_funding_rate')">
               {{ getDisplayValue(account, 'long_funding_rate', true) }}
             </span>
           </div>
           <div v-if="account.platform_id === PlatformId.BINANCE" class="flex justify-between">
-            <span class="text-gray-400">资金费(空头)</span>
+            <span class="text-gray-400">资金费/下期(空)</span>
             <span class="font-mono" :class="getValueColor(account, 'short_funding_rate')">
               {{ getDisplayValue(account, 'short_funding_rate', true) }}
             </span>

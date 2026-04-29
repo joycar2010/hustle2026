@@ -655,6 +655,30 @@ class RiskMetricsStreamer:
                                     except Exception as _fe:
                                         logger.error(f"[LIQUIDATION DANGER] feishu broadcast error: {_fe}")
 
+                        # Check funding rate (short) alert
+                        if getattr(risk_settings, 'funding_rate_threshold', None) is not None:
+                            try:
+                                _pair = getattr(risk_settings, 'pair_code', 'XAU') or 'XAU'
+                                await risk_alert_service.check_funding_rate(
+                                    user_id=user_id,
+                                    threshold=risk_settings.funding_rate_threshold,
+                                    pair_code=_pair,
+                                )
+                            except Exception as e:
+                                logger.error(f"[BROADCAST] funding_rate alert error user={user_id}: {e}")
+
+                        # Check overnight fee (short) alert
+                        if getattr(risk_settings, 'overnight_fee_threshold', None) is not None:
+                            try:
+                                _pair = getattr(risk_settings, 'pair_code', 'XAU') or 'XAU'
+                                await risk_alert_service.check_overnight_fee(
+                                    user_id=user_id,
+                                    threshold=risk_settings.overnight_fee_threshold,
+                                    pair_code=_pair,
+                                )
+                            except Exception as e:
+                                logger.error(f"[BROADCAST] overnight_fee alert error user={user_id}: {e}")
+
                         # Check spread alerts — pair-code-aware
                         try:
                             alert_settings = {
@@ -1858,11 +1882,14 @@ class BinancePositionPusher:
 
                 logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
                 session = aiohttp.ClientSession()
+                _ws_url = f"{ws_base}/{listen_key}"
+                _ws_kwargs = dict(heartbeat=30)
+                if proxy_url:
+                    _ws_kwargs["proxy"] = proxy_url
 
-                async with session.ws_connect(
-                    f"{ws_base}/{listen_key}", heartbeat=30
-                ) as ws:
-                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}…")
+                async with session.ws_connect(_ws_url, **_ws_kwargs) as ws:
+                    _proxy_tag = f"via {proxy_url.split('@')[-1]}" if proxy_url else "direct"
+                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}… ({_proxy_tag})")
 
                     # Bootstrap: REST snapshot once per (re)connect to seed the
                     # cache with pre-existing positions (WS only pushes deltas).
@@ -1872,7 +1899,7 @@ class BinancePositionPusher:
                         logger.warning(f"[BinancePositionPusher] bootstrap failed {api_key[:8]}…: {_be}")
 
                     keepalive_task = asyncio.create_task(
-                        self._keepalive_loop(client, listen_key)
+                        self._keepalive_loop(client, listen_key, api_key=api_key)
                     )
                     try:
                         async for msg in ws:
@@ -1880,7 +1907,11 @@ class BinancePositionPusher:
                                 break
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 await self._handle_message(msg.json(), user_id)
-                            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                logger.warning(f"[BinancePositionPusher] WS closed by server: {api_key[:8]}… data={msg.data}")
+                                break
+                            elif msg.type == aiohttp.WSMsgType.ERROR:
+                                logger.error(f"[BinancePositionPusher] WS error: {api_key[:8]}… err={ws.exception()}")
                                 break
                     finally:
                         keepalive_task.cancel()
@@ -1902,21 +1933,24 @@ class BinancePositionPusher:
                 logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
                 await asyncio.sleep(self.RECONNECT_DELAY)
 
-    async def _keepalive_loop(self, client, listen_key: str):
+    async def _keepalive_loop(self, client, listen_key: str, api_key: str = ""):
         """每 25min 续期 listenKey"""
+        _tag = api_key[:8] if api_key else listen_key[:8]
         while True:
             await asyncio.sleep(self.KEEPALIVE_SEC)
             try:
                 await client.keepalive_futures_listen_key(listen_key)
-                logger.debug("[BinancePositionPusher] listenKey 续期成功")
+                logger.info(f"[BinancePositionPusher] listenKey 续期成功: {_tag}…")
             except Exception as e:
-                logger.warning(f"[BinancePositionPusher] listenKey 续期失败: {e}")
+                logger.warning(f"[BinancePositionPusher] listenKey 续期失败 {_tag}…: {e}")
 
     # ------------------------------------------------------------------
     # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer
     # ------------------------------------------------------------------
     async def _handle_message(self, data: dict, user_id: str = None):
         event_type = data.get("e")
+        if event_type:
+            logger.info(f"[BinancePositionPusher] WS event: {event_type} user={user_id or '?'}")
 
         # ── ORDER_TRADE_UPDATE: notify the order fill registry so
         # _monitor_binance_order's fill_event gets set in real-time.

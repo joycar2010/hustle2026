@@ -124,6 +124,33 @@
           </div>
         </div>
 
+        <!-- Fee Rate Alerts -->
+        <div class="mb-1 lg:mb-0.5 border-t border-gray-700 pt-1 lg:pt-0.5">
+          <h3 class="text-[10px] lg:text-[9px] font-semibold mb-1 lg:mb-0.5 text-primary">费率提醒</h3>
+          <div class="grid grid-cols-2 gap-1 lg:gap-0.5">
+            <div>
+              <label class="block text-[9px] lg:text-[8px] mb-0.5">资金费/手(空) $/手</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.fundingRateThreshold"
+                step="0.01"
+                placeholder="如 0.03"
+                class="w-full px-1.5 lg:px-1 py-0.5 text-[10px] lg:text-[9px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label class="block text-[9px] lg:text-[8px] mb-0.5">过夜费(空) $/手/日</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.overnightFeeThreshold"
+                step="0.1"
+                placeholder="如 5.0"
+                class="w-full px-1.5 lg:px-1 py-0.5 text-[10px] lg:text-[9px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+        </div>
+
         <!-- Liquidation Price and MT5 Lag Alerts -->
         <div class="mb-1 lg:mb-0.5 border-t border-gray-700 pt-1 lg:pt-0.5">
           <h3 class="text-[10px] lg:text-[9px] font-semibold mb-1 lg:mb-0.5 text-primary">爆仓价位提醒</h3>
@@ -246,7 +273,10 @@ const alertSettings = ref({
   reverseCloseSyncCount: 3,
   // Forward Arbitrage sync counts
   forwardOpenSyncCount: 3,
-  forwardCloseSyncCount: 3
+  forwardCloseSyncCount: 3,
+  // Fee Rate Alerts
+  fundingRateThreshold: null,
+  overnightFeeThreshold: null
 })
 
 // Recent Orders

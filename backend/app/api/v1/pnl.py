@@ -22,6 +22,7 @@ from app.api.v1.subaccount import get_view_context, ViewContext
 from app.services.subaccount_projector import project_response
 from app.models.mt5_client import MT5Client
 from app.services.binance_client import BinanceFuturesClient
+from app.utils.time_utils import mt5_server_ts_to_utc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -62,9 +63,10 @@ def _utc_ms_to_beijing_date(ts_ms: int) -> str:
 
 
 def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
-    """MT5 服务器时间（UTC+2/+3）→ 北京时间日期"""
-    # MT5 deal.time 是 UTC+0 的 unix timestamp（Bridge 已转为 UTC）
-    dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc)
+    """MT5 服务器时间（EET/EEST）→ 北京时间日期（DST-aware）"""
+    from app.utils.time_utils import mt5_server_ts_to_utc
+    utc_ts = mt5_server_ts_to_utc(ts_sec)
+    dt = datetime.fromtimestamp(utc_ts, tz=timezone.utc)
     beijing = dt + timedelta(hours=8)
     return beijing.strftime("%Y-%m-%d")
 
@@ -169,10 +171,11 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession
     target_symbols = await _get_active_mt5_symbols(db)
     start_ts = start_ms / 1000
     end_ts = end_ms / 1000
+    # deal.time 是 EET/EEST 编码的时间戳，需先转 UTC 再与 UTC 边界比较
     return [
         d for d in all_deals
         if d.get("symbol") in target_symbols
-        and start_ts <= d.get("time", 0) <= end_ts
+        and start_ts <= mt5_server_ts_to_utc(int(d.get("time", 0))) <= end_ts
         and d.get("entry", 0) == 1  # 只要平仓 deal
     ]
 

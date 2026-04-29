@@ -5,8 +5,23 @@
 版本：1.0.0
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+# MT5 broker servers use EET/EEST (UTC+2 winter, UTC+3 summer)
+_MT5_SERVER_TZ = ZoneInfo("Europe/Helsinki")
+
+
+def mt5_server_ts_to_utc(raw_ts: int) -> int:
+    """Convert MT5 bridge deal.time (broker server local time) to UTC Unix timestamp.
+
+    MT5 deal.time is a Unix-like timestamp encoded in broker server timezone (EET/EEST),
+    not UTC. This function converts it to a true UTC timestamp, handling DST automatically.
+    """
+    naive = datetime.utcfromtimestamp(raw_ts)
+    local = naive.replace(tzinfo=_MT5_SERVER_TZ)
+    return int(local.astimezone(timezone.utc).timestamp())
 
 
 def utc_now() -> datetime:
@@ -258,31 +273,13 @@ def utc_ms_to_beijing(timestamp_ms: int) -> str:
 
 
 def mt5_time_to_beijing(mt5_timestamp: int) -> str:
+    """MT5时间戳 → 北京时间字符串（DST-aware）
+
+    MT5 deal.time 是 broker server local time (EET/EEST) 编码的 Unix-like 时间戳。
+    通过 zoneinfo 自动处理夏令时（UTC+2 冬 / UTC+3 夏）。
     """
-    MT5时间戳 → 北京时间字符串
-
-    MT5返回的时间戳需要特殊处理：
-    - MT5的时间戳是服务器时间（UTC+2）的Unix时间戳
-    - 需要减去2小时得到真实UTC时间
-    - 再加8小时得到北京时间
-    - 总共是 +6小时
-
-    Args:
-        mt5_timestamp: MT5 Unix时间戳
-
-    Returns:
-        北京时间字符串，格式：YYYY-MM-DD HH:MM:SS
-
-    Example:
-        >>> mt5_time_to_beijing(1709575151)
-        "2024-03-05 00:59:11"  # 北京时间
-    """
-    from datetime import timedelta
-    # MT5时间戳转为datetime（假设为UTC）
-    mt5_dt = datetime.fromtimestamp(mt5_timestamp, tz=timezone.utc)
-    # 减去2小时得到真实UTC时间（因为MT5服务器是UTC+2）
-    utc_dt = mt5_dt - timedelta(hours=2)
-    # 加8小时得到北京时间
+    utc_ts = mt5_server_ts_to_utc(mt5_timestamp)
+    utc_dt = datetime.fromtimestamp(utc_ts, tz=timezone.utc)
     beijing_dt = utc_dt + timedelta(hours=8)
     return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
 

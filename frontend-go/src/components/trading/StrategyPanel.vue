@@ -153,15 +153,15 @@
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpeningExecution"
-              :disabled="strategyStore.isLocked(`${type}_opening`)"
+              :disabled="strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                strategyStore.isLocked(`${type}_opening`) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 continuousExecutionEnabled.opening
                   ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                   : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
-              :title="strategyStore.isLocked(`${type}_opening`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="(strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
             </button>
@@ -172,15 +172,15 @@
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosingExecution"
-              :disabled="strategyStore.isLocked(`${type}_closing`)"
+              :disabled="strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                strategyStore.isLocked(`${type}_closing`) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 continuousExecutionEnabled.closing
                   ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                   : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
               ]"
-              :title="strategyStore.isLocked(`${type}_closing`) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="(strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
             </button>
@@ -188,7 +188,7 @@
         </div>
 
         <!-- Hedge Order Records -->
-        <div v-if="hedgeMultiplier > 1 && hedgeRecords.length > 0" class="mt-2 bg-[#1a1d21] rounded p-2">
+        <div v-if="hedgeMultiplier !== 1.0 && hedgeRecords.length > 0" class="mt-2 bg-[#1a1d21] rounded p-2">
           <div class="flex items-center justify-between mb-1">
             <span class="text-[10px] text-gray-400">对冲下单记录</span>
             <button @click="showHedgeHistory = true" class="text-[10px] text-primary hover:underline">查看历史</button>
@@ -251,10 +251,10 @@
         <div v-if="showHedgeRatio" class="mt-2 bg-[#1a1d21] rounded p-2">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-[10px] text-gray-400">对冲倍数</span>
-            <span class="text-xs font-mono font-bold" :class="hedgeMultiplier > 1 ? 'text-[#f0b90b]' : 'text-gray-300'">{{ hedgeMultiplier }}x</span>
+            <span class="text-xs font-mono font-bold" :class="hedgeMultiplier !== 1.0 ? 'text-[#f0b90b]' : 'text-gray-300'">{{ hedgeMultiplier }}x</span>
           </div>
           <div class="flex gap-1">
-            <button v-for="m in [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]" :key="m"
+            <button v-for="m in hedgeOptions" :key="m"
               @click="setHedgeMultiplier(m)"
               :disabled="continuousExecutionEnabled.opening || continuousExecutionEnabled.closing"
               :class="['flex-1 py-1 rounded text-[10px] font-bold transition-all',
@@ -350,6 +350,122 @@
               </div>
             </div>
           </div>
+
+        <!-- Per-Ladder Progress Bars - Opening -->
+        <div v-if="Object.keys(ladderExecutionDetails.opening).length > 0" class="mt-1.5 space-y-1">
+          <div class="text-[10px] text-gray-500 font-bold">开仓阶梯进度</div>
+          <div
+            v-for="(detail, ladderIdx) in ladderExecutionDetails.opening"
+            :key="'open-ld-' + ladderIdx"
+            class="bg-[#1a1d21] rounded px-1.5 py-1"
+          >
+            <div
+              class="flex items-center justify-between cursor-pointer select-none"
+              @click="expandedLadders.opening[ladderIdx] = !expandedLadders.opening[ladderIdx]"
+            >
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-gray-400">阶梯{{ Number(ladderIdx) + 1 }}</span>
+                <span class="text-[10px] font-mono text-white">{{ (detail.currentQty ?? 0).toFixed(1) }}/{{ (detail.totalQty ?? 0).toFixed(1) }}</span>
+                <span
+                  :class="[
+                    'text-[9px] font-bold',
+                    detail.status === 'completed' ? 'text-[#00C98B]' :
+                    detail.status === 'failed' ? 'text-[#f6465d]' :
+                    detail.status === 'running' ? 'text-[#0ecb81]' : 'text-gray-500'
+                  ]"
+                >{{ detail.status === 'completed' ? '完成' : detail.status === 'failed' ? '失败' : detail.status === 'running' ? '进行中' : '等待' }}</span>
+              </div>
+              <span v-if="detail.trades && detail.trades.length > 0" class="text-gray-500 text-[9px]">
+                {{ expandedLadders.opening[ladderIdx] ? '▼' : '▶' }} {{ detail.trades.length }}笔
+              </span>
+            </div>
+            <div class="w-full bg-[#0d1117] rounded-full h-1.5 mt-0.5">
+              <div
+                class="h-1.5 rounded-full transition-all duration-300"
+                :class="detail.status === 'failed' ? 'bg-[#f6465d]' : 'bg-[#0ecb81]'"
+                :style="{ width: `${detail.totalQty > 0 ? Math.min(100, (detail.currentQty / detail.totalQty) * 100) : 0}%` }"
+              ></div>
+            </div>
+            <div v-if="expandedLadders.opening[ladderIdx] && detail.trades && detail.trades.length > 0" class="mt-1">
+              <table class="w-full text-[9px]">
+                <thead class="text-gray-500">
+                  <tr>
+                    <th class="text-left py-0.5 font-normal">时间</th>
+                    <th class="text-right py-0.5 font-normal">Binance</th>
+                    <th class="text-right py-0.5 font-normal">MT5</th>
+                    <th class="text-right py-0.5 font-normal">差值</th>
+                  </tr>
+                </thead>
+                <tbody class="text-gray-300">
+                  <tr v-for="(trade, tIdx) in detail.trades" :key="tIdx" class="border-t border-[#2b3139]">
+                    <td class="py-0.5">{{ new Date(trade.timestamp).toLocaleTimeString() }}</td>
+                    <td class="text-right font-mono">{{ (trade.binanceFilled ?? 0).toFixed(2) }}</td>
+                    <td class="text-right font-mono">{{ (trade.mt5Filled ?? 0).toFixed(2) }}</td>
+                    <td class="text-right font-mono" :class="(trade.spreadAtExecution ?? 0) >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">{{ (trade.spreadAtExecution ?? 0).toFixed(2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Per-Ladder Progress Bars - Closing -->
+        <div v-if="Object.keys(ladderExecutionDetails.closing).length > 0" class="mt-1.5 space-y-1">
+          <div class="text-[10px] text-gray-500 font-bold">平仓阶梯进度</div>
+          <div
+            v-for="(detail, ladderIdx) in ladderExecutionDetails.closing"
+            :key="'close-ld-' + ladderIdx"
+            class="bg-[#1a1d21] rounded px-1.5 py-1"
+          >
+            <div
+              class="flex items-center justify-between cursor-pointer select-none"
+              @click="expandedLadders.closing[ladderIdx] = !expandedLadders.closing[ladderIdx]"
+            >
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-gray-400">阶梯{{ Number(ladderIdx) + 1 }}</span>
+                <span class="text-[10px] font-mono text-white">{{ (detail.currentQty ?? 0).toFixed(1) }}/{{ (detail.totalQty ?? 0).toFixed(1) }}</span>
+                <span
+                  :class="[
+                    'text-[9px] font-bold',
+                    detail.status === 'completed' ? 'text-[#00C98B]' :
+                    detail.status === 'failed' ? 'text-[#f6465d]' :
+                    detail.status === 'running' ? 'text-[#f6465d]' : 'text-gray-500'
+                  ]"
+                >{{ detail.status === 'completed' ? '完成' : detail.status === 'failed' ? '失败' : detail.status === 'running' ? '进行中' : '等待' }}</span>
+              </div>
+              <span v-if="detail.trades && detail.trades.length > 0" class="text-gray-500 text-[9px]">
+                {{ expandedLadders.closing[ladderIdx] ? '▼' : '▶' }} {{ detail.trades.length }}笔
+              </span>
+            </div>
+            <div class="w-full bg-[#0d1117] rounded-full h-1.5 mt-0.5">
+              <div
+                class="h-1.5 rounded-full transition-all duration-300"
+                :class="detail.status === 'failed' ? 'bg-gray-500' : 'bg-[#f6465d]'"
+                :style="{ width: `${detail.totalQty > 0 ? Math.min(100, (detail.currentQty / detail.totalQty) * 100) : 0}%` }"
+              ></div>
+            </div>
+            <div v-if="expandedLadders.closing[ladderIdx] && detail.trades && detail.trades.length > 0" class="mt-1">
+              <table class="w-full text-[9px]">
+                <thead class="text-gray-500">
+                  <tr>
+                    <th class="text-left py-0.5 font-normal">时间</th>
+                    <th class="text-right py-0.5 font-normal">Binance</th>
+                    <th class="text-right py-0.5 font-normal">MT5</th>
+                    <th class="text-right py-0.5 font-normal">差值</th>
+                  </tr>
+                </thead>
+                <tbody class="text-gray-300">
+                  <tr v-for="(trade, tIdx) in detail.trades" :key="tIdx" class="border-t border-[#2b3139]">
+                    <td class="py-0.5">{{ new Date(trade.timestamp).toLocaleTimeString() }}</td>
+                    <td class="text-right font-mono">{{ (trade.binanceFilled ?? 0).toFixed(2) }}</td>
+                    <td class="text-right font-mono">{{ (trade.mt5Filled ?? 0).toFixed(2) }}</td>
+                    <td class="text-right font-mono" :class="(trade.spreadAtExecution ?? 0) >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">{{ (trade.spreadAtExecution ?? 0).toFixed(2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <!-- Data Sync Quantities and Trigger Intervals -->
         <div v-if="configHidden" class="flex items-center justify-between bg-[#1a1d21] rounded px-2 py-1.5 cursor-pointer hover:bg-[#2b3139] transition-colors" @click="configHidden = false; saveConfigHidden()">
@@ -482,6 +598,15 @@
                     class="w-3.5 h-3.5 rounded border-[#2b3139] bg-[#252930] text-[#0ecb81] focus:ring-[#0ecb81]"
                   />
                   <span class="text-xs">启用</span>
+                </label>
+                <label :for="`ladder-autoclose-${type}-${index}`" class="flex items-center space-x-1 cursor-pointer">
+                  <input
+                    :id="`ladder-autoclose-${type}-${index}`"
+                    v-model="ladder.autoClose"
+                    type="checkbox"
+                    class="w-3.5 h-3.5 rounded border-[#2b3139] bg-[#252930] text-[#f0b90b] focus:ring-[#f0b90b]"
+                  />
+                  <span class="text-xs text-[#f0b90b]">自动平仓</span>
                 </label>
                 <button
                   @click="removeLadder(index)"
@@ -812,6 +937,7 @@ const UPDATE_THROTTLE = isMobile.value ? 100 : 500 // 移动端降低更新频�
 
 // Continuous execution state - separate for opening and closing
 const hedgeMultiplier = ref(1.0)
+const hedgeOptions = ref([0.8, 0.9, 1.0, 1.1, 1.2, 1.3])
 
 const showHedgeRatio = ref(false)
 
@@ -820,6 +946,9 @@ async function fetchHedgeMultiplier() {
     const r = await api.get('/api/v1/hedge-ratio', { params: { pair_code: currentPair.value || 'XAU' } })
     hedgeMultiplier.value = r.data?.hedge_multiplier ?? 1.0
     showHedgeRatio.value = !!r.data?.enabled
+    if (Array.isArray(r.data?.options) && r.data.options.length > 0) {
+      hedgeOptions.value = r.data.options
+    }
   } catch { hedgeMultiplier.value = 1.0; showHedgeRatio.value = false }
 }
 
@@ -839,6 +968,9 @@ const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
 const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0 }, closing: { current: 0, required: 0 } })
 const statusPollingInterval = ref({ opening: null, closing: null })
+
+const ladderExecutionDetails = ref({ opening: {}, closing: {} })
+const expandedLadders = ref({ opening: {}, closing: {} })
 
 // 差值提醒设置（从 Risk.vue 迁移）— 读写 /api/v1/risk/alert-settings
 // 仅展示/保存当前策略类型对应的 2 个字段（forward 或 reverse 的 openPrice/closePrice），
@@ -915,9 +1047,9 @@ const config = ref({
   openingTriggerCheckInterval: 200, // 开仓触发器检测频率（毫秒）
   closingTriggerCheckInterval: 200, // 平仓触发器检测频率（毫秒）
   ladders: [
-    { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3 },
-    { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3 },
-    { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3 },
+    { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3, autoClose: false },
+    { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3, autoClose: false },
+    { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3, autoClose: false },
   ]
 })
 
@@ -1301,17 +1433,34 @@ function refreshPositions() {
 }
 
 function handlePositionChange(data) {
-  // Only handle messages for this strategy
-  if (data.strategy_id !== configId.value) return
+  const isContinuous = data.strategy_id && String(data.strategy_id).endsWith('_continuous')
 
-  // Signal that a position change occurred — bypass anti-flicker guard for next snapshot
+  if (isContinuous) {
+    const strategyIdStr = String(data.strategy_id)
+    if (!strategyIdStr.includes(`_${props.type}_`)) return
+
+    const action = strategyIdStr.includes('_opening_') ? 'opening' : 'closing'
+    const idx = data.ladder_index ?? 0
+
+    if (!ladderExecutionDetails.value[action][idx]) {
+      ladderExecutionDetails.value[action][idx] = { currentQty: 0, totalQty: 0, status: 'running', trades: [] }
+    }
+    const d = ladderExecutionDetails.value[action][idx]
+    d.currentQty = data.current_position ?? d.currentQty
+    d.totalQty = data.total_qty ?? d.totalQty
+    if (d.totalQty > 0 && d.currentQty >= d.totalQty) {
+      d.status = 'completed'
+    } else {
+      d.status = 'running'
+    }
+    console.log(`[WebSocket] Ladder ${idx} progress: ${d.currentQty}/${d.totalQty}`)
+  } else {
+    if (data.strategy_id !== configId.value) return
+  }
+
   _forceAcceptZeroUntil = Date.now() + _FORCE_ZERO_WINDOW_MS
   _consecutiveZeroCount = 0
-
-  // Refresh position data
   refreshPositions()
-
-  console.log(`[WebSocket] Position changed: ${data.change_type} ${data.quantity}`)
 }
 
 function handleExecutionStarted(data) {
@@ -1331,6 +1480,20 @@ function handleExecutionStarted(data) {
       current_ladder: 0,
       trades_executed: 0
     }
+
+    // Pre-populate ladder execution details from config
+    ladderExecutionDetails.value[action] = {}
+    expandedLadders.value[action] = {}
+    config.value.ladders.forEach((ladder, idx) => {
+      if (ladder.enabled) {
+        ladderExecutionDetails.value[action][idx] = {
+          currentQty: 0,
+          totalQty: ladder.qtyLimit,
+          status: 'waiting',
+          trades: []
+        }
+      }
+    })
   } else {
     executing.value = true
     console.log(`[WebSocket] Execution started: ${data.action}`)
@@ -1348,13 +1511,35 @@ function handleExecutionCompleted(data) {
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
 
-    // Update status and stop execution
+    // 自动平仓链式触发（备用入口）
+    if (action === 'opening') {
+      const autoCloseLadders = config.value.ladders.filter(l => l.enabled && l.autoClose)
+      if (autoCloseLadders.length > 0 && !continuousExecutionEnabled.value.closing) {
+        console.log('[AutoClose] Execution completed, chaining to closing')
+        continuousExecutionEnabled.value.opening = false
+        stopStatusPolling('opening')
+        notificationStore.showStrategyNotification('开仓执行完成，自动平仓启动中...', 'success')
+        autoStartClosing()
+        return
+      }
+    }
+
+    // 常规完成：释放锁
     continuousExecutionEnabled.value[action] = false
     stopStatusPolling(action)
-    strategyStore.release(`${props.type}_${action}`)  // ← WS通知完成，释放全局锁
+    const hasAutoClose = config.value.ladders.some(l => l.enabled && l.autoClose)
+    strategyStore.release(hasAutoClose ? props.type : `${props.type}_${action}`)
     if (continuousExecutionStatus.value[action]) {
       continuousExecutionStatus.value[action].status = 'completed'
     }
+
+    // Mark all ladder details as completed
+    Object.keys(ladderExecutionDetails.value[action]).forEach(idx => {
+      const ld = ladderExecutionDetails.value[action][idx]
+      if (ld.status === 'running' || ld.status === 'waiting') {
+        ld.status = 'completed'
+      }
+    })
 
     notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
   } else {
@@ -1382,10 +1567,19 @@ function handleExecutionError(data) {
     // Update status and stop execution
     continuousExecutionEnabled.value[action] = false
     stopStatusPolling(action)
-    strategyStore.release(`${props.type}_${action}`)  // ← WS通知错误，释放全局锁
+    const _acErr = config.value.ladders.some(l => l.enabled && l.autoClose)
+    strategyStore.release(_acErr ? props.type : `${props.type}_${action}`)
     if (continuousExecutionStatus.value[action]) {
       continuousExecutionStatus.value[action].status = 'failed'
     }
+
+    // Mark running/waiting ladders as failed
+    Object.keys(ladderExecutionDetails.value[action]).forEach(idx => {
+      const ld = ladderExecutionDetails.value[action][idx]
+      if (ld.status === 'running' || ld.status === 'waiting') {
+        ld.status = 'failed'
+      }
+    })
 
     notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}错误: ${data.error_message}`, 'error')
   } else {
@@ -1396,12 +1590,31 @@ function handleExecutionError(data) {
 }
 
 function handleOrderExecuted(data) {
-  if (data.strategy_id !== configId.value) return
+  const isContinuous = data.strategy_id && String(data.strategy_id).endsWith('_continuous')
 
-  // Refresh position data after order execution
+  if (isContinuous) {
+    const strategyIdStr = String(data.strategy_id)
+    if (!strategyIdStr.includes(`_${props.type}_`)) return
+
+    const action = strategyIdStr.includes('_opening_') ? 'opening' : 'closing'
+    const idx = data.ladder_index ?? 0
+
+    if (!ladderExecutionDetails.value[action][idx]) {
+      ladderExecutionDetails.value[action][idx] = { currentQty: 0, totalQty: 0, status: 'running', trades: [] }
+    }
+    ladderExecutionDetails.value[action][idx].trades.push({
+      binanceFilled: data.binance_filled ?? 0,
+      mt5Filled: data.bybit_filled ?? 0,
+      spreadAtExecution: data.spread_at_execution ?? 0,
+      timestamp: data.timestamp || new Date().toISOString()
+    })
+
+    console.log(`[WebSocket] Ladder ${idx} trade: Binance=${data.binance_filled}, MT5=${data.bybit_filled}, spread=${data.spread_at_execution}`)
+  } else {
+    if (data.strategy_id !== configId.value) return
+  }
+
   refreshPositions()
-
-  console.log(`[WebSocket] Order executed: Binance ${data.binance_filled}, Bybit ${data.bybit_filled}`)
 }
 
 /**
@@ -1432,13 +1645,33 @@ function handleOrdersFilled(data) {
   // 确定 action（后端直接传 action 字段，双重保险）
   const resolvedAction = action || (strategyIdStr.includes('_opening_') ? 'opening' : 'closing')
 
-  console.log(`[WebSocket] orders_filled → 立即恢复 ${panelType} ${resolvedAction} 按钮: binance=${binance_filled} bybit=${bybit_filled}`)
+  console.log(`[WebSocket] orders_filled → ${panelType} ${resolvedAction}: binance=${binance_filled} bybit=${bybit_filled}`)
 
-  // 立即恢复按钮：清除连续执行状态
+  // 自动平仓链式触发：开仓完成 + 存在 autoClose 阶梯 → 不释放锁，直接启动平仓
+  if (resolvedAction === 'opening') {
+    const autoCloseLadders = config.value.ladders.filter(l => l.enabled && l.autoClose)
+    if (autoCloseLadders.length > 0) {
+      console.log('[AutoClose] Opening filled, chaining to closing with', autoCloseLadders.length, 'ladders')
+      continuousExecutionEnabled.value.opening = false
+      continuousExecutionTriggerProgress.value.opening = { current: 0, required: 0 }
+      stopStatusPolling('opening')
+      notificationStore.showStrategyNotification(
+        `开仓成交完成 Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU，自动平仓启动中...`,
+        'success'
+      )
+      autoStartClosing()
+      refreshPositions()
+      return
+    }
+  }
+
+  // 常规流程：释放锁、恢复按钮
   continuousExecutionEnabled.value[resolvedAction] = false
   continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0 }
   stopStatusPolling(resolvedAction)
-  strategyStore.release(`${props.type}_${resolvedAction}`)
+  // 释放锁：可能是方向级锁或动作级锁
+  const hasAutoClose = config.value.ladders.some(l => l.enabled && l.autoClose)
+  strategyStore.release(hasAutoClose ? props.type : `${props.type}_${resolvedAction}`)
 
   notificationStore.showStrategyNotification(
     `${resolvedAction === 'opening' ? '开仓' : '平仓'}双边成交完成！Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU, MT5: ${bybit_filled?.toFixed ? bybit_filled.toFixed(2) : bybit_filled} XAU`,
@@ -1447,6 +1680,69 @@ function handleOrdersFilled(data) {
 
   // 刷新持仓数据
   refreshPositions()
+}
+
+async function autoStartClosing() {
+  try {
+    const closingLadders = config.value.ladders
+      .filter(l => l.enabled && l.autoClose)
+      .map(ladder => ({
+        enabled: true,
+        closing_spread: ladder.threshold,
+        total_qty: ladder.qtyLimit,
+        closing_trigger_count: config.value.closingSyncQty || 1
+      }))
+
+    if (closingLadders.length === 0) {
+      console.warn('[AutoClose] No autoClose ladders found')
+      const _ac = config.value.ladders.some(l => l.enabled && l.autoClose)
+      strategyStore.release(_ac ? props.type : `${props.type}_opening`)
+      return
+    }
+
+    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === PlatformId.BINANCE)
+    const hedgeBId = pairBinding.value?.account_b_id
+    const bybitAccount = hedgeBId
+      ? accountsData.value.accounts.find(a => a.account_id === hedgeBId)
+      : accountsData.value.accounts.find(a => a.platform_id === PlatformId.BYBIT && a.is_active !== false)
+
+    const requestData = {
+      binance_account_id: binanceAccount.account_id,
+      bybit_account_id: bybitAccount.account_id,
+      pair_code: currentPair.value,
+      closing_m_coin: config.value.closingMCoin || 5,
+      trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000,
+      ladders: closingLadders
+    }
+
+    const endpoint = `/api/v1/strategies/close/${props.type}/continuous`
+    console.log('[AutoClose] Sending closing request:', requestData)
+    const response = await api.post(endpoint, requestData)
+
+    if (response.data.task_id) {
+      continuousExecutionEnabled.value.closing = true
+      continuousExecutionTaskId.value.closing = response.data.task_id
+      continuousExecutionTriggerProgress.value.closing = {
+        current: 0,
+        required: config.value.closingSyncQty || 1
+      }
+      startStatusPolling('closing')
+      notificationStore.showStrategyNotification('开仓完成，自动平仓已启动', 'success')
+    } else {
+      console.error('[AutoClose] No task_id in response')
+      const _ac2 = config.value.ladders.some(l => l.enabled && l.autoClose)
+      strategyStore.release(_ac2 ? props.type : `${props.type}_opening`)
+      notificationStore.showStrategyNotification('自动平仓启动失败：未收到任务ID', 'error')
+    }
+  } catch (error) {
+    console.error('[AutoClose] Failed to start closing:', error)
+    const _ac3 = config.value.ladders.some(l => l.enabled && l.autoClose)
+    strategyStore.release(_ac3 ? props.type : `${props.type}_opening`)
+    notificationStore.showStrategyNotification(
+      '自动平仓启动失败: ' + (error.response?.data?.detail || error.message),
+      'error'
+    )
+  }
 }
 
 function handleAccountBalanceUpdate(data) {
@@ -2414,7 +2710,8 @@ function formatNumber(num) {
 async function startContinuousExecution(action) {
   // ── 全局策略互斥锁 ──────────────────────────────────────────────────────
   // 同一时刻只允许一个策略运行（正向开仓/正向平仓/反向开仓/反向平仓互斥）
-  const strategyKey = `${props.type}_${action}`
+  const hasAutoClose = action === 'opening' && config.value.ladders.some(l => l.enabled && l.autoClose)
+  const strategyKey = hasAutoClose ? props.type : `${props.type}_${action}`
   if (!strategyStore.acquire(strategyKey)) {
     const running = strategyStore.activeStrategy
     notificationStore.showStrategyNotification(
@@ -2528,14 +2825,15 @@ async function startContinuousExecution(action) {
     console.error('Failed to start continuous execution:', error)
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`启动连续执行失败: ${errorMsg}`, 'error')
-    strategyStore.release(`${props.type}_${action}`)  // 异常，释放锁
+    strategyStore.release(strategyKey)  // 异常，释放锁
   }
 }
 
 async function stopContinuousExecution(action) {
   try {
     if (!continuousExecutionTaskId.value[action]) {
-      strategyStore.release(`${props.type}_${action}`)
+      const _acEarly = config.value.ladders.some(l => l.enabled && l.autoClose)
+      strategyStore.release(_acEarly ? props.type : `${props.type}_${action}`)
       return
     }
 
@@ -2545,7 +2843,12 @@ async function stopContinuousExecution(action) {
     continuousExecutionStatus.value[action] = null  // Clear status to hide the status display
     continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0 }  // Reset trigger progress
     stopStatusPolling(action)
-    strategyStore.release(`${props.type}_${action}`)  // ← 释放全局策略锁
+    const _acStop = config.value.ladders.some(l => l.enabled && l.autoClose)
+    strategyStore.release(_acStop ? props.type : `${props.type}_${action}`)
+
+    // Clear ladder detail on active stop
+    ladderExecutionDetails.value[action] = {}
+    expandedLadders.value[action] = {}
 
     notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已停止`, 'info')
   } catch (error) {
@@ -2553,7 +2856,8 @@ async function stopContinuousExecution(action) {
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`停止连续执行失败: ${errorMsg}`, 'error')
     // 即使停止失败也释放锁，防止 UI 永久卡死
-    strategyStore.release(`${props.type}_${action}`)
+    const _acCatch = config.value.ladders.some(l => l.enabled && l.autoClose)
+    strategyStore.release(_acCatch ? props.type : `${props.type}_${action}`)
   }
 }
 
@@ -2589,7 +2893,8 @@ async function fetchExecutionStatus(action) {
     if (taskStatus.status === 'completed' || taskStatus.status === 'failed' || taskStatus.status === 'cancelled') {
       continuousExecutionEnabled.value[action] = false
       stopStatusPolling(action)
-      strategyStore.release(`${props.type}_${action}`)  // ← 任务自然结束，释放全局锁
+      const _acPoll = config.value.ladders.some(l => l.enabled && l.autoClose)
+      strategyStore.release(_acPoll ? props.type : `${props.type}_${action}`)
 
       if (taskStatus.status === 'completed') {
         notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
@@ -2616,6 +2921,7 @@ onUnmounted(() => {
   // 组件卸载时释放该 Panel 持有的策略锁（防止导航切换后锁残留）
   strategyStore.release(`${props.type}_opening`)
   strategyStore.release(`${props.type}_closing`)
+  strategyStore.release(props.type)
 })
 </script>
 

@@ -1512,8 +1512,8 @@
             <h3 class="font-bold">对冲倍数权限 — {{ hedgeUser?.username }}</h3>
             <button @click="showHedgeModal = false" class="text-text-tertiary hover:text-text-primary text-xl">✕</button>
           </div>
-          <div class="p-6 text-center">
-            <div class="text-sm text-text-secondary mb-4">是否允许该用户在交易界面调节对冲倍数？</div>
+          <div class="p-6">
+            <div class="text-sm text-text-secondary mb-4 text-center">是否允许该用户在交易界面调节对冲倍数？</div>
             <div class="flex items-center justify-center gap-3 mb-4">
               <span class="text-sm" :class="!hedgeEnabled ? 'text-text-primary font-bold' : 'text-text-tertiary'">禁用</span>
               <div @click="hedgeEnabled = !hedgeEnabled"
@@ -1522,7 +1522,25 @@
               </div>
               <span class="text-sm" :class="hedgeEnabled ? 'text-primary font-bold' : 'text-text-tertiary'">启用</span>
             </div>
-            <div class="text-xs text-text-tertiary mb-5">启用后用户可在 go 站策略面板中选择 1.0x~1.5x 对冲倍数</div>
+            <div v-if="hedgeEnabled" class="mb-4">
+              <div class="text-xs text-text-tertiary mb-2">可用倍数（点击移除，输入添加）</div>
+              <div class="flex flex-wrap gap-1.5 mb-2">
+                <span v-for="(opt, idx) in hedgeOptionsEdit" :key="idx"
+                  @click="hedgeOptionsEdit.splice(idx, 1)"
+                  class="px-2.5 py-1 rounded-lg text-xs font-bold bg-primary/20 text-primary cursor-pointer hover:bg-[#f6465d]/20 hover:text-[#f6465d] transition-colors">
+                  {{ opt }}x ✕
+                </span>
+              </div>
+              <div class="flex gap-2">
+                <input v-model="newHedgeOpt" type="number" step="0.1" min="0.1" max="5.0"
+                  placeholder="如 0.7"
+                  class="flex-1 px-3 py-1.5 rounded-lg text-xs bg-dark-200 border border-border-primary text-text-primary"
+                  @keyup.enter="addHedgeOpt" />
+                <button @click="addHedgeOpt"
+                  class="px-3 py-1.5 rounded-lg text-xs font-bold bg-primary text-dark-300">添加</button>
+              </div>
+            </div>
+            <div v-else class="text-xs text-text-tertiary mb-4 text-center">启用后可自定义倍数选项</div>
             <div class="flex gap-3">
               <button @click="showHedgeModal = false" class="flex-1 px-4 py-2 text-sm text-text-secondary hover:text-text-primary bg-dark-200 rounded-xl">取消</button>
               <button @click="saveHedgeToggle" :disabled="hedgeSaving"
@@ -3137,6 +3155,16 @@ const showHedgeModal = ref(false)
 const hedgeUser = ref(null)
 const hedgeEnabled = ref(false)
 const hedgeSaving = ref(false)
+const hedgeOptionsEdit = ref([0.8, 0.9, 1.0, 1.1, 1.2, 1.3])
+const newHedgeOpt = ref('')
+
+function addHedgeOpt() {
+  const v = parseFloat(newHedgeOpt.value)
+  if (!v || v <= 0 || v > 5 || hedgeOptionsEdit.value.includes(v)) { newHedgeOpt.value = ''; return }
+  hedgeOptionsEdit.value.push(v)
+  hedgeOptionsEdit.value.sort((a, b) => a - b)
+  newHedgeOpt.value = ''
+}
 
 // ── OpenCLAW (auto.hustle2026.xyz) login access ──
 const showOpenclawModal = ref(false)
@@ -3197,6 +3225,12 @@ async function saveFundViewToggle() {
 async function openHedgeRatio(u) {
   hedgeUser.value = u
   hedgeEnabled.value = !!u.hedge_ratio_enabled
+  try {
+    const r = await api.get('/api/v1/hedge-ratio', { params: { user_id: u.user_id } })
+    hedgeOptionsEdit.value = Array.isArray(r.data?.options) && r.data.options.length > 0
+      ? [...r.data.options]
+      : [0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
+  } catch { hedgeOptionsEdit.value = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3] }
   showHedgeModal.value = true
 }
 
@@ -3205,7 +3239,8 @@ async function saveHedgeToggle() {
   try {
     await api.put('/api/v1/hedge-ratio/toggle', {
       user_id: hedgeUser.value?.user_id,
-      enabled: hedgeEnabled.value
+      enabled: hedgeEnabled.value,
+      options: hedgeOptionsEdit.value.length > 0 ? hedgeOptionsEdit.value : null
     })
     const idx = users.value.findIndex(u => u.user_id === hedgeUser.value?.user_id)
     if (idx >= 0) users.value[idx].hedge_ratio_enabled = hedgeEnabled.value

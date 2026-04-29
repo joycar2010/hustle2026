@@ -24,6 +24,7 @@ from app.services.feishu_service import get_feishu_service
 from app.services.alert_bus import alert_bus, Severity
 from app.models.notification_config import NotificationConfig
 from app.websocket.manager import manager
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,8 @@ class RiskAlertService:
 
     # Class-level cooldown cache shared across all instances
     _cooldown_cache: Dict[str, datetime] = {}
+    _funding_cache: Dict = {'data': None, 'ts': 0}
+    _swap_cache: Dict = {'data': None, 'ts': 0}
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -829,7 +832,44 @@ class RiskAlertService:
                     )
                 )
 
-        # 6. 单腿持仓（如果启用）
+        # 6. 资金费率 (空头)
+        funding_threshold = risk_settings.get("funding_rate_threshold")
+        if funding_threshold is not None:
+            funding_data = await self._get_funding_rate()
+            if funding_data:
+                cost_per_lot = abs(funding_data.get('short_cost_per_lot', 0))
+                if cost_per_lot > funding_threshold:
+                    results["funding_rate"] = await self._send_alert(
+                        user_id=user_id,
+                        template_key="funding_rate_alert",
+                        variables={
+                            "pair_code": risk_settings.get("pair_code", "XAU"),
+                            "funding_rate_pct": f"{funding_data['funding_rate_pct']:.4f}",
+                            "short_cost": f"{funding_data['short_cost_per_lot']:.4f}",
+                            "threshold": f"{funding_threshold}",
+                            "mark_price": f"{funding_data['mark_price']:.2f}",
+                        },
+                    )
+
+        # 7. 过夜费 (空头)
+        overnight_threshold = risk_settings.get("overnight_fee_threshold")
+        if overnight_threshold is not None:
+            swap_data = await self._get_swap_rate()
+            if swap_data:
+                swap_short = abs(swap_data.get('short_swap_per_lot', 0))
+                if swap_short > overnight_threshold:
+                    results["overnight_fee"] = await self._send_alert(
+                        user_id=user_id,
+                        template_key="overnight_fee_alert",
+                        variables={
+                            "pair_code": risk_settings.get("pair_code", "XAU"),
+                            "swap_short": f"{swap_data['short_swap_per_lot']:.4f}",
+                            "threshold": f"{overnight_threshold}",
+                            "symbol": swap_data.get("symbol", "XAUUSD+"),
+                        },
+                    )
+
+        # 8. 单腿持仓（如果启用）
         if risk_settings.get("single_leg_alert_enabled", False):
             single_legs = account_data.get("single_leg_positions", [])
             for leg in single_legs:
@@ -844,6 +884,108 @@ class RiskAlertService:
                 )
 
         return results
+
+    # ========================================================================
+    # 资金费率 + 过夜费 独立检查方法（供 broadcast_tasks 调用）
+    # ========================================================================
+
+    async def check_funding_rate(
+        self, user_id: str, threshold: float, pair_code: str = "XAU"
+    ) -> bool:
+        funding_data = await self._get_funding_rate()
+        if not funding_data:
+            return False
+        cost_per_lot = abs(funding_data.get('short_cost_per_lot', 0))
+        if cost_per_lot > threshold:
+            return await self._send_alert(
+                user_id=user_id,
+                template_key="funding_rate_alert",
+                variables={
+                    "pair_code": pair_code,
+                    "funding_rate_pct": f"{funding_data['funding_rate_pct']:.4f}",
+                    "short_cost": f"{cost_per_lot:.4f}",
+                    "threshold": f"{threshold}",
+                    "mark_price": f"{funding_data['mark_price']:.2f}",
+                },
+            )
+        return False
+
+    async def check_overnight_fee(
+        self, user_id: str, threshold: float, pair_code: str = "XAU"
+    ) -> bool:
+        swap_data = await self._get_swap_rate()
+        if not swap_data:
+            return False
+        swap_short = abs(swap_data.get('short_swap_per_lot', 0))
+        if swap_short > threshold:
+            return await self._send_alert(
+                user_id=user_id,
+                template_key="overnight_fee_alert",
+                variables={
+                    "pair_code": pair_code,
+                    "swap_short": f"{swap_data['short_swap_per_lot']:.4f}",
+                    "threshold": f"{threshold}",
+                    "symbol": swap_data.get("symbol", "XAUUSD+"),
+                },
+            )
+        return False
+
+    # ========================================================================
+    # 费率数据获取（带缓存）
+    # ========================================================================
+
+    async def _get_funding_rate(self) -> Optional[Dict]:
+        now = time.time()
+        if RiskAlertService._funding_cache['data'] and now - RiskAlertService._funding_cache['ts'] < 60:
+            return RiskAlertService._funding_cache['data']
+        try:
+            from app.services.binance_client import BinanceFuturesClient
+            client = BinanceFuturesClient("", "")
+            try:
+                data = await client.get_premium_index("XAUUSDT")
+            finally:
+                await client.close()
+            funding_rate = float(data.get("lastFundingRate", 0))
+            mark_price = float(data.get("markPrice", 0))
+            result = {
+                "funding_rate": funding_rate,
+                "funding_rate_pct": round(funding_rate * 100, 6),
+                "mark_price": mark_price,
+                "short_cost_per_lot": round(-funding_rate * mark_price, 4),
+            }
+            RiskAlertService._funding_cache = {'data': result, 'ts': now}
+            return result
+        except Exception as e:
+            logger.warning(f"[RiskAlert] Failed to fetch funding rate: {e}")
+            return RiskAlertService._funding_cache.get('data')
+
+    async def _get_swap_rate(self) -> Optional[Dict]:
+        now = time.time()
+        if RiskAlertService._swap_cache['data'] and now - RiskAlertService._swap_cache['ts'] < 60:
+            return RiskAlertService._swap_cache['data']
+        try:
+            import MetaTrader5 as mt5
+            from app.services.realtime_market_service import market_data_service as realtime_service
+            mt5_client = realtime_service.mt5_client
+            if not mt5_client.ensure_connection():
+                return RiskAlertService._swap_cache.get('data')
+            symbol = "XAUUSD+"
+            info = mt5.symbol_info(symbol)
+            if info is None:
+                return RiskAlertService._swap_cache.get('data')
+            contract = info.trade_contract_size
+            result = {
+                "symbol": symbol,
+                "swap_long": info.swap_long,
+                "swap_short": info.swap_short,
+                "long_swap_per_lot": round(info.swap_long * contract / 365, 4) if info.swap_long else 0,
+                "short_swap_per_lot": round(info.swap_short * contract / 365, 4) if info.swap_short else 0,
+            }
+            RiskAlertService._swap_cache = {'data': result, 'ts': now}
+            return result
+        except Exception as e:
+            logger.warning(f"[RiskAlert] Failed to fetch swap rate: {e}")
+            return RiskAlertService._swap_cache.get('data')
 
     # ========================================================================
     # 爆仓价计算辅助函数
