@@ -742,7 +742,7 @@ const _FORCE_ZERO_WINDOW_MS = 8000  // accept zero snapshots within 8s after clo
 const { currentPair } = useTradingPair()
 const alertPairCode = currentPair  // computed alias — reactive ref from global store
 
-watch(() => marketStore.positionSnapshot, (snap) => {
+watch([() => marketStore.positionSnapshot, alertPairCode], ([snap]) => {
   if (!snap) return
   const pairData = snap.pairs?.[alertPairCode.value]
   let ml, ms, bl, bs

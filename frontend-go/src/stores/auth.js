@@ -54,6 +54,10 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     localStorage.removeItem('token')
+    // Disconnect WebSocket so stale connection doesn't persist to next login
+    import('@/stores/market').then(({ useMarketStore }) => {
+      useMarketStore().disconnect()
+    }).catch(() => {})
     // Reset the pair cache so the next user (or login page) doesn't see
     // the outgoing user's configured set.
     reloadTradingPairs(true).catch(() => {})

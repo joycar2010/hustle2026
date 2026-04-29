@@ -48,9 +48,11 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useMarketStore } from '@/stores/market'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const marketStore = useMarketStore()
 
 const username = ref('')
 const password = ref('')
@@ -64,6 +66,7 @@ async function handleLogin() {
   try {
     const success = await authStore.login(username.value, password.value)
     if (success) {
+      marketStore.reconnect()
       router.push('/')
     } else {
       error.value = 'Invalid username or password'

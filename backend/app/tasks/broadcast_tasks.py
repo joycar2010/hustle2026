@@ -210,37 +210,8 @@ class AccountBalanceStreamer:
                         except Exception as _snap_err:
                             logger.warning(f"[AccountBalanceStreamer] snapshot write error: {_snap_err}")
 
-                        # 将 Binance 持仓同步到 PositionStreamer（仅本用户的）
-                        try:
-                            # 按 symbol 汇总 Binance 持仓 (支持多产品对)
-                            all_positions = aggregated_data.get("positions", [])
-                            logger.info(f"[AccountBalanceStreamer] user={uid} pos_count={len(all_positions)}")
-                            sym_longs = {}
-                            sym_shorts = {}
-                            for pos in all_positions:
-                                if pos.get("is_mt5_account"):
-                                    continue
-                                if pos.get("platform_id") != 1:
-                                    continue
-                                sym = pos.get("symbol", "")
-                                side = pos.get("side", "").upper()
-                                size = round(float(pos.get("size", 0)), 3)
-                                if side in ("LONG", "BUY"):
-                                    sym_longs[sym] = sym_longs.get(sym, 0.0) + size
-                                elif side in ("SHORT", "SELL"):
-                                    sym_shorts[sym] = sym_shorts.get(sym, 0.0) + size
-                            # 更新每个 symbol 的持仓缓存
-                            all_syms = set(list(sym_longs.keys()) + list(sym_shorts.keys()))
-                            for sym in all_syms:
-                                position_streamer.set_binance_positions(
-                                    round(sym_longs.get(sym, 0.0), 3),
-                                    round(sym_shorts.get(sym, 0.0), 3),
-                                    user_id=uid,
-                                    symbol=sym,
-                                )
-                            logger.info(f"[AccountBalanceStreamer] set_binance syms={list(all_syms)} uid={uid}")
-                        except Exception as _pe:
-                            logger.warning(f"[AccountBalanceStreamer] PositionStreamer sync error: {_pe}")
+                        # Binance 持仓同步已由 BinancePositionPusher WS 实时驱动，
+                        # REST 轮询不再更新 PositionStreamer 缓存。
 
                         # 按用户推送，不再广播给所有人
                         await manager.send_to_user({

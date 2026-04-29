@@ -197,6 +197,13 @@ export const useMarketStore = defineStore('market', () => {
   function reconnect() {
     disconnect()
     token = null  // force getToken() to re-read fresh token
+    positionSnapshot.value = {
+      bybit_long_lots: 0,
+      bybit_short_lots: 0,
+      binance_long_xau: 0,
+      binance_short_xau: 0,
+      pairs: {},
+    }
     connect()
   }
 
