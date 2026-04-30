@@ -114,9 +114,13 @@ export const useMarketStore = defineStore('market', () => {
             binance_bid: d.binance_quote?.bid_price ?? d.binance_bid ?? 0,
             binance_ask: d.binance_quote?.ask_price ?? d.binance_ask ?? 0,
             binance_mid: d.binance_mid ?? ((d.binance_quote?.bid_price + d.binance_quote?.ask_price) / 2) ?? 0,
+            binance_bid_qty: d.binance_quote?.bid_qty ?? 0,
+            binance_ask_qty: d.binance_quote?.ask_qty ?? 0,
             bybit_bid: d.bybit_quote?.bid_price ?? d.bybit_bid ?? 0,
             bybit_ask: d.bybit_quote?.ask_price ?? d.bybit_ask ?? 0,
             bybit_mid: d.bybit_mid ?? ((d.bybit_quote?.bid_price + d.bybit_quote?.ask_price) / 2) ?? 0,
+            bybit_bid_qty: d.bybit_quote?.bid_qty ?? 0,
+            bybit_ask_qty: d.bybit_quote?.ask_qty ?? 0,
             timestamp: d.timestamp,
           }
         }
@@ -127,9 +131,13 @@ export const useMarketStore = defineStore('market', () => {
             binance_bid: d.binance_bid ?? 0,
             binance_ask: d.binance_ask ?? 0,
             binance_mid: d.binance_bid != null ? (d.binance_bid + d.binance_ask) / 2 : 0,
+            binance_bid_qty: d.binance_bid_qty ?? 0,
+            binance_ask_qty: d.binance_ask_qty ?? 0,
             bybit_bid:   d.bybit_bid   ?? 0,
             bybit_ask:   d.bybit_ask   ?? 0,
             bybit_mid:   d.bybit_bid   != null ? (d.bybit_bid + d.bybit_ask) / 2 : 0,
+            bybit_bid_qty: d.bybit_bid_qty ?? 0,
+            bybit_ask_qty: d.bybit_ask_qty ?? 0,
             timestamp:   d.timestamp,
           }
         }

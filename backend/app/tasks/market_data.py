@@ -24,9 +24,12 @@ class MarketDataStreamer:
         self.last_strategy_check_time = None
 
     def update_interval(self, new_interval: float):
-        """Update streaming interval (0.1s - 10s)"""
+        """Update streaming interval (0.1s - 10s). Admin setting overrides auto-adjust."""
         if 0.1 <= new_interval <= 10:
             self.base_interval = new_interval
+            self.active_interval = min(new_interval, self.active_interval)
+            self._admin_override = True
+            logger.info(f"[MarketDataStreamer] Admin set interval={new_interval}s (override=True)")
             return True
         return False
 
@@ -106,10 +109,12 @@ class MarketDataStreamer:
                 # Determine push frequency based on connection count and strategy status
                 connection_count = manager.get_connection_count()
 
-                if connection_count > 0 and cached_active_count > 0:
-                    self.current_interval = self.active_interval  # 0.25s (4 times/sec)
+                if getattr(self, '_admin_override', False):
+                    self.current_interval = self.base_interval
+                elif connection_count > 0 and cached_active_count > 0:
+                    self.current_interval = self.active_interval
                 else:
-                    self.current_interval = self.base_interval  # 1s (1 time/sec)
+                    self.current_interval = self.base_interval
 
                 # Get all active pairs from hedging pair service
                 try:

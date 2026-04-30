@@ -89,7 +89,8 @@ func main() {
 
 	// ── Multi-pair pushers ────────────────────────────────────────────
 	go ws.RunMultiPairTickPusher(pairs.Global, 250*time.Millisecond)
-	go ws.RunMultiPairSpreadPusher(pairs.Global, 500*time.Millisecond)
+	// SpreadPusher removed: Python MarketDataStreamer via Redis is authoritative
+	// go ws.RunMultiPairSpreadPusher(pairs.Global, 500*time.Millisecond)
 	log.Printf("[Server] Multi-pair pushers started for %d pairs", len(allPairs))
 
 	go market.RunTimeSyncLoop()

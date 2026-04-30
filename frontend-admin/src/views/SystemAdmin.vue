@@ -2172,7 +2172,8 @@ function connectPushWs() {
         const msg = JSON.parse(event.data)
         pushTotalMsgs.value++
         pushMsgCountLastSec++
-        const t = msg.type || 'unknown'
+        const _typeAlias = { position_snapshot: 'position_update', pending_orders: 'order_update' }
+        const t = _typeAlias[msg.type] || msg.type || 'unknown'
         const now = Date.now()
         if (!pushMsgCounts.value[t]) pushMsgCounts.value[t] = 0
         pushMsgCounts.value[t]++

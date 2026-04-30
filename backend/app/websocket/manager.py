@@ -3,6 +3,9 @@ from typing import Dict, Set
 from fastapi import WebSocket
 import json
 import asyncio
+import logging
+
+_logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
@@ -73,13 +76,20 @@ class ConnectionManager:
             self.all_connections.discard(connection)
 
     async def broadcast_market_data(self, spread_data: dict, pair_code: str = "XAU"):
-        """Broadcast market data to all connections (with pair identifier)"""
+        """Broadcast market data to Python WS + Redis (Go RedisBridge)"""
         message = {
             "type": "market_data",
             "pair_code": pair_code,
             "data": spread_data,
         }
         await self.broadcast(message)
+        # Publish to Redis so Go RedisBridge forwards to Go WS clients
+        try:
+            from app.core.redis_client import redis_client as _rc
+            if _rc.client:
+                await _rc.publish("ws:market_data", json.dumps(message))
+        except Exception:
+            pass
 
     async def send_risk_alert(self, user_id: str, alert_data: dict):
         """Send risk alert to a specific user"""

@@ -704,6 +704,24 @@ watch(() => marketStore.marketData, (data) => {
 
     bybitConnected.value = true
     binanceConnected.value = true
+
+    // Update order book from WS data (volume from bookTicker)
+    if (data.binance_bid_qty != null || data.binance_ask_qty != null) {
+      binanceOrderBook.value = {
+        bid_price: data.binance_bid || 0,
+        bid_volume: data.binance_bid_qty || 0,
+        ask_price: data.binance_ask || 0,
+        ask_volume: data.binance_ask_qty || 0,
+      }
+    }
+    if (data.bybit_bid_qty != null || data.bybit_ask_qty != null) {
+      bybitOrderBook.value = {
+        bid_price: data.bybit_bid || 0,
+        bid_volume: data.bybit_bid_qty || 0,
+        ask_price: data.bybit_ask || 0,
+        ask_volume: data.bybit_ask_qty || 0,
+      }
+    }
   }
 }, { deep: false }) // Shallow watch for better performance
 
@@ -882,10 +900,8 @@ onMounted(() => {
     fetchPendingOrderCounts()
   }, 3000)
 
-  // Fetch order book every 500ms
-  orderBookFetchTimer = setInterval(() => {
-    fetchOrderBook()
-  }, 500)
+  // Order book now updated via WebSocket (market_data messages)
+  // REST fetchOrderBook kept as one-shot initial load only
 
   // Fetch exchange rate every 10 minutes
   exchangeRateTimer = setInterval(() => {
@@ -919,7 +935,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (lagTimer) clearInterval(lagTimer)
   if (orderFetchTimer) clearInterval(orderFetchTimer)
-  if (orderBookFetchTimer) clearInterval(orderBookFetchTimer)
+  // orderBookFetchTimer removed — orderbook now via WS
   if (exchangeRateTimer) clearInterval(exchangeRateTimer)
   if (fundingRateTimer) clearInterval(fundingRateTimer)
   if (bybitSwapRateTimer) clearInterval(bybitSwapRateTimer)

@@ -18,6 +18,7 @@ var bridgeChannels = []string{
 	"ws:order_update",
 	"ws:position_update",
 	"ws:user_event",
+	"ws:mt5_connection_status",
 }
 
 // RunRedisBridge subscribes to Python-published channels and forwards to WS Hub

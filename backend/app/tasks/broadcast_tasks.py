@@ -213,11 +213,18 @@ class AccountBalanceStreamer:
                         # Binance 持仓同步已由 BinancePositionPusher WS 实时驱动，
                         # REST 轮询不再更新 PositionStreamer 缓存。
 
-                        # 按用户推送，不再广播给所有人
-                        await manager.send_to_user({
-                            "type": "account_balance",
-                            "data": aggregated_data,
-                        }, uid)
+                        # 按用户推送 Python WS + Redis (Go WS)
+                        _ab_msg = {"type": "account_balance", "data": aggregated_data}
+                        await manager.send_to_user(_ab_msg, uid)
+                        try:
+                            from app.core.redis_client import redis_client as _rc_ab
+                            if _rc_ab.client:
+                                import json as _j_ab
+                                await _rc_ab.publish("ws:user_event", _j_ab.dumps({
+                                    "user_id": uid, **_ab_msg
+                                }))
+                        except Exception:
+                            pass
                     except Exception as e:
                         logger.error(f"[AccountBalanceStreamer] user {uid} error: {e}")
 
@@ -386,10 +393,17 @@ class RiskMetricsStreamer:
                             "positions": aggregated_data.get("positions", []),
                             "timestamp": aggregated_data.get("timestamp"),
                         }
-                        await manager.send_to_user({
-                            "type": "risk_metrics",
-                            "data": risk_data,
-                        }, uid)
+                        _rm_msg = {"type": "risk_metrics", "data": risk_data}
+                        await manager.send_to_user(_rm_msg, uid)
+                        try:
+                            from app.core.redis_client import redis_client as _rc_rm
+                            if _rc_rm.client:
+                                import json as _j_rm
+                                await _rc_rm.publish("ws:user_event", _j_rm.dumps({
+                                    "user_id": uid, **_rm_msg
+                                }))
+                        except Exception:
+                            pass
                     except Exception as e:
                         logger.error(f"[RiskMetricsStreamer] user {uid} error: {e}")
 
@@ -758,19 +772,21 @@ class MT5ConnectionStreamer:
         """Main streaming loop with connection pool optimization"""
         while self.running:
             try:
-                # Only broadcast if there are active connections
-                if manager.get_connection_count() == 0:
-                    await asyncio.sleep(self.interval)
-                    continue
-
                 # Check MT5 connection status
                 mt5_status = await self._check_mt5_status()
 
-                # Broadcast to all connected clients
-                await manager.broadcast({
-                    "type": "mt5_connection_status",
-                    "data": mt5_status
-                })
+                _msg = {"type": "mt5_connection_status", "data": mt5_status}
+                # Broadcast to Python WS clients (if any)
+                if manager.get_connection_count() > 0:
+                    await manager.broadcast(_msg)
+                # Always publish to Redis for Go WS clients
+                try:
+                    from app.core.redis_client import redis_client as _rc_mt5
+                    if _rc_mt5.client:
+                        import json as _j_mt5
+                        await _rc_mt5.publish("ws:broadcast", _j_mt5.dumps(_msg))
+                except Exception:
+                    pass
                 self.broadcast_count += 1
                 self.last_broadcast_time = datetime.now().isoformat()
 
@@ -862,6 +878,12 @@ class PendingOrdersStreamer:
         self.last_broadcast_time = None
         self.error_count = 0
 
+    def update_interval(self, new_interval):
+        if 1 <= new_interval <= 30:
+            self.interval = new_interval
+            return True
+        return False
+
     async def start(self):
         """Start the pending orders streaming task"""
         if self.running:
@@ -886,11 +908,6 @@ class PendingOrdersStreamer:
         """Main streaming loop"""
         while self.running:
             try:
-                # Only broadcast if there are active connections
-                if manager.get_connection_count() == 0:
-                    await asyncio.sleep(self.interval)
-                    continue
-
                 # Fetch pending orders across all REST-capable platforms
                 # (binance/bybit/gateio/okx). IC Markets (MT5-only) pending
                 # orders flow through the position stream, not this one.
@@ -1065,10 +1082,21 @@ class PendingOrdersStreamer:
                                         f"{account.account_id} (pid={account.platform_id}): {e}"
                                     )
                             user_orders.sort(key=lambda x: x["timestamp"], reverse=True)
-                            await manager.send_to_user({
+                            _po_msg = {
                                 "type": "pending_orders",
                                 "data": user_orders[:20],
-                            }, uid)
+                            }
+                            if manager.get_connection_count() > 0:
+                                await manager.send_to_user(_po_msg, uid)
+                            try:
+                                from app.core.redis_client import redis_client as _rc_po
+                                if _rc_po.client:
+                                    import json as _j_po
+                                    await _rc_po.publish("ws:user_event", _j_po.dumps({
+                                        "user_id": uid, **_po_msg
+                                    }))
+                            except Exception:
+                                pass
                     self.broadcast_count += 1
                     self.last_broadcast_time = datetime.now().isoformat()
 
@@ -1347,12 +1375,32 @@ class PositionStreamer:
     def __init__(self):
         self.running = False
         self.task = None
+        self.interval = self.BROADCAST_INTERVAL
+        self.broadcast_count = 0
+        self.error_count = 0
+        self.last_broadcast_time = None
         # Binance 持仓缓存，按 user_id → symbol 双层隔离
         # 结构: {user_id: {symbol: (long, short)}}
         self._binance_positions: dict = {}
         # MT5 last-known-good cache: prevents flicker when bridge read times out.
         # Structure same as _binance_positions: {user_id: {symbol: (long, short)}}
         self._mt5_lkg: dict = {}
+
+    def get_stats(self):
+        return {
+            "running": self.running,
+            "interval": self.interval,
+            "broadcast_count": self.broadcast_count,
+            "error_count": self.error_count,
+            "last_broadcast_time": self.last_broadcast_time,
+        }
+
+    def update_interval(self, new_interval):
+        if 0.1 <= new_interval <= 30.0:
+            self.BROADCAST_INTERVAL = new_interval
+            self.interval = new_interval
+            return True
+        return False
 
     def set_binance_positions(self, long_xau: float, short_xau: float,
                                user_id: str = None, symbol: str = None) -> None:
@@ -1467,9 +1515,14 @@ class PositionStreamer:
                     }
                     await _rc.publish("ws:user_event", _json.dumps(evt))
 
+                from datetime import datetime as _dt_pos
+                self.broadcast_count += 1
+                self.last_broadcast_time = _dt_pos.now().isoformat()
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                self.error_count += 1
                 logger.error(f"[PositionStreamer] loop error: {e}", exc_info=True)
                 await asyncio.sleep(2)
 
@@ -1881,15 +1934,29 @@ class BinancePositionPusher:
                     continue
 
                 logger.info(f"[BinancePositionPusher] listenKey 已创建: {api_key[:8]}…")
-                session = aiohttp.ClientSession()
+
+                # Build session + ws_connect kwargs — SOCKS5 needs ProxyConnector
                 _ws_url = f"{ws_base}/{listen_key}"
                 _ws_kwargs = dict(heartbeat=30)
-                if proxy_url:
-                    _ws_kwargs["proxy"] = proxy_url
+                if proxy_url and proxy_url.startswith(('socks5://', 'socks4://', 'socks://')):
+                    from aiohttp_socks import ProxyConnector
+                    _connector = ProxyConnector.from_url(proxy_url)
+                    session = aiohttp.ClientSession(connector=_connector)
+                else:
+                    session = aiohttp.ClientSession()
+                    if proxy_url:
+                        from urllib.parse import urlparse as _urlparse
+                        _parsed = _urlparse(proxy_url)
+                        if _parsed.username and _parsed.password:
+                            _ws_kwargs["proxy"] = f"{_parsed.scheme}://{_parsed.hostname}:{_parsed.port}"
+                            _ws_kwargs["proxy_auth"] = aiohttp.BasicAuth(_parsed.username, _parsed.password)
+                        else:
+                            _ws_kwargs["proxy"] = proxy_url
 
                 async with session.ws_connect(_ws_url, **_ws_kwargs) as ws:
                     _proxy_tag = f"via {proxy_url.split('@')[-1]}" if proxy_url else "direct"
-                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}… ({_proxy_tag})")
+                    _proxy_type = "socks5" if proxy_url and "socks" in proxy_url else ("http-proxy" if proxy_url else "direct")
+                    logger.info(f"[BinancePositionPusher] User Data Stream 已连接: {api_key[:8]}… ({_proxy_tag}, {_proxy_type})")
 
                     # Bootstrap: REST snapshot once per (re)connect to seed the
                     # cache with pre-existing positions (WS only pushes deltas).
@@ -1898,14 +1965,21 @@ class BinancePositionPusher:
                     except Exception as _be:
                         logger.warning(f"[BinancePositionPusher] bootstrap failed {api_key[:8]}…: {_be}")
 
+                    # Shared state for health monitoring in _keepalive_loop
+                    _ws_msg_count = [0]
+                    _ws_last_msg_ts = [__import__('time').time()]
+
                     keepalive_task = asyncio.create_task(
-                        self._keepalive_loop(client, listen_key, api_key=api_key)
+                        self._keepalive_loop(client, listen_key, api_key=api_key,
+                                             msg_count=_ws_msg_count, last_msg_ts=_ws_last_msg_ts)
                     )
                     try:
                         async for msg in ws:
                             if not self.running:
                                 break
                             if msg.type == aiohttp.WSMsgType.TEXT:
+                                _ws_msg_count[0] += 1
+                                _ws_last_msg_ts[0] = __import__('time').time()
                                 await self._handle_message(msg.json(), user_id)
                             elif msg.type == aiohttp.WSMsgType.CLOSED:
                                 logger.warning(f"[BinancePositionPusher] WS closed by server: {api_key[:8]}… data={msg.data}")
@@ -1933,9 +2007,13 @@ class BinancePositionPusher:
                 logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
                 await asyncio.sleep(self.RECONNECT_DELAY)
 
-    async def _keepalive_loop(self, client, listen_key: str, api_key: str = ""):
-        """每 25min 续期 listenKey"""
+    async def _keepalive_loop(self, client, listen_key: str, api_key: str = "",
+                            msg_count: list = None, last_msg_ts: list = None):
+        """每 25min 续期 listenKey + 输出 WS 健康状态"""
+        import time as _time
         _tag = api_key[:8] if api_key else listen_key[:8]
+        _health_interval = 300  # 5min health log
+        _next_health = _time.time() + _health_interval
         while True:
             await asyncio.sleep(self.KEEPALIVE_SEC)
             try:
@@ -1943,6 +2021,15 @@ class BinancePositionPusher:
                 logger.info(f"[BinancePositionPusher] listenKey 续期成功: {_tag}…")
             except Exception as e:
                 logger.warning(f"[BinancePositionPusher] listenKey 续期失败 {_tag}…: {e}")
+            # Periodic health log
+            now = _time.time()
+            if msg_count is not None and now >= _next_health:
+                idle_s = int(now - last_msg_ts[0]) if last_msg_ts else 0
+                logger.info(
+                    f"[BinancePositionPusher] health: {_tag}… "
+                    f"total_msgs={msg_count[0]} idle={idle_s}s"
+                )
+                _next_health = now + _health_interval
 
     # ------------------------------------------------------------------
     # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer

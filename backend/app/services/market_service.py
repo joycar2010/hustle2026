@@ -49,9 +49,9 @@ class MarketDataService:
             return MarketQuote(
                 symbol=symbol,
                 bid_price=quote["bid"],
-                bid_qty=0,
+                bid_qty=quote.get("bid_qty", 0),
                 ask_price=quote["ask"],
-                ask_qty=0,
+                ask_qty=quote.get("ask_qty", 0),
                 timestamp=quote["ts"] or int(time.time() * 1000),
             )
         # Backward compat: try old .bid/.ask (single-symbol mode)
@@ -59,9 +59,9 @@ class MarketDataService:
             return MarketQuote(
                 symbol=symbol,
                 bid_price=binance_ws.bid,
-                bid_qty=0,
+                bid_qty=binance_ws.get_quote(symbol.lower()).get("bid_qty", 0) if binance_ws.get_quote(symbol.lower()) else 0,
                 ask_price=binance_ws.ask,
-                ask_qty=0,
+                ask_qty=binance_ws.get_quote(symbol.lower()).get("ask_qty", 0) if binance_ws.get_quote(symbol.lower()) else 0,
                 timestamp=binance_ws.timestamp or int(time.time() * 1000),
             )
         logger.warning(f"Binance WebSocket not available for {symbol} (connected={binance_ws.connected})")

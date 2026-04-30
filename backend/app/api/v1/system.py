@@ -1699,10 +1699,9 @@ async def get_push_streams_stats(
             account_balance_streamer, risk_metrics_streamer,
             mt5_connection_streamer, pending_orders_streamer, position_streamer
         )
-        from app.services.mt5_bridge import mt5_bridge
 
         market_stats = market_streamer.get_stats()
-        bridge_stats = mt5_bridge.get_stats()
+        pos_stats = position_streamer.get_stats()
 
         streams = [
             {
@@ -1728,7 +1727,7 @@ async def get_push_streams_stats(
                 "description": "Binance/Bybit 账户资金实时更新",
                 "source": "python",
                 "interval": account_balance_streamer.interval,
-                "running": account_balance_streamer._running if hasattr(account_balance_streamer, '_running') else True,
+                "running": account_balance_streamer.running,
                 "broadcast_count": getattr(account_balance_streamer, 'broadcast_count', 0),
                 "min_interval": 5,
                 "max_interval": 60,
@@ -1737,14 +1736,13 @@ async def get_push_streams_stats(
             {
                 "type": "position_update",
                 "name": "持仓更新推送",
-                "description": "MT5 持仓实时同步（Bridge 服务）",
+                "description": "Binance+MT5 持仓实时合并推送（PositionStreamer）",
                 "source": "python",
-                "interval": bridge_stats.get("interval", 1),
-                "running": bridge_stats.get("running", False),
-                "broadcast_count": bridge_stats.get("broadcast_count", 0),
-                "error_count": bridge_stats.get("error_count", 0),
-                "last_broadcast": bridge_stats.get("last_broadcast_time"),
-                "active_accounts": bridge_stats.get("active_mt5_accounts", 0),
+                "interval": pos_stats.get("interval", 1),
+                "running": pos_stats.get("running", False),
+                "broadcast_count": pos_stats.get("broadcast_count", 0),
+                "error_count": pos_stats.get("error_count", 0),
+                "last_broadcast": pos_stats.get("last_broadcast_time"),
                 "min_interval": 0.1,
                 "max_interval": 30.0,
                 "step": 0.1,
@@ -1817,14 +1815,13 @@ async def update_push_stream(
         from app.tasks.market_data import market_streamer
         from app.tasks.broadcast_tasks import (
             account_balance_streamer, risk_metrics_streamer,
-            mt5_connection_streamer, pending_orders_streamer
+            mt5_connection_streamer, pending_orders_streamer, position_streamer
         )
-        from app.services.mt5_bridge import mt5_bridge
 
         mapping = {
             "market_data": (market_streamer, "update_interval", 0.1, 10.0),
             "account_balance": (account_balance_streamer, "update_interval", 5, 60),
-            "position_update": (mt5_bridge, None, 0.1, 30.0),
+            "position_update": (position_streamer, "update_interval", 0.1, 30.0),
             "risk_metrics": (risk_metrics_streamer, "update_interval", 10, 120),
             "order_update": (pending_orders_streamer, "update_interval", 1, 30),
             "mt5_connection_status": (mt5_connection_streamer, "update_interval", 10, 120),
@@ -1838,9 +1835,7 @@ async def update_push_stream(
             raise ValueError(f"Interval must be between {min_v} and {max_v}")
 
         # 1) Apply in-memory
-        if data.stream_type == "position_update":
-            mt5_bridge.interval = data.interval
-        elif method and hasattr(obj, method):
+        if method and hasattr(obj, method):
             getattr(obj, method)(data.interval)
 
         # 2) Persist to DB (agent_active_config key='push_stream_intervals')

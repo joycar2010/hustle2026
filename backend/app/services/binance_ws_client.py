@@ -130,6 +130,8 @@ class BinanceWebSocketClient:
                             self._quotes[sym] = {
                                 "bid": float(b),
                                 "ask": float(a),
+                                "bid_qty": float(payload.get("B", 0)),
+                                "ask_qty": float(payload.get("A", 0)),
                                 "ts": int(time.time() * 1000),
                             }
             except asyncio.CancelledError:
