@@ -90,8 +90,7 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- msg:
 				default:
-					close(client.send)
-					delete(h.clients, client)
+					// slow client — drop message (don't force-disconnect)
 				}
 			}
 			h.mu.RUnlock()

@@ -52,7 +52,7 @@
       <!-- 对冲账户 Card -->
       <div class="bg-[#252930] rounded p-1.5 lg:p-1.5 md:p-2 flex flex-col border border-[#2b3139]">
         <div class="flex items-center justify-center mb-1 lg:mb-0.5 md:mb-1.5">
-          <div class="font-medium text-sm lg:text-xs md:text-base">对冲账户 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">{{ pairConfig.mt5 }}</span></div>
+          <div class="font-medium text-sm lg:text-xs md:text-base"><span :class="['inline-block w-1.5 h-1.5 rounded-full mr-1 transition-opacity duration-200', dataAlive ? 'bg-[#0ecb81] opacity-100' : 'bg-gray-600 opacity-40']"></span>对冲账户 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">{{ pairConfig.mt5 }}</span></div>
         </div>
 
         <!-- Real-time Price with liquidation prices on left (long) and right (short) -->
@@ -127,7 +127,7 @@
       <!-- 主账号 Card -->
       <div class="bg-[#252930] rounded p-1.5 lg:p-1.5 md:p-2 flex flex-col border border-[#2b3139]">
         <div class="flex items-center justify-center mb-1 lg:mb-0.5 md:mb-1.5">
-          <div class="font-medium text-sm lg:text-xs md:text-base">主账号 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">{{ pairConfig.binance }}</span></div>
+          <div class="font-medium text-sm lg:text-xs md:text-base"><span :class="['inline-block w-1.5 h-1.5 rounded-full mr-1 transition-opacity duration-200', dataAlive ? 'bg-[#0ecb81] opacity-100' : 'bg-gray-600 opacity-40']"></span>主账号 <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">{{ pairConfig.binance }}</span></div>
         </div>
 
         <!-- Real-time Price with liquidation prices on left (long) and right (short) -->
@@ -455,6 +455,8 @@ const SLIDING_WINDOW_SIZE = 60 // 60 seconds
 const LAG_THRESHOLD = 2000 // 2 seconds
 const bybitUpdateTimestamps = ref([]) // Store last N update timestamps
 const binanceUpdateTimestamps = ref([]) // Store last N update timestamps
+const dataAlive = ref(false)
+let _dataAliveTimer = null
 let lastUpdateTime = Date.now()
 let lagTimer = null
 
@@ -679,6 +681,9 @@ watch(() => marketStore.marketData, (data) => {
   binanceUpdateTimestamps.value = binanceUpdateTimestamps.value.filter(t => t > windowStart)
 
   lastUpdateTime = now
+  dataAlive.value = true
+  clearTimeout(_dataAliveTimer)
+  _dataAliveTimer = setTimeout(() => { dataAlive.value = false }, 300)
 
   // Only update if values actually changed
   const bybitBidChanged = bybit.value.bid !== (data.bybit_bid || 0)

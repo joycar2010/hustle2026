@@ -125,6 +125,26 @@ export const useMarketStore = defineStore('market', () => {
             timestamp:   d.timestamp,
           }
         }
+        // Go TickPusher: 250ms Binance-only tick — merge into marketData
+        else if (msg.type === 'tick' && msg.data) {
+          const d = msg.data
+          const prev = marketData.value
+          if (!prev || d.bid_price !== prev.binance_bid || d.ask_price !== prev.binance_ask) {
+            marketData.value = {
+              binance_bid: d.bid_price ?? prev?.binance_bid ?? 0,
+              binance_ask: d.ask_price ?? prev?.binance_ask ?? 0,
+              binance_mid: d.bid_price != null ? (d.bid_price + d.ask_price) / 2 : (prev?.binance_mid ?? 0),
+              binance_bid_qty: prev?.binance_bid_qty ?? 0,
+              binance_ask_qty: prev?.binance_ask_qty ?? 0,
+              bybit_bid: prev?.bybit_bid ?? 0,
+              bybit_ask: prev?.bybit_ask ?? 0,
+              bybit_mid: prev?.bybit_mid ?? 0,
+              bybit_bid_qty: prev?.bybit_bid_qty ?? 0,
+              bybit_ask_qty: prev?.bybit_ask_qty ?? 0,
+              timestamp: d.timestamp ?? prev?.timestamp,
+            }
+          }
+        }
         // Handle account balance updates
         else if (msg.type === 'account_balance' && msg.data) {
           accountBalanceData.value = msg.data
