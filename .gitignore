@@ -18,9 +18,6 @@ env/
 logs/
 *.log
 
-# Sensitive - credentials (keep structure, strip values via separate process)
-# config.json and .env are included but passwords will be scrubbed
-
 # OS
 .DS_Store
 Thumbs.db
@@ -33,10 +30,24 @@ desktop.ini
 # MT5 runtime data (large binary files)
 *.dat
 *.bin
+
+# MT5 compiled files
 *.ex5
 *.ex4
-MQL5/
-MQL4/
-bases/
-history/
+
+# MT5 runtime directories
+Bases/
+History/
 tester/
+Sounds/
+
+# MT5 binaries
+terminal64.exe
+metatester64.exe
+metaeditor64.exe
+terminal.ico
+*.dll
+
+# MetaTrader user data
+origin.txt
+community/
