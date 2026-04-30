@@ -15,10 +15,10 @@ backend/.env.*
 !backend/.env.example
 
 # All frontend dist (rebuilt on each push/rollback via _build_frontend)
-frontend-admin/dist/
-frontend-go/dist/
-frontend-www/dist/
-frontend-auto/dist/
+# frontend-admin/dist/
+# frontend-go/dist/
+# frontend-www/dist/
+# frontend-auto/dist/
 
 # Node
 **/node_modules/
