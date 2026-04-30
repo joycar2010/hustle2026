@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Legacy fallback if DB unavailable
 SSL_DOMAINS = [
-    "go.hustle2026.xyz",
-    "admin.hustle2026.xyz",
-    "www.hustle2026.xyz",
-    "auto.hustle2026.xyz",
+    "testgo.hustle2026.xyz",
+    "testadmin.hustle2026.xyz",
+    "test.hustle2026.xyz",
+    "testauto.hustle2026.xyz",
 ]
 
 

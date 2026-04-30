@@ -478,7 +478,7 @@ function getPlatformName(platformId, isMt5Account) {
 
 function getPlatformDisplayName(account) {
   // 显示真实平台名（含 MT5 前缀），与 admin 总控保持一致
-  const map = { 1: '币安', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX' }
+  const map = { 1: '币安', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX', 6: 'Bitget' }
   const pname = map[account.platform_id] || '未知'
   return account.is_mt5_account ? ('MT5·' + pname) : pname
 }

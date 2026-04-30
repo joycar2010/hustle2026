@@ -139,13 +139,14 @@ async def create_account(
 
 @router.get("/summary")
 async def get_accounts_summary(
-    user_id: str = Depends(get_current_user_id),
+    include_inactive: bool = False,
+    ctx: ViewContext = Depends(get_view_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Get account summary for www frontend.
-    Alias for /dashboard/aggregated — MUST be before /{account_id} route.
+    Alias for /dashboard/aggregated.
     """
-    return await get_aggregated_dashboard(user_id=user_id, db=db)
+    return await get_aggregated_dashboard(include_inactive=include_inactive, ctx=ctx, db=db)
 
 
 @router.get("/{account_id}", response_model=AccountResponse)

@@ -305,6 +305,7 @@ async def build_snapshot(db: AsyncSession, ctx=None) -> Optional[MarketState]:
         now_utc_ms=int(time.time() * 1000),
         funding_rate_history=list(_funding_history),
         position_direction=direction,
+        funding_rate_trend=funding_rate_trend(ctx),
     )
 
 

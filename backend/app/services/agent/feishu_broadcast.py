@@ -123,7 +123,7 @@ async def broadcast_approval_request(
 
     viol_text = '\n'.join(f'  • {v}' for v in violations) or '无'
 
-    base_url = 'https://auto.hustle2026.xyz/decisions'
+    base_url = 'https://testauto.hustle2026.xyz/decisions'
     approve_url = f'{base_url}?action=approve&id={decision_id}'
     reject_url = f'{base_url}?action=reject&id={decision_id}'
 

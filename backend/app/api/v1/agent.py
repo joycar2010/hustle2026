@@ -3627,3 +3627,37 @@ async def chat_admin_hot_questions(
     return {
         "questions": [{"content": r[0], "count": int(r[1])} for r in rows],
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Guard Time-Window Rules CRUD
+# ──────────────────────────────────────────────────────────────────────
+
+@router.get('/guard-rules')
+async def get_guard_rules(db: AsyncSession = Depends(get_db),
+                          user_id: str = Depends(require_admin)) -> Dict[str, Any]:
+    """Return current Guard time_rules configuration."""
+    row = (await db.execute(text(
+        "SELECT value::text FROM agent_active_config WHERE key = 'time_rules'"
+    ))).first()
+    if not row:
+        return {}
+    import json as _json
+    return _json.loads(row[0])
+
+
+@router.put('/guard-rules')
+async def update_guard_rules(rules: Dict[str, Any] = Body(...),
+                             db: AsyncSession = Depends(get_db),
+                             user_id: str = Depends(require_admin)) -> Dict[str, str]:
+    """Update Guard time_rules configuration. Takes effect within 5s (config_loader TTL)."""
+    import json as _json
+    from app.services.agent.config_loader import invalidate as _invalidate_config
+    await db.execute(text("""
+        INSERT INTO agent_active_config (key, value, updated_by)
+        VALUES ('time_rules', cast(:v as jsonb), :uid)
+        ON CONFLICT (key) DO UPDATE SET value = cast(:v as jsonb), updated_at = NOW(), updated_by = :uid
+    """), {'v': _json.dumps(rules), 'uid': user_id})
+    await db.commit()
+    _invalidate_config()
+    return {'status': 'ok', 'message': 'Guard rules updated, effective within 5s'}

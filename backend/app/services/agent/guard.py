@@ -13,7 +13,7 @@ Bound rules implement the operator's stated rules verbatim:
   - Anti-ban frequency caps (delegated to rate_buckets)
   - Monday open volatility guard (06:00-06:30 BJT)
   - Wednesday triple overnight direction-aware caps
-  - Friday weekend graduated position reduction
+  - Friday weekend conditional bidirectional position management
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -53,6 +53,7 @@ class MarketState:
     now_utc_ms: int
     funding_rate_history: List[float] = field(default_factory=list)
     position_direction: str = 'flat'  # 'forward', 'reverse', 'flat', 'mixed'
+    funding_rate_trend: str = 'stable'  # 'rising', 'falling', 'stable', 'insufficient_data'
 
 
 @dataclass
@@ -152,8 +153,10 @@ def check_no_signal(p: Proposal, _: MarketState, __: Dict[str, Any]) -> Optional
 def check_monday_open(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Optional[str]:
     """Monday market open volatility guard.
 
-    06:00-06:30 BJT (summer): High volatility, require spread >= threshold.
-    07:15-08:00 BJT: Funding rate capture window, special handling.
+    06:00-06:30 BJT: High volatility, require spread >= 4.0 to open.
+    07:15-07:30 BJT: If funding > 10 pips (0.01), allow entry with spread 0~1.
+    07:30-07:45 BJT: If funding > 10 pips, allow entry with spread -2~0.
+    08:00-08:15 BJT: Must exit positions opened for funding capture.
     """
     if p.action not in ('open_long', 'open_short'):
         return None
@@ -167,6 +170,7 @@ def check_monday_open(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Optio
 
     t_minutes = bjt.hour * 60 + bjt.minute
 
+    # Phase 1: 06:00-06:30 high volatility - require wide spread
     vol_start = _parse_hhmm(tr.get('volatility_start', '06:00'))
     vol_end = _parse_hhmm(tr.get('volatility_end', '06:30'))
     min_spread = float(tr.get('min_spread_to_open', 4.0))
@@ -176,85 +180,61 @@ def check_monday_open(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Optio
             return (f'monday_open_volatility:spread={s.spread_now:.2f}<{min_spread}'
                     f'(06:00-06:30_high_volatility_window)')
 
+    # Phase 2: 07:15-08:00 funding capture - phased spread thresholds
+    phases = tr.get('funding_capture_phases', [
+        {'start': '07:15', 'end': '07:30', 'max_spread_entry': 1.0, 'min_funding': 0.01},
+        {'start': '07:30', 'end': '07:45', 'max_spread_entry': -2.0, 'min_funding': 0.01},
+    ])
+    for phase in phases:
+        ph_start = _parse_hhmm(phase.get('start', '07:15'))
+        ph_end = _parse_hhmm(phase.get('end', '07:30'))
+        if ph_start <= t_minutes < ph_end:
+            min_fr = float(phase.get('min_funding', 0.01))
+            max_sp = float(phase.get('max_spread_entry', 1.0))
+            if abs(s.funding_rate) < min_fr:
+                return (f'monday_funding_phase:funding={s.funding_rate:.6f}<{min_fr}'
+                        f'({phase["start"]}-{phase["end"]}_need_high_funding)')
+            min_sp = float(phase.get('min_spread_entry', 0 if max_sp >= 0 else max_sp))
+            upper_sp = float(phase.get('upper_spread_entry', max_sp if max_sp >= 0 else 0))
+            if not (min_sp <= s.spread_now <= upper_sp):
+                return (f'monday_funding_phase:spread={s.spread_now:.2f}_not_in_[{min_sp},{upper_sp}]'
+                        f'({phase["start"]}-{phase["end"]}_spread_out_of_range)')
+            return None  # within phase and conditions met - allow
+
+    # Phase 3: general funding window check
     fr_start = _parse_hhmm(tr.get('funding_window_start', '07:15'))
     fr_end = _parse_hhmm(tr.get('funding_window_end', '08:00'))
     if fr_start <= t_minutes < fr_end:
-        min_funding = float(tr.get('min_funding_for_capture', 0.003))
+        min_funding = float(tr.get('min_funding_for_capture', 0.01))
         if abs(s.funding_rate) < min_funding:
             return (f'monday_funding_window:funding={s.funding_rate:.6f}<{min_funding}'
                     f'(07:15-08:00_funding_capture_window)')
 
     return None
-
-
 def check_time_window(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Optional[str]:
     """Wednesday triple overnight fee: direction-aware position caps.
 
-    Forward (A long + B short): MT5 short swap x3 is the cost.
-    Reverse (A short + B long): MT5 long swap x3 is the cost.
-    Net cost vs funding rate benefit determines allowed position cap.
+    Starts from 18:00 BJT (configurable). After Wed 18:00:
+      - Forward: encouraged. base_cap=30%, favorable=50%.
+      - Reverse: discouraged. base_cap=20%.
+        BUT if funding_rate >= triple_swap_cost, operate normally (no restriction).
     """
     if p.action not in ('open_long', 'open_short'):
         return None
     bjt = _bjt_now(s)
-    if not (bjt.weekday() == 2 and bjt.hour >= 22):
-        return None
 
     tr = cfg.get('time_rules', {}).get('wednesday_overnight', {})
     if tr and not tr.get('enabled', True):
         return None
 
+    start_hour = int((tr or {}).get('start_hour', 18))
+    if not (bjt.weekday() == 2 and bjt.hour >= start_hour):
+        return None
+
     direction = s.position_direction if s.position_direction != 'flat' else _position_direction(s)
     proposed_pct = _proposed_position_pct(p, s)
 
-    if tr:
-        if direction in ('forward', 'flat'):
-            rules = tr.get('forward', {})
-            base_cap = float(rules.get('base_cap_pct', 0.30))
-            favorable_cap = float(rules.get('favorable_cap_pct', 0.50))
-            fav = rules.get('favorable_conditions', {})
-            min_spread = float(fav.get('min_spread', 2.0))
-            min_funding = float(fav.get('min_funding', 0.005))
-
-            triple_swap_cost = abs(s.swap_fee_short) * 3
-            funding_benefit = s.funding_rate if s.funding_rate > 0 else 0
-            net_favorable = funding_benefit > triple_swap_cost * 0.5
-
-            if proposed_pct > favorable_cap:
-                return f'wed_overnight_forward_max:{proposed_pct:.2%}>{favorable_cap:.0%}'
-            if proposed_pct > base_cap:
-                if s.spread_30m_avg >= min_spread and s.funding_rate >= min_funding and net_favorable:
-                    return None
-                return (f'wed_overnight_forward_cap:{proposed_pct:.2%}>{base_cap:.0%}'
-                        f'(spread={s.spread_30m_avg:.2f},funding={s.funding_rate:.4f},'
-                        f'swap_cost_x3={triple_swap_cost:.4f})')
-
-        elif direction == 'reverse':
-            rules = tr.get('reverse', {})
-            base_cap = float(rules.get('base_cap_pct', 0.20))
-            favorable_cap = float(rules.get('favorable_cap_pct', 0.40))
-            fav = rules.get('favorable_conditions', {})
-            min_spread = float(fav.get('min_spread', 3.0))
-
-            triple_swap_cost = abs(s.swap_fee_long) * 3
-            funding_offset = abs(s.funding_rate) if s.funding_rate < 0 else 0
-            net_favorable = funding_offset > triple_swap_cost * 0.5
-
-            if proposed_pct > favorable_cap:
-                return f'wed_overnight_reverse_max:{proposed_pct:.2%}>{favorable_cap:.0%}'
-            if proposed_pct > base_cap:
-                if abs(s.spread_30m_avg) >= min_spread and net_favorable:
-                    return None
-                return (f'wed_overnight_reverse_cap:{proposed_pct:.2%}>{base_cap:.0%}'
-                        f'(spread={s.spread_30m_avg:.2f},'
-                        f'swap_cost_x3={triple_swap_cost:.4f})')
-
-        else:  # mixed
-            if proposed_pct > 0.20:
-                return f'wed_overnight_mixed_cap:{proposed_pct:.2%}>20%'
-
-    else:
-        # Fallback: original behavior when time_rules not configured
+    if not tr:
         if proposed_pct > 0.30:
             is_favorable = s.spread_30m_avg >= 2.0 and s.funding_rate >= 0.005
             if is_favorable and proposed_pct <= 0.50:
@@ -262,18 +242,65 @@ def check_time_window(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Optio
             if proposed_pct > 0.50:
                 return f'wed_evening_max_50pct_exceeded:{proposed_pct:.2%}'
             return f'wed_evening_cap:{proposed_pct:.2%}>30%_without_favorable_combo'
+        return None
+
+    if direction in ('forward', 'flat'):
+        rules = tr.get('forward', {})
+        base_cap = float(rules.get('base_cap_pct', 0.30))
+        favorable_cap = float(rules.get('favorable_cap_pct', 0.50))
+        fav = rules.get('favorable_conditions', {})
+        min_spread = float(fav.get('min_spread', 2.0))
+        min_funding = float(fav.get('min_funding', 0.005))
+
+        if proposed_pct > favorable_cap:
+            return f'wed_overnight_forward_max:{proposed_pct:.2%}>{favorable_cap:.0%}'
+        if proposed_pct > base_cap:
+            if s.spread_30m_avg >= min_spread and s.funding_rate >= min_funding:
+                return None
+            return (f'wed_overnight_forward_cap:{proposed_pct:.2%}>{base_cap:.0%}'
+                    f'(spread={s.spread_30m_avg:.2f},funding={s.funding_rate:.4f},'
+                    f'need_spread>={min_spread}_and_funding>={min_funding})')
+
+    elif direction == 'reverse':
+        rules = tr.get('reverse', {})
+        base_cap = float(rules.get('base_cap_pct', 0.20))
+        favorable_cap = float(rules.get('favorable_cap_pct', 0.40))
+        fav = rules.get('favorable_conditions', {})
+        min_spread = float(fav.get('min_spread', 3.0))
+
+        triple_swap_cost = abs(s.swap_fee_long) * 3
+        funding_offset = abs(s.funding_rate) if s.funding_rate < 0 else 0
+
+        # Key rule: if funding rate >= triple overnight cost, operate normally
+        if funding_offset >= triple_swap_cost:
+            return None
+
+        net_favorable = funding_offset > triple_swap_cost * 0.5
+
+        if proposed_pct > favorable_cap:
+            return f'wed_overnight_reverse_max:{proposed_pct:.2%}>{favorable_cap:.0%}'
+        if proposed_pct > base_cap:
+            if abs(s.spread_30m_avg) >= min_spread and net_favorable:
+                return None
+            return (f'wed_overnight_reverse_cap:{proposed_pct:.2%}>{base_cap:.0%}'
+                    f'(spread={s.spread_30m_avg:.2f},'
+                    f'swap_cost_x3={triple_swap_cost:.4f},funding_offset={funding_offset:.4f})')
+
+    else:  # mixed
+        if proposed_pct > 0.20:
+            return f'wed_overnight_mixed_cap:{proposed_pct:.2%}>20%'
 
     return None
-
-
 def check_friday_weekend(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Optional[str]:
-    """Friday evening through Saturday close: graduated position reduction.
+    """Friday evening through Saturday: conditional bidirectional position management.
 
-    Default phases (configurable via time_rules.friday_weekend.phases):
-      Phase 1 (Fri 22:00 - Sat 00:00): max 30%, exception: spread>=5 + funding>=1%
-      Phase 2 (Sat 00:00 - 02:00): max 20%
-      Phase 3 (Sat 02:00 - 04:00): max 10%
-      Phase 4 (Sat 04:00+): no new opens (approaching market close)
+    Default to light positions, BUT increase when funding rate is rising + spread favorable.
+
+    Phase 1 (Fri 22:00-00:00): default 20%. Forward+funding_rising: 30%. Spread>=3.5: 40%.
+    Phase 2 (Sat 00:00-02:00): default 20%. Forward+funding>=swap: 40%.
+    Phase 3 (Sat 02:00-04:00): funding_rising+spread>=4: 40%. spread>=3.5: 30%.
+    Phase 4 (Sat 04:00+): funding_rising+spread>=5: 50%. Otherwise: no new opens.
+    Weekend hold: spread >= 3.0 allows holding over weekend.
     """
     if p.action not in ('open_long', 'open_short'):
         return None
@@ -291,54 +318,84 @@ def check_friday_weekend(p: Proposal, s: MarketState, cfg: Dict[str, Any]) -> Op
         return None
 
     proposed_pct = _proposed_position_pct(p, s)
+    direction = s.position_direction if s.position_direction != 'flat' else _position_direction(s)
+    is_forward = direction in ('forward', 'flat') and p.action == 'open_long'
+    funding_rising = s.funding_rate_trend == 'rising'
+    spread_abs = abs(s.spread_now)
+    funding_abs = abs(s.funding_rate)
 
-    phases = (tr or {}).get('phases', [
-        {"fri_hour": 22, "sat_hour": None, "max_pct": 0.30,
-         "exception": {"min_spread": 5.0, "min_funding": 0.01}},
-        {"fri_hour": None, "sat_hour": 0, "max_pct": 0.20},
-        {"fri_hour": None, "sat_hour": 2, "max_pct": 0.10},
-        {"fri_hour": None, "sat_hour": 4, "max_pct": 0.0, "force_close": True},
-    ])
-
-    matched_phase = None
+    # ----- Phase 1: Fri 22:00 - Sat 00:00 -----
     if is_fri_evening:
-        for phase in phases:
-            fh = phase.get('fri_hour')
-            if fh is not None and hour >= fh:
-                matched_phase = phase
-    elif is_saturday:
-        for phase in reversed(phases):
-            sh = phase.get('sat_hour')
-            if sh is not None and hour >= sh:
-                matched_phase = phase
-                break
-        if matched_phase is None:
-            for phase in phases:
-                if phase.get('fri_hour') is not None:
-                    matched_phase = phase
-                    break
+        default_cap = 0.20
+        if is_forward and funding_rising:
+            if spread_abs >= 3.5:
+                effective_cap = 0.40
+            else:
+                effective_cap = 0.30
+        elif is_forward:
+            swap_benefit = abs(s.swap_fee_short)
+            if funding_abs > 0 and swap_benefit > 0:
+                effective_cap = 0.30
+            else:
+                effective_cap = default_cap
+        else:
+            effective_cap = default_cap
 
-    if matched_phase is None:
-        if proposed_pct > 0.30:
-            return f'friday_weekend_default_cap:{proposed_pct:.2%}>30%'
+        if proposed_pct > effective_cap:
+            return (f'friday_weekend_phase_cap:{proposed_pct:.2%}>{effective_cap:.0%}'
+                    f'(fri_22,dir={direction},funding_trend={s.funding_rate_trend},'
+                    f'spread={spread_abs:.2f})')
         return None
 
-    max_pct = float(matched_phase.get('max_pct', 0.30))
-    force_close = matched_phase.get('force_close', False)
+    # ----- Phase 2: Sat 00:00 - 02:00 -----
+    if is_saturday and hour < 2:
+        overnight_cost = abs(s.swap_fee_long) if direction == 'reverse' else abs(s.swap_fee_short)
+        if is_forward and funding_abs >= overnight_cost:
+            effective_cap = 0.40
+        elif direction == 'reverse' and funding_abs >= overnight_cost:
+            if proposed_pct > 0.20:
+                return (f'friday_weekend_reverse_funding:{proposed_pct:.2%}>20%'
+                        f'(sat_00,funding={funding_abs:.4f}>=swap={overnight_cost:.4f},'
+                        f'reverse_should_reduce)')
+            return None
+        else:
+            effective_cap = 0.20
 
-    if force_close:
-        return 'friday_weekend_force_close:no_new_opens_approaching_market_close'
+        if proposed_pct > effective_cap:
+            return (f'friday_weekend_phase_cap:{proposed_pct:.2%}>{effective_cap:.0%}'
+                    f'(sat_00,dir={direction},funding={funding_abs:.4f})')
+        return None
 
-    if proposed_pct > max_pct:
-        exc = matched_phase.get('exception', {})
-        if exc:
-            min_sp = float(exc.get('min_spread', 99))
-            min_fr = float(exc.get('min_funding', 99))
-            if abs(s.spread_now) >= min_sp and abs(s.funding_rate) >= min_fr:
-                return None
-        phase_label = f"fri_{matched_phase.get('fri_hour', '?')}" if is_fri_evening else f"sat_{matched_phase.get('sat_hour', '?')}"
-        return f'friday_weekend_phase_cap:{proposed_pct:.2%}>{max_pct:.0%}({phase_label})'
+    # ----- Phase 3: Sat 02:00 - 04:00 -----
+    if is_saturday and 2 <= hour < 4:
+        if funding_rising and spread_abs >= 4.0:
+            effective_cap = 0.40
+        elif funding_rising and spread_abs >= 3.5:
+            effective_cap = 0.30
+        else:
+            effective_cap = 0.10
 
+        if proposed_pct > effective_cap:
+            return (f'friday_weekend_phase_cap:{proposed_pct:.2%}>{effective_cap:.0%}'
+                    f'(sat_02,funding_trend={s.funding_rate_trend},spread={spread_abs:.2f})')
+        return None
+
+    # ----- Phase 4: Sat 04:00+ -----
+    if is_saturday and hour >= 4:
+        if funding_rising and spread_abs >= 5.0:
+            effective_cap = 0.50
+        else:
+            return (f'friday_weekend_force_close:no_new_opens_approaching_market_close'
+                    f'(sat_04,funding_trend={s.funding_rate_trend},spread={spread_abs:.2f})')
+
+        if proposed_pct > effective_cap:
+            return (f'friday_weekend_phase_cap:{proposed_pct:.2%}>{effective_cap:.0%}'
+                    f'(sat_04_extreme)')
+        return None
+
+    # Fallback
+    if proposed_pct > 0.20:
+        return f'friday_weekend_default_cap:{proposed_pct:.2%}>20%'
     return None
 
 
@@ -347,6 +404,7 @@ ESCALATABLE_PREFIXES = (
     'must_open_both_legs_simultaneously:',
     'monday_open_volatility:',
     'monday_funding_window:',
+    'monday_funding_phase:',
     'wed_overnight_forward_cap:',
     'wed_overnight_forward_max:',
     'wed_overnight_reverse_cap:',
@@ -357,6 +415,7 @@ ESCALATABLE_PREFIXES = (
     'friday_weekend_phase_cap:',
     'friday_weekend_default_cap:',
     'friday_weekend_force_close:',
+    'friday_weekend_reverse_funding:',
 )
 
 

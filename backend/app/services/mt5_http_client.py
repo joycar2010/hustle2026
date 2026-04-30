@@ -19,7 +19,7 @@ class MT5HttpClient:
     def __init__(self, base_url: str = "http://localhost:8001", api_key: str = "OQ6bUimHZDmXEZzJKE"):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
-        self.client = httpx.AsyncClient(timeout=10.0)
+        self.client = httpx.AsyncClient(timeout=3.0)
         self.headers = {"X-API-Key": self.api_key}
         # 兼容 MT5Client 接口的状态字段
         self.connected = False
