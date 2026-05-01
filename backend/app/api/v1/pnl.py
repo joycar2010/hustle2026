@@ -1,4 +1,4 @@
-"""PnL 收益分析 API — 为 www 用户平台提供日/周/月收益图表数据"""
+﻿"""PnL 收益分析 API — 为 www 用户平台提供日/周/月收益图表数据"""
 import os
 import logging
 import math
@@ -50,7 +50,6 @@ def _beijing_date_to_utc_ms(date_str: str, end_of_day=False) -> int:
     dt = datetime.strptime(date_str, "%Y-%m-%d")
     if end_of_day:
         dt = dt.replace(hour=23, minute=59, second=59)
-    # 北京 = UTC+8
     utc_dt = dt - timedelta(hours=8)
     return int(utc_dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
@@ -64,7 +63,6 @@ def _utc_ms_to_beijing_date(ts_ms: int) -> str:
 
 def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
     """MT5 服务器时间（EET/EEST）→ 北京时间日期（DST-aware）"""
-    from app.utils.time_utils import mt5_server_ts_to_utc
     utc_ts = mt5_server_ts_to_utc(ts_sec)
     dt = datetime.fromtimestamp(utc_ts, tz=timezone.utc)
     beijing = dt + timedelta(hours=8)
@@ -74,9 +72,7 @@ def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
 # ── 数据获取 ─────────────────────────────────────────
 
 async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str) -> list:
-    """获取 Binance income 记录（自动分页，limit=1000/次）
-    不传 symbol 则查询账户所有产品对的收入，覆盖 XAU/XAG/BZ/CL/NG 等全部合约。
-    """
+    """获取 Binance income 记录（自动分页，limit=1000/次）"""
     client = BinanceFuturesClient(
         account.api_key, account.api_secret,
         proxy_url=build_proxy_url(account.proxy_config)
@@ -84,9 +80,8 @@ async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type
     all_records = []
     cursor_start = start_ms
     try:
-        for _ in range(20):  # 最多 20 页 = 20000 条（多产品对记录更多）
+        for _ in range(20):
             records = await client.get_income(
-                # symbol 不传 → Binance 返回账户所有 symbol 的收入记录
                 income_type=income_type,
                 start_time=cursor_start,
                 end_time=end_ms,
@@ -97,7 +92,6 @@ async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type
             all_records.extend(records)
             if len(records) < 1000:
                 break
-            # 下一页从最后一条记录之后
             cursor_start = int(records[-1].get("time", 0)) + 1
     except Exception as e:
         logger.error(f"Binance income ({income_type}) fetch failed [{account.account_name}]: {e}")
@@ -107,10 +101,7 @@ async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type
 
 
 async def _get_active_mt5_symbols(db: AsyncSession) -> set:
-    """从 hedging_pairs 动态加载所有活跃产品对的 MT5 B 侧符号集合。
-    返回如 {"XAUUSD+", "XAUUSD", "XAGUSD", "UKOUSD", "USOUSD", "NG-C"} 等。
-    失败时回退到已知的默认符号集以保证向后兼容。
-    """
+    """从 hedging_pairs 动态加载所有活跃产品对的 MT5 B 侧符号集合。"""
     _FALLBACK_MT5_SYMBOLS = {"XAUUSD+", "XAUUSD.s", "XAUUSD", "XAGUSD", "UKOUSD", "USOUSD", "NG-C"}
     try:
         result = await db.execute(text("""
@@ -130,10 +121,9 @@ async def _get_active_mt5_symbols(db: AsyncSession) -> set:
 async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
     """获取 MT5 平仓 deal（entry==1），覆盖所有活跃产品对的 MT5 符号"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
-    api_key = os.getenv("MT5_API_KEY", "")
+    api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
     headers = {"X-Api-Key": api_key} if api_key else {}
 
-    # 查找该账户对应的 Bridge 端口
     try:
         result = await db.execute(
             select(MT5Client.bridge_service_port).where(
@@ -167,18 +157,65 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession
         logger.error(f"MT5 Bridge deals fetch failed [{account.account_name}]: {e}")
         return []
 
-    # 动态加载所有活跃产品对的 MT5 符号，替代硬编码的 {"XAUUSD+", "XAUUSD.s"}
     target_symbols = await _get_active_mt5_symbols(db)
     start_ts = start_ms / 1000
     end_ts = end_ms / 1000
-    # deal.time 是 EET/EEST 编码的时间戳，需先转 UTC 再与 UTC 边界比较
     return [
         d for d in all_deals
         if d.get("symbol") in target_symbols
         and start_ts <= mt5_server_ts_to_utc(int(d.get("time", 0))) <= end_ts
-        and d.get("entry", 0) == 1  # 只要平仓 deal
+        and d.get("entry", 0) == 1
     ]
 
+
+async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
+    """获取 MT5 入出金记录（entry=0, symbol 为空的 deals = deposit/withdrawal）"""
+    bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
+    api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
+    headers = {"X-Api-Key": api_key} if api_key else {}
+
+    try:
+        result = await db.execute(
+            select(MT5Client.bridge_service_port).where(
+                MT5Client.account_id == account.account_id,
+                MT5Client.is_active == True,
+                MT5Client.is_system_service == False,
+                MT5Client.bridge_service_port.isnot(None),
+            ).order_by(MT5Client.priority).limit(1)
+        )
+        bridge_port = result.scalar_one_or_none()
+    except Exception:
+        bridge_port = None
+
+    if not bridge_port:
+        return []
+
+    start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc)
+    days = max(1, int((end_dt - start_dt).total_seconds() / 86400) + 1)
+    days = min(days, 365)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.get(
+                f"{bridge_host}:{bridge_port}/mt5/history/deals",
+                headers=headers, params={"days": days},
+            )
+            resp.raise_for_status()
+            all_deals = resp.json().get("deals", [])
+    except Exception as e:
+        logger.error(f"MT5 Bridge cashflow fetch failed [{account.account_name}]: {e}")
+        return []
+
+    start_ts = start_ms / 1000
+    end_ts = end_ms / 1000
+    return [
+        d for d in all_deals
+        if d.get("entry") == 0
+        and (d.get("symbol") or "") == ""
+        and float(d.get("profit", 0)) != 0
+        and start_ts <= mt5_server_ts_to_utc(int(d.get("time", 0))) <= end_ts
+    ]
 
 
 async def _fetch_gateio_income(account, start_ms: int, end_ms: int) -> list:
@@ -212,6 +249,36 @@ async def _fetch_gateio_income(account, start_ms: int, end_ms: int) -> list:
     return records
 
 
+async def _fetch_daily_closing_nav(account_ids: list, start_date: str, end_date: str, db: AsyncSession) -> dict:
+    """从 account_snapshots 查询每天收盘净值（北京时间最后一条快照）
+    Returns: {date_str: total_nav_float}
+    """
+    if not account_ids:
+        return {}
+    from datetime import date as _d
+    sd = _d.fromisoformat(start_date)
+    ed = _d.fromisoformat(end_date)
+    result = await db.execute(text("""
+        WITH ranked AS (
+            SELECT
+                CAST(timestamp + interval '8 hours' AS date) as bj_date,
+                account_id,
+                net_assets,
+                ROW_NUMBER() OVER (
+                    PARTITION BY account_id, CAST(timestamp + interval '8 hours' AS date)
+                    ORDER BY timestamp DESC
+                ) as rn
+            FROM account_snapshots
+            WHERE account_id = ANY(CAST(:aids AS uuid[]))
+            AND CAST(timestamp + interval '8 hours' AS date) BETWEEN :sd AND :ed
+        )
+        SELECT bj_date, SUM(net_assets) as total_nav
+        FROM ranked WHERE rn = 1
+        GROUP BY bj_date ORDER BY bj_date
+    """), {"aids": account_ids, "sd": sd, "ed": ed})
+    return {row[0].isoformat(): float(row[1]) for row in result.fetchall()}
+
+
 # ── 统计计算 ─────────────────────────────────────────
 
 def _compute_summary(daily_list: list) -> dict:
@@ -231,7 +298,6 @@ def _compute_summary(daily_list: list) -> dict:
         s += p
         cumulative.append(s)
 
-    # 最大回撤
     peak = 0
     max_dd = 0
     for c in cumulative:
@@ -241,18 +307,15 @@ def _compute_summary(daily_list: list) -> dict:
             max_dd = dd
     max_dd_pct = (max_dd / peak * 100) if peak > 0 else 0
 
-    # 胜率
     profit_days = [p for p in pnls if p > 0]
     loss_days = [p for p in pnls if p < 0]
     total_days = len([p for p in pnls if p != 0])
     win_rate = len(profit_days) / total_days if total_days > 0 else 0
 
-    # 盈亏比
     sum_profit = sum(profit_days) if profit_days else 0
     sum_loss = abs(sum(loss_days)) if loss_days else 0
     profit_factor = round(sum_profit / sum_loss, 2) if sum_loss > 0 else (99.9 if sum_profit > 0 else 0)
 
-    # 夏普比率（年化，假设无风险利率=0）
     if len(pnls) >= 2:
         mean_pnl = sum(pnls) / len(pnls)
         std_pnl = (sum((p - mean_pnl) ** 2 for p in pnls) / len(pnls)) ** 0.5
@@ -260,7 +323,6 @@ def _compute_summary(daily_list: list) -> dict:
     else:
         sharpe = 0
 
-    # 最佳/最差日
     best_idx = pnls.index(max(pnls))
     worst_idx = pnls.index(min(pnls))
 
@@ -290,13 +352,10 @@ async def get_daily_pnl(
     ctx: ViewContext = Depends(get_view_context),
     db: AsyncSession = Depends(get_db),
 ):
-    # Sub-account: read parent's data instead of empty self data
     from app.models.user import User as _U
     _row = (await db.execute(__import__('sqlalchemy').select(_U).where(_U.user_id == ctx.data_user_id))).scalar_one_or_none()
     current_user = _row
-    # Sub-account: clamp start_date to MIN(subscription.created_at) so the chart
-    # only shows data from after the sub joined. With M2M we take the earliest
-    # subscription across all parents.
+
     if ctx.is_sub:
         from sqlalchemy import text as _text
         _row_sub = (await db.execute(_text(
@@ -307,17 +366,12 @@ async def get_daily_pnl(
             if _join_date_str > start_date:
                 start_date = _join_date_str
 
-    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:v2"
+    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:v3"
     cached = _cache_get(cache_key)
     if cached:
         return cached
 
-    # ── Sub path: short-circuit to per-share NAV replay from subscription_daily_nav ──
-    # This is mathematically correct regardless of parent cashflow events
-    # (mint/burn keeps nav_per_share stable across deposits/withdrawals).
-    # Falls back to parent raw PnL × multiplier when snapshot history is too
-    # sparse (e.g. sub just joined — <3 snapshot rows means the line chart
-    # would be blank).
+    # ── Sub path: per-share NAV replay ──
     if ctx.is_sub:
         from app.services.subaccount_nav import (
             list_parent_daily_navs, list_active_subscriptions_by_sub,
@@ -326,7 +380,6 @@ async def get_daily_pnl(
         if not subs:
             return {"daily_pnl": [], "summary": _compute_summary([])}
 
-        # date → aggregated PnL across all parent subscriptions
         date_pnl: Dict[str, Decimal] = defaultdict(lambda: Decimal(0))
         total_snapshots = 0
         for _sid, parent_uid, shares, _inv_u, _inv_c, nav_at_join, _created in subs:
@@ -338,9 +391,6 @@ async def get_daily_pnl(
                 date_pnl[snap_date.isoformat()] += pnl
                 prev_nav = nav
 
-        # If enough snapshot history, use the mathematically-precise per-share
-        # replay. Threshold: >= 3 snapshot rows means at least 2 meaningful
-        # deltas on the chart.
         if total_snapshots >= 3:
             daily_list = [
                 {
@@ -372,13 +422,10 @@ async def get_daily_pnl(
 
         logger.info(
             f"[PnL-sub] sub={ctx.auth_user_id} sparse snapshots "
-            f"(n={total_snapshots}); falling back to parent raw PnL × multiplier"
+            f"(n={total_snapshots}); falling back to parent raw PnL x multiplier"
         )
-        # Fall through to the parent-path fetching below, then apply
-        # project_response at the tail (see tail-patch below).
 
-    # ── Parent path: legacy binance/MT5 income API ──
-    """获取每日收益数据（支持日/周/月前端聚合）"""
+    # ── Parent path: NAV-based PnL from account_snapshots ──
 
     try:
         start_ms = _beijing_date_to_utc_ms(start_date)
@@ -386,158 +433,139 @@ async def get_daily_pnl(
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式错误，需 YYYY-MM-DD")
 
-    # 获取用户账户
     result = await db.execute(select(Account).filter(Account.user_id == current_user.user_id))
     accounts = result.scalars().all()
     if not accounts:
         return {"daily_pnl": [], "summary": _compute_summary([])}
 
-    # 按日期聚合容器
-    daily = defaultdict(lambda: {
-        "realized_pnl": 0, "funding_fee": 0, "mt5_pnl": 0, "mt5_swap": 0, "mt5_commission": 0,
-        "trade_count": 0, "win_count": 0,
-        "binance_pnl": 0, "binance_funding": 0,
-    })
+    active_account_ids = [str(a.account_id) for a in accounts if a.is_active]
 
-    # ── Binance 数据 ──
-    if platform in ("all", "binance"):
-        for account in accounts:
-            if account.platform_id != 1:
-                continue
-            # 已实现盈亏
-            pnl_records = await _fetch_binance_income(account, start_ms, end_ms, "REALIZED_PNL")
-            for r in pnl_records:
-                date_key = _utc_ms_to_beijing_date(int(r.get("time", 0)))
-                income = float(r.get("income", 0))
-                daily[date_key]["realized_pnl"] += income
-                daily[date_key]["binance_pnl"] += income
-                daily[date_key]["trade_count"] += 1
-                if income > 0:
-                    daily[date_key]["win_count"] += 1
-
-            # 资金费
-            fee_records = await _fetch_binance_income(account, start_ms, end_ms, "FUNDING_FEE")
-            for r in fee_records:
-                date_key = _utc_ms_to_beijing_date(int(r.get("time", 0)))
-                income = float(r.get("income", 0))
-                daily[date_key]["funding_fee"] += income
-                daily[date_key]["binance_funding"] += income
-
-    # ── Gate.io 数据（platform_id=4, CEX 永续合约）──
-    if platform in ("all", "gateio"):
-        for account in accounts:
-            if account.platform_id != 4:
-                continue
-            try:
-                from app.services.gateio_client import GateioFuturesClient
-                from app.core.proxy_utils import build_proxy_url
-                gclient = GateioFuturesClient(
-                    account.api_key, account.api_secret,
-                    proxy_url=build_proxy_url(account.proxy_config),
-                )
-                try:
-                    closes = await gclient.get_position_close(limit=500)
-                    for c in closes:
-                        ts = int(c.get("time", 0))
-                        if start_ms / 1000 <= ts <= end_ms / 1000:
-                            date_key = _utc_ms_to_beijing_date(ts * 1000)
-                            pnl_val = float(c.get("pnl", 0))
-                            daily[date_key]["realized_pnl"] += pnl_val
-                            daily[date_key]["trade_count"] += 1
-                            if pnl_val > 0:
-                                daily[date_key]["win_count"] += 1
-                finally:
-                    await gclient.close()
-            except Exception as e:
-                logger.error(f"Gate.io PnL fetch failed [{account.account_name}]: {e}")
-
-        # ── Gate.io 数据 (platform_id=4, A侧 CEX) ──
-    if platform in ("all", "binance"):  # 与 Binance 同类 CEX，归入同一过滤
-        for account in accounts:
-            if account.platform_id != 4:
-                continue
-            gateio_records = await _fetch_gateio_income(account, start_ms, end_ms)
-            for r in gateio_records:
-                date_key = _utc_ms_to_beijing_date(int(r.get("time", 0)) // 1000 if r.get("time", 0) > 1e10 else int(r.get("time", 0)))
-                pnl = float(r.get("pnl", 0))
-                daily[date_key]["realized_pnl"] += pnl
-                daily[date_key]["binance_pnl"] += pnl  # reuse binance_pnl field for CEX display
-                daily[date_key]["trade_count"] += 1
-                if pnl > 0:
-                    daily[date_key]["win_count"] += 1
-
-    # ── MT5 数据：只查 user_pair_accounts 中实际绑定的 B 侧账户 ──
-    if platform in ("all", "mt5"):
-        # 精确查询：从 pair binding 获取该用户实际使用的 B 侧 MT5 账户（去重）
-        _bound_b_result = await db.execute(text(
-            "SELECT DISTINCT account_b_id FROM user_pair_accounts WHERE user_id = :uid AND account_b_id IS NOT NULL"
-        ), {"uid": str(current_user.user_id)})
-        _bound_b_ids = {str(r[0]) for r in _bound_b_result.fetchall()}
-
-        for account in accounts:
-            if not account.is_mt5_account:
-                continue
-            # 只查绑定的 B 侧账户，跳过未绑定或非对冲用途的 MT5 账户
-            if str(account.account_id) not in _bound_b_ids:
-                continue
-            deals = await _fetch_mt5_deals(account, start_ms, end_ms, db)
-            for d in deals:
-                date_key = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
-                profit = float(d.get("profit", 0))
-                swap = float(d.get("swap", 0))
-                commission = float(d.get("commission", 0))
-                daily[date_key]["mt5_pnl"] += profit
-                daily[date_key]["mt5_swap"] += swap
-                daily[date_key]["mt5_commission"] += commission
-                daily[date_key]["trade_count"] += 1
-                if profit > 0:
-                    daily[date_key]["win_count"] += 1
-
-    # 组装结果（按日期排序，填充空日期）
+    # 1) 查询前一天 NAV（作为起始基准）
     from datetime import date as _date
     d_start = _date.fromisoformat(start_date)
     d_end = _date.fromisoformat(end_date)
+    prev_date = (d_start - timedelta(days=1)).isoformat()
+
+    nav_by_date = await _fetch_daily_closing_nav(
+        active_account_ids, prev_date, end_date, db
+    )
+
+    # 2) Binance TRANSFER 资金流（spot <-> futures）
+    binance_transfers = defaultdict(float)
+    if platform in ("all", "binance"):
+        for account in accounts:
+            if account.platform_id != 1 or not account.is_active:
+                continue
+            transfer_records = await _fetch_binance_income(account, start_ms, end_ms, "TRANSFER")
+            for r in transfer_records:
+                dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
+                binance_transfers[dk] += float(r.get("income", 0))
+
+    # 3) MT5 入出金（entry=0, symbol 为空的 deals）
+    mt5_cashflows = defaultdict(float)
+    _bound_b_result = await db.execute(text(
+        "SELECT DISTINCT account_b_id FROM user_pair_accounts WHERE user_id = :uid AND account_b_id IS NOT NULL"
+    ), {"uid": str(current_user.user_id)})
+    _bound_b_ids = {str(r[0]) for r in _bound_b_result.fetchall()}
+
+    if platform in ("all", "mt5"):
+        for account in accounts:
+            if not account.is_mt5_account or str(account.account_id) not in _bound_b_ids:
+                continue
+            cf_deals = await _fetch_mt5_cashflows(account, start_ms, end_ms, db)
+            for d in cf_deals:
+                dk = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
+                mt5_cashflows[dk] += float(d.get("profit", 0))
+
+    # 4) Binance REALIZED_PNL + FUNDING_FEE（仅用于 platform_breakdown 展示）
+    binance_rpnl = defaultdict(float)
+    binance_ff = defaultdict(float)
+    binance_trades = defaultdict(int)
+    binance_wins = defaultdict(int)
+    if platform in ("all", "binance"):
+        for account in accounts:
+            if account.platform_id != 1 or not account.is_active:
+                continue
+            for r in await _fetch_binance_income(account, start_ms, end_ms, "REALIZED_PNL"):
+                dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
+                income = float(r.get("income", 0))
+                binance_rpnl[dk] += income
+                binance_trades[dk] += 1
+                if income > 0:
+                    binance_wins[dk] += 1
+            for r in await _fetch_binance_income(account, start_ms, end_ms, "FUNDING_FEE"):
+                dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
+                binance_ff[dk] += float(r.get("income", 0))
+
+    # 5) MT5 deals（仅用于 platform_breakdown 展示和 trade_count）
+    mt5_rpnl = defaultdict(float)
+    mt5_swap = defaultdict(float)
+    mt5_comm = defaultdict(float)
+    mt5_trades = defaultdict(int)
+    mt5_wins = defaultdict(int)
+    if platform in ("all", "mt5"):
+        for account in accounts:
+            if not account.is_mt5_account or str(account.account_id) not in _bound_b_ids:
+                continue
+            deals = await _fetch_mt5_deals(account, start_ms, end_ms, db)
+            for d in deals:
+                dk = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
+                profit = float(d.get("profit", 0))
+                mt5_rpnl[dk] += profit
+                mt5_swap[dk] += float(d.get("swap", 0))
+                mt5_comm[dk] += float(d.get("commission", 0))
+                mt5_trades[dk] += 1
+                if profit > 0:
+                    mt5_wins[dk] += 1
+
+    # 6) 按日组装：net_pnl = NAV变化 - Binance转账 - MT5入出金
     daily_list = []
+    prev_nav = nav_by_date.get(prev_date)
     current = d_start
     while current <= d_end:
         dk = current.isoformat()
-        d = daily.get(dk, {})
-        rpnl = d.get("realized_pnl", 0)
-        ffee = d.get("funding_fee", 0)
-        mt5p = d.get("mt5_pnl", 0)
-        mt5s = d.get("mt5_swap", 0)
-        mt5c = d.get("mt5_commission", 0)
-        net = rpnl + ffee + mt5p + mt5s + mt5c
+        today_nav = nav_by_date.get(dk)
+
+        if prev_nav is not None and today_nav is not None and today_nav > 0 and prev_nav > 0:
+            nav_change = today_nav - prev_nav
+            total_cashflow = binance_transfers.get(dk, 0) + mt5_cashflows.get(dk, 0)
+            net_pnl = nav_change - total_cashflow
+        elif today_nav is not None and today_nav > 0 and prev_nav is None:
+            net_pnl = 0
+        else:
+            net_pnl = 0
 
         daily_list.append({
             "date": dk,
-            "realized_pnl": round(rpnl, 2),
-            "funding_fee": round(ffee, 2),
-            "net_pnl": round(net, 2),
-            "trade_count": d.get("trade_count", 0),
-            "win_count": d.get("win_count", 0),
+            "realized_pnl": round(binance_rpnl.get(dk, 0) + mt5_rpnl.get(dk, 0), 2),
+            "funding_fee": round(binance_ff.get(dk, 0), 2),
+            "net_pnl": round(net_pnl, 2),
+            "trade_count": binance_trades.get(dk, 0) + mt5_trades.get(dk, 0),
+            "win_count": binance_wins.get(dk, 0) + mt5_wins.get(dk, 0),
             "platform_breakdown": {
                 "binance": {
-                    "realized_pnl": round(d.get("binance_pnl", 0), 2),
-                    "funding_fee": round(d.get("binance_funding", 0), 2),
+                    "realized_pnl": round(binance_rpnl.get(dk, 0), 2),
+                    "funding_fee": round(binance_ff.get(dk, 0), 2),
                 },
                 "mt5": {
-                    "realized_pnl": round(mt5p, 2),
-                    "swap": round(mt5s, 2),
-                    "commission": round(mt5c, 2),
+                    "realized_pnl": round(mt5_rpnl.get(dk, 0), 2),
+                    "swap": round(mt5_swap.get(dk, 0), 2),
+                    "commission": round(mt5_comm.get(dk, 0), 2),
                 },
             },
         })
+
+        if today_nav is not None and today_nav > 0:
+            prev_nav = today_nav
         current += timedelta(days=1)
 
     summary = _compute_summary(daily_list)
-    resp = {"daily_pnl": daily_list, "summary": summary}
+    resp = {"daily_pnl": daily_list, "summary": summary, "data_source": "nav_based"}
     _cache_set(cache_key, resp)
 
-    logger.info(f"[PnL] user={current_user.username}, range={start_date}~{end_date}, "
+    logger.info(f"[PnL-NAV] user={current_user.username}, range={start_date}~{end_date}, "
                 f"days={len(daily_list)}, cumulative={summary['cumulative_pnl']}")
-    # Parent path — for subs that fell through (sparse snapshots), we still
-    # apply project_response to scale monetary fields by the sub's multiplier.
+
     if ctx.is_sub:
         scaled = project_response(resp, ctx.multiplier)
         if isinstance(scaled, dict):
