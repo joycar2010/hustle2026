@@ -1,10 +1,14 @@
 import asyncio
+import json
 import logging
 import os
 import signal
 import sys
 from datetime import datetime, timezone
 
+import redis.asyncio as aioredis
+
+from app.config import settings
 from app.db.models import Base
 from app.db.session import engine as db_engine, SessionLocal
 from engine.models import Position, TradeLog, EngineState
@@ -66,11 +70,13 @@ async def _main():
     )
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop(shutdown_event))
+    command_task = asyncio.create_task(_command_listener(orchestrator, shutdown_event))
 
     await shutdown_event.wait()
 
     logger.info("Shutting down gracefully...")
     heartbeat_task.cancel()
+    command_task.cancel()
     await orchestrator.stop()
     await spread_feed.stop()
     await config_loader.stop()
@@ -104,6 +110,36 @@ async def _heartbeat_loop(shutdown_event: asyncio.Event):
             break
         except Exception as e:
             logger.warning(f"Heartbeat error: {e}")
+
+
+async def _command_listener(orchestrator: Orchestrator, shutdown_event: asyncio.Event):
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    pubsub = r.pubsub()
+    await pubsub.subscribe("engine:commands")
+    try:
+        async for msg in pubsub.listen():
+            if shutdown_event.is_set():
+                break
+            if msg["type"] != "message":
+                continue
+            try:
+                data = json.loads(msg["data"])
+                action = data.get("action")
+                target = data.get("target", "global")
+                logger.info(f"Received command: {action} target={target}")
+                if action == "pause":
+                    await orchestrator.pause(target)
+                elif action == "resume":
+                    await orchestrator.resume(target)
+                elif action == "stop":
+                    shutdown_event.set()
+            except Exception as e:
+                logger.warning(f"Command parse error: {e}")
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await pubsub.unsubscribe("engine:commands")
+        await r.aclose()
 
 
 def run():

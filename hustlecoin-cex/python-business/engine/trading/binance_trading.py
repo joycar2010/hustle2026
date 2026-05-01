@@ -16,16 +16,20 @@ _global_semaphore = asyncio.Semaphore(10)
 
 
 class BinanceTradingClient:
-    def __init__(self, api_key: str, api_secret: str, timeout: int = 10):
+    def __init__(self, api_key: str, api_secret: str, timeout: int = 10, proxy_url: str | None = None):
         self._api_key = api_key
         self._api_secret = api_secret
         self._timeout = timeout
+        self._proxy_url = proxy_url
         self._client: httpx.AsyncClient | None = None
         self._semaphore = asyncio.Semaphore(3)
         self._lot_cache: dict[str, dict] = {}
 
     async def __aenter__(self):
-        self._client = httpx.AsyncClient(timeout=self._timeout)
+        kwargs = {"timeout": self._timeout}
+        if self._proxy_url:
+            kwargs["proxy"] = self._proxy_url
+        self._client = httpx.AsyncClient(**kwargs)
         return self
 
     async def __aexit__(self, *args):

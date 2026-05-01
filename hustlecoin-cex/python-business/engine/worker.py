@@ -36,8 +36,11 @@ class Worker:
         logger.info(f"Worker started for sub-account {self.sub_account_id} ({account_note})")
 
         from engine.trading.binance_trading import BinanceTradingClient
+        from app.config import settings
+        effective_proxy = account_info.get("proxy_url") or settings.proxy_url
         self._trading_client = BinanceTradingClient(
             account_info["api_key"], account_info["api_secret"],
+            proxy_url=effective_proxy,
         )
 
         from engine.notify.feishu_sender import FeishuSender
@@ -173,6 +176,7 @@ class Worker:
                 "note": account.note,
                 "api_key": account.api_key,
                 "api_secret": account.api_secret,
+                "proxy_url": account.proxy_url,
             }
         finally:
             db.close()

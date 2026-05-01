@@ -28,10 +28,14 @@ def _sign(params: dict, secret: str) -> dict:
     return params
 
 
-async def validate_api_key(api_key: str, api_secret: str) -> ValidationResult:
+async def validate_api_key(api_key: str, api_secret: str, proxy_url: str | None = None) -> ValidationResult:
     params = _sign({}, api_secret)
+    effective_proxy = proxy_url or settings.proxy_url
+    client_kwargs = {"timeout": settings.binance_api_timeout}
+    if effective_proxy:
+        client_kwargs["proxy"] = effective_proxy
     try:
-        async with httpx.AsyncClient(timeout=settings.binance_api_timeout) as client:
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(
                 f"{SPOT_BASE}/api/v3/account",
                 params=params,

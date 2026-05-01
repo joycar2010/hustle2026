@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     binance_api_timeout: int = 10
+    proxy_url: str | None = None
     symbol_sync_on_startup: bool = True
     symbol_sync_interval_hours: int = 24
 

@@ -37,6 +37,7 @@ class SubAccount(Base):
     spot_enabled = Column(Boolean, default=False)
     bnb_burn_enabled = Column(Boolean, default=False)
     bnb_interest_enabled = Column(Boolean, default=False)
+    proxy_url = Column(String(300), nullable=True)
     last_validated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

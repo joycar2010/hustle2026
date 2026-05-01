@@ -14,6 +14,7 @@ class SubAccountCreate(BaseModel):
     spot_enabled: bool = False
     bnb_burn_enabled: bool = False
     bnb_interest_enabled: bool = False
+    proxy_url: Optional[str] = None
 
 
 class SubAccountUpdate(BaseModel):
@@ -24,6 +25,7 @@ class SubAccountUpdate(BaseModel):
     spot_enabled: Optional[bool] = None
     bnb_burn_enabled: Optional[bool] = None
     bnb_interest_enabled: Optional[bool] = None
+    proxy_url: Optional[str] = None
 
 
 class SubAccountKeyUpdate(BaseModel):
@@ -43,6 +45,7 @@ class SubAccountResponse(BaseModel):
     spot_enabled: bool
     bnb_burn_enabled: bool
     bnb_interest_enabled: bool
+    proxy_url: Optional[str] = None
     last_validated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

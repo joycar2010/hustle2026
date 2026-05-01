@@ -34,6 +34,7 @@ def _to_response(account: SubAccount) -> dict:
         "spot_enabled": account.spot_enabled,
         "bnb_burn_enabled": account.bnb_burn_enabled,
         "bnb_interest_enabled": account.bnb_interest_enabled,
+        "proxy_url": account.proxy_url,
         "last_validated_at": account.last_validated_at,
         "created_at": account.created_at,
         "updated_at": account.updated_at,
@@ -68,10 +69,11 @@ async def create_sub_account(
         spot_enabled=data.spot_enabled,
         bnb_burn_enabled=data.bnb_burn_enabled,
         bnb_interest_enabled=data.bnb_interest_enabled,
+        proxy_url=data.proxy_url,
     )
 
     if validate:
-        result = await binance_client.validate_api_key(data.api_key, data.api_secret)
+        result = await binance_client.validate_api_key(data.api_key, data.api_secret, proxy_url=data.proxy_url)
         if not result.is_valid:
             raise HTTPException(status_code=400, detail=f"API key validation failed: {result.error}")
         account.last_validated_at = datetime.now(timezone.utc)
@@ -132,7 +134,7 @@ async def update_keys(
         raise HTTPException(status_code=404, detail="Sub-account not found")
 
     if validate:
-        result = await binance_client.validate_api_key(data.api_key, data.api_secret)
+        result = await binance_client.validate_api_key(data.api_key, data.api_secret, proxy_url=account.proxy_url)
         if not result.is_valid:
             raise HTTPException(status_code=400, detail=f"API key validation failed: {result.error}")
         account.last_validated_at = datetime.now(timezone.utc)
@@ -150,7 +152,7 @@ async def validate_sub_account(account_id: int, db: Session = Depends(get_db)):
     if not account:
         raise HTTPException(status_code=404, detail="Sub-account not found")
 
-    result = await binance_client.validate_api_key(account.api_key, account.api_secret)
+    result = await binance_client.validate_api_key(account.api_key, account.api_secret, proxy_url=account.proxy_url)
     if result.is_valid:
         account.last_validated_at = datetime.now(timezone.utc)
         db.commit()
