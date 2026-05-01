@@ -196,9 +196,9 @@ class RiskAlertService:
 
             # 获取飞书服务
             feishu = get_feishu_service()
+            feishu_success = False
             if not feishu:
-                logger.warning("Feishu service not initialized")
-                return False
+                logger.warning("Feishu service not initialized, will still broadcast to frontend")
 
             # 根据优先级设置颜色
             color_map = {1: "blue", 2: "blue", 3: "orange", 4: "red"}
@@ -209,60 +209,64 @@ class RiskAlertService:
             receive_id_type = "open_id" if user.feishu_open_id else "email"
 
             # 发送飞书卡片消息
-            logger.info(f"[RISK_ALERT] Preparing to send Feishu card: receiver_id={receiver_id}, title={title}")
-            result = await feishu.send_card_message(
-                receive_id=receiver_id,
-                title=title,
-                content=content,
-                receive_id_type=receive_id_type,
-                color=color
-            )
-
-            success = result.get("success", False)
-            logger.info(f"[RISK_ALERT] Feishu card send result: success={success}, result={result}")
-
-            if success:
-                # 更新冷却时间
-                cache_key = f"{user_id}_{template_key}"
-                self.cooldown_cache[cache_key] = get_beijing_time()
-                logger.info(f"Alert sent: {template_key} to user {user_id}")
-
-                # Mirror to unified AlertBus ledger (agent_alerts table) — best
-                # effort; failures here must not abort the existing flow.
+            if feishu:
                 try:
-                    severity = {1: Severity.INFO, 2: Severity.INFO,
-                                3: Severity.WARN, 4: Severity.DANGER}.get(
-                        template.priority, Severity.WARN)
-                    await alert_bus.persist(
-                        user_id=user_id,
-                        template_key=template_key,
-                        severity=severity,
+                    logger.info(f"[RISK_ALERT] Preparing to send Feishu card: receiver_id={receiver_id}, title={title}")
+                    result = await feishu.send_card_message(
+                        receive_id=receiver_id,
                         title=title,
-                        message=content,
-                        payload=dict(variables) if variables else {},
-                        feishu_sent=True,
+                        content=content,
+                        receive_id_type=receive_id_type,
+                        color=color
                     )
-                except Exception as _be:
-                    logger.debug(f"[risk_alert] AlertBus persist skipped: {_be}")
+                    feishu_success = result.get("success", False)
+                    logger.info(f"[RISK_ALERT] Feishu card send result: success={feishu_success}, result={result}")
+                except Exception as _fe:
+                    logger.warning(f"[RISK_ALERT] Feishu send failed: {_fe}")
+                    feishu_success = False
 
-                # 发送邮件（如果模板启用了邮件渠道且用户有邮箱）
-                if template.enable_email and user.email:
-                    try:
-                        from app.services.email_service import email_service as _es
-                        _plain = content.replace("**", "")
-                        await _es.send_alert_email(self.db, user.email, title, _plain)
-                    except Exception as _ee:
-                        logger.warning(f"[RISK_ALERT] Email failed: {_ee}")
+            # 更新冷却时间（无论飞书是否成功，只要通过了 dedup 就更新）
+            cache_key = f"{user_id}_{template_key}"
+            self.cooldown_cache[cache_key] = get_beijing_time()
 
-                # 通过WebSocket推送到前端
-                await self._broadcast_alert_to_frontend(
+            if feishu_success:
+                logger.info(f"Alert sent via Feishu: {template_key} to user {user_id}")
+
+            # Mirror to unified AlertBus ledger — best effort
+            try:
+                severity = {1: Severity.INFO, 2: Severity.INFO,
+                            3: Severity.WARN, 4: Severity.DANGER}.get(
+                    template.priority, Severity.WARN)
+                await alert_bus.persist(
                     user_id=user_id,
                     template_key=template_key,
-                    template=template,
-                    variables=variables
+                    severity=severity,
+                    title=title,
+                    message=content,
+                    payload=dict(variables) if variables else {},
+                    feishu_sent=feishu_success,
                 )
+            except Exception as _be:
+                logger.debug(f"[risk_alert] AlertBus persist skipped: {_be}")
 
-            return success
+            # 发送邮件（如果模板启用了邮件渠道且用户有邮箱）
+            if template.enable_email and user.email:
+                try:
+                    from app.services.email_service import email_service as _es
+                    _plain = content.replace("**", "")
+                    await _es.send_alert_email(self.db, user.email, title, _plain)
+                except Exception as _ee:
+                    logger.warning(f"[RISK_ALERT] Email failed: {_ee}")
+
+            # 通过WebSocket推送到前端（无论飞书是否成功都推送弹窗）
+            await self._broadcast_alert_to_frontend(
+                user_id=user_id,
+                template_key=template_key,
+                template=template,
+                variables=variables
+            )
+
+            return feishu_success or True
 
         except Exception as e:
             logger.error(f"Error sending alert {template_key}: {e}", exc_info=True)

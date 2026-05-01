@@ -246,9 +246,6 @@ class AccountBalanceStreamer:
     async def _check_spread_alerts(self, active_accounts):
         """Check spread alerts for all active users (every 20 seconds)"""
         try:
-            async with get_db_session(timeout=3.0) as check_db:
-                if not await _is_agent_active(check_db):
-                    return
             # Group accounts by user
             user_accounts = {}
             user_ids = []
@@ -430,9 +427,6 @@ class RiskMetricsStreamer:
         """Check risk alerts and send Feishu notifications with batch queries"""
         logger.info(f"[BROADCAST] _check_risk_alerts called, active_accounts数量={len(active_accounts)}")
         try:
-            async with get_db_session(timeout=3.0) as check_db:
-                if not await _is_agent_active(check_db):
-                    return
             # Group accounts by user
             user_accounts = {}
             user_ids = []
