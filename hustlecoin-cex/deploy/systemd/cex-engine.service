@@ -1,0 +1,18 @@
+[Unit]
+Description=CEX Trading Engine (Rust)
+After=network.target redis6.service
+Wants=redis6.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/hustlecoin-cex/rust-engine
+ExecStart=/home/ec2-user/hustlecoin-cex/rust-engine/target/release/cex-engine
+Environment=RUST_LOG=cex_engine=info
+Environment=REDIS_URL=redis://127.0.0.1:6379
+Restart=always
+RestartSec=3
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target
