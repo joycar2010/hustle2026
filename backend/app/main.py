@@ -45,7 +45,7 @@ def _setup_logging():
 _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, mt5_infra, pnl, hedging, hedge_ratio, agent, site_status, hedge_records, dashboard_viz
+from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, mt5_infra, pnl, hedging, hedge_ratio, agent, site_status, hedge_records, dashboard_viz, aicoin
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor, snapshot_request_listener
 from app.tasks.data_request_handler import data_request_listener
@@ -582,6 +582,7 @@ app.include_router(mt5_infra.router, prefix="/api/v1/mt5-infra", tags=["MT5基�
 app.include_router(mt5_server.router, prefix="/api/v1", tags=["MT5服务器状态"])
 app.include_router(websocket.router, tags=["WebSocket"])
 app.include_router(dashboard_viz.router, prefix="/api/v1/accounts", tags=["Dashboard可视化"])
+app.include_router(aicoin.router, prefix="/api/v1/aicoin", tags=["AiCoin"])
 
 # Mount static files for uploaded alert sounds
 uploads_dir = Path("uploads")
