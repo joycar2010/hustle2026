@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HustleCoin CEX-CEX Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e1e4e8;padding:20px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.header h1{font-size:22px;color:#58a6ff}
+.status-badge{padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600}
+.status-running{background:#238636;color:#fff}
+.status-stopped{background:#da3633;color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:24px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}
+.card h3{font-size:13px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px}
+.metric{font-size:28px;font-weight:700;color:#f0f6fc}
+.metric-sm{font-size:16px;color:#c9d1d9;margin-top:4px}
+.metric-label{font-size:12px;color:#8b949e;margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 12px;border-bottom:1px solid #30363d;color:#8b949e;font-weight:600}
+td{padding:8px 12px;border-bottom:1px solid #21262d}
+tr:hover{background:#1c2128}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.tag-open{background:#1f6feb33;color:#58a6ff}
+.tag-closed{background:#23863633;color:#3fb950}
+.tag-failed{background:#da363333;color:#f85149}
+.tab-bar{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid #30363d}
+.tab{padding:8px 16px;cursor:pointer;color:#8b949e;border-bottom:2px solid transparent;font-size:14px}
+.tab.active{color:#58a6ff;border-bottom-color:#58a6ff}
+.tab-content{display:none}.tab-content.active{display:block}
+.refresh-btn{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+.refresh-btn:hover{background:#30363d}
+.worker-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.worker-card{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px}
+.worker-card .name{font-weight:600;font-size:14px;color:#c9d1d9}
+.worker-card .detail{font-size:12px;color:#8b949e;margin-top:4px}
+.positive{color:#3fb950}.negative{color:#f85149}
+#history-filters{display:flex;gap:12px;margin-bottom:12px;align-items:center}
+#history-filters input,#history-filters select{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:6px 10px;border-radius:4px;font-size:13px}
+.symbol-rule-row input{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:4px 8px;border-radius:4px;width:80px;font-size:12px}
+.btn-sm{background:#238636;border:none;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px}
+.btn-sm.danger{background:#da3633}
+.btn-sm:hover{opacity:0.85}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>HustleCoin CEX-CEX Monitor</h1>
+  <div>
+    <span id="engine-status" class="status-badge status-stopped">STOPPED</span>
+    <button class="refresh-btn" onclick="refresh()" style="margin-left:8px">Refresh</button>
+  </div>
+</div>
+
+<div class="grid" id="summary-cards"></div>
+
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab('workers')">Workers</div>
+  <div class="tab" onclick="switchTab('positions')">Positions</div>
+  <div class="tab" onclick="switchTab('funding')">Funding Fees</div>
+  <div class="tab" onclick="switchTab('history')">History</div>
+  <div class="tab" onclick="switchTab('rules')">Symbol Rules</div>
+  <div class="tab" onclick="switchTab('trades')">Trade Logs</div>
+</div>
+
+<div id="workers" class="tab-content active"><div class="worker-grid" id="worker-grid"></div></div>
+<div id="positions" class="tab-content"><table id="positions-table"><thead><tr><th>ID</th><th>Account</th><th>Symbol</th><th>Status</th><th>Qty</th><th>Open Spread</th><th>PnL</th><th>Opened</th></tr></thead><tbody></tbody></table></div>
+<div id="funding" class="tab-content"><table id="funding-table"><thead><tr><th>Symbol</th><th>Account</th><th>Borrow Qty</th><th>Funding Fee</th><th>Interest</th><th>Ratio</th><th>Opened</th></tr></thead><tbody></tbody></table></div>
+<div id="history" class="tab-content">
+  <div id="history-filters">
+    <input type="date" id="start-date"> <span style="color:#8b949e">to</span> <input type="date" id="end-date">
+    <button class="refresh-btn" onclick="loadHistory()">Filter</button>
+    <span id="history-summary" style="font-size:13px;color:#8b949e;margin-left:12px"></span>
+  </div>
+  <table id="history-table"><thead><tr><th>ID</th><th>Symbol</th><th>Account</th><th>Open Spread</th><th>Close Spread</th><th>PnL</th><th>Funding</th><th>Closed At</th></tr></thead><tbody></tbody></table>
+</div>
+<div id="rules" class="tab-content"><table id="rules-table"><thead><tr><th>Symbol</th><th>Open Spread</th><th>Close Spread</th><th>Order Amount</th><th>Source</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+<div id="trades" class="tab-content"><table id="trades-table"><thead><tr><th>ID</th><th>Action</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th>Latency</th><th>Time</th></tr></thead><tbody></tbody></table></div>
+
+<script>
+const API = '';
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById(name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'funding') loadFunding();
+  if (name === 'history') loadHistory();
+  if (name === 'rules') loadRules();
+  if (name === 'trades') loadTrades();
+  if (name === 'positions') loadPositions();
+}
+
+async function refresh() {
+  try {
+    const res = await fetch(API + '/api/engine/dashboard');
+    const d = await res.json();
+    const s = d.engine_status;
+    const badge = document.getElementById('engine-status');
+    badge.textContent = s;
+    badge.className = 'status-badge ' + (s === 'RUNNING' ? 'status-running' : 'status-stopped');
+
+    const ps = d.positions_summary;
+    const fs = d.funding_summary || {};
+    document.getElementById('summary-cards').innerHTML = `
+      <div class="card"><h3>Open Positions</h3><div class="metric">${ps.total_open}</div></div>
+      <div class="card"><h3>Closed Positions</h3><div class="metric">${ps.total_closed}</div></div>
+      <div class="card"><h3>Total PnL</h3><div class="metric ${parseFloat(ps.total_pnl)>=0?'positive':'negative'}">${parseFloat(ps.total_pnl).toFixed(2)} USDT</div></div>
+      <div class="card"><h3>Funding Fees</h3><div class="metric-sm">Fee: ${parseFloat(fs.total_funding_fee||0).toFixed(4)}</div><div class="metric-sm">Interest: ${parseFloat(fs.total_interest||0).toFixed(4)}</div><div class="metric-sm">Avg Ratio: ${fs.avg_funding_ratio ? parseFloat(fs.avg_funding_ratio).toFixed(2) : 'N/A'}</div></div>
+    `;
+
+    const wg = document.getElementById('worker-grid');
+    wg.innerHTML = d.workers.map(w => `
+      <div class="worker-card">
+        <div class="name">${w.scope}</div>
+        <div class="detail">Status: <span class="tag tag-${w.status==='RUNNING'?'open':'failed'}">${w.status}</span></div>
+        <div class="detail">Positions: ${w.active_positions} | Cycles: ${w.total_cycles}</div>
+        <div class="detail">Heartbeat: ${w.last_heartbeat ? new Date(w.last_heartbeat).toLocaleTimeString() : '-'}</div>
+      </div>
+    `).join('');
+  } catch(e) { console.error('Dashboard refresh failed:', e); }
+}
+
+async function loadPositions() {
+  const res = await fetch(API + '/api/engine/positions?status=OPEN&size=100');
+  const data = await res.json();
+  const tbody = document.querySelector('#positions-table tbody');
+  tbody.innerHTML = data.map(p => `<tr>
+    <td>${p.id}</td><td>${p.sub_account_id}</td><td>${p.symbol}</td>
+    <td><span class="tag tag-${p.status.toLowerCase()}">${p.status}</span></td>
+    <td>${parseFloat(p.borrow_qty||0).toFixed(4)}</td>
+    <td>${parseFloat(p.open_spread||0).toFixed(2)}%</td>
+    <td class="${parseFloat(p.realized_pnl||0)>=0?'positive':'negative'}">${parseFloat(p.realized_pnl||0).toFixed(2)}</td>
+    <td>${p.opened_at ? new Date(p.opened_at).toLocaleString() : '-'}</td>
+  </tr>`).join('');
+}
+
+async function loadFunding() {
+  const res = await fetch(API + '/api/engine/funding-fees');
+  const data = await res.json();
+  const tbody = document.querySelector('#funding-table tbody');
+  tbody.innerHTML = data.map(p => `<tr>
+    <td>${p.symbol}</td><td>${p.sub_account_id}</td>
+    <td>${parseFloat(p.borrow_qty).toFixed(4)}</td>
+    <td class="${parseFloat(p.cumulative_funding_fee)>=0?'positive':'negative'}">${parseFloat(p.cumulative_funding_fee).toFixed(6)}</td>
+    <td class="negative">${parseFloat(p.cumulative_interest).toFixed(6)}</td>
+    <td>${p.funding_rate_ratio || 'N/A'}</td>
+    <td>${p.opened_at ? new Date(p.opened_at).toLocaleString() : '-'}</td>
+  </tr>`).join('');
+}
+
+async function loadHistory() {
+  let url = API + '/api/engine/positions/history?size=100';
+  const sd = document.getElementById('start-date').value;
+  const ed = document.getElementById('end-date').value;
+  if (sd) url += '&start_date=' + sd;
+  if (ed) url += '&end_date=' + ed;
+  const res = await fetch(url);
+  const d = await res.json();
+  document.getElementById('history-summary').textContent =
+    `${d.count} trades | PnL: ${parseFloat(d.total_pnl).toFixed(2)} | Funding: ${parseFloat(d.total_funding_fee).toFixed(4)} | Interest: ${parseFloat(d.total_interest).toFixed(4)} | Net: ${parseFloat(d.net_pnl).toFixed(2)}`;
+  const tbody = document.querySelector('#history-table tbody');
+  tbody.innerHTML = d.positions.map(p => `<tr>
+    <td>${p.id}</td><td>${p.symbol}</td><td>${p.sub_account_id}</td>
+    <td>${parseFloat(p.open_spread||0).toFixed(2)}%</td>
+    <td>${parseFloat(p.close_spread||0).toFixed(2)}%</td>
+    <td class="${parseFloat(p.realized_pnl||0)>=0?'positive':'negative'}">${parseFloat(p.realized_pnl||0).toFixed(2)}</td>
+    <td>${parseFloat(p.cumulative_funding_fee||0).toFixed(4)}</td>
+    <td>${p.closed_at ? new Date(p.closed_at).toLocaleString() : '-'}</td>
+  </tr>`).join('');
+}
+
+async function loadRules() {
+  const res = await fetch(API + '/api/symbol-rules/');
+  const data = await res.json();
+  const tbody = document.querySelector('#rules-table tbody');
+  tbody.innerHTML = data.map(r => `<tr class="symbol-rule-row">
+    <td>${r.symbol}</td>
+    <td>${r.open_spread !== null ? r.open_spread : '<span style="color:#8b949e">global('+r.effective_open_spread+')</span>'}</td>
+    <td>${r.close_spread !== null ? r.close_spread : '<span style="color:#8b949e">global('+r.effective_close_spread+')</span>'}</td>
+    <td>${r.order_amount !== null ? r.order_amount : '<span style="color:#8b949e">global('+r.effective_order_amount+')</span>'}</td>
+    <td><span class="tag tag-${r.source==='custom'?'open':'closed'}">${r.source}</span></td>
+    <td><button class="btn-sm danger" onclick="resetRule('${r.symbol}')">Reset</button></td>
+  </tr>`).join('');
+}
+
+async function resetRule(symbol) {
+  await fetch(API + '/api/symbol-rules/' + symbol + '/reset', {method: 'POST'});
+  loadRules();
+}
+
+async function loadTrades() {
+  const res = await fetch(API + '/api/engine/trade-logs?size=100');
+  const data = await res.json();
+  const tbody = document.querySelector('#trades-table tbody');
+  tbody.innerHTML = data.map(t => `<tr>
+    <td>${t.id}</td><td>${t.action}</td><td>${t.symbol||'-'}</td><td>${t.side||'-'}</td>
+    <td>${t.quantity ? parseFloat(t.quantity).toFixed(4) : '-'}</td>
+    <td>${t.price ? parseFloat(t.price).toFixed(2) : '-'}</td>
+    <td><span class="tag tag-${t.status==='SUCCESS'?'open':'failed'}">${t.status}</span></td>
+    <td>${t.latency_ms ? t.latency_ms+'ms' : '-'}</td>
+    <td>${new Date(t.created_at).toLocaleTimeString()}</td>
+  </tr>`).join('');
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

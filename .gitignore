@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+*.log
+backups/
+static/spa/assets/
+node_modules/
