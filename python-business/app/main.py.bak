@@ -1,0 +1,99 @@
+import logging
+from contextlib import asynccontextmanager
+
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.api.spread import router as spread_router
+from app.api.global_rules import router as global_rules_router
+from app.api.fund_rules import router as fund_rules_router
+from app.api.feishu import router as feishu_router
+from app.api.blacklist import router as blacklist_router
+from app.api.sub_account import router as sub_account_router
+from app.api.master_account import router as master_account_router
+from app.api.symbol import router as symbol_router
+from app.api.engine_api import router as engine_router
+from app.api.symbol_rules import router as symbol_rules_router
+from app.api.auth import router as auth_router
+from app.api.websocket import router as ws_router
+from app.config import settings
+from app.middleware.auth import JWTAuthMiddleware
+from app.middleware.audit import AuditMiddleware
+from app.db.models import Base
+from app.db.session import engine, SessionLocal
+from app.services.spread_reader import spread_reader
+from app.services import symbol_sync
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    await spread_reader.start()
+
+    if settings.symbol_sync_on_startup:
+        try:
+            db = SessionLocal()
+            result = await symbol_sync.sync_symbols(db)
+            logger.info(f"Startup symbol sync: {result}")
+            db.close()
+        except Exception as e:
+            logger.warning(f"Startup symbol sync failed (non-fatal): {e}")
+
+    yield
+
+
+app = FastAPI(title="HustleCoin CEX-CEX", version="0.2.0", lifespan=lifespan)
+
+origins = settings.allowed_origins.split(",") if settings.allowed_origins != "*" else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(AuditMiddleware)
+app.add_middleware(JWTAuthMiddleware)
+
+app.include_router(spread_router)
+app.include_router(global_rules_router)
+app.include_router(fund_rules_router)
+app.include_router(feishu_router)
+app.include_router(blacklist_router)
+app.include_router(sub_account_router)
+app.include_router(master_account_router)
+app.include_router(symbol_router)
+app.include_router(engine_router)
+app.include_router(symbol_rules_router)
+app.include_router(auth_router)
+app.include_router(ws_router)
+
+STATIC_DIR = Path(__file__).parent.parent / "static"
+SPA_DIR = STATIC_DIR / "spa"
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+if SPA_DIR.exists() and (SPA_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(SPA_DIR / "assets")), name="spa-assets")
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/dashboard")
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    spa_index = SPA_DIR / "index.html"
+    if spa_index.exists():
+        return FileResponse(str(spa_index))
+    legacy = STATIC_DIR / "dashboard.html"
+    if legacy.exists():
+        return FileResponse(str(legacy))
+    return RedirectResponse(url="/docs")

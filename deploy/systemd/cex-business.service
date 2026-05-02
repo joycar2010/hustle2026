@@ -1,0 +1,17 @@
+[Unit]
+Description=CEX Business Server (Python)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/hustlecoin-cex/python-business
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Environment=CEX_REDIS_URL=redis://10.0.1.95:6379
+Environment=CEX_DATABASE_URL=postgresql://postgres:cex_trading_2026@127.0.0.1:5432/cex_trading
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
