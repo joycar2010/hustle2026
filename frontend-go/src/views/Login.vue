@@ -2,9 +2,7 @@
   <div class="min-h-screen flex items-center justify-center px-4">
     <div class="card max-w-md w-full">
       <div class="text-center mb-8">
-        <div class="w-16 h-16 bg-primary rounded-full flex items-center justify-center mx-auto mb-4">
-          <span class="text-dark-300 font-bold text-3xl">H</span>
-        </div>
+        <img src="/logo.png" alt="Hustle XAU" class="w-16 h-16 mx-auto mb-4 object-contain" />
         <h1 class="text-3xl font-bold">Hustle XAU</h1>
         <p class="text-gray-400 mt-2">Arbitrage Trading System</p>
       </div>

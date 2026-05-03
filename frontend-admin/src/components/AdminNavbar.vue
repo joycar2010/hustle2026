@@ -6,9 +6,7 @@
         <!-- Logo -->
         <div class="flex items-center space-x-6">
           <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
-            <div class="w-10 h-10 bg-gradient-to-br from-red-600 to-red-800 rounded-lg flex items-center justify-center shadow-lg">
-              <span class="text-white font-bold text-lg">管</span>
-            </div>
+            <img src="/logo.png" alt="HustleXAU Admin" class="w-10 h-10 object-contain" />
             <div class="hidden md:block">
               <div class="text-lg font-bold text-text-primary">HustleXAU Admin</div>
               <div class="text-xs text-red-400">总控管理平台</div>

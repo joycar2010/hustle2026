@@ -76,9 +76,7 @@
           </div>
 
           <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
-            <div class="w-10 h-10 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center shadow-lg">
-              <span class="text-dark-300 font-bold text-xl">H</span>
-            </div>
+            <img src="/logo.png" alt="Hustle XAU" class="w-10 h-10 object-contain" />
             <div class="hidden md:block" :class="{ 'md:hidden': navbarCollapsed }">
               <div class="text-lg font-bold">Hustle XAU</div>
               <div class="text-xs text-text-tertiary">Arbitrage System</div>
@@ -255,7 +253,7 @@
   <button
     v-show="navbarHidden"
     @click="toggleNavbarVisibility"
-    class="fixed bottom-4 left-4 z-50 p-3 bg-primary hover:bg-primary-hover rounded-lg shadow-lg transition-colors lg:right-4 lg:left-auto"
+    class="fixed bottom-4 left-4 z-50 p-3 bg-primary hover:bg-primary-hover rounded-lg shadow-lg transition-colors lg:right-4 lg:left-auto lg:bottom-20"
     title="显示顶部导航栏"
   >
     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
