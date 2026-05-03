@@ -11,6 +11,9 @@ router = APIRouter()
 AICOIN_API_KEY = "Kc9TBaTv5qA8ZFFGWFiLWuXL7DG2iIaB"
 AICOIN_API_SECRET = "YNXiSLTUgAhFEWaOXFQYpbCwCwsrIPLC"
 
+_PERIOD_TO_SECONDS = {"1": "60", "5": "300", "15": "900", "30": "1800",
+                      "60": "3600", "240": "14400", "1440": "86400"}
+
 _client: AiCoinClient | None = None
 
 
@@ -28,8 +31,9 @@ async def get_kline(
     size: int = Query(300, ge=1, le=500),
 ):
     ac = _get_client()
+    api_period = _PERIOD_TO_SECONDS.get(period, period)
     try:
-        data = await ac.get_kline(symbol, period, size)
+        data = await ac.get_kline(symbol, api_period, size)
         return {"data": data}
     except Exception as e:
         logger.warning(f"AiCoin kline error: {e}")
