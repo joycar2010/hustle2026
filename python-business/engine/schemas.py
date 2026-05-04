@@ -91,3 +91,43 @@ class PositionHistoryResponse(BaseModel):
     total_interest: Decimal = Decimal("0")
     net_pnl: Decimal = Decimal("0")
     count: int = 0
+
+
+class WorkerHealth(BaseModel):
+    scope: str
+    status: str
+    last_heartbeat: Optional[datetime] = None
+    heartbeat_stale: bool = False
+    active_positions: int = 0
+    total_cycles: int = 0
+    error_message: Optional[str] = None
+
+
+class StuckPosition(BaseModel):
+    id: int
+    symbol: str
+    sub_account_id: int
+    status: str
+    stuck_minutes: int
+    error_message: Optional[str] = None
+
+
+class APIMetricsResponse(BaseModel):
+    total_calls: int = 0
+    total_errors: int = 0
+    rate_limited: int = 0
+    error_rate: float = 0
+    last_error_ago_sec: Optional[int] = None
+    last_error_msg: Optional[str] = None
+    last_success_ago_sec: Optional[int] = None
+
+
+class HealthResponse(BaseModel):
+    status: str
+    engine_status: str
+    workers: list[WorkerHealth]
+    stuck_positions: list[StuckPosition]
+    open_positions: int = 0
+    api_metrics: dict[str, APIMetricsResponse] = {}
+    spread_count: int = 0
+    uptime_sec: Optional[int] = None

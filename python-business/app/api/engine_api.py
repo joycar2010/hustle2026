@@ -16,7 +16,8 @@ from engine.models import Position, TradeLog, EngineState
 from engine.schemas import (
     PositionResponse, TradeLogResponse, EngineStateResponse,
     PositionSummary, DashboardResponse, FundingSummary,
-    PositionHistoryResponse,
+    PositionHistoryResponse, HealthResponse, WorkerHealth,
+    StuckPosition, APIMetricsResponse,
 )
 
 router = APIRouter(prefix="/api/engine", tags=["engine"])
@@ -568,3 +569,94 @@ def workers_status(request: Request, db: Session = Depends(get_db)):
         EngineState.user_id == user_id, EngineState.scope != "global",
     ).all()
     return {"workers": [EngineStateResponse.model_validate(w) for w in workers]}
+
+
+STUCK_STATUSES = {
+    "PENDING_BORROW", "BORROWED", "SPOT_SOLD",
+    "CLOSING_FUTURES", "FUTURES_CLOSED", "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
+}
+HEARTBEAT_STALE_SEC = 120
+
+
+@router.get("/health", response_model=HealthResponse)
+def engine_health(request: Request, db: Session = Depends(get_db)):
+    from datetime import datetime, timezone
+    from engine.metrics import all_metrics_snapshot
+    from app.services.spread_reader import spread_reader
+
+    user_id = get_current_user_id(request)
+
+    global_state = db.query(EngineState).filter(
+        EngineState.user_id == user_id, EngineState.scope == "global",
+    ).first()
+    engine_status = global_state.status if global_state else "STOPPED"
+
+    now = datetime.now(timezone.utc)
+    worker_rows = db.query(EngineState).filter(
+        EngineState.user_id == user_id, EngineState.scope != "global",
+    ).all()
+
+    workers = []
+    any_stale = False
+    for w in worker_rows:
+        stale = False
+        if w.last_heartbeat:
+            delta = (now - w.last_heartbeat).total_seconds()
+            stale = delta > HEARTBEAT_STALE_SEC
+        if stale:
+            any_stale = True
+        workers.append(WorkerHealth(
+            scope=w.scope,
+            status=w.status,
+            last_heartbeat=w.last_heartbeat,
+            heartbeat_stale=stale,
+            active_positions=w.active_positions or 0,
+            total_cycles=w.total_cycles or 0,
+            error_message=w.error_message,
+        ))
+
+    stuck = []
+    stuck_rows = db.query(Position).filter(
+        Position.user_id == user_id,
+        Position.status.in_(STUCK_STATUSES),
+    ).all()
+    for p in stuck_rows:
+        updated = p.updated_at or p.created_at
+        if updated:
+            mins = int((now - updated).total_seconds() / 60)
+        else:
+            mins = 0
+        stuck.append(StuckPosition(
+            id=p.id,
+            symbol=p.symbol,
+            sub_account_id=p.sub_account_id,
+            status=p.status,
+            stuck_minutes=mins,
+            error_message=p.error_message,
+        ))
+
+    total_open = db.query(Position).filter(
+        Position.user_id == user_id, Position.status == "OPEN",
+    ).count()
+
+    raw_metrics = all_metrics_snapshot()
+    api_metrics = {k: APIMetricsResponse(**v) for k, v in raw_metrics.items()}
+
+    spread_health = spread_reader.health()
+    spread_count = spread_health.get("active_symbols", 0)
+
+    overall = "HEALTHY"
+    if engine_status in ("STOPPED", "ERROR"):
+        overall = "UNHEALTHY"
+    elif any_stale or len(stuck) > 0:
+        overall = "DEGRADED"
+
+    return HealthResponse(
+        status=overall,
+        engine_status=engine_status,
+        workers=workers,
+        stuck_positions=stuck,
+        open_positions=total_open,
+        api_metrics=api_metrics,
+        spread_count=spread_count,
+    )

@@ -142,7 +142,10 @@ async def serve_admin_spa(full_path: str):
             return FileResponse(str(file_path))
     admin_index = ADMIN_SPA_DIR / "index.html"
     if admin_index.exists():
-        return FileResponse(str(admin_index))
+        return FileResponse(
+            str(admin_index),
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
     return {"detail": "Admin frontend not deployed yet"}
 
 
@@ -156,7 +159,10 @@ async def serve_spa(full_path: str):
         raise HTTPException(status_code=404, detail="Not found")
     spa_index = SPA_DIR / "index.html"
     if spa_index.exists():
-        return FileResponse(str(spa_index))
+        return FileResponse(
+            str(spa_index),
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
     legacy = STATIC_DIR / "dashboard.html"
     if legacy.exists():
         return FileResponse(str(legacy))

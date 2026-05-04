@@ -7,6 +7,8 @@ from decimal import Decimal
 
 import httpx
 
+from engine.metrics import get_metrics
+
 logger = logging.getLogger(__name__)
 
 SPOT_BASE = "https://api.binance.com"
@@ -16,13 +18,17 @@ _global_semaphore = asyncio.Semaphore(10)
 
 
 class BinanceTradingClient:
-    def __init__(self, api_key: str, api_secret: str, timeout: int = 10):
+    def __init__(self, api_key: str, api_secret: str, timeout: int = 10, sub_account_id: int = 0):
         self._api_key = api_key
         self._api_secret = api_secret
         self._timeout = timeout
+        self._sub_account_id = sub_account_id
         self._client: httpx.AsyncClient | None = None
         self._semaphore = asyncio.Semaphore(3)
         self._lot_cache: dict[str, dict] = {}
+        self._lot_cache_ts: dict[str, float] = {}
+        self._futures_exchange_info: dict | None = None
+        self._futures_exchange_info_ts: float = 0
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(timeout=self._timeout)
@@ -43,6 +49,7 @@ class BinanceTradingClient:
         return {"X-MBX-APIKEY": self._api_key}
 
     async def _request(self, method: str, url: str, params: dict = None, signed: bool = True) -> dict:
+        metrics = get_metrics(self._sub_account_id)
         if params is None:
             params = {}
         if signed:
@@ -62,37 +69,36 @@ class BinanceTradingClient:
                 await asyncio.sleep(1)
 
             if resp.status_code == 429:
+                metrics.record_rate_limit()
                 retry_after = int(resp.headers.get("Retry-After", 5))
                 logger.warning(f"Rate limited, sleeping {retry_after}s")
                 await asyncio.sleep(retry_after)
-                return await self._request(method, url, params, signed=False)
+                params.pop("timestamp", None)
+                params.pop("signature", None)
+                return await self._request(method, url, params, signed=True)
 
             if resp.status_code >= 400:
                 data = resp.json()
-                raise BinanceAPIError(resp.status_code, data.get("code", 0), data.get("msg", resp.text))
+                msg = data.get("msg", resp.text)
+                metrics.record_error(f"[{resp.status_code}] {msg}")
+                raise BinanceAPIError(resp.status_code, data.get("code", 0), msg)
 
+            metrics.record_success()
             return resp.json()
 
     # ---- Margin ----
 
     async def margin_borrow(self, asset: str, amount: Decimal) -> dict:
-        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/loan", {
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
             "asset": asset, "amount": str(amount),
+            "type": "BORROW", "isIsolated": "FALSE",
         })
 
     async def margin_repay(self, asset: str, amount: Decimal) -> dict:
-        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/repay", {
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
             "asset": asset, "amount": str(amount),
+            "type": "REPAY", "isIsolated": "FALSE",
         })
-
-    async def get_spot_account(self) -> dict:
-        return await self._request("GET", f"{SPOT_BASE}/api/v3/account")
-
-    async def get_funding_account(self) -> list:
-        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/asset/get-funding-asset", {})
-
-    async def get_simple_earn_account(self) -> dict:
-        return await self._request("GET", f"{SPOT_BASE}/sapi/v1/simple-earn/account")
 
     async def get_margin_account(self) -> dict:
         return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/account")
@@ -107,13 +113,23 @@ class BinanceTradingClient:
 
     # ---- Spot Orders ----
 
-    async def spot_market_sell(self, symbol: str, quantity: Decimal) -> dict:
+    async def spot_market_sell(self, symbol: str, quantity: Decimal, is_margin: bool = True) -> dict:
+        if is_margin:
+            return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/order", {
+                "symbol": symbol, "side": "SELL", "type": "MARKET",
+                "quantity": str(quantity), "sideEffectType": "NO_SIDE_EFFECT",
+            })
         return await self._request("POST", f"{SPOT_BASE}/api/v3/order", {
             "symbol": symbol, "side": "SELL", "type": "MARKET",
             "quantity": str(quantity),
         })
 
-    async def spot_market_buy_qty(self, symbol: str, quantity: Decimal) -> dict:
+    async def spot_market_buy_qty(self, symbol: str, quantity: Decimal, is_margin: bool = True) -> dict:
+        if is_margin:
+            return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/order", {
+                "symbol": symbol, "side": "BUY", "type": "MARKET",
+                "quantity": str(quantity), "sideEffectType": "NO_SIDE_EFFECT",
+            })
         return await self._request("POST", f"{SPOT_BASE}/api/v3/order", {
             "symbol": symbol, "side": "BUY", "type": "MARKET",
             "quantity": str(quantity),
@@ -152,22 +168,6 @@ class BinanceTradingClient:
             "type": transfer_type, "asset": asset, "amount": str(amount),
         })
 
-    async def sub_to_master(self, asset: str, amount: Decimal) -> dict:
-        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/sub-account/transfer/subToMaster", {
-            "asset": asset, "amount": str(amount),
-        })
-
-    async def universal_transfer(
-        self, from_email: str, to_email: str,
-        from_account_type: str, to_account_type: str,
-        asset: str, amount: Decimal,
-    ) -> dict:
-        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/sub-account/universalTransfer", {
-            "fromEmail": from_email, "toEmail": to_email,
-            "fromAccountType": from_account_type, "toAccountType": to_account_type,
-            "asset": asset, "amount": str(amount),
-        })
-
     # ---- Utilities ----
 
     async def get_bnb_balance(self) -> dict:
@@ -179,27 +179,22 @@ class BinanceTradingClient:
                 break
         return {"margin": bnb_margin}
 
-    async def get_max_borrowable(self, asset: str) -> Decimal:
-        data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/maxBorrowable", {
-            "asset": asset,
-        })
-        return Decimal(str(data.get("amount", "0")))
-
-    async def get_funding_income(self, symbol: str, start_time: int = None, limit: int = 100) -> list[dict]:
-        params = {"symbol": symbol, "incomeType": "FUNDING_FEE", "limit": limit}
-        if start_time:
-            params["startTime"] = start_time
-        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", params)
-
     async def get_funding_rate(self, symbol: str) -> Decimal:
         data = await self._request("GET", f"{FUTURES_BASE}/fapi/v1/premiumIndex", {
             "symbol": symbol,
         }, signed=False)
         return Decimal(str(data.get("lastFundingRate", "0")))
 
+    async def get_funding_income(self, symbol: str) -> list:
+        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", {
+            "symbol": symbol, "incomeType": "FUNDING_FEE", "limit": "100",
+        })
+
     async def get_lot_size(self, symbol: str, market: str = "spot") -> dict:
         cache_key = f"{market}:{symbol}"
-        if cache_key in self._lot_cache:
+        now = time.time()
+
+        if cache_key in self._lot_cache and now - self._lot_cache_ts.get(cache_key, 0) < 3600:
             return self._lot_cache[cache_key]
 
         if market == "spot":
@@ -207,7 +202,25 @@ class BinanceTradingClient:
                 "symbol": symbol,
             }, signed=False)
         else:
-            data = await self._request("GET", f"{FUTURES_BASE}/fapi/v1/exchangeInfo", signed=False)
+            if not self._futures_exchange_info or now - self._futures_exchange_info_ts > 3600:
+                self._futures_exchange_info = await self._request(
+                    "GET", f"{FUTURES_BASE}/fapi/v1/exchangeInfo", signed=False,
+                )
+                self._futures_exchange_info_ts = now
+                for s in self._futures_exchange_info.get("symbols", []):
+                    for f in s.get("filters", []):
+                        if f["filterType"] == "LOT_SIZE":
+                            fkey = f"futures:{s['symbol']}"
+                            self._lot_cache[fkey] = {
+                                "stepSize": f["stepSize"],
+                                "minQty": f["minQty"],
+                                "maxQty": f["maxQty"],
+                            }
+                            self._lot_cache_ts[fkey] = now
+                            break
+            if cache_key in self._lot_cache:
+                return self._lot_cache[cache_key]
+            data = self._futures_exchange_info
 
         for s in data.get("symbols", []):
             if s["symbol"] == symbol:
@@ -219,6 +232,7 @@ class BinanceTradingClient:
                             "maxQty": f["maxQty"],
                         }
                         self._lot_cache[cache_key] = result
+                        self._lot_cache_ts[cache_key] = now
                         return result
         return {"stepSize": "0.001", "minQty": "0.001", "maxQty": "999999"}
 

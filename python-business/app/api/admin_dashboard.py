@@ -188,6 +188,62 @@ def _get_ws_status() -> dict:
     return {"connections": connections, "streamers": streamers}
 
 
+STUCK_STATUSES = {
+    "PENDING_BORROW", "BORROWED", "SPOT_SOLD",
+    "CLOSING_FUTURES", "FUTURES_CLOSED", "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
+}
+HEARTBEAT_STALE_SEC = 120
+
+
+def _get_engine_health(db: Session, now: datetime) -> dict:
+    stuck_rows = db.query(Position).filter(
+        Position.status.in_(STUCK_STATUSES),
+    ).all()
+    stuck_positions = []
+    for p in stuck_rows:
+        updated = p.updated_at or p.created_at
+        mins = int((now - updated).total_seconds() / 60) if updated else 0
+        stuck_positions.append({
+            "id": p.id,
+            "symbol": p.symbol,
+            "sub_account_id": p.sub_account_id,
+            "status": p.status,
+            "stuck_minutes": mins,
+            "user_id": getattr(p, "user_id", None),
+        })
+
+    worker_rows = db.query(EngineState).filter(EngineState.scope != "global").all()
+    stale_workers = []
+    for w in worker_rows:
+        if w.status != "RUNNING":
+            continue
+        if w.last_heartbeat:
+            delta = (now - w.last_heartbeat).total_seconds()
+            if delta > HEARTBEAT_STALE_SEC:
+                stale_workers.append({
+                    "scope": w.scope,
+                    "user_id": getattr(w, "user_id", None),
+                    "last_heartbeat": str(w.last_heartbeat),
+                    "stale_seconds": int(delta),
+                })
+
+    from engine.metrics import all_metrics_snapshot
+    api_metrics = all_metrics_snapshot()
+
+    overall = "HEALTHY"
+    if len(stuck_positions) > 0 or len(stale_workers) > 0:
+        overall = "DEGRADED"
+    if len(stuck_positions) > 3 or len(stale_workers) > 2:
+        overall = "UNHEALTHY"
+
+    return {
+        "status": overall,
+        "stuck_positions": stuck_positions,
+        "stale_workers": stale_workers,
+        "api_metrics": api_metrics,
+    }
+
+
 @router.get("/overview")
 def dashboard_overview(request: Request, db: Session = Depends(get_db)):
     require_admin(request)
@@ -288,6 +344,8 @@ def dashboard_overview(request: Request, db: Session = Depends(get_db)):
             "last_trade_at": str(last_trade[0]) if last_trade else None,
         })
 
+    engine_health = _get_engine_health(db, now)
+
     return {
         "users": {"total": total_users, "active": active_users},
         "positions": {
@@ -318,4 +376,5 @@ def dashboard_overview(request: Request, db: Session = Depends(get_db)):
         "ai_chat": _get_ai_chat_status(db),
         "rust_engine": _get_rust_engine_status(),
         "websocket": _get_ws_status(),
+        "engine_health": engine_health,
     }
