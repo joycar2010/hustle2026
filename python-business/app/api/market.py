@@ -6,6 +6,8 @@ import redis as redis_lib
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
+from app.db.models import AiCoinConfig
+from app.db.session import SessionLocal
 from app.middleware.permissions import get_current_user_id
 from app.services.aicoin_client import AiCoinClient
 
@@ -16,12 +18,31 @@ router = APIRouter(prefix="/api/market", tags=["market"])
 _aicoin: AiCoinClient | None = None
 
 
+def _reset_aicoin():
+    global _aicoin
+    _aicoin = None
+
+
 def _get_aicoin() -> AiCoinClient:
     global _aicoin
     if _aicoin is None:
-        if not settings.aicoin_api_key:
+        api_key = ""
+        api_secret = ""
+        try:
+            db = SessionLocal()
+            cfg = db.query(AiCoinConfig).first()
+            if cfg and cfg.api_key:
+                api_key = cfg.api_key
+                api_secret = cfg.api_secret or ""
+            db.close()
+        except Exception:
+            pass
+        if not api_key:
+            api_key = settings.aicoin_api_key
+            api_secret = settings.aicoin_api_secret
+        if not api_key:
             raise HTTPException(status_code=500, detail="AiCoin API key not configured")
-        _aicoin = AiCoinClient(settings.aicoin_api_key, settings.aicoin_api_secret)
+        _aicoin = AiCoinClient(api_key, api_secret)
     return _aicoin
 
 
@@ -40,12 +61,17 @@ def _safe_float(val, default=0.0) -> float:
 
 # ─── K-Line ───
 
+_PERIOD_TO_SECONDS = {"1": "60", "5": "300", "15": "900", "30": "1800",
+                      "60": "3600", "240": "14400", "1440": "86400"}
+
+
 @router.get("/kline")
 async def get_kline(symbol: str, period: str = "60", size: int = 200, request: Request = None):
     get_current_user_id(request)
     ac = _get_aicoin()
+    api_period = _PERIOD_TO_SECONDS.get(period, period)
     try:
-        data = await ac.get_kline(symbol, period, size)
+        data = await ac.get_kline(symbol, api_period, size)
         return {"data": data}
     except Exception as e:
         logger.warning(f"AiCoin kline error: {e}")

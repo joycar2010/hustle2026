@@ -1,12 +1,13 @@
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.models import Symbol
+from app.db.models import Symbol, MasterAccount
 from app.db.session import get_db
+from app.middleware.permissions import get_current_user_id
 
 router = APIRouter(prefix="/api/coins", tags=["coin-management"])
 
@@ -35,12 +36,14 @@ class CoinPatch(BaseModel):
 
 @router.get("/", response_model=list[CoinResponse])
 def list_coins(
+    request: Request,
     is_new_coin: Optional[bool] = Query(None),
     is_delisting: Optional[bool] = Query(None),
     min_volume: Optional[Decimal] = Query(None),
     search: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    get_current_user_id(request)
     q = db.query(Symbol).filter(Symbol.is_active == True)
     if is_new_coin is not None:
         q = q.filter(Symbol.is_new_coin == is_new_coin)
@@ -54,7 +57,8 @@ def list_coins(
 
 
 @router.post("/{symbol}/mark-new")
-def mark_new(symbol: str, db: Session = Depends(get_db)):
+def mark_new(symbol: str, request: Request, db: Session = Depends(get_db)):
+    get_current_user_id(request)
     sym = db.query(Symbol).filter(Symbol.symbol == symbol.upper()).first()
     if not sym:
         raise HTTPException(status_code=404, detail="Symbol not found")
@@ -65,7 +69,8 @@ def mark_new(symbol: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{symbol}/mark-delisting")
-def mark_delisting(symbol: str, db: Session = Depends(get_db)):
+def mark_delisting(symbol: str, request: Request, db: Session = Depends(get_db)):
+    get_current_user_id(request)
     sym = db.query(Symbol).filter(Symbol.symbol == symbol.upper()).first()
     if not sym:
         raise HTTPException(status_code=404, detail="Symbol not found")
@@ -75,7 +80,8 @@ def mark_delisting(symbol: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{symbol}", response_model=CoinResponse)
-def patch_coin(symbol: str, data: CoinPatch, db: Session = Depends(get_db)):
+def patch_coin(symbol: str, data: CoinPatch, request: Request, db: Session = Depends(get_db)):
+    get_current_user_id(request)
     sym = db.query(Symbol).filter(Symbol.symbol == symbol.upper()).first()
     if not sym:
         raise HTTPException(status_code=404, detail="Symbol not found")
@@ -87,12 +93,12 @@ def patch_coin(symbol: str, data: CoinPatch, db: Session = Depends(get_db)):
 
 
 @router.post("/sync-volume")
-async def sync_volume(db: Session = Depends(get_db)):
+async def sync_volume(request: Request, db: Session = Depends(get_db)):
     from engine.trading.binance_trading import BinanceTradingClient, SPOT_BASE
-    from app.db.models import MasterAccount
     from datetime import datetime, timezone
 
-    master = db.query(MasterAccount).first()
+    user_id = get_current_user_id(request)
+    master = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if not master:
         raise HTTPException(status_code=400, detail="Master account not configured")
 

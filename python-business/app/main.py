@@ -33,6 +33,8 @@ from app.api.admin_system import router as admin_system_router
 from app.api.admin_ai import router as admin_ai_router
 from app.api.admin_global_rules import router as admin_global_rules_router
 from app.api.admin_market import router as admin_market_router
+from app.api.ai_chat import router as ai_chat_router
+from app.api.admin_rbac import router as admin_rbac_router
 from app.api.market import router as market_router
 from app.config import settings
 from app.middleware.auth import JWTAuthMiddleware
@@ -40,6 +42,7 @@ from app.middleware.audit import AuditMiddleware
 from app.db.models import Base
 from app.db.session import engine, SessionLocal
 from app.services.spread_reader import spread_reader
+from app.services.balance_pusher import balance_pusher
 from app.services import symbol_sync
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     await spread_reader.start()
+    await balance_pusher.start()
 
     if settings.symbol_sync_on_startup:
         try:
@@ -103,6 +107,8 @@ app.include_router(admin_system_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_global_rules_router)
 app.include_router(admin_market_router)
+app.include_router(admin_rbac_router)
+app.include_router(ai_chat_router)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 SPA_DIR = STATIC_DIR / "spa"
@@ -130,6 +136,10 @@ async def health():
 
 @app.get("/admin/{full_path:path}")
 async def serve_admin_spa(full_path: str):
+    if full_path:
+        file_path = (ADMIN_SPA_DIR / full_path).resolve()
+        if file_path.is_file() and str(file_path).startswith(str(ADMIN_SPA_DIR.resolve())):
+            return FileResponse(str(file_path))
     admin_index = ADMIN_SPA_DIR / "index.html"
     if admin_index.exists():
         return FileResponse(str(admin_index))

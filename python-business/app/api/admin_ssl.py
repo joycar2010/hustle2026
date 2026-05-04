@@ -36,12 +36,19 @@ def _parse_cert(pem_data: str) -> dict:
         serial = format(cert.serial_number, 'x')
         issued_at = cert.not_valid_before_utc
         expires_at = cert.not_valid_after_utc
+        san_domains = []
+        try:
+            san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            san_domains = san.value.get_values_for_type(x509.DNSName)
+        except x509.ExtensionNotFound:
+            pass
         return {
             "issuer": issuer,
             "subject": subject,
             "serial_number": serial,
             "issued_at": issued_at,
             "expires_at": expires_at,
+            "san_domains": san_domains,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid certificate: {e}")
@@ -138,42 +145,44 @@ def scan_letsencrypt(request: Request, db: Session = Depends(get_db)):
         if not cert_file.exists() or not key_file.exists():
             continue
 
-        domain = domain_dir.name
-        existing = db.query(SSLCertificate).filter(
-            SSLCertificate.domain_name == domain,
-            SSLCertificate.cert_type == "letsencrypt",
-        ).first()
-        if existing:
-            continue
-
         try:
             cert_content = cert_file.read_text()
             key_content = key_file.read_text()
             parsed = _parse_cert(cert_content)
 
-            cert = SSLCertificate(
-                cert_name=f"LE-{domain}",
-                domain_name=domain,
-                cert_type="letsencrypt",
-                cert_content=cert_content,
-                key_content=key_content,
-                issuer=parsed["issuer"],
-                subject=parsed["subject"],
-                serial_number=parsed.get("serial_number"),
-                issued_at=parsed["issued_at"],
-                expires_at=parsed["expires_at"],
-                is_deployed=True,
-                deploy_path=str(cert_file),
-                status="active",
-                auto_renew=True,
-                created_by=user_id,
-            )
-            db.add(cert)
-            db.flush()
-            _add_log(db, cert.id, "scan_import", f"Imported from {cert_file}")
-            added_domains.append(domain)
+            domains_to_add = parsed.get("san_domains", []) or [domain_dir.name]
+
+            for domain in domains_to_add:
+                existing = db.query(SSLCertificate).filter(
+                    SSLCertificate.domain_name == domain,
+                    SSLCertificate.cert_type == "letsencrypt",
+                ).first()
+                if existing:
+                    continue
+
+                cert = SSLCertificate(
+                    cert_name=f"LE-{domain}",
+                    domain_name=domain,
+                    cert_type="letsencrypt",
+                    cert_content=cert_content,
+                    key_content=key_content,
+                    issuer=parsed["issuer"],
+                    subject=parsed["subject"],
+                    serial_number=parsed.get("serial_number"),
+                    issued_at=parsed["issued_at"],
+                    expires_at=parsed["expires_at"],
+                    is_deployed=True,
+                    deploy_path=str(cert_file),
+                    status="active",
+                    auto_renew=True,
+                    created_by=user_id,
+                )
+                db.add(cert)
+                db.flush()
+                _add_log(db, cert.id, "scan_import", f"Imported from {cert_file} (SAN: {domain})")
+                added_domains.append(domain)
         except Exception as e:
-            logger.warning(f"Failed to import cert for {domain}: {e}")
+            logger.warning(f"Failed to import cert for {domain_dir.name}: {e}")
 
     db.commit()
     return {"scanned": len(list(le_dir.iterdir())), "added": len(added_domains), "domains": added_domains}

@@ -5,3 +5,6 @@ __pycache__/
 backups/
 static/spa/assets/
 node_modules/
+python-business/app/app/
+python-business/engine/engine/
+python-business/tests/tests/

@@ -316,6 +316,7 @@ async def _publish_position(pos, account_note: str):
     try:
         from app.services.event_publisher import publish_position_update
         await publish_position_update({
+            "user_id": pos.user_id,
             "id": pos.id,
             "sub_account_id": pos.sub_account_id,
             "account_note": account_note,

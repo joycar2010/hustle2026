@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.db.models import MasterAccount
@@ -8,6 +8,7 @@ from app.db.schemas.master_account import MasterAccountCreate, MasterAccountResp
 from app.db.schemas.sub_account import SubAccountValidation
 from app.db.schemas.common import MessageResponse
 from app.db.session import get_db
+from app.middleware.permissions import get_current_user_id
 from app.services import binance_client
 
 router = APIRouter(prefix="/api/master-account", tags=["master-account"])
@@ -30,22 +31,24 @@ def _to_response(account: MasterAccount) -> dict:
 
 
 @router.get("/", response_model=MasterAccountResponse)
-def get_master_account(db: Session = Depends(get_db)):
-    account = db.query(MasterAccount).first()
+def get_master_account(request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    account = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Master account not configured")
     return _to_response(account)
 
 
 @router.post("/", response_model=MasterAccountResponse, status_code=201)
-def upsert_master_account(data: MasterAccountCreate, db: Session = Depends(get_db)):
-    account = db.query(MasterAccount).first()
+def upsert_master_account(data: MasterAccountCreate, request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    account = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if account:
         account.api_key = data.api_key
         account.api_secret = data.api_secret
         account.is_verified = False
     else:
-        account = MasterAccount(api_key=data.api_key, api_secret=data.api_secret)
+        account = MasterAccount(api_key=data.api_key, api_secret=data.api_secret, user_id=user_id)
         db.add(account)
     db.commit()
     db.refresh(account)
@@ -53,8 +56,9 @@ def upsert_master_account(data: MasterAccountCreate, db: Session = Depends(get_d
 
 
 @router.get("/permissions")
-async def get_master_permissions(db: Session = Depends(get_db)):
-    account = db.query(MasterAccount).first()
+async def get_master_permissions(request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    account = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Master account not configured")
     try:
@@ -65,8 +69,9 @@ async def get_master_permissions(db: Session = Depends(get_db)):
 
 
 @router.post("/validate", response_model=SubAccountValidation)
-async def validate_master_account(db: Session = Depends(get_db)):
-    account = db.query(MasterAccount).first()
+async def validate_master_account(request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    account = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Master account not configured")
 

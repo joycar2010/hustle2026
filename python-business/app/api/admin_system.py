@@ -10,12 +10,57 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.session import get_db
+from app.db.models import AiCoinConfig
 from app.middleware.permissions import require_super_admin
 
 router = APIRouter(prefix="/api/admin/system", tags=["admin-system"])
 
 _start_time = time.time()
 _BRANCH = "coin"
+_SSH_KEY = os.path.expanduser("~/.ssh/cex-trading-key2.pem")
+_RUST_HOST = "57.182.57.4"
+_SSH_USER = "ec2-user"
+_VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "VERSION")
+
+
+def _ssh_command(host: str, cmd: str, timeout: int = 10) -> str:
+    try:
+        result = subprocess.check_output(
+            ["ssh", "-i", _SSH_KEY, "-o", "StrictHostKeyChecking=no",
+             "-o", f"ConnectTimeout={timeout}",
+             f"{_SSH_USER}@{host}", cmd],
+            stderr=subprocess.DEVNULL, timeout=timeout + 5,
+        )
+        return result.decode().strip()
+    except Exception:
+        return ""
+
+
+def _read_version() -> str:
+    try:
+        with open(_VERSION_FILE, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return "0.5.0"
+
+
+def _write_version(ver: str):
+    with open(_VERSION_FILE, "w") as f:
+        f.write(ver + "\n")
+
+
+def _bump_version(ver: str) -> str:
+    parts = ver.split(".")
+    if len(parts) == 3:
+        parts[2] = str(int(parts[2]) + 1)
+    return ".".join(parts)
+
+
+def _decrement_version(ver: str) -> str:
+    parts = ver.split(".")
+    if len(parts) == 3 and int(parts[2]) > 0:
+        parts[2] = str(int(parts[2]) - 1)
+    return ".".join(parts)
 
 
 # ─── System Info ───
@@ -28,13 +73,8 @@ def system_info(request: Request):
     hours, rem = divmod(uptime_sec, 3600)
     minutes, secs = divmod(rem, 60)
 
-    git_branch = ""
     git_commit = ""
     try:
-        git_branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL, timeout=5,
-        ).decode().strip()
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
             stderr=subprocess.DEVNULL, timeout=5,
@@ -43,45 +83,98 @@ def system_info(request: Request):
         pass
 
     return {
-        "backend_version": "0.5.0",
+        "backend_version": _read_version(),
         "python_version": sys.version.split()[0],
         "db_version": "PostgreSQL",
         "uptime": f"{hours}h {minutes}m {secs}s",
-        "git_branch": git_branch,
+        "git_branch": _BRANCH,
         "git_commit": git_commit,
     }
 
 
-# ─── Git Operations (coin branch) ───
+# ─── Multi-Service Versions ───
+
+@router.get("/versions")
+def service_versions(request: Request):
+    require_super_admin(request)
+
+    uptime_sec = int(time.time() - _start_time)
+    hours, rem = divmod(uptime_sec, 3600)
+    minutes, secs = divmod(rem, 60)
+
+    backend_commit = ""
+    try:
+        backend_commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL, timeout=5,
+        ).decode().strip()
+    except Exception:
+        pass
+
+    ver = _read_version()
+
+    backend_info = {
+        "service": "后端",
+        "host": "coinadmin.hustle2026.xyz",
+        "version": ver,
+        "git_commit": backend_commit,
+        "uptime": f"{hours}h {minutes}m {secs}s",
+        "status": "running",
+    }
+
+    frontend_commit = ""
+    frontend_deploy_time = ""
+    try:
+        frontend_commit = subprocess.check_output(
+            ["git", "log", "-1", "--format=%h", "--", "frontend/", "frontend-admin/", "python-business/static/"],
+            stderr=subprocess.DEVNULL, timeout=5,
+        ).decode().strip()
+        frontend_deploy_time = subprocess.check_output(
+            ["git", "log", "-1", "--format=%ai", "--", "frontend/", "frontend-admin/", "python-business/static/"],
+            stderr=subprocess.DEVNULL, timeout=5,
+        ).decode().strip()
+    except Exception:
+        pass
+
+    frontend_info = {
+        "service": "前端",
+        "host": "coin.hustle2026.xyz",
+        "version": ver,
+        "git_commit": frontend_commit or backend_commit,
+        "last_deploy": frontend_deploy_time[:19] if frontend_deploy_time else "-",
+        "status": "deployed",
+    }
+
+    rust_status = _ssh_command(_RUST_HOST, "systemctl is-active cex-engine 2>/dev/null || echo stopped")
+    rust_version = _ssh_command(_RUST_HOST,
+        "grep '^version' /home/ec2-user/hustlecoin-cex/rust-engine/Cargo.toml 2>/dev/null"
+        " | head -1 | sed 's/.*\"\\(.*\\)\"/\\1/'")
+    rust_uptime = _ssh_command(_RUST_HOST,
+        "systemctl show cex-engine --property=ActiveEnterTimestamp --value 2>/dev/null")
+    rust_binary_time = _ssh_command(_RUST_HOST,
+        "stat -c '%y' /home/ec2-user/hustlecoin-cex/rust-engine/target/release/cex-engine 2>/dev/null"
+        " | cut -d. -f1")
+
+    rust_info = {
+        "service": "Rust引擎",
+        "host": "57.182.57.4",
+        "version": rust_version or "unknown",
+        "git_commit": rust_binary_time or "-",
+        "uptime": rust_uptime or "-",
+        "status": rust_status or "unknown",
+    }
+
+    return {"services": [frontend_info, backend_info, rust_info]}
+
+
+# ─── Git Operations (coin branch, no checkout needed) ───
 
 class GitPushRequest(BaseModel):
     message: str
 
 
-def _ensure_coin_branch():
-    """Ensure 'coin' branch exists. Create if not."""
-    try:
-        branches = subprocess.check_output(
-            ["git", "branch", "--list", _BRANCH],
-            stderr=subprocess.DEVNULL, timeout=5,
-        ).decode().strip()
-        if not branches:
-            subprocess.check_output(
-                ["git", "branch", _BRANCH],
-                stderr=subprocess.DEVNULL, timeout=5,
-            )
-    except Exception:
-        pass
-
-
-def _get_current_branch() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL, timeout=5,
-        ).decode().strip()
-    except Exception:
-        return "main"
+class GitCommitRequest(BaseModel):
+    commit_hash: str
 
 
 @router.get("/git-history")
@@ -89,9 +182,8 @@ def git_history(request: Request):
     require_super_admin(request)
 
     try:
-        _ensure_coin_branch()
         output = subprocess.check_output(
-            ["git", "log", _BRANCH, "--oneline", "--format=%H|%h|%s|%an|%ai", "-20"],
+            ["git", "log", "--oneline", "--format=%H|%h|%s|%an|%ai", "-20"],
             stderr=subprocess.DEVNULL, timeout=10,
         ).decode().strip()
 
@@ -117,17 +209,33 @@ def git_history(request: Request):
 def git_push(req: GitPushRequest, request: Request):
     require_super_admin(request)
 
-    original_branch = _get_current_branch()
-    _ensure_coin_branch()
-
     try:
-        subprocess.check_output(["git", "stash"], stderr=subprocess.STDOUT, timeout=10)
-        subprocess.check_output(["git", "checkout", _BRANCH], stderr=subprocess.STDOUT, timeout=10)
-        subprocess.check_output(
-            ["git", "merge", original_branch, "--no-edit", "-X", "theirs"],
-            stderr=subprocess.STDOUT, timeout=30,
-        )
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        try:
+            subprocess.check_output(
+                ["git", "tag", f"backup-{timestamp}"],
+                stderr=subprocess.DEVNULL, timeout=5,
+            )
+        except Exception:
+            pass
+
         subprocess.check_output(["git", "add", "-A"], stderr=subprocess.STDOUT, timeout=30)
+
+        has_changes = False
+        try:
+            subprocess.check_output(
+                ["git", "diff", "--cached", "--quiet"],
+                stderr=subprocess.DEVNULL, timeout=10,
+            )
+        except subprocess.CalledProcessError:
+            has_changes = True
+
+        if has_changes:
+            ver = _read_version()
+            new_ver = _bump_version(ver)
+            _write_version(new_ver)
+            subprocess.check_output(["git", "add", _VERSION_FILE], stderr=subprocess.DEVNULL, timeout=5)
+
         try:
             subprocess.check_output(
                 ["git", "commit", "-m", req.message],
@@ -139,59 +247,56 @@ def git_push(req: GitPushRequest, request: Request):
             ["git", "push", "origin", _BRANCH],
             stderr=subprocess.STDOUT, timeout=60,
         ).decode()
-        subprocess.check_output(["git", "checkout", original_branch], stderr=subprocess.STDOUT, timeout=10)
-        try:
-            subprocess.check_output(["git", "stash", "pop"], stderr=subprocess.DEVNULL, timeout=10)
-        except Exception:
-            pass
-        return {"status": "success", "output": result[:500]}
+        return {"status": "success", "output": result[:500], "version": _read_version()}
     except subprocess.CalledProcessError as e:
-        try:
-            subprocess.check_output(["git", "checkout", original_branch], stderr=subprocess.DEVNULL, timeout=10)
-            subprocess.check_output(["git", "stash", "pop"], stderr=subprocess.DEVNULL, timeout=10)
-        except Exception:
-            pass
         return {"status": "error", "output": e.output.decode()[:500] if e.output else str(e)}
 
 
 @router.post("/git-rollback")
-def git_rollback(req: GitPushRequest, request: Request):
+def git_rollback(req: GitCommitRequest, request: Request):
     require_super_admin(request)
 
-    original_branch = _get_current_branch()
-    _ensure_coin_branch()
+    try:
+        ver = _read_version()
+        new_ver = _decrement_version(ver)
+
+        subprocess.check_output(
+            ["git", "reset", "--hard", req.commit_hash],
+            stderr=subprocess.STDOUT, timeout=30,
+        )
+
+        _write_version(new_ver)
+        subprocess.check_output(["git", "add", _VERSION_FILE], stderr=subprocess.DEVNULL, timeout=5)
+        subprocess.check_output(
+            ["git", "commit", "-m", f"rollback to {req.commit_hash[:8]}, version {new_ver}"],
+            stderr=subprocess.STDOUT, timeout=30,
+        )
+
+        result = subprocess.check_output(
+            ["git", "push", "--force", "origin", _BRANCH],
+            stderr=subprocess.STDOUT, timeout=60,
+        ).decode()
+        return {"status": "success", "output": result[:500], "version": new_ver}
+    except subprocess.CalledProcessError as e:
+        return {"status": "error", "output": e.output.decode()[:500] if e.output else str(e)}
+
+
+@router.post("/git-delete")
+def git_delete_commit(req: GitCommitRequest, request: Request):
+    require_super_admin(request)
 
     try:
-        subprocess.check_output(["git", "stash"], stderr=subprocess.STDOUT, timeout=10)
-        subprocess.check_output(["git", "checkout", _BRANCH], stderr=subprocess.STDOUT, timeout=10)
         subprocess.check_output(
-            ["git", "revert", "HEAD", "--no-edit"],
+            ["git", "revert", req.commit_hash, "--no-edit"],
             stderr=subprocess.STDOUT, timeout=30,
         )
         result = subprocess.check_output(
             ["git", "push", "origin", _BRANCH],
             stderr=subprocess.STDOUT, timeout=60,
         ).decode()
-        subprocess.check_output(["git", "checkout", original_branch], stderr=subprocess.STDOUT, timeout=10)
-        try:
-            subprocess.check_output(["git", "stash", "pop"], stderr=subprocess.DEVNULL, timeout=10)
-        except Exception:
-            pass
         return {"status": "success", "output": result[:500]}
     except subprocess.CalledProcessError as e:
-        try:
-            subprocess.check_output(["git", "checkout", original_branch], stderr=subprocess.DEVNULL, timeout=10)
-            subprocess.check_output(["git", "stash", "pop"], stderr=subprocess.DEVNULL, timeout=10)
-        except Exception:
-            pass
         return {"status": "error", "output": e.output.decode()[:500] if e.output else str(e)}
-
-
-@router.post("/git-delete")
-def git_delete_commit(req: GitPushRequest, request: Request):
-    """Delete the latest commit from coin branch (revert + push)."""
-    require_super_admin(request)
-    return git_rollback(req, request)
 
 
 # ─── Database Management ───
@@ -264,13 +369,10 @@ def table_data(table_name: str, request: Request, db: Session = Depends(get_db))
 
 @router.post("/database/backup")
 def database_backup(request: Request):
-    """Backup database and commit SQL dump to coin branch."""
     require_super_admin(request)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_file = f"/tmp/cex_backup_{timestamp}.sql"
-    original_branch = _get_current_branch()
-    _ensure_coin_branch()
 
     try:
         subprocess.check_output(
@@ -279,9 +381,6 @@ def database_backup(request: Request):
             env={**os.environ, "PGPASSWORD": "cex_trading_2026"},
         )
         size = os.path.getsize(backup_file)
-
-        subprocess.check_output(["git", "stash"], stderr=subprocess.STDOUT, timeout=10)
-        subprocess.check_output(["git", "checkout", _BRANCH], stderr=subprocess.STDOUT, timeout=10)
 
         backup_dir = os.path.join(os.getcwd(), "backups")
         os.makedirs(backup_dir, exist_ok=True)
@@ -298,19 +397,8 @@ def database_backup(request: Request):
             stderr=subprocess.STDOUT, timeout=60,
         )
 
-        subprocess.check_output(["git", "checkout", original_branch], stderr=subprocess.STDOUT, timeout=10)
-        try:
-            subprocess.check_output(["git", "stash", "pop"], stderr=subprocess.DEVNULL, timeout=10)
-        except Exception:
-            pass
-
         return {"status": "success", "file": dest, "size_mb": round(size / 1024 / 1024, 2)}
     except subprocess.CalledProcessError as e:
-        try:
-            subprocess.check_output(["git", "checkout", original_branch], stderr=subprocess.DEVNULL, timeout=10)
-            subprocess.check_output(["git", "stash", "pop"], stderr=subprocess.DEVNULL, timeout=10)
-        except Exception:
-            pass
         return {"status": "error", "output": e.output.decode()[:500] if e.output else str(e)}
 
 
@@ -366,3 +454,61 @@ def list_roles(request: Request):
             "permissions": ["own_data"],
         },
     ]
+
+
+# ─── AiCoin Config ───
+
+class AiCoinConfigUpdate(BaseModel):
+    api_key: str | None = None
+    api_secret: str | None = None
+
+
+@router.get("/aicoin-config")
+def get_aicoin_config(request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request)
+    cfg = db.query(AiCoinConfig).first()
+    if not cfg:
+        return {"api_key": "", "api_secret": ""}
+    return {
+        "api_key": cfg.api_key or "",
+        "api_secret": "****" if cfg.api_secret else "",
+    }
+
+
+@router.put("/aicoin-config")
+def update_aicoin_config(req: AiCoinConfigUpdate, request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request)
+    cfg = db.query(AiCoinConfig).first()
+    if not cfg:
+        cfg = AiCoinConfig()
+        db.add(cfg)
+
+    if req.api_key is not None:
+        cfg.api_key = req.api_key
+    if req.api_secret is not None and req.api_secret != "****":
+        cfg.api_secret = req.api_secret
+
+    db.commit()
+
+    from app.api.market import _reset_aicoin
+    _reset_aicoin()
+
+    return {"message": "AiCoin config updated"}
+
+
+@router.post("/aicoin-test")
+async def test_aicoin(request: Request, db: Session = Depends(get_db)):
+    require_super_admin(request)
+    cfg = db.query(AiCoinConfig).first()
+    api_key = (cfg.api_key if cfg and cfg.api_key else None) or ""
+    api_secret = (cfg.api_secret if cfg and cfg.api_secret else None) or ""
+    if not api_key or not api_secret:
+        raise HTTPException(status_code=400, detail="AiCoin API Key/Secret 未配置")
+
+    from app.services.aicoin_client import AiCoinClient
+    try:
+        client = AiCoinClient(api_key, api_secret)
+        coins = await client.get_coin_list()
+        return {"status": "ok", "coin_count": len(coins)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AiCoin API 连接失败: {e}")

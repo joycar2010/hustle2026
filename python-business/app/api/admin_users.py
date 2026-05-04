@@ -1,4 +1,6 @@
+import asyncio
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import bcrypt
@@ -14,6 +16,7 @@ from app.db.models_proxy import AccountProxyBinding, ProxyPool
 from app.db.session import get_db
 from app.config import settings
 from app.middleware.permissions import require_super_admin, require_admin, get_current_user_id
+from app.services import binance_client
 from engine.models import Position, EngineState, TradeLog
 
 router = APIRouter(prefix="/api/admin", tags=["admin-users"])
@@ -330,6 +333,7 @@ def get_user_sub_accounts(user_id: int, request: Request, db: Session = Depends(
             "spot_enabled": sa.spot_enabled,
             "positions_count": pos_count,
             "proxy": proxy_info,
+            "last_validated_at": str(sa.last_validated_at) if sa.last_validated_at else None,
             "created_at": str(sa.created_at) if sa.created_at else None,
         })
 
@@ -411,6 +415,50 @@ def delete_sub_account(user_id: int, sa_id: int, request: Request, db: Session =
     db.delete(sa)
     db.commit()
     return {"message": "Sub-account deleted"}
+
+
+# ─── Sync Permissions ───
+
+
+@router.post("/users/{user_id}/sub-accounts/sync-permissions")
+async def sync_user_sub_account_permissions(user_id: int, request: Request, db: Session = Depends(get_db)):
+    require_admin(request)
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    accounts = db.query(SubAccount).filter(
+        SubAccount.user_id == user_id,
+        SubAccount.is_enabled == True,
+    ).all()
+
+    if not accounts:
+        return {"synced": 0, "failed": 0, "results": []}
+
+    results = []
+    synced = 0
+    failed = 0
+
+    for sa in accounts:
+        try:
+            restrictions = await binance_client.get_api_restrictions(sa.api_key, sa.api_secret)
+            sa.spot_enabled = bool(restrictions.get("enableSpotAndMarginTrading", False))
+            sa.margin_enabled = bool(restrictions.get("enableMargin", False))
+            sa.futures_enabled = bool(restrictions.get("enableFutures", False))
+            sa.last_validated_at = datetime.now(timezone.utc)
+            results.append({
+                "id": sa.id, "note": sa.note, "status": "ok",
+                "spot": sa.spot_enabled, "margin": sa.margin_enabled, "futures": sa.futures_enabled,
+            })
+            synced += 1
+        except Exception as e:
+            results.append({"id": sa.id, "note": sa.note, "status": "error", "error": str(e)[:100]})
+            failed += 1
+        await asyncio.sleep(0.3)
+
+    db.commit()
+    return {"synced": synced, "failed": failed, "results": results}
 
 
 # ─── Engine Control ───

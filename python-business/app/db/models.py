@@ -165,12 +165,23 @@ class FeishuConfig(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     webhook_url = Column(String(300))
     secret_key = Column(String(100))
+    app_id = Column(String(100), server_default="")
+    app_secret = Column(String(200), server_default="")
     alert_interval_sec = Column(Integer, default=5)
     alert_count = Column(Integer, default=1)
     margin_rate_alert = Column(Numeric(10, 2), default=30)
     leverage_risk_alert = Column(Numeric(10, 4), default=1.3)
     enable_transfer_fail_alert = Column(Boolean, default=True)
     enable_new_borrow_alert = Column(Boolean, default=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AiCoinConfig(Base):
+    __tablename__ = "aicoin_config"
+
+    id = Column(Integer, primary_key=True)
+    api_key = Column(String(200), default="")
+    api_secret = Column(String(200), default="")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -202,5 +213,6 @@ from app.db.models_auth import User, AdminUser, AuditLog  # noqa: E402, F401
 from app.db.models_ssl import SSLCertificate, SSLCertificateLog  # noqa: E402, F401
 from app.db.models_proxy import ProxyPool, AccountProxyBinding, ProxyHealthLog, IpipgoOrder  # noqa: E402, F401
 from app.db.models_notify import NotificationTemplate, NotificationLog  # noqa: E402, F401
-from app.db.models_ai import AiFaq, AiConfig  # noqa: E402, F401
+from app.db.models_ai import AiFaq, AiConfig, AiConversation, AiMessage  # noqa: E402, F401
 from app.db.models_market import PendingBlacklist  # noqa: E402, F401
+from app.db.models_rbac import Role, Permission, RolePermission, UserRoleAssignment  # noqa: E402, F401

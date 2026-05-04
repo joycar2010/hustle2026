@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     allowed_origins: str = "*"
     aicoin_api_key: str = ""
     aicoin_api_secret: str = ""
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_ssl: bool = True
 
     class Config:
         env_prefix = "CEX_"

@@ -14,19 +14,18 @@ router = APIRouter()
 
 class ConnectionManager:
     def __init__(self):
-        self.active: list[WebSocket] = []
+        self.active: list[tuple[WebSocket, int | None]] = []
 
-    async def connect(self, ws: WebSocket):
+    async def connect(self, ws: WebSocket, user_id: int | None = None):
         await ws.accept()
-        self.active.append(ws)
+        self.active.append((ws, user_id))
 
     def disconnect(self, ws: WebSocket):
-        if ws in self.active:
-            self.active.remove(ws)
+        self.active = [(w, u) for w, u in self.active if w is not ws]
 
     async def broadcast(self, message: dict):
         dead = []
-        for ws in self.active:
+        for ws, _uid in self.active:
             try:
                 await ws.send_json(message)
             except Exception:
@@ -52,7 +51,8 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
         await ws.close(code=4001, reason="Invalid token")
         return
 
-    await manager.connect(ws)
+    ws_user_id = payload.get("user_id")
+    await manager.connect(ws, ws_user_id)
     logger.info(f"WebSocket connected: user={payload.get('sub', '?')}, total={len(manager.active)}")
 
     redis_conn = None
@@ -61,6 +61,7 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
     flush_task = None
 
     try:
+        # Send initial spread snapshot
         try:
             from app.services.spread_reader import spread_reader
             all_spreads = spread_reader.get_all()
@@ -73,8 +74,17 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
             await ws.send_json({"type": "spread_snapshot", "data": []})
 
         redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+        # Send initial balance snapshot from cache (user-scoped)
+        try:
+            cached = await redis_conn.get(f"balance:latest:{ws_user_id}") if ws_user_id else None
+            if cached:
+                await ws.send_json({"type": "balance_update", "data": json.loads(cached)})
+        except Exception as e:
+            logger.warning(f"Failed to send initial balance snapshot: {e}")
+
         pubsub = redis_conn.pubsub()
-        await pubsub.subscribe("spread:updates", "position:updates", "worker:status")
+        await pubsub.subscribe("spread:updates", "position:updates", "worker:status", "balance:updates", "notification:broadcast")
 
         batch: dict[str, dict] = {}
         batch_lock = asyncio.Lock()
@@ -109,6 +119,8 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                 elif channel == "position:updates":
                     try:
                         parsed = json.loads(data_str)
+                        if ws_user_id and parsed.get("user_id") != ws_user_id:
+                            continue
                         await ws.send_json({"type": "position_update", "data": parsed})
                     except Exception:
                         pass
@@ -116,7 +128,25 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                 elif channel == "worker:status":
                     try:
                         parsed = json.loads(data_str)
+                        if ws_user_id and parsed.get("user_id") not in (None, ws_user_id):
+                            continue
                         await ws.send_json({"type": "worker_status", "data": parsed})
+                    except Exception:
+                        pass
+
+                elif channel == "balance:updates":
+                    try:
+                        parsed = json.loads(data_str)
+                        if ws_user_id and parsed.get("user_id") != ws_user_id:
+                            continue
+                        await ws.send_json({"type": "balance_update", "data": parsed})
+                    except Exception:
+                        pass
+
+                elif channel == "notification:broadcast":
+                    try:
+                        parsed = json.loads(data_str)
+                        await ws.send_json({"type": "notification", "data": parsed})
                     except Exception:
                         pass
 

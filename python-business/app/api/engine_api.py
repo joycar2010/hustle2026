@@ -405,7 +405,7 @@ async def manual_transfer(account_id: int, data: TransferRequest, request: Reque
 
 
 class CrossTransferRequest(BaseModel):
-    target_type: str  # "master" or "sub"
+    target_type: str
     target_sub_account_id: int | None = None
     asset: str = "USDT"
     amount: Decimal
@@ -438,8 +438,6 @@ async def cross_account_transfer(account_id: int, data: CrossTransferRequest, re
 
         master = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
         if not master:
-            master = db.query(MasterAccount).first()
-        if not master:
             raise HTTPException(status_code=400, detail="Master account not configured, required for sub-to-sub transfer")
 
         async with BinanceTradingClient(master.api_key, master.api_secret) as client:
@@ -469,8 +467,6 @@ def get_pushed_symbols(request: Request):
     user_id = get_current_user_id(request)
     r = _redis()
     raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
-    if not raw:
-        raw = r.get("engine:pushed_symbols")
     return {"pushed_symbols": json.loads(raw) if raw else []}
 
 
@@ -484,13 +480,9 @@ def push_symbol(symbol: str, request: Request):
     r.expire(key, 120)
     ps_key = _user_redis_key(user_id, "pushed_symbols")
     raw = r.get(ps_key)
-    if not raw:
-        raw = r.get("engine:pushed_symbols")
     current = set(json.loads(raw)) if raw else set()
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
-    # Also update legacy key for backward compatibility
-    r.set("engine:pushed_symbols", json.dumps(sorted(current)))
     return {"message": f"Pushed {sym}"}
 
 
@@ -504,12 +496,9 @@ def remove_pushed_symbol(symbol: str, request: Request):
     r.expire(key, 120)
     ps_key = _user_redis_key(user_id, "pushed_symbols")
     raw = r.get(ps_key)
-    if not raw:
-        raw = r.get("engine:pushed_symbols")
     current = set(json.loads(raw)) if raw else set()
     current.discard(sym)
     r.set(ps_key, json.dumps(sorted(current)))
-    r.set("engine:pushed_symbols", json.dumps(sorted(current)))
     return {"message": f"Removed {sym}"}
 
 
@@ -534,3 +523,48 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
         await client.margin_repay(base_asset, data.amount)
 
     return {"message": f"Repaid {data.amount} {base_asset} for account {account.note}"}
+
+
+# ─── Engine Start/Stop Control ───
+
+
+@router.post("/workers/start")
+def start_engine(request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    r = _redis()
+    r.rpush(f"engine:{user_id}:commands", json.dumps({"action": "start"}))
+    r.expire(f"engine:{user_id}:commands", 120)
+    state = db.query(EngineState).filter(
+        EngineState.user_id == user_id, EngineState.scope == "global",
+    ).first()
+    if not state:
+        state = EngineState(scope="global", user_id=user_id, status="STARTING")
+        db.add(state)
+    else:
+        state.status = "STARTING"
+    db.commit()
+    return {"message": "Engine start signal sent"}
+
+
+@router.post("/workers/stop")
+def stop_engine(request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    r = _redis()
+    r.rpush(f"engine:{user_id}:commands", json.dumps({"action": "stop"}))
+    r.expire(f"engine:{user_id}:commands", 120)
+    state = db.query(EngineState).filter(
+        EngineState.user_id == user_id, EngineState.scope == "global",
+    ).first()
+    if state:
+        state.status = "STOPPING"
+        db.commit()
+    return {"message": "Engine stop signal sent"}
+
+
+@router.get("/workers/status")
+def workers_status(request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    workers = db.query(EngineState).filter(
+        EngineState.user_id == user_id, EngineState.scope != "global",
+    ).all()
+    return {"workers": [EngineStateResponse.model_validate(w) for w in workers]}

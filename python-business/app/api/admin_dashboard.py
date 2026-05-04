@@ -13,6 +13,7 @@ from app.db.models_auth import User
 from app.db.models_ssl import SSLCertificate
 from app.db.models_proxy import ProxyPool
 from app.db.models import FeishuConfig
+from app.db.models_ai import AiConfig, AiConversation, AiMessage
 from app.db.session import get_db
 from app.config import settings
 from app.middleware.permissions import require_admin
@@ -70,9 +71,121 @@ def _get_server_info() -> dict:
 def _get_feishu_status(db: Session) -> dict:
     configs = db.query(FeishuConfig).all()
     if not configs:
-        return {"status": "disabled", "count": 0}
-    active = sum(1 for c in configs if c.webhook_url)
-    return {"status": "healthy" if active > 0 else "disabled", "count": active}
+        return {"connected": False, "token_expires_at": None, "error": "未配置",
+                "count": 0, "webhooks": 0}
+    webhooks = sum(1 for c in configs if c.webhook_url)
+    global_cfg = next((c for c in configs if c.user_id is None), None)
+    app_id = getattr(global_cfg, "app_id", "") or "" if global_cfg else ""
+    app_secret = getattr(global_cfg, "app_secret", "") or "" if global_cfg else ""
+    if not app_id:
+        return {"connected": False, "token_expires_at": None, "error": "App ID 未配置",
+                "count": len(configs), "webhooks": webhooks}
+    try:
+        import httpx
+        resp = httpx.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": app_id, "app_secret": app_secret}, timeout=10,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            return {"connected": False, "token_expires_at": None,
+                    "error": data.get("msg", "token获取失败"),
+                    "count": len(configs), "webhooks": webhooks}
+        expire = data.get("expire", 7200)
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expire)).isoformat()
+        return {"connected": True, "token_expires_at": expires_at, "error": None,
+                "count": len(configs), "webhooks": webhooks}
+    except Exception as e:
+        return {"connected": False, "token_expires_at": None, "error": str(e)[:80],
+                "count": len(configs), "webhooks": webhooks}
+
+
+def _get_aicoin_status() -> dict:
+    configured = bool(settings.aicoin_api_key and settings.aicoin_api_secret)
+    if not configured:
+        return {"status": "not_configured", "connected": False, "api_key_set": False}
+    try:
+        from app.services.aicoin_client import AiCoinClient
+        import asyncio
+        client = AiCoinClient(settings.aicoin_api_key, settings.aicoin_api_secret)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(client.get_coin_list())
+            return {"status": "connected", "connected": True, "api_key_set": True}
+        except Exception as e:
+            return {"status": "error", "connected": False, "api_key_set": True, "error": str(e)[:100]}
+        finally:
+            loop.close()
+    except Exception as e:
+        return {"status": "error", "connected": False, "api_key_set": True, "error": str(e)[:100]}
+
+
+def _get_ai_chat_status(db: Session) -> dict:
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    sites = {}
+    for site_name in ("coin", "coinadmin"):
+        cfg = db.query(AiConfig).filter(AiConfig.site == site_name).first()
+        today_msgs = db.query(func.count(AiMessage.id)).join(
+            AiConversation, AiMessage.conversation_id == AiConversation.id
+        ).filter(
+            AiConversation.site == site_name,
+            AiMessage.created_at >= today_start,
+        ).scalar() or 0
+        total_convs = db.query(func.count(AiConversation.id)).filter(
+            AiConversation.site == site_name,
+        ).scalar() or 0
+        sites[site_name] = {
+            "enabled": cfg.is_enabled if cfg else False,
+            "provider": cfg.provider if cfg else None,
+            "model": cfg.model_name if cfg else None,
+            "today_messages": today_msgs,
+            "total_conversations": total_convs,
+        }
+    return sites
+
+
+def _get_rust_engine_status() -> dict:
+    try:
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2, decode_responses=True)
+        spread_count = r.hlen("spreads")
+        channels = r.pubsub_channels("*")
+        channel_list = [c if isinstance(c, str) else c.decode() for c in channels]
+        spread_active = "spread:updates" in channel_list
+        if spread_count > 0 and spread_active:
+            return {"status": "running", "spread_pairs": spread_count, "channel_active": True}
+        elif spread_count > 0:
+            return {"status": "idle", "spread_pairs": spread_count, "channel_active": False}
+        else:
+            return {"status": "stopped", "spread_pairs": 0, "channel_active": False}
+    except Exception:
+        return {"status": "unknown", "spread_pairs": 0, "channel_active": False}
+
+
+def _get_ws_status() -> dict:
+    try:
+        from app.api.websocket import manager
+        connections = len(manager.active)
+    except Exception:
+        connections = 0
+
+    streamers = []
+    try:
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2, decode_responses=True)
+        spread_count = r.hlen("spreads")
+        streamers.append({"name": "spread_data", "status": "active" if spread_count > 0 else "idle", "count": spread_count})
+        channels = r.pubsub_channels("*")
+        channel_list = [c if isinstance(c, str) else c.decode() for c in channels]
+        for ch, display in [("position:updates", "position_update"), ("worker:status", "engine_status"), ("balance:updates", "balance_update")]:
+            streamers.append({"name": display, "status": "active" if ch in channel_list else "idle", "count": 0})
+    except Exception:
+        streamers = [
+            {"name": "spread_data", "status": "error", "count": 0},
+            {"name": "position_update", "status": "error", "count": 0},
+            {"name": "engine_status", "status": "error", "count": 0},
+            {"name": "balance_update", "status": "error", "count": 0},
+        ]
+    return {"connections": connections, "streamers": streamers}
 
 
 @router.get("/overview")
@@ -201,4 +314,8 @@ def dashboard_overview(request: Request, db: Session = Depends(get_db)):
         "server": _get_server_info(),
         "feishu": _get_feishu_status(db),
         "engine_users": engine_users,
+        "aicoin": _get_aicoin_status(),
+        "ai_chat": _get_ai_chat_status(db),
+        "rust_engine": _get_rust_engine_status(),
+        "websocket": _get_ws_status(),
     }

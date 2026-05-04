@@ -1,13 +1,16 @@
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import httpx
 import jwt
 import redis
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models_auth import User, UserRole
+from app.db.models import FeishuConfig
 from app.db.schemas.auth import LoginRequest, TokenResponse
 from app.db.session import get_db
 
@@ -139,4 +142,94 @@ def get_me(request: Request, db: Session = Depends(get_db)):
         "is_active": user.is_active,
         "max_sub_accounts": user.max_sub_accounts,
         "last_login_at": str(user.last_login_at) if user.last_login_at else None,
+        "feishu_open_id": user.feishu_open_id or "",
+        "feishu_phone": user.feishu_phone or "",
+        "feishu_union_id": user.feishu_union_id or "",
     }
+
+
+class ProfileUpdate(BaseModel):
+    email: str | None = None
+    display_name: str | None = None
+    feishu_open_id: str | None = None
+    feishu_phone: str | None = None
+    feishu_union_id: str | None = None
+    password: str | None = None
+
+
+@router.put("/profile")
+def update_profile(req: ProfileUpdate, request: Request, db: Session = Depends(get_db)):
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if req.email is not None:
+        user.email = req.email
+    if req.display_name is not None:
+        user.display_name = req.display_name
+    if req.feishu_open_id is not None:
+        user.feishu_open_id = req.feishu_open_id
+    if req.feishu_phone is not None:
+        user.feishu_phone = req.feishu_phone
+    if req.feishu_union_id is not None:
+        user.feishu_union_id = req.feishu_union_id
+    if req.password:
+        user.password_hash = _hash_password(req.password)
+
+    db.commit()
+    return {"message": "Profile updated"}
+
+
+class FeishuLookupRequest(BaseModel):
+    phone: str
+
+
+@router.post("/feishu-lookup")
+async def feishu_lookup(req: FeishuLookupRequest, db: Session = Depends(get_db)):
+    fc = db.query(FeishuConfig).filter(FeishuConfig.user_id.is_(None)).first()
+    app_id = (fc.app_id if fc and fc.app_id else None) or settings.feishu_app_id
+    app_secret = (fc.app_secret if fc and fc.app_secret else None) or settings.feishu_app_secret
+    if not app_id or not app_secret:
+        raise HTTPException(status_code=400, detail="飞书 App ID/Secret 未配置")
+
+    async with httpx.AsyncClient(timeout=10) as http:
+        token_resp = await http.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": app_id, "app_secret": app_secret},
+        )
+        token_data = token_resp.json()
+        if token_data.get("code") != 0:
+            raise HTTPException(status_code=502, detail=f"获取飞书token失败: {token_data.get('msg')}")
+        tenant_token = token_data["tenant_access_token"]
+
+        lookup_resp = await http.post(
+            "https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id",
+            headers={"Authorization": f"Bearer {tenant_token}"},
+            json={"mobiles": [req.phone]},
+            params={"user_id_type": "open_id"},
+        )
+        lookup_data = lookup_resp.json()
+        if lookup_data.get("code") != 0:
+            raise HTTPException(status_code=502, detail=f"飞书查询失败: {lookup_data.get('msg')}")
+
+        user_list = lookup_data.get("data", {}).get("user_list", [])
+        if not user_list or not user_list[0].get("user_id"):
+            raise HTTPException(status_code=404, detail="未找到该手机号对应的飞书用户")
+
+        open_id = user_list[0].get("user_id", "")
+
+    union_id = ""
+    async with httpx.AsyncClient(timeout=10) as http:
+        user_resp = await http.get(
+            f"https://open.feishu.cn/open-apis/contact/v3/users/{open_id}",
+            headers={"Authorization": f"Bearer {tenant_token}"},
+            params={"user_id_type": "open_id"},
+        )
+        user_data = user_resp.json()
+        if user_data.get("code") == 0:
+            union_id = user_data.get("data", {}).get("user", {}).get("union_id", "")
+
+    return {"open_id": open_id, "union_id": union_id}

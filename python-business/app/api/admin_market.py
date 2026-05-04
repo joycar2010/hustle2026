@@ -9,9 +9,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import Blacklist, PendingBlacklist
+from app.db.models import Blacklist, PendingBlacklist, AiCoinConfig
 from app.db.models_auth import User
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.middleware.permissions import require_admin
 from app.services.aicoin_client import AiCoinClient
 
@@ -21,13 +21,30 @@ router = APIRouter(prefix="/api/admin/market", tags=["admin-market"])
 
 _aicoin: AiCoinClient | None = None
 
+_PERIOD_TO_SECONDS = {"1": "60", "5": "300", "15": "900", "30": "1800",
+                      "60": "3600", "240": "14400", "1440": "86400"}
+
 
 def _get_aicoin() -> AiCoinClient:
     global _aicoin
     if _aicoin is None:
-        if not settings.aicoin_api_key:
+        api_key = ""
+        api_secret = ""
+        try:
+            db = SessionLocal()
+            cfg = db.query(AiCoinConfig).first()
+            if cfg and cfg.api_key:
+                api_key = cfg.api_key
+                api_secret = cfg.api_secret or ""
+            db.close()
+        except Exception:
+            pass
+        if not api_key:
+            api_key = settings.aicoin_api_key
+            api_secret = settings.aicoin_api_secret
+        if not api_key:
             raise HTTPException(status_code=500, detail="AiCoin API key not configured")
-        _aicoin = AiCoinClient(settings.aicoin_api_key, settings.aicoin_api_secret)
+        _aicoin = AiCoinClient(api_key, api_secret)
     return _aicoin
 
 
@@ -211,8 +228,9 @@ def dismiss_pending(item_id: int, request: Request, db: Session = Depends(get_db
 async def get_kline(symbol: str, period: str = "60", size: int = 200, request: Request = None):
     require_admin(request)
     ac = _get_aicoin()
+    api_period = _PERIOD_TO_SECONDS.get(period, period)
     try:
-        data = await ac.get_kline(symbol, period, size)
+        data = await ac.get_kline(symbol, api_period, size)
         return {"data": data}
     except Exception as e:
         logger.warning(f"AiCoin kline error: {e}")
