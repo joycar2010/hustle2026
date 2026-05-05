@@ -257,7 +257,9 @@ class ContinuousStrategyExecutor:
                         ladder_idx,
                         self.trigger_mgr.count,
                         trigger_count_required,
-                        strategy_type
+                        strategy_type,
+                        current_spread=current_spread,
+                        threshold=spread_threshold,
                     )
 
                 await asyncio.sleep(self.trigger_check_interval)
@@ -925,7 +927,9 @@ class ContinuousStrategyExecutor:
         ladder_idx: int,
         current_count: int,
         required_count: int,
-        strategy_type: str
+        strategy_type: str,
+        current_spread: float = None,
+        threshold: float = None,
     ):
         """Push trigger progress update via WebSocket"""
         if self.user_id:
@@ -940,7 +944,9 @@ class ContinuousStrategyExecutor:
                     'required_count': required_count,
                     'progress_percent': (current_count / required_count) * 100,
                     'action': action,
-                    'strategy_type': strategy_type
+                    'strategy_type': strategy_type,
+                    'current_spread': round(current_spread, 3) if current_spread is not None else None,
+                    'threshold': threshold,
                 },
                 self.user_id
             )
@@ -1038,8 +1044,11 @@ class ContinuousStrategyExecutor:
                     _bn_syms[sym_a] = (binance_long_xau, binance_short_xau)
                     # Also update the shared position_streamer cache for 1s broadcast
                     _ps.set_binance_positions(binance_long_xau, binance_short_xau, user_id=self.user_id, symbol=sym_a)
-                    # Inject freshly-read MT5 position
-                    _mt5_syms[sym_b] = (long_lots, short_lots)
+                    # Inject freshly-read MT5 position (only if direct read succeeded)
+                    _has_direct_mt5 = (long_lots > 0 or short_lots > 0)
+                    if _has_direct_mt5:
+                        _mt5_syms[sym_b] = (long_lots, short_lots)
+                        _ps.set_mt5_positions(long_lots, short_lots, user_id=self.user_id, symbol=sym_b)
 
                     _pairs_meta = {}
                     try:
@@ -1155,6 +1164,9 @@ class ContinuousStrategyExecutor:
 
             # Init MT5 client if needed
             if not hasattr(bybit_account, 'mt5_client'):
+                if not bybit_account.mt5_id:
+                    logger.warning("[SNAPSHOT] bybit_account.mt5_id is None, skipping MT5 client init")
+                    return {'binance_qty': None, 'bybit_qty_xau': None}
                 from app.services.mt5_client import MT5Client
                 bybit_account.mt5_client = MT5Client(
                     login=int(bybit_account.mt5_id),
@@ -1213,6 +1225,9 @@ class ContinuousStrategyExecutor:
                     )
 
                 if not hasattr(bybit_account, 'mt5_client'):
+                    if not bybit_account.mt5_id:
+                        logger.warning("[SINGLE_LEG_CHECK] bybit_account.mt5_id is None, skipping")
+                        return
                     from app.services.mt5_client import MT5Client
                     bybit_account.mt5_client = MT5Client(
                         login=int(bybit_account.mt5_id),

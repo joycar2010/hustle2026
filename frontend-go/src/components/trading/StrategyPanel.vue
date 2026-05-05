@@ -288,7 +288,10 @@
               <div v-if="continuousExecutionStatus.opening.status === 'running' && continuousExecutionTriggerProgress.opening.required > 0" class="mb-0.5">
                 <div class="flex justify-between text-gray-400 mb-0.5">
                   <span>触发进度:</span>
-                  <span class="text-white">{{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}</span>
+                  <span class="text-white">
+                    {{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}
+                    <span v-if="continuousExecutionTriggerProgress.opening.triggerSpread !== null" class="text-[#fcd535] ml-1">({{ continuousExecutionTriggerProgress.opening.triggerSpread.toFixed(2) }})</span>
+                  </span>
                 </div>
                 <div class="w-full bg-[#0d1117] rounded-full h-1.5">
                   <div
@@ -331,7 +334,10 @@
               <div v-if="continuousExecutionStatus.closing.status === 'running' && continuousExecutionTriggerProgress.closing.required > 0" class="mb-0.5">
                 <div class="flex justify-between text-gray-400 mb-0.5">
                   <span>触发进度:</span>
-                  <span class="text-white">{{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}</span>
+                  <span class="text-white">
+                    {{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}
+                    <span v-if="continuousExecutionTriggerProgress.closing.triggerSpread !== null" class="text-[#fcd535] ml-1">({{ continuousExecutionTriggerProgress.closing.triggerSpread.toFixed(2) }})</span>
+                  </span>
                 </div>
                 <div class="w-full bg-[#0d1117] rounded-full h-1.5">
                   <div
@@ -966,7 +972,7 @@ async function setHedgeMultiplier(m) {
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
-const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0 }, closing: { current: 0, required: 0 } })
+const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null } })
 const statusPollingInterval = ref({ opening: null, closing: null })
 
 const ladderExecutionDetails = ref({ opening: {}, closing: {} })
@@ -1248,7 +1254,7 @@ watch(() => marketStore.marketData, (newData) => {
   const binanceLongValue = props.type === 'forward' ? newData.binance_bid : newData.binance_ask
 
   // Trigger count logic for opening
-  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening) {
+  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening && !continuousExecutionEnabled.value.opening) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.opening.currentLadderIndex
 
@@ -1273,7 +1279,7 @@ watch(() => marketStore.marketData, (newData) => {
   }
 
   // Trigger count logic for closing
-  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing) {
+  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing && !continuousExecutionEnabled.value.closing) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.closing.currentLadderIndex
 
@@ -1385,7 +1391,9 @@ function handleTriggerProgress(data) {
     // Update continuous execution trigger progress
     continuousExecutionTriggerProgress.value[data.action] = {
       current: data.current_count,
-      required: data.required_count
+      required: data.required_count,
+      triggerSpread: data.current_spread ?? null,
+      threshold: data.threshold ?? null,
     }
   } else {
     // Update regular trigger count
@@ -1415,7 +1423,9 @@ function handleTriggerReset(data) {
     // Reset continuous execution trigger progress
     continuousExecutionTriggerProgress.value[data.action] = {
       current: 0,
-      required: continuousExecutionTriggerProgress.value[data.action].required
+      required: continuousExecutionTriggerProgress.value[data.action].required,
+      triggerSpread: null,
+      threshold: null,
     }
   } else {
     // Reset regular trigger count
@@ -1653,7 +1663,7 @@ function handleOrdersFilled(data) {
     if (autoCloseLadders.length > 0) {
       console.log('[AutoClose] Opening filled, chaining to closing with', autoCloseLadders.length, 'ladders')
       continuousExecutionEnabled.value.opening = false
-      continuousExecutionTriggerProgress.value.opening = { current: 0, required: 0 }
+      continuousExecutionTriggerProgress.value.opening = { current: 0, required: 0, triggerSpread: null, threshold: null }
       stopStatusPolling('opening')
       notificationStore.showStrategyNotification(
         `开仓成交完成 Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU，自动平仓启动中...`,
@@ -1667,7 +1677,7 @@ function handleOrdersFilled(data) {
 
   // 常规流程：释放锁、恢复按钮
   continuousExecutionEnabled.value[resolvedAction] = false
-  continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0 }
+  continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0, triggerSpread: null, threshold: null }
   stopStatusPolling(resolvedAction)
   // 释放锁：可能是方向级锁或动作级锁
   const hasAutoClose = config.value.ladders.some(l => l.enabled && l.autoClose)
@@ -1724,7 +1734,9 @@ async function autoStartClosing() {
       continuousExecutionTaskId.value.closing = response.data.task_id
       continuousExecutionTriggerProgress.value.closing = {
         current: 0,
-        required: config.value.closingSyncQty || 1
+        required: config.value.closingSyncQty || 1,
+        triggerSpread: null,
+        threshold: null
       }
       startStatusPolling('closing')
       notificationStore.showStrategyNotification('开仓完成，自动平仓已启动', 'success')
@@ -2807,7 +2819,9 @@ async function startContinuousExecution(action) {
       const triggerCount = action === 'opening' ? config.value.openingSyncQty : config.value.closingSyncQty
       continuousExecutionTriggerProgress.value[action] = {
         current: 0,
-        required: triggerCount || 1
+        required: triggerCount || 1,
+        triggerSpread: null,
+        threshold: null
       }
 
       console.log('Task ID received:', response.data.task_id)
@@ -2841,7 +2855,7 @@ async function stopContinuousExecution(action) {
 
     continuousExecutionEnabled.value[action] = false
     continuousExecutionStatus.value[action] = null  // Clear status to hide the status display
-    continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0 }  // Reset trigger progress
+    continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0, triggerSpread: null, threshold: null }  // Reset trigger progress
     stopStatusPolling(action)
     const _acStop = config.value.ladders.some(l => l.enabled && l.autoClose)
     strategyStore.release(_acStop ? props.type : `${props.type}_${action}`)

@@ -1409,6 +1409,14 @@ class PositionStreamer:
                 self._binance_positions["_default"] = {}
             self._binance_positions["_default"][_symbol] = (long_xau, short_xau)
 
+    def set_mt5_positions(self, long_lots: float, short_lots: float,
+                           user_id: str = None, symbol: str = None) -> None:
+        """Inject MT5 positions into LKG cache (called by continuous_executor after trade)."""
+        if user_id and symbol:
+            if user_id not in self._mt5_lkg:
+                self._mt5_lkg[user_id] = {}
+            self._mt5_lkg[user_id][symbol] = (long_lots, short_lots)
+
     async def start(self):
         if self.running:
             return
@@ -1486,6 +1494,8 @@ class PositionStreamer:
                         if mt5_l == 0.0 and mt5_s == 0.0:
                             alt = sym_b.replace("+", ".s")
                             mt5_l, mt5_s = mt5_syms.get(alt, (0.0, 0.0))
+                        if mt5_l == 0.0 and mt5_s == 0.0 and "+" in sym_b:
+                            mt5_l, mt5_s = mt5_syms.get(sym_b.replace("+", ""), (0.0, 0.0))
                         pairs_out[pair_code] = {
                             "mt5_long": mt5_l, "mt5_short": mt5_s,
                             "binance_long": bn_l, "binance_short": bn_s,
@@ -1559,6 +1569,8 @@ class PositionStreamer:
                 if mt5_l == 0.0 and mt5_s == 0.0:
                     alt = sb.replace("+", ".s")
                     mt5_l, mt5_s = mt5_syms.get(alt, (0.0, 0.0))
+                if mt5_l == 0.0 and mt5_s == 0.0 and "+" in sb:
+                    mt5_l, mt5_s = mt5_syms.get(sb.replace("+", ""), (0.0, 0.0))
                 pairs_out[pc] = {
                     "mt5_long": mt5_l, "mt5_short": mt5_s,
                     "binance_long": bn_l, "binance_short": bn_s,
@@ -1620,8 +1632,7 @@ class PositionStreamer:
                         rows = await _db.execute(_text(
                             "SELECT a.user_id::text, mc.bridge_url, mc.bridge_service_port "
                             "FROM mt5_clients mc JOIN accounts a ON mc.account_id = a.account_id "
-                            "WHERE mc.is_active = true AND mc.is_system_service = false "
-                            "AND mc.connection_status NOT IN ('error', 'disconnected')"
+                            "WHERE mc.is_active = true AND mc.is_system_service = false"
                         ))
                         for row in rows.fetchall():
                             uid = row[0]
@@ -2152,6 +2163,8 @@ class BinancePositionPusher:
                         if mt5_l == 0.0 and mt5_s == 0.0:
                             alt = sb.replace("+", ".s")
                             mt5_l, mt5_s = mt5_syms.get(alt, (0.0, 0.0))
+                        if mt5_l == 0.0 and mt5_s == 0.0 and "+" in sb:
+                            mt5_l, mt5_s = mt5_syms.get(sb.replace("+", ""), (0.0, 0.0))
                         pairs_out[pc] = {
                             "mt5_long": mt5_l, "mt5_short": mt5_s,
                             "binance_long": bn_l, "binance_short": bn_s,

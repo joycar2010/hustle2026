@@ -1,5 +1,5 @@
 <template>
-  <nav v-show="!navbarHidden" class="bg-dark-100 border-b border-border-primary sticky top-0 z-50">
+  <nav v-show="!navbarHidden" class="border-b border-border-primary sticky top-0 z-50" style="background-color: #16181F">
     <div class="container mx-auto px-4">
       <div class="flex items-center justify-between h-16">
         <!-- Logo -->
@@ -76,9 +76,7 @@
           </div>
 
           <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
-            <div class="w-10 h-10 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center shadow-lg">
-              <span class="text-dark-300 font-bold text-xl">H</span>
-            </div>
+            <img src="/logo.png" alt="Hustle XAU" class="w-10 h-10 shadow-lg" />
             <div class="hidden md:block" :class="{ 'md:hidden': navbarCollapsed }">
               <div class="text-lg font-bold">Hustle XAU</div>
               <div class="text-xs text-text-tertiary">Arbitrage System</div>

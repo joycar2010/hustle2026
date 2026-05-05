@@ -1,9 +1,9 @@
 <template>
   <div class="pb-20 md:pb-6">
     <!-- Header -->
-    <header class="hidden md:flex bg-dark-100 border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40">
+    <header class="hidden md:flex border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40" style="background-color: #16181F">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-gradient-to-br from-primary to-primary-hover rounded-lg flex items-center justify-center"><span class="text-dark-300 font-bold">H</span></div>
+        <img src="/logo.png" alt="Hustle XAU" class="w-8 h-8" />
         <span class="font-semibold">HustleXAU · 收益总览</span>
       </div>
       <div class="flex items-center gap-4">

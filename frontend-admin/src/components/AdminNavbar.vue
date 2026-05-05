@@ -1,14 +1,12 @@
 <template>
-  <nav class="bg-dark-100 border-b border-border-primary sticky top-0 z-50">
+  <nav class="border-b border-border-primary sticky top-0 z-50" style="background-color: #16181F">
     <div class="container mx-auto px-4">
       <div class="flex items-center justify-between h-16">
 
         <!-- Logo -->
         <div class="flex items-center space-x-6">
           <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
-            <div class="w-10 h-10 bg-gradient-to-br from-red-600 to-red-800 rounded-lg flex items-center justify-center shadow-lg">
-              <span class="text-white font-bold text-lg">管</span>
-            </div>
+            <img src="/logo.png" alt="Hustle XAU" class="w-10 h-10 shadow-lg" />
             <div class="hidden md:block">
               <div class="text-lg font-bold text-text-primary">HustleXAU Admin</div>
               <div class="text-xs text-red-400">总控管理平台</div>
@@ -33,7 +31,7 @@
 
         <!-- Right: user + role badge -->
         <div class="flex items-center space-x-3">
-          <span v-if="userRole" class="hidden md:inline-flex items-center px-2 py-1 bg-red-900/40 text-red-300 rounded text-xs font-medium border border-red-800/50">
+          <span v-if="userRole" class="hidden md:inline-flex items-center px-2 py-1 bg-red-900/40 text-red-300 rounded text-xs font-medium border border-red-800/50 whitespace-nowrap">
             {{ userRole }}
           </span>
           <div class="relative" ref="userMenuRef">

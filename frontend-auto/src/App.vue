@@ -10,10 +10,10 @@
   </div>
   <div v-else class="min-h-screen flex flex-col">
     <AnnouncementBanner />
-    <header class="bg-dark-200 border-b border-border-primary px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden">
+    <header class="border-b border-border-primary px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden" style="background-color: #16181F">
       <div class="flex items-center gap-6">
         <div class="flex items-center gap-2">
-          <div class="w-8 h-8 rounded bg-primary flex items-center justify-center font-bold text-dark-300">C</div>
+          <img src="/logo.png" alt="Hustle XAU" class="w-8 h-8" />
           <div>
             <div class="font-bold text-base leading-tight">OpenCLAW</div>
             <div class="text-[10px] text-text-tertiary leading-tight">量化智能体控制台</div>

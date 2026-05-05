@@ -3,9 +3,7 @@
     <div class="w-full max-w-sm">
       <!-- Logo -->
       <div class="text-center mb-8">
-        <div class="inline-flex w-14 h-14 bg-gradient-to-br from-primary to-primary-hover rounded-2xl items-center justify-center shadow-lg mb-3">
-          <span class="text-dark-300 font-bold text-2xl">H</span>
-        </div>
+        <img src="/logo.png" alt="Hustle XAU" class="w-14 h-14 shadow-lg mb-3 inline-block" />
         <h1 class="text-xl font-bold">HustleXAU</h1>
         <p class="text-sm text-text-tertiary mt-1">实时收益查看平台</p>
       </div>

@@ -1,11 +1,9 @@
 <template>
-  <div class="min-h-screen bg-dark-200 flex items-center justify-center px-4">
+  <div class="min-h-screen flex items-center justify-center px-4" style="background-color: #16181F">
     <div class="w-full max-w-md">
       <!-- Logo -->
       <div class="text-center mb-8">
-        <div class="inline-flex w-16 h-16 bg-gradient-to-br from-red-600 to-red-800 rounded-2xl items-center justify-center shadow-lg mb-4">
-          <span class="text-white font-bold text-3xl">管</span>
-        </div>
+        <img src="/logo.png" alt="Hustle XAU" class="w-16 h-16 shadow-lg mb-4 inline-block" />
         <h1 class="text-2xl font-bold text-text-primary">HustleXAU 总控管理</h1>
         <p class="text-sm text-text-tertiary mt-1">仅限 系统管理员 / 安全管理员 / 超级管理员 登录</p>
       </div>
