@@ -8,23 +8,24 @@ from engine.models import EngineState
 from engine.config_loader import ConfigLoader
 from engine.spread_feed import SpreadFeed
 from engine.worker import Worker
+from engine.fund.delisting_scanner import scan_delisting_announcements
 
 logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    def __init__(self, config_loader: ConfigLoader, spread_feed: SpreadFeed):
+    def __init__(self, config_loader: ConfigLoader, spread_feed: SpreadFeed, user_id: int = None):
         self.config = config_loader
         self.spread_feed = spread_feed
+        self.user_id = user_id
         self._workers: dict[int, Worker] = {}
         self._tasks: dict[int, asyncio.Task] = {}
         self._running = False
-        self._paused = False
-        self._paused_workers: set[int] = set()
 
     async def start(self):
         self._running = True
         asyncio.create_task(self._supervisor_loop())
+        asyncio.create_task(self._delisting_scan_loop())
         logger.info("Orchestrator started")
 
     async def stop(self):
@@ -40,44 +41,6 @@ class Orchestrator:
         self._tasks.clear()
         logger.info("Orchestrator stopped")
 
-    async def pause(self, target: str = "global"):
-        if target == "global":
-            self._paused = True
-            for account_id, worker in list(self._workers.items()):
-                await worker.stop()
-            self._tasks.clear()
-            self._workers.clear()
-            self._update_global_state("PAUSED")
-            logger.info("Engine paused globally")
-        else:
-            sub_id = int(target.split(":")[1])
-            if sub_id in self._workers:
-                await self._workers[sub_id].stop()
-                self._paused_workers.add(sub_id)
-                logger.info(f"Worker {sub_id} paused")
-
-    async def resume(self, target: str = "global"):
-        if target == "global":
-            self._paused = False
-            self._paused_workers.clear()
-            self._update_global_state("RUNNING")
-            logger.info("Engine resumed — workers will respawn on next cycle")
-        else:
-            sub_id = int(target.split(":")[1])
-            self._paused_workers.discard(sub_id)
-            logger.info(f"Worker {sub_id} resumed — will respawn on next cycle")
-
-    def _update_global_state(self, status: str):
-        db = SessionLocal()
-        try:
-            state = db.query(EngineState).filter(EngineState.scope == "global").first()
-            if state:
-                state.status = status
-                state.last_heartbeat = datetime.now(timezone.utc)
-                db.commit()
-        finally:
-            db.close()
-
     async def _supervisor_loop(self):
         while self._running:
             try:
@@ -87,11 +50,7 @@ class Orchestrator:
             await asyncio.sleep(10)
 
     async def _reconcile(self):
-        if self._paused:
-            return
-
         enabled_ids = await asyncio.to_thread(self._get_enabled_accounts)
-        enabled_ids -= self._paused_workers
 
         for account_id in enabled_ids:
             if account_id in self._workers:
@@ -117,6 +76,17 @@ class Orchestrator:
                 self._tasks[account_id].cancel()
                 del self._workers[account_id]
                 del self._tasks[account_id]
+
+    async def _delisting_scan_loop(self):
+        await asyncio.sleep(30)
+        while self._running:
+            try:
+                flagged = await scan_delisting_announcements()
+                if flagged:
+                    logger.warning(f"Delisting scan flagged: {flagged}")
+            except Exception as e:
+                logger.error(f"Delisting scan error: {e}")
+            await asyncio.sleep(300)
 
     def _get_enabled_accounts(self) -> set[int]:
         db = SessionLocal()

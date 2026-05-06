@@ -7,12 +7,25 @@ from decimal import Decimal
 from app.db.session import SessionLocal
 from engine.models import Position, TradeLog
 from engine.config_loader import GlobalRulesSnapshot
-from engine.spread_feed import SpreadSnapshot
+from engine.spread_feed import SpreadFeed, SpreadSnapshot
 from engine.trading.binance_trading import BinanceTradingClient, BinanceAPIError
-from engine.trading.quantity_calc import usdt_to_quantity
+from engine.trading.quantity_calc import usdt_to_quantity, round_to_step
 from engine.notify.feishu_sender import FeishuSender
 
 logger = logging.getLogger(__name__)
+
+TAKER_FEE_RATE = Decimal("0.00075")
+FEE_BUFFER = Decimal("1.0015")
+
+
+async def _get_asset_debt(client: BinanceTradingClient, asset: str) -> tuple[Decimal, Decimal]:
+    margin_info = await client.get_margin_account()
+    for a in margin_info.get("userAssets", []):
+        if a["asset"] == asset:
+            borrowed = Decimal(str(a.get("borrowed", "0")))
+            interest = Decimal(str(a.get("interest", "0")))
+            return borrowed + interest, interest
+    return Decimal("0"), Decimal("0")
 
 
 def _log_trade(db, position_id: int, sub_account_id: int, action: str, symbol: str,
@@ -42,6 +55,7 @@ async def execute_open(
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
+    spread_feed: SpreadFeed = None,
 ):
     base_asset = symbol.replace("USDT", "")
     db = SessionLocal()
@@ -69,8 +83,20 @@ async def execute_open(
             return
         position.borrow_interest_rate = interest_rate
 
-        # delay + re-confirm
+        # delay + re-confirm spread
         await asyncio.sleep(rules.borrow_delay_sec)
+        if spread_feed:
+            current = spread_feed.get_symbol(symbol)
+            if not current or current.spread_short <= rules.open_spread:
+                position.status = "FAILED"
+                position.error_message = (
+                    f"Spread degraded after delay: "
+                    f"{current.spread_short if current else 'N/A'}% <= {rules.open_spread}%"
+                )
+                db.commit()
+                db.close()
+                return
+            spread = current
 
         # calculate quantity
         lot_info = await client.get_lot_size(symbol, "spot")
@@ -106,7 +132,6 @@ async def execute_open(
 
         # Step 3: futures long
         futures_lot = await client.get_lot_size(symbol, "futures")
-        from engine.trading.quantity_calc import round_to_step
         futures_qty = round_to_step(qty, futures_lot["stepSize"])
 
         t0 = time.monotonic()
@@ -160,17 +185,20 @@ async def _handle_open_failure(db, position, client, error, sub_account_id, symb
 
     elif current == "SPOT_SOLD":
         # futures long failed — buy back spot + repay
+        rollback_qty = position.spot_sell_qty if position.spot_sell_qty else position.borrow_qty
         try:
-            await client.spot_market_buy_qty(symbol, position.borrow_qty)
+            await client.spot_market_buy_qty(symbol, rollback_qty)
             _log_trade(db, position.id, sub_account_id, "ROLLBACK_SPOT_BUY", symbol,
-                        "BUY", position.borrow_qty, status="SUCCESS")
+                        "BUY", rollback_qty, status="SUCCESS")
         except Exception as re:
             _log_trade(db, position.id, sub_account_id, "ROLLBACK_SPOT_BUY", symbol,
                         status="FAILED", error=str(re))
         try:
-            await client.margin_repay(position.base_asset, position.borrow_qty)
+            total_debt, _ = await _get_asset_debt(client, position.base_asset)
+            repay_amount = total_debt if total_debt > 0 else position.borrow_qty
+            await client.margin_repay(position.base_asset, repay_amount)
             _log_trade(db, position.id, sub_account_id, "ROLLBACK_REPAY", symbol,
-                        quantity=position.borrow_qty, status="SUCCESS")
+                        quantity=repay_amount, status="SUCCESS")
         except Exception as re:
             _log_trade(db, position.id, sub_account_id, "ROLLBACK_REPAY", symbol,
                         status="FAILED", error=str(re))
@@ -216,11 +244,16 @@ async def execute_close(
                     pos.futures_long_qty, pos.futures_close_price,
                     pos.futures_close_order_id, "SUCCESS", latency=latency)
 
-        # Step 2: spot buy
+        # Step 2: query actual debt (principal + interest), then spot buy with buffer
+        total_debt, interest_amount = await _get_asset_debt(client, pos.base_asset)
+        buy_qty = total_debt * FEE_BUFFER if total_debt > 0 else pos.borrow_qty
+        spot_lot = await client.get_lot_size(pos.symbol, "spot")
+        buy_qty = round_to_step(buy_qty, spot_lot["stepSize"])
+
         pos.status = "CLOSING_SPOT"
         db.commit()
         t0 = time.monotonic()
-        buy_result = await client.spot_market_buy_qty(pos.symbol, pos.borrow_qty)
+        buy_result = await client.spot_market_buy_qty(pos.symbol, buy_qty)
         latency = int((time.monotonic() - t0) * 1000)
         pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
         pos.spot_buy_price = _avg_fill_price(buy_result)
@@ -231,20 +264,30 @@ async def execute_close(
                     pos.spot_buy_qty, pos.spot_buy_price,
                     pos.spot_buy_order_id, "SUCCESS", latency=latency)
 
-        # Step 3: repay
+        # Step 3: repay actual debt (re-query for freshness)
         pos.status = "REPAYING"
         db.commit()
+        total_debt, interest_amount = await _get_asset_debt(client, pos.base_asset)
+        repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
         t0 = time.monotonic()
-        await client.margin_repay(pos.base_asset, pos.borrow_qty)
+        await client.margin_repay(pos.base_asset, repay_amount)
         latency = int((time.monotonic() - t0) * 1000)
-        pos.repay_qty = pos.borrow_qty
+        pos.repay_qty = repay_amount
+        pos.repay_interest = interest_amount
         _log_trade(db, pos.id, pos.sub_account_id, "REPAY", pos.symbol,
-                    quantity=pos.borrow_qty, status="SUCCESS", latency=latency)
+                    quantity=repay_amount, status="SUCCESS", latency=latency)
 
-        # Calculate PnL
+        # Calculate PnL (including fees and interest)
         spot_pnl = (pos.spot_sell_qty * pos.spot_sell_price) - (pos.spot_buy_qty * pos.spot_buy_price)
         futures_pnl = (pos.futures_close_price - pos.futures_long_price) * pos.futures_long_qty
-        pos.realized_pnl = spot_pnl + futures_pnl
+        spot_sell_notional = pos.spot_sell_qty * pos.spot_sell_price
+        spot_buy_notional = pos.spot_buy_qty * pos.spot_buy_price
+        futures_open_notional = pos.futures_long_qty * pos.futures_long_price
+        futures_close_notional = pos.futures_long_qty * pos.futures_close_price
+        total_fee = (spot_sell_notional + spot_buy_notional + futures_open_notional + futures_close_notional) * TAKER_FEE_RATE
+        interest_cost = interest_amount * pos.spot_buy_price if interest_amount else Decimal("0")
+        pos.fee_total = total_fee + interest_cost
+        pos.realized_pnl = spot_pnl + futures_pnl - total_fee - interest_cost
         pos.close_spread = spread.spread_short
         pos.closed_at = datetime.now(timezone.utc)
         pos.status = "CLOSED"
@@ -266,6 +309,57 @@ async def execute_close(
         pos.error_message = str(e)
         db.commit()
         await notifier.notify_error(account_note, f"close {pos.symbol}", str(e))
+    finally:
+        db.close()
+
+
+async def execute_borrow_only_repay(
+    sub_account_id: int,
+    symbol: str,
+    client: BinanceTradingClient,
+    notifier: FeishuSender,
+    account_note: str,
+):
+    """C6: Repay a borrow-only position (never opened) and record interest in history."""
+    base_asset = symbol.replace("USDT", "")
+    db = SessionLocal()
+    try:
+        total_debt, interest_amount = await _get_asset_debt(client, base_asset)
+        if total_debt <= 0:
+            return
+
+        await client.margin_repay(base_asset, total_debt)
+
+        position = Position(
+            sub_account_id=sub_account_id,
+            symbol=symbol,
+            base_asset=base_asset,
+            status="CLOSED",
+            borrow_qty=total_debt - interest_amount,
+            repay_qty=total_debt,
+            repay_interest=interest_amount,
+            cumulative_interest=interest_amount,
+            realized_pnl=-interest_amount,
+            fee_total=interest_amount,
+            opened_at=datetime.now(timezone.utc),
+            closed_at=datetime.now(timezone.utc),
+            error_message="borrow-only repay (no position opened)",
+        )
+        db.add(position)
+        db.commit()
+
+        _log_trade(db, position.id, sub_account_id, "BORROW_ONLY_REPAY", symbol,
+                    quantity=total_debt, status="SUCCESS")
+
+        logger.info(f"Borrow-only repay: {symbol} debt={total_debt} interest={interest_amount}")
+        await notifier.send(
+            "借币还币记录",
+            f"账户: {account_note}\n币种: {symbol}\n借币: {total_debt - interest_amount}\n利息: {interest_amount}",
+        )
+    except Exception as e:
+        logger.error(f"Borrow-only repay failed {symbol}: {e}")
+        _log_trade(db, None, sub_account_id, "BORROW_ONLY_REPAY", symbol,
+                    status="FAILED", error=str(e))
     finally:
         db.close()
 

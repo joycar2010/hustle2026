@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
@@ -35,8 +35,11 @@ def list_symbols(
 
 @router.post("/sync", response_model=SymbolSyncResult)
 async def trigger_sync(db: Session = Depends(get_db)):
-    result = await symbol_sync.sync_symbols(db)
-    return result
+    try:
+        result = await symbol_sync.sync_symbols(db)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/stats", response_model=SymbolStats)

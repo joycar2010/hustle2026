@@ -96,3 +96,27 @@ class FeishuSender:
             f"保证金水平: {margin_level}\n"
             f"请立即检查!",
         )
+
+    async def notify_stuck_positions(self, positions: list[dict]):
+        lines = [f"  {p['symbol']}(#{p['id']}) 状态={p['status']} 已卡{p['stuck_minutes']}分钟" for p in positions]
+        await self.send(
+            "持仓异常告警",
+            f"发现 {len(positions)} 个卡住的持仓:\n" + "\n".join(lines),
+        )
+
+    async def notify_heartbeat_stale(self, workers: list[dict]):
+        lines = [f"  {w['scope']} 上次心跳={w['last_heartbeat']}" for w in workers]
+        await self.send(
+            "Worker心跳告警",
+            f"{len(workers)} 个Worker心跳超时:\n" + "\n".join(lines),
+        )
+
+    async def notify_transfer_failed(self, account_note: str, amount: Decimal, skipped_futures: bool = False):
+        reason = "（已跳过合约划转，爆仓率低于阈值）" if skipped_futures else ""
+        await self.send(
+            "划转失败告警",
+            f"账户: {account_note}\n"
+            f"所需金额: {amount} USDT\n"
+            f"所有资金来源均划转失败{reason}\n"
+            f"请立即检查账户余额!",
+        )

@@ -38,6 +38,11 @@ class Position(Base):
     repay_qty = Column(Numeric(20, 8))
     repay_interest = Column(Numeric(20, 8))
 
+    # funding tracking
+    cumulative_funding_fee = Column(Numeric(15, 8), server_default='0')
+    cumulative_interest = Column(Numeric(15, 8), server_default='0')
+    funding_rate_ratio = Column(Numeric(10, 4), nullable=True)
+
     # pnl
     realized_pnl = Column(Numeric(15, 4))
     fee_total = Column(Numeric(15, 4))
@@ -49,6 +54,7 @@ class Position(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)
+    user_id = Column(Integer, nullable=True)
 
 
 class TradeLog(Base):
@@ -73,7 +79,7 @@ class EngineState(Base):
     __tablename__ = "engine_state"
 
     id = Column(Integer, primary_key=True)
-    scope = Column(String(30), nullable=False, unique=True)
+    scope = Column(String(30), nullable=False)
     status = Column(String(20), nullable=False, default="STOPPED")
     pid = Column(Integer)
     started_at = Column(DateTime(timezone=True))
@@ -82,3 +88,4 @@ class EngineState(Base):
     total_cycles = Column(Integer, default=0)
     error_message = Column(Text)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    user_id = Column(Integer, nullable=True)

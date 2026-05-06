@@ -1,10 +1,8 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 
 from app.api.spread import router as spread_router
 from app.api.global_rules import router as global_rules_router
@@ -15,7 +13,6 @@ from app.api.sub_account import router as sub_account_router
 from app.api.master_account import router as master_account_router
 from app.api.symbol import router as symbol_router
 from app.api.engine_api import router as engine_router
-from app.api.engine_command import router as engine_command_router
 from app.config import settings
 from app.db.models import Base
 from app.db.session import engine, SessionLocal
@@ -60,11 +57,3 @@ app.include_router(sub_account_router)
 app.include_router(master_account_router)
 app.include_router(symbol_router)
 app.include_router(engine_router)
-app.include_router(engine_command_router)
-
-_FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
-
-
-@app.get("/dashboard")
-async def dashboard():
-    return FileResponse(_FRONTEND_DIR / "dashboard.html")

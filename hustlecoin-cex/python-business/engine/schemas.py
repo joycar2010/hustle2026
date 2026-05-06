@@ -18,6 +18,9 @@ class PositionResponse(BaseModel):
     close_spread: Optional[Decimal] = None
     futures_close_price: Optional[Decimal] = None
     spot_buy_price: Optional[Decimal] = None
+    cumulative_funding_fee: Optional[Decimal] = None
+    cumulative_interest: Optional[Decimal] = None
+    funding_rate_ratio: Optional[Decimal] = None
     realized_pnl: Optional[Decimal] = None
     fee_total: Optional[Decimal] = None
     opened_at: Optional[datetime] = None
@@ -66,8 +69,65 @@ class PositionSummary(BaseModel):
     total_pnl: Decimal
 
 
+class FundingSummary(BaseModel):
+    total_funding_fee: Decimal = Decimal("0")
+    total_interest: Decimal = Decimal("0")
+    avg_funding_ratio: Optional[Decimal] = None
+    position_count: int = 0
+
+
 class DashboardResponse(BaseModel):
     engine_status: str
     workers: list[EngineStateResponse]
     positions_summary: PositionSummary
+    funding_summary: Optional[FundingSummary] = None
     recent_trades: list[TradeLogResponse]
+
+
+class PositionHistoryResponse(BaseModel):
+    positions: list[PositionResponse]
+    total_pnl: Decimal = Decimal("0")
+    total_funding_fee: Decimal = Decimal("0")
+    total_interest: Decimal = Decimal("0")
+    net_pnl: Decimal = Decimal("0")
+    count: int = 0
+
+
+class WorkerHealth(BaseModel):
+    scope: str
+    status: str
+    last_heartbeat: Optional[datetime] = None
+    heartbeat_stale: bool = False
+    active_positions: int = 0
+    total_cycles: int = 0
+    error_message: Optional[str] = None
+
+
+class StuckPosition(BaseModel):
+    id: int
+    symbol: str
+    sub_account_id: int
+    status: str
+    stuck_minutes: int
+    error_message: Optional[str] = None
+
+
+class APIMetricsResponse(BaseModel):
+    total_calls: int = 0
+    total_errors: int = 0
+    rate_limited: int = 0
+    error_rate: float = 0
+    last_error_ago_sec: Optional[int] = None
+    last_error_msg: Optional[str] = None
+    last_success_ago_sec: Optional[int] = None
+
+
+class HealthResponse(BaseModel):
+    status: str
+    engine_status: str
+    workers: list[WorkerHealth]
+    stuck_positions: list[StuckPosition]
+    open_positions: int = 0
+    api_metrics: dict[str, APIMetricsResponse] = {}
+    spread_count: int = 0
+    uptime_sec: Optional[int] = None

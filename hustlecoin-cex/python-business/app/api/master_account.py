@@ -70,3 +70,15 @@ async def validate_master_account(db: Session = Depends(get_db)):
         "permissions": result.permissions or [],
         "error": result.error,
     }
+
+
+@router.get("/permissions")
+async def get_master_permissions(db: Session = Depends(get_db)):
+    account = db.query(MasterAccount).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Master account not configured")
+    try:
+        data = await binance_client.get_api_restrictions(account.api_key, account.api_secret)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Binance API 错误: {str(e)[:100]}")

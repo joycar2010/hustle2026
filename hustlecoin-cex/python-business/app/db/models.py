@@ -19,6 +19,11 @@ class Symbol(Base):
     margin_tradable = Column(Boolean, default=False)
     futures_tradable = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+    is_new_coin = Column(Boolean, server_default='false')
+    is_delisting = Column(Boolean, server_default='false')
+    allow_open = Column(Boolean, server_default='true')
+    volume_24h = Column(Numeric(20, 2), nullable=True)
+    volume_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -27,6 +32,7 @@ class SubAccount(Base):
     __tablename__ = "sub_accounts"
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
     note = Column(String(20), nullable=False)
     email = Column(String(100), nullable=False)
     api_key = Column(String(100), nullable=False)
@@ -37,8 +43,16 @@ class SubAccount(Base):
     spot_enabled = Column(Boolean, default=False)
     bnb_burn_enabled = Column(Boolean, default=False)
     bnb_interest_enabled = Column(Boolean, default=False)
-    proxy_url = Column(String(300), nullable=True)
     last_validated_at = Column(DateTime(timezone=True), nullable=True)
+    order_amount = Column(Numeric(15, 2), nullable=True)
+    base_margin_amount = Column(Numeric(15, 2), nullable=True)
+    single_transfer_amount = Column(Numeric(15, 2), nullable=True)
+    risk_threshold = Column(Numeric(5, 2), nullable=True)
+    min_balance = Column(Numeric(10, 2), nullable=True)
+    single_order_amount = Column(Numeric(10, 2), nullable=True)
+    max_positions = Column(Integer, nullable=True)
+    max_borrow_amount = Column(Numeric(15, 2), nullable=True)
+    max_order_count = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -57,6 +71,7 @@ class GlobalRules(Base):
     __tablename__ = "global_rules"
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
     auto_push_spread = Column(Numeric(10, 4), default=0.8)
     remove_spread = Column(Numeric(10, 4), default=0.5)
     open_spread = Column(Numeric(10, 4), default=0.8)
@@ -69,6 +84,14 @@ class GlobalRules(Base):
     confirm_skip_spread = Column(Numeric(10, 4), default=2.0)
     repay_ban_minutes = Column(Integer, default=30)
     interest_filter = Column(Numeric(10, 4), default=1.0)
+    max_positions = Column(Integer, default=10)
+    auto_start_on_boot = Column(Boolean, default=False)
+    futures_liquidation_threshold = Column(Numeric(5, 2), nullable=True)
+    max_loss_per_position = Column(Numeric(15, 2), nullable=True)
+    circuit_breaker_spread_pct = Column(Numeric(10, 4), nullable=True)
+    circuit_breaker_pause_sec = Column(Integer, default=300)
+    max_daily_interest_rate = Column(Numeric(10, 6), nullable=True)
+    repay_spread = Column(Numeric(10, 4), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -114,6 +137,49 @@ class FundRules(Base):
     single_transfer_amount = Column(Numeric(15, 2), default=500)
     base_margin_amount = Column(Numeric(15, 2), default=500)
     transfer_order = Column(String(50), default="futures,spot,margin")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SymbolRule(Base):
+    __tablename__ = "symbol_rules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
+    symbol = Column(String(30), nullable=False)
+    open_spread = Column(Numeric(10, 4), nullable=True)
+    close_spread = Column(Numeric(10, 4), nullable=True)
+    order_amount = Column(Numeric(15, 2), nullable=True)
+    remove_spread = Column(Numeric(10, 4), nullable=True)
+    close_funding_ratio = Column(Numeric(10, 4), nullable=True)
+    repay_funding_ratio = Column(Numeric(10, 4), nullable=True)
+    allow_remove = Column(Boolean, server_default='true')
+    allow_repay = Column(Boolean, server_default='true')
+    max_daily_interest_rate = Column(Numeric(10, 6), nullable=True)
+    repay_spread = Column(Numeric(10, 4), nullable=True)
+    source = Column(String(10), server_default='custom')
+    is_temporary = Column(Boolean, server_default='false')
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AccountSymbolRule(Base):
+    __tablename__ = "account_symbol_rules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
+    sub_account_id = Column(Integer, nullable=False)
+    symbol = Column(String(30), nullable=False)
+    open_spread = Column(Numeric(10, 4), nullable=True)
+    close_spread = Column(Numeric(10, 4), nullable=True)
+    order_amount = Column(Numeric(15, 2), nullable=True)
+    remove_spread = Column(Numeric(10, 4), nullable=True)
+    close_funding_ratio = Column(Numeric(10, 4), nullable=True)
+    repay_funding_ratio = Column(Numeric(10, 4), nullable=True)
+    max_daily_interest_rate = Column(Numeric(10, 6), nullable=True)
+    repay_spread = Column(Numeric(10, 4), nullable=True)
+    max_borrow_amount = Column(Numeric(15, 2), nullable=True)
+    is_enabled = Column(Boolean, server_default='true')
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

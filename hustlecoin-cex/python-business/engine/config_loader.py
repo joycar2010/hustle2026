@@ -25,6 +25,11 @@ class GlobalRulesSnapshot:
     confirm_skip_spread: Decimal = Decimal("2.0")
     repay_ban_minutes: int = 30
     interest_filter: Decimal = Decimal("1.0")
+    max_positions: int = 10
+    auto_start_on_boot: bool = False
+    futures_liquidation_threshold: Decimal | None = None
+    repay_spread: Decimal | None = None
+    max_daily_interest_rate: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -50,7 +55,8 @@ DEFAULT_FUND = FundRulesSnapshot()
 
 
 class ConfigLoader:
-    def __init__(self):
+    def __init__(self, user_id: int = None):
+        self.user_id = user_id
         self.global_rules: GlobalRulesSnapshot = DEFAULT_GLOBAL
         self.fund_rules: FundRulesSnapshot = DEFAULT_FUND
         self.blacklist: set[str] = set()
@@ -91,6 +97,11 @@ class ConfigLoader:
                     confirm_skip_spread=rules.confirm_skip_spread,
                     repay_ban_minutes=rules.repay_ban_minutes,
                     interest_filter=rules.interest_filter,
+                    max_positions=rules.max_positions or 10,
+                    auto_start_on_boot=bool(rules.auto_start_on_boot),
+                    futures_liquidation_threshold=rules.futures_liquidation_threshold,
+                    repay_spread=rules.repay_spread,
+                    max_daily_interest_rate=rules.max_daily_interest_rate,
                 )
 
             fund = db.query(FundRules).first()

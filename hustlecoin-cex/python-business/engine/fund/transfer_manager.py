@@ -1,8 +1,9 @@
 import logging
 from decimal import Decimal
 
-from engine.config_loader import FundRulesSnapshot
+from engine.config_loader import FundRulesSnapshot, GlobalRulesSnapshot
 from engine.trading.binance_trading import BinanceTradingClient
+from engine.notify.feishu_sender import FeishuSender
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +17,26 @@ TRANSFER_TYPES = {
 }
 
 
+async def _get_futures_margin_rate(client: BinanceTradingClient) -> Decimal | None:
+    try:
+        account_info = await client.get_futures_account()
+        total_margin = Decimal(str(account_info.get("totalMarginBalance", "0")))
+        maintenance = Decimal(str(account_info.get("totalMaintMargin", "0")))
+        if maintenance <= 0:
+            return None
+        return total_margin / maintenance * 100
+    except Exception as e:
+        logger.warning(f"Failed to get futures margin rate: {e}")
+        return None
+
+
 async def ensure_margin_balance(
     client: BinanceTradingClient,
     rules: FundRulesSnapshot,
     required_amount: Decimal,
+    global_rules: GlobalRulesSnapshot = None,
+    notifier: FeishuSender = None,
+    account_note: str = "",
 ):
     margin_info = await client.get_margin_account()
     usdt_free = Decimal("0")
@@ -34,10 +51,22 @@ async def ensure_margin_balance(
     deficit = required_amount - usdt_free
     transfer_amount = min(deficit, rules.single_transfer_amount)
 
+    skip_futures = False
+    if global_rules and global_rules.futures_liquidation_threshold:
+        rate = await _get_futures_margin_rate(client)
+        if rate is not None and rate < global_rules.futures_liquidation_threshold:
+            skip_futures = True
+            logger.warning(
+                f"Futures margin rate {rate}% < threshold {global_rules.futures_liquidation_threshold}%, "
+                f"skipping futures transfer"
+            )
+
     order = rules.transfer_order.split(",")
     for source in order:
         source = source.strip()
         if source == "margin":
+            continue
+        if source == "futures" and skip_futures:
             continue
         key = (source, "margin")
         transfer_type = TRANSFER_TYPES.get(key)
@@ -51,4 +80,6 @@ async def ensure_margin_balance(
             logger.warning(f"Transfer from {source} failed: {e}")
             continue
 
+    if notifier:
+        await notifier.notify_transfer_failed(account_note, transfer_amount, skip_futures)
     return False

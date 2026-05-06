@@ -9,8 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 async def sync_symbols(db: Session) -> dict:
-    spot_data = await binance_client.fetch_spot_exchange_info()
-    futures_data = await binance_client.fetch_futures_exchange_info()
+    try:
+        spot_data = await binance_client.fetch_spot_exchange_info()
+    except Exception as e:
+        raise RuntimeError(f"现货交易对获取失败: {e}")
+    try:
+        futures_data = await binance_client.fetch_futures_exchange_info()
+    except Exception as e:
+        raise RuntimeError(f"合约交易对获取失败: {e}")
 
     futures_set = {s["symbol"] for s in futures_data}
     spot_map = {s["symbol"]: s for s in spot_data}
