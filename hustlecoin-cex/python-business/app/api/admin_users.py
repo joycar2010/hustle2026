@@ -65,6 +65,7 @@ class UpdateSubAccountRequest(BaseModel):
 
 
 class MasterAccountRequest(BaseModel):
+    account_name: str | None = None
     api_key: str
     api_secret: str
 
@@ -245,6 +246,7 @@ def get_master_account(user_id: int, request: Request, db: Session = Depends(get
     return {
         "id": ma.id,
         "user_id": ma.user_id,
+        "account_name": ma.account_name,
         "api_key_masked": _mask_key(ma.api_key or ""),
         "is_verified": ma.is_verified,
         "created_at": str(ma.created_at) if ma.created_at else None,
@@ -257,7 +259,7 @@ def create_master_account(user_id: int, req: MasterAccountRequest, request: Requ
     existing = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if existing:
         raise HTTPException(status_code=409, detail="Master account already exists")
-    ma = MasterAccount(user_id=user_id, api_key=req.api_key, api_secret=req.api_secret)
+    ma = MasterAccount(user_id=user_id, account_name=req.account_name, api_key=req.api_key, api_secret=req.api_secret)
     db.add(ma)
     db.commit()
     db.refresh(ma)
@@ -270,6 +272,8 @@ def update_master_account(user_id: int, req: MasterAccountRequest, request: Requ
     ma = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if not ma:
         raise HTTPException(status_code=404, detail="Master account not found")
+    if req.account_name is not None:
+        ma.account_name = req.account_name
     ma.api_key = req.api_key
     ma.api_secret = req.api_secret
     db.commit()

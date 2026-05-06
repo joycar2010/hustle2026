@@ -22,6 +22,7 @@ def _mask_secret(secret: str) -> str:
 def _to_response(account: MasterAccount) -> dict:
     return {
         "id": account.id,
+        "account_name": account.account_name,
         "api_key": account.api_key,
         "api_secret_masked": _mask_secret(account.api_secret),
         "is_verified": account.is_verified,
@@ -41,11 +42,17 @@ def get_master_account(db: Session = Depends(get_db)):
 def upsert_master_account(data: MasterAccountCreate, db: Session = Depends(get_db)):
     account = db.query(MasterAccount).first()
     if account:
+        if data.account_name is not None:
+            account.account_name = data.account_name
         account.api_key = data.api_key
         account.api_secret = data.api_secret
         account.is_verified = False
     else:
-        account = MasterAccount(api_key=data.api_key, api_secret=data.api_secret)
+        account = MasterAccount(
+            account_name=data.account_name,
+            api_key=data.api_key,
+            api_secret=data.api_secret,
+        )
         db.add(account)
     db.commit()
     db.refresh(account)

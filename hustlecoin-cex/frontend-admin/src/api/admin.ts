@@ -54,6 +54,7 @@ export async function resetPassword(id: number, newPassword: string) {
 export interface MasterAccountItem {
   id: number
   user_id: number
+  account_name: string | null
   api_key_masked: string
   is_verified: boolean
   created_at: string | null
@@ -64,12 +65,12 @@ export async function getMasterAccount(userId: number) {
   return data as MasterAccountItem | null
 }
 
-export async function createMasterAccount(userId: number, body: { api_key: string; api_secret: string }) {
+export async function createMasterAccount(userId: number, body: { account_name?: string; api_key: string; api_secret: string }) {
   const { data } = await client.post(`/api/admin/users/${userId}/master-account`, body)
   return data
 }
 
-export async function updateMasterAccount(userId: number, body: { api_key: string; api_secret: string }) {
+export async function updateMasterAccount(userId: number, body: { account_name?: string; api_key: string; api_secret: string }) {
   const { data } = await client.put(`/api/admin/users/${userId}/master-account`, body)
   return data
 }

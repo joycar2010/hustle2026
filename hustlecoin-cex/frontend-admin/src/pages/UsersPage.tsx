@@ -378,7 +378,8 @@ function BindingsTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
+                  <div><span className="text-muted-foreground">账号: </span><span>{masterAccount.account_name || '未设置'}</span></div>
                   <div><span className="text-muted-foreground">API Key: </span><span className="font-mono">{masterAccount.api_key_masked}</span></div>
                   <div><span className="text-muted-foreground">验证: </span>
                     <Badge variant={masterAccount.is_verified ? 'success' : 'secondary'}>{masterAccount.is_verified ? '已验证' : '未验证'}</Badge>
@@ -853,7 +854,7 @@ function EditSubAccountDialog({ userId, subAccount, onClose, onSaved }: {
 function MasterAccountDialog({ userId, existing, onClose, onSaved }: {
   userId: number; existing: MasterAccountItem | null; onClose: () => void; onSaved: () => void
 }) {
-  const [form, setForm] = useState({ api_key: '', api_secret: '' })
+  const [form, setForm] = useState({ account_name: existing?.account_name || '', api_key: '', api_secret: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -880,6 +881,10 @@ function MasterAccountDialog({ userId, existing, onClose, onSaved }: {
       <CardHeader><CardTitle className="text-sm">{existing ? '更新主账户' : '绑定主账户'}</CardTitle></CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">账号</label>
+            <Input value={form.account_name} onChange={(e) => setForm({ ...form, account_name: e.target.value })} placeholder="主账户名称/邮箱" name="account-name" autoComplete="off" />
+          </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">API Key</label>
             <Input value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} required name="binance-key" autoComplete="new-password" data-1p-ignore data-lpignore="true" />

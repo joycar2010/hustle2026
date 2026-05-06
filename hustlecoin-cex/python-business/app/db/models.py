@@ -62,6 +62,7 @@ class MasterAccount(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=True)
+    account_name = Column(String(100), nullable=True)
     api_key = Column(String(100), nullable=False)
     api_secret = Column(String(200), nullable=False)
     is_verified = Column(Boolean, default=False)

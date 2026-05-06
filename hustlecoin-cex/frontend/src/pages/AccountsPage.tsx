@@ -96,6 +96,7 @@ interface IpInfo {
 
 interface MasterAccountData {
   id: number
+  account_name: string | null
   api_key: string
   api_secret_masked: string
   is_verified: boolean
@@ -128,6 +129,7 @@ export function AccountsPage() {
   const [masterPermLoading, setMasterPermLoading] = useState(false)
   const [masterIpRestrict, setMasterIpRestrict] = useState<boolean | null>(null)
   const [masterPermError, setMasterPermError] = useState<string | null>(null)
+  const [masterAccountName, setMasterAccountName] = useState('')
   const [masterKey, setMasterKey] = useState('')
   const [masterSecret, setMasterSecret] = useState('')
   const [masterSaving, setMasterSaving] = useState(false)
@@ -225,9 +227,10 @@ export function AccountsPage() {
     if (!masterKey.trim() || !masterSecret.trim()) return
     setMasterSaving(true)
     try {
-      const data = await updateMasterAccount({ api_key: masterKey, api_secret: masterSecret })
+      const data = await updateMasterAccount({ account_name: masterAccountName || undefined, api_key: masterKey, api_secret: masterSecret })
       setMasterAccount(data)
       setEditingMaster(false)
+      setMasterAccountName('')
       setMasterKey('')
       setMasterSecret('')
       addToast('主账户已更新', 'success')
@@ -279,8 +282,10 @@ export function AccountsPage() {
         <CardContent>
           {masterAccount ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-3 text-sm">
-                <span className="text-muted-foreground">状态</span>
+              <div className="flex items-center gap-3 text-sm flex-wrap">
+                {masterAccount.account_name && (
+                  <span className="font-medium">{masterAccount.account_name}</span>
+                )}
                 <Badge className={cn(
                   masterAccount.is_verified
                     ? 'bg-positive/20 text-positive border-positive/30'
@@ -292,6 +297,8 @@ export function AccountsPage() {
               {masterExpanded && (
                 <div className="space-y-2 text-xs border-t pt-2">
                   <div className="grid grid-cols-[80px_1fr] gap-1">
+                    <span className="text-muted-foreground">账号</span>
+                    <span>{masterAccount.account_name || '未设置'}</span>
                     <span className="text-muted-foreground">API Key</span>
                     <span className="font-mono text-[11px]">{masterAccount.api_key.slice(0, 8)}...{masterAccount.api_key.slice(-4)}</span>
                     <span className="text-muted-foreground">Secret</span>
@@ -334,6 +341,7 @@ export function AccountsPage() {
 
                   {editingMaster ? (
                     <div className="space-y-2 border-t pt-2">
+                      <Input value={masterAccountName} onChange={(e) => setMasterAccountName(e.target.value)} placeholder="账号名称/邮箱" className="text-xs" name="account-name" autoComplete="off" />
                       <Input value={masterKey} onChange={(e) => setMasterKey(e.target.value)} placeholder="新 API Key" className="text-xs" name="binance-key" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
                       <Input value={masterSecret} onChange={(e) => setMasterSecret(e.target.value)} placeholder="新 API Secret" type="password" className="text-xs" name="binance-secret" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
                       <div className="flex gap-2">
@@ -345,7 +353,7 @@ export function AccountsPage() {
                     </div>
                   ) : (
                     <div className="flex gap-2 border-t pt-2">
-                      <Button size="sm" variant="outline" onClick={() => setEditingMaster(true)} className="text-xs">
+                      <Button size="sm" variant="outline" onClick={() => { setMasterAccountName(masterAccount.account_name || ''); setEditingMaster(true) }} className="text-xs">
                         <Key size={12} className="mr-1" />更新密钥
                       </Button>
                       <Button size="sm" variant="outline" onClick={async () => {
@@ -369,6 +377,7 @@ export function AccountsPage() {
                 <span>主账户未配置 — IP 白名单功能需要主账户</span>
               </div>
               <div className="space-y-2">
+                <Input value={masterAccountName} onChange={(e) => setMasterAccountName(e.target.value)} placeholder="账号名称/邮箱" className="text-xs" name="account-name" autoComplete="off" />
                 <Input value={masterKey} onChange={(e) => setMasterKey(e.target.value)} placeholder="API Key" className="text-xs" name="binance-key" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
                 <Input value={masterSecret} onChange={(e) => setMasterSecret(e.target.value)} placeholder="API Secret" type="password" className="text-xs" name="binance-secret" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
                 <Button size="sm" onClick={handleSaveMaster} disabled={masterSaving} className="text-xs">
