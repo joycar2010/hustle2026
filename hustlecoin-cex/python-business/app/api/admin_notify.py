@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.config import settings
-from app.db.models import FeishuConfig, User
+from app.db.models import FeishuConfig
+from app.db.models_auth import User
 from app.db.models_notify import NotificationTemplate, NotificationLog, EmailConfig
 from app.db.session import get_db
 from app.middleware.permissions import require_admin

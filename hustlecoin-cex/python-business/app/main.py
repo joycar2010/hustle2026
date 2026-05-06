@@ -21,9 +21,23 @@ from app.api.account_symbol_rules import router as account_symbol_rules_router
 from app.api.auth import router as auth_router
 from app.api.coin_management import router as coin_mgmt_router
 from app.api.websocket import router as ws_router
+from app.api.ai_chat import router as ai_chat_router
+from app.api.admin_dashboard import router as admin_dashboard_router
+from app.api.admin_users import router as admin_users_router
+from app.api.admin_proxy import router as admin_proxy_router
+from app.api.admin_ssl import router as admin_ssl_router
+from app.api.admin_notify import router as admin_notify_router
+from app.api.admin_system import router as admin_system_router
+from app.api.admin_market import router as admin_market_router
+from app.api.admin_rbac import router as admin_rbac_router
+from app.api.admin_audit import router as admin_audit_router
+from app.api.admin_ai import router as admin_ai_router
+from app.api.admin_ws import router as admin_ws_router
+from app.api.admin_global_rules import router as admin_global_rules_router
 from app.config import settings
 from app.db.models import Base
 from app.db.session import engine, SessionLocal
+from app.middleware.auth import JWTAuthMiddleware
 from app.services.spread_reader import spread_reader
 from app.services import symbol_sync
 
@@ -51,6 +65,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="HustleCoin CEX-CEX", version="0.5.0", lifespan=lifespan)
 
+app.add_middleware(JWTAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -72,6 +87,19 @@ app.include_router(account_symbol_rules_router)
 app.include_router(auth_router)
 app.include_router(coin_mgmt_router)
 app.include_router(ws_router)
+app.include_router(ai_chat_router)
+app.include_router(admin_dashboard_router)
+app.include_router(admin_users_router)
+app.include_router(admin_proxy_router)
+app.include_router(admin_ssl_router)
+app.include_router(admin_notify_router)
+app.include_router(admin_system_router)
+app.include_router(admin_market_router)
+app.include_router(admin_rbac_router)
+app.include_router(admin_audit_router)
+app.include_router(admin_ai_router)
+app.include_router(admin_ws_router)
+app.include_router(admin_global_rules_router)
 
 ADMIN_SPA_DIR = Path(__file__).resolve().parent.parent / "static" / "admin-spa"
 

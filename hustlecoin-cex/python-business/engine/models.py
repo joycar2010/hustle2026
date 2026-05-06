@@ -73,6 +73,7 @@ class TradeLog(Base):
     error_message = Column(Text)
     latency_ms = Column(Integer)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_id = Column(Integer, nullable=True)
 
 
 class EngineState(Base):

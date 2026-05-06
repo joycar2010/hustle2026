@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Boolean, Numeric, DateTime, Text,
+    Column, Integer, String, Boolean, Numeric, DateTime, Text, JSON,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase
@@ -108,8 +108,11 @@ class FeishuConfig(Base):
     __tablename__ = "feishu_config"
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
     webhook_url = Column(String(300))
     secret_key = Column(String(100))
+    app_id = Column(String(100), nullable=True)
+    app_secret = Column(String(200), nullable=True)
     alert_interval_sec = Column(Integer, default=5)
     alert_count = Column(Integer, default=1)
     margin_rate_alert = Column(Numeric(10, 2), default=30)
@@ -179,6 +182,26 @@ class AccountSymbolRule(Base):
     repay_spread = Column(Numeric(10, 4), nullable=True)
     max_borrow_amount = Column(Numeric(15, 2), nullable=True)
     is_enabled = Column(Boolean, server_default='true')
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PendingBlacklist(Base):
+    __tablename__ = "pending_blacklist"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(30), nullable=False, unique=True)
+    reason = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiCoinConfig(Base):
+    __tablename__ = "aicoin_config"
+
+    id = Column(Integer, primary_key=True)
+    api_key = Column(String(200), nullable=True)
+    api_secret = Column(String(200), nullable=True)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

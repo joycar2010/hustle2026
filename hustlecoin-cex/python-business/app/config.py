@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     binance_api_timeout: int = 10
     symbol_sync_on_startup: bool = True
     symbol_sync_interval_hours: int = 24
+    jwt_secret: str = "changeme"
+    jwt_expire_hours: int = 24
+    encryption_key: str = ""
+    allowed_origins: str = ""
+    aicoin_api_key: str = ""
+    aicoin_api_secret: str = ""
 
     class Config:
         env_prefix = "CEX_"
