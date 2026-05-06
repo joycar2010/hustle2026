@@ -61,6 +61,7 @@ class MasterAccount(Base):
     __tablename__ = "master_account"
 
     id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
     api_key = Column(String(100), nullable=False)
     api_secret = Column(String(200), nullable=False)
     is_verified = Column(Boolean, default=False)
