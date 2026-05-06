@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   listUsers, createUser, updateUser, deleteUser, resetPassword,
   getUserSubAccounts, createSubAccount, updateSubAccount, deleteSubAccount, syncSubAccountPermissions,
-  getMasterAccount, createMasterAccount, updateMasterAccount, deleteMasterAccount,
+  getMasterAccount, createMasterAccount, updateMasterAccount, validateMasterAccount, deleteMasterAccount,
   listEngineUsers, startUserEngine, stopUserEngine,
   listProxies, bindProxy,
   feishuLookupByPhone,
@@ -229,6 +229,7 @@ function BindingsTab() {
   const [editingSub, setEditingSub] = useState<SubAccountItem | null>(null)
   const [bindingTarget, setBindingTarget] = useState<SubAccountItem | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [validatingMaster, setValidatingMaster] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
 
   useEffect(() => {
@@ -286,6 +287,21 @@ function BindingsTab() {
       addToast('主账户已删除', 'success')
       loadData(selectedUserId)
     } catch (err: unknown) { addToast(extractError(err, '删除失败'), 'error') }
+  }
+
+  const handleValidateMaster = async () => {
+    if (!selectedUserId) return
+    setValidatingMaster(true)
+    try {
+      const result = await validateMasterAccount(selectedUserId)
+      if (result.is_valid) {
+        addToast('主账户验证通过', 'success')
+      } else {
+        addToast(result.error || '验证失败', 'error')
+      }
+      loadData(selectedUserId)
+    } catch (err: unknown) { addToast(extractError(err, '验证失败'), 'error') }
+    finally { setValidatingMaster(false) }
   }
 
   return (
@@ -368,10 +384,13 @@ function BindingsTab() {
                 <CardTitle className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2"><Key className="h-4 w-4 text-primary" /> 主账户</span>
                   <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => setShowMasterForm(true)}>
+                    <Button size="sm" variant="ghost" onClick={handleValidateMaster} disabled={validatingMaster} title="验证 API Key">
+                      <Shield className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setShowMasterForm(true)} title="编辑">
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={handleDeleteMaster}>
+                    <Button size="sm" variant="ghost" onClick={handleDeleteMaster} title="删除">
                       <Trash2 className="h-3.5 w-3.5 text-negative" />
                     </Button>
                   </div>
@@ -857,28 +876,35 @@ function MasterAccountDialog({ userId, existing, onClose, onSaved }: {
   const [form, setForm] = useState({ account_name: existing?.account_name || '', api_key: '', api_secret: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const isUpdate = !!existing
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!form.api_key.trim()) { setError('请填写 API Key'); return }
-    if (!form.api_secret.trim()) { setError('请填写 API Secret'); return }
+    if (!isUpdate) {
+      if (!form.api_key.trim()) { setError('请填写 API Key'); return }
+      if (!form.api_secret.trim()) { setError('请填写 API Secret'); return }
+    }
     setSaving(true)
     try {
-      if (existing) {
-        await updateMasterAccount(userId, form)
+      if (isUpdate) {
+        const body: Record<string, string> = {}
+        if (form.account_name) body.account_name = form.account_name
+        if (form.api_key.trim()) body.api_key = form.api_key
+        if (form.api_secret.trim()) body.api_secret = form.api_secret
+        await updateMasterAccount(userId, body)
       } else {
         await createMasterAccount(userId, form)
       }
       onSaved()
     } catch (err: unknown) {
-      setError(extractError(err, existing ? '更新失败' : '绑定失败'))
+      setError(extractError(err, isUpdate ? '更新失败' : '绑定失败'))
     } finally { setSaving(false) }
   }
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-sm">{existing ? '更新主账户' : '绑定主账户'}</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-sm">{isUpdate ? '更新主账户' : '绑定主账户'}</CardTitle></CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-1">
@@ -886,12 +912,12 @@ function MasterAccountDialog({ userId, existing, onClose, onSaved }: {
             <Input value={form.account_name} onChange={(e) => setForm({ ...form, account_name: e.target.value })} placeholder="主账户名称/邮箱" name="account-name" autoComplete="off" />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">API Key</label>
-            <Input value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} required name="binance-key" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
+            <label className="text-xs text-muted-foreground">API Key {isUpdate && <span className="text-muted-foreground/60">（留空保留现有值）</span>}</label>
+            <Input value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} placeholder={isUpdate ? existing.api_key_masked : 'API Key'} required={!isUpdate} name="binance-key" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">API Secret</label>
-            <Input type="password" value={form.api_secret} onChange={(e) => setForm({ ...form, api_secret: e.target.value })} required name="binance-secret" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
+            <label className="text-xs text-muted-foreground">API Secret {isUpdate && <span className="text-muted-foreground/60">（留空保留现有值）</span>}</label>
+            <Input type="password" value={form.api_secret} onChange={(e) => setForm({ ...form, api_secret: e.target.value })} placeholder={isUpdate ? '****' : 'API Secret'} required={!isUpdate} name="binance-secret" autoComplete="new-password" data-1p-ignore data-lpignore="true" />
           </div>
           {error && <p className="text-sm text-negative">{error}</p>}
           <div className="flex justify-end gap-2">

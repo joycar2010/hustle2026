@@ -70,9 +70,14 @@ export async function createMasterAccount(userId: number, body: { account_name?:
   return data
 }
 
-export async function updateMasterAccount(userId: number, body: { account_name?: string; api_key: string; api_secret: string }) {
+export async function updateMasterAccount(userId: number, body: { account_name?: string; api_key?: string; api_secret?: string }) {
   const { data } = await client.put(`/api/admin/users/${userId}/master-account`, body)
   return data
+}
+
+export async function validateMasterAccount(userId: number) {
+  const { data } = await client.post(`/api/admin/users/${userId}/master-account/validate`)
+  return data as { is_valid: boolean; is_verified: boolean; error?: string }
 }
 
 export async function deleteMasterAccount(userId: number) {

@@ -70,6 +70,12 @@ class MasterAccountRequest(BaseModel):
     api_secret: str
 
 
+class UpdateMasterAccountRequest(BaseModel):
+    account_name: str | None = None
+    api_key: str | None = None
+    api_secret: str | None = None
+
+
 def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
 
@@ -267,17 +273,38 @@ def create_master_account(user_id: int, req: MasterAccountRequest, request: Requ
 
 
 @router.put("/users/{user_id}/master-account")
-def update_master_account(user_id: int, req: MasterAccountRequest, request: Request, db: Session = Depends(get_db)):
+def update_master_account(user_id: int, req: UpdateMasterAccountRequest, request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     ma = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
     if not ma:
         raise HTTPException(status_code=404, detail="Master account not found")
     if req.account_name is not None:
         ma.account_name = req.account_name
-    ma.api_key = req.api_key
-    ma.api_secret = req.api_secret
+    if req.api_key is not None and req.api_key.strip():
+        ma.api_key = req.api_key
+        ma.is_verified = False
+    if req.api_secret is not None and req.api_secret.strip():
+        ma.api_secret = req.api_secret
+        ma.is_verified = False
     db.commit()
     return {"message": "Master account updated"}
+
+
+@router.post("/users/{user_id}/master-account/validate")
+async def validate_admin_master_account(user_id: int, request: Request, db: Session = Depends(get_db)):
+    require_admin(request)
+    ma = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
+    if not ma:
+        raise HTTPException(status_code=404, detail="Master account not found")
+    result = await binance_client.validate_api_key(ma.api_key, ma.api_secret)
+    if result.is_valid:
+        ma.is_verified = True
+        db.commit()
+    return {
+        "is_valid": result.is_valid,
+        "is_verified": result.is_valid,
+        "error": result.error,
+    }
 
 
 @router.delete("/users/{user_id}/master-account")
