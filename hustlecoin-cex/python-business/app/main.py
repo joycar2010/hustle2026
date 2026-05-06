@@ -73,6 +73,18 @@ app.include_router(auth_router)
 app.include_router(coin_mgmt_router)
 app.include_router(ws_router)
 
+ADMIN_SPA_DIR = Path(__file__).resolve().parent.parent / "static" / "admin-spa"
+
+if ADMIN_SPA_DIR.is_dir():
+    app.mount("/admin/assets", StaticFiles(directory=str(ADMIN_SPA_DIR / "assets")), name="admin-assets")
+
+    @app.get("/admin/{full_path:path}")
+    async def admin_spa_fallback(request: Request, full_path: str):
+        file_path = ADMIN_SPA_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(ADMIN_SPA_DIR / "index.html"))
+
 if SPA_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=str(SPA_DIR / "assets")), name="spa-assets")
 
