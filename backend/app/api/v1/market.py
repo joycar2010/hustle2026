@@ -105,6 +105,26 @@ async def get_current_spread(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+@router.get("/spread/chart")
+async def get_spread_chart(
+    symbol: str = Query(default="XAUUSDT", description="Trading symbol"),
+    start_time: str = Query(default=None, description="Start time ISO format"),
+    end_time: str = Query(default=None, description="End time ISO format"),
+    interval: int = Query(default=5, ge=1, le=60, description="Downsample interval in seconds"),
+):
+    """降采样点差数据，用于图表展示。短字段名节省传输量。"""
+    try:
+        return await market_data_service.get_spread_chart(
+            symbol=symbol,
+            start_time=start_time,
+            end_time=end_time,
+            interval=interval,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/spread/history")
 async def get_spread_history(
     limit: int = Query(default=100, ge=1, le=1000, description="Max records in legacy (non-paginated) mode"),

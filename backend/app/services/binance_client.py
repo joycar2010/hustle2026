@@ -426,6 +426,52 @@ class BinanceFuturesClient:
         """Get funding wallet balance - POST /sapi/v1/asset/get-funding-asset"""
         return await self._request("POST", "/sapi/v1/asset/get-funding-asset", signed=True, use_spot_api=True)
 
+    async def get_deposit_history(
+        self,
+        coin: Optional[str] = None,
+        status: Optional[int] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 1000,
+    ) -> list:
+        """GET /sapi/v1/capital/deposit/hisrec"""
+        params = {"limit": limit}
+        if coin:
+            params["coin"] = coin
+        if status is not None:
+            params["status"] = status
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        return await self._request(
+            "GET", "/sapi/v1/capital/deposit/hisrec",
+            signed=True, use_spot_api=True, params=params,
+        )
+
+    async def get_withdraw_history(
+        self,
+        coin: Optional[str] = None,
+        status: Optional[int] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 1000,
+    ) -> list:
+        """GET /sapi/v1/capital/withdraw/history"""
+        params = {"limit": limit}
+        if coin:
+            params["coin"] = coin
+        if status is not None:
+            params["status"] = status
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        return await self._request(
+            "GET", "/sapi/v1/capital/withdraw/history",
+            signed=True, use_spot_api=True, params=params,
+        )
+
     async def get_spot_prices(self) -> list:
         """Get all spot ticker prices"""
         return await self._request("GET", "/api/v3/ticker/price", use_spot_api=True)

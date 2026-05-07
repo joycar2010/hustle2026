@@ -322,7 +322,7 @@ async def update_account(
     if account_update.leverage is not None:
         account.leverage = account_update.leverage
 
-    if account_update.proxy_config is not None:
+    if 'proxy_config' in account_update.model_fields_set:
         account.proxy_config = account_update.proxy_config
 
     await db.commit()

@@ -1,6 +1,6 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center">
-    <div class="bg-dark-100 p-8 rounded-xl border border-border-primary w-96">
+  <div class="min-h-screen flex items-center justify-center" style="background-color: #16181F">
+    <div class="p-8 rounded-xl border border-border-primary w-96" style="background-color: #16181F">
       <div class="text-center mb-6">
         <img src="/logo.png" alt="OpenCLAW" class="w-16 h-16 mx-auto mb-3 object-contain" />
         <div class="text-2xl font-bold">OpenCLAW</div>

@@ -71,7 +71,7 @@ def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
 
 # ── 数据获取 ─────────────────────────────────────────
 
-async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str) -> list:
+async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str = None) -> list:
     """获取 Binance income 记录（自动分页，limit=1000/次）"""
     client = BinanceFuturesClient(
         account.api_key, account.api_secret,
@@ -279,6 +279,34 @@ async def _fetch_daily_closing_nav(account_ids: list, start_date: str, end_date:
     return {row[0].isoformat(): float(row[1]) for row in result.fetchall()}
 
 
+async def _fetch_daily_closing_upnl(account_ids: list, start_date: str, end_date: str, db) -> dict:
+    """从 account_snapshots 查询 Binance 账户每天收盘 unrealized_pnl"""
+    if not account_ids:
+        return {}
+    from datetime import date as _d
+    sd = _d.fromisoformat(start_date)
+    ed = _d.fromisoformat(end_date)
+    result = await db.execute(text("""
+        WITH ranked AS (
+            SELECT
+                CAST(timestamp + interval '8 hours' AS date) as bj_date,
+                account_id,
+                unrealized_pnl,
+                ROW_NUMBER() OVER (
+                    PARTITION BY account_id, CAST(timestamp + interval '8 hours' AS date)
+                    ORDER BY timestamp DESC
+                ) as rn
+            FROM account_snapshots
+            WHERE account_id = ANY(CAST(:aids AS uuid[]))
+            AND CAST(timestamp + interval '8 hours' AS date) BETWEEN :sd AND :ed
+        )
+        SELECT bj_date, SUM(unrealized_pnl) as total_upnl
+        FROM ranked WHERE rn = 1
+        GROUP BY bj_date ORDER BY bj_date
+    """), {"aids": account_ids, "sd": sd, "ed": ed})
+    return {row[0].isoformat(): float(row[1]) for row in result.fetchall()}
+
+
 # ── 统计计算 ─────────────────────────────────────────
 
 def _compute_summary(daily_list: list) -> dict:
@@ -440,26 +468,25 @@ async def get_daily_pnl(
 
     active_account_ids = [str(a.account_id) for a in accounts if a.is_active]
 
-    # 1) 查询前一天 NAV（作为起始基准）
+    # 1) 日期范围 + 分平台 NAV / UPL
     from datetime import date as _date
     d_start = _date.fromisoformat(start_date)
     d_end = _date.fromisoformat(end_date)
     prev_date = (d_start - timedelta(days=1)).isoformat()
 
-    nav_by_date = await _fetch_daily_closing_nav(
-        active_account_ids, prev_date, end_date, db
-    )
+    mt5_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.is_mt5_account]
+    binance_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.platform_id == 1]
 
-    # 2) Binance TRANSFER 资金流（spot <-> futures）
-    binance_transfers = defaultdict(float)
-    if platform in ("all", "binance"):
-        for account in accounts:
-            if account.platform_id != 1 or not account.is_active:
-                continue
-            transfer_records = await _fetch_binance_income(account, start_ms, end_ms, "TRANSFER")
-            for r in transfer_records:
-                dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
-                binance_transfers[dk] += float(r.get("income", 0))
+    mt5_nav_by_date = await _fetch_daily_closing_nav(
+        mt5_account_ids, prev_date, end_date, db
+    ) if mt5_account_ids else {}
+
+    binance_upnl_by_date = await _fetch_daily_closing_upnl(
+        binance_account_ids, prev_date, end_date, db
+    ) if binance_account_ids else {}
+
+    # 2) Binance 全量 income（PnL = 所有已结算收入（不含 TRANSFER）+ UPL 变动）
+    binance_income_pnl = defaultdict(float)
 
     # 3) MT5 入出金（entry=0, symbol 为空的 deals）
     mt5_cashflows = defaultdict(float)
@@ -477,7 +504,7 @@ async def get_daily_pnl(
                 dk = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
                 mt5_cashflows[dk] += float(d.get("profit", 0))
 
-    # 4) Binance REALIZED_PNL + FUNDING_FEE（仅用于 platform_breakdown 展示）
+    # 4) Binance 全量 income 拆分（PnL + breakdown）
     binance_rpnl = defaultdict(float)
     binance_ff = defaultdict(float)
     binance_trades = defaultdict(int)
@@ -486,16 +513,20 @@ async def get_daily_pnl(
         for account in accounts:
             if account.platform_id != 1 or not account.is_active:
                 continue
-            for r in await _fetch_binance_income(account, start_ms, end_ms, "REALIZED_PNL"):
+            all_income = await _fetch_binance_income(account, start_ms, end_ms)
+            for r in all_income:
                 dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
                 income = float(r.get("income", 0))
-                binance_rpnl[dk] += income
-                binance_trades[dk] += 1
-                if income > 0:
-                    binance_wins[dk] += 1
-            for r in await _fetch_binance_income(account, start_ms, end_ms, "FUNDING_FEE"):
-                dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
-                binance_ff[dk] += float(r.get("income", 0))
+                itype = r.get("incomeType", "")
+                if itype != "TRANSFER":
+                    binance_income_pnl[dk] += income
+                if itype == "REALIZED_PNL":
+                    binance_rpnl[dk] += income
+                    binance_trades[dk] += 1
+                    if income > 0:
+                        binance_wins[dk] += 1
+                elif itype == "FUNDING_FEE":
+                    binance_ff[dk] += income
 
     # 5) MT5 deals（仅用于 platform_breakdown 展示和 trade_count）
     mt5_rpnl = defaultdict(float)
@@ -518,22 +549,29 @@ async def get_daily_pnl(
                 if profit > 0:
                     mt5_wins[dk] += 1
 
-    # 6) 按日组装：net_pnl = NAV变化 - Binance转账 - MT5入出金
+    # 6) 按日组装：Binance(income-based) + MT5(NAV-based)
+    #    Binance PnL = 所有已结算收入(不含TRANSFER) + unrealized_pnl 变动
+    #    MT5 PnL = NAV 变化 - 入出金
     daily_list = []
-    prev_nav = nav_by_date.get(prev_date)
+    prev_mt5_nav = mt5_nav_by_date.get(prev_date)
+    prev_binance_upnl = binance_upnl_by_date.get(prev_date)
     current = d_start
     while current <= d_end:
         dk = current.isoformat()
-        today_nav = nav_by_date.get(dk)
+        today_mt5_nav = mt5_nav_by_date.get(dk)
+        today_binance_upnl = binance_upnl_by_date.get(dk)
 
-        if prev_nav is not None and today_nav is not None and today_nav > 0 and prev_nav > 0:
-            nav_change = today_nav - prev_nav
-            total_cashflow = binance_transfers.get(dk, 0) + mt5_cashflows.get(dk, 0)
-            net_pnl = nav_change - total_cashflow
-        elif today_nav is not None and today_nav > 0 and prev_nav is None:
-            net_pnl = 0
-        else:
-            net_pnl = 0
+        # Binance: income-based PnL
+        binance_pnl = binance_income_pnl.get(dk, 0)
+        if prev_binance_upnl is not None and today_binance_upnl is not None:
+            binance_pnl += (today_binance_upnl - prev_binance_upnl)
+
+        # MT5: NAV-based PnL
+        mt5_pnl = 0.0
+        if prev_mt5_nav is not None and today_mt5_nav is not None and today_mt5_nav > 0 and prev_mt5_nav > 0:
+            mt5_pnl = (today_mt5_nav - prev_mt5_nav) - mt5_cashflows.get(dk, 0)
+
+        net_pnl = binance_pnl + mt5_pnl
 
         daily_list.append({
             "date": dk,
@@ -555,8 +593,10 @@ async def get_daily_pnl(
             },
         })
 
-        if today_nav is not None and today_nav > 0:
-            prev_nav = today_nav
+        if today_mt5_nav is not None and today_mt5_nav > 0:
+            prev_mt5_nav = today_mt5_nav
+        if today_binance_upnl is not None:
+            prev_binance_upnl = today_binance_upnl
         current += timedelta(days=1)
 
     summary = _compute_summary(daily_list)

@@ -14,6 +14,17 @@ export const useMarketStore = defineStore('market', () => {
   const accountBalanceData = ref(null) // 新增：账户余额数据
   const connected = ref(false)
   const lastMessage = ref(null)
+  const strategyMessage = ref(null)
+  const _STRATEGY_MSG_TYPES = new Set([
+    'strategy_trigger_progress',
+    'strategy_trigger_reset',
+    'strategy_position_change',
+    'strategy_execution_started',
+    'strategy_execution_completed',
+    'strategy_execution_error',
+    'strategy_order_executed',
+    'strategy_orders_filled',
+  ])
   // Real-time position snapshot — updated on every position_snapshot WebSocket message
   const positionSnapshot = ref({
     bybit_long_lots: 0,
@@ -75,8 +86,12 @@ export const useMarketStore = defineStore('market', () => {
           console.log('[WebSocket] Received account_balance message', new Date().toISOString())
         }
 
-        // Store last message for components to watch
-        lastMessage.value = msg
+        // Route strategy messages to dedicated ref (avoids triggering unrelated watchers)
+        if (_STRATEGY_MSG_TYPES.has(msg.type)) {
+          strategyMessage.value = msg
+        } else {
+          lastMessage.value = msg
+        }
 
         // Global risk_alert handler — must run regardless of which page/component is active.
         // Previously only Risk.vue watched for this, so alerts were lost on TradingDashboard etc.
@@ -260,6 +275,7 @@ export const useMarketStore = defineStore('market', () => {
     accountBalanceData,
     connected,
     lastMessage,
+    strategyMessage,
     positionSnapshot,
     connect,
     disconnect,

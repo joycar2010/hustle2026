@@ -205,9 +205,16 @@
         </div>
       </div>
 
-      <!-- Spread Data Table -->
-      <div class="mt-1">
-        <SpreadDataTable />
+      <!-- Market Bottom Tabs: K线图 + 数据流 -->
+      <div class="mt-1 bg-[#252930] rounded border border-[#2b3139]">
+        <div class="flex border-b border-[#2b3139]">
+          <button @click="bottomTab = 'kline'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors', bottomTab === 'kline' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']">K线图</button>
+          <button @click="bottomTab = 'stream'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors', bottomTab === 'stream' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']">数据流</button>
+        </div>
+        <MiniKlineChart v-show="bottomTab === 'kline'" :visible="bottomTab === 'kline'" />
+        <div v-show="bottomTab === 'stream'">
+          <SpreadDataTable />
+        </div>
       </div>
 
       <!-- Pending Orders Modal -->
@@ -289,8 +296,10 @@ import { useStrategyStore } from '@/stores/strategy'
 import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
 import SpreadDataTable from './SpreadDataTable.vue'
+import MiniKlineChart from './MiniKlineChart.vue'
 import { useTradingPair } from '@/composables/useTradingPair'
 
+const bottomTab = ref("kline")
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const { currentPair, pairConfig } = useTradingPair()

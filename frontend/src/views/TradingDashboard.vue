@@ -91,6 +91,7 @@
 <script setup>
 import { ref, watch, onMounted, defineAsyncComponent } from 'vue'
 import MarketCards from '@/components/trading/MarketCards.vue'
+import { useMarketStore } from '@/stores/market'
 import StrategyPanel from '@/components/trading/StrategyPanel.vue'
 
 // 懒加载非关键组件，提升初始加载速度
@@ -100,6 +101,7 @@ const RecentTradingRecords = defineAsyncComponent(() => import('@/components/tra
 const FloatingActionButtons = defineAsyncComponent(() => import('@/components/trading/FloatingActionButtons.vue'))
 const Risk = defineAsyncComponent(() => import('@/views/Risk.vue'))
 
+const marketStore = useMarketStore()
 const recentRecordsRef = ref(null)
 const marketCardsRef = ref(null)
 
@@ -133,6 +135,8 @@ function handleOrderExecuted() {
   if (recentRecordsRef.value) {
     recentRecordsRef.value.fetchRecentOrders()
   }
+  marketStore.requestSnapshot()
+  setTimeout(() => marketStore.requestSnapshot(), 2000)
 }
 </script>
 

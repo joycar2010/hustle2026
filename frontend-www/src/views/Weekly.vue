@@ -1,6 +1,6 @@
 <template>
   <div class="pb-20 md:pb-6">
-    <header class="hidden md:flex bg-dark-100 border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40">
+    <header class="hidden md:flex border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40" style="background-color: #16181F">
       <span class="font-semibold">HustleXAU · 周收益</span>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">{{ auth.user?.username || '--' }}</span>

@@ -288,7 +288,10 @@
               <div v-if="continuousExecutionStatus.opening.status === 'running' && continuousExecutionTriggerProgress.opening.required > 0" class="mb-0.5">
                 <div class="flex justify-between text-gray-400 mb-0.5">
                   <span>触发进度:</span>
-                  <span class="text-white">{{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}</span>
+                  <span class="text-white">
+                    {{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}
+                    <span v-if="continuousExecutionTriggerProgress.opening.triggerSpread !== null" class="text-[#fcd535] ml-1">({{ continuousExecutionTriggerProgress.opening.triggerSpread.toFixed(2) }})</span>
+                  </span>
                 </div>
                 <div class="w-full bg-[#0d1117] rounded-full h-1.5">
                   <div
@@ -331,7 +334,10 @@
               <div v-if="continuousExecutionStatus.closing.status === 'running' && continuousExecutionTriggerProgress.closing.required > 0" class="mb-0.5">
                 <div class="flex justify-between text-gray-400 mb-0.5">
                   <span>触发进度:</span>
-                  <span class="text-white">{{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}</span>
+                  <span class="text-white">
+                    {{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}
+                    <span v-if="continuousExecutionTriggerProgress.closing.triggerSpread !== null" class="text-[#fcd535] ml-1">({{ continuousExecutionTriggerProgress.closing.triggerSpread.toFixed(2) }})</span>
+                  </span>
                 </div>
                 <div class="w-full bg-[#0d1117] rounded-full h-1.5">
                   <div
@@ -599,15 +605,7 @@
                   />
                   <span class="text-xs">启用</span>
                 </label>
-                <label :for="`ladder-autoclose-${type}-${index}`" class="flex items-center space-x-1 cursor-pointer">
-                  <input
-                    :id="`ladder-autoclose-${type}-${index}`"
-                    v-model="ladder.autoClose"
-                    type="checkbox"
-                    class="w-3.5 h-3.5 rounded border-[#2b3139] bg-[#252930] text-[#f0b90b] focus:ring-[#f0b90b]"
-                  />
-                  <span class="text-xs text-[#f0b90b]">自动平仓</span>
-                </label>
+
                 <button
                   @click="removeLadder(index)"
                   class="px-1.5 py-0.5 bg-[#f6465d] text-white rounded text-xs hover:bg-[#e03d52] transition-colors"
@@ -966,7 +964,7 @@ async function setHedgeMultiplier(m) {
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
-const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0 }, closing: { current: 0, required: 0 } })
+const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null } })
 const statusPollingInterval = ref({ opening: null, closing: null })
 
 const ladderExecutionDetails = ref({ opening: {}, closing: {} })
@@ -1047,9 +1045,9 @@ const config = ref({
   openingTriggerCheckInterval: 200, // 开仓触发器检测频率（毫秒）
   closingTriggerCheckInterval: 200, // 平仓触发器检测频率（毫秒）
   ladders: [
-    { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3, autoClose: false },
-    { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3, autoClose: false },
-    { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3, autoClose: false },
+    { enabled: true, openPrice: 3.00, threshold: 2.00, qtyLimit: 3 },
+    { enabled: true, openPrice: 3.00, threshold: 3.00, qtyLimit: 3 },
+    { enabled: false, openPrice: 3.00, threshold: 4.00, qtyLimit: 3 },
   ]
 })
 
@@ -1248,7 +1246,7 @@ watch(() => marketStore.marketData, (newData) => {
   const binanceLongValue = props.type === 'forward' ? newData.binance_bid : newData.binance_ask
 
   // Trigger count logic for opening
-  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening) {
+  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening && !continuousExecutionEnabled.value.opening) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.opening.currentLadderIndex
 
@@ -1259,7 +1257,7 @@ watch(() => marketStore.marketData, (newData) => {
       // 检查是否满足触发条件
       if (currentSpread.value >= currentLadder.openPrice) {
         triggerCount.value.opening++
-        console.log(`Opening trigger count: ${triggerCount.value.opening}/${config.value.openingSyncQty}, currentSpread=${currentSpread.value}, openPrice=${currentLadder.openPrice}, ladder=${currentLadderIdx + 1}`)
+        // trigger count logging removed for performance
 
         if (triggerCount.value.opening >= config.value.openingSyncQty) {
           // 执行当前阶梯
@@ -1273,7 +1271,7 @@ watch(() => marketStore.marketData, (newData) => {
   }
 
   // Trigger count logic for closing
-  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing) {
+  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing && !continuousExecutionEnabled.value.closing) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.closing.currentLadderIndex
 
@@ -1284,7 +1282,7 @@ watch(() => marketStore.marketData, (newData) => {
       // 检查是否满足触发条件
       if (closingSpread.value <= currentLadder.threshold) {
         triggerCount.value.closing++
-        console.log(`Closing trigger count: ${triggerCount.value.closing}/${config.value.closingSyncQty}, closingSpread=${closingSpread.value}, threshold=${currentLadder.threshold}, ladder=${currentLadderIdx + 1}`)
+        // trigger count logging removed for performance
 
         if (triggerCount.value.closing >= config.value.closingSyncQty) {
           // 执行当前阶梯
@@ -1300,34 +1298,18 @@ watch(() => marketStore.marketData, (newData) => {
 
 // Watch for account balance updates and strategy status via WebSocket
 // Optimized: Use shallow watch and early return for irrelevant messages
-watch(() => marketStore.lastMessage, (message) => {
+// Account balance updates come via lastMessage (low frequency, not strategy messages)
+watch(() => marketStore.lastMessage, (msg) => {
+  if (msg && msg.type === 'account_balance' && msg.data) {
+    handleAccountBalanceUpdate(msg.data)
+  }
+}, { deep: false })
+
+watch(() => marketStore.strategyMessage, (message) => {
   if (!message || !message.type) return
 
-  // Early return if not a relevant message type
-  const relevantTypes = [
-    'account_balance',
-    'strategy_trigger_progress',
-    'strategy_trigger_reset',
-    'strategy_position_change',
-    'strategy_execution_started',
-    'strategy_execution_completed',
-    'strategy_execution_error',
-    'strategy_order_executed',
-    'strategy_orders_filled'   // 双边成交完成立即恢复按钮，不等待整个执行流结束
-  ]
-
-  if (!relevantTypes.includes(message.type)) return
-
-  // Debug: log strategy messages
-  if (message.type.startsWith('strategy_')) {
-    console.log('[WebSocket] Received strategy message:', message.type, message.data)
-  }
-
-  // Handle different message types
+  // Handle strategy messages (routed via strategyMessage ref for performance)
   switch (message.type) {
-    case 'account_balance':
-      handleAccountBalanceUpdate(message.data)
-      break
     case 'strategy_trigger_progress':
       handleTriggerProgress(message.data)
       break
@@ -1357,9 +1339,7 @@ watch(() => marketStore.lastMessage, (message) => {
 
 // Handle strategy WebSocket events
 function handleTriggerProgress(data) {
-  console.log('[WebSocket] handleTriggerProgress called with data:', data)
-  console.log('[WebSocket] configId.value:', configId.value)
-  console.log('[WebSocket] data.strategy_id:', data.strategy_id)
+  // trigger progress debug logs removed for performance
 
   // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_opening_continuous
   // We need to check if this message is for continuous execution by checking if it ends with '_continuous'
@@ -1367,16 +1347,16 @@ function handleTriggerProgress(data) {
 
   if (isContinuousExecution) {
     // For continuous execution, accept the message (it's already filtered by user_id on backend)
-    console.log('[WebSocket] Continuous execution message accepted')
+    // continuous execution message accepted
   } else {
     // For regular execution, check strategy_id match
     if (data.strategy_id !== configId.value) {
-      console.log('[WebSocket] Strategy ID mismatch, ignoring message')
+      // strategy ID mismatch — ignored
       return
     }
   }
 
-  console.log(`[WebSocket] Trigger progress: ${data.current_count}/${data.required_count} for ${data.action}`)
+  // trigger progress log removed for performance
 
   // Check if this is for continuous execution
   const isContinuous = continuousExecutionEnabled.value[data.action]
@@ -1385,7 +1365,9 @@ function handleTriggerProgress(data) {
     // Update continuous execution trigger progress
     continuousExecutionTriggerProgress.value[data.action] = {
       current: data.current_count,
-      required: data.required_count
+      required: data.required_count,
+      triggerSpread: data.current_spread ?? null,
+      threshold: data.threshold ?? null,
     }
   } else {
     // Update regular trigger count
@@ -1398,7 +1380,7 @@ function handleTriggerProgress(data) {
 }
 
 function handleTriggerReset(data) {
-  console.log(`[WebSocket] Trigger reset for ${data.action}`)
+  // trigger reset log removed for performance
 
   // For continuous execution, strategy_id format is: {user_id}_{strategy_type}_opening_continuous
   const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
@@ -1415,7 +1397,9 @@ function handleTriggerReset(data) {
     // Reset continuous execution trigger progress
     continuousExecutionTriggerProgress.value[data.action] = {
       current: 0,
-      required: continuousExecutionTriggerProgress.value[data.action].required
+      required: continuousExecutionTriggerProgress.value[data.action].required,
+      triggerSpread: null,
+      threshold: null,
     }
   } else {
     // Reset regular trigger count
@@ -1453,7 +1437,7 @@ function handlePositionChange(data) {
     } else {
       d.status = 'running'
     }
-    console.log(`[WebSocket] Ladder ${idx} progress: ${d.currentQty}/${d.totalQty}`)
+    // ladder progress log removed for performance
   } else {
     if (data.strategy_id !== configId.value) return
   }
@@ -1511,24 +1495,10 @@ function handleExecutionCompleted(data) {
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
 
-    // 自动平仓链式触发（备用入口）
-    if (action === 'opening') {
-      const autoCloseLadders = config.value.ladders.filter(l => l.enabled && l.autoClose)
-      if (autoCloseLadders.length > 0 && !continuousExecutionEnabled.value.closing) {
-        console.log('[AutoClose] Execution completed, chaining to closing')
-        continuousExecutionEnabled.value.opening = false
-        stopStatusPolling('opening')
-        notificationStore.showStrategyNotification('开仓执行完成，自动平仓启动中...', 'success')
-        autoStartClosing()
-        return
-      }
-    }
-
     // 常规完成：释放锁
     continuousExecutionEnabled.value[action] = false
     stopStatusPolling(action)
-    const hasAutoClose = config.value.ladders.some(l => l.enabled && l.autoClose)
-    strategyStore.release(hasAutoClose ? props.type : `${props.type}_${action}`)
+    strategyStore.release(`${props.type}_${action}`)
     if (continuousExecutionStatus.value[action]) {
       continuousExecutionStatus.value[action].status = 'completed'
     }
@@ -1567,8 +1537,7 @@ function handleExecutionError(data) {
     // Update status and stop execution
     continuousExecutionEnabled.value[action] = false
     stopStatusPolling(action)
-    const _acErr = config.value.ladders.some(l => l.enabled && l.autoClose)
-    strategyStore.release(_acErr ? props.type : `${props.type}_${action}`)
+    strategyStore.release(`${props.type}_${action}`)
     if (continuousExecutionStatus.value[action]) {
       continuousExecutionStatus.value[action].status = 'failed'
     }
@@ -1609,7 +1578,7 @@ function handleOrderExecuted(data) {
       timestamp: data.timestamp || new Date().toISOString()
     })
 
-    console.log(`[WebSocket] Ladder ${idx} trade: Binance=${data.binance_filled}, MT5=${data.bybit_filled}, spread=${data.spread_at_execution}`)
+    // trade execution log removed for performance
   } else {
     if (data.strategy_id !== configId.value) return
   }
@@ -1647,31 +1616,11 @@ function handleOrdersFilled(data) {
 
   console.log(`[WebSocket] orders_filled → ${panelType} ${resolvedAction}: binance=${binance_filled} bybit=${bybit_filled}`)
 
-  // 自动平仓链式触发：开仓完成 + 存在 autoClose 阶梯 → 不释放锁，直接启动平仓
-  if (resolvedAction === 'opening') {
-    const autoCloseLadders = config.value.ladders.filter(l => l.enabled && l.autoClose)
-    if (autoCloseLadders.length > 0) {
-      console.log('[AutoClose] Opening filled, chaining to closing with', autoCloseLadders.length, 'ladders')
-      continuousExecutionEnabled.value.opening = false
-      continuousExecutionTriggerProgress.value.opening = { current: 0, required: 0 }
-      stopStatusPolling('opening')
-      notificationStore.showStrategyNotification(
-        `开仓成交完成 Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU，自动平仓启动中...`,
-        'success'
-      )
-      autoStartClosing()
-      refreshPositions()
-      return
-    }
-  }
-
   // 常规流程：释放锁、恢复按钮
   continuousExecutionEnabled.value[resolvedAction] = false
-  continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0 }
+  continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0, triggerSpread: null, threshold: null }
   stopStatusPolling(resolvedAction)
-  // 释放锁：可能是方向级锁或动作级锁
-  const hasAutoClose = config.value.ladders.some(l => l.enabled && l.autoClose)
-  strategyStore.release(hasAutoClose ? props.type : `${props.type}_${resolvedAction}`)
+  strategyStore.release(`${props.type}_${resolvedAction}`)
 
   notificationStore.showStrategyNotification(
     `${resolvedAction === 'opening' ? '开仓' : '平仓'}双边成交完成！Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU, MT5: ${bybit_filled?.toFixed ? bybit_filled.toFixed(2) : bybit_filled} XAU`,
@@ -1680,69 +1629,6 @@ function handleOrdersFilled(data) {
 
   // 刷新持仓数据
   refreshPositions()
-}
-
-async function autoStartClosing() {
-  try {
-    const closingLadders = config.value.ladders
-      .filter(l => l.enabled && l.autoClose)
-      .map(ladder => ({
-        enabled: true,
-        closing_spread: ladder.threshold,
-        total_qty: ladder.qtyLimit,
-        closing_trigger_count: config.value.closingSyncQty || 1
-      }))
-
-    if (closingLadders.length === 0) {
-      console.warn('[AutoClose] No autoClose ladders found')
-      const _ac = config.value.ladders.some(l => l.enabled && l.autoClose)
-      strategyStore.release(_ac ? props.type : `${props.type}_opening`)
-      return
-    }
-
-    const binanceAccount = accountsData.value.accounts.find(a => a.platform_id === PlatformId.BINANCE)
-    const hedgeBId = pairBinding.value?.account_b_id
-    const bybitAccount = hedgeBId
-      ? accountsData.value.accounts.find(a => a.account_id === hedgeBId)
-      : accountsData.value.accounts.find(a => a.platform_id === PlatformId.BYBIT && a.is_active !== false)
-
-    const requestData = {
-      binance_account_id: binanceAccount.account_id,
-      bybit_account_id: bybitAccount.account_id,
-      pair_code: currentPair.value,
-      closing_m_coin: config.value.closingMCoin || 5,
-      trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000,
-      ladders: closingLadders
-    }
-
-    const endpoint = `/api/v1/strategies/close/${props.type}/continuous`
-    console.log('[AutoClose] Sending closing request:', requestData)
-    const response = await api.post(endpoint, requestData)
-
-    if (response.data.task_id) {
-      continuousExecutionEnabled.value.closing = true
-      continuousExecutionTaskId.value.closing = response.data.task_id
-      continuousExecutionTriggerProgress.value.closing = {
-        current: 0,
-        required: config.value.closingSyncQty || 1
-      }
-      startStatusPolling('closing')
-      notificationStore.showStrategyNotification('开仓完成，自动平仓已启动', 'success')
-    } else {
-      console.error('[AutoClose] No task_id in response')
-      const _ac2 = config.value.ladders.some(l => l.enabled && l.autoClose)
-      strategyStore.release(_ac2 ? props.type : `${props.type}_opening`)
-      notificationStore.showStrategyNotification('自动平仓启动失败：未收到任务ID', 'error')
-    }
-  } catch (error) {
-    console.error('[AutoClose] Failed to start closing:', error)
-    const _ac3 = config.value.ladders.some(l => l.enabled && l.autoClose)
-    strategyStore.release(_ac3 ? props.type : `${props.type}_opening`)
-    notificationStore.showStrategyNotification(
-      '自动平仓启动失败: ' + (error.response?.data?.detail || error.message),
-      'error'
-    )
-  }
 }
 
 function handleAccountBalanceUpdate(data) {
@@ -2062,21 +1948,21 @@ const toggleOpeningExecution = debounce(async function() {
 }, 500)
 
 const toggleClosingExecution = debounce(async function() {
-  console.log('[toggleClosingExecution] Called, current state:', continuousExecutionEnabled.value.closing)
+  // toggleClosingExecution called
 
   if (continuousExecutionEnabled.value.closing) {
     // Stop execution
-    console.log('[toggleClosingExecution] Stopping execution')
+    // stopping closing execution
     await stopContinuousExecution('closing')
   } else {
     // Start execution
-    console.log('[toggleClosingExecution] Starting execution')
+    // starting closing execution
     // Clear previous errors
     validationErrors.value = []
 
     // Validate accounts
     const accountValidation = validateAccountsForExecution()
-    console.log('[toggleClosingExecution] Account validation:', accountValidation)
+    // account validation checked
     if (!accountValidation.valid) {
       validationErrors.value = [accountValidation.message]
       return
@@ -2084,7 +1970,7 @@ const toggleClosingExecution = debounce(async function() {
 
     // Validate ladder configuration
     const configValidation = validateLadderConfig('closing')
-    console.log('[toggleClosingExecution] Config validation:', configValidation)
+    // config validation checked
     if (!configValidation.valid) {
       validationErrors.value = configValidation.errors
       return
@@ -2093,7 +1979,7 @@ const toggleClosingExecution = debounce(async function() {
     // Start continuous execution — backend continuous_executor handles spread
     // condition checking (Step 3 trigger count) and position checks internally.
     // No client-side spread/position pre-check needed.
-    console.log('[toggleClosingExecution] All validations passed, starting continuous execution')
+    // all validations passed
     await startContinuousExecution('closing')
   }
 }, 500)
@@ -2696,6 +2582,21 @@ function validateLadderConfig(action) {
     }
   })
 
+  // 跨梯度校验：开仓差值必须严格递增
+  if (action === 'opening' && enabledLadders.length > 1) {
+    for (let i = 1; i < enabledLadders.length; i++) {
+      const prevIdx = config.value.ladders.indexOf(enabledLadders[i - 1]) + 1
+      const currIdx = config.value.ladders.indexOf(enabledLadders[i]) + 1
+      const prevPrice = enabledLadders[i - 1].openPrice
+      const currPrice = enabledLadders[i].openPrice
+      if (currPrice !== null && currPrice !== undefined && prevPrice !== null && prevPrice !== undefined) {
+        if (currPrice <= prevPrice) {
+          errors.push()
+        }
+      }
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors
@@ -2708,10 +2609,8 @@ function formatNumber(num) {
 
 // Continuous execution methods
 async function startContinuousExecution(action) {
-  // ── 全局策略互斥锁 ──────────────────────────────────────────────────────
-  // 同一时刻只允许一个策略运行（正向开仓/正向平仓/反向开仓/反向平仓互斥）
-  const hasAutoClose = action === 'opening' && config.value.ladders.some(l => l.enabled && l.autoClose)
-  const strategyKey = hasAutoClose ? props.type : `${props.type}_${action}`
+  // ── 并发策略锁：同方向开平可共存，跨方向互斥 ──
+  const strategyKey = `${props.type}_${action}`
   if (!strategyStore.acquire(strategyKey)) {
     const running = strategyStore.activeStrategy
     notificationStore.showStrategyNotification(
@@ -2723,16 +2622,14 @@ async function startContinuousExecution(action) {
   // ────────────────────────────────────────────────────────────────────────
 
   try {
-    console.log('[DEBUG] startContinuousExecution called, action:', action)
-    console.log('[DEBUG] config.value:', config.value)
-    console.log('[DEBUG] accountsData.value:', accountsData.value)
+    // DEBUG logs removed for performance
 
     // Validate configuration
     const validation = validateLadderConfig(action)
-    console.log('[DEBUG] Ladder validation result:', validation)
+    // validation debug removed
     if (!validation.valid) {
       validationErrors.value = validation.errors
-      console.error('[DEBUG] Ladder validation failed:', validation.errors)
+      // validation failed — errors shown in UI
       notificationStore.showStrategyNotification('配置验证失败', 'error')
       strategyStore.release(strategyKey)  // 验证失败，释放锁
       return
@@ -2740,7 +2637,7 @@ async function startContinuousExecution(action) {
 
     // Validate accounts
     const accountValidation = validateAccountsForExecution()
-    console.log('[DEBUG] Account validation result:', accountValidation)
+    // account validation debug removed
     if (!accountValidation.valid) {
       notificationStore.showStrategyNotification(accountValidation.message, 'error')
       strategyStore.release(strategyKey)  // 账户验证失败，释放锁
@@ -2752,8 +2649,7 @@ async function startContinuousExecution(action) {
     const bybitMT5Account = hedgeBId
       ? accountsData.value.accounts.find(a => a.account_id === hedgeBId)
       : accountsData.value.accounts.find(a => a.platform_id === PlatformId.BYBIT && a.is_active !== false)
-    console.log('[DEBUG] Binance account:', binanceAccount)
-    console.log('[DEBUG] Bybit account:', bybitMT5Account)
+    // account debug removed
 
     // Prepare ladder configurations
     const ladders = config.value.ladders
@@ -2767,10 +2663,10 @@ async function startContinuousExecution(action) {
         closing_trigger_count: config.value.closingSyncQty || 1
       }))
 
-    console.log('[DEBUG] Filtered ladders:', ladders)
+    // filtered ladders debug removed
 
     if (ladders.length === 0) {
-      console.error('[DEBUG] No enabled ladders found!')
+      // no enabled ladders
       notificationStore.showStrategyNotification('没有启用的梯度配置', 'error')
       strategyStore.release(strategyKey)  // 无梯度配置，释放锁
       return
@@ -2794,23 +2690,71 @@ async function startContinuousExecution(action) {
       endpoint = `/api/v1/strategies/close/${props.type}/continuous`
     }
 
-    console.log('Sending continuous execution request:', { endpoint, requestData })
+    // sending continuous execution request
     const response = await api.post(endpoint, requestData)
-    console.log('Continuous execution response:', response.data)
+    // continuous execution response received
 
     if (response.data.task_id) {
       continuousExecutionTaskId.value[action] = response.data.task_id
       continuousExecutionEnabled.value[action] = true
       // 锁已在 acquire 时设置，任务启动成功，保持锁直到 stop/complete/fail
 
+      // ── 并发开平仓：开仓启动成功后自动启动平仓 ──
+      if (action === 'opening' && !continuousExecutionEnabled.value.closing) {
+        const closingLadders = config.value.ladders
+          .filter(l => l.enabled && l.threshold > 0)
+          .map(ladder => ({
+            enabled: true,
+            closing_spread: ladder.threshold,
+            total_qty: ladder.qtyLimit,
+            closing_trigger_count: config.value.closingSyncQty || 1
+          }))
+        if (closingLadders.length > 0) {
+          const closingKey = `${props.type}_closing`
+          if (strategyStore.acquire(closingKey)) {
+            try {
+              const closingReq = {
+                binance_account_id: binanceAccount.account_id,
+                bybit_account_id: bybitMT5Account.account_id,
+                pair_code: currentPair.value,
+                closing_m_coin: config.value.closingMCoin || 5,
+                trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000,
+                ladders: closingLadders
+              }
+              const closingEndpoint = `/api/v1/strategies/close/${props.type}/continuous`
+              const closingResp = await api.post(closingEndpoint, closingReq)
+              if (closingResp.data.task_id) {
+                continuousExecutionEnabled.value.closing = true
+                continuousExecutionTaskId.value.closing = closingResp.data.task_id
+                continuousExecutionTriggerProgress.value.closing = {
+                  current: 0,
+                  required: config.value.closingSyncQty || 1,
+                  triggerSpread: null,
+                  threshold: null
+                }
+                startStatusPolling('closing')
+                // closing auto-started alongside opening
+              } else {
+                strategyStore.release(closingKey)
+              }
+            } catch (closingErr) {
+              console.error('[Concurrent] Auto-start closing failed:', closingErr)
+              strategyStore.release(closingKey)
+            }
+          }
+        }
+      }
+
       // Initialize trigger progress
       const triggerCount = action === 'opening' ? config.value.openingSyncQty : config.value.closingSyncQty
       continuousExecutionTriggerProgress.value[action] = {
         current: 0,
-        required: triggerCount || 1
+        required: triggerCount || 1,
+        triggerSpread: null,
+        threshold: null
       }
 
-      console.log('Task ID received:', response.data.task_id)
+      // task ID received
 
       // Start polling for status
       startStatusPolling(action)
@@ -2832,8 +2776,7 @@ async function startContinuousExecution(action) {
 async function stopContinuousExecution(action) {
   try {
     if (!continuousExecutionTaskId.value[action]) {
-      const _acEarly = config.value.ladders.some(l => l.enabled && l.autoClose)
-      strategyStore.release(_acEarly ? props.type : `${props.type}_${action}`)
+      strategyStore.release(`${props.type}_${action}`)
       return
     }
 
@@ -2841,10 +2784,9 @@ async function stopContinuousExecution(action) {
 
     continuousExecutionEnabled.value[action] = false
     continuousExecutionStatus.value[action] = null  // Clear status to hide the status display
-    continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0 }  // Reset trigger progress
+    continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0, triggerSpread: null, threshold: null }  // Reset trigger progress
     stopStatusPolling(action)
-    const _acStop = config.value.ladders.some(l => l.enabled && l.autoClose)
-    strategyStore.release(_acStop ? props.type : `${props.type}_${action}`)
+    strategyStore.release(`${props.type}_${action}`)
 
     // Clear ladder detail on active stop
     ladderExecutionDetails.value[action] = {}
@@ -2856,8 +2798,7 @@ async function stopContinuousExecution(action) {
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`停止连续执行失败: ${errorMsg}`, 'error')
     // 即使停止失败也释放锁，防止 UI 永久卡死
-    const _acCatch = config.value.ladders.some(l => l.enabled && l.autoClose)
-    strategyStore.release(_acCatch ? props.type : `${props.type}_${action}`)
+    strategyStore.release(`${props.type}_${action}`)
   }
 }
 
@@ -2868,7 +2809,7 @@ function startStatusPolling(action) {
 
   statusPollingInterval.value[action] = setInterval(async () => {
     await fetchExecutionStatus(action)
-  }, 5000) // Poll every 5 seconds (降低频率，减少数据库压力)
+  }, 30000) // Poll every 30s as WS fallback (主要靠 WebSocket 推送状态)
 }
 
 function stopStatusPolling(action) {
@@ -2893,8 +2834,7 @@ async function fetchExecutionStatus(action) {
     if (taskStatus.status === 'completed' || taskStatus.status === 'failed' || taskStatus.status === 'cancelled') {
       continuousExecutionEnabled.value[action] = false
       stopStatusPolling(action)
-      const _acPoll = config.value.ladders.some(l => l.enabled && l.autoClose)
-      strategyStore.release(_acPoll ? props.type : `${props.type}_${action}`)
+      strategyStore.release(`${props.type}_${action}`)
 
       if (taskStatus.status === 'completed') {
         notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
@@ -2909,7 +2849,7 @@ async function fetchExecutionStatus(action) {
       clearInterval(statusPollingInterval.value[action])
       statusPollingInterval.value[action] = setInterval(async () => {
         await fetchExecutionStatus(action)
-      }, 10000) // 失败后改为10秒轮询
+      }, 60000) // 失败后改为60秒轮询
     }
   }
 }
@@ -2921,7 +2861,6 @@ onUnmounted(() => {
   // 组件卸载时释放该 Panel 持有的策略锁（防止导航切换后锁残留）
   strategyStore.release(`${props.type}_opening`)
   strategyStore.release(`${props.type}_closing`)
-  strategyStore.release(props.type)
 })
 </script>
 

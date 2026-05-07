@@ -162,8 +162,21 @@ class ContinuousStrategyExecutor:
             logger.info("All ladders completed successfully")
             return {'success': True, 'message': 'All ladders completed'}
 
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (reverse_opening)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_opening')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in reverse opening continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_opening')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
@@ -653,6 +666,10 @@ class ContinuousStrategyExecutor:
                 # Safe exit point 1: Binance order cancelled — no single-leg risk
                 if self.stop_requested:
                     logger.info(f"[GRACEFUL STOP] Stop requested — exiting after Binance cancel (safe, no single-leg)")
+                    try:
+                        await self._push_stop_confirmed(strategy_type)
+                    except Exception:
+                        pass
                     self.is_running = False
                     break
 
@@ -764,6 +781,10 @@ class ContinuousStrategyExecutor:
             # Safe exit point 2: Both legs filled — no single-leg risk
             if self.stop_requested:
                 logger.info(f"[GRACEFUL STOP] Stop requested — exiting after dual-leg fill (safe, binance={binance_filled} bybit={exec_result.get('bybit_filled_qty', 0)})")
+                try:
+                    await self._push_stop_confirmed(strategy_type)
+                except Exception:
+                    pass
                 self.is_running = False
                 break
 
@@ -1134,6 +1155,17 @@ class ContinuousStrategyExecutor:
         except Exception as e:
             logger.debug(f"[DelayedZeroSnapshot] error: {e}")
 
+
+
+    async def _push_stop_confirmed(self, strategy_type: str):
+        if self.user_id:
+            action = 'opening' if 'opening' in strategy_type else 'closing'
+            await status_pusher.push_custom_event(
+                self.strategy_id,
+                'strategy_stop_confirmed',
+                {'action': action, 'strategy_type': strategy_type, 'reason': 'user_stopped'},
+                self.user_id
+            )
 
     async def _snapshot_positions(
         self,
@@ -1554,8 +1586,21 @@ class ContinuousStrategyExecutor:
             logger.info("All ladders completed successfully")
             return {'success': True, 'message': 'All ladders completed'}
 
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (forward_opening)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_opening')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in forward opening continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_opening')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
@@ -1620,8 +1665,21 @@ class ContinuousStrategyExecutor:
             await self._push_execution_completed('reverse_closing')
             return {'success': True, 'message': 'All ladders completed'}
 
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (reverse_closing)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_closing')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in reverse closing continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_closing')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
@@ -1686,8 +1744,21 @@ class ContinuousStrategyExecutor:
             await self._push_execution_completed('forward_closing')
             return {'success': True, 'message': 'All ladders completed'}
 
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (forward_closing)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_closing')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in forward closing continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_closing')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
