@@ -694,8 +694,8 @@ watch(alertPairCode, () => {
 const config = ref({
   openingMCoin: 5,
   closingMCoin: 5,
-  openingEnabled: loadEnabledState(STORAGE_KEY_OPENING.value, false),
-  closingEnabled: loadEnabledState(STORAGE_KEY_CLOSING.value, false),
+  openingEnabled: false,  // Always start disabled — old auto-trigger removed
+  closingEnabled: false,  // Always start disabled — old auto-trigger removed
   openingSyncQty: 3,
   closingSyncQty: 3,
   openingTriggerCheckInterval: 200, // 开仓触发器检测频率（毫秒）
@@ -803,13 +803,14 @@ async function loadConfigFromDB() {
       config.value.closingTriggerCheckInterval = data.trigger_check_interval * 1000
     }
 
-    // 保留策略启用状态（如果数据库中有保存）
-    if (data.opening_enabled !== undefined) {
-      config.value.openingEnabled = data.opening_enabled
-    }
-    if (data.closing_enabled !== undefined) {
-      config.value.closingEnabled = data.closing_enabled
-    }
+    // [DISABLED] Don't restore opening/closing enabled from DB
+    // Old auto-trigger removed — continuous execution mode handles this via buttons
+    // if (data.opening_enabled !== undefined) {
+    //   config.value.openingEnabled = data.opening_enabled
+    // }
+    // if (data.closing_enabled !== undefined) {
+    //   config.value.closingEnabled = data.closing_enabled
+    // }
 
     if (data.ladders && data.ladders.length > 0) {
       config.value.ladders = data.ladders
@@ -838,9 +839,9 @@ watch(() => authStore.user?.user_id, async (newUid, oldUid) => {
   accountsData.value = null
   ladderFailureCounts.value = { opening: {}, closing: {} }
   triggerCount.value = { opening: 0, closing: 0 }
-  // 2. Re-read new user's persisted state from (now user-scoped) localStorage
-  config.value.openingEnabled = loadEnabledState(STORAGE_KEY_OPENING.value, false)
-  config.value.closingEnabled = loadEnabledState(STORAGE_KEY_CLOSING.value, false)
+  // 2. Always start disabled on user switch — old auto-trigger removed
+  config.value.openingEnabled = false
+  config.value.closingEnabled = false
   ladderProgress.value = loadLadderProgress()
   // 3. Reconnect WebSocket with new user's token so pushes target the new user
   try {
@@ -891,8 +892,9 @@ watch(() => marketStore.marketData, (newData) => {
   // binance做多值: forward=binance_bid, reverse=binance_ask
   const binanceLongValue = props.type === 'forward' ? newData.binance_bid : newData.binance_ask
 
-  // Trigger count logic for opening
-  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening) {
+  // [DISABLED] Old single-shot auto-trigger — replaced by continuous execution mode.
+  // Kept for reference but never fires: guard always skips.
+  if (false && config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.opening.currentLadderIndex
 
@@ -916,8 +918,8 @@ watch(() => marketStore.marketData, (newData) => {
     }
   }
 
-  // Trigger count logic for closing
-  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing) {
+  // [DISABLED] Old single-shot auto-trigger — replaced by continuous execution mode.
+  if (false && config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing) {
     const enabledLadders = config.value.ladders.filter(l => l.enabled)
     const currentLadderIdx = ladderProgress.value.closing.currentLadderIndex
 

@@ -90,6 +90,72 @@ class ContinuousStrategyExecutor:
         self.trigger_mgr: Optional[TriggerCountManager] = None
         self.user_id: Optional[str] = None
 
+    # ----- MT5 first-trade preflight check -----
+    # When MT5 broker reopens (weekend/daily break), QUOTE feed comes back 3-5 min
+    # BEFORE the TRADE engine accepts orders. During that window, the strategy
+    # sees a valid spread and fires Binance (24/7) which fills, then MT5 rejects
+    # with retcode=10018 -> single leg.
+    #
+    # Fix: query MT5 symbol_info.trade_mode (must == 4 / TRADE_FULL) on the FIRST
+    # trade after a >2h idle gap. Subsequent trades short-circuit on the cache.
+    _mt5_trade_mode_verified_at: dict = {}
+    MT5_PREFLIGHT_TTL_S: float = 2 * 3600.0
+
+    async def _ensure_mt5_trade_mode(self, bybit_account, sym_b: str) -> bool:
+        """Pre-trade gate: only the FIRST trade after >2h idle actually probes
+        MT5 trade_mode. Subsequent trades short-circuit on cached verification."""
+        import time as _t, os, httpx
+        from app.services.order_executor_v2 import _get_trading_bridge_url
+
+        try:
+            bridge_url = _get_trading_bridge_url(str(bybit_account.account_id))
+        except Exception as e:
+            logger.warning(f"[MT5_PREFLIGHT] bridge resolve failed: {e} - refusing trade")
+            return False
+
+        key = (bridge_url, sym_b)
+        now = _t.time()
+        last_ok = ContinuousStrategyExecutor._mt5_trade_mode_verified_at.get(key)
+        if last_ok is not None and (now - last_ok) < self.MT5_PREFLIGHT_TTL_S:
+            return True
+
+        api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", ""))
+        headers = {"X-Api-Key": api_key} if api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get(f"{bridge_url}/mt5/symbol_info/{sym_b}", headers=headers)
+            if r.status_code != 200:
+                logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} http={r.status_code} - refusing first trade")
+                return False
+            info = r.json()
+            tmode_raw = info.get("trade_mode")
+            if tmode_raw is None:
+                logger.info(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} old bridge (no trade_mode field) - proceeding optimistically")
+                ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
+                return True
+            tmode = int(tmode_raw)
+            if tmode == 4:
+                ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
+                logger.info(f"[MT5_PREFLIGHT] OK {sym_b}@{bridge_url} trade_mode=FULL verified, next probe in {int(self.MT5_PREFLIGHT_TTL_S/60)}min unless idle")
+                return True
+            mode_name = {0:"DISABLED",1:"LONGONLY",2:"SHORTONLY",3:"CLOSEONLY",4:"FULL"}.get(tmode, str(tmode))
+            logger.warning(f"[MT5_PREFLIGHT] BLOCK {sym_b}@{bridge_url} trade_mode={mode_name} ({tmode}) - MT5 broker not fully open yet; deferring iter")
+            return False
+        except Exception as e:
+            logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} probe error: {e} - refusing first trade (safe default)")
+            return False
+
+    def _mt5_preflight_refresh(self, bybit_account, sym_b: str) -> None:
+        """Touch verified-at timestamp on every successful round-trip so cache
+        stays warm during active trading; only goes cold during real idle."""
+        import time as _t
+        try:
+            from app.services.order_executor_v2 import _get_trading_bridge_url
+            bridge_url = _get_trading_bridge_url(str(bybit_account.account_id))
+            ContinuousStrategyExecutor._mt5_trade_mode_verified_at[(bridge_url, sym_b)] = _t.time()
+        except Exception:
+            pass
+
     async def execute_reverse_opening_continuous(
         self,
         binance_account: Account,
@@ -132,38 +198,28 @@ class ContinuousStrategyExecutor:
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
-            # Execute each ladder sequentially
-            for ladder_idx, ladder in enumerate(ladders):
-                if not ladder.enabled:
-                    logger.info(f"Ladder {ladder_idx} disabled, skipping")
-                    continue
-
-                self.current_ladder_index = ladder_idx
-                logger.info(f"Executing ladder {ladder_idx}")
-
-                # Execute ladder with continuous logic
-                result = await self._execute_ladder(
-                    ladder_idx=ladder_idx,
-                    ladder=ladder,
-                    strategy_type='reverse_opening',
-                    binance_account=binance_account,
-                    bybit_account=bybit_account,
-                    order_qty_limit=opening_m_coin
-                )
-
-                if not result['success']:
-                    logger.error(f"Ladder {ladder_idx} failed: {result.get('error')}")
-                    return {
-                        'success': False,
-                        'error': result.get('error'),
-                        'ladder_index': ladder_idx
-                    }
-
-            logger.info("All ladders completed successfully")
-            return {'success': True, 'message': 'All ladders completed'}
-
+            return await self._execute_continuous_v2(
+                strategy_type='reverse_opening',
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                order_qty_limit=opening_m_coin,
+            )
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (reverse_opening)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_opening')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in reverse opening continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_opening')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
@@ -358,9 +414,22 @@ class ContinuousStrategyExecutor:
                     )
                     try:
                         open_orders = await _cancel_client.get_open_orders(symbol=sym_a)
-                        if open_orders and len(open_orders) > 0:
-                            await _cancel_client.cancel_all_orders(sym_a)
-                            logger.warning(f"[ladder={ladder_idx}] Cancelled {len(open_orders)} lingering open orders on {sym_a} before new order")
+                        # SAFETY: only cancel orders this strategy itself placed.
+                        # Manual emergency orders carry clientOrderId prefix "m-" and MUST
+                        # survive — they may only be cancelled via the explicit Cancel-All
+                        # button. Strategy orders carry prefix "s-".
+                        own = [o for o in (open_orders or []) if str(o.get("clientOrderId", "")).startswith("s-")]
+                        kept = (len(open_orders) - len(own)) if open_orders else 0
+                        for od in own:
+                            try:
+                                await _cancel_client.cancel_order(sym_a, od["orderId"])
+                            except Exception as _ce:
+                                logger.debug(f"[ladder={ladder_idx}] cancel one lingering failed: {_ce}")
+                        if own or kept:
+                            logger.warning(
+                                f"[ladder={ladder_idx}] Pre-order cleanup: cancelled {len(own)} OWN strategy orders, "
+                                f"kept {kept} non-strategy (e.g. manual emergency) orders on {sym_a}"
+                            )
                     finally:
                         await _cancel_client.close()
                 elif binance_account.platform_id == 2:
@@ -370,12 +439,40 @@ class ContinuousStrategyExecutor:
                         proxy_url=build_proxy_url(binance_account.proxy_config),
                     )
                     try:
-                        resp = await _cancel_client.cancel_all_orders(category='linear', symbol=sym_a)
-                        if resp: logger.warning(f"[ladder={ladder_idx}] Cancelled lingering Bybit orders on {sym_a}")
+                        # SAFETY: mirror Binance behavior — only cancel orders carrying
+                        # the strategy "s-" clientOrderId / orderLinkId prefix. Manual
+                        # emergency orders use "m-" and must be preserved.
+                        bb_open = await _cancel_client.get_open_orders(category='linear', symbol=sym_a)
+                        bb_list = (bb_open or {}).get('list', []) if isinstance(bb_open, dict) else (bb_open or [])
+                        bb_own = [o for o in bb_list if str(o.get('orderLinkId', '') or o.get('clientOrderId', '')).startswith('s-')]
+                        bb_kept = max(0, len(bb_list) - len(bb_own))
+                        for od in bb_own:
+                            try:
+                                _oid = od.get('orderId') or od.get('order_id')
+                                if _oid:
+                                    await _cancel_client.cancel_order(category='linear', symbol=sym_a, order_id=_oid)
+                            except Exception as _ce:
+                                logger.debug(f"[ladder={ladder_idx}] Bybit cancel one failed: {_ce}")
+                        if bb_own or bb_kept:
+                            logger.warning(
+                                f"[ladder={ladder_idx}] Pre-order Bybit cleanup: cancelled {len(bb_own)} OWN, "
+                                f"kept {bb_kept} non-strategy (manual) orders on {sym_a}"
+                            )
                     finally:
                         await _cancel_client.close()
             except Exception as e:
                 logger.warning(f"[ladder={ladder_idx}] Failed to cancel lingering orders: {e}")
+
+            # Step 7.5: MT5 first-trade preflight (probes only after >2h idle).
+            # Active trading short-circuits this via cached verified-at (<1us).
+            _sym_a_pf, _sym_b_pf, _ = _get_pair_config(self.pair_code)
+            if not await self._ensure_mt5_trade_mode(bybit_account, _sym_b_pf):
+                logger.warning(
+                    f"[ladder={ladder_idx}] MT5 preflight refused - deferring iter "
+                    f"(no A-side order placed; will retry next trigger cycle)"
+                )
+                await asyncio.sleep(self.api_spam_prevention_delay)
+                continue
 
             # Step 8: Execute order
             logger.info(f"[ladder={ladder_idx}] Executing {strategy_type}: {order_qty} units")
@@ -390,11 +487,52 @@ class ContinuousStrategyExecutor:
                     spread_threshold,
                 )
             except Exception as e:
-                logger.error(f"[ladder={ladder_idx}] Exception executing order: {e}")
-                self.trigger_mgr.reset()
-                await self._push_trigger_reset(ladder_idx, strategy_type)
-                await asyncio.sleep(self.api_spam_prevention_delay)
-                continue
+                logger.error(f"[ladder={ladder_idx}] CRITICAL: Exception executing order: {e}", exc_info=True)
+                # SAFETY: Exception after A-side fill = unhedged position.
+                # Cancel any open orders, send emergency alert, and HALT (never continue).
+                try:
+                    sym_a_err, _, _ = _get_pair_config(self.pair_code)
+                    from app.core.proxy_utils import build_proxy_url as _bpu_err
+                    if binance_account.platform_id == 1:
+                        from app.services.binance_client import BinanceFuturesClient as _BFC_err
+                        _err_client = _BFC_err(binance_account.api_key, binance_account.api_secret,
+                                               proxy_url=_bpu_err(binance_account.proxy_config))
+                        _err_open = await _err_client.get_open_orders(symbol=sym_a_err)
+                        # POST-CRASH SAFETY: even in panic cleanup, do NOT cancel manual
+                        # emergency orders ("m-"). User considers them sacred — only
+                        # explicit Cancel-All button may remove them.
+                        if _err_open:
+                            _err_own = [o for o in _err_open if str(o.get("clientOrderId", "")).startswith("s-")]
+                            _err_kept = len(_err_open) - len(_err_own)
+                            for _eo in _err_own:
+                                try:
+                                    await _err_client.cancel_order(sym_a_err, _eo["orderId"])
+                                except Exception:
+                                    pass
+                            logger.warning(
+                                f"[ladder={ladder_idx}] Post-crash cleanup: cancelled {len(_err_own)} OWN strategy orders, "
+                                f"kept {_err_kept} manual orders"
+                            )
+                        await _err_client.close()
+                except Exception as _cleanup_err:
+                    logger.error(f"[ladder={ladder_idx}] Crash cleanup failed: {_cleanup_err}")
+                try:
+                    await self._send_single_leg_alert(
+                        strategy_type=strategy_type,
+                        exec_result={"single_leg_details": {
+                            "binance_filled": order_qty, "bybit_filled": 0,
+                            "unfilled_qty": order_qty,
+                            "error": f"execution exception: {e}"
+                        }}
+                    )
+                except Exception:
+                    pass
+                logger.error(f"[ladder={ladder_idx}] HALTING ladder loop after execution exception to prevent cascading single-leg")
+                return {
+                    "success": False,
+                    "error": f"Execution exception: {e}",
+                    "halted_after_crash": True,
+                }
 
             logger.info(f"[ladder={ladder_idx}] Result — success={exec_result.get('success')}, binance_filled={exec_result.get('binance_filled_qty')}, bybit_filled={exec_result.get('bybit_filled_qty')}")
 
@@ -490,6 +628,11 @@ class ContinuousStrategyExecutor:
                     except Exception as _retry_e:
                         logger.error(f"[SINGLE_LEG_RETRY] B-side retry #{_retry_i+1} exception: {_retry_e}")
 
+            # On successful round-trip, keep preflight cache warm.
+            if exec_result.get('success'):
+                _sym_a_rf, _sym_b_rf, _ = _get_pair_config(self.pair_code)
+                self._mt5_preflight_refresh(bybit_account, _sym_b_rf)
+
             if not exec_result['success']:
                 logger.error(f"Execution failed: {exec_result.get('error')}")
 
@@ -512,7 +655,11 @@ class ContinuousStrategyExecutor:
                         )
                     except Exception as _e:
                         logger.warning(f"[BUTTON_RESTORE] Failed to send position_exhausted restore: {_e}")
-                    break
+                    # FIX: Return position_exhausted flag so V2 outer loop exits the entire strategy.
+                    # Without this, V2 loop sees success and re-enters the same ladder, creating
+                    # a tight error loop (zombie strategy). MT5 has no positions to close — no
+                    # ladder can succeed, so the entire closing strategy must terminate.
+                    return {'success': True, 'position_exhausted': True, 'message': 'MT5 positions exhausted'}
 
                 # CRITICAL: Binance API outage detected — stop strategy and send emergency alert
                 if exec_result.get('binance_api_error'):
@@ -656,6 +803,7 @@ class ContinuousStrategyExecutor:
                 if self.stop_requested:
                     logger.info(f"[GRACEFUL STOP] Stop requested — exiting after Binance cancel (safe, no single-leg)")
                     self.is_running = False
+                    await self._push_stop_confirmed(strategy_type)
                     break
 
                 # Spread chase: if spread still meets threshold, skip trigger re-accumulation
@@ -753,7 +901,7 @@ class ContinuousStrategyExecutor:
             logger.info(f"Position updated: {'+'if is_opening else '-'}{filled_qty}")
 
             # Step 11: Push status updates
-            await self._push_position_change(ladder_idx, filled_qty, position_info, ladder.total_qty)
+            asyncio.create_task(self._push_position_change(ladder_idx, filled_qty, position_info, ladder.total_qty))
             await self._push_order_executed(ladder_idx, exec_result, current_spread)
 
             # Step 12: Reset triggers after successful execution
@@ -767,6 +915,7 @@ class ContinuousStrategyExecutor:
             if self.stop_requested:
                 logger.info(f"[GRACEFUL STOP] Stop requested — exiting after dual-leg fill (safe, binance={binance_filled} bybit={exec_result.get('bybit_filled_qty', 0)})")
                 self.is_running = False
+                await self._push_stop_confirmed(strategy_type)
                 break
 
             # ── 目标达成立即退出，不等待 api_spam_prevention_delay ──────────────────
@@ -787,6 +936,129 @@ class ContinuousStrategyExecutor:
 
         logger.info(f"[ladder={ladder_idx}] Loop exited after {loop_count} iterations. pos={current_position}/{ladder.total_qty} stop_req={self.stop_requested} is_running={self.is_running}")
         return {'success': True}
+
+    async def _execute_continuous_v2(
+        self,
+        strategy_type: str,
+        binance_account,
+        bybit_account,
+        ladders,
+        order_qty_limit: float,
+    ):
+        """Position-based continuous execution with dynamic ladder selection.
+
+        Replaces the sequential for-loop through ladders. Runs a SINGLE loop that:
+        1. Reads global position
+        2. Reads current spread
+        3. Uses LadderRangeMapper to determine active ladder + remaining capacity
+        4. Calls _execute_ladder() with a synthetic config for the active ladder
+        5. Re-evaluates after each ladder completion
+        """
+        from app.services.ladder_range_mapper import LadderRangeMapper
+        mapper = LadderRangeMapper(ladders)
+        is_opening = 'opening' in strategy_type
+
+        logger.info(
+            f"[V2] Starting position-based execution: strategy={self.strategy_id} "
+            f"type={strategy_type} ladders={len(ladders)} capacity={mapper.get_global_capacity()}"
+        )
+
+        while self.is_running and not self.stop_requested:
+            global_pos = self.position_mgr.get_global_position(
+                self.strategy_id, strategy_type
+            )
+
+            try:
+                current_spread = await self._get_current_spread(strategy_type)
+            except Exception as e:
+                logger.warning(f"[V2] Failed to get spread: {e}")
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
+
+            if is_opening:
+                active = mapper.get_active_ladder_for_opening(global_pos, current_spread)
+            else:
+                held_pos = mapper.get_global_capacity() - global_pos
+                active = mapper.get_active_ladder_for_closing(held_pos, current_spread)
+
+            if active is None:
+                if is_opening and global_pos >= mapper.get_global_capacity():
+                    logger.info(f"[V2] All ladders filled: pos={global_pos}/{mapper.get_global_capacity()}")
+                    break
+                if not is_opening and global_pos >= mapper.get_global_capacity():
+                    logger.info(f"[V2] All positions closed: executed={global_pos}/{mapper.get_global_capacity()}")
+                    break
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
+
+            if is_opening:
+                logger.info(
+                    f"[V2] Active ladder {active.index}: pos={global_pos}, "
+                    f"spread={current_spread:.3f}, remaining={active.remaining_capacity}, "
+                    f"range=[{active.range_lower}, {active.range_upper}]"
+                )
+            else:
+                logger.info(
+                    f"[V2] Active ladder {active.index}: held={mapper.get_global_capacity() - global_pos}, executed={global_pos}, "
+                    f"spread={current_spread:.3f}, remaining={active.remaining_capacity}, "
+                    f"range=[{active.range_lower}, {active.range_upper}]"
+                )
+
+            iter_config = LadderConfig(
+                enabled=True,
+                opening_spread=active.config.opening_spread,
+                closing_spread=active.config.closing_spread,
+                total_qty=active.remaining_capacity,
+                opening_trigger_count=active.config.opening_trigger_count,
+                closing_trigger_count=active.config.closing_trigger_count,
+            )
+
+            self.current_ladder_index = active.index
+
+            result = await self._execute_ladder(
+                ladder_idx=active.index,
+                ladder=iter_config,
+                strategy_type=strategy_type,
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                order_qty_limit=order_qty_limit,
+            )
+
+            if not result['success']:
+                logger.error(f"[V2] Ladder {active.index} failed: {result.get('error')}")
+                return result
+
+            # FIX: If _execute_ladder signals position_exhausted (MT5 has no more positions
+            # to close), exit the entire V2 loop. No closing ladder can run without MT5
+            # positions, so re-entering would create a zombie loop. This is the only safe
+            # exit path for "B-side dry" cases.
+            if result.get('position_exhausted'):
+                logger.info(
+                    f"[V2] Position exhausted — closing strategy fully terminated. "
+                    f"pos={global_pos}, capacity={mapper.get_global_capacity()}"
+                )
+                break
+
+        logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
+        if self.stop_requested:
+            await self._push_stop_confirmed(strategy_type)
+        return {'success': True, 'message': 'Execution completed'}
+
+    async def _push_stop_confirmed(self, strategy_type: str):
+        """Push stop confirmation event after graceful stop completes."""
+        if self.user_id:
+            action = 'opening' if 'opening' in strategy_type else 'closing'
+            logger.info(f"[GRACEFUL STOP] Pushing stop_confirmed for {self.strategy_id} action={action}")
+            await status_pusher.push_custom_event(
+                self.strategy_id,
+                'stop_confirmed',
+                {
+                    'action': action,
+                    'strategy_type': strategy_type,
+                    'reason': 'graceful_stop'
+                },
+                self.user_id
+            )
 
     async def _get_current_spread(self, strategy_type: str) -> float:
         """Get current spread for strategy type (pair-aware)"""
@@ -1162,27 +1434,42 @@ class ContinuousStrategyExecutor:
                     api_secret=binance_account.api_secret
                 )
 
-            # Init MT5 client if needed
-            if not hasattr(bybit_account, 'mt5_client'):
-                if not bybit_account.mt5_id:
-                    logger.warning("[SNAPSHOT] bybit_account.mt5_id is None, skipping MT5 client init")
-                    return {'binance_qty': None, 'bybit_qty_xau': None}
-                from app.services.mt5_client import MT5Client
-                bybit_account.mt5_client = MT5Client(
-                    login=int(bybit_account.mt5_id),
-                    password=bybit_account.mt5_primary_pwd,
-                    server=bybit_account.mt5_server
-                )
-                if not bybit_account.mt5_client.connect():
-                    logger.warning("[SNAPSHOT] MT5 connection failed, snapshot will be empty")
-                    return {'binance_qty': None, 'bybit_qty_xau': None}
-
             sym_a, sym_b, conv_factor = _get_pair_config(self.pair_code)
             binance_positions = await binance_account.binance_client.get_position_risk(symbol=sym_a)
             binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
-            bybit_positions = bybit_account.mt5_client.get_positions(symbol=sym_b)
-            bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
+            # Use HTTP bridge for MT5 positions (MT5Client requires Windows)
+            bybit_qty_lot = 0.0
+            try:
+                from app.models.mt5_client import MT5Client as MT5ClientModel
+                from app.core.database import AsyncSessionLocal
+                from sqlalchemy import select as _sa_sel
+                import httpx as _httpx
+                async with AsyncSessionLocal() as _snap_db:
+                    _mc = (await _snap_db.execute(
+                        _sa_sel(MT5ClientModel)
+                        .where(MT5ClientModel.account_id == bybit_account.account_id)
+                        .where(MT5ClientModel.is_active == True)
+                        .where(MT5ClientModel.is_system_service == False)
+                        .order_by(MT5ClientModel.priority).limit(1)
+                    )).scalar_one_or_none()
+                if _mc:
+                    _bridge = _mc.bridge_url or f"http://172.31.14.113:{_mc.bridge_service_port}"
+                    _api_key = __import__('os').getenv("MT5_API_KEY", "")
+                    _headers = {"X-Api-Key": _api_key} if _api_key else {}
+                    async with _httpx.AsyncClient(timeout=3.0) as _hc:
+                        _resp = await _hc.get(f"{_bridge}/mt5/positions", headers=_headers)
+                        if _resp.status_code == 200:
+                            _positions = _resp.json() if isinstance(_resp.json(), list) else _resp.json().get("positions", [])
+                            bybit_qty_lot = sum(
+                                abs(float(p.get("volume", 0)))
+                                for p in _positions
+                                if p.get("symbol", "") == sym_b
+                            )
+                else:
+                    logger.warning("[SNAPSHOT] No active bridge for bybit account, skipping MT5 snapshot")
+            except Exception as _bridge_err:
+                logger.warning(f"[SNAPSHOT] Bridge position query failed: {_bridge_err}")
             bybit_qty_xau = bybit_qty_lot * conv_factor
 
             logger.info(f"[SNAPSHOT] Pre-execution: Binance={binance_qty} XAU, Bybit={bybit_qty_xau} XAU ({bybit_qty_lot} Lot)")
@@ -1201,21 +1488,48 @@ class ContinuousStrategyExecutor:
         pre_snapshot: Dict = None
     ):
         """
-        Single-leg detection based on position DELTA comparison after 3-second wait.
+        Single-leg detection: two-phase check.
 
-        Rules:
-        1. Wait 3 seconds after Binance fill for exchange data to sync
-        2. Compute position delta: post - pre for both sides
-        3. If both sides fully filled → no alert
-        4. If partial: bybit_delta_xau / binance_delta_xau < 0.6 → alert
-           (ratio accounts for 1 XAU Binance = 0.01 Lot Bybit conversion)
-        5. Alert is non-blocking: never interrupts the main execution loop
+        Phase 1 (immediate): compare this iteration's exact fill quantities
+                 from exec_result — immune to snapshot-window accumulation.
+        Phase 2 (delayed):   query live positions to verify overall gap,
+                 alert only — never auto-REPAIR.
         """
         try:
-            logger.info(f"[SINGLE_LEG_CHECK] Waiting {self.delayed_single_leg_check_delay}s after Binance fill for {strategy_type}")
+            sym_a, sym_b, conv_factor = _get_pair_config(self.pair_code)
+
+            # ── Phase 1: exec_result based (no snapshot dependency) ──
+            binance_filled = exec_result.get('binance_filled_qty', 0)
+            bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
+            bybit_filled_xau = bybit_filled_lot * conv_factor
+
+            if binance_filled < 0.001:
+                return
+
+            ratio = bybit_filled_xau / binance_filled if binance_filled > 0 else 0
+
+            logger.info(
+                f"[SINGLE_LEG_CHECK] Phase1: exec_result — "
+                f"Binance={binance_filled:.4f} XAU, "
+                f"Bybit={bybit_filled_xau:.4f} XAU ({bybit_filled_lot:.2f} Lot), "
+                f"ratio={ratio:.2%}"
+            )
+
+            if ratio >= 0.60:
+                logger.info(
+                    f"[SINGLE_LEG_CHECK] Phase1 PASS: ratio={ratio:.2%} >= 60%, "
+                    f"skipping delayed check"
+                )
+                return
+
+            logger.warning(
+                f"[SINGLE_LEG_CHECK] Phase1 MISMATCH: ratio={ratio:.2%} < 60%, "
+                f"waiting {self.delayed_single_leg_check_delay}s for Phase2 verification"
+            )
+
+            # ── Phase 2: delayed live-position verification ──
             await asyncio.sleep(self.delayed_single_leg_check_delay)
 
-            # Ensure clients are initialized
             try:
                 if not hasattr(binance_account, 'binance_client'):
                     from app.services.binance_client import BinanceFuturesClient
@@ -1223,120 +1537,84 @@ class ContinuousStrategyExecutor:
                         api_key=binance_account.api_key,
                         api_secret=binance_account.api_secret
                     )
-
-                if not hasattr(bybit_account, 'mt5_client'):
-                    if not bybit_account.mt5_id:
-                        logger.warning("[SINGLE_LEG_CHECK] bybit_account.mt5_id is None, skipping")
-                        return
-                    from app.services.mt5_client import MT5Client
-                    bybit_account.mt5_client = MT5Client(
-                        login=int(bybit_account.mt5_id),
-                        password=bybit_account.mt5_primary_pwd,
-                        server=bybit_account.mt5_server
-                    )
-                    if not bybit_account.mt5_client.connect():
-                        logger.error("[SINGLE_LEG_CHECK] MT5 connection failed, skipping check")
-                        return
-
-                # Get post-execution positions
-                sym_a, sym_b, conv_factor = _get_pair_config(self.pair_code)
                 binance_positions = await binance_account.binance_client.get_position_risk(symbol=sym_a)
                 post_binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
-                bybit_positions = bybit_account.mt5_client.get_positions(symbol=sym_b)
-                bybit_qty_lot = sum(abs(float(pos.get('volume', 0))) for pos in bybit_positions)
+                bybit_qty_lot = 0.0
+                try:
+                    from app.models.mt5_client import MT5Client as MT5ClientModel
+                    from app.core.database import AsyncSessionLocal
+                    from sqlalchemy import select as _sa_sel2
+                    import httpx as _httpx2
+                    async with AsyncSessionLocal() as _slc_db:
+                        _mc2 = (await _slc_db.execute(
+                            _sa_sel2(MT5ClientModel)
+                            .where(MT5ClientModel.account_id == bybit_account.account_id)
+                            .where(MT5ClientModel.is_active == True)
+                            .where(MT5ClientModel.is_system_service == False)
+                            .order_by(MT5ClientModel.priority).limit(1)
+                        )).scalar_one_or_none()
+                    if _mc2:
+                        _bridge2 = _mc2.bridge_url or f"http://172.31.14.113:{_mc2.bridge_service_port}"
+                        _api_key2 = __import__('os').getenv("MT5_API_KEY", "")
+                        _headers2 = {"X-Api-Key": _api_key2} if _api_key2 else {}
+                        async with _httpx2.AsyncClient(timeout=3.0) as _hc2:
+                            _resp2 = await _hc2.get(f"{_bridge2}/mt5/positions", headers=_headers2)
+                            if _resp2.status_code == 200:
+                                _pos2 = _resp2.json() if isinstance(_resp2.json(), list) else _resp2.json().get("positions", [])
+                                bybit_qty_lot = sum(
+                                    abs(float(p.get("volume", 0)))
+                                    for p in _pos2
+                                    if p.get("symbol", "") == sym_b
+                                )
+                except Exception as _bridge_err2:
+                    logger.warning(f"[SINGLE_LEG_CHECK] Phase2 bridge query failed: {_bridge_err2}")
                 post_bybit_qty_xau = bybit_qty_lot * conv_factor
 
-                # Compute deltas using pre-snapshot
-                if pre_snapshot and pre_snapshot.get('binance_qty') is not None:
-                    binance_delta = abs(post_binance_qty - pre_snapshot['binance_qty'])
-                    bybit_delta_xau = abs(post_bybit_qty_xau - pre_snapshot['bybit_qty_xau'])
-                else:
-                    # Fallback: use exec_result filled quantities
-                    binance_delta = exec_result.get('binance_filled_qty', 0)
-                    bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
-                    bybit_delta_xau = bybit_filled_lot * conv_factor
+                position_gap = abs(post_binance_qty - post_bybit_qty_xau)
 
                 logger.info(
-                    f"[SINGLE_LEG_CHECK] Delta: Binance={binance_delta:.4f} XAU, "
-                    f"Bybit={bybit_delta_xau:.4f} XAU | "
-                    f"Post: Binance={post_binance_qty} XAU, Bybit={post_bybit_qty_xau} XAU"
+                    f"[SINGLE_LEG_CHECK] Phase2: live positions — "
+                    f"Binance={post_binance_qty:.4f} XAU, "
+                    f"Bybit={post_bybit_qty_xau:.4f} XAU, "
+                    f"gap={position_gap:.4f} XAU"
                 )
 
-                # No Binance fill detected → nothing to check
-                if binance_delta < 0.001:
-                    logger.info("[SINGLE_LEG_CHECK] No Binance position change detected, skipping")
-                    return
-
-                # Both sides fully matched (within 5% tolerance) → no alert
-                if bybit_delta_xau >= binance_delta * 0.95:
+                if position_gap <= binance_filled * 0.5:
                     logger.info(
-                        f"[SINGLE_LEG_CHECK] Both sides matched: "
-                        f"Bybit/Binance ratio={bybit_delta_xau/binance_delta:.2%}, no alert"
+                        f"[SINGLE_LEG_CHECK] Phase2 RESOLVED: gap={position_gap:.4f} "
+                        f"<= threshold={binance_filled * 0.5:.4f}, no alert"
                     )
                     return
 
-                # Compute fill ratio
-                ratio = bybit_delta_xau / binance_delta if binance_delta > 0 else 0
-
-                if ratio < 0.6:
-                    logger.error(
-                        f"[SINGLE_LEG_CHECK] SINGLE-LEG CONFIRMED: "
-                        f"Binance delta={binance_delta:.4f} XAU, "
-                        f"Bybit delta={bybit_delta_xau:.4f} XAU, "
-                        f"ratio={ratio:.2%} < 60%"
-                    )
-                    exec_result['single_leg_details'] = {
-                        'binance_filled': binance_delta,
-                        'bybit_filled': bybit_delta_xau,
-                        'bybit_filled_xau': bybit_delta_xau,
-                        'unfilled_qty': binance_delta - bybit_delta_xau,
-                        'fill_ratio': ratio,
-                        'verification_method': 'position_delta_3s'
-                    }
-                    await self._send_single_leg_alert(
-                        strategy_type=strategy_type,
-                        exec_result=exec_result
-                    )
-                    # Auto-repair: attempt B-side补单 when hedge_multiplier==1.0
-                    if self.hedge_multiplier == 1.0:
-                        _unfilled_xau = binance_delta - bybit_delta_xau
-                        _repair_lot = _unfilled_xau / conv_factor
-                        if _repair_lot >= 0.01:
-                            logger.warning(f"[SINGLE_LEG_REPAIR] Attempting auto-repair: {_repair_lot:.2f} lot")
-                            if strategy_type in ('reverse_opening', 'forward_closing'):
-                                _repair_side = "Buy"
-                                _repair_close = strategy_type == 'forward_closing'
-                            else:
-                                _repair_side = "Sell"
-                                _repair_close = strategy_type == 'reverse_closing'
-                            for _ri in range(3):
-                                if _ri > 0:
-                                    await asyncio.sleep(1.0)
-                                try:
-                                    from app.services.order_executor import order_executor as _repair_oe
-                                    _rr = await _repair_oe.place_bybit_order(
-                                        account=bybit_account, symbol=sym_b,
-                                        side=_repair_side, order_type="Market",
-                                        quantity=str(round(_repair_lot, 2)),
-                                        close_position=_repair_close,
-                                    )
-                                    if _rr.get('success'):
-                                        logger.warning(f"[SINGLE_LEG_REPAIR] SUCCESS on attempt #{_ri+1}: ticket={_rr.get('order_id')}")
-                                        break
-                                    logger.error(f"[SINGLE_LEG_REPAIR] attempt #{_ri+1} failed: {_rr.get('error')}")
-                                except Exception as _re:
-                                    logger.error(f"[SINGLE_LEG_REPAIR] attempt #{_ri+1} exception: {_re}")
-                else:
-                    logger.info(
-                        f"[SINGLE_LEG_CHECK] Partial fill but ratio={ratio:.2%} >= 60%, no alert"
-                    )
+                logger.error(
+                    f"[SINGLE_LEG_CHECK] Phase2 CONFIRMED SINGLE-LEG: "
+                    f"Binance={post_binance_qty:.4f}, Bybit={post_bybit_qty_xau:.4f}, "
+                    f"gap={position_gap:.4f} XAU, "
+                    f"exec_ratio={ratio:.2%}"
+                )
+                exec_result['single_leg_details'] = {
+                    'binance_filled': binance_filled,
+                    'bybit_filled': bybit_filled_xau,
+                    'bybit_filled_xau': bybit_filled_xau,
+                    'unfilled_qty': binance_filled - bybit_filled_xau,
+                    'fill_ratio': ratio,
+                    'position_gap': position_gap,
+                    'post_binance': post_binance_qty,
+                    'post_bybit': post_bybit_qty_xau,
+                    'verification_method': 'exec_result_phase2'
+                }
+                await self._send_single_leg_alert(
+                    strategy_type=strategy_type,
+                    exec_result=exec_result
+                )
 
             except Exception as e:
-                logger.error(f"[SINGLE_LEG_CHECK] Position check error: {e}")
+                logger.error(f"[SINGLE_LEG_CHECK] Phase2 position check error: {e}")
 
         except Exception as e:
             logger.error(f"[SINGLE_LEG_CHECK] Delayed check failed: {e}")
+
 
     async def _send_binance_api_emergency_alert(
         self,
@@ -1507,7 +1785,6 @@ class ContinuousStrategyExecutor:
         """
         logger.info(f"Stop requested for strategy {self.strategy_id} — will exit at next safe point")
         self.stop_requested = True
-        self.is_running = False  # also set for legacy checks
 
     async def execute_forward_opening_continuous(
         self,
@@ -1541,36 +1818,28 @@ class ContinuousStrategyExecutor:
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
-            for ladder_idx, ladder in enumerate(ladders):
-                if not ladder.enabled:
-                    logger.info(f"Ladder {ladder_idx} disabled, skipping")
-                    continue
-
-                self.current_ladder_index = ladder_idx
-                logger.info(f"Executing ladder {ladder_idx}")
-
-                result = await self._execute_ladder(
-                    ladder_idx=ladder_idx,
-                    ladder=ladder,
-                    strategy_type='forward_opening',
-                    binance_account=binance_account,
-                    bybit_account=bybit_account,
-                    order_qty_limit=opening_m_coin
-                )
-
-                if not result['success']:
-                    logger.error(f"Ladder {ladder_idx} failed: {result.get('error')}")
-                    return {
-                        'success': False,
-                        'error': result.get('error'),
-                        'ladder_index': ladder_idx
-                    }
-
-            logger.info("All ladders completed successfully")
-            return {'success': True, 'message': 'All ladders completed'}
-
+            return await self._execute_continuous_v2(
+                strategy_type='forward_opening',
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                order_qty_limit=opening_m_coin,
+            )
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (forward_opening)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_opening')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in forward opening continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_opening')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
@@ -1606,37 +1875,31 @@ class ContinuousStrategyExecutor:
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
-            for ladder_idx, ladder in enumerate(ladders):
-                if not ladder.enabled:
-                    logger.info(f"Ladder {ladder_idx} disabled, skipping")
-                    continue
-
-                self.current_ladder_index = ladder_idx
-                logger.info(f"Executing ladder {ladder_idx}")
-
-                result = await self._execute_ladder(
-                    ladder_idx=ladder_idx,
-                    ladder=ladder,
-                    strategy_type='reverse_closing',
-                    binance_account=binance_account,
-                    bybit_account=bybit_account,
-                    order_qty_limit=closing_m_coin
-                )
-
-                if not result['success']:
-                    logger.error(f"Ladder {ladder_idx} failed: {result.get('error')}")
-                    return {
-                        'success': False,
-                        'error': result.get('error'),
-                        'ladder_index': ladder_idx
-                    }
-
-            logger.info("All ladders completed successfully")
-            await self._push_execution_completed('reverse_closing')
-            return {'success': True, 'message': 'All ladders completed'}
-
+            result = await self._execute_continuous_v2(
+                strategy_type='reverse_closing',
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                order_qty_limit=closing_m_coin,
+            )
+            if result.get('success'):
+                await self._push_execution_completed('reverse_closing')
+            return result
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (reverse_closing)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_closing')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in reverse closing continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('reverse_closing')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False
@@ -1672,37 +1935,31 @@ class ContinuousStrategyExecutor:
         self.position_mgr.reset_strategy(self.strategy_id)
 
         try:
-            for ladder_idx, ladder in enumerate(ladders):
-                if not ladder.enabled:
-                    logger.info(f"Ladder {ladder_idx} disabled, skipping")
-                    continue
-
-                self.current_ladder_index = ladder_idx
-                logger.info(f"Executing ladder {ladder_idx}")
-
-                result = await self._execute_ladder(
-                    ladder_idx=ladder_idx,
-                    ladder=ladder,
-                    strategy_type='forward_closing',
-                    binance_account=binance_account,
-                    bybit_account=bybit_account,
-                    order_qty_limit=closing_m_coin
-                )
-
-                if not result['success']:
-                    logger.error(f"Ladder {ladder_idx} failed: {result.get('error')}")
-                    return {
-                        'success': False,
-                        'error': result.get('error'),
-                        'ladder_index': ladder_idx
-                    }
-
-            logger.info("All ladders completed successfully")
-            await self._push_execution_completed('forward_closing')
-            return {'success': True, 'message': 'All ladders completed'}
-
+            result = await self._execute_continuous_v2(
+                strategy_type='forward_closing',
+                binance_account=binance_account,
+                bybit_account=bybit_account,
+                ladders=ladders,
+                order_qty_limit=closing_m_coin,
+            )
+            if result.get('success'):
+                await self._push_execution_completed('forward_closing')
+            return result
+        except asyncio.CancelledError:
+            logger.warning(f"Task cancelled for strategy {self.strategy_id} (forward_closing)")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_closing')
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             logger.exception(f"Error in forward closing continuous: {e}")
+            if self.stop_requested and self.user_id:
+                try:
+                    await self._push_stop_confirmed('forward_closing')
+                except Exception:
+                    pass
             return {'success': False, 'error': str(e)}
         finally:
             self.is_running = False

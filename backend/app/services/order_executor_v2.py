@@ -132,7 +132,7 @@ class OrderExecutorV2:
     """
 
     def __init__(self):
-        self.binance_timeout = 3.0
+        self.binance_timeout = 1.5  # 3.0→1.5: 缩短Maker等待，减少A→B价格漂移
         self.bybit_timeout = 1.0  # 0.3→1.0: ICMarkets撮合需要更多等待时间
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
@@ -278,6 +278,7 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
 
@@ -336,14 +337,17 @@ class OrderExecutorV2:
                 "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot, will accumulate"
             }
 
+        _t_b_sent = time.perf_counter()
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=False  # Open new LONG position
         )
+        _t_b_done = time.perf_counter()
 
         logger.info(f"[REVERSE_OPENING] Bybit filled: {bybit_filled_qty} Lot")
+        logger.info(f"[SLIPPAGE_TIMING] REVERSE_OPENING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -498,6 +502,7 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
 
@@ -570,12 +575,15 @@ class OrderExecutorV2:
         except Exception as _pre_e:
             logger.warning(f"[REVERSE_CLOSING] pre-check 持仓查询失败 (continue with original qty): {_pre_e}")
 
+        _t_b_sent = time.perf_counter()
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=True  # Close existing LONG position
         )
+        _t_b_done = time.perf_counter()
+        logger.info(f"[SLIPPAGE_TIMING] REVERSE_CLOSING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -705,6 +713,7 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
         logger.info(f"[FORWARD_OPENING] Monitor returned: filled={binance_filled_qty}, spread_cancelled={spread_cancelled}, api_error={binance_api_error}")
@@ -754,12 +763,15 @@ class OrderExecutorV2:
                     f"(+accumulated={accumulated_unhedged_xau:.4f}) -> bybit_quantity={bybit_quantity} Lot "
                     f"(multiplier={hedge_multiplier})")
 
+        _t_b_sent = time.perf_counter()
         bybit_filled_qty = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=False  # Open new SHORT position
         )
+        _t_b_done = time.perf_counter()
+        logger.info(f"[SLIPPAGE_TIMING] FORWARD_OPENING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -912,6 +924,7 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
 
@@ -986,14 +999,17 @@ class OrderExecutorV2:
 
         logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU, multiplier={hedge_multiplier})")
 
+        _t_b_sent = time.perf_counter()
         bybit_filled_qty = await self._execute_bybit_market_buy(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=True  # Close existing SHORT position
         )
+        _t_b_done = time.perf_counter()
 
         logger.info(f"[FORWARD_CLOSING] Bybit filled: {bybit_filled_qty} Lot")
+        logger.info(f"[SLIPPAGE_TIMING] FORWARD_CLOSING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -1274,7 +1290,10 @@ class OrderExecutorV2:
         platform_id == 2 → Bybit Linear PostOnly Limit (BXAU new interface)
         """
         if account.platform_id == 1:
-            # Binance — use existing place_binance_order (unchanged)
+            # Binance — use existing place_binance_order with strategy tag.
+            # Tag with "s-" so the cleanup loop in continuous_executor can distinguish
+            # auto-strategy orders (safe to cancel between iterations) from emergency
+            # manual orders (which must persist until user explicitly cancels them).
             return await self.base_executor.place_binance_order(
                 account=account,
                 symbol=symbol,
@@ -1284,6 +1303,7 @@ class OrderExecutorV2:
                 price=price,
                 position_side=position_side,
                 post_only=True,
+                client_order_id_prefix="s-",
             )
         elif account.platform_id == 2:
             # Bybit Linear Contract (BXAU)
@@ -1668,7 +1688,9 @@ class OrderExecutorV2:
                 }
 
             # Event was set (WS or REST heartbeat) — read result from registry
+            detection_method = "ws" if not (rest_heartbeat_task and rest_heartbeat_task.done()) else "rest_heartbeat"
             record = _order_fill_registry.get(order_id, {})
+            logger.info(f"[BINANCE_MONITOR] Order {order_id} filled via {detection_method}: qty={record.get("filled_qty", 0)}")
 
             if spread_cancelled:
                 return {

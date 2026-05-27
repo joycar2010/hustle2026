@@ -1279,6 +1279,16 @@ async def execute_continuous_opening(
             for ladder in request.ladders
         ]
 
+        # 2.5a. Validate cumulative ladder total_qty (must be strictly increasing)
+        enabled_ladders = [l for l in ladders if l.enabled]
+        for i in range(1, len(enabled_ladders)):
+            if enabled_ladders[i].total_qty <= enabled_ladders[i - 1].total_qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
+                           f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
+                )
+
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
         strategy_type_name = f"{strategy_type}_opening"
@@ -1468,6 +1478,16 @@ async def execute_continuous_closing(
             for ladder in request.ladders
         ]
 
+        # 2.5a. Validate cumulative ladder total_qty (must be strictly increasing)
+        enabled_ladders = [l for l in ladders if l.enabled]
+        for i in range(1, len(enabled_ladders)):
+            if enabled_ladders[i].total_qty <= enabled_ladders[i - 1].total_qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
+                           f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
+                )
+
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
         strategy_type_name = f"{strategy_type}_closing"
@@ -1534,11 +1554,9 @@ async def execute_continuous_closing(
                 _first_ladder_idx = next((i for i, l in enumerate(ladders) if l.enabled), 0)
                 _ladder_total = ladders[_first_ladder_idx].total_qty if ladders else _existing_qty
                 _seed_qty = min(_existing_qty, _ladder_total)
-                position_manager.record_opening(strategy_id, _first_ladder_idx,
-                                                f"{strategy_type}_opening", _seed_qty)
-                logger.warning(
-                    f"[POSITION_GUARD] Pre-seeded {_seed_qty}/{_ladder_total} XAU "
-                    f"({_target_side}) from existing Binance position (pair={pair_code})"
+                logger.info(
+                    f"[POSITION_GUARD] Closing strategy: Binance holds {_seed_qty}/{_ladder_total} XAU "
+                    f"({_target_side}) — V2 mapper will use capacity-based tracking (pair={pair_code})"
                 )
         except Exception as _guard_err:
             logger.warning(f"[POSITION_GUARD] Position check skipped: {_guard_err}")

@@ -883,6 +883,20 @@ class ManualOrderRequest(BaseModel):
 
 
 
+
+
+async def _push_position_after_trade(user_id: str):
+    user_id = str(user_id)
+    try:
+        from app.tasks.broadcast_tasks import position_streamer
+        await position_streamer.push_snapshot_for_user(user_id)
+        async def _delayed():
+            await asyncio.sleep(1.5)
+            await position_streamer.push_snapshot_for_user(user_id)
+        asyncio.create_task(_delayed())
+    except Exception:
+        pass
+
 async def _resolve_manual_target_account(db, user_id, exchange, pair_code="XAU"):
     """Resolve the correct account for manual/emergency trading using pair-account binding.
     
@@ -1132,6 +1146,7 @@ async def place_manual_order(
                 price=price,
                 position_side="LONG" if req.side == "buy" else "SHORT",
                 post_only=True,
+                client_order_id_prefix="m-",
             )
         else:
             # Scenarios 3 & 4: hedge account
@@ -1169,6 +1184,8 @@ async def place_manual_order(
             account_balance_streamer.trigger_immediate_refresh()
         except Exception:
             pass
+
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
 
         return {
             "success": True,
@@ -1253,6 +1270,7 @@ async def close_all_positions(
                             price=price,
                             position_side=position_side,
                             post_only=True,
+                            client_order_id_prefix="m-",
                         )
 
                         results.append({
@@ -1313,6 +1331,8 @@ async def close_all_positions(
             except Exception as e:
                 logger.error(f"Bybit close positions error: {str(e)}", exc_info=True)
                 results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
+
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
 
         return {
             "success": True,
@@ -1595,6 +1615,7 @@ async def close_short_position(
                 quantity=float(req.quantity),
                 price=price,
                 post_only=True,
+                client_order_id_prefix="m-",
             )
         else:
             if req.price:
@@ -1609,6 +1630,7 @@ async def close_short_position(
                 )
                 if not result.get("success"):
                     raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
+                asyncio.create_task(_push_position_after_trade(current_user.user_id))
                 return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
@@ -1621,6 +1643,7 @@ async def close_short_position(
                     status_code=400,
                     detail=f"{'空仓平多'} failed: {close_result.get('error') or 'no position closed'}"
                 )
+            asyncio.create_task(_push_position_after_trade(current_user.user_id))
             return {
                 "success": True,
                 "filled_volume": close_result["filled_volume"],
@@ -1630,6 +1653,7 @@ async def close_short_position(
                 "exchange": req.exchange,
             }
 
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
         return {
             "success": result.get("success"),
             "order_id": result.get("order_id"),
@@ -1703,6 +1727,7 @@ async def close_long_position(
                 quantity=float(req.quantity),
                 price=price,
                 post_only=True,
+                client_order_id_prefix="m-",
             )
         else:
             if req.price:
@@ -1717,6 +1742,7 @@ async def close_long_position(
                 )
                 if not result.get("success"):
                     raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
+                asyncio.create_task(_push_position_after_trade(current_user.user_id))
                 return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
@@ -1729,6 +1755,7 @@ async def close_long_position(
                     status_code=400,
                     detail=f"{'多仓平空'} failed: {close_result.get('error') or 'no position closed'}"
                 )
+            asyncio.create_task(_push_position_after_trade(current_user.user_id))
             return {
                 "success": True,
                 "filled_volume": close_result["filled_volume"],
@@ -1738,6 +1765,7 @@ async def close_long_position(
                 "exchange": req.exchange,
             }
 
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
         return {
             "success": result.get("success"),
             "order_id": result.get("order_id"),
@@ -1834,6 +1862,8 @@ async def cancel_all_orders(
             except Exception as e:
                 logger.error(f"Bybit cancel orders error: {str(e)}", exc_info=True)
                 results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
+
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
 
         return {
             "success": True,

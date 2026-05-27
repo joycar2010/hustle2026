@@ -65,6 +65,7 @@ class OrderExecutor:
         price: Optional[float] = None,
         position_side: Optional[str] = None,
         post_only: bool = False,
+        client_order_id_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Place order on Binance.
 
@@ -92,6 +93,7 @@ class OrderExecutor:
                     order_type=order_type,
                     quantity=quantity,
                     position_side=position_side,
+                    client_order_id_prefix=client_order_id_prefix,
                 )
             else:
                 # Log order parameters
@@ -104,6 +106,7 @@ class OrderExecutor:
                     price=price,
                     position_side=position_side,
                     post_only=post_only,
+                    client_order_id_prefix=client_order_id_prefix,
                 )
 
             logger.info(f"Binance下单成功 - order_id: {result.get('orderId')}, status: {result.get('status')}, priceMatch: {result.get('priceMatch', 'N/A')}")

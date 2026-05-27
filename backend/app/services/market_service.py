@@ -107,6 +107,7 @@ class MarketDataService:
         last_error = None
         max_retries = 2
         for attempt in range(max_retries + 1):
+            got_zero_tick = False
             for mt5_client in clients_to_try:
                 try:
                     tick = await mt5_client.get_tick(mt5_symbol)
@@ -120,9 +121,15 @@ class MarketDataService:
                             ask_qty=0,
                             timestamp=int(time.time() * 1000),
                         )
+                    if tick is not None:
+                        got_zero_tick = True
                 except Exception:
                     pass
             last_error = f"No valid ticker data for {mt5_symbol} (tick=None)"
+
+            # At least one bridge returned tick with bid=0 → market closed, skip retries
+            if got_zero_tick:
+                break
 
             if attempt < max_retries:
                 logger.warning(

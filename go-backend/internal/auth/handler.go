@@ -36,7 +36,7 @@ func jwtSecret() []byte {
 	return []byte(s)
 }
 
-func makeToken(userID string) (string, error) {
+func MakeToken(userID string) (string, error) {
 	expireMinutes := 480
 	claims := jwt.MapClaims{
 		"sub": userID,
@@ -77,7 +77,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	token, err := makeToken(userID)
+	token, err := MakeToken(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Token generation failed"})
 		return

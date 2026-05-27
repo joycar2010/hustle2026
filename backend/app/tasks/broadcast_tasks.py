@@ -1540,6 +1540,7 @@ class PositionStreamer:
         """
         if not user_id:
             return
+        user_id = str(user_id)
         try:
             import json as _json
             from app.core.redis_client import redis_client as _rc
@@ -1883,6 +1884,12 @@ class BinancePositionPusher:
                     asyncio.create_task(self._account_stream_loop(api_key, api_secret, proxy_url, user_id))
                     for api_key, api_secret, proxy_url, user_id in accounts
                 ]
+                # Run a periodic REST sync alongside WS streams. Binance UserDataStream
+                # has been observed to silently stop delivering events on this setup
+                # (total_msgs=0 with active trading). REST sync guarantees max ~4s
+                # position staleness regardless of WS health. WS still wins when
+                # working (sub-second), REST is the floor.
+                tasks.append(asyncio.create_task(self._periodic_rest_sync_loop(accounts)))
                 await asyncio.gather(*tasks, return_exceptions=True)
 
             except asyncio.CancelledError:
@@ -1890,6 +1897,36 @@ class BinancePositionPusher:
             except Exception as e:
                 logger.error(f"[BinancePositionPusher] Manager loop error: {e}")
                 await asyncio.sleep(self.RECONNECT_DELAY)
+
+    # ------------------------------------------------------------------
+    # 主动 REST 同步循环 — 作为 WS 不可靠时的兜底
+    # ------------------------------------------------------------------
+    async def _periodic_rest_sync_loop(self, accounts: list):
+        # Polls every SYNC_INTERVAL seconds for each account; refreshes
+        # position_streamer._binance_positions cache via REST. The 1s
+        # PositionStreamer broadcast picks up the fresh cache, so end-to-end
+        # latency = SYNC_INTERVAL + ~1s.
+        from app.services.binance_client import BinanceFuturesClient
+        SYNC_INTERVAL = 3.0  # 3s REST poll → max ~4s position staleness in UI
+        # Stagger across accounts to spread API load
+        await asyncio.sleep(1.0)
+        while self.running:
+            for api_key, api_secret, proxy_url, user_id in accounts:
+                if not self.running:
+                    break
+                if not user_id:
+                    continue
+                try:
+                    client = BinanceFuturesClient(api_key, api_secret, proxy_url=proxy_url)
+                    try:
+                        await self._bootstrap_positions_via_rest(client, user_id, api_key)
+                    finally:
+                        await client.close()
+                except Exception as e:
+                    logger.debug(
+                        f"[BinancePositionPusher] REST sync error {api_key[:8]}…: {e}"
+                    )
+            await asyncio.sleep(SYNC_INTERVAL)
 
     async def _load_binance_accounts(self) -> list:
         """从 DB 加载所有活跃 Binance REST 账户（去重 api_key）。
@@ -1976,7 +2013,8 @@ class BinancePositionPusher:
 
                     keepalive_task = asyncio.create_task(
                         self._keepalive_loop(client, listen_key, api_key=api_key,
-                                             msg_count=_ws_msg_count, last_msg_ts=_ws_last_msg_ts)
+                                             msg_count=_ws_msg_count, last_msg_ts=_ws_last_msg_ts,
+                                             ws=ws)
                     )
                     try:
                         async for msg in ws:
@@ -2013,28 +2051,97 @@ class BinancePositionPusher:
                 await asyncio.sleep(self.RECONNECT_DELAY)
 
     async def _keepalive_loop(self, client, listen_key: str, api_key: str = "",
-                            msg_count: list = None, last_msg_ts: list = None):
-        """每 25min 续期 listenKey + 输出 WS 健康状态"""
+                            msg_count: list = None, last_msg_ts: list = None,
+                            ws=None):
+        # Renew listenKey every KEEPALIVE_SEC (25min) — Binance requirement.
+        # Plus silent-death detection: if no events for IDLE_THRESHOLD seconds
+        # AND REST shows position changed vs our cache, force-close WS so the
+        # outer loop reconnects. REST cross-check avoids false-positive
+        # reconnects when account is legitimately quiet.
         import time as _time
         _tag = api_key[:8] if api_key else listen_key[:8]
-        _health_interval = 300  # 5min health log
-        _next_health = _time.time() + _health_interval
+        IDLE_THRESHOLD       = 300   # 5min no events triggers REST verify
+        IDLE_CHECK_INTERVAL  = 60    # verify every 60s
+        HEALTH_LOG_INTERVAL  = 300   # log health every 5min
+
+        now0 = _time.time()
+        last_renew_ts      = now0
+        last_health_log_ts = now0
+
         while True:
-            await asyncio.sleep(self.KEEPALIVE_SEC)
-            try:
-                await client.keepalive_futures_listen_key(listen_key)
-                logger.info(f"[BinancePositionPusher] listenKey 续期成功: {_tag}…")
-            except Exception as e:
-                logger.warning(f"[BinancePositionPusher] listenKey 续期失败 {_tag}…: {e}")
-            # Periodic health log
+            await asyncio.sleep(IDLE_CHECK_INTERVAL)
             now = _time.time()
-            if msg_count is not None and now >= _next_health:
+
+            # listenKey renewal (every 25min)
+            if now - last_renew_ts >= self.KEEPALIVE_SEC:
+                try:
+                    await client.keepalive_futures_listen_key(listen_key)
+                    logger.info(f"[BinancePositionPusher] listenKey 续期成功: {_tag}…")
+                except Exception as e:
+                    logger.warning(f"[BinancePositionPusher] listenKey 续期失败 {_tag}…: {e}")
+                last_renew_ts = now
+
+            # Periodic health log (every 5min)
+            if msg_count is not None and now - last_health_log_ts >= HEALTH_LOG_INTERVAL:
                 idle_s = int(now - last_msg_ts[0]) if last_msg_ts else 0
                 logger.info(
                     f"[BinancePositionPusher] health: {_tag}… "
                     f"total_msgs={msg_count[0]} idle={idle_s}s"
                 )
-                _next_health = now + _health_interval
+                last_health_log_ts = now
+
+            # Silent-death detection + force reconnect
+            if last_msg_ts is not None and ws is not None and not ws.closed:
+                idle_s = now - last_msg_ts[0]
+                if idle_s >= IDLE_THRESHOLD:
+                    silent_death = False
+                    try:
+                        rows = await client.get_position_risk(symbol=None)
+                        if isinstance(rows, list):
+                            rest_by_sym = {}
+                            for r in rows:
+                                sym = r.get("symbol")
+                                if not sym:
+                                    continue
+                                amt = float(r.get("positionAmt") or 0)
+                                side = (r.get("positionSide") or "BOTH").upper()
+                                l, s = rest_by_sym.get(sym, (0.0, 0.0))
+                                if side == "LONG":
+                                    l += max(0.0, amt)
+                                elif side == "SHORT":
+                                    s += max(0.0, abs(amt))
+                                else:
+                                    if amt > 0: l += amt
+                                    elif amt < 0: s += abs(amt)
+                                rest_by_sym[sym] = (round(l, 3), round(s, 3))
+                            # Compare with cache for this account
+                            cache = position_streamer._binance_positions
+                            for uid, syms in cache.items():
+                                for sym, (cl, cs) in syms.items():
+                                    rl, rs = rest_by_sym.get(sym, (0.0, 0.0))
+                                    if abs(cl - rl) > 0.001 or abs(cs - rs) > 0.001:
+                                        silent_death = True
+                                        logger.warning(
+                                            f"[BinancePositionPusher] WS silent-death {_tag}…: "
+                                            f"sym={sym} cache=({cl},{cs}) rest=({rl},{rs}) "
+                                            f"idle={int(idle_s)}s"
+                                        )
+                                        break
+                                if silent_death:
+                                    break
+                    except Exception as e:
+                        logger.debug(f"[BinancePositionPusher] idle REST verify error {_tag}…: {e}")
+
+                    if silent_death:
+                        try:
+                            await ws.close(code=1000, message=b"idle silent-death")
+                            logger.warning(
+                                f"[BinancePositionPusher] forced WS reconnect {_tag}… "
+                                f"(idle={int(idle_s)}s)"
+                            )
+                        except Exception:
+                            pass
+                        return  # exit keepalive; outer loop reconnects
 
     # ------------------------------------------------------------------
     # 消息处理：ACCOUNT_UPDATE → 立即更新 PositionStreamer
@@ -2238,12 +2345,24 @@ class BinancePositionPusher:
             logger.info(f"[BinancePositionPusher] bootstrap {api_key[:8]}…: all positions = 0")
             return
 
+        # Compare with cache BEFORE overwriting — only log when position actually changed
+        _changed = False
+        try:
+            prev = position_streamer._binance_positions.get(user_id, {}) if user_id else {}
+            for _s, _v in non_zero.items():
+                _pv = prev.get(_s, (0.0, 0.0))
+                if abs(_pv[0] - _v[0]) > 0.001 or abs(_pv[1] - _v[1]) > 0.001:
+                    _changed = True
+                    break
+        except Exception:
+            _changed = True
         for sym, (long_v, short_v) in non_zero.items():
             position_streamer.set_binance_positions(long_v, short_v, user_id=user_id, symbol=sym)
-        logger.info(
-            f"[BinancePositionPusher] bootstrap {api_key[:8]}… user={user_id} "
-            f"symbols={list(non_zero.keys())} counts={non_zero}"
-        )
+        if _changed:
+            logger.info(
+                f"[BinancePositionPusher] bootstrap {api_key[:8]}… user={user_id} "
+                f"symbols={list(non_zero.keys())} counts={non_zero}"
+            )
 
 
 binance_position_pusher = BinancePositionPusher()

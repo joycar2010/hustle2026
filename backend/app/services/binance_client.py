@@ -159,6 +159,33 @@ def format_binance_error(error_data: Dict[str, Any]) -> str:
     return base_msg
 
 
+
+def _make_client_order_id(prefix: str) -> str:
+    """Generate a unique newClientOrderId for Binance Futures.
+
+    Binance constraints: 1-36 chars, allowed [a-zA-Z0-9_:./-].
+    Layout: <prefix><base36(ms_timestamp)><4 random hex>
+    Example: "s-l4m7n2pz1f9w8b3a"  (typically 16-22 chars)
+    Prefix convention:
+        "s-" = strategy-placed (auto cleanup target)
+        "m-" = manual / emergency trading (NEVER auto-cancelled)
+    """
+    import time as _time, random as _random
+    if not prefix:
+        prefix = ""
+    ts_ms = int(_time.time() * 1000)
+    # Base36 timestamp keeps it short
+    def _b36(n):
+        chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+        out = ""
+        while n > 0:
+            out = chars[n % 36] + out
+            n //= 36
+        return out or "0"
+    rand4 = f"{_random.randint(0, 0xFFFF):04x}"
+    return f"{prefix}{_b36(ts_ms)}{rand4}"
+
+
 class BinanceFuturesClient:
     """Async client for Binance Futures API"""
 
@@ -519,6 +546,7 @@ class BinanceFuturesClient:
         order_type: str,
         quantity: float,
         position_side: Optional[str] = None,
+        client_order_id_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Place a native MAKER order using Binance priceMatch=QUEUE.
 
@@ -548,6 +576,12 @@ class BinanceFuturesClient:
         if position_side:
             params["positionSide"] = position_side.upper()
 
+        # Tag order origin via newClientOrderId so cleanup code can distinguish
+        # strategy orders ("s-...") from emergency manual orders ("m-...").
+        # Without a tag, the strategy cleanup loop would blanket-cancel manual orders.
+        if client_order_id_prefix:
+            params["newClientOrderId"] = _make_client_order_id(client_order_id_prefix)
+
         # NOTE: no 'price' param — mutually exclusive with priceMatch
         # NOTE: no 'reduceOnly' — hedge mode accounts use positionSide instead
 
@@ -564,6 +598,7 @@ class BinanceFuturesClient:
         reduce_only: bool = False,
         position_side: Optional[str] = None,
         post_only: bool = False,
+        client_order_id_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Place a new order"""
         params = {
@@ -585,6 +620,10 @@ class BinanceFuturesClient:
 
         if position_side:
             params["positionSide"] = position_side.upper()
+
+        # Tag with newClientOrderId — see place_maker_order for rationale.
+        if client_order_id_prefix:
+            params["newClientOrderId"] = _make_client_order_id(client_order_id_prefix)
 
         return await self._request("POST", "/fapi/v1/order", signed=True, params=params)
 

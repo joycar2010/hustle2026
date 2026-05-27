@@ -304,6 +304,39 @@ class PositionManager:
                 positions.append(tracker.to_dict())
         return positions
 
+    def get_global_position(self, strategy_id, strategy_type: str = None) -> float:
+        """Get total position across all ladders for a strategy.
+
+        Args:
+            strategy_id: Strategy configuration ID
+            strategy_type: Optional filter by strategy type
+
+        Returns:
+            Sum of current_position across all matching trackers
+        """
+        total = 0.0
+        for key, tracker in self._trackers.items():
+            if tracker.strategy_id == strategy_id:
+                if strategy_type is None or tracker.strategy_type == strategy_type:
+                    total += tracker.current_position
+        return total
+
+    def seed_global_position(self, strategy_id, strategy_type: str, exchange_position: float):
+        """Seed global position from exchange (writes to ladder_index=0).
+
+        Used during strategy startup to sync with actual exchange position.
+
+        Args:
+            strategy_id: Strategy configuration ID
+            strategy_type: Strategy type
+            exchange_position: Actual position from exchange
+        """
+        tracker = self.get_tracker(strategy_id, 0, strategy_type)
+        tracker.current_position = exchange_position
+        tracker.total_opened = exchange_position
+        from datetime import datetime
+        tracker.last_update_time = datetime.utcnow()
+
     def reset_strategy(self, strategy_id: int):
         """
         Reset all positions for a strategy.

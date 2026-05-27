@@ -64,7 +64,13 @@ function performLogout(reason) {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const renewed = response.headers['x-new-token']
+    if (renewed) {
+      localStorage.setItem('token', renewed)
+    }
+    return response
+  },
   (error) => {
     if (error.response?.status !== 401) return Promise.reject(error)
 

@@ -3,38 +3,45 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"hustle-go/internal/auth"
 	ws "hustle-go/internal/websocket"
 )
 
-// JWTAuth extracts and validates Bearer token, sets user_id in context
+const renewalThreshold = 2 * time.Hour
+
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var token string
-
-		// Try Authorization header first
-		auth := c.GetHeader("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			token = strings.TrimPrefix(auth, "Bearer ")
+		var rawToken string
+		if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			rawToken = strings.TrimPrefix(h, "Bearer ")
 		}
-		// Fallback to query param (for WS compat)
-		if token == "" {
-			token = c.Query("token")
+		if rawToken == "" {
+			rawToken = c.Query("token")
 		}
-
-		if token == "" {
+		if rawToken == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 			return
 		}
 
-		userID, err := ws.ValidateToken(token)
+		userID, exp, err := ws.ParseTokenExp(rawToken)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"detail": "Invalid token"})
 			return
 		}
 
 		c.Set("user_id", userID)
+
+		// Sliding window: set renewal header BEFORE handler writes the response
+		remaining := time.Until(time.Unix(exp, 0))
+		if remaining > 0 && remaining < renewalThreshold {
+			if newToken, err := auth.MakeToken(userID); err == nil {
+				c.Header("X-New-Token", newToken)
+			}
+		}
+
 		c.Next()
 	}
 }
