@@ -117,6 +117,18 @@ class StreamHub:
 
     async def _send_to(self, channel: str, payload: Any,
                        subs: list) -> int:
+        # ALWAYS bridge to Redis ws:stream channel so Rust Hub can forward
+        # to clients connected on its WebSocket endpoint (frontend-www/auto/go).
+        # This decouples Python stream_hub from being the only WS authority.
+        try:
+            from app.core.redis_client import redis_client
+            import json
+            await redis_client.publish('ws:stream', json.dumps({
+                'channel': channel, 'payload': payload
+            }, default=str))
+        except Exception as e:
+            logger.debug(f"[stream_hub] redis bridge publish failed: {e}")
+
         if not subs:
             return 0
         msg = {"type": "stream", "channel": channel, "payload": payload}

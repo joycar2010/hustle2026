@@ -15,7 +15,7 @@ class MarketDataStreamer:
         self.running = False
         self.task = None
         self.base_interval = 1.0  # Base interval when no strategies active (1 time/sec)
-        self.active_interval = 0.5  # Active interval when strategies running (2 times/sec)
+        self.active_interval = 0.25  # Active interval when strategies running (4 times/sec)
         self.current_interval = self.base_interval
         self.broadcast_count = 0
         self.last_broadcast_time = None

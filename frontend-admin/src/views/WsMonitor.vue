@@ -5,7 +5,7 @@
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div>
         <h1 class="text-2xl font-bold">WebSocket 连接监控</h1>
-        <p class="text-xs text-text-tertiary mt-0.5">实时监控 Go 后端 WebSocket 推送状态 · {{ wsUrl }}</p>
+        <p class="text-xs text-text-tertiary mt-0.5">实时监控 Rust 行情引擎 WebSocket Hub 推送状态 · {{ wsUrl }}</p>
       </div>
       <div class="flex items-center gap-3 flex-wrap">
         <div :class="['w-3 h-3 rounded-full', connected ? 'bg-[#0ecb81] animate-pulse' : 'bg-[#f6465d]']"></div>
@@ -225,7 +225,7 @@
             </div>
             <div class="flex justify-between">
               <span class="text-text-tertiary">服务</span>
-              <span class="font-mono text-text-secondary">{{ serverStats.service ?? 'hustle-go' }}</span>
+              <span class="font-mono text-text-secondary">{{ serverStats.service ?? 'rust-engine' }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-text-tertiary">服务器时间</span>

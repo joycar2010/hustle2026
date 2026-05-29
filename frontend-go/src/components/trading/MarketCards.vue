@@ -1279,8 +1279,7 @@ async function updateSystemStatus() {
 
 async function fetchRedisStatus() {
   try {
-    // Use Go-native /monitor/status for Redis info (independent of Python backend).
-    // The Go handler pings Redis directly via db.Redis().
+    // Use /monitor/status for Redis info (Python backend).
     const response = await api.get('/api/v1/monitor/status')
     const redis = response.data?.redis
     redisStatus.value = {
@@ -1296,7 +1295,7 @@ async function fetchRedisStatus() {
 async function fetchSSLCertStatus() {
   try {
     const response = await api.get('/api/v1/monitor/ssl/current')
-    // Go /monitor/ssl/current returns {most_urgent: {status, days_remaining, ...}, certificates: [...]}
+    // /monitor/ssl/current returns {most_urgent: {status, days_remaining, ...}, certificates: [...]}
     const cert = response.data?.most_urgent || response.data
     if (cert && cert.is_valid !== undefined) {
       sslCertStatus.value = {

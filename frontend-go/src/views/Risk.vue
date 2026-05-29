@@ -126,7 +126,10 @@
 
         <!-- Fee Rate Alerts -->
         <div class="mb-1 lg:mb-0.5 border-t border-gray-700 pt-1 lg:pt-0.5">
-          <h3 class="text-[10px] lg:text-[9px] font-semibold mb-1 lg:mb-0.5 text-primary">费率提醒</h3>
+          <div class="flex items-center justify-between mb-1 lg:mb-0.5">
+            <h3 class="text-[10px] lg:text-[9px] font-semibold text-primary">费率提醒</h3>
+            <span class="text-[9px] lg:text-[8px] text-gray-400">当前产品对: <span class="text-primary font-mono">{{ currentPair }}</span> · 切换产品对后单独配置</span>
+          </div>
           <div class="grid grid-cols-2 gap-1 lg:gap-0.5">
             <div>
               <label class="block text-[9px] lg:text-[8px] mb-0.5">资金费/手(空) $/手</label>
@@ -139,10 +142,30 @@
               />
             </div>
             <div>
+              <label class="block text-[9px] lg:text-[8px] mb-0.5">资金费/手(多) $/手</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.fundingRateThresholdLong"
+                step="0.01"
+                placeholder="如 0.03"
+                class="w-full px-1.5 lg:px-1 py-0.5 text-[10px] lg:text-[9px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div>
               <label class="block text-[9px] lg:text-[8px] mb-0.5">过夜费(空) $/手/日</label>
               <input
                 type="number"
                 v-model.number="alertSettings.overnightFeeThreshold"
+                step="0.1"
+                placeholder="如 5.0"
+                class="w-full px-1.5 lg:px-1 py-0.5 text-[10px] lg:text-[9px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label class="block text-[9px] lg:text-[8px] mb-0.5">过夜费(多) $/手/日</label>
+              <input
+                type="number"
+                v-model.number="alertSettings.overnightFeeThresholdLong"
                 step="0.1"
                 placeholder="如 5.0"
                 class="w-full px-1.5 lg:px-1 py-0.5 text-[10px] lg:text-[9px] bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
@@ -244,12 +267,14 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
+import { useTradingPair } from '@/composables/useTradingPair'
 import { useNotificationStore } from '@/stores/notification'
 import { formatTimeBeijing } from '@/utils/timeUtils'
 import EmergencyManualTrading from '@/components/trading/EmergencyManualTrading.vue'
 
 const router = useRouter()
 const marketStore = useMarketStore()
+const { currentPair } = useTradingPair()
 const notificationStore = useNotificationStore()
 const riskMetrics = ref({
   accountRisk: 45,
@@ -275,8 +300,10 @@ const alertSettings = ref({
   forwardOpenSyncCount: 3,
   forwardCloseSyncCount: 3,
   // Fee Rate Alerts
-  fundingRateThreshold: null,
-  overnightFeeThreshold: null
+  fundingRateThreshold: null,         // short direction
+  fundingRateThresholdLong: null,     // long direction
+  overnightFeeThreshold: null,         // short direction
+  overnightFeeThresholdLong: null     // long direction
 })
 
 // Recent Orders
@@ -298,6 +325,21 @@ onMounted(async () => {
   // Backend broadcasts risk_metrics every 30s via WebSocket
 })
 
+// Watch for pair changes — refetch settings for that pair
+watch(currentPair, async (newPair, oldPair) => {
+  if (!newPair || newPair === oldPair) return
+  console.log('[Risk] pair switched', oldPair, '→', newPair, '- reloading alert settings')
+  // Reset to defaults so stale values from other pair don't leak
+  alertSettings.value = {
+    ...alertSettings.value,
+    fundingRateThreshold: null,
+    fundingRateThresholdLong: null,
+    overnightFeeThreshold: null,
+    overnightFeeThresholdLong: null,
+  }
+  await fetchAlertSettings()
+})
+
 // Watch for risk alerts and metrics via WebSocket
 watch(() => marketStore.lastMessage, (message) => {
   if (message && message.type === 'risk_alert') {
@@ -312,7 +354,9 @@ watch(() => marketStore.lastMessage, (message) => {
 
 async function fetchAlertSettings() {
   try {
-    const response = await api.get('/api/v1/risk/alert-settings')
+    const response = await api.get('/api/v1/risk/alert-settings', {
+      params: { pair_code: currentPair.value }
+    })
     if (response.data) {
       alertSettings.value = { ...alertSettings.value, ...response.data }
     }
@@ -334,6 +378,7 @@ async function saveAlertSettings() {
       }
     }
 
+    settingsToSave.pair_code = currentPair.value
     await api.post('/api/v1/risk/alert-settings', settingsToSave)
     notificationStore.showStrategyNotification('风险设置保存成功', 'success')
   } catch (error) {

@@ -886,6 +886,7 @@ class ManualOrderRequest(BaseModel):
 
 
 async def _push_position_after_trade(user_id: str):
+    user_id = str(user_id)
     try:
         from app.tasks.broadcast_tasks import position_streamer
         await position_streamer.push_snapshot_for_user(user_id)
@@ -1145,6 +1146,7 @@ async def place_manual_order(
                 price=price,
                 position_side="LONG" if req.side == "buy" else "SHORT",
                 post_only=True,
+                client_order_id_prefix="m-",
             )
         else:
             # Scenarios 3 & 4: hedge account
@@ -1183,7 +1185,7 @@ async def place_manual_order(
         except Exception:
             pass
 
-        await _push_position_after_trade(current_user.user_id)
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
 
         return {
             "success": True,
@@ -1268,6 +1270,7 @@ async def close_all_positions(
                             price=price,
                             position_side=position_side,
                             post_only=True,
+                            client_order_id_prefix="m-",
                         )
 
                         results.append({
@@ -1289,47 +1292,77 @@ async def close_all_positions(
 
         if bybit_account:
             try:
-                # Get Bybit MT5 positions
-                import MetaTrader5 as mt5
-                loop = asyncio.get_event_loop()
+                # Use existing per-ticket close via MT5 Bridge HTTP.
+                # 旧代码 import MetaTrader5 → Linux 永远失败 (dead code).
                 _hpair = _get_hedging_pair_by_code(req.pair_code)
                 _sym_b = _hpair[1] if _hpair else "XAUUSD+"
-                positions = await loop.run_in_executor(None, mt5.positions_get, _sym_b)
 
-                if positions:
-                    for pos in positions:
-                        volume = round(pos.volume, 2)
-                        if volume == 0:
-                            continue
+                # First query positions via bridge to know what's open
+                import os, httpx
+                from app.models.mt5_client import MT5Client as MT5ClientModel
+                from sqlalchemy import select as _sa_sel
 
-                        # Bybit: Market Taker单平仓，close_position=True关联持仓ticket
-                        if pos.type == mt5.POSITION_TYPE_BUY:  # LONG position → Sell to close
-                            side = "Sell"
-                        else:  # SHORT position → Buy to close
-                            side = "Buy"
+                api_key = os.getenv("MT5_API_KEY", "")
+                bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
+                _mc = (await db.execute(
+                    _sa_sel(MT5ClientModel)
+                    .where(MT5ClientModel.account_id == bybit_account.account_id)
+                    .where(MT5ClientModel.is_active == True)
+                    .where(MT5ClientModel.is_system_service == False)
+                    .order_by(MT5ClientModel.priority)
+                    .limit(1)
+                )).scalar_one_or_none()
+                if _mc and _mc.bridge_url:
+                    bridge_url = _mc.bridge_url
+                elif _mc and _mc.bridge_service_port:
+                    bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+                headers = {"X-Api-Key": api_key} if api_key else {}
 
-                        result = await order_executor.place_bybit_order(
-                            account=bybit_account,
-                            symbol=_sym_b,
-                            side=side,
-                            order_type="Market",
-                            quantity=str(volume),
-                            price=None,
-                            close_position=True,
-                        )
+                async with httpx.AsyncClient(timeout=10.0) as _http:
+                    r = await _http.get(
+                        f"{bridge_url}/mt5/positions",
+                        params={"symbol": _sym_b},
+                        headers=headers,
+                    )
+                    positions = r.json().get("positions", []) if r.status_code == 200 else []
 
-                        results.append({
-                            "exchange": PlatformId.BYBIT.key,
-                            "position_type": "LONG" if pos.type == mt5.POSITION_TYPE_BUY else "SHORT",
-                            "quantity": volume,
-                            "success": result.get("success"),
-                            "order_id": result.get("order_id"),
-                        })
+                # Aggregate by side: type 0 = LONG, type 1 = SHORT
+                long_vol = round(sum(float(p.get("volume", 0)) for p in positions if int(p.get("type", -1)) == 0), 2)
+                short_vol = round(sum(float(p.get("volume", 0)) for p in positions if int(p.get("type", -1)) == 1), 2)
+
+                if long_vol > 0:
+                    close_long = await _close_mt5_hedge_by_ticket_aggregation(
+                        target_account=bybit_account,
+                        symbol=_sym_b,
+                        position_type=0,  # LONG
+                        requested_volume=long_vol,
+                    )
+                    results.append({
+                        "exchange": PlatformId.BYBIT.key,
+                        "position_type": "LONG",
+                        "quantity": long_vol,
+                        "success": close_long.get("success"),
+                        "filled_volume": close_long.get("filled_volume"),
+                    })
+                if short_vol > 0:
+                    close_short = await _close_mt5_hedge_by_ticket_aggregation(
+                        target_account=bybit_account,
+                        symbol=_sym_b,
+                        position_type=1,  # SHORT
+                        requested_volume=short_vol,
+                    )
+                    results.append({
+                        "exchange": PlatformId.BYBIT.key,
+                        "position_type": "SHORT",
+                        "quantity": short_vol,
+                        "success": close_short.get("success"),
+                        "filled_volume": close_short.get("filled_volume"),
+                    })
             except Exception as e:
-                logger.error(f"Bybit close positions error: {str(e)}", exc_info=True)
+                logger.error(f"MT5 close positions error: {str(e)}", exc_info=True)
                 results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
 
-        await _push_position_after_trade(current_user.user_id)
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
 
         return {
             "success": True,
@@ -1612,6 +1645,7 @@ async def close_short_position(
                 quantity=float(req.quantity),
                 price=price,
                 post_only=True,
+                client_order_id_prefix="m-",
             )
         else:
             if req.price:
@@ -1626,7 +1660,7 @@ async def close_short_position(
                 )
                 if not result.get("success"):
                     raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
-                await _push_position_after_trade(current_user.user_id)
+                asyncio.create_task(_push_position_after_trade(current_user.user_id))
                 return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
@@ -1639,7 +1673,7 @@ async def close_short_position(
                     status_code=400,
                     detail=f"{'空仓平多'} failed: {close_result.get('error') or 'no position closed'}"
                 )
-            await _push_position_after_trade(current_user.user_id)
+            asyncio.create_task(_push_position_after_trade(current_user.user_id))
             return {
                 "success": True,
                 "filled_volume": close_result["filled_volume"],
@@ -1649,7 +1683,7 @@ async def close_short_position(
                 "exchange": req.exchange,
             }
 
-        await _push_position_after_trade(current_user.user_id)
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
         return {
             "success": result.get("success"),
             "order_id": result.get("order_id"),
@@ -1723,6 +1757,7 @@ async def close_long_position(
                 quantity=float(req.quantity),
                 price=price,
                 post_only=True,
+                client_order_id_prefix="m-",
             )
         else:
             if req.price:
@@ -1737,7 +1772,7 @@ async def close_long_position(
                 )
                 if not result.get("success"):
                     raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
-                await _push_position_after_trade(current_user.user_id)
+                asyncio.create_task(_push_position_after_trade(current_user.user_id))
                 return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
@@ -1750,7 +1785,7 @@ async def close_long_position(
                     status_code=400,
                     detail=f"{'多仓平空'} failed: {close_result.get('error') or 'no position closed'}"
                 )
-            await _push_position_after_trade(current_user.user_id)
+            asyncio.create_task(_push_position_after_trade(current_user.user_id))
             return {
                 "success": True,
                 "filled_volume": close_result["filled_volume"],
@@ -1760,7 +1795,7 @@ async def close_long_position(
                 "exchange": req.exchange,
             }
 
-        await _push_position_after_trade(current_user.user_id)
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
         return {
             "success": result.get("success"),
             "order_id": result.get("order_id"),
@@ -1805,7 +1840,17 @@ async def cancel_all_orders(
                     _sym_a = _hpair[0] if _hpair else "XAUUSDT"
                     open_orders = await client.get_open_orders(_sym_a)
 
+                    # SAFETY (方案 A): only cancel manual ("m-" prefix) and
+                    # legacy/no-prefix orders. Strategy orders ("s-" prefix) are
+                    # owned by the running ContinuousStrategyExecutor and MUST
+                    # be preserved — user should stop the strategy from the
+                    # strategy panel if they want to cancel those.
+                    skipped_strategy = 0
                     for order in open_orders:
+                        coid = str(order.get("clientOrderId", "") or "")
+                        if coid.startswith("s-"):
+                            skipped_strategy += 1
+                            continue
                         order_id = order.get("orderId")
                         result = await order_executor.cancel_binance_order(
                             binance_account,
@@ -1816,49 +1861,109 @@ async def cancel_all_orders(
                         results.append({
                             "exchange": PlatformId.BINANCE.key,
                             "order_id": order_id,
+                            "client_order_id": coid,
                             "success": result.get("success") if isinstance(result, dict) else True,
                         })
+                    if skipped_strategy:
+                        logger.info(
+                            f"[manual/cancel-all] Binance: kept {skipped_strategy} strategy orders "
+                            f"(s- prefix). Stop strategy from panel to cancel those."
+                        )
                 finally:
                     await client.close()
             except Exception as e:
                 logger.error(f"Binance cancel orders error: {str(e)}", exc_info=True)
                 results.append({"exchange": PlatformId.BINANCE.key, "error": str(e)})
 
-        # Cancel Bybit orders
-        bybit_account = None
-        for account in accounts:
-            if account.platform_id == 2:
-                bybit_account = account
-                break
-
-        if bybit_account:
+        # Cancel hedge-side (MT5) orders via Bridge HTTP
+        # NOTE: 旧代码用 import MetaTrader5 → Linux 永远失败 (dead code)
+        # 现改为通过 MT5 Bridge HTTP 调用 /mt5/orders (查询) + /mt5/order/cancel
+        hedge_account = await _resolve_manual_target_account(
+            db, current_user.user_id, PlatformId.BYBIT.key, req.pair_code
+        )
+        if hedge_account:
             try:
-                # Get Bybit MT5 open orders
-                import MetaTrader5 as mt5
-                loop = asyncio.get_event_loop()
+                import os, httpx
+                from app.models.mt5_client import MT5Client as MT5ClientModel
+                from sqlalchemy import select as _sa_sel
+
                 _hpair = _get_hedging_pair_by_code(req.pair_code)
                 _sym_b = _hpair[1] if _hpair else "XAUUSD+"
-                orders = await loop.run_in_executor(None, mt5.orders_get, _sym_b)
 
-                if orders:
-                    for order in orders:
-                        order_id = str(order.ticket)
-                        result = await order_executor.cancel_bybit_order(
-                            bybit_account,
-                            _sym_b,
-                            order_id
+                # Resolve per-account bridge URL
+                api_key = os.getenv("MT5_API_KEY", "")
+                bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
+                _mc = (await db.execute(
+                    _sa_sel(MT5ClientModel)
+                    .where(MT5ClientModel.account_id == hedge_account.account_id)
+                    .where(MT5ClientModel.is_active == True)
+                    .where(MT5ClientModel.is_system_service == False)
+                    .order_by(MT5ClientModel.priority)
+                    .limit(1)
+                )).scalar_one_or_none()
+                if _mc and _mc.bridge_url:
+                    bridge_url = _mc.bridge_url
+                elif _mc and _mc.bridge_service_port:
+                    bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+
+                headers = {"X-Api-Key": api_key} if api_key else {}
+
+                async with httpx.AsyncClient(timeout=10.0) as _http:
+                    # Query open MT5 orders for this symbol
+                    r = await _http.get(
+                        f"{bridge_url}/mt5/orders",
+                        params={"symbol": _sym_b},
+                        headers=headers,
+                    )
+                    if r.status_code != 200:
+                        logger.warning(f"[manual/cancel-all] MT5 bridge orders query failed: {r.status_code}")
+                        mt5_orders = []
+                    else:
+                        mt5_orders = r.json().get("orders", []) or []
+
+                    # SAFETY (方案 A): only cancel manual/no-prefix orders.
+                    # MT5 orders' "comment" field carries the s-/m- prefix when our
+                    # executor places them (place_bybit_order forwards as comment).
+                    skipped_strategy = 0
+                    for od in mt5_orders:
+                        comment = str(od.get("comment", "") or "")
+                        if comment.startswith("s-"):
+                            skipped_strategy += 1
+                            continue
+                        ticket = od.get("ticket") or od.get("order_id")
+                        if not ticket:
+                            continue
+                        try:
+                            rc = await _http.post(
+                                f"{bridge_url}/mt5/order/cancel",
+                                json={"ticket": int(ticket)},
+                                headers=headers,
+                            )
+                            ok = rc.status_code == 200
+                            results.append({
+                                "exchange": PlatformId.BYBIT.key,
+                                "order_id": str(ticket),
+                                "comment": comment,
+                                "success": ok,
+                            })
+                        except Exception as _ce:
+                            logger.warning(f"[manual/cancel-all] cancel ticket {ticket} failed: {_ce}")
+                            results.append({
+                                "exchange": PlatformId.BYBIT.key,
+                                "order_id": str(ticket),
+                                "success": False,
+                                "error": str(_ce),
+                            })
+                    if skipped_strategy:
+                        logger.info(
+                            f"[manual/cancel-all] MT5: kept {skipped_strategy} strategy orders "
+                            f"(s- prefix in comment). Stop strategy from panel to cancel those."
                         )
-
-                        results.append({
-                            "exchange": PlatformId.BYBIT.key,
-                            "order_id": order_id,
-                            "success": result.get("success") if isinstance(result, dict) else True,
-                        })
             except Exception as e:
-                logger.error(f"Bybit cancel orders error: {str(e)}", exc_info=True)
+                logger.error(f"MT5 cancel orders error: {str(e)}", exc_info=True)
                 results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
 
-        await _push_position_after_trade(current_user.user_id)
+        asyncio.create_task(_push_position_after_trade(current_user.user_id))
 
         return {
             "success": True,
@@ -2022,12 +2127,27 @@ async def get_realtime_trading_history(
         formatted_binance = _format_binance_trades(binance_trades)
         formatted_mt5 = _format_mt5_trades(mt5_trades)
 
+        # 标注 source (strategy/manual) + 补全 threshold (从 Redis 元数据)
+        # 该函数会调用 Binance get_all_orders 获取 clientOrderId 前缀
+        await _enrich_trade_sources(
+            formatted_binance,
+            primary_accs,
+            start_utc_ms,
+            end_utc_ms,
+            binance_symbol,
+            a_platform_id,
+        )
+
+        # 配对成交 (按 orderId 分组主账号 + 时间窗口匹配 MT5)
+        paired_trades = _build_paired_trades(formatted_binance, formatted_mt5)
+
         # 计算统计数据
         stats = _calculate_stats(formatted_binance, formatted_mt5, binance_realized_pnl, binance_funding_fee)
 
         return {
             "accountTrades": formatted_binance,
             "mt5Trades": formatted_mt5,
+            "pairedTrades": paired_trades,
             "stats": stats,
             "pair_code": pair_code,
             "warnings": (_warnings + ([f"不支持的主账号平台 id={_unsupported_a_platform}（Gate.io/OKX 实时查询尚未实现，请切换到 Binance/Bybit 系列产品对）"] if _unsupported_a_platform else [])),
@@ -2360,6 +2480,10 @@ def _format_binance_trades(trades):
             "fee_bnb": round(commission, 6) if commission_asset == "BNB" else 0.0,
             "commission_asset": commission_asset,
             "id": str(trade.get("id")),
+            "orderId": str(trade.get("orderId", "")),
+            "source": "unknown",  # 后续由 _enrich_trade_sources 标注
+            "threshold": None,
+            "client_order_id": None,
         })
 
     # 降序排序（最新的在最上面）
@@ -2420,6 +2544,237 @@ def _format_mt5_trades(deals):
 
     logger.info(f"Formatted {len(formatted)} MT5 trades, realized PnL (close deals): {realized_pnl:.2f}")
     return sorted(formatted, key=lambda x: x["timestamp"], reverse=True)
+
+
+async def _enrich_trade_sources(
+    formatted_trades,
+    primary_accs,
+    start_ms,
+    end_ms,
+    symbol,
+    a_platform_id,
+):
+    """为每条主账号成交标注 source/threshold/client_order_id。
+
+    流程:
+    1. 调用 Binance get_all_orders 获取该时段所有订单的 clientOrderId
+    2. 根据前缀判断 source: s-=strategy, m-=manual, 无前缀=manual
+    3. 对 strategy 订单, 从 Redis 读取 strategy_trade_meta:{order_id} 补 threshold
+    """
+    if a_platform_id != 1 or not formatted_trades:
+        # Bybit/其他平台暂未支持
+        for t in formatted_trades:
+            t["source"] = "manual"
+        return
+
+    # 收集所有 orderId
+    order_ids_needed = {t["orderId"] for t in formatted_trades if t.get("orderId")}
+    if not order_ids_needed:
+        return
+
+    # 1. 调用 get_all_orders 获取 clientOrderId 映射
+    order_meta = {}  # orderId -> clientOrderId
+    from app.services.binance_client import BinanceFuturesClient
+    for account in primary_accs:
+        try:
+            client = BinanceFuturesClient(
+                account.api_key, account.api_secret,
+                proxy_url=build_proxy_url(account.proxy_config),
+            )
+            try:
+                _chunk_ms = 6 * 24 * 60 * 60 * 1000 + 23 * 60 * 60 * 1000 + 59 * 60 * 1000
+                chunk_start = start_ms
+                while chunk_start < end_ms:
+                    chunk_end = min(chunk_start + _chunk_ms, end_ms)
+                    orders = await client.get_all_orders(
+                        symbol=symbol,
+                        start_time=chunk_start,
+                        end_time=chunk_end,
+                        limit=1000,
+                    )
+                    for o in orders:
+                        oid = str(o.get("orderId", ""))
+                        coid = o.get("clientOrderId", "") or ""
+                        if oid:
+                            order_meta[oid] = coid
+                    chunk_start = chunk_end + 1
+            finally:
+                await client.close()
+        except Exception as e:
+            logger.warning(f"[enrich] get_all_orders failed for {account.account_name}: {e}")
+
+    # 2. 标注 source 和 client_order_id
+    strategy_order_ids = []
+    for t in formatted_trades:
+        oid = t.get("orderId", "")
+        coid = order_meta.get(oid, "")
+        t["client_order_id"] = coid
+        if coid.startswith("s-"):
+            t["source"] = "strategy"
+            strategy_order_ids.append(oid)
+        elif coid.startswith("m-"):
+            t["source"] = "manual"
+        else:
+            t["source"] = "manual"
+
+    # 3. 对 strategy 成交，从 Redis 读取 threshold
+    if strategy_order_ids:
+        try:
+            from app.core.redis_client import redis_client as _rc
+            import json as _json
+            for oid in strategy_order_ids:
+                try:
+                    raw = await _rc.client.get(f"strategy_trade_meta:{oid}")
+                    if raw:
+                        meta = _json.loads(raw)
+                        for t in formatted_trades:
+                            if t.get("orderId") == oid:
+                                t["threshold"] = meta.get("threshold")
+                                t["strategy_type"] = meta.get("strategy_type")
+                                t["trigger_spread"] = meta.get("trigger_spread")
+                except Exception as _e:
+                    logger.debug(f"[enrich] Redis read failed for {oid}: {_e}")
+        except Exception as e:
+            logger.warning(f"[enrich] Redis enrich block failed: {e}")
+
+
+def _build_paired_trades(binance_trades, mt5_trades):
+    """按 orderId 聚合主账号成交 + 1分钟时间窗口匹配 MT5 成交。
+
+    返回每个配对包含:
+    - timestamp_primary, side_primary, avg_price_primary, qty_primary
+    - timestamp_hedge, side_hedge, avg_price_hedge, qty_hedge
+    - source (strategy/manual)
+    - threshold (仅 strategy)
+    - spread (avg_price_primary - avg_price_hedge, abs)
+    - slippage (spread - threshold, 仅 strategy)
+    """
+    from datetime import datetime
+    import re
+
+    if not binance_trades:
+        return []
+
+    # 按 orderId 聚合 (orderId 相同的多条 fill 是同一笔订单)
+    groups = {}  # orderId -> {trades: [], total_qty, total_quote, side}
+    for t in binance_trades:
+        oid = t.get("orderId") or t.get("id")
+        if not oid:
+            continue
+        if oid not in groups:
+            groups[oid] = {
+                "trades": [],
+                "total_qty": 0.0,
+                "total_quote": 0.0,
+                "side": t.get("side"),
+                "source": t.get("source", "manual"),
+                "threshold": t.get("threshold"),
+                "client_order_id": t.get("client_order_id"),
+                "strategy_type": t.get("strategy_type"),
+                "trigger_spread": t.get("trigger_spread"),
+            }
+        groups[oid]["trades"].append(t)
+        q = float(t.get("quantity") or 0)
+        p = float(t.get("price") or 0)
+        groups[oid]["total_qty"] += q
+        groups[oid]["total_quote"] += q * p
+        # source/threshold 取最新非空值
+        if t.get("source") and t.get("source") != "unknown":
+            groups[oid]["source"] = t["source"]
+        if t.get("threshold") is not None:
+            groups[oid]["threshold"] = t["threshold"]
+
+    paired = []
+    used_mt5_ids = set()
+
+    for oid, g in groups.items():
+        if g["total_qty"] <= 0:
+            continue
+        avg_price_p = g["total_quote"] / g["total_qty"]
+        # 时间取最后一条 fill
+        ts_p = max((t["timestamp"] for t in g["trades"]), default=None)
+        side_p = g["side"]
+        symbol_p = g["trades"][0].get("symbol", "")
+
+        # 找匹配的 MT5 成交: 时间窗口 ±60s, 方向相反 (主买↔冲卖, 主卖↔冲买)
+        matched_mt5 = []
+        if ts_p:
+            try:
+                t_p_dt = datetime.fromisoformat(ts_p.replace(" ", "T")) if isinstance(ts_p, str) else ts_p
+            except Exception:
+                t_p_dt = None
+
+            if t_p_dt:
+                # 反向: 主 sell -> hedge buy
+                # 正向: 主 buy -> hedge sell
+                # 平仓时方向相反
+                # 直接选最近时间窗口的反向 trade
+                for mt in mt5_trades:
+                    if mt["id"] in used_mt5_ids:
+                        continue
+                    try:
+                        mt_ts = mt["timestamp"]
+                        if isinstance(mt_ts, str):
+                            mt_dt = datetime.fromisoformat(mt_ts.replace(" ", "T"))
+                        else:
+                            mt_dt = mt_ts
+                        delta = abs((mt_dt - t_p_dt).total_seconds())
+                        if delta <= 60.0:
+                            matched_mt5.append((delta, mt))
+                    except Exception:
+                        continue
+                matched_mt5.sort(key=lambda x: x[0])
+
+        # 汇总匹配的 MT5
+        hedge_total_qty = 0.0
+        hedge_total_quote = 0.0
+        hedge_side = None
+        hedge_ts = None
+        hedge_symbol = ""
+        for _, mt in matched_mt5:
+            used_mt5_ids.add(mt["id"])
+            q = float(mt.get("quantity") or 0)
+            p = float(mt.get("price") or 0)
+            hedge_total_qty += q
+            hedge_total_quote += q * p
+            hedge_side = mt.get("side")
+            hedge_ts = mt.get("timestamp")
+            hedge_symbol = mt.get("symbol", "")
+
+        avg_price_h = hedge_total_quote / hedge_total_qty if hedge_total_qty > 0 else None
+
+        # 价差/滑点
+        spread = None
+        slippage = None
+        if avg_price_h is not None:
+            spread = round(abs(avg_price_p - avg_price_h), 4)
+            if g["source"] == "strategy" and g["threshold"] is not None:
+                slippage = round(spread - float(g["threshold"]), 4)
+
+        paired.append({
+            "id": oid,
+            "timestamp_primary": ts_p,
+            "side_primary": side_p,
+            "avg_price_primary": round(avg_price_p, 4),
+            "qty_primary": round(g["total_qty"], 4),
+            "symbol_primary": symbol_p,
+            "timestamp_hedge": hedge_ts,
+            "side_hedge": hedge_side,
+            "avg_price_hedge": round(avg_price_h, 4) if avg_price_h is not None else None,
+            "qty_hedge": round(hedge_total_qty, 4) if hedge_total_qty > 0 else None,
+            "symbol_hedge": hedge_symbol if hedge_total_qty > 0 else None,
+            "source": g["source"],
+            "threshold": g["threshold"],
+            "spread": spread,
+            "slippage": slippage,
+            "strategy_type": g.get("strategy_type"),
+            "client_order_id": g.get("client_order_id"),
+            "hedge_matched": hedge_total_qty > 0,
+        })
+
+    # 按时间降序
+    paired.sort(key=lambda x: x.get("timestamp_primary") or "", reverse=True)
+    return paired
 
 
 def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binance_funding_fee=0.0):

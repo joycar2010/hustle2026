@@ -30,3 +30,12 @@ backend/.env.*
 # IDE
 .vscode/
 .idea/
+
+# Python bytecode (should never be tracked)
+**/__pycache__/
+
+# Debug logs
+backend/api_debug.log
+
+# Editor swap
+*.swp

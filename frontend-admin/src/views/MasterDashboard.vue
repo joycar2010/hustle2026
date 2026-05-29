@@ -269,12 +269,12 @@
       <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">基础设施</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
 
-        <!-- Card A: 服务集群 (API + MT5 Bridge) -->
-        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online && mt5System.online ? 'border-green-800/30' : 'border-red-800/30'">
+        <!-- Card A: 服务集群 (Python API + Rust Market Engine + MT5 Bridge) -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online && rustStatus.online && mt5System.online ? 'border-green-800/30' : 'border-red-800/30'">
           <div class="flex items-center justify-between mb-3">
             <span class="text-sm font-semibold">服务集群</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="goStatus.online && mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-              {{ goStatus.online && mt5System.online ? '全部在线' : '部分异常' }}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="goStatus.online && rustStatus.online && mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+              {{ goStatus.online && rustStatus.online && mt5System.online ? '全部在线' : '部分异常' }}
             </span>
           </div>
           <div class="space-y-2">
@@ -285,10 +285,10 @@
               <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ goStatus.uptime || '--' }}</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
-              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', goStatus.online ? 'bg-green-500' : 'bg-red-500']"></div>
-              <span class="text-text-tertiary w-16">Go API</span>
-              <span class="font-mono text-text-secondary flex-1 text-right">:8080</span>
-              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ goStatus.memory || '--' }}</span>
+              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', rustStatus.online ? 'bg-green-500' : 'bg-red-500']"></div>
+              <span class="text-text-tertiary w-16">Rust 行情</span>
+              <span class="font-mono text-text-secondary flex-1 text-right">:8090</span>
+              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ rustStatus.ticks }}t/{{ rustStatus.ws_clients }}ws</span>
             </div>
             <div class="border-t border-border-secondary my-1"></div>
             <div class="flex items-center gap-2 text-xs">
@@ -299,8 +299,8 @@
             </div>
             <div class="flex items-center gap-2 text-xs">
               <div class="w-1.5 h-1.5 flex-shrink-0"></div>
-              <span class="text-text-tertiary w-16">内存</span>
-              <span class="font-mono text-text-secondary flex-1 text-right">API {{ goStatus.memory || '--' }} / MT5 {{ mt5System.memory || '--' }}</span>
+              <span class="text-text-tertiary w-16">Rust Pairs</span>
+              <span class="font-mono text-primary font-bold flex-1 text-right">{{ rustStatus.pairs }} 产品对 · {{ rustStatus.status }}</span>
             </div>
           </div>
         </div>
@@ -638,6 +638,7 @@ const usersLoading = ref(true)
 const lastUpdate = ref('--')
 
 const goStatus = ref({ online: false, uptime: '', memory: '', redis: false })
+const rustStatus = ref({ online: false, status: '--', ticks: 0, pairs: 0, ws_clients: 0 })
 const dbPool = ref({ active: 0, idle: 0, max: 0 })
 const mt5System = ref({ online: false })
 const mt5Infra = ref({ reachable: false, status: null, uptime_seconds: 0, instances: { running: 0, total: 0 }, bridges: { alive: 0, total: 0, detail: [] } })
@@ -914,6 +915,18 @@ async function fetchMonitorStatus() {
       }
     }
   } catch { goStatus.value.online = false }
+  // Fetch Rust engine health
+  try {
+    const rustR = await api.get('/api/v1/health')
+    const rd = rustR.data || {}
+    rustStatus.value = {
+      online: rd.status === 'ok' || rd.status === 'degraded',
+      status: rd.status || '--',
+      ticks: rd.tick_count || 0,
+      pairs: (rd.pairs || []).length,
+      ws_clients: rd.ws_clients || 0,
+    }
+  } catch { rustStatus.value.online = false }
 }
 
 async function fetchMT5Status() {

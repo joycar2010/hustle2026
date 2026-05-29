@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { useTradingPair } from '@/composables/useTradingPair'
 
-// Same-origin WebSocket by default: nginx routes /ws → Go (8080) /api/v1/ws.
+// Same-origin WebSocket by default: nginx routes /ws → Rust Engine (8090) /api/v1/ws.
 // Runtime construction guarantees wss:// on HTTPS pages (avoids mixed-content blocks).
 const WS_URL = (
   import.meta.env.VITE_WS_URL
@@ -139,7 +139,7 @@ export const useMarketStore = defineStore('market', () => {
             timestamp: d.timestamp,
           }
         }
-        // Go native pusher sends type:"spread" with both Binance+Bybit prices every 500ms
+        // Rust Engine sends type:"spread" with both Binance+Bybit prices every 500ms
         else if (msg.type === 'spread' && msg.data) {
           const d = msg.data
           marketData.value = {

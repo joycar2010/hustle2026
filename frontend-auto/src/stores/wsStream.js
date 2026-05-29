@@ -49,9 +49,18 @@ export const useWsStream = defineStore('wsStream', () => {
     socket.onmessage = (ev) => {
       let m
       try { m = JSON.parse(ev.data) } catch (_) { return }
+      // Python stream 格式（兼容旧协议）
       if (m.type === 'stream' && m.channel) {
         channels[m.channel] = m.payload
-      } else if (m.type === 'error') {
+        return
+      }
+      // Rust Hub 格式：type 字段即为频道名，data 为 payload
+      if (m.type && m.data !== undefined &&
+          m.type !== 'connection' && m.type !== 'pong') {
+        channels[m.type] = m.data
+        return
+      }
+      if (m.type === 'error') {
         lastError.value = `${m.channel || ''}:${m.message || 'error'}`
       }
     }

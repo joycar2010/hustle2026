@@ -1188,6 +1188,7 @@ class ClosingLadderConfigSchema(BaseModel):
 
 class ContinuousExecuteRequest(BaseModel):
     """Request schema for continuous opening execution"""
+    force_resume: Optional[bool] = False  # 强制清除 slippage_pause 后启动
     binance_account_id: UUID
     bybit_account_id: UUID
     pair_code: str = "XAU"
@@ -1199,6 +1200,7 @@ class ContinuousExecuteRequest(BaseModel):
 
 class ContinuousClosingRequest(BaseModel):
     """Request schema for continuous closing execution"""
+    force_resume: Optional[bool] = False  # 强制清除 slippage_pause 后启动
     binance_account_id: UUID
     bybit_account_id: UUID
     pair_code: str = "XAU"
@@ -1219,26 +1221,28 @@ async def execute_continuous_opening(
     Args:
         strategy_type: 'forward' or 'reverse'
     """
-    # Write to a debug file to confirm API is called
-    import datetime
-    with open("api_debug.log", "a") as f:
-        f.write(f"\n{'='*80}\n")
-        f.write(f"[{datetime.datetime.now()}] API CALLED: /execute/{strategy_type}/continuous\n")
-        f.write(f"User ID: {user_id}\n")
-        f.write(f"Request: {request.dict()}\n")
-        f.write(f"{'='*80}\n")
 
-    import logging
-    logger = logging.getLogger(__name__)
-
-    logger.error("=" * 80)
-    logger.error(f"API ENDPOINT CALLED: /execute/{strategy_type}/continuous")
-    logger.error(f"User ID: {user_id}")
-    logger.error(f"Request data: {request.dict()}")
-    logger.error("=" * 80)
 
     from app.services.continuous_executor import ContinuousStrategyExecutor, LadderConfig
     from app.services.execution_task_manager import execution_task_manager
+
+    # ── 滑点保护暂停检查 ──
+    from app.services.slippage_guard import is_paused as _slip_is_paused, mark_user_interaction as _slip_mark_interact, force_clear as _slip_force_clear
+    _pair_code = request.pair_code or "XAU"
+    paused, pause_state = await _slip_is_paused(user_id, _pair_code)
+    if paused and not getattr(request, "force_resume", False):
+        await _slip_mark_interact(user_id, _pair_code)
+        return {
+            "success": False,
+            "code": "slippage_paused",
+            "level": pause_state.get("level"),
+            "reason": pause_state.get("reason"),
+            "auto_resume_at": pause_state.get("auto_resume_at"),
+            "can_force": True,
+            "message": "策略已被滑点保护暂停, 如需启动请确认后强制恢复",
+        }
+    if paused and getattr(request, "force_resume", False):
+        await _slip_force_clear(user_id, _pair_code, reason="user_force_resume")
 
     # Validate strategy type
     if strategy_type not in ['forward', 'reverse']:
@@ -1278,6 +1282,16 @@ async def execute_continuous_opening(
             )
             for ladder in request.ladders
         ]
+
+        # 2.5a. Validate cumulative ladder total_qty (must be strictly increasing)
+        enabled_ladders = [l for l in ladders if l.enabled]
+        for i in range(1, len(enabled_ladders)):
+            if enabled_ladders[i].total_qty <= enabled_ladders[i - 1].total_qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
+                           f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
+                )
 
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
@@ -1393,11 +1407,6 @@ async def execute_continuous_opening(
 
         task_id = execution_task_manager.start_task(executor, coro)
 
-        # Write debug info
-        with open("api_debug.log", "a") as f:
-            f.write(f"[{datetime.datetime.now()}] Task created: {task_id}\n")
-            f.write(f"Executor is_running: {executor.is_running}\n")
-            f.write(f"Coroutine: {coro}\n\n")
 
         return {
             "success": True,
@@ -1427,6 +1436,24 @@ async def execute_continuous_closing(
     """
     from app.services.continuous_executor import ContinuousStrategyExecutor, LadderConfig
     from app.services.execution_task_manager import execution_task_manager
+
+    # ── 滑点保护暂停检查 ──
+    from app.services.slippage_guard import is_paused as _slip_is_paused, mark_user_interaction as _slip_mark_interact, force_clear as _slip_force_clear
+    _pair_code = request.pair_code or "XAU"
+    paused, pause_state = await _slip_is_paused(user_id, _pair_code)
+    if paused and not getattr(request, "force_resume", False):
+        await _slip_mark_interact(user_id, _pair_code)
+        return {
+            "success": False,
+            "code": "slippage_paused",
+            "level": pause_state.get("level"),
+            "reason": pause_state.get("reason"),
+            "auto_resume_at": pause_state.get("auto_resume_at"),
+            "can_force": True,
+            "message": "策略已被滑点保护暂停, 如需启动请确认后强制恢复",
+        }
+    if paused and getattr(request, "force_resume", False):
+        await _slip_force_clear(user_id, _pair_code, reason="user_force_resume")
 
     # Validate strategy type
     if strategy_type not in ['forward', 'reverse']:
@@ -1467,6 +1494,16 @@ async def execute_continuous_closing(
             )
             for ladder in request.ladders
         ]
+
+        # 2.5a. Validate cumulative ladder total_qty (must be strictly increasing)
+        enabled_ladders = [l for l in ladders if l.enabled]
+        for i in range(1, len(enabled_ladders)):
+            if enabled_ladders[i].total_qty <= enabled_ladders[i - 1].total_qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
+                           f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
+                )
 
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
@@ -1534,11 +1571,9 @@ async def execute_continuous_closing(
                 _first_ladder_idx = next((i for i, l in enumerate(ladders) if l.enabled), 0)
                 _ladder_total = ladders[_first_ladder_idx].total_qty if ladders else _existing_qty
                 _seed_qty = min(_existing_qty, _ladder_total)
-                position_manager.record_opening(strategy_id, _first_ladder_idx,
-                                                f"{strategy_type}_opening", _seed_qty)
-                logger.warning(
-                    f"[POSITION_GUARD] Pre-seeded {_seed_qty}/{_ladder_total} XAU "
-                    f"({_target_side}) from existing Binance position (pair={pair_code})"
+                logger.info(
+                    f"[POSITION_GUARD] Closing strategy: Binance holds {_seed_qty}/{_ladder_total} XAU "
+                    f"({_target_side}) — V2 mapper will use capacity-based tracking (pair={pair_code})"
                 )
         except Exception as _guard_err:
             logger.warning(f"[POSITION_GUARD] Position check skipped: {_guard_err}")
@@ -1582,11 +1617,6 @@ async def execute_continuous_closing(
 
         task_id = execution_task_manager.start_task(executor, coro)
 
-        # Write debug info
-        with open("api_debug.log", "a") as f:
-            f.write(f"[{datetime.datetime.now()}] Task created: {task_id}\n")
-            f.write(f"Executor is_running: {executor.is_running}\n")
-            f.write(f"Coroutine: {coro}\n\n")
 
         return {
             "success": True,
@@ -1660,3 +1690,35 @@ async def get_all_execution_tasks(
         "success": True,
         "tasks": tasks
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Slippage protection endpoints
+# ──────────────────────────────────────────────────────────────────────
+@router.get("/slippage-pause/{pair_code}")
+async def get_slippage_pause_state(
+    pair_code: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Query current slippage-pause state for a (user, pair)."""
+    from app.services.slippage_guard import get_pause_state
+    state = await get_pause_state(user_id, pair_code)
+    return {"paused": state is not None, "state": state}
+
+
+@router.get("/slippage-events")
+async def list_slippage_events(
+    pair_code: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user_id: str = Depends(get_current_user_id),
+):
+    """List recent slippage-protection events (audit). Used by SpreadChart."""
+    from app.services.slippage_guard import query_events
+    events = await query_events(
+        user_id=user_id,
+        pair_code=pair_code,
+        limit=min(limit, 500),
+        offset=offset,
+    )
+    return {"events": events}

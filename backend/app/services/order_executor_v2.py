@@ -132,12 +132,12 @@ class OrderExecutorV2:
     """
 
     def __init__(self):
-        self.binance_timeout = 3.0
+        self.binance_timeout = 1.5  # 3.0→1.5: 缩短Maker等待，减少A→B价格漂移
         self.bybit_timeout = 1.0  # 0.3→1.0: ICMarkets撮合需要更多等待时间
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
-        self.spread_check_interval = 0.5
-        self.spread_cancel_tolerance = 0.5
+        self.spread_check_interval = 0.1   # 0.5→0.1: 100ms guard tick, faster reaction to unfavorable spread drift
+        self.spread_cancel_tolerance = 0.2  # 0.5→0.2: tighter ribbon; cancel when spread moves 0.2 against us
         self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
         self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
         self.mt5_deal_recheck_wait = 1.0  # 2.0→1.0: 二次确认等待时间缩短
@@ -240,6 +240,8 @@ class OrderExecutorV2:
                 "error": precheck["error"],
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "margin_precheck_failed": True,
                 "precheck_detail": precheck["detail"],
             }
@@ -278,6 +280,8 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        binance_avg_price = monitor_result.get("avg_price", 0.0)
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
 
@@ -288,6 +292,8 @@ class OrderExecutorV2:
                     "success": False,
                     "binance_filled_qty": 0,
                     "bybit_filled_qty": 0,
+                    "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                    "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -299,6 +305,8 @@ class OrderExecutorV2:
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -330,20 +338,27 @@ class OrderExecutorV2:
                 "success": True,
                 "binance_filled_qty": binance_filled_qty,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "b_side_skipped_below_min": True,
                 "message": f"Binance filled {binance_filled_qty} XAU but below min B-side lot, will accumulate"
             }
 
-        bybit_filled_qty = await self._execute_bybit_market_buy(
+        _t_b_sent = time.perf_counter()
+        _bb_res = await self._execute_bybit_market_buy(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=False  # Open new LONG position
         )
+        bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
+        _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _t_b_done = time.perf_counter()
 
         logger.info(f"[REVERSE_OPENING] Bybit filled: {bybit_filled_qty} Lot")
+        logger.info(f"[SLIPPAGE_TIMING] REVERSE_OPENING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -352,6 +367,8 @@ class OrderExecutorV2:
                 "error": "Bybit订单未成交",
                 "binance_filled_qty": binance_filled_qty,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -401,6 +418,8 @@ class OrderExecutorV2:
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
+            "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+            "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -449,6 +468,8 @@ class OrderExecutorV2:
                 "error": "Bybit没有LONG持仓可以平仓",
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "is_single_leg": False,
                 "position_exhausted": True,
                 "message": "Bybit没有LONG持仓，无法执行反向平仓"
@@ -498,6 +519,8 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        binance_avg_price = monitor_result.get("avg_price", 0.0)
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
 
@@ -508,6 +531,8 @@ class OrderExecutorV2:
                     "success": False,
                     "binance_filled_qty": 0,
                     "bybit_filled_qty": 0,
+                    "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                    "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -519,6 +544,8 @@ class OrderExecutorV2:
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -551,6 +578,8 @@ class OrderExecutorV2:
                     "error": "Bybit LONG=0 在下单前",
                     "binance_filled_qty": binance_filled_qty,
                     "bybit_filled_qty": 0,
+                    "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                    "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": True,
                     "message": "Bybit 多仓为 0，无法平仓 — Binance 已成交需要人工补救",
@@ -570,12 +599,17 @@ class OrderExecutorV2:
         except Exception as _pre_e:
             logger.warning(f"[REVERSE_CLOSING] pre-check 持仓查询失败 (continue with original qty): {_pre_e}")
 
-        bybit_filled_qty = await self._execute_bybit_market_sell(
+        _t_b_sent = time.perf_counter()
+        _bb_res = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=True  # Close existing LONG position
         )
+        bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
+        _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _t_b_done = time.perf_counter()
+        logger.info(f"[SLIPPAGE_TIMING] REVERSE_CLOSING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -584,6 +618,8 @@ class OrderExecutorV2:
                 "error": "Bybit订单未成交",
                 "binance_filled_qty": binance_filled_qty,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -621,6 +657,8 @@ class OrderExecutorV2:
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
+            "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+            "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -666,6 +704,8 @@ class OrderExecutorV2:
                 "error": precheck["error"],
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "margin_precheck_failed": True,
                 "precheck_detail": precheck["detail"],
             }
@@ -705,6 +745,8 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        binance_avg_price = monitor_result.get("avg_price", 0.0)
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
         logger.info(f"[FORWARD_OPENING] Monitor returned: filled={binance_filled_qty}, spread_cancelled={spread_cancelled}, api_error={binance_api_error}")
@@ -716,6 +758,8 @@ class OrderExecutorV2:
                     "success": False,
                     "binance_filled_qty": 0,
                     "bybit_filled_qty": 0,
+                    "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                    "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -727,6 +771,8 @@ class OrderExecutorV2:
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -754,12 +800,17 @@ class OrderExecutorV2:
                     f"(+accumulated={accumulated_unhedged_xau:.4f}) -> bybit_quantity={bybit_quantity} Lot "
                     f"(multiplier={hedge_multiplier})")
 
-        bybit_filled_qty = await self._execute_bybit_market_sell(
+        _t_b_sent = time.perf_counter()
+        _bb_res = await self._execute_bybit_market_sell(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=False  # Open new SHORT position
         )
+        bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
+        _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _t_b_done = time.perf_counter()
+        logger.info(f"[SLIPPAGE_TIMING] FORWARD_OPENING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -768,6 +819,8 @@ class OrderExecutorV2:
                 "error": "Bybit订单未成交",
                 "binance_filled_qty": binance_filled_qty,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -805,6 +858,8 @@ class OrderExecutorV2:
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
+            "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+            "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -858,6 +913,8 @@ class OrderExecutorV2:
                 "error": "Bybit没有SHORT持仓可以平仓",
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "is_single_leg": False,
                 "position_exhausted": True,
                 "message": "Bybit没有SHORT持仓，无法执行正向平仓"
@@ -912,6 +969,8 @@ class OrderExecutorV2:
         )
 
         binance_filled_qty = monitor_result["filled_qty"]
+        binance_avg_price = monitor_result.get("avg_price", 0.0)
+        _t_a_detected = time.perf_counter()
         spread_cancelled = monitor_result["spread_cancelled"]
         binance_api_error = monitor_result.get("api_error", False)
 
@@ -924,6 +983,8 @@ class OrderExecutorV2:
                     "success": False,
                     "binance_filled_qty": 0,
                     "bybit_filled_qty": 0,
+                    "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                    "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -936,6 +997,8 @@ class OrderExecutorV2:
                 "success": True,
                 "binance_filled_qty": 0,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -965,6 +1028,8 @@ class OrderExecutorV2:
                     "error": "Bybit SHORT=0 在下单前",
                     "binance_filled_qty": binance_filled_qty,
                     "bybit_filled_qty": 0,
+                    "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                    "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": True,
                     "message": "Bybit 空仓为 0，无法平仓 — Binance 已成交需要人工补救",
@@ -986,14 +1051,19 @@ class OrderExecutorV2:
 
         logger.info(f"[FORWARD_CLOSING] Placing Bybit BUY order: quantity={bybit_quantity} Lot (from {binance_filled_qty} XAU, multiplier={hedge_multiplier})")
 
-        bybit_filled_qty = await self._execute_bybit_market_buy(
+        _t_b_sent = time.perf_counter()
+        _bb_res = await self._execute_bybit_market_buy(
             bybit_account,
             sym_b,
             bybit_quantity,
             close_position=True  # Close existing SHORT position
         )
+        bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
+        _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _t_b_done = time.perf_counter()
 
         logger.info(f"[FORWARD_CLOSING] Bybit filled: {bybit_filled_qty} Lot")
+        logger.info(f"[SLIPPAGE_TIMING] FORWARD_CLOSING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
         # Check if Bybit order not filled at all
         if bybit_filled_qty == 0:
@@ -1003,6 +1073,8 @@ class OrderExecutorV2:
                 "error": "Bybit订单未成交",
                 "binance_filled_qty": binance_filled_qty,
                 "bybit_filled_qty": 0,
+                "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+                "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -1045,6 +1117,8 @@ class OrderExecutorV2:
             "success": True,
             "binance_filled_qty": binance_filled_qty,
             "bybit_filled_qty": bybit_filled_qty,
+            "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
+            "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -1256,7 +1330,7 @@ class OrderExecutorV2:
                 pass
 
         logger.info(f"[BYBIT_LINEAR_MON] Order {order_id} final: filled={filled_qty} spread_cancelled={spread_cancelled} api_error={api_error}")
-        return {"filled_qty": filled_qty, "spread_cancelled": spread_cancelled, "api_error": api_error}
+        return {"filled_qty": filled_qty, "spread_cancelled": spread_cancelled, "api_error": api_error, "avg_price": _order_fill_registry.get(order_id, {}).get("avg_price", 0.0)}
 
     async def _place_a_side_order(
         self,
@@ -1274,7 +1348,10 @@ class OrderExecutorV2:
         platform_id == 2 → Bybit Linear PostOnly Limit (BXAU new interface)
         """
         if account.platform_id == 1:
-            # Binance — use existing place_binance_order (unchanged)
+            # Binance — use existing place_binance_order with strategy tag.
+            # Tag with "s-" so the cleanup loop in continuous_executor can distinguish
+            # auto-strategy orders (safe to cancel between iterations) from emergency
+            # manual orders (which must persist until user explicitly cancels them).
             return await self.base_executor.place_binance_order(
                 account=account,
                 symbol=symbol,
@@ -1284,6 +1361,7 @@ class OrderExecutorV2:
                 price=price,
                 position_side=position_side,
                 post_only=True,
+                client_order_id_prefix="s-",
             )
         elif account.platform_id == 2:
             # Bybit Linear Contract (BXAU)
@@ -1337,6 +1415,7 @@ class OrderExecutorV2:
                 spread_threshold=spread_threshold,
                 compare_op=compare_op,
                 strategy_type=strategy_type,
+                pair_code=pair_code,
             )
         elif account.platform_id == 2:
             return await self._monitor_bybit_linear_order(
@@ -1438,7 +1517,8 @@ class OrderExecutorV2:
         timeout: float,
         spread_threshold: float = None,
         compare_op: str = None,
-        strategy_type: str = None
+        strategy_type: str = None,
+        pair_code: str = "XAU",
     ) -> dict:
         """
         Monitor Binance order via User Data Stream (ORDER_TRADE_UPDATE) — zero REST polling.
@@ -1478,7 +1558,13 @@ class OrderExecutorV2:
                     if fill_event.is_set():
                         break
                     try:
-                        market_data = await market_data_service.get_current_spread()
+                        # CRITICAL: query the SAME pair the strategy is on (e.g. ICXAU),
+                        # not the default XAU. Mismatched symbols = guard reads wrong
+                        # spread = never fires = unfavorable drift goes unchecked.
+                        sym_a_g, sym_b_g = _get_pair_symbols(pair_code)
+                        market_data = await market_data_service.get_current_spread(
+                            binance_symbol=sym_a_g, bybit_symbol=sym_b_g
+                        )
                         spreads = market_data_service.calculate_spread(
                             market_data.binance_quote,
                             market_data.bybit_quote
@@ -1515,6 +1601,7 @@ class OrderExecutorV2:
                                 pass
                             record = _order_fill_registry.get(order_id, {})
                             spread_cancel_qty = record.get("filled_qty", 0.0)
+                            spread_cancel_ap = record.get("avg_price", 0.0)
                             spread_cancelled = True
                             fill_event.set()  # wake main wait
                             return
@@ -1524,63 +1611,159 @@ class OrderExecutorV2:
             if spread_threshold is not None:
                 spread_check_task = asyncio.create_task(_watch_spread())
 
-            # --- Main wait: block until WS event fires or timeout ---
+            # --- Main wait: WS-first with concurrent REST heartbeat ---
+            rest_heartbeat_task = None
+
+            async def _rest_heartbeat():
+                """Concurrent REST check fires partway through WS wait.
+                If WS is degraded, catches fills before the full timeout."""
+                await asyncio.sleep(min(timeout * 0.6, 2.0))
+                if fill_event.is_set():
+                    return
+                try:
+                    rest_result = await self.base_executor.check_binance_order_status(
+                        account, symbol, order_id
+                    )
+                    if rest_result.get("success"):
+                        rest_status = rest_result.get("status", "")
+                        rest_filled = rest_result.get("filled_qty", 0.0)
+                        if rest_status in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                            _order_fill_registry[order_id] = {
+                                "filled_qty": rest_filled,
+                                "status": rest_status,
+                            }
+                            logger.info(
+                                f"[BINANCE_MONITOR] REST heartbeat detected terminal state for "
+                                f"order {order_id}: status={rest_status}, filled_qty={rest_filled}"
+                            )
+                            fill_event.set()
+                        elif rest_filled > 0 and rest_status == "PARTIALLY_FILLED":
+                            _order_fill_registry[order_id] = {
+                                "filled_qty": rest_filled,
+                                "status": rest_status,
+                            }
+                except Exception as e:
+                    logger.debug(f"[BINANCE_MONITOR] REST heartbeat error for order {order_id}: {e}")
+
+            rest_heartbeat_task = asyncio.create_task(_rest_heartbeat())
+
             try:
                 await asyncio.wait_for(fill_event.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                # Timeout: cancel order and rely on WebSocket to report final status
-                logger.warning(f"[BINANCE_MONITOR] Timeout waiting for order {order_id} ({timeout}s), cancelling")
-                try:
-                    await self.base_executor.cancel_binance_order(account, symbol, order_id)
-                    # Wait briefly for ORDER_TRADE_UPDATE to arrive via WebSocket
-                    logger.info(f"[BINANCE_MONITOR] Waiting for WebSocket cancel confirmation for order {order_id}")
-                    try:
-                        await asyncio.wait_for(fill_event.wait(), timeout=3.0)
-                        logger.info(f"[BINANCE_MONITOR] WebSocket cancel confirmation received for order {order_id}")
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[BINANCE_MONITOR] WebSocket cancel confirmation timeout for order {order_id}")
-                        pass
-                except Exception as cancel_err:
-                    # -2011 (already filled/expired) or network error — safe to ignore here
-                    logger.warning(f"[BINANCE_MONITOR] cancel error (order may be filled/expired): {cancel_err}")
+                logger.warning(
+                    f"[BINANCE_MONITOR] Timeout waiting for order {order_id} ({timeout}s), cancelling"
+                )
 
-                # Read final status from WebSocket registry (no REST query)
+                cancel_result = await self.base_executor.cancel_binance_order(
+                    account, symbol, order_id
+                )
+                cancel_success = cancel_result.get("success", False)
+                cancel_error = str(cancel_result.get("error", ""))
+
+                is_already_filled = (
+                    not cancel_success
+                    and ("-2011" in cancel_error or "\u8ba2\u5355\u4e0d\u5b58\u5728" in cancel_error
+                         or "Unknown order" in cancel_error)
+                )
+
+                if is_already_filled:
+                    logger.info(
+                        f"[BINANCE_MONITOR] Cancel returned -2011 for order {order_id}, "
+                        f"order already filled/expired, checking REST immediately"
+                    )
+                elif cancel_success:
+                    logger.info(
+                        f"[BINANCE_MONITOR] Cancel succeeded for order {order_id}, "
+                        f"waiting 0.5s for WS confirmation"
+                    )
+                    try:
+                        await asyncio.wait_for(fill_event.wait(), timeout=0.5)
+                        logger.info(
+                            f"[BINANCE_MONITOR] WS cancel confirmation received for order {order_id}"
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"[BINANCE_MONITOR] WS cancel confirmation timeout (0.5s) for order {order_id}"
+                        )
+                else:
+                    logger.warning(
+                        f"[BINANCE_MONITOR] Cancel failed for order {order_id}: {cancel_error}"
+                    )
+
                 record = _order_fill_registry.get(order_id, {})
                 filled_qty = record.get("filled_qty", 0.0)
+                ws_status = record.get("status", "")
 
-                # Only fallback to REST if WebSocket completely failed to report
-                if filled_qty == 0 and not record:
-                    logger.error(
-                        f"[BINANCE_MONITOR] CRITICAL: WebSocket failed to report order {order_id} status, "
-                        f"falling back to single REST query"
+                needs_rest_check = (
+                    is_already_filled
+                    or not ws_status
+                    or (filled_qty == 0 and ws_status not in ("CANCELED", "EXPIRED", "REJECTED"))
+                )
+
+                if needs_rest_check:
+                    logger.info(
+                        f"[BINANCE_MONITOR] REST fallback for order {order_id} "
+                        f"(is_2011={is_already_filled}, ws_status={ws_status!r}, ws_filled={filled_qty})"
                     )
-                    final_status = await self.base_executor.check_binance_order_status(
-                        account, symbol, order_id
-                    )
-                    return {
-                        "filled_qty": final_status.get("filled_qty", 0) if final_status.get("success") else 0,
-                        "spread_cancelled": False,
-                        "api_error": not final_status.get("success", False)
-                    }
+                    try:
+                        final_status = await self.base_executor.check_binance_order_status(
+                            account, symbol, order_id
+                        )
+                        if final_status.get("success"):
+                            rest_filled = final_status.get("filled_qty", 0.0)
+                            rest_status = final_status.get("status", "")
+                            if rest_filled > filled_qty:
+                                filled_qty = rest_filled
+                                logger.info(
+                                    f"[BINANCE_MONITOR] REST upgraded filled_qty for order {order_id}: "
+                                    f"{rest_filled} (REST status={rest_status})"
+                                )
+                            else:
+                                filled_qty = max(filled_qty, rest_filled)
+                                logger.info(
+                                    f"[BINANCE_MONITOR] REST confirmed order {order_id}: "
+                                    f"filled_qty={filled_qty}, status={rest_status}"
+                                )
+                        else:
+                            logger.error(
+                                f"[BINANCE_MONITOR] REST check failed for order {order_id}: "
+                                f"{final_status.get('error', 'unknown')}"
+                            )
+                            return {
+                                "filled_qty": filled_qty,
+                                "spread_cancelled": False,
+                                "api_error": True, "avg_price": _order_fill_registry.get(order_id, {}).get("avg_price", 0.0)
+                            }
+                    except Exception as rest_err:
+                        logger.error(
+                            f"[BINANCE_MONITOR] REST fallback exception for order {order_id}: {rest_err}"
+                        )
+                        return {
+                            "filled_qty": filled_qty,
+                            "spread_cancelled": False,
+                            "api_error": True, "avg_price": _order_fill_registry.get(order_id, {}).get("avg_price", 0.0)
+                        }
 
                 logger.info(
-                    f"[BINANCE_MONITOR] Order {order_id} timeout handled via WebSocket: "
-                    f"filled_qty={filled_qty}, status={record.get('status', 'UNKNOWN')}"
+                    f"[BINANCE_MONITOR] Order {order_id} final: filled_qty={filled_qty}, "
+                    f"ws_status={ws_status!r}, cancel_2011={is_already_filled}"
                 )
                 return {
                     "filled_qty": filled_qty,
                     "spread_cancelled": False,
-                    "api_error": False
+                    "api_error": False, "avg_price": _order_fill_registry.get(order_id, {}).get("avg_price", 0.0)
                 }
 
-            # Event was set — read result from registry
+            # Event was set (WS or REST heartbeat) — read result from registry
+            detection_method = "ws" if not (rest_heartbeat_task and rest_heartbeat_task.done()) else "rest_heartbeat"
             record = _order_fill_registry.get(order_id, {})
+            logger.info(f"[BINANCE_MONITOR] Order {order_id} filled via {detection_method}: qty={record.get("filled_qty", 0)}")
 
             if spread_cancelled:
                 return {
                     "filled_qty": spread_cancel_qty,
                     "spread_cancelled": True,
-                    "api_error": False
+                    "api_error": False, "avg_price": _order_fill_registry.get(order_id, {}).get("avg_price", 0.0)
                 }
 
             return {
@@ -1590,6 +1773,8 @@ class OrderExecutorV2:
             }
 
         finally:
+            if rest_heartbeat_task and not rest_heartbeat_task.done():
+                rest_heartbeat_task.cancel()
             if spread_check_task and not spread_check_task.done():
                 spread_check_task.cancel()
             unregister_order_watch(order_id)
@@ -1701,6 +1886,8 @@ class OrderExecutorV2:
         """
         logger.info(f"[BYBIT_BUY] Starting: quantity={quantity} Lot, close_position={close_position}, symbol={symbol}")
         total_filled = 0
+        total_quote = 0.0  # for avg_price calc
+        total_avg_price = 0.0
         remaining = round(quantity, 2)
 
         # ── CLOSE path: delegate to shared ticket-aggregation helper. ──
@@ -1912,8 +2099,8 @@ class OrderExecutorV2:
                 if attempt == self.max_retries:
                     break  # Exhausted all retries, give up
 
-        logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot")
-        return total_filled
+        logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
+        return {"filled_qty": total_filled, "avg_price": total_avg_price}
 
     async def _execute_bybit_market_sell(
         self,
@@ -1933,6 +2120,8 @@ class OrderExecutorV2:
         """
         logger.info(f"[BYBIT_SELL] Starting: quantity={quantity} Lot, close_position={close_position}")
         total_filled = 0
+        total_quote = 0.0  # for avg_price calc
+        total_avg_price = 0.0
         remaining = round(quantity, 2)
 
         # ── CLOSE path: delegate to shared ticket-aggregation helper. ──
@@ -2147,8 +2336,8 @@ class OrderExecutorV2:
                 if attempt == self.max_retries:
                     break  # Exhausted all retries, give up
 
-        logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot")
-        return total_filled
+        logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
+        return {"filled_qty": total_filled, "avg_price": total_avg_price}
 
     async def _check_mt5_filled_volume(
         self,
@@ -2425,7 +2614,7 @@ class OrderExecutorV2:
                 pass
 
         logger.info(f"[GATEIO_MON] Order {order_id} final: filled={filled_qty} spread_cancel={spread_cancelled}")
-        return {"filled_qty": filled_qty, "spread_cancelled": spread_cancelled, "api_error": api_error}
+        return {"filled_qty": filled_qty, "spread_cancelled": spread_cancelled, "api_error": api_error, "avg_price": _order_fill_registry.get(order_id, {}).get("avg_price", 0.0)}
 
 
 # Global instance

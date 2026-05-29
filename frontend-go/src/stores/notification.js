@@ -44,7 +44,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
   // Check market data against alert thresholds
   // Spread alerts are handled server-side by spread_alert_service →
-  // Redis → Go WebSocket → frontend risk_alert event. No client-side check needed.
+  // Redis → Rust WebSocket Hub → frontend risk_alert event. No client-side check needed.
   function checkMarketAlerts(_marketData) {
     // noop: single source of truth is backend spread_alert_service
   }

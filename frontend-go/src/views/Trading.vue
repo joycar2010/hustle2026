@@ -279,6 +279,91 @@
         </div>
       </div>
     </div>
+
+    <!-- 配对宽表: 主+冲并排同行 + 分类查询 -->
+    <div v-if="pairedTrades.length > 0" class="card mb-6">
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <h3 class="text-lg font-semibold">套利配对成交历史</h3>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-400">分类:</label>
+          <select v-model="pairFilter" class="px-3 py-1.5 bg-dark-100 border border-border-primary rounded text-sm focus:outline-none focus:border-primary">
+            <option value="all">全部 ({{ pairedTrades.length }})</option>
+            <option value="strategy">自动交易 ({{ pairedStrategyCount }})</option>
+            <option value="manual">手动交易 ({{ pairedManualCount }})</option>
+          </select>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-left text-gray-400 border-b border-gray-700">
+              <th class="pb-2 px-1">来源</th>
+              <th class="pb-2 px-1">时间(主)</th>
+              <th class="pb-2 px-1">方向</th>
+              <th class="pb-2 px-1">主账号均价</th>
+              <th class="pb-2 px-1">数量</th>
+              <th class="pb-2 px-1 bg-dark-100">价差</th>
+              <th class="pb-2 px-1 bg-dark-100">阈值</th>
+              <th class="pb-2 px-1 bg-dark-100">滑点</th>
+              <th class="pb-2 px-1">对冲均价</th>
+              <th class="pb-2 px-1">数量(对冲)</th>
+              <th class="pb-2 px-1">方向(对冲)</th>
+              <th class="pb-2 px-1">时间(对冲)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="filteredPairedTrades.length === 0">
+              <td colspan="12" class="text-center py-8 text-gray-500">该分类下暂无配对记录</td>
+            </tr>
+            <tr v-for="p in filteredPairedTrades" :key="p.id" class="border-b border-gray-800 hover:bg-dark-200">
+              <td class="py-2 px-1">
+                <span :class="p.source === 'strategy' ? 'text-[#0ecb81] bg-[#0ecb81]/10 px-1.5 py-0.5 rounded text-[10px]' : 'text-[#fcd535] bg-[#fcd535]/10 px-1.5 py-0.5 rounded text-[10px]'">
+                  {{ p.source === 'strategy' ? '自动' : '手动' }}
+                </span>
+              </td>
+              <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_primary) }}</td>
+              <td class="py-2 px-1">
+                <span :class="p.side_primary === 'buy' ? 'text-green-500' : 'text-red-500'">
+                  {{ p.side_primary === 'buy' ? '买入' : '卖出' }}
+                </span>
+              </td>
+              <td class="py-2 px-1 font-mono">{{ p.avg_price_primary != null ? Number(p.avg_price_primary).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1 font-mono">{{ p.qty_primary != null ? Number(p.qty_primary).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.spread != null">{{ Number(p.spread).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.threshold != null">{{ Number(p.threshold).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.slippage != null"
+                      :class="p.slippage >= 0 ? 'text-green-500' : 'text-red-500'">
+                  {{ p.slippage >= 0 ? '+' : '' }}{{ Number(p.slippage).toFixed(2) }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono">
+                <span v-if="p.avg_price_hedge != null">{{ Number(p.avg_price_hedge).toFixed(2) }}</span>
+                <span v-else class="text-yellow-500">未匹配</span>
+              </td>
+              <td class="py-2 px-1 font-mono">{{ p.qty_hedge != null ? Number(p.qty_hedge).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1">
+                <span v-if="p.side_hedge" :class="p.side_hedge === 'buy' ? 'text-green-500' : 'text-red-500'">
+                  {{ p.side_hedge === 'buy' ? '买入' : '卖出' }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_hedge) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-xs text-gray-500">
+        <span>说明: 价差=主账号均价与对冲均价的绝对差值; 阈值=策略设定的开/平差值; 滑点=价差-阈值. 手动交易不展示价差/阈值/滑点.</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -338,6 +423,30 @@ const stats = ref({
 const accountTrades = ref([])
 const mt5Trades = ref([])
 const queryWarnings = ref([])
+
+// 配对成交数据 + 分类过滤
+const pairedTrades = ref([])
+const pairFilter = ref('all')  // all | strategy | manual
+
+const pairedStrategyCount = computed(() => pairedTrades.value.filter(p => p.source === 'strategy').length)
+const pairedManualCount = computed(() => pairedTrades.value.filter(p => p.source === 'manual').length)
+const filteredPairedTrades = computed(() => {
+  if (pairFilter.value === 'all') return pairedTrades.value
+  return pairedTrades.value.filter(p => p.source === pairFilter.value)
+})
+
+function formatPairedTime(ts) {
+  if (!ts) return '-'
+  // 后端返回北京时间字符串，截取 HH:MM:SS
+  try {
+    if (typeof ts === 'string' && ts.includes(' ')) {
+      return ts.split(' ')[1]?.substring(0, 8) || ts
+    }
+    return ts
+  } catch {
+    return ts
+  }
+}
 
 // Computed Net Profit
 const netProfit = computed(() => {
@@ -455,6 +564,11 @@ function updateData(data) {
       return timeB - timeA
     })
   }
+  if (data.pairedTrades) {
+    pairedTrades.value = data.pairedTrades
+  } else {
+    pairedTrades.value = []
+  }
 }
 
 function clearData() {
@@ -484,6 +598,7 @@ function clearData() {
   }
   accountTrades.value = []
   mt5Trades.value = []
+  pairedTrades.value = []
 }
 
 function formatDateTime(timestamp) {

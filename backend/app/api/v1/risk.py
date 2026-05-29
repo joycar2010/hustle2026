@@ -45,8 +45,10 @@ class AlertSettings(BaseModel):
     mt5AlertRepeatCount: Optional[int] = None
     liquidationAlertSound: Optional[str] = None
     liquidationAlertRepeatCount: Optional[int] = None
-    fundingRateThreshold: Optional[float] = None
-    overnightFeeThreshold: Optional[float] = None
+    fundingRateThreshold: Optional[float] = None  # short (legacy)
+    fundingRateThresholdLong: Optional[float] = None
+    overnightFeeThreshold: Optional[float] = None  # short (legacy)
+    overnightFeeThresholdLong: Optional[float] = None
     pair_code: Optional[str] = None  # Product pair code for multi-pair support
 
 
@@ -115,7 +117,9 @@ async def get_alert_settings(
                 liquidationAlertSound=settings.liquidation_alert_sound,
                 liquidationAlertRepeatCount=settings.liquidation_alert_repeat_count,
                 fundingRateThreshold=settings.funding_rate_threshold,
+                fundingRateThresholdLong=settings.funding_rate_threshold_long,
                 overnightFeeThreshold=settings.overnight_fee_threshold,
+                overnightFeeThresholdLong=settings.overnight_fee_threshold_long,
             )
 
         # Return default settings if none exist
@@ -172,7 +176,9 @@ async def save_alert_settings(
             existing_settings.liquidation_alert_sound = settings.liquidationAlertSound
             existing_settings.liquidation_alert_repeat_count = settings.liquidationAlertRepeatCount
             existing_settings.funding_rate_threshold = settings.fundingRateThreshold
+            existing_settings.funding_rate_threshold_long = settings.fundingRateThresholdLong
             existing_settings.overnight_fee_threshold = settings.overnightFeeThreshold
+            existing_settings.overnight_fee_threshold_long = settings.overnightFeeThresholdLong
             existing_settings.update_time = datetime.utcnow()
         else:
             # Create new settings
@@ -204,7 +210,9 @@ async def save_alert_settings(
                 liquidation_alert_sound=settings.liquidationAlertSound,
                 liquidation_alert_repeat_count=settings.liquidationAlertRepeatCount,
                 funding_rate_threshold=settings.fundingRateThreshold,
+                funding_rate_threshold_long=settings.fundingRateThresholdLong,
                 overnight_fee_threshold=settings.overnightFeeThreshold,
+                overnight_fee_threshold_long=settings.overnightFeeThresholdLong,
             )
             db.add(new_settings)
 

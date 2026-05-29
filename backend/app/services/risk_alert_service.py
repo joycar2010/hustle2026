@@ -47,8 +47,8 @@ class RiskAlertService:
 
     # Class-level cooldown cache shared across all instances
     _cooldown_cache: Dict[str, datetime] = {}
-    _funding_cache: Dict = {'data': None, 'ts': 0}
-    _swap_cache: Dict = {'data': None, 'ts': 0}
+    _funding_cache: Dict = {}  # {pair_code: {'data': ..., 'ts': ...}}
+    _swap_cache: Dict = {}
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -894,102 +894,230 @@ class RiskAlertService:
     # ========================================================================
 
     async def check_funding_rate(
-        self, user_id: str, threshold: float, pair_code: str = "XAU"
+        self,
+        user_id: str,
+        threshold_short: float = None,
+        threshold_long: float = None,
+        pair_code: str = "XAU",
     ) -> bool:
-        funding_data = await self._get_funding_rate()
+        funding_data = await self._get_funding_rate(pair_code)
         if not funding_data:
             return False
-        cost_per_lot = abs(funding_data.get('short_cost_per_lot', 0))
-        if cost_per_lot > threshold:
-            return await self._send_alert(
-                user_id=user_id,
-                template_key="funding_rate_alert",
-                variables={
-                    "pair_code": pair_code,
-                    "funding_rate_pct": f"{funding_data['funding_rate_pct']:.4f}",
-                    "short_cost": f"{cost_per_lot:.4f}",
-                    "threshold": f"{threshold}",
-                    "mark_price": f"{funding_data['mark_price']:.2f}",
-                },
-            )
-        return False
+        sent = False
+        # Short direction
+        if threshold_short is not None:
+            short_cost = abs(funding_data.get('short_cost_per_lot', 0))
+            if short_cost > threshold_short:
+                ok = await self._send_alert(
+                    user_id=user_id,
+                    template_key="funding_rate_alert",
+                    variables={
+                        "pair_code": pair_code,
+                        "direction": "空",
+                        "funding_rate_pct": f"{funding_data['funding_rate_pct']:.4f}",
+                        "cost_per_lot": f"{short_cost:.4f}",
+                        "short_cost": f"{short_cost:.4f}",
+                        "threshold": f"{threshold_short}",
+                        "mark_price": f"{funding_data['mark_price']:.2f}",
+                    },
+                )
+                sent = sent or ok
+        # Long direction
+        if threshold_long is not None:
+            long_cost = abs(funding_data.get('long_cost_per_lot', 0))
+            if long_cost > threshold_long:
+                ok = await self._send_alert(
+                    user_id=user_id,
+                    template_key="funding_rate_alert",
+                    variables={
+                        "pair_code": pair_code,
+                        "direction": "多",
+                        "funding_rate_pct": f"{funding_data['funding_rate_pct']:.4f}",
+                        "cost_per_lot": f"{long_cost:.4f}",
+                        "short_cost": f"{long_cost:.4f}",
+                        "threshold": f"{threshold_long}",
+                        "mark_price": f"{funding_data['mark_price']:.2f}",
+                    },
+                )
+                sent = sent or ok
+        return sent
 
     async def check_overnight_fee(
-        self, user_id: str, threshold: float, pair_code: str = "XAU"
+        self,
+        user_id: str,
+        threshold_short: float = None,
+        threshold_long: float = None,
+        pair_code: str = "XAU",
     ) -> bool:
-        swap_data = await self._get_swap_rate()
+        swap_data = await self._get_swap_rate(pair_code)
         if not swap_data:
             return False
-        swap_short = abs(swap_data.get('short_swap_per_lot', 0))
-        if swap_short > threshold:
-            return await self._send_alert(
-                user_id=user_id,
-                template_key="overnight_fee_alert",
-                variables={
-                    "pair_code": pair_code,
-                    "swap_short": f"{swap_data['short_swap_per_lot']:.4f}",
-                    "threshold": f"{threshold}",
-                    "symbol": swap_data.get("symbol", "XAUUSD+"),
-                },
-            )
-        return False
+        sent = False
+        symbol = swap_data.get("symbol", "")
+        # Short direction
+        if threshold_short is not None:
+            swap_short = abs(swap_data.get('short_swap_per_lot', 0))
+            if swap_short > threshold_short:
+                ok = await self._send_alert(
+                    user_id=user_id,
+                    template_key="overnight_fee_alert",
+                    variables={
+                        "pair_code": pair_code,
+                        "direction": "空",
+                        "swap_per_lot": f"{swap_data['short_swap_per_lot']:.4f}",
+                        "swap_short": f"{swap_data['short_swap_per_lot']:.4f}",
+                        "threshold": f"{threshold_short}",
+                        "symbol": symbol,
+                    },
+                )
+                sent = sent or ok
+        # Long direction
+        if threshold_long is not None:
+            swap_long = abs(swap_data.get('long_swap_per_lot', 0))
+            if swap_long > threshold_long:
+                ok = await self._send_alert(
+                    user_id=user_id,
+                    template_key="overnight_fee_alert",
+                    variables={
+                        "pair_code": pair_code,
+                        "direction": "多",
+                        "swap_per_lot": f"{swap_data['long_swap_per_lot']:.4f}",
+                        "swap_short": f"{swap_data['long_swap_per_lot']:.4f}",
+                        "threshold": f"{threshold_long}",
+                        "symbol": symbol,
+                    },
+                )
+                sent = sent or ok
+        return sent
 
     # ========================================================================
     # 费率数据获取（带缓存）
     # ========================================================================
 
-    async def _get_funding_rate(self) -> Optional[Dict]:
+    async def _get_funding_rate(self, pair_code: str = "XAU") -> Optional[Dict]:
+        """Get funding rate for the pair's A-side symbol (Binance).
+
+        Returns long_cost_per_lot and short_cost_per_lot:
+        - funding_rate > 0: longs PAY shorts -> short benefits (cost negative), long pays (cost positive)
+        - funding_rate < 0: shorts PAY longs -> long benefits, short pays
+        """
         now = time.time()
-        if RiskAlertService._funding_cache['data'] and now - RiskAlertService._funding_cache['ts'] < 60:
-            return RiskAlertService._funding_cache['data']
+        cache_entry = RiskAlertService._funding_cache.get(pair_code)
+        if cache_entry and now - cache_entry.get('ts', 0) < 60:
+            return cache_entry.get('data')
+
         try:
+            from app.services.hedging_pair_service import hedging_pair_service
+            pair = hedging_pair_service.get_pair(pair_code)
+            if not pair:
+                logger.warning(f"[RiskAlert] Unknown pair_code: {pair_code}")
+                return cache_entry.get('data') if cache_entry else None
+
+            symbol_a = pair.symbol_a.symbol  # e.g. XAUUSDT
+            conversion_factor = pair.conversion_factor or 100.0
+
             from app.services.binance_client import BinanceFuturesClient
             client = BinanceFuturesClient("", "")
             try:
-                data = await client.get_premium_index("XAUUSDT")
+                data = await client.get_premium_index(symbol_a)
             finally:
                 await client.close()
+
             funding_rate = float(data.get("lastFundingRate", 0))
             mark_price = float(data.get("markPrice", 0))
+            per_lot = funding_rate * mark_price * conversion_factor
+            # Convention: cost > 0 means user pays funding
+            # long pays when funding_rate > 0
+            # short pays when funding_rate < 0
             result = {
+                "pair_code": pair_code,
+                "symbol": symbol_a,
                 "funding_rate": funding_rate,
                 "funding_rate_pct": round(funding_rate * 100, 6),
                 "mark_price": mark_price,
-                "short_cost_per_lot": round(-funding_rate * mark_price, 4),
+                "long_cost_per_lot": round(per_lot, 4),       # positive when rate > 0
+                "short_cost_per_lot": round(-per_lot, 4),     # positive when rate < 0
             }
-            RiskAlertService._funding_cache = {'data': result, 'ts': now}
+            RiskAlertService._funding_cache[pair_code] = {'data': result, 'ts': now}
             return result
         except Exception as e:
-            logger.warning(f"[RiskAlert] Failed to fetch funding rate: {e}")
-            return RiskAlertService._funding_cache.get('data')
+            logger.warning(f"[RiskAlert] Failed to fetch funding rate for {pair_code}: {e}")
+            return cache_entry.get('data') if cache_entry else None
 
-    async def _get_swap_rate(self) -> Optional[Dict]:
+    async def _get_swap_rate(self, pair_code: str = "XAU") -> Optional[Dict]:
+        """Get swap (overnight) rate via MT5 Bridge HTTP (Linux-compatible).
+
+        Computes per-lot per-day swap cost in USD using MT5 symbol_info.
+        """
         now = time.time()
-        if RiskAlertService._swap_cache['data'] and now - RiskAlertService._swap_cache['ts'] < 60:
-            return RiskAlertService._swap_cache['data']
+        cache_entry = RiskAlertService._swap_cache.get(pair_code)
+        if cache_entry and now - cache_entry.get('ts', 0) < 60:
+            return cache_entry.get('data')
+
         try:
-            import MetaTrader5 as mt5
-            from app.services.realtime_market_service import market_data_service as realtime_service
-            mt5_client = realtime_service.mt5_client
-            if not mt5_client.ensure_connection():
-                return RiskAlertService._swap_cache.get('data')
-            symbol = "XAUUSD+"
-            info = mt5.symbol_info(symbol)
-            if info is None:
-                return RiskAlertService._swap_cache.get('data')
-            contract = info.trade_contract_size
+            from app.services.hedging_pair_service import hedging_pair_service
+            pair = hedging_pair_service.get_pair(pair_code)
+            if not pair:
+                return cache_entry.get('data') if cache_entry else None
+
+            mt5_symbol = pair.symbol_b.symbol
+            mt5_platform_id = pair.symbol_b.platform_id
+
+            # Resolve bridge URL from system MT5 client (per-platform)
+            from app.core.database import AsyncSessionLocal
+            from app.models.mt5_client import MT5Client as MT5ClientModel
+            from app.models.account import Account
+            from sqlalchemy import select as _sa_sel
+            import os
+            import httpx
+
+            bridge_url = None
+            async with AsyncSessionLocal() as _db:
+                row = (await _db.execute(
+                    _sa_sel(MT5ClientModel, Account.platform_id)
+                    .join(Account, MT5ClientModel.account_id == Account.account_id)
+                    .where(MT5ClientModel.is_active == True)
+                    .where(MT5ClientModel.is_system_service == True)
+                    .where(Account.platform_id == mt5_platform_id)
+                    .limit(1)
+                )).first()
+                if row:
+                    mc, _ = row
+                    bridge_url = mc.bridge_url or f"http://172.31.14.113:{mc.bridge_service_port}"
+
+            if not bridge_url:
+                logger.warning(f"[RiskAlert] No MT5 bridge for pair {pair_code} platform_id={mt5_platform_id}")
+                return cache_entry.get('data') if cache_entry else None
+
+            api_key = os.getenv("MT5_API_KEY", "")
+            headers = {"X-Api-Key": api_key} if api_key else {}
+
+            async with httpx.AsyncClient(timeout=3.0) as _http:
+                resp = await _http.get(
+                    f"{bridge_url}/mt5/symbol_info/{mt5_symbol}",
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    return cache_entry.get('data') if cache_entry else None
+                info = resp.json()
+
+            swap_long = float(info.get("swap_long", 0) or 0)
+            swap_short = float(info.get("swap_short", 0) or 0)
+            contract = float(info.get("trade_contract_size", 100) or 100)
+
             result = {
-                "symbol": symbol,
-                "swap_long": info.swap_long,
-                "swap_short": info.swap_short,
-                "long_swap_per_lot": round(info.swap_long * contract / 365, 4) if info.swap_long else 0,
-                "short_swap_per_lot": round(info.swap_short * contract / 365, 4) if info.swap_short else 0,
+                "pair_code": pair_code,
+                "symbol": mt5_symbol,
+                "swap_long": swap_long,
+                "swap_short": swap_short,
+                "long_swap_per_lot": round(swap_long * contract / 365, 4) if swap_long else 0,
+                "short_swap_per_lot": round(swap_short * contract / 365, 4) if swap_short else 0,
             }
-            RiskAlertService._swap_cache = {'data': result, 'ts': now}
+            RiskAlertService._swap_cache[pair_code] = {'data': result, 'ts': now}
             return result
         except Exception as e:
-            logger.warning(f"[RiskAlert] Failed to fetch swap rate: {e}")
-            return RiskAlertService._swap_cache.get('data')
+            logger.warning(f"[RiskAlert] Failed to fetch swap rate for {pair_code}: {e}")
+            return cache_entry.get('data') if cache_entry else None
 
     # ========================================================================
     # 爆仓价计算辅助函数

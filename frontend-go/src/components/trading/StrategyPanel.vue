@@ -1087,6 +1087,26 @@ async function loadEffectiveTriggerInterval() {
 onMounted(async () => {
   // Load config from database (including enabled states)
   await loadConfigFromDB()
+  // 建议4: 恢复后端运行中的连续执行任务状态
+  try {
+    const tasksR = await api.get('/api/v1/strategies/execution/tasks')
+    const tasks = tasksR.data?.tasks || []
+    for (const t of tasks) {
+      if (t.status === 'running' && t.strategy_id?.includes(props.type)) {
+        if (t.strategy_type?.includes('opening')) {
+          continuousExecutionEnabled.value.opening = true
+          continuousExecutionTaskId.value.opening = t.task_id
+          startStatusPolling('opening')
+        }
+        if (t.strategy_type?.includes('closing')) {
+          continuousExecutionEnabled.value.closing = true
+          continuousExecutionTaskId.value.closing = t.task_id
+          startStatusPolling('closing')
+        }
+      }
+    }
+  } catch {}
+
 
   // Load alert settings (spread thresholds) from Risk API
   fetchAlertSettings()
@@ -1242,58 +1262,7 @@ watch(() => marketStore.marketData, (newData) => {
     closingSpread.value = spreads.reverseClosing  // 反向平仓点差
   }
 
-  // binance做多值: forward=binance_bid, reverse=binance_ask
-  const binanceLongValue = props.type === 'forward' ? newData.binance_bid : newData.binance_ask
-
-  // Trigger count logic for opening
-  if (config.value.openingEnabled && !executingOpening.value && !orderPlaced.value.opening && !continuousExecutionEnabled.value.opening) {
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    const currentLadderIdx = ladderProgress.value.opening.currentLadderIndex
-
-    // 只检查当前阶梯（严格顺序执行）
-    if (currentLadderIdx < enabledLadders.length) {
-      const currentLadder = enabledLadders[currentLadderIdx]
-
-      // 检查是否满足触发条件
-      if (currentSpread.value >= currentLadder.openPrice) {
-        triggerCount.value.opening++
-        // trigger count logging removed for performance
-
-        if (triggerCount.value.opening >= config.value.openingSyncQty) {
-          // 执行当前阶梯
-          executeLadderOpening(currentLadderIdx, currentLadder)
-          triggerCount.value.opening = 0
-        }
-      } else {
-        triggerCount.value.opening = 0
-      }
-    }
-  }
-
-  // Trigger count logic for closing
-  if (config.value.closingEnabled && !executingClosing.value && !orderPlaced.value.closing && !continuousExecutionEnabled.value.closing) {
-    const enabledLadders = config.value.ladders.filter(l => l.enabled)
-    const currentLadderIdx = ladderProgress.value.closing.currentLadderIndex
-
-    // 只检查当前阶梯（严格顺序执行）
-    if (currentLadderIdx < enabledLadders.length) {
-      const currentLadder = enabledLadders[currentLadderIdx]
-
-      // 检查是否满足触发条件
-      if (closingSpread.value <= currentLadder.threshold) {
-        triggerCount.value.closing++
-        // trigger count logging removed for performance
-
-        if (triggerCount.value.closing >= config.value.closingSyncQty) {
-          // 执行当前阶梯
-          executeLadderClosing(currentLadderIdx, currentLadder)
-          triggerCount.value.closing = 0
-        }
-      } else {
-        triggerCount.value.closing = 0
-      }
-    }
-  }
+  // binance做多值: forward=binance_bid, reverse=binance_ask (保留用于 MarketCards 等组件)
 })
 
 // Watch for account balance updates and strategy status via WebSocket
@@ -1984,504 +1953,6 @@ const toggleClosingExecution = debounce(async function() {
   }
 }, 500)
 
-async function executeLadderOpening(ladderIndex, ladder) {
-  // Phase 3: 检查阶梯失败次数，决定是否跳过
-  const failureCount = ladderFailureCounts.value.opening[ladderIndex] || 0
-
-  if (failureCount >= MAX_LADDER_FAILURES) {
-    console.log(`Skipping ladder ${ladderIndex + 1} due to ${failureCount} consecutive failures`)
-
-    // 跳过到下一个阶梯
-    ladderProgress.value.opening.currentLadderIndex++
-    ladderProgress.value.opening.completedQty = 0
-    saveLadderProgress()
-
-    // 重置失败计数
-    ladderFailureCounts.value.opening[ladderIndex] = 0
-    saveLadderFailureCounts()
-
-    // 通知用户
-    notificationStore.showStrategyNotification(
-      `阶梯 ${ladderIndex + 1} 连续失败${failureCount}次，已自动跳过`,
-      'warning'
-    )
-
-    return
-  }
-
-  // 全局互斥锁：防止与其他策略冲突
-  if (executingAnyStrategy.value) {
-    console.log('Another strategy is executing, skipping opening')
-    return
-  }
-
-  try {
-    executingOpening.value = true
-
-    const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = findHedgeAccount(accounts)
-
-    if (!binanceAccount || !bybitMT5Account) {
-      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
-      config.value.openingEnabled = false
-      return
-    }
-
-    const remainingQty = ladder.qtyLimit - ladderProgress.value.opening.completedQty
-    const mCoin = config.value.openingMCoin
-    const batchQty = Math.min(mCoin, remainingQty)
-
-    console.log(`Executing ladder ${ladderIndex + 1} opening: batch=${batchQty}, remaining=${remainingQty}, total=${ladder.qtyLimit}`)
-
-    const executionData = {
-      binance_account_id: binanceAccount.account_id,
-      bybit_account_id: bybitMT5Account.account_id,
-      quantity: batchQty,
-      ladder_index: ladderIndex,
-      target_spread: ladder.threshold
-    }
-
-    try {
-      const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
-
-      console.log(`Ladder ${ladderIndex + 1} API response:`, response.data)
-
-      if (response.data.success) {
-        console.log(`Ladder ${ladderIndex + 1} batch executed successfully`)
-        console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
-
-        // Phase 3: 成功执行，重置失败计数
-        ladderFailureCounts.value.opening[ladderIndex] = 0
-        saveLadderFailureCounts()
-
-        // 检查实际成交数量
-        const binanceFilled = response.data.binance_filled_qty || 0
-        const bybitFilled = response.data.bybit_filled_qty || 0
-
-        // 如果两边都没有成交，显示警告但保持策略启用（等待下次自动重试）
-        if (binanceFilled === 0 && bybitFilled === 0) {
-          const message = response.data.message || 'Binance未匹配到订单，等待下次自动重试'
-          console.log(`Ladder ${ladderIndex + 1}: ${message}`)
-          notificationStore.showStrategyNotification(message, 'warning')
-          // 不禁用策略，允许下次触发时自动重试
-          return
-        }
-
-        // 如果有成交，更新阶梯进度（使用实际成交数量）
-        const actualFilled = Math.min(binanceFilled, bybitFilled)
-        ladderProgress.value.opening.completedQty += actualFilled
-        saveLadderProgress()  // 持久化进度
-
-        // 检查当前阶梯是否完成
-        if (ladderProgress.value.opening.completedQty >= ladder.qtyLimit) {
-          console.log(`Ladder ${ladderIndex + 1} completed, moving to next ladder`)
-
-          // 移动到下一个阶梯
-          ladderProgress.value.opening.currentLadderIndex++
-          ladderProgress.value.opening.completedQty = 0
-          saveLadderProgress()  // 持久化进度
-
-          // 检查是否所有阶梯都完成
-          const enabledLadders = config.value.ladders.filter(l => l.enabled)
-          if (ladderProgress.value.opening.currentLadderIndex >= enabledLadders.length) {
-            // 所有阶梯完成，停止策略
-            console.log('All ladders completed, stopping opening strategy')
-            config.value.openingEnabled = false
-            ladderProgress.value.opening.currentLadderIndex = 0
-            saveLadderProgress()  // 持久化进度
-            notificationStore.showStrategyNotification('所有阶梯开仓完成', 'success')
-          }
-        }
-
-        // Position data will be updated via WebSocket
-      } else {
-        // Phase 3: 失败时增加失败计数
-        const currentFailures = ladderFailureCounts.value.opening[ladderIndex] || 0
-        ladderFailureCounts.value.opening[ladderIndex] = currentFailures + 1
-        saveLadderFailureCounts()
-
-        const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
-        console.error(`Ladder ${ladderIndex + 1} execution failed:`, errorMsg)
-        console.log(`Ladder ${ladderIndex + 1} failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
-
-        notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行失败: ${errorMsg}`, 'error')
-
-        // 如果达到最大失败次数，提示下次将自动跳过
-        if (currentFailures + 1 >= MAX_LADDER_FAILURES) {
-          notificationStore.showStrategyNotification(
-            `阶梯 ${ladderIndex + 1} 已连续失败${currentFailures + 1}次，下次将自动跳过`,
-            'error'
-          )
-        }
-
-        config.value.openingEnabled = false
-        saveEnabledState(STORAGE_KEY_OPENING.value, false)  // Save to localStorage
-      }
-    } catch (error) {
-      // Phase 3: 异常也算失败
-      const currentFailures = ladderFailureCounts.value.opening[ladderIndex] || 0
-      ladderFailureCounts.value.opening[ladderIndex] = currentFailures + 1
-      saveLadderFailureCounts()
-
-      console.error(`Ladder ${ladderIndex + 1} execution error:`, error)
-      console.log(`Ladder ${ladderIndex + 1} failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
-
-      const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
-      notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 执行异常: ${errorMsg}`, 'error')
-
-      config.value.openingEnabled = false
-      saveEnabledState(STORAGE_KEY_OPENING.value, false)  // Save to localStorage
-    }
-  } finally {
-    executingOpening.value = false
-  }
-}
-
-async function executeLadderClosing(ladderIndex, ladder) {
-  // Phase 3: 检查阶梯失败次数，决定是否跳过
-  const failureCount = ladderFailureCounts.value.closing[ladderIndex] || 0
-
-  if (failureCount >= MAX_LADDER_FAILURES) {
-    console.log(`Skipping ladder ${ladderIndex + 1} closing due to ${failureCount} consecutive failures`)
-
-    // 跳过到下一个阶梯
-    ladderProgress.value.closing.currentLadderIndex++
-    ladderProgress.value.closing.completedQty = 0
-    saveLadderProgress()
-
-    // 重置失败计数
-    ladderFailureCounts.value.closing[ladderIndex] = 0
-    saveLadderFailureCounts()
-
-    // 通知用户
-    notificationStore.showStrategyNotification(
-      `阶梯 ${ladderIndex + 1} 平仓连续失败${failureCount}次，已自动跳过`,
-      'warning'
-    )
-
-    return
-  }
-
-  // 全局互斥锁：防止与其他策略冲突
-  if (executingAnyStrategy.value) {
-    console.log('Another strategy is executing, skipping closing')
-    return
-  }
-
-  try {
-    executingClosing.value = true
-
-    const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = findHedgeAccount(accounts)
-
-    if (!binanceAccount || !bybitMT5Account) {
-      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
-      config.value.closingEnabled = false
-      return
-    }
-
-    const remainingQty = ladder.qtyLimit - ladderProgress.value.closing.completedQty
-    const mCoin = config.value.closingMCoin
-    const batchQty = Math.min(mCoin, remainingQty)
-
-    console.log(`Executing ladder ${ladderIndex + 1} closing: batch=${batchQty}, remaining=${remainingQty}, total=${ladder.qtyLimit}`)
-
-    const executionData = {
-      binance_account_id: binanceAccount.account_id,
-      bybit_account_id: bybitMT5Account.account_id,
-      quantity: batchQty,
-      ladder_index: ladderIndex
-    }
-
-    try {
-      const response = await api.post(`/api/v1/strategies/close/${props.type}`, executionData)
-
-      if (response.data.success) {
-        console.log(`Ladder ${ladderIndex + 1} batch closed successfully`)
-        console.log(`Binance filled: ${response.data.binance_filled_qty}, Bybit filled: ${response.data.bybit_filled_qty}`)
-
-        // Phase 3: 成功执行，重置失败计数
-        ladderFailureCounts.value.closing[ladderIndex] = 0
-        saveLadderFailureCounts()
-
-        // 检查实际成交数量
-        const binanceFilled = response.data.binance_filled_qty || 0
-        const bybitFilled = response.data.bybit_filled_qty || 0
-
-        // 如果两边都没有成交，显示警告但保持策略启用（等待下次自动重试）
-        if (binanceFilled === 0 && bybitFilled === 0) {
-          const message = response.data.message || 'Binance未匹配到订单，等待下次自动重试'
-          console.log(`Ladder ${ladderIndex + 1}: ${message}`)
-          notificationStore.showStrategyNotification(message, 'warning')
-          // 不禁用策略，允许下次触发时自动重试
-          return
-        }
-
-        // 如果有成交，更新阶梯进度（使用实际成交数量）
-        const actualFilled = Math.min(binanceFilled, bybitFilled)
-        ladderProgress.value.closing.completedQty += actualFilled
-        saveLadderProgress()  // 持久化进度
-
-        // 检查当前阶梯是否完成
-        if (ladderProgress.value.closing.completedQty >= ladder.qtyLimit) {
-          console.log(`Ladder ${ladderIndex + 1} closing completed, moving to next ladder`)
-
-          // 移动到下一个阶梯
-          ladderProgress.value.closing.currentLadderIndex++
-          ladderProgress.value.closing.completedQty = 0
-          saveLadderProgress()  // 持久化进度
-
-          // 检查是否所有阶梯都完成
-          const enabledLadders = config.value.ladders.filter(l => l.enabled)
-          if (ladderProgress.value.closing.currentLadderIndex >= enabledLadders.length) {
-            // 所有阶梯完成，停止策略
-            console.log('All ladders closing completed, stopping closing strategy')
-            config.value.closingEnabled = false
-            ladderProgress.value.closing.currentLadderIndex = 0
-            saveLadderProgress()  // 持久化进度
-            notificationStore.showStrategyNotification('所有阶梯平仓完成', 'success')
-          }
-        }
-
-        // Position data will be updated via WebSocket
-      } else {
-        // Phase 3: 失败时增加失败计数
-        const currentFailures = ladderFailureCounts.value.closing[ladderIndex] || 0
-        ladderFailureCounts.value.closing[ladderIndex] = currentFailures + 1
-        saveLadderFailureCounts()
-
-        const errorMsg = response.data.error || response.data.detail || response.data.message || '未知错误'
-        console.error(`Ladder ${ladderIndex + 1} closing failed:`, errorMsg)
-        console.log(`Ladder ${ladderIndex + 1} closing failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
-
-        notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓失败: ${errorMsg}`, 'error')
-
-        // 如果达到最大失败次数，提示下次将自动跳过
-        if (currentFailures + 1 >= MAX_LADDER_FAILURES) {
-          notificationStore.showStrategyNotification(
-            `阶梯 ${ladderIndex + 1} 平仓已连续失败${currentFailures + 1}次，下次将自动跳过`,
-            'error'
-          )
-        }
-
-        config.value.closingEnabled = false
-        saveEnabledState(STORAGE_KEY_CLOSING.value, false)  // Save to localStorage
-      }
-    } catch (error) {
-      // Phase 3: 异常也算失败
-      const currentFailures = ladderFailureCounts.value.closing[ladderIndex] || 0
-      ladderFailureCounts.value.closing[ladderIndex] = currentFailures + 1
-      saveLadderFailureCounts()
-
-      console.error(`Ladder ${ladderIndex + 1} closing error:`, error)
-      console.log(`Ladder ${ladderIndex + 1} closing failed ${currentFailures + 1}/${MAX_LADDER_FAILURES} times`)
-
-      const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
-      notificationStore.showStrategyNotification(`阶梯 ${ladderIndex + 1} 平仓异常: ${errorMsg}`, 'error')
-
-      config.value.closingEnabled = false
-      saveEnabledState(STORAGE_KEY_CLOSING.value, false)  // Save to localStorage
-    }
-  } finally {
-    executingClosing.value = false
-  }
-}
-
-async function executeBatchOpening(ladder) {
-  if (executingOpening.value) return
-
-  try {
-    executingOpening.value = true
-
-    const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = findHedgeAccount(accounts)
-
-    if (!binanceAccount || !bybitMT5Account) {
-      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
-      config.value.openingEnabled = false
-      return
-    }
-
-    const totalQuantity = ladder.qtyLimit
-    const mCoin = config.value.openingMCoin
-    const numBatches = Math.ceil(totalQuantity / mCoin)
-    let remainingQuantity = totalQuantity
-
-    console.log(`Starting batch opening: total=${totalQuantity}, mCoin=${mCoin}, batches=${numBatches}`)
-
-    for (let i = 0; i < numBatches; i++) {
-      const batchQuantity = Math.min(mCoin, remainingQuantity)
-      console.log(`Batch ${i + 1}/${numBatches}: executing ${batchQuantity} units`)
-
-      const executionData = {
-        binance_account_id: binanceAccount.account_id,
-        bybit_account_id: bybitMT5Account.account_id,
-        quantity: batchQuantity,
-        target_spread: ladder.threshold
-      }
-
-      try {
-        const response = await api.post(`/api/v1/strategies/execute/${props.type}`, executionData)
-
-        if (response.data.success) {
-          console.log(`Batch ${i + 1} executed successfully`)
-          remainingQuantity -= batchQuantity
-
-          // Wait for order to be filled before next batch
-          if (i < numBatches - 1) {
-            await waitForOrderFill(response.data.order_ids)
-          }
-        } else {
-          // Extract error message from various possible fields
-          const executionResult = response.data.execution_result || {}
-          // binance_result and bybit_result are nested inside execution_result
-          const binanceResult = executionResult.binance_result || response.data.binance_result || {}
-          const bybitResult = executionResult.bybit_result || response.data.bybit_result || {}
-
-          const errorMsg = response.data.error
-            || response.data.detail
-            || response.data.message
-            || executionResult.error
-            || executionResult.message
-            || JSON.stringify(executionResult)
-            || '未知错误'
-
-          console.error(`Batch ${i + 1} failed:`, errorMsg)
-          console.error('Full response:', response.data)
-          console.error('Execution result:', executionResult)
-          console.error('Binance result:', binanceResult)
-          console.error('Bybit result:', bybitResult)
-
-          // Build detailed error message
-          let detailedError = errorMsg
-          if (binanceResult.error || bybitResult.error) {
-            detailedError += '\n详细信息:'
-            if (binanceResult.error) detailedError += `\nBinance: ${binanceResult.error}`
-            if (bybitResult.error) detailedError += `\nBybit: ${bybitResult.error}`
-          }
-
-          notificationStore.showStrategyNotification(`批次 ${i + 1} 执行失败: ${detailedError}`, 'error')
-          break
-        }
-      } catch (error) {
-        console.error(`Batch ${i + 1} error:`, error)
-        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
-        console.error('Full error:', error.response?.data)
-        notificationStore.showStrategyNotification(`批次 ${i + 1} 执行异常: ${errorMsg}`, 'error')
-        break
-      }
-    }
-
-    // Mark as completed and disable
-    orderPlaced.value.opening = true
-    config.value.openingEnabled = false
-    console.log('Batch opening completed')
-  } catch (error) {
-    console.error('Failed to execute batch opening:', error)
-  } finally {
-    executingOpening.value = false
-  }
-}
-
-async function executeBatchClosing(ladder) {
-  if (executingClosing.value) return
-
-  try {
-    executingClosing.value = true
-
-    const accounts = accountsData.value?.accounts || []
-    const binanceAccount = pickAccount(accounts, 1)
-    const bybitMT5Account = findHedgeAccount(accounts)
-
-    if (!binanceAccount || !bybitMT5Account) {
-      notificationStore.showStrategyNotification('无法找到账户信息，请刷新页面重试', 'error')
-      config.value.closingEnabled = false
-      return
-    }
-
-    const totalQuantity = ladder.qtyLimit
-    const mCoin = config.value.closingMCoin
-    const numBatches = Math.ceil(totalQuantity / mCoin)
-    let remainingQuantity = totalQuantity
-
-    console.log(`Starting batch closing: total=${totalQuantity}, mCoin=${mCoin}, batches=${numBatches}`)
-
-    for (let i = 0; i < numBatches; i++) {
-      const batchQuantity = Math.min(mCoin, remainingQuantity)
-      console.log(`Batch ${i + 1}/${numBatches}: executing ${batchQuantity} units`)
-
-      const executionData = {
-        binance_account_id: binanceAccount.account_id,
-        bybit_account_id: bybitMT5Account.account_id,
-        quantity: batchQuantity
-      }
-
-      try {
-        const response = await api.post(`/api/v1/strategies/close/${props.type}`, executionData)
-
-        if (response.data.success) {
-          console.log(`Batch ${i + 1} executed successfully`)
-          remainingQuantity -= batchQuantity
-
-          // Wait for order to be filled before next batch
-          if (i < numBatches - 1) {
-            await waitForOrderFill(response.data.order_ids)
-          }
-        } else {
-          // Extract error message from various possible fields
-          const executionResult = response.data.execution_result || {}
-          // binance_result and bybit_result are nested inside execution_result
-          const binanceResult = executionResult.binance_result || response.data.binance_result || {}
-          const bybitResult = executionResult.bybit_result || response.data.bybit_result || {}
-
-          const errorMsg = response.data.error
-            || response.data.detail
-            || response.data.message
-            || executionResult.error
-            || executionResult.message
-            || JSON.stringify(executionResult)
-            || '未知错误'
-
-          console.error(`Batch ${i + 1} failed:`, errorMsg)
-          console.error('Full response:', response.data)
-          console.error('Execution result:', executionResult)
-          console.error('Binance result:', binanceResult)
-          console.error('Bybit result:', bybitResult)
-
-          // Build detailed error message
-          let detailedError = errorMsg
-          if (binanceResult.error || bybitResult.error) {
-            detailedError += '\n详细信息:'
-            if (binanceResult.error) detailedError += `\nBinance: ${binanceResult.error}`
-            if (bybitResult.error) detailedError += `\nBybit: ${bybitResult.error}`
-          }
-
-          notificationStore.showStrategyNotification(`批次 ${i + 1} 执行失败: ${detailedError}`, 'error')
-          break
-        }
-      } catch (error) {
-        console.error(`Batch ${i + 1} error:`, error)
-        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'
-        console.error('Full error:', error.response?.data)
-        notificationStore.showStrategyNotification(`批次 ${i + 1} 执行异常: ${errorMsg}`, 'error')
-        break
-      }
-    }
-
-    // Mark as completed and disable
-    orderPlaced.value.closing = true
-    config.value.closingEnabled = false
-    console.log('Batch closing completed')
-  } catch (error) {
-    console.error('Failed to execute batch closing:', error)
-  } finally {
-    executingClosing.value = false
-  }
-}
-
 async function checkPositionForClosing() {
   try {
     // Calculate total position needed for closing
@@ -2691,8 +2162,34 @@ async function startContinuousExecution(action) {
     }
 
     // sending continuous execution request
-    const response = await api.post(endpoint, requestData)
-    // continuous execution response received
+    let response
+    try {
+      response = await api.post(endpoint, requestData)
+    } catch (e) {
+      throw e
+    }
+
+    // ── 滑点保护暂停检查 ──
+    if (response.data && response.data.success === false && response.data.code === 'slippage_paused') {
+      const lvl = response.data.level
+      const reason = response.data.reason || ''
+      const auto_at = response.data.auto_resume_at
+      let prompt = ''
+      if (lvl === 1) {
+        const left = auto_at ? Math.max(0, Math.floor(auto_at - Date.now()/1000)) : 0
+        prompt = `⚠️ 滑点警告 已暂停\n原因: ${reason}\n约 ${Math.floor(left/60)} 分钟后自动恢复 (若期间无任何操作)\n\n是否强制立即启动?`
+      } else {
+        prompt = `🚨 滑点严重异常 已暂停\n原因: ${reason}\n需人工排查后才能启动\n\n确认已排查, 强制启动?`
+      }
+      const ok = window.confirm(prompt)
+      if (!ok) {
+        strategyStore.release(strategyKey)
+        return
+      }
+      // Retry with force_resume
+      requestData.force_resume = true
+      response = await api.post(endpoint, requestData)
+    }
 
     if (response.data.task_id) {
       continuousExecutionTaskId.value[action] = response.data.task_id

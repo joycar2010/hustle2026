@@ -1,7 +1,8 @@
 import axios from 'axios'
 import router from '@/router'
 
-// Same-origin by default: nginx routes /api/* to Go (8080) / Python (8000).
+// Same-origin by default: nginx routes /api/* to Python (8000);
+// /api/v1/market/ and /api/v1/ws route to Rust Engine (8090).
 // An explicit VITE_API_BASE_URL override still works for local dev.
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '',

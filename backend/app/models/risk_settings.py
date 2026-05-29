@@ -52,8 +52,10 @@ class RiskSettings(Base):
     liquidation_alert_repeat_count = Column(Integer, nullable=True)  # Number of times to repeat liquidation alert sound
 
     # Funding Rate & Overnight Fee Alerts
-    funding_rate_threshold = Column(Float, nullable=True)
-    overnight_fee_threshold = Column(Float, nullable=True)
+    funding_rate_threshold = Column(Float, nullable=True)  # short direction (legacy name)
+    funding_rate_threshold_long = Column(Float, nullable=True)
+    overnight_fee_threshold = Column(Float, nullable=True)  # short direction (legacy name)
+    overnight_fee_threshold_long = Column(Float, nullable=True)
 
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     update_time = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

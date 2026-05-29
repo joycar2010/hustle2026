@@ -102,12 +102,102 @@
         拖拽平移 · 滚轮缩放 · 缩放到目标时段后查看区间统计（最高/最低/均值）
       </div>
     </div>
+
+    <!-- ── 滑点保护事件审计 (审计专用, 不可操作) ───────────────────── -->
+    <div class="mt-4 bg-[#0a0a12] rounded border border-[#2d2d3d] p-3">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold text-[#fcd535]">滑点保护事件</h3>
+        <div class="flex items-center gap-2">
+          <select v-model="slipPairFilter" @change="loadSlippageEvents" class="text-xs bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-0.5 text-[#e5e7eb]">
+            <option value="">全部产品对</option>
+            <option v-for="p in (slipPairList || [])" :key="p" :value="p">{{ p }}</option>
+          </select>
+          <button @click="loadSlippageEvents" class="text-[10px] text-[#6b7280] hover:text-[#e5e7eb] px-2 py-0.5 border border-[#2d2d3d] rounded">刷新</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-left text-[#6b7280] border-b border-[#2d2d3d]">
+              <th class="py-1.5 px-1">时间</th>
+              <th class="py-1.5 px-1">产品对</th>
+              <th class="py-1.5 px-1">策略</th>
+              <th class="py-1.5 px-1">阈值</th>
+              <th class="py-1.5 px-1">实际价差</th>
+              <th class="py-1.5 px-1">滑点</th>
+              <th class="py-1.5 px-1">级别</th>
+              <th class="py-1.5 px-1">Binance 均价</th>
+              <th class="py-1.5 px-1">MT5 均价</th>
+              <th class="py-1.5 px-1">订单号</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!slipEvents.length">
+              <td colspan="10" class="text-center py-4 text-[#6b7280]">暂无滑点事件</td>
+            </tr>
+            <tr v-for="ev in slipEvents" :key="ev.id" class="border-b border-[#1a1a22]">
+              <td class="py-1 px-1 text-[#6b7280]">{{ formatSlipTime(ev.created_at) }}</td>
+              <td class="py-1 px-1 font-mono text-[#fcd535]">{{ ev.pair_code }}</td>
+              <td class="py-1 px-1 text-[#9ca3af]">{{ ev.strategy_type }}</td>
+              <td class="py-1 px-1 font-mono">{{ (ev.spread_threshold ?? 0).toFixed(3) }}</td>
+              <td class="py-1 px-1 font-mono">{{ (ev.actual_spread ?? 0).toFixed(3) }}</td>
+              <td class="py-1 px-1 font-mono" :class="Math.abs(ev.slippage ?? 0) > 1.2 ? 'text-[#ef4444]' : 'text-[#f0b90b]'">
+                {{ (ev.slippage ?? 0).toFixed(3) }}
+              </td>
+              <td class="py-1 px-1">
+                <span :class="ev.level === 2 ? 'bg-[#ef4444]/20 text-[#ef4444] px-1.5 rounded text-[10px]' : 'bg-[#f0b90b]/20 text-[#f0b90b] px-1.5 rounded text-[10px]'">
+                  L{{ ev.level }}
+                </span>
+              </td>
+              <td class="py-1 px-1 font-mono">{{ (ev.binance_avg_price ?? 0).toFixed(2) }}</td>
+              <td class="py-1 px-1 font-mono">{{ (ev.bybit_avg_price ?? 0).toFixed(2) }}</td>
+              <td class="py-1 px-1 font-mono text-[10px] text-[#6b7280] truncate max-w-[100px]">{{ ev.binance_order_id || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-[10px] text-[#6b7280]">
+        L1 = 单次 |滑点| > 0.9 (10分钟无操作自动恢复) · L2 = 连续2次 |滑点| > 1.2 (需用户强制启动)
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { createChart, LineSeries, ColorType, CrosshairMode } from 'lightweight-charts'
+import api from '@/services/api'
+
+// ── 滑点保护事件审计 ───────────────────────────────
+const slipEvents = ref([])
+const slipPairFilter = ref('')
+const slipPairList = computed(() => {
+  const set = new Set()
+  for (const e of slipEvents.value) if (e.pair_code) set.add(e.pair_code)
+  return Array.from(set)
+})
+
+async function loadSlippageEvents() {
+  try {
+    const params = {}
+    if (slipPairFilter.value) params.pair_code = slipPairFilter.value
+    params.limit = 200
+    const r = await api.get('/api/v1/strategies/slippage-events', { params })
+    slipEvents.value = r.data?.events || []
+  } catch (e) {
+    console.error('Failed to load slippage events:', e)
+    slipEvents.value = []
+  }
+}
+
+function formatSlipTime(ts) {
+  if (!ts) return '-'
+  try {
+    const d = new Date(ts)
+    if (isNaN(d.getTime())) return ts
+    return d.toLocaleString('zh-CN', { hour12: false })
+  } catch { return ts }
+}
 
 const isMobile = ref(window.innerWidth < 768)
 const chartHeight = computed(() => isMobile.value ? 300 : 440)
@@ -364,7 +454,7 @@ function onResize() {
 let resizeObs = null
 onMounted(() => {
   window.addEventListener('resize', onResize)
-  nextTick(() => { initChart(); fetchData() })
+  nextTick(() => { initChart(); fetchData(); loadSlippageEvents() })
   if (window.ResizeObserver && chartContainer.value) {
     resizeObs = new ResizeObserver(() => {
       if (chart && chartContainer.value) {

@@ -72,6 +72,7 @@
               <h3 class="font-bold mb-2">后端版本</h3>
               <div class="text-2xl font-mono text-primary mb-2">{{ systemInfo.backend_version }}</div>
               <div class="text-sm text-text-secondary">Python: {{ systemInfo.python_version }}</div>
+              <div class="text-sm text-text-secondary">Rust: {{ systemInfo.rust_version || '1.95.0' }} <span class="text-success text-xs">:8090</span></div>
             </div>
             <div class="bg-dark-200 rounded p-4">
               <h3 class="font-bold mb-2">数据库版本</h3>
@@ -2154,6 +2155,7 @@ const systemInfo = ref({
   frontend_build_time: '2026-02-19 12:00:00',
   backend_version: '1.0.0',
   python_version: '3.13.7',
+  rust_version: '1.95.0',
   db_version: '16.1',
   uptime: '2天 5小时',
   start_time: '2026-02-17 07:00:00'

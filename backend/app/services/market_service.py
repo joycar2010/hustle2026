@@ -107,6 +107,7 @@ class MarketDataService:
         last_error = None
         max_retries = 2
         for attempt in range(max_retries + 1):
+            got_zero_tick = False
             for mt5_client in clients_to_try:
                 try:
                     tick = await mt5_client.get_tick(mt5_symbol)
@@ -120,9 +121,15 @@ class MarketDataService:
                             ask_qty=0,
                             timestamp=int(time.time() * 1000),
                         )
+                    if tick is not None:
+                        got_zero_tick = True
                 except Exception:
                     pass
             last_error = f"No valid ticker data for {mt5_symbol} (tick=None)"
+
+            # At least one bridge returned tick with bid=0 → market closed, skip retries
+            if got_zero_tick:
+                break
 
             if attempt < max_retries:
                 logger.warning(
@@ -342,90 +349,6 @@ class MarketDataService:
             "forward_spread": record.forward_spread,
             "reverse_spread": record.reverse_spread,
         }
-
-
-    async def get_spread_chart(
-        self,
-        symbol: str = "XAUUSDT",
-        start_time: str = None,
-        end_time: str = None,
-        interval: int = 5,
-    ):
-        """降采样点差数据，用于图表展示。
-        
-        Args:
-            symbol: 交易对
-            start_time: ISO 时间戳下界
-            end_time: ISO 时间戳上界  
-            interval: 降采样间隔(秒) 1/5/10/30/60
-        Returns:
-            list of {timestamp, forward_spread, reverse_spread, ...}
-        """
-        from app.core.database import AsyncSessionLocal
-        from sqlalchemy import text
-        from datetime import datetime, timedelta, timezone
-
-        if interval not in (1, 2, 5, 10, 30, 60):
-            interval = 5
-
-        # 默认: 最近 24h
-        if not end_time:
-            end_dt = datetime.now(timezone.utc)
-        else:
-            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00')).replace(tzinfo=None)
-
-        if not start_time:
-            start_dt = end_dt - timedelta(hours=24)
-        else:
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00')).replace(tzinfo=None)
-
-        if hasattr(end_dt, 'tzinfo') and end_dt.tzinfo:
-            end_dt = end_dt.replace(tzinfo=None)
-        if hasattr(start_dt, 'tzinfo') and start_dt.tzinfo:
-            start_dt = start_dt.replace(tzinfo=None)
-
-        sql = text("""
-            SELECT * FROM (
-                SELECT DISTINCT ON (bucket)
-                    date_trunc('second', timestamp)
-                      - (EXTRACT(SECOND FROM timestamp)::int % :interval) * interval '1 second'
-                      AS bucket,
-                    timestamp,
-                    forward_spread,
-                    reverse_spread,
-                    binance_bid,
-                    binance_ask,
-                    bybit_bid,
-                    bybit_ask
-                FROM spread_records
-                WHERE symbol = :symbol
-                  AND timestamp BETWEEN :start_dt AND :end_dt
-                ORDER BY bucket, timestamp DESC
-            ) sub
-            ORDER BY timestamp ASC
-        """)
-
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(sql, {
-                "symbol": symbol,
-                "interval": interval,
-                "start_dt": start_dt,
-                "end_dt": end_dt,
-            })
-            rows = result.fetchall()
-
-        return [
-            {
-                "t": row.timestamp.isoformat() + "Z",
-                "fs": round(float(row.forward_spread), 4),
-                "rs": round(float(row.reverse_spread), 4),
-                "bb": round(float(row.binance_bid), 2),
-                "ba": round(float(row.binance_ask), 2),
-                "yb": round(float(row.bybit_bid), 2),
-                "ya": round(float(row.bybit_ask), 2),
-            }
-            for row in rows
-        ]
 
     async def store_spread_history(
         self,

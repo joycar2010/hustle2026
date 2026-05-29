@@ -1165,18 +1165,46 @@
           <div class="bg-dark-200 rounded-xl p-4">
             <div class="text-xs text-text-tertiary mb-1">后端版本</div>
             <div class="text-2xl font-mono font-bold text-primary">v{{ sysInfo.backend_version || '--' }}</div>
-            <div class="text-xs text-text-tertiary mt-1">Go: {{ sysInfo.go_version || '--' }}</div>
-            <div class="text-xs text-text-tertiary">Python: {{ sysInfo.python_version || '--' }}</div>
+            <div class="text-xs text-text-tertiary mt-1">Python: {{ sysInfo.python_version || '--' }} <span class="text-[#0ecb81]">:8000</span></div>
+            <div class="text-xs text-text-tertiary">Rust: {{ sysInfo.rust_version || '--' }} <span class="text-[#0ecb81]">:8090</span></div>
           </div>
           <div class="bg-dark-200 rounded-xl p-4">
             <div class="text-xs text-text-tertiary mb-1">数据库</div>
             <div class="text-lg font-mono font-bold">PostgreSQL {{ sysInfo.db_version || '' }}</div>
-            <div class="text-xs text-[#0ecb81] mt-1">● go服务器 127.0.0.1:5432 正常</div>
+            <div class="text-xs text-[#0ecb81] mt-1">● 本机 127.0.0.1:5432 正常</div>
           </div>
           <div class="bg-dark-200 rounded-xl p-4">
             <div class="text-xs text-text-tertiary mb-1">运行时长</div>
             <div class="text-lg font-mono font-bold">{{ sysInfo.uptime || '--' }}</div>
             <div class="text-xs text-text-tertiary mt-1">启动: {{ sysInfo.start_time || '--' }}</div>
+          </div>
+        </div>
+
+        <!-- 新架构: 进程列表 (Python + Rust + MT5 Bridge) -->
+        <div class="bg-dark-200 rounded-xl p-4 mb-6">
+          <h3 class="text-sm font-bold mb-3">运行中的服务进程</h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div class="bg-dark-100 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-semibold">hustle-python</span>
+                <span class="text-[#0ecb81] text-[10px]">● active</span>
+              </div>
+              <div class="text-text-tertiary">FastAPI · :8000 · 业务后端 + 策略引擎</div>
+            </div>
+            <div class="bg-dark-100 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-semibold">hustle-rust-engine</span>
+                <span class="text-[#0ecb81] text-[10px]">● active</span>
+              </div>
+              <div class="text-text-tertiary">Axum · :8090 · 多交易所 WS + Hub + Redis Bridge</div>
+            </div>
+            <div class="bg-dark-100 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-semibold">MT5 Bridges</span>
+                <span class="text-[#0ecb81] text-[10px]">● remote</span>
+              </div>
+              <div class="text-text-tertiary">FastAPI · 172.31.14.113 · MT5 桥接 (多端口)</div>
+            </div>
           </div>
         </div>
 

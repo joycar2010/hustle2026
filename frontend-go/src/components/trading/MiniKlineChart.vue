@@ -78,10 +78,25 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { createChart, CandlestickSeries, HistogramSeries, ColorType } from 'lightweight-charts'
+import { useMarketStore } from '@/stores/market'
 
 const props = defineProps({
   visible: { type: Boolean, default: true }
 })
+
+const marketStore = useMarketStore()
+
+// period (分钟) → 秒数, 用于按时间窗滚动新K线
+const PERIOD_SECONDS = {
+  '1': 60, '5': 300, '15': 900, '30': 1800,
+  '60': 3600, '240': 14400, '1440': 86400,
+}
+
+// 当前在用的最后一根K线 (用于实时 WS 增量更新)
+let lastCandle = null
+let lastVolume = null
+// 右侧留白 1/4 的视图设置
+const RIGHT_PADDING_RATIO = 0.25
 
 const PERIODS = [
   { label: '1分', value: '1' },
@@ -193,7 +208,17 @@ async function loadKline() {
 
     candleSeries.setData(candles)
     volumeSeries.setData(volumes)
-    chart.timeScale().fitContent()
+
+    // ── 自定义视图: 让最新K线占据左 3/4, 右侧 1/4 留空给未来 ──
+    // 显示最近 75 根 K 线 + 25 根空间留白 (共逻辑范围 100)
+    const visibleBars = Math.min(75, candles.length)
+    const fromIdx = candles.length - visibleBars
+    const toIdx = candles.length + Math.round(visibleBars * RIGHT_PADDING_RATIO / (1 - RIGHT_PADDING_RATIO))
+    chart.timeScale().setVisibleLogicalRange({ from: fromIdx, to: toIdx })
+
+    // 缓存最后一根, 用于WS增量更新
+    lastCandle = candles[candles.length - 1] ? { ...candles[candles.length - 1] } : null
+    lastVolume = volumes[volumes.length - 1] ? { ...volumes[volumes.length - 1] } : null
 
     const last = candles[candles.length - 1]
     const first = candles[0]
@@ -251,8 +276,75 @@ watch(() => props.visible, (v) => {
   if (v && chart && chartContainer.value) {
     nextTick(() => {
       chart.applyOptions({ width: chartContainer.value.clientWidth })
-      chart.timeScale().fitContent()
+      // 切回 K 线 tab 时恢复自定义视图 (左 3/4 + 右 1/4 留空)
+      if (lastCandle) {
+        const visibleBars = 75
+        const totalBars = candleSeries?.data()?.length || visibleBars
+        const toIdx = totalBars + Math.round(visibleBars * RIGHT_PADDING_RATIO / (1 - RIGHT_PADDING_RATIO))
+        chart.timeScale().setVisibleLogicalRange({ from: totalBars - visibleBars, to: toIdx })
+      }
     })
+  }
+})
+
+// ── 实时增量更新: 监听 Binance WS tick, 更新最后一根 K 线 ──
+// 仅当当前选中的标的是 XAU/USDT (Binance) 系列时才更新
+function isBinanceXauSelected() {
+  const sym = (selectedSymbol.value || '').toLowerCase()
+  return sym.includes('xau') && sym.includes('binance')
+}
+
+function updateLastCandle(price) {
+  if (!candleSeries || !lastCandle || !price || price <= 0) return
+  const now = Math.floor(Date.now() / 1000)
+  const periodSec = PERIOD_SECONDS[period.value] || 3600
+
+  // 检查当前 tick 是否落在最后一根 K 线的时间窗内
+  const windowStart = lastCandle.time
+  const windowEnd = windowStart + periodSec
+
+  if (now < windowEnd) {
+    // 仍在当前 K 线窗内: 更新 close/high/low
+    lastCandle.close = price
+    if (price > lastCandle.high) lastCandle.high = price
+    if (price < lastCandle.low) lastCandle.low = price
+    candleSeries.update(lastCandle)
+    // OHLC 显示同步更新 (基于初始 open 计算涨跌)
+    const firstData = candleSeries.data()[0]
+    const change = firstData ? ((price - firstData.open) / firstData.open) * 100 : 0
+    ohlc.value = {
+      o: lastCandle.open, h: lastCandle.high,
+      l: lastCandle.low, c: price, change
+    }
+  } else {
+    // 时间窗已过, 滚动到新 K 线
+    const newWindowStart = Math.floor(now / periodSec) * periodSec
+    const newCandle = {
+      time: newWindowStart,
+      open: price, high: price, low: price, close: price,
+    }
+    candleSeries.update(newCandle)
+    lastCandle = newCandle
+    if (volumeSeries) {
+      const newVol = {
+        time: newWindowStart,
+        value: 0,
+        color: 'rgba(34,197,94,0.3)',
+      }
+      volumeSeries.update(newVol)
+      lastVolume = newVol
+    }
+  }
+}
+
+// 监听 Binance WS 行情, 实时更新 K 线
+watch(() => marketStore.marketData, (data) => {
+  if (!data || !isBinanceXauSelected()) return
+  // 中间价 = (bid + ask) / 2
+  const bid = data.binance_bid || 0
+  const ask = data.binance_ask || 0
+  if (bid > 0 && ask > 0) {
+    updateLastCandle((bid + ask) / 2)
   }
 })
 

@@ -130,14 +130,25 @@ class ExecutionTaskManager:
             self._strategy_to_task.pop(strategy_id, None)
 
     async def stop_task(self, task_id: str) -> bool:
-        """Stop execution task by signaling graceful stop (no task.cancel)."""
+        """
+        Stop execution task via graceful stop_requested flag.
+
+        Does NOT cancel the asyncio task — lets the execution loop exit
+        at the next safe point and push stop_confirmed via WebSocket.
+
+        Args:
+            task_id: Task ID to stop
+
+        Returns:
+            True if task was stopped, False if task not found
+        """
         if task_id not in self.tasks:
             logger.warning(f"Task {task_id} not found")
             return False
 
         if task_id in self.executors:
             self.executors[task_id].stop()
-            logger.info(f"Signaled graceful stop for task {task_id}")
+            logger.info(f"Signaled graceful stop for task {task_id} — loop will exit at next safe point")
         else:
             logger.warning(f"No executor found for task {task_id}")
 
