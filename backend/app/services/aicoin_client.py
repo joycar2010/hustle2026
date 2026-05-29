@@ -51,6 +51,21 @@ class AiCoinClient:
             return kline.get("kline_data", [])
         return kline if isinstance(kline, list) else []
 
+    async def get_distributor_info(self) -> dict:
+        """GET /api/upgrade/v2/distributor/info — 分销商账户信息"""
+        data = await self._get("/api/upgrade/v2/distributor/info")
+        return data.get("data", data)
+
+    async def get_distributor_quota(self) -> dict:
+        """GET /api/upgrade/v2/distributor/quota — 配额/余额"""
+        data = await self._get("/api/upgrade/v2/distributor/quota")
+        return data.get("data", data)
+
+    async def get_sub_key_detail(self, access_key: str) -> dict:
+        """GET /api/upgrade/v2/distributor/sub-keys/:access_key — 子Key详情含到期时间"""
+        data = await self._get(f"/api/upgrade/v2/distributor/sub-keys/{access_key}")
+        return data.get("data", data)
+
     async def search_coin(self, keyword: str) -> list:
         data = await self._get("/api/upgrade/v2/coin/search", {
             "search": keyword,

@@ -2144,6 +2144,7 @@ class AiCoinConfigRequest(BaseModel):
     api_secret: str
     api_base: Optional[str] = "https://open.aicoin.com"
     enabled: Optional[bool] = True
+    expires_at: Optional[str] = None
 
 
 @router.get("/aicoin-config")
@@ -2155,7 +2156,7 @@ async def get_aicoin_config(
     from app.core.database import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            _text("SELECT api_key, api_secret, api_base, enabled, updated_at, updated_by FROM aicoin_config WHERE id=1")
+            _text("SELECT api_key, api_secret, api_base, enabled, updated_at, updated_by, expires_at FROM aicoin_config WHERE id=1")
         )).first()
     if not row:
         return {
@@ -2165,7 +2166,7 @@ async def get_aicoin_config(
             "enabled": False,
             "configured": False,
         }
-    api_key, api_secret, api_base, enabled, updated_at, updated_by = row
+    api_key, api_secret, api_base, enabled, updated_at, updated_by, expires_at_val = row
     masked_secret = ""
     if api_secret:
         if len(api_secret) > 8:
@@ -2180,6 +2181,7 @@ async def get_aicoin_config(
         "configured": bool(api_key and api_secret),
         "updated_at": updated_at.isoformat() if updated_at else None,
         "updated_by": updated_by,
+        "expires_at": expires_at_val.isoformat() if expires_at_val else None,
     }
 
 
@@ -2197,11 +2199,13 @@ async def save_aicoin_config(
         await db.execute(
             _text(
                 "UPDATE aicoin_config SET api_key=:k, api_secret=:s, api_base=:b, "
-                "enabled=:e, updated_at=now(), updated_by=:u WHERE id=1"
+                "enabled=:e, expires_at=CASE WHEN :exp = '' OR :exp IS NULL THEN expires_at ELSE CAST(:exp AS TIMESTAMP) END, "
+                "updated_at=now(), updated_by=:u WHERE id=1"
             ),
             {"k": req.api_key, "s": req.api_secret,
              "b": req.api_base or "https://open.aicoin.com",
              "e": bool(req.enabled),
+             "exp": req.expires_at or "",
              "u": str(user_id) if user_id else "system"},
         )
         # If row doesn't exist (rare), insert
@@ -2252,3 +2256,85 @@ async def test_aicoin_config(
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AiCoin API 测试失败: {e}")
+
+
+@router.get("/aicoin-status")
+async def get_aicoin_status():
+    """获取 AiCoin 服务状态 + 到期时间 (供 MasterDashboard 卡片).
+
+    不需要认证 — 只返回服务状态摘要, 不暴露密钥.
+    """
+    from sqlalchemy import text as _text
+    from app.core.database import AsyncSessionLocal
+    from app.services.aicoin_client import AiCoinClient
+
+    result = {
+        "configured": False,
+        "enabled": False,
+        "healthy": False,
+        "level": None,
+        "expires_at": None,
+        "quota_used": None,
+        "quota_remaining": None,
+        "quota_total": None,
+        "error": None,
+    }
+
+    try:
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(
+                _text("SELECT api_key, api_secret, enabled, expires_at FROM aicoin_config WHERE id=1")
+            )).first()
+
+        if not row or not row[0] or not row[1]:
+            result["error"] = "未配置"
+            return result
+
+        result["configured"] = True
+        result["enabled"] = bool(row[2])
+
+        if row[3]:
+            result["expires_at"] = row[3].isoformat() if hasattr(row[3], "isoformat") else str(row[3])
+
+        if not result["enabled"]:
+            return result
+
+        # Query AiCoin API for live status
+        client = AiCoinClient(row[0], row[1])
+
+        # Primary health check: search_coin (always works with basic Key)
+        try:
+            test_data = await client.search_coin("BTC")
+            result["healthy"] = isinstance(test_data, list) and len(test_data) > 0
+        except Exception as e:
+            result["healthy"] = False
+            result["error"] = f"API 测试失败: {str(e)[:100]}"
+
+        # Optional: try distributor API for level/quota/expires (requires distributor Key)
+        try:
+            info = await client.get_distributor_info()
+            result["level"] = info.get("level")
+            quota = await client.get_distributor_quota()
+            result["quota_used"] = quota.get("used_quota")
+            result["quota_remaining"] = quota.get("remaining_quota")
+            result["quota_total"] = quota.get("max_total_quota")
+        except Exception:
+            pass  # Not a distributor Key — level/quota unavailable
+
+        # Optional: try sub-key detail for expires_at
+        if not result["expires_at"]:
+            try:
+                detail = await client.get_sub_key_detail(row[0])
+                if detail.get("expires_at"):
+                    result["expires_at"] = detail["expires_at"]
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(_text("UPDATE aicoin_config SET expires_at=:e WHERE id=1"),
+                                         {"e": detail["expires_at"]})
+                        await db.commit()
+            except Exception:
+                pass
+
+    except Exception as e:
+        result["error"] = f"内部错误: {str(e)[:100]}"
+
+    return result

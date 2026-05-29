@@ -1655,6 +1655,13 @@
               <span>启用 AiCoin 接口</span>
             </label>
           </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">
+              到期时间 (从 <a href="https://www.aicoin.com/zh-Hans/opendata" target="_blank" class="text-primary hover:underline">AiCoin 控制台</a> API Key 详情中获取)
+            </label>
+            <input v-model="aicoinConfig.expires_at" type="datetime-local"
+              class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+          </div>
           <div class="flex items-center gap-2 pt-2">
             <button @click="saveAicoinConfig" :disabled="aicoinSaving"
               class="px-4 py-2 bg-primary text-dark-300 rounded text-sm font-semibold hover:bg-primary-hover disabled:opacity-40">
@@ -1928,6 +1935,7 @@ async function saveAicoinConfig() {
       api_secret: aicoinConfig.value.api_secret,
       api_base: aicoinConfig.value.api_base || 'https://open.aicoin.com',
       enabled: aicoinConfig.value.enabled,
+      expires_at: aicoinConfig.value.expires_at || null,
     })
     alert('AiCoin 配置已保存')
     await loadAicoinConfig()

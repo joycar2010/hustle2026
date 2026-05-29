@@ -343,6 +343,17 @@
                 {{ feishuText(monitorData.feishu?.status) }}
               </span>
             </div>
+            <div class="flex justify-between"><span>AiCoin 行情</span>
+              <span :class="aicoinStatus.healthy ? 'text-green-400' : aicoinStatus.configured ? 'text-yellow-400' : 'text-text-tertiary'">
+                {{ aicoinStatus.healthy ? (aicoinStatus.level || '正常') : aicoinStatus.configured ? '异常' : '未配置' }}
+              </span>
+            </div>
+            <div v-if="aicoinStatus.expires_at" class="flex justify-between"><span>AiCoin 到期</span>
+              <span class="font-mono" :class="aicoinDaysLeft <= 7 ? 'text-red-400' : aicoinDaysLeft <= 30 ? 'text-yellow-400' : 'text-text-secondary'">
+                {{ aicoinExpiresText }}
+              </span>
+            </div>
+
           </div>
         </div>
 
@@ -639,6 +650,10 @@ const lastUpdate = ref('--')
 
 const goStatus = ref({ online: false, uptime: '', memory: '', redis: false })
 const rustStatus = ref({ online: false, status: '--', ticks: 0, pairs: 0, ws_clients: 0 })
+const aicoinStatus = ref({ configured: false, enabled: false, healthy: false, level: null, expires_at: null, quota_used: null, quota_remaining: null, quota_total: null })
+const aicoinDaysLeft = computed(() => { if (!aicoinStatus.value.expires_at) return 999; const diff = new Date(aicoinStatus.value.expires_at).getTime() - Date.now(); return Math.max(0, Math.floor(diff / 86400000)) })
+const aicoinExpiresText = computed(() => { if (!aicoinStatus.value.expires_at) return "--"; const d = aicoinDaysLeft.value; const ds = new Date(aicoinStatus.value.expires_at).toLocaleDateString("zh-CN"); if (d <= 0) return ds + " (已过期)"; if (d <= 7) return ds + " (" + d + "天)"; return ds + " (剩" + d + "天)" })
+function fmtQuota(n) { if (n == null) return "--"; if (n >= 1000000) return (n/1000000).toFixed(1) + "M"; if (n >= 1000) return (n/1000).toFixed(1) + "K"; return String(n) }
 const dbPool = ref({ active: 0, idle: 0, max: 0 })
 const mt5System = ref({ online: false })
 const mt5Infra = ref({ reachable: false, status: null, uptime_seconds: 0, instances: { running: 0, total: 0 }, bridges: { alive: 0, total: 0, detail: [] } })
@@ -915,6 +930,11 @@ async function fetchMonitorStatus() {
       }
     }
   } catch { goStatus.value.online = false }
+  // Fetch AiCoin service status
+  try {
+    const aicR = await api.get('/api/v1/system/aicoin-status')
+    aicoinStatus.value = { ...aicoinStatus.value, ...aicR.data }
+  } catch { aicoinStatus.value.healthy = false }
   // Fetch Rust engine health
   try {
     const rustR = await api.get('/api/v1/health')
