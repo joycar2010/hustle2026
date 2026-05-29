@@ -1,41 +1,34 @@
-# Logs
-backend/backend.log*
-backend/api_debug.log*
-*.log
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-
-# Virtualenv + deps
-backend/venv/
-backend/.env
-backend/.env.*
 !backend/.env.example
-
 # All frontend dist (rebuilt on each push/rollback via _build_frontend)
+# Build artifacts
+# Debug logs
+# Editor swap
+# IDE
+# Logs
+# Node
+# Python bytecode (should never be tracked)
+# Python cache
+# Virtualenv + deps
 # frontend-admin/dist/
+# frontend-auto/dist/
 # frontend-go/dist/
 # frontend-www/dist/
-# frontend-auto/dist/
-
-# Node
+**/__pycache__/
 **/node_modules/
-
-# Build artifacts
 *.bak
 *.bak.*
-
-# IDE
-.vscode/
-.idea/
-
-# Python bytecode (should never be tracked)
-**/__pycache__/
-
-# Debug logs
-backend/api_debug.log
-
-# Editor swap
+*.log
+*.pyc
+*.pyo
 *.swp
+.idea/
+.vscode/
+/backups/
+__pycache__/
+backend/.env
+backend/.env.*
+backend/api_debug.log
+backend/api_debug.log*
+backend/backend.log*
+backend/venv/
