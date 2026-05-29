@@ -32,6 +32,19 @@ async def execute_partial_reduce(
     ctx=None,
 ) -> Dict[str, Any]:
     """D4: reduce current positions by reduce_pct over N chunks with platform-aware A-leg."""
+    # ── GATEWAY GUARD: must check mode/kill_switch before executing real trades ──
+    try:
+        from app.services.trading_gateway import is_trading_allowed
+        gw = await is_trading_allowed(caller="partial_reduce")
+        if not gw.allowed:
+            logger.warning(f"[partial_reduce] BLOCKED by gateway: {gw.reason}")
+            return {"success": False, "blocked": True, "reason": gw.reason,
+                    "a_ok_count": 0, "b_ok_count": 0}
+    except Exception as _gw_err:
+        logger.error(f"[partial_reduce] gateway check FAILED: {_gw_err} — ABORTING for safety")
+        return {"success": False, "blocked": True, "reason": f"gateway error: {_gw_err}",
+                "a_ok_count": 0, "b_ok_count": 0}
+
     from app.services.agent.market_snapshot import collect_xau_positions_and_equity, fetch_conversion_factor
     from app.services.order_executor import order_executor
     from app.services.agent.feishu_broadcast import broadcast

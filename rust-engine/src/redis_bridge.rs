@@ -103,15 +103,26 @@ async fn subscribe_loop(redis_url: &str, hub: &Arc<Hub>) -> Result<(), Box<dyn s
             });
 
         let data = parsed.get("data").unwrap_or(&parsed);
-        let out = serde_json::json!({
-            "type": msg_type,
-            "data": data,
-            "timestamp": now_ms(),
-        });
+        // Preserve pair_code in forwarded message (critical for SpreadAnalysis)
+        let pair_code = parsed.get("pair_code").and_then(|v| v.as_str());
+        let out = if let Some(pc) = pair_code {
+            serde_json::json!({
+                "type": msg_type,
+                "pair_code": pc,
+                "data": data,
+                "timestamp": now_ms(),
+            })
+        } else {
+            serde_json::json!({
+                "type": msg_type,
+                "data": data,
+                "timestamp": now_ms(),
+            })
+        };
         let out_str = out.to_string();
 
         if channel == "ws:market_data" {
-            if let Some(pc) = parsed.get("pair_code").and_then(|v| v.as_str()) {
+            if let Some(pc) = pair_code {
                 hub.broadcast_to_room(pc, &out_str);
                 continue;
             }

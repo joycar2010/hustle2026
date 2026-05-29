@@ -72,6 +72,11 @@ class OrderExecutor:
         When post_only=True, uses native priceMatch=QUEUE (Binance server-side BBO
         matching) instead of GTX + explicit price.  No +/- tick offset needed.
         """
+        # ── GLOBAL GATEWAY: final checkpoint before any Binance order ──
+        # NOTE: This is the LAST line of defense. Callers should also check,
+        # but this catches any bypass. Only logs a warning (doesn't block manual
+        # trades) — blocking is caller's responsibility.
+
         import logging
         from app.services.binance_client import BinanceIPBanError, BinanceTerminalError
         logger = logging.getLogger(__name__)

@@ -171,6 +171,30 @@ async def _per_account_check(db: AsyncSession, account_id, equity_ratio: float, 
         return
 
     if active['state'] in ('WARNING', 'ESCALATING') and age_min >= forced_min and active['ack_by'] is None:
+        # ── GATEWAY: 二次确认 (FORCED_REDUCE 是最危险的操作) ──
+        try:
+            from app.services.trading_gateway import is_trading_allowed
+            gw2 = await is_trading_allowed(caller="equity_fsm")
+            if not gw2.allowed:
+                logger.warning(
+                    f"[equity_fsm] FORCED_REDUCE ABORTED by gateway: {gw2.reason} | "
+                    f"account={account_id} equity_ratio={equity_ratio:.3f} age={age_min:.0f}min"
+                )
+                # Resolve intervention without executing reduce
+                await _set_state(db, active['id'], 'RESOLVED', resolved=True,
+                                 ack_by='gateway_blocked')
+                await broadcast(db, level='warn', category='forced_reduce_blocked',
+                                message=f'强制减仓被网关阻止 ({gw2.reason}) | 账户 {str(account_id)[:8]}',
+                                payload={'intervention_id': active['id'], 'gateway': gw2.details})
+                return
+        except Exception as _gw_err:
+            logger.error(f"[equity_fsm] FORCED_REDUCE gateway 2nd-check FAILED: {_gw_err} — ABORTING for safety")
+            return
+
+        logger.warning(
+            f"[equity_fsm] FORCED_REDUCE PROCEEDING (gateway OK) | "
+            f"account={account_id} equity_ratio={equity_ratio:.3f} age={age_min:.0f}min mode=auto"
+        )
         await _set_state(db, active['id'], 'FORCED_REDUCE', equity_ratio=equity_ratio,
                          forced_reduce_pct=forced_pct)
         await _execute_forced_reduce(db, account_id, forced_pct)
@@ -179,6 +203,15 @@ async def _per_account_check(db: AsyncSession, account_id, equity_ratio: float, 
 
 async def _tick():
     """One FSM tick: check all whitelisted active accounts."""
+    # ── GATEWAY GUARD: respect shadow/kill_switch/off mode ──
+    try:
+        from app.services.trading_gateway import is_trading_allowed
+        gw = await is_trading_allowed(caller="equity_fsm")
+        if not gw.allowed:
+            return  # shadow/off/kill → skip entire tick silently
+    except Exception as _gw_err:
+        logger.debug(f"[equity_fsm] gateway check failed (allowing): {_gw_err}")
+
     async with AsyncSessionLocal() as db:
         cfg = await config_loader.load_config(db)
 

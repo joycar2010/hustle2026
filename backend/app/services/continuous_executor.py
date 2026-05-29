@@ -78,7 +78,7 @@ class ContinuousStrategyExecutor:
         self.order_executor = order_executor
         self.position_mgr = position_mgr or position_manager
         self.hedge_multiplier = hedge_multiplier
-        self.trigger_check_interval = trigger_check_interval
+        self.trigger_check_interval = max(trigger_check_interval, 0.3)  # floor 300ms to prevent API rate limit
         self.api_spam_prevention_delay = api_spam_prevention_delay
         self.delayed_single_leg_check_delay = delayed_single_leg_check_delay
         self.delayed_single_leg_second_check_delay = delayed_single_leg_second_check_delay
@@ -1109,13 +1109,55 @@ class ContinuousStrategyExecutor:
                 self.user_id
             )
 
-    async def _get_live_position(self, binance_account, strategy_type: str) -> float:
-        """Query real Binance position for closing decisions.
+    # REST fallback cache for _get_live_position (user_id+pair → (value, timestamp))
+    _rest_pos_cache: dict = {}
+    _REST_POS_CACHE_TTL = 3.0  # seconds — at most 1 REST call per 3s
 
-        Returns the ACTUAL position quantity from exchange (not internal counter).
-        For reverse: short position size (positionAmt < 0, return abs)
-        For forward: long position size (positionAmt > 0)
+    async def _get_live_position(self, binance_account, strategy_type: str) -> float:
+        """Get Binance position for closing decisions — ZERO REST in normal operation.
+
+        Priority:
+        1. WS cache (position_streamer._binance_positions) — updated by ACCOUNT_UPDATE
+           in real-time with zero REST calls. This is the primary source.
+        2. REST fallback with 3-second min-interval cache — only fires if WS cache
+           is empty (e.g. WS disconnected, or just started).
+
+        For reverse: short position size
+        For forward: long position size
         """
+        sym_a, _, _ = _get_pair_config(self.pair_code)
+
+        # ── 1. WS cache (primary — zero REST) ──────────────────────────────
+        try:
+            from app.tasks.broadcast_tasks import position_streamer
+            user_id = self.user_id or "_default"
+            bn_syms = position_streamer._binance_positions.get(user_id, {})
+            if sym_a in bn_syms:
+                long_v, short_v = bn_syms[sym_a]
+                if 'reverse' in strategy_type:
+                    return short_v
+                else:
+                    return long_v
+            # Try _default user (backward compat — single user mode)
+            if user_id != "_default":
+                bn_default = position_streamer._binance_positions.get("_default", {})
+                if sym_a in bn_default:
+                    long_v, short_v = bn_default[sym_a]
+                    if 'reverse' in strategy_type:
+                        return short_v
+                    else:
+                        return long_v
+        except Exception as _ws_e:
+            logger.debug(f"[V2] WS position cache miss: {_ws_e}")
+
+        # ── 2. REST fallback with 3s cache ──────────────────────────────────
+        import time as _time
+        cache_key = f"{self.user_id}:{self.pair_code}:{strategy_type}"
+        cached = ContinuousStrategyExecutor._rest_pos_cache.get(cache_key)
+        now = _time.time()
+        if cached and (now - cached[1]) < ContinuousStrategyExecutor._REST_POS_CACHE_TTL:
+            return cached[0]
+
         try:
             if not hasattr(binance_account, 'binance_client'):
                 from app.services.binance_client import BinanceFuturesClient
@@ -1123,7 +1165,6 @@ class ContinuousStrategyExecutor:
                     api_key=binance_account.api_key,
                     api_secret=binance_account.api_secret
                 )
-            sym_a, _, _ = _get_pair_config(self.pair_code)
             positions = await binance_account.binance_client.get_position_risk(symbol=sym_a)
             total = 0.0
             for pos in positions:
@@ -1134,9 +1175,13 @@ class ContinuousStrategyExecutor:
                 else:
                     if amt > 0:
                         total += amt
+            ContinuousStrategyExecutor._rest_pos_cache[cache_key] = (total, now)
+            logger.info(f"[V2] REST fallback position query: {sym_a} {strategy_type} = {total} (WS cache was empty)")
             return total
         except Exception as e:
-            logger.warning(f"[V2] Failed to query live position: {e}")
+            logger.warning(f"[V2] REST position query failed: {e}")
+            if cached:
+                return cached[0]  # return stale cache on error
             return -1.0
 
     async def _get_current_spread(self, strategy_type: str) -> float:
@@ -1224,6 +1269,20 @@ class ContinuousStrategyExecutor:
         spread_threshold: float = None,
     ) -> Dict:
         """Execute order based on strategy type"""
+        # ── GATEWAY GUARD ──
+        try:
+            from app.services.trading_gateway import is_trading_allowed
+            gw = await is_trading_allowed(
+                caller="continuous_executor",
+                user_id=self.user_id,
+                pair_code=self.pair_code,
+            )
+            if not gw.allowed:
+                logger.warning(f"[GATEWAY] Order blocked: {gw.reason} | {strategy_type} qty={quantity}")
+                return {"success": False, "error": f"Trading blocked: {gw.reason}",
+                        "binance_filled_qty": 0, "bybit_filled_qty": 0}
+        except Exception as _gw_err:
+            logger.debug(f"[GATEWAY] check failed (allowing): {_gw_err}")
         if strategy_type == 'reverse_opening':
             return await self.order_executor.execute_reverse_opening(
                 binance_account=binance_account,

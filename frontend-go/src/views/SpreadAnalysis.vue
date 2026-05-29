@@ -245,20 +245,20 @@ watch(currentPair, (newPair) => {
 })
 
 watch(lastMessage, (msg) => {
-  if (!msg || msg.type !== 'spread' || !msg.data) return
+  if (!msg || (msg.type !== 'spread' && msg.type !== 'market_data') || !msg.data) return
   const d = msg.data
-  const pc = d.pair_code || msg.pair_code
+  const pc = msg.pair_code || d.pair_code || msg.data?.pair_code
   if (!pc) return
 
   // Update live data for all pairs
   liveData.value[pc] = {
     forwardEntry: d.forward_entry_spread ?? d.forward_spread ?? 0,
     reverseEntry: d.reverse_entry_spread ?? d.reverse_spread ?? 0,
-    binanceBid: d.binance_bid ?? 0,
-    binanceAsk: d.binance_ask ?? 0,
-    bybitBid: d.bybit_bid ?? 0,
-    bybitAsk: d.bybit_ask ?? 0,
-    ts: msg.timestamp || Date.now(),
+    binanceBid: d.binance_bid ?? d.binance_quote?.bid_price ?? 0,
+    binanceAsk: d.binance_ask ?? d.binance_quote?.ask_price ?? 0,
+    bybitBid: d.bybit_bid ?? d.bybit_quote?.bid_price ?? 0,
+    bybitAsk: d.bybit_ask ?? d.bybit_quote?.ask_price ?? 0,
+    ts: msg.timestamp || d.timestamp || Date.now(),
     hasData: true,
   }
 
@@ -524,12 +524,15 @@ async function fetchHistory(page = 1) {
   const binSymbol = pairConfig?.symbol_a?.symbol || pairConfig?.cex_symbol || 'XAUUSDT'
   const mt5Symbol = pairConfig?.symbol_b?.symbol || pairConfig?.mt5_symbol || binSymbol
   try {
+    // Convert displayed Beijing time to UTC ISO for backend (DB stores UTC)
+    const startUTC = new Date(startTime.value).toISOString()
+    const endUTC = new Date(endTime.value).toISOString()
     const r = await api.get('/api/v1/market/spread/history', {
       params: {
         binance_symbol: binSymbol,
         bybit_symbol: mt5Symbol,
-        start_time: startTime.value + ':00',
-        end_time: endTime.value + ':00',
+        start_time: startUTC,
+        end_time: endUTC,
         page,
         page_size: pageSize.value,
       }
