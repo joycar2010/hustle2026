@@ -376,6 +376,7 @@ const initPageVisibility = () => {
     '/': true,
     '/trading': true,
     '/spread-chart': true,
+    '/spread-analysis': true,
     '/pending-orders': true,
     '/global-positions': true,
   }
@@ -403,6 +404,10 @@ const allNavItems = [
     path: '/spread-chart',
     label: '点差走势',
     icon: 'SpreadChartIcon',
+  },
+  {
+    path: '/spread-analysis',
+    label: '点差分析',
   },
   {
     path: '/pending-orders',

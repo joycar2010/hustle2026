@@ -1613,6 +1613,66 @@
     </transition>
 
     <!-- ===== AI客服管理 ===== -->
+    <div v-if="activeTab==='aicoin'" class="space-y-4">
+      <div class="card">
+        <h2 class="text-lg font-bold mb-4">AiCoin 行情接口配置</h2>
+        <p class="text-xs text-text-tertiary mb-4">
+          为 K线 图表 (frontend-go / frontend-admin) 提供 K 线数据和币种搜索。
+          凭据从 https://open.aicoin.com 获取, 保存后自动生效 (60s 缓存)。
+        </p>
+        <div class="bg-dark-200 rounded-xl p-4 space-y-3 max-w-xl">
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">AccessKeyId</label>
+            <input v-model="aicoinConfig.api_key" type="text" placeholder="如 abc123def456..."
+              autocomplete="new-password"
+              class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">
+              Secret Key
+              <span v-if="aicoinConfig.configured" class="text-text-tertiary ml-1">(当前: {{ aicoinConfig.api_secret_masked || '已设置' }})</span>
+            </label>
+            <div class="relative">
+              <input v-model="aicoinConfig.api_secret"
+                :type="aicoinShowSecret ? 'text' : 'password'"
+                :placeholder="aicoinConfig.configured ? '••••••••• (留空则不修改, 但保存按钮要求重新输入)' : '请输入 Secret Key'"
+                autocomplete="new-password"
+                class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 pr-12 text-sm font-mono focus:border-primary outline-none">
+              <button @click="aicoinShowSecret = !aicoinShowSecret" type="button"
+                class="absolute right-2 top-1.5 text-xs text-text-tertiary hover:text-text-primary">
+                {{ aicoinShowSecret ? '隐藏' : '显示' }}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-text-tertiary mb-1">API Base URL</label>
+            <input v-model="aicoinConfig.api_base" type="text" placeholder="https://open.aicoin.com"
+              class="w-full bg-dark-300 border border-border-primary rounded px-3 py-2 text-sm font-mono focus:border-primary outline-none">
+          </div>
+          <div>
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" v-model="aicoinConfig.enabled" class="accent-primary">
+              <span>启用 AiCoin 接口</span>
+            </label>
+          </div>
+          <div class="flex items-center gap-2 pt-2">
+            <button @click="saveAicoinConfig" :disabled="aicoinSaving"
+              class="px-4 py-2 bg-primary text-dark-300 rounded text-sm font-semibold hover:bg-primary-hover disabled:opacity-40">
+              {{ aicoinSaving ? '保存中...' : '保存配置' }}
+            </button>
+            <button @click="testAicoinConfig" :disabled="aicoinTesting"
+              class="px-4 py-2 bg-dark-300 border border-border-primary rounded text-sm hover:border-primary disabled:opacity-40">
+              {{ aicoinTesting ? '测试中...' : '测试连接' }}
+            </button>
+            <span v-if="aicoinTestResult" class="text-xs ml-2">{{ aicoinTestResult }}</span>
+          </div>
+          <div v-if="aicoinConfig.updated_at" class="text-[10px] text-text-tertiary pt-2 border-t border-border-primary">
+            最后更新: {{ aicoinConfig.updated_at }} ({{ aicoinConfig.updated_by || '-' }})
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="activeTab==='ai_chat'" class="space-y-4">
 
       <!-- Stats Cards -->
@@ -1821,8 +1881,83 @@ const tabs = [
   { id: 'logs',     label: '系统日志' },
   { id: 'version',  label: '系统版本管理' },
   { id: 'database', label: '数据库管理' },
+  { id: 'aicoin',   label: 'AiCoin 配置' },
   { id: 'ai_chat', label: 'AI客服管理' },
 ]
+
+// ── AiCoin 配置 ──────────────────────────────────
+const aicoinConfig = ref({
+  api_key: '',
+  api_secret: '',
+  api_secret_masked: '',
+  api_base: 'https://open.aicoin.com',
+  enabled: true,
+  configured: false,
+  updated_at: null,
+  updated_by: null,
+})
+const aicoinSaving = ref(false)
+const aicoinTesting = ref(false)
+const aicoinShowSecret = ref(false)
+const aicoinTestResult = ref('')
+
+async function loadAicoinConfig() {
+  try {
+    const r = await api.get('/api/v1/system/aicoin-config')
+    aicoinConfig.value = { ...aicoinConfig.value, ...r.data }
+    // For UX: leave api_secret as empty string; user types new one to update
+    aicoinConfig.value.api_secret = ''
+  } catch (e) {
+    console.error('Failed to load AiCoin config:', e)
+  }
+}
+
+async function saveAicoinConfig() {
+  if (!aicoinConfig.value.api_key) {
+    alert('请填入 AccessKeyId')
+    return
+  }
+  if (!aicoinConfig.value.api_secret) {
+    alert('请填入 Secret Key (如不修改请重新输入)')
+    return
+  }
+  aicoinSaving.value = true
+  try {
+    await api.post('/api/v1/system/aicoin-config', {
+      api_key: aicoinConfig.value.api_key,
+      api_secret: aicoinConfig.value.api_secret,
+      api_base: aicoinConfig.value.api_base || 'https://open.aicoin.com',
+      enabled: aicoinConfig.value.enabled,
+    })
+    alert('AiCoin 配置已保存')
+    await loadAicoinConfig()
+  } catch (e) {
+    alert('保存失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    aicoinSaving.value = false
+  }
+}
+
+async function testAicoinConfig() {
+  aicoinTesting.value = true
+  aicoinTestResult.value = '测试中...'
+  try {
+    let body = undefined
+    // If user typed new credentials, test them directly
+    if (aicoinConfig.value.api_key && aicoinConfig.value.api_secret) {
+      body = {
+        api_key: aicoinConfig.value.api_key,
+        api_secret: aicoinConfig.value.api_secret,
+      }
+    }
+    const r = await api.post('/api/v1/system/aicoin-config/test', body)
+    aicoinTestResult.value = '✅ ' + (r.data.message || '测试通过')
+  } catch (e) {
+    aicoinTestResult.value = '❌ ' + (e.response?.data?.detail || e.message)
+  } finally {
+    aicoinTesting.value = false
+  }
+}
 
 // ── OpenCLAW 全局开关状态 ──────────────────────────────────
 const openclawStatus = ref({ openclaw_enabled: true, kill_switch: false, mode: 'shadow' })
@@ -2882,6 +3017,7 @@ onMounted(() => {
   loadSystemLogs()
   loadSecurityComponents()
   initNotifyTab()
+  loadAicoinConfig()
 })
 
 watch(activeTab, (tab) => {

@@ -5,7 +5,7 @@
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div>
         <h1 class="text-2xl font-bold">点差分析</h1>
-        <p class="text-xs text-text-tertiary mt-0.5">多品种实时点差监控 · WebSocket 500ms 推送</p>
+        <p class="text-xs text-text-tertiary mt-0.5">多品种实时点差监控 · 与全局产品对同步</p>
       </div>
       <div class="flex items-center gap-2">
         <div class="flex items-center gap-1.5">
@@ -183,18 +183,26 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Line } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler } from 'chart.js'
-import { useWebSocket } from '@/composables/useWebSocket.js'
-import api from '@/services/api.js'
+import { useMarketStore } from '@/stores/market'
+import { useTradingPair } from '@/composables/useTradingPair'
+import api from '@/services/api'
 import dayjs from 'dayjs'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
 
-// ── WebSocket ──
-const { connected: wsConnected, lastMessage, connect: wsConnect, disconnect: wsDisconnect, send: wsSend } = useWebSocket()
+// ── WebSocket (use global marketStore from go-style) ──
+const marketStore = useMarketStore()
+const { currentPair } = useTradingPair()
+const wsConnected = computed(() => marketStore.connected)
+const lastMessage = computed(() => marketStore.lastMessage)
+// no-op shims (kept for code compatibility below)
+function wsConnect() { if (!marketStore.connected) marketStore.connect() }
+function wsDisconnect() { /* shared store, do not disconnect */ }
+function wsSend() { /* shared store, no per-component send */ }
 
 // ── State ──
 const pairs = ref([])
-const activePair = ref('XAU')
+const activePair = ref(currentPair.value || 'XAU')
 const liveData = ref({})        // { pair_code: { forwardEntry, reverseEntry, binanceBid, bybitAsk, ts } }
 const wsChartData = ref([])     // rolling window for chart (max 300 points)
 const historyData = ref([])     // from HTTP history API (current page only)
@@ -228,6 +236,14 @@ const directions = [
 ]
 
 // ── WS message handler ──
+// Sync global currentPair → local activePair
+watch(currentPair, (newPair) => {
+  if (newPair && newPair !== activePair.value) {
+    activePair.value = newPair
+    fetchHistory(1)
+  }
+})
+
 watch(lastMessage, (msg) => {
   if (!msg || msg.type !== 'spread' || !msg.data) return
   const d = msg.data

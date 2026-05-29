@@ -46,6 +46,7 @@ _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
 from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, mt5_infra, pnl, hedging, hedge_ratio, agent, site_status, hedge_records, dashboard_viz
+from app.api.v1 import aicoin
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor, snapshot_request_listener
 from app.tasks.data_request_handler import data_request_listener
@@ -568,6 +569,7 @@ app.include_router(ssl_certificates.router, prefix="/api/v1/ssl", tags=["SSL证�
 app.include_router(system_monitor.router, prefix="/api/v1/monitor", tags=["系统监控"])
 app.include_router(key_management.router, prefix="/api/v1/keys", tags=["密钥管理"])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["OpenCLAW Agent"])
+app.include_router(aicoin.router, prefix="/api/v1/aicoin", tags=["AiCoin K-line"])
 app.include_router(site_status.router, prefix="/api/v1", tags=["Site Status"])
 from app.api.v1 import subaccount
 app.include_router(subaccount.router, prefix="/api/v1", tags=["Sub-account"])

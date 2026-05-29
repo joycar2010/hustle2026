@@ -134,6 +134,66 @@ async def get_spread_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/spread/chart")
+async def get_spread_chart(
+    start_time: str = Query(..., description="ISO format start time"),
+    end_time: str = Query(..., description="ISO format end time"),
+    interval: int = Query(60, ge=1, description="Downsample interval in seconds"),
+    pair_code: str = Query("XAU", description="Hedging pair code (XAU/ICXAU/BXAU/...)"),
+):
+    """Return downsampled spread history in compact format expected by SpreadChart.vue.
+
+    Output shape: [{t: <iso>, fs: <forward_spread>, rs: <reverse_spread>}, ...]
+    """
+    try:
+        # Resolve symbols from pair_code
+        try:
+            from app.services.hedging_pair_service import hedging_pair_service
+            pair = hedging_pair_service.get_pair(pair_code)
+            binance_symbol = pair.symbol_a.symbol if pair else "XAUUSDT"
+            bybit_symbol = pair.symbol_b.symbol if pair else "XAUUSDT"
+        except Exception:
+            binance_symbol, bybit_symbol = "XAUUSDT", "XAUUSDT"
+
+        # Fetch raw history (up to 1000)
+        records = await market_data_service.get_spread_history(
+            limit=1000,
+            binance_symbol=binance_symbol,
+            bybit_symbol=bybit_symbol,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        # `records` may be a dict {data, pagination} or a list
+        items = records.get("data", records) if isinstance(records, dict) else records
+        if not items:
+            return []
+
+        # Downsample by interval
+        from datetime import datetime as _dt
+        result = []
+        last_t = None
+        for r in items:
+            ts = r.get("timestamp") if isinstance(r, dict) else None
+            if not ts:
+                continue
+            try:
+                t = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            t_sec = int(t.timestamp())
+            if last_t is not None and (t_sec - last_t) < interval:
+                continue
+            last_t = t_sec
+            result.append({
+                "t": ts,
+                "fs": r.get("forward_spread", 0),
+                "rs": r.get("reverse_spread", 0),
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/data/latest")
 async def get_latest_market_data(
     symbol: str = Query(default="XAUUSDT", description="Trading symbol"),

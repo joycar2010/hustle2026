@@ -2134,3 +2134,121 @@ async def get_system_status(
             "backend": False,
             "message": f"Failed to get system status: {str(e)}"
         }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# AiCoin Configuration Endpoints
+# ──────────────────────────────────────────────────────────────────────
+class AiCoinConfigRequest(BaseModel):
+    api_key: str
+    api_secret: str
+    api_base: Optional[str] = "https://open.aicoin.com"
+    enabled: Optional[bool] = True
+
+
+@router.get("/aicoin-config")
+async def get_aicoin_config(
+    user_id: str = Depends(get_current_user_id),
+):
+    """Get current AiCoin config (secret masked)."""
+    from sqlalchemy import text as _text
+    from app.core.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(
+            _text("SELECT api_key, api_secret, api_base, enabled, updated_at, updated_by FROM aicoin_config WHERE id=1")
+        )).first()
+    if not row:
+        return {
+            "api_key": "",
+            "api_secret": "",
+            "api_base": "https://open.aicoin.com",
+            "enabled": False,
+            "configured": False,
+        }
+    api_key, api_secret, api_base, enabled, updated_at, updated_by = row
+    masked_secret = ""
+    if api_secret:
+        if len(api_secret) > 8:
+            masked_secret = api_secret[:4] + "••••••" + api_secret[-4:]
+        else:
+            masked_secret = "••••••"
+    return {
+        "api_key": api_key or "",
+        "api_secret_masked": masked_secret,
+        "api_base": api_base or "https://open.aicoin.com",
+        "enabled": bool(enabled) if enabled is not None else False,
+        "configured": bool(api_key and api_secret),
+        "updated_at": updated_at.isoformat() if updated_at else None,
+        "updated_by": updated_by,
+    }
+
+
+@router.post("/aicoin-config")
+async def save_aicoin_config(
+    req: AiCoinConfigRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Save AiCoin AccessKeyId + Secret to DB."""
+    from sqlalchemy import text as _text
+    from app.core.database import AsyncSessionLocal
+    if not req.api_key or not req.api_secret:
+        raise HTTPException(status_code=400, detail="api_key 和 api_secret 不能为空")
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            _text(
+                "UPDATE aicoin_config SET api_key=:k, api_secret=:s, api_base=:b, "
+                "enabled=:e, updated_at=now(), updated_by=:u WHERE id=1"
+            ),
+            {"k": req.api_key, "s": req.api_secret,
+             "b": req.api_base or "https://open.aicoin.com",
+             "e": bool(req.enabled),
+             "u": str(user_id) if user_id else "system"},
+        )
+        # If row doesn't exist (rare), insert
+        result = (await db.execute(_text("SELECT count(*) FROM aicoin_config WHERE id=1"))).scalar()
+        if not result:
+            await db.execute(
+                _text("INSERT INTO aicoin_config (id, api_key, api_secret, api_base, enabled, updated_by) VALUES (1, :k, :s, :b, :e, :u)"),
+                {"k": req.api_key, "s": req.api_secret,
+                 "b": req.api_base or "https://open.aicoin.com",
+                 "e": bool(req.enabled),
+                 "u": str(user_id) if user_id else "system"},
+            )
+        await db.commit()
+    # Invalidate aicoin client cache
+    try:
+        from app.api.v1 import aicoin as _aicoin_mod
+        _aicoin_mod._client_cache["ts"] = 0
+        _aicoin_mod._client_cache["client"] = None
+    except Exception:
+        pass
+    return {"success": True, "message": "AiCoin 配置已保存"}
+
+
+@router.post("/aicoin-config/test")
+async def test_aicoin_config(
+    req: Optional[AiCoinConfigRequest] = None,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Test current (or provided) AiCoin credentials by calling search_coin('BTC')."""
+    from app.services.aicoin_client import AiCoinClient
+    if req and req.api_key and req.api_secret:
+        client = AiCoinClient(req.api_key, req.api_secret)
+    else:
+        # Test stored credentials
+        from sqlalchemy import text as _text
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(_text("SELECT api_key, api_secret FROM aicoin_config WHERE id=1"))).first()
+        if not row or not row[0] or not row[1]:
+            raise HTTPException(status_code=400, detail="未配置 AiCoin 凭据")
+        client = AiCoinClient(row[0], row[1])
+    try:
+        data = await client.search_coin("BTC")
+        return {
+            "success": True,
+            "message": f"测试通过, 返回 {len(data) if isinstance(data, list) else 0} 条搜索结果",
+            "sample": data[:2] if isinstance(data, list) else data,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AiCoin API 测试失败: {e}")

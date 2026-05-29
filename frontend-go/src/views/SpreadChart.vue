@@ -421,6 +421,16 @@ async function fetchData() {
     dataPointCount.value = data.length
 
     if (!chart) { await nextTick(); initChart() }
+    // Guard against initChart() failing (chart container not yet mounted)
+    if (!chart || !forwardSeries || !reverseSeries) {
+      console.warn('Chart not initialized yet, retry next tick')
+      await nextTick()
+      if (!chart) initChart()
+      if (!chart || !forwardSeries || !reverseSeries) {
+        console.error('Chart still null after retry — skipping setData')
+        return
+      }
+    }
 
     fwdData = []
     revData = []

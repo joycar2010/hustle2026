@@ -127,8 +127,11 @@ class MarketDataStreamer:
                     # Fallback: single pair with default symbols
                     spread_data = await market_data_service.get_current_spread(use_cache=False)
                     await manager.broadcast_market_data(spread_data.model_dump(), pair_code="XAU")
-                    if cached_active_count > 0:
+                    # Always write (no strategy requirement)
+                    try:
                         await market_data_service.store_spread_history(spread_data)
+                    except Exception as _e_st:
+                        logger.debug(f'[MarketStreamer] fallback spread store failed: {_e_st}')
                 else:
                     # Fetch all pairs in parallel
                     async def _fetch_pair(pair):
@@ -148,6 +151,8 @@ class MarketDataStreamer:
                         return_exceptions=True
                     )
 
+                    # Build pair_code → pair dict for safe lookup (avoid closure issues)
+                    pair_lookup = {p.pair_code: p for p in active_pairs}
                     for r in results:
                         if isinstance(r, Exception):
                             continue
@@ -155,8 +160,19 @@ class MarketDataStreamer:
                         if spread_data is None:
                             continue
                         await manager.broadcast_market_data(spread_data.model_dump(), pair_code=pair_code)
-                        if cached_active_count > 0 and pair_code == "XAU":
-                            await market_data_service.store_spread_history(spread_data)
+                        # Always store spread history per pair (so SpreadAnalysis works
+                        # without requiring an active strategy). Each pair has its own
+                        # Redis sorted set; capped to 1000 entries with 24h TTL.
+                        try:
+                            _p = pair_lookup.get(pair_code)
+                            if _p is not None:
+                                await market_data_service.store_spread_history(
+                                    spread_data,
+                                    binance_symbol=_p.symbol_a.symbol,
+                                    bybit_symbol=_p.symbol_b.symbol,
+                                )
+                        except Exception as _e_st:
+                            logger.debug(f'[MarketStreamer] spread store failed {pair_code}: {_e_st}')
 
                 self.broadcast_count += 1
                 self.last_broadcast_time = datetime.now().isoformat()
