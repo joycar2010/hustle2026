@@ -340,10 +340,14 @@ async def backup_database(
         _run(["git", "add", str(file_path)], cwd=REPO_ROOT)
         commit_msg = f"[db-backup] {filename} ({size_mb:.2f} MB) - {timestamp} UTC"
         _run(["git", "commit", "-m", commit_msg, "--no-verify"], cwd=REPO_ROOT)
-        _run(["git", "push", "origin", "go"], cwd=REPO_ROOT, timeout=120)
+        # Push to rust (renamed from go); falls back to go for legacy compat
+        try:
+            _run(["git", "push", "origin", "rust"], cwd=REPO_ROOT, timeout=120)
+        except Exception:
+            _run(["git", "push", "origin", "go"], cwd=REPO_ROOT, timeout=120)
 
         return {
-            "message": "Database backup successful and pushed to go branch",
+            "message": "Database backup successful and pushed to rust branch",
             "filename": filename,
             "path": str(file_path),
             "size": f"{size_mb:.2f} MB"
@@ -701,20 +705,20 @@ async def get_version_history(
     try:
         import subprocess
 
-        # Fetch latest commits from remote GO branch
+        # Fetch latest commits from remote RUST branch (renamed from GO)
         fetch_result = subprocess.run(
-            ["git", "fetch", "origin", "go"],
+            ["git", "fetch", "origin", "rust"],
             capture_output=True,
             text=True,
             cwd=".."
         )
 
         if fetch_result.returncode != 0:
-            raise Exception(f"Failed to fetch from GitHub GO branch: {fetch_result.stderr}")
+            raise Exception(f"Failed to fetch from GitHub RUST branch: {fetch_result.stderr}")
 
-        # Get last 20 commits from origin/go (GitHub GO branch)
+        # Get last commits from origin/rust (GitHub RUST branch)
         result = subprocess.run(
-            ["git", "log", "origin/go", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-100"],
+            ["git", "log", "origin/rust", "--pretty=format:%H|%an|%ae|%ad|%s", "--date=format:%Y-%m-%d %H:%M:%S", "-100"],
             capture_output=True,
             text=True,
             encoding='utf-8',
@@ -753,24 +757,27 @@ async def push_to_github(
     branch: Optional[str] = Body(None, embed=True),
     user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
-    """Push current version to GitHub GO branch.
+    """Push current version to GitHub RUST branch (default).
 
-    Flow (when branch == "go"):
+    Flow (when branch == "rust" or "go"):
       1. Build admin + go frontends via vite (fails fast on build error).
       2. Sync dist-admin → frontend-admin/dist and dist → frontend/dist so the
          Nginx deploy directories and the git snapshot stay in sync.
-      3. git add . && git commit && git push --force origin HEAD:go.
+      3. git add . && git commit && git push --force origin HEAD:{branch}.
 
-    This guarantees the GO branch snapshot contains the *exact* code currently
-    deployed to go.hustle2026.xyz and admin.hustle2026.xyz.
+    Default branch is "rust" (renamed from legacy "go"). Old callers passing
+    branch="go" still work — both trigger the build/deploy/push pipeline.
     """
+    # Default branch: rust (renamed from legacy go)
+    if not branch:
+        branch = "rust"
     build_info: Dict[str, Any] = {}
     try:
         # ----------------------------------------------------------------
-        # Step 1: Build frontend (only when pushing to go — avoids rebuild
-        # overhead on non-GO branches). Failure aborts before git ops.
+        # Step 1: Build frontend (only when pushing to rust/go — avoids
+        # rebuild overhead on non-default branches). Failure aborts before git ops.
         # ----------------------------------------------------------------
-        if branch == "go":
+        if branch in ("go", "rust"):
             try:
                 build_info["build"] = _build_frontend()
                 build_info["deploy"] = _deploy_frontend()
@@ -906,10 +913,10 @@ async def push_to_github(
                 error_msg = commit_result.stderr or commit_result.stdout or "Unknown error"
                 raise Exception(f"Git commit failed: {error_msg}")
 
-        # Push to remote — go branch uses force-push to HEAD:go refspec
+        # Push to remote — rust/go branch uses force-push to HEAD:{branch}
         push_args = ["git", "push"]
-        if branch == "go":
-            push_args.extend(["--force", "origin", "HEAD:go"])
+        if branch in ("go", "rust"):
+            push_args.extend(["--force", "origin", f"HEAD:{branch}"])
         elif current_branch.startswith("backup-"):
             push_args.extend(["--force", "origin", current_branch])
         else:
@@ -1007,13 +1014,15 @@ async def rollback_version(
             )
 
         # Step 1: ensure the hash is locally reachable
-        if request.branch == "go":
+        # Default branch: rust; legacy callers may still pass "go"
+        _rb_branch = request.branch or "rust"
+        if _rb_branch in ("go", "rust"):
             try:
-                _run(["git", "fetch", "origin", "go"], timeout=120)
+                _run(["git", "fetch", "origin", _rb_branch], timeout=120)
             except Exception as fetch_exc:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to fetch origin/go: {fetch_exc}",
+                    detail=f"Failed to fetch origin/{_rb_branch}: {fetch_exc}",
                 )
 
         # Verify the target hash exists and capture its commit message

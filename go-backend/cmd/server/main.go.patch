@@ -1,4 +1,0 @@
-The following routes need to be added to main.go:
-strat.POST(/execute/:strategy_type/continuous, strategies.ProxyExecute)
-strat.POST(/close/:strategy_type/continuous, strategies.ProxyClose)
-acc.GET(/:account_id/proxy/:platform_id, accounts.GetAccountProxy)

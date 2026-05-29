@@ -1210,9 +1210,9 @@
 
         <!-- GitHub版本管理 -->
         <div class="bg-dark-200 rounded-xl p-5">
-          <h3 class="font-bold mb-1">GitHub 版本备份 (分支: go)</h3>
+          <h3 class="font-bold mb-1">GitHub 版本备份 (分支: rust)</h3>
           <div class="text-xs text-text-tertiary mb-3">
-            推送目标: <span class="font-mono text-primary">https://github.com/joycar2010/hustle2026.git @ go</span>
+            推送目标: <span class="font-mono text-primary">https://github.com/joycar2010/hustle2026.git @ rust</span>
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-2 text-text-secondary">推送备注</label>
@@ -1223,7 +1223,7 @@
             <button @click="pushToGitHub" :disabled="pushing"
               class="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 text-dark-300 font-semibold rounded-lg text-sm transition-colors">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-              {{ pushing ? '推送中...' : '推送到 go 分支' }}
+              {{ pushing ? '推送中...' : '推送到 rust 分支' }}
             </button>
           </div>
           <!-- 推送进度条 -->
@@ -1240,7 +1240,7 @@
             {{ pushResult.msg }}
           </div>
 
-          <h4 class="font-semibold text-sm mb-3">go 分支备份记录</h4>
+          <h4 class="font-semibold text-sm mb-3">rust 分支备份记录</h4>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead><tr class="border-b border-border-primary text-text-tertiary text-xs">
@@ -1314,11 +1314,11 @@
         <div class="flex gap-2 mb-5 flex-wrap">
           <button @click="backupDatabase" class="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-dark-300 font-semibold rounded-lg text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-            备份至 go 分支
+            备份至 rust 分支
           </button>
           <button @click="restoreDatabase" class="flex items-center gap-2 px-4 py-2 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            从 go 分支恢复
+            从 rust 分支恢复
           </button>
         </div>
 
@@ -2765,11 +2765,11 @@ async function pushToGitHub() {
     }, 1500)
     setTimeout(() => { pushStage.value = '正在提交代码...' }, 3000)
     setTimeout(() => { pushStage.value = '正在推送至 GitHub...' }, 8000)
-    await api.post('/api/v1/system/github/push', { remark: pushRemark.value, branch: 'go', repo: 'https://github.com/joycar2010/hustle2026.git' })
+    await api.post('/api/v1/system/github/push', { remark: pushRemark.value, branch: 'rust', repo: 'https://github.com/joycar2010/hustle2026.git' })
     clearInterval(progressTimer)
     pushProgress.value = 100
     pushStage.value = '推送完成'
-    pushResult.value = { ok: true, msg: '已成功推送至 GitHub go 分支' }
+    pushResult.value = { ok: true, msg: '已成功推送至 GitHub rust 分支' }
     pushRemark.value = ''
     await refreshVersionHistory()
   } catch (e) {
@@ -2784,14 +2784,14 @@ async function rollback(hash) {
   const v = versionHistory.value.find(i => i.hash === hash)
   if (v) { v._rolling = true; v._loading = true }
   try {
-    await api.post('/api/v1/system/github/rollback', { hash, branch: 'go' })
+    await api.post('/api/v1/system/github/rollback', { hash, branch: 'rust' })
     toast('回滚成功，服务将自动重启')
     await refreshVersionHistory()
   } catch (e) { toast('回滚失败: ' + (e.response?.data?.detail || e.message), 'error') }
   finally { if (v) { v._rolling = false; v._loading = false } }
 }
 async function deleteVersion(hash) {
-  if (!confirm(`确认从 go 分支删除版本 ${hash.substring(0,7)}？`)) return
+  if (!confirm(`确认从 rust 分支删除版本 ${hash.substring(0,7)}？`)) return
   const v = versionHistory.value.find(i => i.hash === hash)
   if (v) { v._deleting = true; v._loading = true }
   try {
@@ -2830,8 +2830,8 @@ async function loadDbStats() {
 }
 async function backupDatabase() {
   try {
-    await api.post('/api/v1/system/database/backup', { target: 'github', branch: 'go', repo: 'https://github.com/joycar2010/hustle2026.git' })
-    toast('数据库备份已提交至 go 分支')
+    await api.post('/api/v1/system/database/backup', { target: 'github', branch: 'rust', repo: 'https://github.com/joycar2010/hustle2026.git' })
+    toast('数据库备份已提交至 rust 分支')
     await refreshVersionHistory()
   } catch (e) { toast('备份失败: ' + (e.response?.data?.detail || e.message), 'error') }
 }

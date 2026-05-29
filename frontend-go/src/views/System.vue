@@ -3396,7 +3396,8 @@ async function pushToGitHub() {
   if (!confirm('确定要推送当前版本到GitHub吗？')) return
   try {
     const response = await api.post('/api/v1/system/github/push', {
-      remark: pushRemark.value || undefined
+      remark: pushRemark.value || undefined,
+      branch: 'rust'
     })
 
     // Check if there's a warning about excluded large files
@@ -3433,7 +3434,7 @@ async function refreshVersionHistory() {
 async function rollbackToVersion(hash) {
   if (!confirm(`确定要回滚到版本 ${hash.substring(0, 7)} 吗？这将重置当前代码！`)) return
   try {
-    await api.post('/api/v1/system/github/rollback', { hash })
+    await api.post('/api/v1/system/github/rollback', { hash, branch: 'rust' })
     alert('回滚成功，请重启系统')
     await loadVersionHistory()
   } catch (error) {
@@ -3459,7 +3460,7 @@ async function rollbackVersion() {
   const version = prompt('请输入要回滚到的版本号:')
   if (!version) return
   try {
-    await api.post('/api/v1/system/github/rollback', { version })
+    await api.post('/api/v1/system/github/rollback', { version, branch: 'rust' })
     alert('回滚成功，请重启系统')
   } catch (error) {
     console.error('Failed to rollback:', error)
@@ -3507,7 +3508,7 @@ async function handleBackupSelect(type) {
   if (type === 'github') {
     if (!confirm('确定要备份数据库至 GitHub 吗？')) return
     try {
-      const response = await api.post('/api/v1/system/github/push', { remark: '数据库备份' })
+      const response = await api.post('/api/v1/system/github/push', { remark: '数据库备份', branch: 'rust' })
       alert(`备份至 GitHub 成功: ${response.data.branch}`)
     } catch (error) {
       console.error('Failed to backup to GitHub:', error)

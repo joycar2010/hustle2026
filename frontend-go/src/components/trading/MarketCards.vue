@@ -100,14 +100,6 @@
           </div>
         </div>
 
-        <!-- Order Book Data Row (对冲账户 XAUUSD.s) -->
-        <div class="grid grid-cols-4 gap-0.5 mb-1 lg:mb-0.5 md:mb-1.5 text-base lg:text-sm md:text-xl">
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(bybitOrderBook.ask_volume) }}</div>
-          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(bybitOrderBook.ask_price) }}</div>
-          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(bybitOrderBook.bid_price) }}</div>
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(bybitOrderBook.bid_volume) }}</div>
-        </div>
-
         <!-- Lag Heartbeat -->
         <div class="pt-0.5 lg:pt-0.5 md:pt-1 border-t border-[#2b3139] flex justify-between items-center">
           <span class="text-[10px] lg:text-[9px] md:text-xs text-gray-400">卡顿</span>
@@ -166,6 +158,11 @@
             <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
               {{ formatPrice(binance.ask) }}
             </div>
+            <!-- 行情卖一: 量 + 价 (左→右) -->
+            <div class="flex justify-between mt-0.5 text-[11px] lg:text-[10px] md:text-sm font-mono">
+              <span class="text-[#3b82f6]">{{ formatVolume(binanceOrderBook.ask_volume) }}</span>
+              <span class="text-[#0ecb81]">{{ formatPrice(binanceOrderBook.ask_price) }}</span>
+            </div>
             <div v-if="askOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
               挂{{ askOrderCount }}
             </div>
@@ -175,18 +172,23 @@
             <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
               {{ formatPrice(binance.bid) }}
             </div>
+            <!-- 行情买一: 价 + 量 (左→右) -->
+            <div class="flex justify-between mt-0.5 text-[11px] lg:text-[10px] md:text-sm font-mono">
+              <span class="text-[#f6465d]">{{ formatPrice(binanceOrderBook.bid_price) }}</span>
+              <span class="text-[#3b82f6]">{{ formatVolume(binanceOrderBook.bid_volume) }}</span>
+            </div>
             <div v-if="bidOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
               挂{{ bidOrderCount }}
             </div>
           </div>
         </div>
 
-        <!-- Order Book Data Row (主账号 XAUUSDT) -->
+        <!-- User Pending Orders Row (当前用户 Binance 实时挂单: ASK 价格/数量 + BID 价格/数量) -->
         <div class="grid grid-cols-4 gap-0.5 mb-1 lg:mb-0.5 md:mb-1.5 text-base lg:text-sm md:text-xl">
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(binanceOrderBook.ask_volume) }}</div>
-          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(binanceOrderBook.ask_price) }}</div>
-          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(binanceOrderBook.bid_price) }}</div>
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(binanceOrderBook.bid_volume) }}</div>
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(userAskOrder.quantity) }}</div>
+          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(userAskOrder.price) }}</div>
+          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(userBidOrder.price) }}</div>
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(userBidOrder.quantity) }}</div>
         </div>
 
         <!-- Lag Heartbeat -->
@@ -519,6 +521,9 @@ const binanceLagCount = computed(() => {
 // Pending orders data
 const askOrderCount = ref(0)
 const bidOrderCount = ref(0)
+// 用户自己的最新一笔 Binance 挂单 (取价格最优的那笔)
+const userAskOrder = ref({ price: 0, quantity: 0 })
+const userBidOrder = ref({ price: 0, quantity: 0 })
 const showModal = ref(false)
 const modalType = ref('') // 'ASK' or 'BID'
 const pendingOrders = ref([])
@@ -1088,6 +1093,22 @@ async function fetchPendingOrderCounts() {
 
     askOrderCount.value = askCount
     bidOrderCount.value = bidCount
+
+    // 提取最新代表挂单 (ASK 取最低价, BID 取最高价 — 最贴近成交的那笔)
+    const askOrders = orders.filter(o => o.side === 'sell' && o.price > 0)
+    const bidOrders = orders.filter(o => o.side === 'buy' && o.price > 0)
+    if (askOrders.length > 0) {
+      const best = askOrders.reduce((a, b) => (a.price < b.price ? a : b))
+      userAskOrder.value = { price: best.price || 0, quantity: best.quantity || 0 }
+    } else {
+      userAskOrder.value = { price: 0, quantity: 0 }
+    }
+    if (bidOrders.length > 0) {
+      const best = bidOrders.reduce((a, b) => (a.price > b.price ? a : b))
+      userBidOrder.value = { price: best.price || 0, quantity: best.quantity || 0 }
+    } else {
+      userBidOrder.value = { price: 0, quantity: 0 }
+    }
 
     console.log('[fetchPendingOrderCounts] ASK count:', askCount, 'BID count:', bidCount)
   } catch (error) {
