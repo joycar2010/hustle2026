@@ -153,17 +153,19 @@
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpeningExecution"
-              :disabled="strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)"
+              :disabled="isStopping.opening || (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type))"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
                 (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
-                continuousExecutionEnabled.opening
-                  ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
-                  : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
+                isStopping.opening
+                  ? 'bg-[#F59E0B] text-white animate-pulse cursor-wait'
+                  : continuousExecutionEnabled.opening
+                    ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
+                    : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
               :title="(strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
-              {{ continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓') }}
+              {{ isStopping.opening ? '停止中...' : (continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓')) }}
             </button>
           </div>
 
@@ -172,17 +174,19 @@
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosingExecution"
-              :disabled="strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)"
+              :disabled="isStopping.closing || (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type))"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
                 (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
-                continuousExecutionEnabled.closing
-                  ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
-                  : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
+                isStopping.closing
+                  ? 'bg-[#F59E0B] text-white animate-pulse cursor-wait'
+                  : continuousExecutionEnabled.closing
+                    ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
+                    : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
               ]"
               :title="(strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
-              {{ continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓') }}
+              {{ isStopping.closing ? '停止中...' : (continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓')) }}
             </button>
           </div>
         </div>
@@ -963,6 +967,7 @@ async function setHedgeMultiplier(m) {
 
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
+const isStopping = ref({ opening: false, closing: false })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
 const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null } })
 const statusPollingInterval = ref({ opening: null, closing: null })
@@ -1303,6 +1308,9 @@ watch(() => marketStore.strategyMessage, (message) => {
     case 'strategy_orders_filled':
       handleOrdersFilled(message.data)
       break
+    case 'strategy_stop_confirmed':
+      handleStopConfirmed(message.data)
+      break
   }
 }, { deep: false }) // Shallow watch for better performance
 
@@ -1465,6 +1473,7 @@ function handleExecutionCompleted(data) {
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
 
     // 常规完成：释放锁
+    isStopping.value[action] = false
     continuousExecutionEnabled.value[action] = false
     stopStatusPolling(action)
     strategyStore.release(`${props.type}_${action}`)
@@ -1504,6 +1513,7 @@ function handleExecutionError(data) {
     console.log(`[WebSocket] Continuous execution error: ${action}, ${data.error_message}`)
 
     // Update status and stop execution
+    isStopping.value[action] = false
     continuousExecutionEnabled.value[action] = false
     stopStatusPolling(action)
     strategyStore.release(`${props.type}_${action}`)
@@ -1586,6 +1596,7 @@ function handleOrdersFilled(data) {
   console.log(`[WebSocket] orders_filled → ${panelType} ${resolvedAction}: binance=${binance_filled} bybit=${bybit_filled}`)
 
   // 常规流程：释放锁、恢复按钮
+  isStopping.value[resolvedAction] = false
   continuousExecutionEnabled.value[resolvedAction] = false
   continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0, triggerSpread: null, threshold: null }
   stopStatusPolling(resolvedAction)
@@ -1597,6 +1608,41 @@ function handleOrdersFilled(data) {
   )
 
   // 刷新持仓数据
+  refreshPositions()
+}
+
+
+/**
+ * 优雅停止确认 — 后端双边平衡后推送 strategy_stop_confirmed
+ * 前端收到后才真正恢复按钮至初始状态
+ */
+function handleStopConfirmed(data) {
+  const { strategy_id, action } = data
+  const isContinuous = strategy_id && String(strategy_id).endsWith('_continuous')
+  if (!isContinuous) return
+
+  const panelType = props.type
+  const strategyIdStr = String(strategy_id)
+  if (!strategyIdStr.includes(`_${panelType}_`)) return
+
+  const resolvedAction = action || (strategyIdStr.includes('_opening_') ? 'opening' : 'closing')
+
+  console.log(`[WebSocket] stop_confirmed: ${panelType} ${resolvedAction}`)
+
+  isStopping.value[resolvedAction] = false
+  continuousExecutionEnabled.value[resolvedAction] = false
+  continuousExecutionStatus.value[resolvedAction] = null
+  continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0, triggerSpread: null, threshold: null }
+  stopStatusPolling(resolvedAction)
+  strategyStore.release(`${props.type}_${resolvedAction}`)
+
+  ladderExecutionDetails.value[resolvedAction] = {}
+  expandedLadders.value[resolvedAction] = {}
+
+  notificationStore.showStrategyNotification(
+    `${resolvedAction === 'opening' ? '开仓' : '平仓'}已安全停止（双边平衡确认）`,
+    'info'
+  )
   refreshPositions()
 }
 
@@ -2062,7 +2108,22 @@ function validateLadderConfig(action) {
       const currPrice = enabledLadders[i].openPrice
       if (currPrice !== null && currPrice !== undefined && prevPrice !== null && prevPrice !== undefined) {
         if (currPrice <= prevPrice) {
-          errors.push()
+          errors.push(`阶梯${currIdx}的开差值(${currPrice})必须大于阶梯${prevIdx}的开差值(${prevPrice})`)
+        }
+      }
+    }
+  }
+
+  // 跨梯度校验：平仓差值必须严格递增
+  if (action === 'closing' && enabledLadders.length > 1) {
+    for (let i = 1; i < enabledLadders.length; i++) {
+      const prevIdx = config.value.ladders.indexOf(enabledLadders[i - 1]) + 1
+      const currIdx = config.value.ladders.indexOf(enabledLadders[i]) + 1
+      const prevThreshold = enabledLadders[i - 1].threshold
+      const currThreshold = enabledLadders[i].threshold
+      if (currThreshold !== null && currThreshold !== undefined && prevThreshold !== null && prevThreshold !== undefined) {
+        if (currThreshold <= prevThreshold) {
+          errors.push(`阶梯${currIdx}的平差值(${currThreshold})必须大于阶梯${prevIdx}的平差值(${prevThreshold})`)
         }
       }
     }
@@ -2277,24 +2338,36 @@ async function stopContinuousExecution(action) {
       return
     }
 
+    // 进入停止中状态，按钮显示停止中...，等待后端 stop_confirmed 事件再恢复
+    isStopping.value[action] = true
+
     await api.post(`/api/v1/strategies/execution/${continuousExecutionTaskId.value[action]}/stop`)
 
-    continuousExecutionEnabled.value[action] = false
-    continuousExecutionStatus.value[action] = null  // Clear status to hide the status display
-    continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0, triggerSpread: null, threshold: null }  // Reset trigger progress
-    stopStatusPolling(action)
-    strategyStore.release(`${props.type}_${action}`)
+    notificationStore.showStrategyNotification(
+      `${action === 'opening' ? '开仓' : '平仓'}正在安全停止，等待双边平衡...`,
+      'info'
+    )
 
-    // Clear ladder detail on active stop
-    ladderExecutionDetails.value[action] = {}
-    expandedLadders.value[action] = {}
-
-    notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已停止`, 'info')
+    // 设置 15 秒安全超时：若后端 stop_confirmed 未到达则强制恢复，防止 UI 永久卡死
+    setTimeout(() => {
+      if (isStopping.value[action]) {
+        console.warn(`[STOP_TIMEOUT] ${action} stop_confirmed not received in 15s, force restoring button`)
+        isStopping.value[action] = false
+        continuousExecutionEnabled.value[action] = false
+        continuousExecutionStatus.value[action] = null
+        continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0, triggerSpread: null, threshold: null }
+        stopStatusPolling(action)
+        strategyStore.release(`${props.type}_${action}`)
+        ladderExecutionDetails.value[action] = {}
+        expandedLadders.value[action] = {}
+        notificationStore.showStrategyNotification(`${action === 'opening' ? '开仓' : '平仓'}已超时停止`, 'warning')
+      }
+    }, 15000)
   } catch (error) {
     console.error('Failed to stop continuous execution:', error)
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`停止连续执行失败: ${errorMsg}`, 'error')
-    // 即使停止失败也释放锁，防止 UI 永久卡死
+    isStopping.value[action] = false
     strategyStore.release(`${props.type}_${action}`)
   }
 }
@@ -2329,6 +2402,7 @@ async function fetchExecutionStatus(action) {
 
     // If task completed or failed, stop polling and release global lock
     if (taskStatus.status === 'completed' || taskStatus.status === 'failed' || taskStatus.status === 'cancelled') {
+      isStopping.value[action] = false
       continuousExecutionEnabled.value[action] = false
       stopStatusPolling(action)
       strategyStore.release(`${props.type}_${action}`)

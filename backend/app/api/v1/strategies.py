@@ -1292,6 +1292,18 @@ async def execute_continuous_opening(
                     detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
                            f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
                 )
+            if enabled_ladders[i].opening_spread <= enabled_ladders[i - 1].opening_spread:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的开仓差值({enabled_ladders[i].opening_spread})必须大于"
+                           f"阶梯{i}的开仓差值({enabled_ladders[i - 1].opening_spread})"
+                )
+            if enabled_ladders[i].closing_spread <= enabled_ladders[i - 1].closing_spread:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的平仓差值({enabled_ladders[i].closing_spread})必须大于"
+                           f"阶梯{i}的平仓差值({enabled_ladders[i - 1].closing_spread})"
+                )
 
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
@@ -1503,6 +1515,18 @@ async def execute_continuous_closing(
                     status_code=400,
                     detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
                            f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
+                )
+            if enabled_ladders[i].opening_spread <= enabled_ladders[i - 1].opening_spread:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的开仓差值({enabled_ladders[i].opening_spread})必须大于"
+                           f"阶梯{i}的开仓差值({enabled_ladders[i - 1].opening_spread})"
+                )
+            if enabled_ladders[i].closing_spread <= enabled_ladders[i - 1].closing_spread:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"阶梯{i + 1}的平仓差值({enabled_ladders[i].closing_spread})必须大于"
+                           f"阶梯{i}的平仓差值({enabled_ladders[i - 1].closing_spread})"
                 )
 
         # 2.5. Get timing configuration for this strategy type

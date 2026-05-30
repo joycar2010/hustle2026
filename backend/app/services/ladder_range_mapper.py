@@ -33,14 +33,28 @@ class LadderRangeMapper:
         self._ranges: List[tuple] = []
 
         prev_upper = 0.0
+        prev_open_spread = None
+        prev_close_spread = None
         for ladder in self._ladders:
             if ladder.total_qty <= prev_upper and prev_upper > 0:
                 raise ValueError(
                     f"Ladder total_qty must be strictly increasing: "
                     f"{ladder.total_qty} <= {prev_upper}"
                 )
+            if prev_open_spread is not None and ladder.opening_spread <= prev_open_spread:
+                raise ValueError(
+                    f"Ladder opening_spread must be strictly increasing: "
+                    f"{ladder.opening_spread} <= {prev_open_spread}"
+                )
+            if prev_close_spread is not None and ladder.closing_spread <= prev_close_spread:
+                raise ValueError(
+                    f"Ladder closing_spread must be strictly increasing: "
+                    f"{ladder.closing_spread} <= {prev_close_spread}"
+                )
             self._ranges.append((prev_upper, ladder.total_qty))
             prev_upper = ladder.total_qty
+            prev_open_spread = ladder.opening_spread
+            prev_close_spread = ladder.closing_spread
 
     def get_active_ladder_for_opening(
         self, global_pos: float, current_spread: float
