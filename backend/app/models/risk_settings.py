@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, Float, Integer, String, TIMESTAMP, ForeignKey
+from sqlalchemy import Column, Float, Integer, String, TIMESTAMP, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -54,6 +54,9 @@ class RiskSettings(Base):
     # Funding Rate & Overnight Fee Alerts
     funding_rate_threshold = Column(Float, nullable=True)
     overnight_fee_threshold = Column(Float, nullable=True)
+
+    # 2026-06 fix: 停市检测通知开关(补缺失列,修复 market_close_notify AttributeError)
+    market_close_notify = Column(Boolean, nullable=False, default=False)
 
     create_time = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     update_time = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

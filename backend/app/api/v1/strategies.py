@@ -1266,6 +1266,36 @@ async def execute_continuous_opening(
                 )
 
 
+        # P2 SAFETY (2026-06): DB config is source of truth for sizing/spreads.
+        # A stale browser tab once sent opening_m_coin=10 while saved=1, causing a
+        # 10x order and a 20-lot naked single-leg. Front-end POSTs /configs/upsert
+        # immediately before /execute, so the DB row is authoritative.
+        try:
+            from sqlalchemy import text as _sqltext
+            _row = (await db.execute(_sqltext(
+                "SELECT opening_m_coin, ladders FROM strategy_configs "
+                "WHERE user_id = CAST(:u AS UUID) AND pair_code = :pc AND strategy_type = :st "
+                "ORDER BY update_time DESC LIMIT 1"
+            ), {"u": user_id, "pc": request.pair_code or "XAU", "st": strategy_type})).first()
+            if _row:
+                _db_m, _db_ladders = _row[0], _row[1]
+                if _db_m is not None and float(_db_m) != float(request.opening_m_coin or 0):
+                    logger.warning(f"[CFG_OVERRIDE] opening_m_coin {request.opening_m_coin} -> DB {_db_m}")
+                    request.opening_m_coin = float(_db_m)
+                if _db_ladders:
+                    _den = [l for l in _db_ladders if l.get("enabled")]
+                    _ren = [l for l in request.ladders if l.enabled]
+                    if _den and len(_den) == len(_ren):
+                        for _rl, _dl in zip(_ren, _den):
+                            _rl.opening_spread = float(_dl.get("openPrice", _rl.opening_spread))
+                            _rl.closing_spread = float(_dl.get("threshold", _rl.closing_spread))
+                            _rl.total_qty = float(_dl.get("qtyLimit", _rl.total_qty))
+                        logger.info(f"[CFG_OVERRIDE] ladders synced from DB ({len(_den)} enabled)")
+                    else:
+                        logger.warning(f"[CFG_OVERRIDE] ladder count mismatch req={len(_ren)} db={len(_den)} - keep request")
+        except Exception as _ce:
+            logger.warning(f"[CFG_OVERRIDE] skipped: {_ce}")
+
         # 2. Convert ladder schemas to LadderConfig objects
         ladders = [
             LadderConfig(
