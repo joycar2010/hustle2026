@@ -1996,13 +1996,27 @@ async def get_market_status(
 ) -> Dict[str, Any]:
     """Get current market status based on trading hours"""
     try:
-        from app.utils.trading_time import is_bybit_trading_hours
+        from app.utils.trading_time import (
+            is_bybit_trading_hours, minutes_to_mt5_close, minutes_since_mt5_open
+        )
         is_open, message = is_bybit_trading_hours()
+        mins_to_close = minutes_to_mt5_close()
+        mins_since_open = minutes_since_mt5_open()
+        # 开市后第3分钟方可恢复交易（行情先于交易引擎恢复，留安全缓冲）；
+        # 且距下次收盘 >15min 才恢复，避免恢复后立即又被软停。
+        can_trade = bool(
+            is_open
+            and mins_since_open is not None and mins_since_open >= 3.0
+            and (mins_to_close is None or mins_to_close > 15.0)
+        )
 
         return {
             "success": True,
             "is_open": is_open,
-            "message": message
+            "message": message,
+            "minutes_to_close": mins_to_close,
+            "minutes_since_open": mins_since_open,
+            "can_trade": can_trade
         }
     except Exception as e:
         return {

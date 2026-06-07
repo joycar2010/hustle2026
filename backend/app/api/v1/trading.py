@@ -2081,6 +2081,8 @@ async def get_realtime_trading_history(
         binance_trades = []
         binance_realized_pnl = 0.0
         binance_funding_fee = 0.0
+        binance_funding_records = []  # 资金费明细用于 pair_code 拆分
+        binance_rebate = 0.0
         for account in primary_accs:
             if a_platform_id == 1:
                 # Binance 永续合约：XAU/XAG/BZ/CL/NG/ICXAU
@@ -2089,8 +2091,11 @@ async def get_realtime_trading_history(
                     binance_trades.extend([(t, account.account_name) for t in raw_trades])
                     pnl = await _get_binance_realized_pnl(account, start_utc_ms, end_utc_ms, symbol=binance_symbol)
                     binance_realized_pnl += pnl
-                    funding = await _get_binance_funding_fee(account, start_utc_ms, end_utc_ms, symbol=binance_symbol)
-                    binance_funding_fee += funding
+                    funding_total, funding_recs = await _get_binance_funding_fee(account, start_utc_ms, end_utc_ms, symbol=binance_symbol)
+                    binance_funding_fee += funding_total
+                    binance_funding_records.extend(funding_recs)
+                    rebate = await _get_binance_rebate(account, start_utc_ms, end_utc_ms, symbol=binance_symbol)
+                    binance_rebate += rebate
                 except Exception as e:
                     logger.error(f"Binance trades error [{account.account_name}]: {str(e)}")
             elif a_platform_id == 2:
@@ -2138,11 +2143,56 @@ async def get_realtime_trading_history(
             a_platform_id,
         )
 
+        # 保存过滤前完整列表，用于资金费 pair_code 拆分（需所有 pair 的仓位数据）
+        _all_binance_pre_filter = list(formatted_binance)
+
+        # ── pair_code 归属过滤 ──
+        # 新格式 clientOrderId 含 pair_code: 只显示属于当前 pair 的策略单
+        # 旧格式(无 pair_code) 和手动单: 保留（向后兼容）
+        _before_filter = len(formatted_binance)
+        formatted_binance = [
+            t for t in formatted_binance
+            if t.get("source") != "strategy"          # 手动单/未知 → 保留
+            or t.get("coid_pair_code") is None         # 旧格式策略单 → 保留
+            or t.get("coid_pair_code") == pair_code    # 新格式匹配 → 保留
+        ]
+        _filtered_out = _before_filter - len(formatted_binance)
+        if _filtered_out:
+            logger.info(f"[realtime] pair_code filter: kept {len(formatted_binance)}, "
+                        f"excluded {_filtered_out} trades belonging to other pairs")
+
+        # ── 资金费按 pair_code 拆分 ──
+        # 用 enrich 后（过滤前的 formatted_binance 已被过滤）的 all_trades_for_funding
+        # 注意：此时 formatted_binance 已经过 pair_code 过滤，
+        # 但我们需要 ALL trades (含其他pair) 来建仓位比例。
+        # 所以在过滤前保存了完整列表 — 见下方 _all_binance_pre_filter。
+        # 如果 binance_funding_records 为空则跳过
+        pair_funding_fee = binance_funding_fee  # 默认用总额
+        if binance_funding_records and pair_code and _all_binance_pre_filter:
+            pair_funding_fee = _split_funding_by_pair_code(
+                _all_binance_pre_filter, binance_funding_records, pair_code
+            )
+            logger.info(f"[realtime] funding split: pair={pair_code} gets {pair_funding_fee:.4f} of total {binance_funding_fee:.4f}")
+
         # 配对成交 (按 orderId 分组主账号 + 时间窗口匹配 MT5)
-        paired_trades = _build_paired_trades(formatted_binance, formatted_mt5)
+        _conv_factor = float(getattr(pair, "conversion_factor", 100.0)) if pair else 100.0
+        paired_trades = _build_paired_trades(formatted_binance, formatted_mt5, conversion_factor=_conv_factor)
+
+        # 将资金费明细分配到每笔主账号成交（按时间就近+仓位比例）
+        if binance_funding_records and formatted_binance:
+            _assign_funding_to_trades(formatted_binance, binance_funding_records,
+                                      _all_binance_pre_filter, pair_code)
+
+        # 将资金费明细分配到配对成交行（按时间就近+仓位比例）
+        if binance_funding_records and paired_trades:
+            _assign_funding_to_paired(paired_trades, binance_funding_records,
+                                       _all_binance_pre_filter, pair_code)
 
         # 计算统计数据
-        stats = _calculate_stats(formatted_binance, formatted_mt5, binance_realized_pnl, binance_funding_fee)
+        stats = _calculate_stats(
+            formatted_binance, formatted_mt5, binance_realized_pnl, pair_funding_fee,
+            binance_rebate=binance_rebate,
+        )
 
         return {
             "accountTrades": formatted_binance,
@@ -2238,20 +2288,18 @@ async def _get_binance_realized_pnl(account, start_time_ms, end_time_ms, symbol=
 
 
 async def _get_binance_funding_fee(account, start_time_ms, end_time_ms, symbol=None):
-    """获取Binance资金费汇总（FUNDING_FEE income type，自动分7天段查询）。
-    资金费每8小时结算，正数=收入，负数=支出（USDT）。
+    """获取Binance资金费汇总 + 明细列表（用于 pair_code 拆分）。
+    返回 (total_float, records_list)。
+    records_list 每条: {"time_ms": int, "income": float}
     """
     from app.services.binance_client import BinanceFuturesClient
     _CHUNK_MS = 6 * 24 * 60 * 60 * 1000 + 23 * 60 * 60 * 1000 + 59 * 60 * 1000
     client = BinanceFuturesClient(account.api_key, account.api_secret,
                                    proxy_url=build_proxy_url(account.proxy_config))
     try:
-        # Use the symbol passed in by the caller (already resolved from pair_code
-        # in the endpoint handler). Falls back to XAUUSDT if caller forgot.
         _sym_a = symbol or "XAUUSDT"
-        _sym_b = ""  # unused on A-side helpers
         total_funding = 0.0
-        total_count = 0
+        records = []
         chunk_start = start_time_ms
         while chunk_start < end_time_ms:
             chunk_end = min(chunk_start + _CHUNK_MS, end_time_ms)
@@ -2262,13 +2310,45 @@ async def _get_binance_funding_fee(account, start_time_ms, end_time_ms, symbol=N
                 end_time=chunk_end,
                 limit=1000,
             )
-            total_funding += sum(float(item.get("income", 0)) for item in income_data)
-            total_count += len(income_data)
+            for item in income_data:
+                amt = float(item.get("income", 0))
+                total_funding += amt
+                records.append({"time_ms": int(item.get("time", 0)), "income": amt})
             chunk_start = chunk_end + 1
-        logger.info(f"Binance funding fee: {total_funding:.4f} USDT ({total_count} records)")
-        return total_funding
+        logger.info(f"Binance funding fee: {total_funding:.4f} USDT ({len(records)} records)")
+        return total_funding, records
     except Exception as e:
         logger.error(f"Failed to get Binance funding fee: {str(e)}")
+        return 0.0, []
+    finally:
+        await client.close()
+
+
+async def _get_binance_rebate(account, start_time_ms, end_time_ms, symbol=None):
+    """获取 Binance 返佣汇总（COMMISSION_REBATE income type）。"""
+    from app.services.binance_client import BinanceFuturesClient
+    _CHUNK_MS = 6 * 24 * 60 * 60 * 1000 + 23 * 60 * 60 * 1000 + 59 * 60 * 1000
+    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                   proxy_url=build_proxy_url(account.proxy_config))
+    try:
+        _sym_a = symbol or "XAUUSDT"
+        total_rebate = 0.0
+        chunk_start = start_time_ms
+        while chunk_start < end_time_ms:
+            chunk_end = min(chunk_start + _CHUNK_MS, end_time_ms)
+            income_data = await client.get_income(
+                symbol=_sym_a,
+                income_type="COMMISSION_REBATE",
+                start_time=chunk_start,
+                end_time=chunk_end,
+                limit=1000,
+            )
+            total_rebate += sum(float(item.get("income", 0)) for item in income_data)
+            chunk_start = chunk_end + 1
+        logger.info(f"Binance rebate: {total_rebate:.4f} USDT")
+        return total_rebate
+    except Exception as e:
+        logger.error(f"Failed to get Binance rebate: {str(e)}")
         return 0.0
     finally:
         await client.close()
@@ -2339,10 +2419,15 @@ async def _get_mt5_trades_realtime(account, start_time_ms, end_time_ms, db=None,
     # to symbol names — accept both variants.
     _sym_b = mt5_symbol or "XAUUSD+"
     target_symbols = {_sym_b, _sym_b.replace("+", ".s")}
+    # FIX: MT5 deal.time is broker-server-local (EET/EEST = UTC+2/+3), NOT UTC.
+    # Comparing raw broker time against UTC start/end bounds filters out the most
+    # recent ~3h of deals (their broker timestamp exceeds the UTC end_ts), which is
+    # why afternoon hedge records went missing. Convert broker time -> UTC first.
+    from app.utils.time_utils import mt5_server_ts_to_utc as _mt5_to_utc
     filtered = [
         d for d in all_deals
         if d.get("symbol") in target_symbols
-        and start_ts <= d.get("time", 0) <= end_ts
+        and start_ts <= _mt5_to_utc(int(d.get("time", 0))) <= end_ts
     ]
     logger.info(f"MT5 Bridge: {len(filtered)} deals in range out of {len(all_deals)} total")
 
@@ -2481,6 +2566,7 @@ def _format_binance_trades(trades):
             "commission_asset": commission_asset,
             "id": str(trade.get("id")),
             "orderId": str(trade.get("orderId", "")),
+            "realizedPnl": round(float(trade.get("realizedPnl", 0)), 4),
             "source": "unknown",  # 后续由 _enrich_trade_sources 标注
             "threshold": None,
             "client_order_id": None,
@@ -2603,7 +2689,11 @@ async def _enrich_trade_sources(
         except Exception as e:
             logger.warning(f"[enrich] get_all_orders failed for {account.account_name}: {e}")
 
-    # 2. 标注 source 和 client_order_id
+    # 2. 标注 source / client_order_id / coid_pair_code
+    #    新格式 clientOrderId: s-{PAIR_CODE}-{base36}{hex}
+    #    旧格式: s-{base36}{hex} (pair_code 为空 → 不做过滤)
+    import re as _re
+    _PAIR_RE = _re.compile(r'^s-([A-Z][A-Z0-9]*)-')
     strategy_order_ids = []
     for t in formatted_trades:
         oid = t.get("orderId", "")
@@ -2612,10 +2702,14 @@ async def _enrich_trade_sources(
         if coid.startswith("s-"):
             t["source"] = "strategy"
             strategy_order_ids.append(oid)
+            _m = _PAIR_RE.match(coid)
+            t["coid_pair_code"] = _m.group(1) if _m else None
         elif coid.startswith("m-"):
             t["source"] = "manual"
+            t["coid_pair_code"] = None
         else:
             t["source"] = "manual"
+            t["coid_pair_code"] = None
 
     # 3. 对 strategy 成交，从 Redis 读取 threshold
     if strategy_order_ids:
@@ -2638,7 +2732,7 @@ async def _enrich_trade_sources(
             logger.warning(f"[enrich] Redis enrich block failed: {e}")
 
 
-def _build_paired_trades(binance_trades, mt5_trades):
+def _build_paired_trades(binance_trades, mt5_trades, conversion_factor: float = 100.0):
     """按 orderId 聚合主账号成交 + 1分钟时间窗口匹配 MT5 成交。
 
     返回每个配对包含:
@@ -2687,7 +2781,12 @@ def _build_paired_trades(binance_trades, mt5_trades):
     paired = []
     used_mt5_ids = set()
 
-    for oid, g in groups.items():
+    # 因果 FIFO: 主腿(maker)按成交时间从早到晚处理, 逐一吃掉其后触发的对冲(taker)成交,
+    # 避免"最近时间贪心"把相邻订单的对冲腿错配给本单。
+    def _grp_min_ts(gg):
+        _ts = [t.get("timestamp") for t in gg["trades"] if t.get("timestamp")]
+        return min(_ts) if _ts else ""
+    for oid, g in sorted(groups.items(), key=lambda kv: _grp_min_ts(kv[1])):
         if g["total_qty"] <= 0:
             continue
         avg_price_p = g["total_quote"] / g["total_qty"]
@@ -2705,12 +2804,14 @@ def _build_paired_trades(binance_trades, mt5_trades):
                 t_p_dt = None
 
             if t_p_dt:
-                # 反向: 主 sell -> hedge buy
-                # 正向: 主 buy -> hedge sell
-                # 平仓时方向相反
-                # 直接选最近时间窗口的反向 trade
+                # 主腿是 maker、对冲腿是 taker, 且方向相反(主买↔冲卖,主卖↔冲买)。
+                # 对冲在主腿成交后瞬间触发, 故只取方向相反、时间在主腿成交后(允许 5s 时钟
+                # 偏差、窗口 90s)的对冲成交, 并按成交时间升序(FIFO)消费。
+                _hedge_side = 'sell' if str(side_p).lower() == 'buy' else 'buy'
                 for mt in mt5_trades:
                     if mt["id"] in used_mt5_ids:
+                        continue
+                    if str(mt.get("side", "")).lower() != _hedge_side:
                         continue
                     try:
                         mt_ts = mt["timestamp"]
@@ -2718,12 +2819,12 @@ def _build_paired_trades(binance_trades, mt5_trades):
                             mt_dt = datetime.fromisoformat(mt_ts.replace(" ", "T"))
                         else:
                             mt_dt = mt_ts
-                        delta = abs((mt_dt - t_p_dt).total_seconds())
-                        if delta <= 60.0:
-                            matched_mt5.append((delta, mt))
+                        offset = (mt_dt - t_p_dt).total_seconds()
+                        if -5.0 <= offset <= 90.0:
+                            matched_mt5.append((mt_dt, mt))
                     except Exception:
                         continue
-                matched_mt5.sort(key=lambda x: x[0])
+                matched_mt5.sort(key=lambda x: x[0])  # FIFO: 最早触发的对冲成交先配
 
         # 汇总匹配的 MT5
         hedge_total_qty = 0.0
@@ -2731,8 +2832,18 @@ def _build_paired_trades(binance_trades, mt5_trades):
         hedge_side = None
         hedge_ts = None
         hedge_symbol = ""
-        for _, mt in matched_mt5:
+        # FIX: consume nearest MT5 deals only until the hedge quantity covers THIS
+        # Binance order, instead of greedily eating every deal within the 60s window.
+        # 1 Binance unit (e.g. 1 XAU) = 1/conversion_factor lots (e.g. 0.01 lot).
+        # Over-consuming starved adjacent orders -> they showed "未匹配" despite an
+        # MT5 deal existing for them.
+        expected_lots = (g["total_qty"] / conversion_factor) if conversion_factor else g["total_qty"]
+        _this_pair_mt5 = []  # 本配对消耗的 MT5 deals
+        for _, mt in matched_mt5:  # FIFO 时间序消费
+            if hedge_total_qty >= expected_lots - 1e-9:
+                break
             used_mt5_ids.add(mt["id"])
+            _this_pair_mt5.append(mt)
             q = float(mt.get("quantity") or 0)
             p = float(mt.get("price") or 0)
             hedge_total_qty += q
@@ -2743,13 +2854,35 @@ def _build_paired_trades(binance_trades, mt5_trades):
 
         avg_price_h = hedge_total_quote / hedge_total_qty if hedge_total_qty > 0 else None
 
-        # 价差/滑点
+        # 价差/滑点(方向化、带符号; 更有利为负)
+        # 方向约定与触发价差 calculate_spread 一致: reverse=主-对冲, forward=对冲-主
         spread = None
         slippage = None
         if avg_price_h is not None:
-            spread = round(abs(avg_price_p - avg_price_h), 4)
-            if g["source"] == "strategy" and g["threshold"] is not None:
-                slippage = round(spread - float(g["threshold"]), 4)
+            _st = (g.get("strategy_type") or "")
+            if "forward" in _st:
+                realized = avg_price_h - avg_price_p          # 对冲 - 主
+            elif "reverse" in _st:
+                realized = avg_price_p - avg_price_h          # 主 - 对冲
+            else:
+                realized = abs(avg_price_p - avg_price_h)     # 手动单无方向, 退绝对值
+            spread = round(realized, 4)
+            # 滑点 = 实得相对"触发时实际价差(trigger_spread)"的偏离, 更有利为负:
+            #   开仓(求高价差): trigger - realized; 平仓(求低价差): realized - trigger
+            _trig = g.get("trigger_spread")
+            if g["source"] == "strategy" and _trig is not None and ("forward" in _st or "reverse" in _st):
+                if "opening" in _st:
+                    slippage = round(float(_trig) - realized, 4)
+                else:
+                    slippage = round(realized - float(_trig), 4)
+
+        # 聚合主账号费用
+        primary_fee = sum(float(t.get("fee", 0)) for t in g["trades"])
+        primary_pnl = sum(float(t.get("realizedPnl", 0)) for t in g["trades"])
+        # 聚合对冲账户费用（仅本配对消耗的 MT5 成交）
+        hedge_fee = sum(float(mt.get("fee", 0)) for mt in _this_pair_mt5)
+        hedge_overnight = sum(float(mt.get("overnight_fee", 0)) for mt in _this_pair_mt5)
+        hedge_profit = sum(float(mt.get("profit", 0)) for mt in _this_pair_mt5)
 
         paired.append({
             "id": oid,
@@ -2770,6 +2903,14 @@ def _build_paired_trades(binance_trades, mt5_trades):
             "strategy_type": g.get("strategy_type"),
             "client_order_id": g.get("client_order_id"),
             "hedge_matched": hedge_total_qty > 0,
+            "primary_fee": round(primary_fee, 4),
+            "primary_pnl": round(primary_pnl, 4),
+            "hedge_fee": round(hedge_fee, 4),
+            "hedge_overnight": round(hedge_overnight, 4),
+            "hedge_profit": round(hedge_profit, 4),
+            "pair_profit": round(primary_pnl + hedge_profit, 4),
+            "pair_total_fee": round(primary_fee + hedge_fee, 4),
+            "funding_fee": 0.0,  # 后续由端点按资金费明细回填
         })
 
     # 按时间降序
@@ -2777,26 +2918,269 @@ def _build_paired_trades(binance_trades, mt5_trades):
     return paired
 
 
-def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binance_funding_fee=0.0):
-    """计算交易统计数据（含资金费汇总）
 
-    MT5已实现盈亏: 仅统计平仓交易(entry==1)的native profit
-    套利组合总盈亏: Binance已实现盈亏 + MT5已实现平仓盈亏
+def _split_funding_by_pair_code(all_binance_trades, funding_records, target_pair_code):
+    """根据持仓构成按比例拆分资金费到指定 pair_code。
+
+    原理：资金费按持仓量收取。通过回放所有成交，在每个资金费时间点
+    计算各 pair_code 的净仓位占比，按比例分配资金费。
+    """
+    import re as _re
+    from datetime import datetime
+
+    if not funding_records or not all_binance_trades:
+        return 0.0
+
+    _PAIR_RE = _re.compile(r'^s-([A-Z][A-Z0-9]*)-')
+
+    # 构建时间排序的成交列表 (time_ms, qty_signed, pair_code)
+    events = []
+    for t in all_binance_trades:
+        try:
+            ts_str = t.get("timestamp", "")
+            if isinstance(ts_str, str):
+                # 北京时间 → UTC ms
+                dt = datetime.fromisoformat(ts_str.replace(" ", "T"))
+                t_ms = int(dt.timestamp() * 1000) - 8 * 3600 * 1000  # BJ → UTC
+            else:
+                t_ms = 0
+        except Exception:
+            t_ms = 0
+
+        qty = float(t.get("quantity", 0))
+        side = t.get("side", "")
+        signed_qty = qty if side == "buy" else -qty
+
+        coid_pc = t.get("coid_pair_code")
+        if not coid_pc:
+            # 旧格式或手动单：归入 "UNKNOWN" 桶
+            coid_pc = "__UNKNOWN__"
+        events.append((t_ms, signed_qty, coid_pc))
+
+    events.sort(key=lambda x: x[0])
+    funding_records_sorted = sorted(funding_records, key=lambda x: x["time_ms"])
+
+    # 回放：在每个资金费时间点计算仓位比例
+    position_by_pair = {}  # pair_code -> net_qty
+    event_idx = 0
+    total_for_target = 0.0
+
+    for fr in funding_records_sorted:
+        ft = fr["time_ms"]
+        # 推进成交到此时间点
+        while event_idx < len(events) and events[event_idx][0] <= ft:
+            _, sq, pc = events[event_idx]
+            position_by_pair[pc] = position_by_pair.get(pc, 0.0) + sq
+            event_idx += 1
+
+        # 计算各 pair 持仓占比（用绝对值）
+        abs_positions = {pc: abs(q) for pc, q in position_by_pair.items() if abs(q) > 1e-9}
+        total_abs = sum(abs_positions.values())
+        if total_abs < 1e-9:
+            # 无持仓时资金费通常为 0，但如有则不归属任何 pair
+            continue
+
+        target_abs = abs_positions.get(target_pair_code, 0.0)
+        ratio = target_abs / total_abs
+        total_for_target += fr["income"] * ratio
+
+    return round(total_for_target, 4)
+
+
+def _assign_funding_to_trades(formatted_trades, funding_records, all_binance_trades, target_pair_code):
+    """将资金费明细分配到每笔主账号成交（与 _assign_funding_to_paired 同算法）。
+    为每笔 trade 添加 funding_fee 字段。
+    """
+    import re as _re
+    from datetime import datetime
+
+    # 初始化所有 trade 的 funding_fee
+    for t in formatted_trades:
+        t["funding_fee"] = 0.0
+
+    if not funding_records or not formatted_trades:
+        return
+
+    _PAIR_RE = _re.compile(r'^s-([A-Z][A-Z0-9]*)-')
+
+    # 构建成交事件列表 (time_ms, qty_signed, pair_code)
+    events = []
+    for t in all_binance_trades:
+        try:
+            ts_str = t.get("timestamp", "")
+            if isinstance(ts_str, str):
+                dt = datetime.fromisoformat(ts_str.replace(" ", "T"))
+                t_ms = int(dt.timestamp() * 1000) - 8 * 3600 * 1000
+            else:
+                t_ms = 0
+        except Exception:
+            t_ms = 0
+        qty = float(t.get("quantity", 0))
+        side = t.get("side", "")
+        signed_qty = qty if side == "buy" else -qty
+        coid_pc = t.get("coid_pair_code") or "__UNKNOWN__"
+        events.append((t_ms, signed_qty, coid_pc))
+    events.sort(key=lambda x: x[0])
+
+    # 解析 formatted_trades 的时间戳并排序
+    trades_with_ms = []
+    for t in formatted_trades:
+        try:
+            ts_str = t.get("timestamp", "")
+            if isinstance(ts_str, str):
+                dt = datetime.fromisoformat(ts_str.replace(" ", "T"))
+                t_ms = int(dt.timestamp() * 1000) - 8 * 3600 * 1000
+            else:
+                t_ms = 0
+        except Exception:
+            t_ms = 0
+        trades_with_ms.append((t_ms, t))
+    trades_with_ms.sort(key=lambda x: x[0])
+
+    funding_sorted = sorted(funding_records, key=lambda x: x["time_ms"])
+
+    position_by_pair = {}
+    event_idx = 0
+
+    for fr in funding_sorted:
+        ft = fr["time_ms"]
+        while event_idx < len(events) and events[event_idx][0] <= ft:
+            _, sq, pc = events[event_idx]
+            position_by_pair[pc] = position_by_pair.get(pc, 0.0) + sq
+            event_idx += 1
+
+        abs_positions = {pc: abs(q) for pc, q in position_by_pair.items() if abs(q) > 1e-9}
+        total_abs = sum(abs_positions.values())
+        if total_abs < 1e-9:
+            continue
+        target_abs = abs_positions.get(target_pair_code, 0.0)
+        if target_abs < 1e-9:
+            continue
+        ratio = target_abs / total_abs
+        allocated = fr["income"] * ratio
+
+        # 分配到最近的前序 trade
+        best_t = None
+        for t_ms, t in trades_with_ms:
+            if t_ms <= ft:
+                best_t = t
+            else:
+                break
+        if best_t is None and trades_with_ms:
+            best_t = trades_with_ms[0][1]
+        if best_t:
+            best_t["funding_fee"] = round(best_t.get("funding_fee", 0.0) + allocated, 4)
+
+
+def _assign_funding_to_paired(paired_trades, funding_records, all_binance_trades, target_pair_code):
+    """将资金费明细事件分配到配对成交行。
+
+    对每条资金费记录，按该时刻的仓位构成计算 target_pair_code 的份额，
+    然后分配到时间最近的前序配对成交行。
+    """
+    import re as _re
+    from datetime import datetime
+
+    if not funding_records or not paired_trades:
+        return
+
+    _PAIR_RE = _re.compile(r'^s-([A-Z][A-Z0-9]*)-')
+
+    # 构建成交事件列表 (time_ms, qty_signed, pair_code)
+    events = []
+    for t in all_binance_trades:
+        try:
+            ts_str = t.get("timestamp", "")
+            if isinstance(ts_str, str):
+                dt = datetime.fromisoformat(ts_str.replace(" ", "T"))
+                t_ms = int(dt.timestamp() * 1000) - 8 * 3600 * 1000
+            else:
+                t_ms = 0
+        except Exception:
+            t_ms = 0
+        qty = float(t.get("quantity", 0))
+        side = t.get("side", "")
+        signed_qty = qty if side == "buy" else -qty
+        coid_pc = t.get("coid_pair_code") or "__UNKNOWN__"
+        events.append((t_ms, signed_qty, coid_pc))
+    events.sort(key=lambda x: x[0])
+
+    # 按时间升序排列配对成交 + 解析时间戳
+    paired_with_ms = []
+    for p in paired_trades:
+        try:
+            ts_str = p.get("timestamp_primary", "")
+            if isinstance(ts_str, str):
+                dt = datetime.fromisoformat(ts_str.replace(" ", "T"))
+                p_ms = int(dt.timestamp() * 1000) - 8 * 3600 * 1000
+            else:
+                p_ms = 0
+        except Exception:
+            p_ms = 0
+        paired_with_ms.append((p_ms, p))
+    paired_with_ms.sort(key=lambda x: x[0])
+
+    funding_sorted = sorted(funding_records, key=lambda x: x["time_ms"])
+
+    # 回放仓位 + 分配
+    position_by_pair = {}
+    event_idx = 0
+
+    for fr in funding_sorted:
+        ft = fr["time_ms"]
+        # 推进成交到此时间点
+        while event_idx < len(events) and events[event_idx][0] <= ft:
+            _, sq, pc = events[event_idx]
+            position_by_pair[pc] = position_by_pair.get(pc, 0.0) + sq
+            event_idx += 1
+
+        # 计算 target pair 的资金费份额
+        abs_positions = {pc: abs(q) for pc, q in position_by_pair.items() if abs(q) > 1e-9}
+        total_abs = sum(abs_positions.values())
+        if total_abs < 1e-9:
+            continue
+        target_abs = abs_positions.get(target_pair_code, 0.0)
+        if target_abs < 1e-9:
+            continue
+        ratio = target_abs / total_abs
+        allocated = fr["income"] * ratio
+
+        # 找时间最近的前序配对成交
+        best_p = None
+        for p_ms, p in paired_with_ms:
+            if p_ms <= ft:
+                best_p = p
+            else:
+                break
+        if best_p is None and paired_with_ms:
+            best_p = paired_with_ms[0][1]  # fallback: 第一条
+        if best_p:
+            best_p["funding_fee"] = round(best_p.get("funding_fee", 0.0) + allocated, 4)
+
+
+def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binance_funding_fee=0.0,
+                     binance_rebate=0.0):
+    """计算交易统计数据（含资金费/返佣/返佣前利润/返佣后净利润）
+
+    返佣前利润 = binanceRealizedPnL + mt5RealizedPnL + fundingFee + mt5OvernightFee - mt5Fee
+    返佣后净利润 = 返佣前利润 + binanceRebate + mt5Rebate
     """
     stats = {
         "totalVolume": 0,
         "totalAmount": 0,
-        "takerAmount": 0,  # 吃单成交额
-        "makerAmount": 0,  # 挂单成交额
+        "takerAmount": 0,
+        "makerAmount": 0,
         "totalFees": 0,
-        "bnbFees": 0,  # BNB手续费
-        "realizedPnL": binance_realized_pnl,  # 使用从income API获取的已实现盈亏
-        "fundingFee": binance_funding_fee,     # Binance资金费汇总（FUNDING_FEE）
-        "mt5Volume": 0,  # MT5成交量
-        "mt5Amount": 0,  # MT5成交额
+        "bnbFees": 0,
+        "realizedPnL": binance_realized_pnl,
+        "fundingFee": binance_funding_fee,
+        "binanceRebate": binance_rebate,
+        "mt5Volume": 0,
+        "mt5Amount": 0,
         "mt5OvernightFee": 0,
         "mt5Fee": 0,
         "mt5RealizedPnL": 0,
+        "mt5Rebate": 0.0,  # MT5 返佣暂无数据源
     }
 
     # 计算Binance统计
@@ -2856,10 +3240,24 @@ def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binan
     stats["mt5OvernightFee"] = round(stats["mt5OvernightFee"], 2)
     stats["mt5RealizedPnL"] = round(stats["mt5RealizedPnL"], 2)
 
+    # 返佣前利润 = Binance已实现 + MT5已实现 + 资金费 + MT5过夜费 - MT5手续费
+    stats["profitBeforeRebate"] = round(
+        stats["realizedPnL"] + stats["mt5RealizedPnL"]
+        + stats["fundingFee"] + stats["mt5OvernightFee"] - stats["mt5Fee"], 2
+    )
+    # 返佣后净利润 = 返佣前利润 + 各方返佣
+    stats["netProfitAfterRebate"] = round(
+        stats["profitBeforeRebate"] + stats["binanceRebate"] + stats["mt5Rebate"], 2
+    )
+    stats["binanceRebate"] = round(stats["binanceRebate"], 4)
+    stats["mt5Rebate"] = round(stats["mt5Rebate"], 2)
+
     logger.info(f"Stats calculated: Binance trades={len(binance_trades)}, MT5 trades={len(mt5_trades)}, "
                 f"Binance realizedPnL={stats['realizedPnL']:.2f}, fundingFee={stats['fundingFee']:.4f}, "
                 f"bnbFees={stats['bnbFees']:.6f} BNB, MT5 realizedPnL={stats['mt5RealizedPnL']:.2f}, "
-                f"MT5 overnightFee={stats['mt5OvernightFee']:.2f}")
+                f"MT5 overnightFee={stats['mt5OvernightFee']:.2f}, "
+                f"profitBeforeRebate={stats['profitBeforeRebate']:.2f}, "
+                f"netProfitAfterRebate={stats['netProfitAfterRebate']:.2f}")
     return stats
 
 

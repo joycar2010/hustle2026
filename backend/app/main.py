@@ -48,7 +48,7 @@ from app.middleware.permission_interceptor import PermissionInterceptor
 from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, mt5_infra, pnl, hedging, hedge_ratio, agent, site_status, hedge_records, dashboard_viz
 from app.api.v1 import aicoin
 from app.tasks.market_data import market_streamer
-from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor, snapshot_request_listener
+from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor, snapshot_request_listener, market_rate_streamer, quote_divergence_monitor
 from app.tasks.data_request_handler import data_request_listener
 from app.tasks.redis_monitor import redis_monitor
 from app.tasks.arbitrage_opportunity_scheduler import arbitrage_opportunity_scheduler
@@ -161,6 +161,8 @@ async def init_mt5_and_monitoring():
         await market_state_monitor.start()  # MT5 休市/开市状态监控
         await binance_position_pusher.start()  # Binance User Data Stream，<100ms 持仓更新
         await snapshot_request_listener.start()  # On-demand snapshot listener (Go Hub → Python)
+        await market_rate_streamer.start()  # 资金费+过夜费率 10s 广播
+        await quote_divergence_monitor.start()  # 行情背离软暂停护栏
         await data_request_listener.start()  # On-demand data request listener (PnL/FundFlow)
         await mt5_bridge.start()
         # MT5 客户端连接状态同步（每10秒更新 connection_status）

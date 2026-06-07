@@ -168,6 +168,10 @@ async def get_spread_chart(
         if not items:
             return []
 
+        # get_spread_history 返回时间倒序(DESC)；下方降采样假设时间升序，
+        # 否则 (t_sec-last_t) 为负、interval 过滤会丢弃首点之后的所有点。
+        items = list(reversed(items))
+
         # Downsample by interval
         from datetime import datetime as _dt
         result = []

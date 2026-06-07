@@ -12,6 +12,7 @@ from app.services.trigger_manager import TriggerCountManager, CompareOperator
 from app.services.market_service import market_data_service
 from app.services.strategy_status_pusher import status_pusher
 from app.utils.quantity_converter import quantity_converter
+from app.core.config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -86,9 +87,35 @@ class ContinuousStrategyExecutor:
         # Execution state
         self.is_running = False
         self.stop_requested = False  # Graceful stop: wait for safe exit point before stopping
+        self.stop_reason = None  # 'market_close' 表示因 MT5 临近休市自动停，其余为 None
         self.current_ladder_index = 0
         self.trigger_mgr: Optional[TriggerCountManager] = None
         self.user_id: Optional[str] = None
+        self._active_key: Optional[str] = None
+        # 优化: 停止信号事件 — 收到停止时立即唤醒空闲 sleep
+        self._stop_event = asyncio.Event()
+        self._binance_account = None
+
+    async def _init_redis(self):
+        if not hasattr(self, '_redis') or self._redis is None:
+            import redis.asyncio as aioredis
+            self._redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
+    def _make_active_key(self, strategy_type: str) -> str:
+        direction = 'reverse' if 'reverse' in strategy_type else 'forward'
+        action = 'opening' if 'opening' in strategy_type else 'closing'
+        return f"strategy_active:{self.user_id}:{direction}_{action}"
+
+    async def _is_peer_running(self, strategy_type: str) -> bool:
+        try:
+            direction = 'reverse' if 'reverse' in strategy_type else 'forward'
+            if 'opening' in strategy_type:
+                peer_key = f"strategy_active:{self.user_id}:{direction}_closing"
+            else:
+                peer_key = f"strategy_active:{self.user_id}:{direction}_opening"
+            return bool(await self._redis.exists(peer_key))
+        except Exception:
+            return False
 
     # ----- MT5 first-trade preflight check -----
     # When MT5 broker reopens (weekend/daily break), QUOTE feed comes back 3-5 min
@@ -192,12 +219,19 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.stop_requested = False
+        self.stop_reason = None
+        try:
+            self._stop_event.clear()
+        except Exception:
+            pass
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account  # stored for position snapshot
-        self.position_mgr.reset_strategy(self.strategy_id)
+        await self._init_redis()
+        self._active_key = self._make_active_key('reverse_opening')
 
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             return await self._execute_continuous_v2(
                 strategy_type='reverse_opening',
                 binance_account=binance_account,
@@ -222,6 +256,14 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if getattr(self, '_active_key', None):
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
     async def _execute_ladder(
@@ -471,7 +513,7 @@ class ContinuousStrategyExecutor:
                     f"[ladder={ladder_idx}] MT5 preflight refused - deferring iter "
                     f"(no A-side order placed; will retry next trigger cycle)"
                 )
-                await asyncio.sleep(self.api_spam_prevention_delay)
+                await self._sleep_or_stop(self.api_spam_prevention_delay)
                 continue
 
             # Step 8: Execute order
@@ -541,38 +583,6 @@ class ContinuousStrategyExecutor:
             # 否则会在多批次场景（如 total_qty=2, m_coin=1）第一批次就错误地恢复按钮，
             # 导致用户看到按钮恢复后策略仍在继续交易第二批次。
             _binance_filled_now = exec_result.get('binance_filled_qty', 0)
-            _new_position_after_fill = current_position + _binance_filled_now
-            _ladder_will_complete = _new_position_after_fill >= ladder.total_qty
-
-            if (exec_result.get('success')
-                    and _binance_filled_now > 0
-                    and _ladder_will_complete):
-                try:
-                    from app.services.strategy_status_pusher import status_pusher
-                    action = 'opening' if 'opening' in strategy_type else 'closing'
-                    bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
-                    bybit_filled_xau = quantity_converter.lot_to_xau(bybit_filled_lot)
-
-                    await status_pusher.push_orders_filled(
-                        strategy_id=self.strategy_id,
-                        action=action,
-                        binance_filled=_binance_filled_now,
-                        bybit_filled=bybit_filled_xau,
-                        user_id=self.user_id
-                    )
-                    logger.info(
-                        f"[BUTTON_RESTORE] ✓ 最终成交通知已发送 "
-                        f"(pos {current_position:.2f}→{_new_position_after_fill:.2f}/{ladder.total_qty}): "
-                        f"strategy_id={self.strategy_id}, action={action}"
-                    )
-                except Exception as e:
-                    logger.warning(f"[BUTTON_RESTORE] Failed to send button restore notification: {e}")
-            elif exec_result.get('success') and _binance_filled_now > 0:
-                # 中间批次成交：不发送 button restore，仅记录日志
-                logger.info(
-                    f"[BUTTON_RESTORE] 中间批次成交不发送通知 "
-                    f"(pos {current_position:.2f}→{_new_position_after_fill:.2f}/{ladder.total_qty})"
-                )
 
             # Step 8.5: Schedule single-leg check if Binance had any fill
             # Non-blocking: uses asyncio.create_task so it never interrupts the main execution loop
@@ -643,18 +653,6 @@ class ContinuousStrategyExecutor:
                         f"[ladder={ladder_idx}] MT5持仓已耗尽 ({exec_result.get('error')})，"
                         f"平仓策略视为完成 pos={current_position}/{ladder.total_qty}"
                     )
-                    # Send button restore notification so frontend knows we are done
-                    try:
-                        from app.services.strategy_status_pusher import status_pusher as _sp
-                        await _sp.push_orders_filled(
-                            strategy_id=self.strategy_id,
-                            action='closing',
-                            binance_filled=current_position,
-                            bybit_filled=current_position,
-                            user_id=self.user_id
-                        )
-                    except Exception as _e:
-                        logger.warning(f"[BUTTON_RESTORE] Failed to send position_exhausted restore: {_e}")
                     # FIX: Return position_exhausted flag so V2 outer loop exits the entire strategy.
                     # Without this, V2 loop sees success and re-enters the same ladder, creating
                     # a tight error loop (zombie strategy). MT5 has no positions to close — no
@@ -733,7 +731,7 @@ class ContinuousStrategyExecutor:
 
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
-                await asyncio.sleep(self.api_spam_prevention_delay)
+                await self._sleep_or_stop(self.api_spam_prevention_delay)
                 continue
 
             # Step 9: Handle three scenarios
@@ -976,7 +974,7 @@ class ContinuousStrategyExecutor:
             # Small delay to prevent API spam (configurable via api_spam_prevention_delay)
             # 仅在目标未完成、需要继续触发时等待，防止频繁 API 调用
             logger.info(f"Waiting {self.api_spam_prevention_delay} seconds to prevent API spam")
-            await asyncio.sleep(self.api_spam_prevention_delay)
+            await self._sleep_or_stop(self.api_spam_prevention_delay)
 
         logger.info(f"[ladder={ladder_idx}] Loop exited after {loop_count} iterations. pos={current_position}/{ladder.total_qty} stop_req={self.stop_requested} is_running={self.is_running}")
         return {'success': True}
@@ -1007,10 +1005,62 @@ class ContinuousStrategyExecutor:
             f"type={strategy_type} ladders={len(ladders)} capacity={mapper.get_global_capacity()}"
         )
 
+        scan_count = 0
+
+        # MT5 收盘自动停：记录启动时距收盘分钟数，用于区分"收盘前一直运行"与"手动重启"
+        from app.utils.trading_time import minutes_to_mt5_close as _mins_to_close
+        try:
+            _start_mins = _mins_to_close()
+        except Exception:
+            _start_mins = None
+        _SOFT_MIN = 15.0   # 收盘前15分钟：软停（仅停"一直运行"的，允许手动重启）
+        _HARD_MIN = 5.0    # 收盘前5分钟：硬停（全部停，禁止启动）
+
         while self.is_running and not self.stop_requested:
-            global_pos = self.position_mgr.get_global_position(
-                self.strategy_id, strategy_type
-            )
+            scan_count += 1
+
+            if self._active_key and scan_count % 200 == 1:
+                try:
+                    await self._redis.set(self._active_key, "1", ex=3600)
+                except Exception:
+                    pass
+
+            # ── MT5 收盘自动停检查 ──────────────────────────────────────────
+            try:
+                _mins = _mins_to_close()
+            except Exception:
+                _mins = None
+            if _mins is not None:
+                if _mins <= _HARD_MIN:
+                    logger.info(
+                        f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_HARD_MIN}，硬停 {strategy_type}"
+                    )
+                    self.stop_reason = 'market_close'
+                    self.stop_requested = True
+                    break
+                elif _mins <= _SOFT_MIN:
+                    # 软停：仅当本策略在进入15分钟窗口前就已运行（启动时>15分钟）
+                    # 启动时已在窗口内的（手动重启）不软停，继续运行至硬停
+                    if _start_mins is not None and _start_mins > _SOFT_MIN:
+                        logger.info(
+                            f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_SOFT_MIN}，软停 {strategy_type}"
+                            f"（启动时={_start_mins:.1f}分钟，可手动重启运行至收盘前{_HARD_MIN}分钟）"
+                        )
+                        self.stop_reason = 'market_close'
+                        self.stop_requested = True
+                        break
+
+            # ── 行情背离软暂停：ICMarkets 行情停顿/背离时只暂停下单，恢复后自动继续 ──
+            if await self._is_quote_diverged():
+                if scan_count % 50 == 1:
+                    logger.info(f"[V2][行情背离] 暂停下单（{strategy_type}），待行情恢复")
+                await self._sleep_or_stop(0.5)
+                continue
+
+            live_pos = await self._get_live_position(binance_account, strategy_type)
+            if live_pos < 0:
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
 
             try:
                 current_spread = await self._get_current_spread(strategy_type)
@@ -1020,38 +1070,32 @@ class ContinuousStrategyExecutor:
                 continue
 
             if is_opening:
-                active = mapper.get_active_ladder_for_opening(global_pos, current_spread)
+                active = mapper.get_active_ladder_for_opening(live_pos, current_spread)
             else:
-                live_pos = await self._get_live_position(binance_account, strategy_type)
-                if live_pos < 0:
-                    await asyncio.sleep(self.trigger_check_interval)
-                    continue
                 active = mapper.get_active_ladder_for_closing(live_pos, current_spread)
+                # Dust guard: if the remaining closeable amount is smaller than one
+                # close-order unit (closing_m_coin), treat it as un-closeable dust and
+                # skip. Prevents a tiny residual (e.g. 0.0022) from sending a sub-min
+                # hedge order that the hedge account cannot fill -> single-leg error.
+                if active is not None and active.remaining_capacity < order_qty_limit:
+                    if scan_count % 100 == 1:
+                        logger.info(
+                            f"[V2] Closing dust skipped: remaining={active.remaining_capacity:.4f} "
+                            f"< close_unit={order_qty_limit} (left as dust, loop continues)"
+                        )
+                    active = None
 
             if active is None:
-                if is_opening and global_pos >= mapper.get_global_capacity():
-                    logger.info(f"[V2] All ladders filled: pos={global_pos}/{mapper.get_global_capacity()}")
-                    break
-                if not is_opening:
-                    live_check = await self._get_live_position(binance_account, strategy_type)
-                    if live_check >= 0 and live_check < 0.001:
-                        logger.info(f"[V2] All positions closed: live_pos={live_check}")
-                        break
-                await asyncio.sleep(self.trigger_check_interval)
+                if scan_count % 100 == 1:
+                    logger.debug(f"[V2] No active ladder: live_pos={live_pos:.2f} spread={current_spread:.3f} (idle, polling 2s)")
+                await self._sleep_or_stop(2.0)
                 continue
 
-            if is_opening:
-                logger.info(
-                    f"[V2] Active ladder {active.index}: pos={global_pos}, "
-                    f"spread={current_spread:.3f}, remaining={active.remaining_capacity}, "
-                    f"range=[{active.range_lower}, {active.range_upper}]"
-                )
-            else:
-                logger.info(
-                    f"[V2] Active ladder {active.index}: live_pos={live_pos}, "
-                    f"spread={current_spread:.3f}, close_qty={active.remaining_capacity}, "
-                    f"range=[{active.range_lower}, {active.range_upper}]"
-                )
+            logger.info(
+                f"[V2] Active ladder {active.index}: live_pos={live_pos:.2f}, "
+                f"spread={current_spread:.3f}, remaining={active.remaining_capacity:.2f}, "
+                f"range=[{active.range_lower}, {active.range_upper}]"
+            )
 
             iter_config = LadderConfig(
                 enabled=True,
@@ -1063,6 +1107,7 @@ class ContinuousStrategyExecutor:
             )
 
             self.current_ladder_index = active.index
+            self.position_mgr.reset_ladder(self.strategy_id, active.index)
 
             result = await self._execute_ladder(
                 ladder_idx=active.index,
@@ -1089,9 +1134,24 @@ class ContinuousStrategyExecutor:
                 break
 
         logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
-        if self.stop_requested:
-            await self._push_stop_confirmed(strategy_type)
+        await self._push_stop_confirmed(strategy_type)
         return {'success': True, 'message': 'Execution completed'}
+
+    async def _is_quote_diverged(self) -> bool:
+        """读取行情背离监控写入的 Redis 标记（无 HTTP）。
+        新鲜（ts 在 5s 内）且 diverged=True 才暂停；缺失/过期/异常一律放行（fail-open）。"""
+        try:
+            await self._init_redis()
+            raw = await self._redis.get('quote_divergence:state')
+            if not raw:
+                return False
+            import json as _j, time as _t
+            st = _j.loads(raw)
+            if _t.time() - float(st.get('ts', 0)) > 5.0:
+                return False
+            return bool(st.get('diverged'))
+        except Exception:
+            return False
 
     async def _push_stop_confirmed(self, strategy_type: str):
         """Push stop confirmation event after graceful stop completes."""
@@ -1104,7 +1164,7 @@ class ContinuousStrategyExecutor:
                 {
                     'action': action,
                     'strategy_type': strategy_type,
-                    'reason': 'graceful_stop'
+                    'reason': getattr(self, 'stop_reason', None) or 'graceful_stop'
                 },
                 self.user_id
             )
@@ -1923,6 +1983,52 @@ class ContinuousStrategyExecutor:
         """
         logger.info(f"Stop requested for strategy {self.strategy_id} — will exit at next safe point")
         self.stop_requested = True
+        try:
+            self._stop_event.set()
+        except Exception:
+            pass
+        try:
+            asyncio.get_event_loop().create_task(self._cancel_inflight_on_stop())
+        except Exception as _e:
+            logger.debug(f"schedule cancel-on-stop failed: {_e}")
+
+    async def _sleep_or_stop(self, secs: float):
+        """可中断 sleep：收到停止信号(_stop_event)立即返回，否则睡满 secs。"""
+        if secs and secs > 0:
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=secs)
+            except asyncio.TimeoutError:
+                pass
+
+    async def _cancel_inflight_on_stop(self):
+        """停止时主动撤掉 A 侧在途挂单，使其尽快进入已撤单安全点。"""
+        try:
+            acct = getattr(self, '_binance_account', None)
+            if not acct:
+                return
+            sym_a, _, _ = _get_pair_config(self.pair_code)
+            from app.core.proxy_utils import build_proxy_url
+            pid = getattr(acct, 'platform_id', 1)
+            if pid == 1:
+                from app.services.binance_client import BinanceFuturesClient
+                _cli = BinanceFuturesClient(acct.api_key, acct.api_secret,
+                                            proxy_url=build_proxy_url(getattr(acct, 'proxy_config', None)))
+                try:
+                    await _cli.cancel_all_orders(sym_a)
+                    logger.info(f"[GRACEFUL STOP] active-cancel {sym_a} done")
+                finally:
+                    await _cli.close()
+            elif pid == 2:
+                from app.services.bybit_client import BybitV5Client
+                _cli = BybitV5Client(api_key=acct.api_key, api_secret=acct.api_secret,
+                                     proxy_url=build_proxy_url(getattr(acct, 'proxy_config', None)))
+                try:
+                    await _cli.cancel_all_orders(category='linear', symbol=sym_a)
+                    logger.info(f"[GRACEFUL STOP] active-cancel(Bybit) {sym_a} done")
+                finally:
+                    await _cli.close()
+        except Exception as _e:
+            logger.warning(f"[GRACEFUL STOP] active-cancel failed: {_e}")
 
     async def execute_forward_opening_continuous(
         self,
@@ -1950,12 +2056,19 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.stop_requested = False
+        self.stop_reason = None
+        try:
+            self._stop_event.clear()
+        except Exception:
+            pass
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
-        self.position_mgr.reset_strategy(self.strategy_id)
+        await self._init_redis()
+        self._active_key = self._make_active_key('forward_opening')
 
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             return await self._execute_continuous_v2(
                 strategy_type='forward_opening',
                 binance_account=binance_account,
@@ -1980,6 +2093,14 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if getattr(self, '_active_key', None):
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
     async def execute_reverse_closing_continuous(
@@ -2007,11 +2128,20 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.stop_requested = False
+        self.stop_reason = None
+        try:
+            self._stop_event.clear()
+        except Exception:
+            pass
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
 
+        await self._init_redis()
+        self._active_key = self._make_active_key('reverse_closing')
+
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             result = await self._execute_continuous_v2(
                 strategy_type='reverse_closing',
                 binance_account=binance_account,
@@ -2019,8 +2149,6 @@ class ContinuousStrategyExecutor:
                 ladders=ladders,
                 order_qty_limit=closing_m_coin,
             )
-            if result.get('success'):
-                await self._push_execution_completed('reverse_closing')
             return result
         except asyncio.CancelledError:
             logger.warning(f"Task cancelled for strategy {self.strategy_id} (reverse_closing)")
@@ -2039,6 +2167,14 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if getattr(self, '_active_key', None):
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
     async def execute_forward_closing_continuous(
@@ -2066,11 +2202,20 @@ class ContinuousStrategyExecutor:
 
         self.is_running = True
         self.stop_requested = False
+        self.stop_reason = None
+        try:
+            self._stop_event.clear()
+        except Exception:
+            pass
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
 
+        await self._init_redis()
+        self._active_key = self._make_active_key('forward_closing')
+
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             result = await self._execute_continuous_v2(
                 strategy_type='forward_closing',
                 binance_account=binance_account,
@@ -2078,8 +2223,6 @@ class ContinuousStrategyExecutor:
                 ladders=ladders,
                 order_qty_limit=closing_m_coin,
             )
-            if result.get('success'):
-                await self._push_execution_completed('forward_closing')
             return result
         except asyncio.CancelledError:
             logger.warning(f"Task cancelled for strategy {self.strategy_id} (forward_closing)")
@@ -2098,5 +2241,13 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if getattr(self, '_active_key', None):
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 

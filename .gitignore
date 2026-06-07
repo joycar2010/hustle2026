@@ -32,3 +32,6 @@ backend/api_debug.log
 backend/api_debug.log*
 backend/backend.log*
 backend/venv/
+dist.old./
+dist.old.*/
+dist.WORKING.*

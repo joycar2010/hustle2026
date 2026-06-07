@@ -16,21 +16,40 @@
           class="bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
         />
 
-        <div class="flex rounded border border-[#2d2d3d]">
+        <!-- 套利方向选择（单线：正向绿 / 反向红） -->
+        <label class="text-[10px] text-[#6b7280]">方向:</label>
+        <div class="flex rounded border border-[#2d2d3d] overflow-hidden">
           <button
-            v-for="iv in INTERVALS"
-            :key="iv.value"
-            @click="intervalSec = iv.value; fetchData()"
+            @click="setDirection('forward')"
             :class="[
-              'px-2 py-1 text-[10px] border-r border-[#2d2d3d] last:border-0 transition-colors',
-              intervalSec === iv.value
-                ? 'bg-[#fcd535] text-black font-medium'
+              'px-3 py-1 text-[10px] border-r border-[#2d2d3d] transition-colors',
+              direction === 'forward'
+                ? 'bg-[#22c55e] text-black font-medium'
                 : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
             ]"
-          >
-            {{ iv.label }}
-          </button>
+          >正向</button>
+          <button
+            @click="setDirection('reverse')"
+            :class="[
+              'px-3 py-1 text-[10px] transition-colors',
+              direction === 'reverse'
+                ? 'bg-[#ef4444] text-white font-medium'
+                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
+            ]"
+          >反向</button>
         </div>
+
+        <!-- 记录频率(秒) -->
+        <label class="text-[10px] text-[#6b7280]">记录频率(秒):</label>
+        <input
+          type="number"
+          min="1"
+          max="3600"
+          step="1"
+          v-model.number="intervalSec"
+          @keyup.enter="fetchData"
+          class="w-16 bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
+        />
 
         <button
           @click="fetchData"
@@ -45,32 +64,23 @@
         </span>
       </div>
 
-      <!-- Legend (static) -->
+      <!-- Legend (单线，跟随方向) -->
       <div class="flex items-center gap-4 text-[10px] font-mono">
         <span class="flex items-center gap-1">
-          <span class="w-3 h-0.5 bg-[#22c55e] inline-block"></span>
-          <span class="text-[#6b7280]">正向开仓点差</span>
-        </span>
-        <span class="flex items-center gap-1">
-          <span class="w-3 h-0.5 bg-[#ef4444] inline-block"></span>
-          <span class="text-[#6b7280]">反向开仓点差</span>
+          <span class="w-3 h-0.5 inline-block" :style="{ background: dirColor }"></span>
+          <span class="text-[#6b7280]">{{ dirLabel }}开仓点差</span>
         </span>
       </div>
 
-      <!-- Range Statistics -->
+      <!-- Range Statistics (单方向) -->
       <div v-if="rangeStats.count > 0" class="flex items-center gap-3 text-[10px] font-mono flex-wrap bg-[#111118] rounded px-3 py-2 border border-[#2d2d3d]">
         <span class="text-[#6b7280]">可视区间</span>
         <span class="text-[#9ca3af]">{{ rangeStats.startTime }} ~ {{ rangeStats.endTime }}</span>
         <span class="text-[#6b7280]">|</span>
-        <span class="text-[#6b7280]">正向</span>
-        <span class="text-[#22c55e]">高 {{ rangeStats.fwdMax.toFixed(2) }}</span>
-        <span class="text-[#ef4444]">低 {{ rangeStats.fwdMin.toFixed(2) }}</span>
-        <span class="text-[#e5e7eb]">均 {{ rangeStats.fwdAvg.toFixed(2) }}</span>
-        <span class="text-[#6b7280]">|</span>
-        <span class="text-[#6b7280]">反向</span>
-        <span class="text-[#22c55e]">高 {{ rangeStats.revMax.toFixed(2) }}</span>
-        <span class="text-[#ef4444]">低 {{ rangeStats.revMin.toFixed(2) }}</span>
-        <span class="text-[#e5e7eb]">均 {{ rangeStats.revAvg.toFixed(2) }}</span>
+        <span class="text-[#6b7280]">{{ dirLabel }}</span>
+        <span :style="{ color: dirColor }">高 {{ rangeStats.max.toFixed(2) }}</span>
+        <span :style="{ color: dirColor }">低 {{ rangeStats.min.toFixed(2) }}</span>
+        <span class="text-[#e5e7eb]">均 {{ rangeStats.avg.toFixed(2) }}</span>
         <span class="text-[#6b7280]">| {{ rangeStats.count }} 点</span>
       </div>
 
@@ -85,21 +95,16 @@
         >
           <div class="tt-time">{{ tooltip.time }}</div>
           <div class="tt-row">
-            <span class="tt-dot" style="background:#22c55e"></span>
-            <span class="tt-label">正向</span>
-            <span class="tt-val" style="color:#22c55e">{{ tooltip.fwd }}</span>
-          </div>
-          <div class="tt-row">
-            <span class="tt-dot" style="background:#ef4444"></span>
-            <span class="tt-label">反向</span>
-            <span class="tt-val" style="color:#ef4444">{{ tooltip.rev }}</span>
+            <span class="tt-dot" :style="{ background: dirColor }"></span>
+            <span class="tt-label">{{ dirLabel }}</span>
+            <span class="tt-val" :style="{ color: dirColor }">{{ tooltip.val }}</span>
           </div>
         </div>
       </div>
 
       <!-- Usage Hint -->
       <div class="text-[10px] text-[#4b5563] text-center">
-        拖拽平移 · 滚轮缩放 · 缩放到目标时段后查看区间统计（最高/最低/均值）
+        拖拽平移 · 滚轮缩放 · 切换方向查看正向/反向单线 · Y轴固定刻度网格
       </div>
     </div>
 
@@ -202,14 +207,6 @@ function formatSlipTime(ts) {
 const isMobile = ref(window.innerWidth < 768)
 const chartHeight = computed(() => isMobile.value ? 300 : 440)
 
-const INTERVALS = [
-  { label: '1秒', value: 1 },
-  { label: '5秒', value: 5 },
-  { label: '10秒', value: 10 },
-  { label: '30秒', value: 30 },
-  { label: '1分', value: 60 },
-]
-
 function getBJLocalISO(date) {
   const bj = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
   const y = bj.getFullYear()
@@ -249,21 +246,57 @@ const intervalSec = ref(5)
 const loading = ref(false)
 const dataPointCount = ref(0)
 
-const tooltip = reactive({ show: false, x: 0, y: 0, time: '', fwd: '', rev: '' })
+// 套利方向：forward=正向(绿) / reverse=反向(红)
+const direction = ref('forward')
+const dirColor = computed(() => direction.value === 'forward' ? '#22c55e' : '#ef4444')
+const dirLabel = computed(() => direction.value === 'forward' ? '正向' : '反向')
+
+const tooltip = reactive({ show: false, x: 0, y: 0, time: '', val: '' })
 
 const rangeStats = ref({
   count: 0, startTime: '', endTime: '',
-  fwdMax: 0, fwdMin: 0, fwdAvg: 0,
-  revMax: 0, revMin: 0, revAvg: 0,
+  max: 0, min: 0, avg: 0,
 })
 
 const chartWrap = ref(null)
 const chartContainer = ref(null)
 let chart = null
-let forwardSeries = null
-let reverseSeries = null
+let lineSeries = null
 let fwdData = []
 let revData = []
+// 固定刻度网格：根据数据自动取整到"漂亮"的边界与步长
+let scaleBounds = null
+
+function activeData() {
+  return direction.value === 'forward' ? fwdData : revData
+}
+
+// 计算 Y 轴"漂亮"边界（自动适应数据 + 固定整齐刻度）
+function computeNiceBounds(data) {
+  if (!data || !data.length) { scaleBounds = null; return }
+  let lo = Infinity, hi = -Infinity
+  for (const p of data) {
+    if (p.value < lo) lo = p.value
+    if (p.value > hi) hi = p.value
+  }
+  if (!isFinite(lo) || !isFinite(hi)) { scaleBounds = null; return }
+  if (lo === hi) { lo -= 1; hi += 1 }
+  const pad = (hi - lo) * 0.08
+  lo -= pad; hi += pad
+  const rawStep = (hi - lo) / 6
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)))
+  const norm = rawStep / mag
+  let step
+  if (norm <= 1) step = 1
+  else if (norm <= 2) step = 2
+  else if (norm <= 2.5) step = 2.5
+  else if (norm <= 5) step = 5
+  else step = 10
+  step *= mag
+  const niceMin = Math.floor(lo / step) * step
+  const niceMax = Math.ceil(hi / step) * step
+  scaleBounds = { min: niceMin, max: niceMax, step }
+}
 
 function initChart() {
   if (!chartContainer.value || chart) return
@@ -275,7 +308,7 @@ function initChart() {
     },
     grid: {
       vertLines: { color: '#1e1e2e' },
-      horzLines: { color: '#1e1e2e' },
+      horzLines: { color: '#26263a' },
     },
     crosshair: {
       mode: CrosshairMode.Normal,
@@ -287,7 +320,11 @@ function initChart() {
       secondsVisible: true,
       borderColor: '#2d2d3d',
     },
-    rightPriceScale: { borderColor: '#2d2d3d' },
+    rightPriceScale: {
+      borderColor: '#2d2d3d',
+      // 固定刻度网格：禁用自动留白，刻度按 computeNiceBounds 的整齐边界绘制
+      scaleMargins: { top: 0.05, bottom: 0.05 },
+    },
     localization: {
       timeFormatter: (time) => bjSecToFull(time),
     },
@@ -295,20 +332,18 @@ function initChart() {
     height: chartHeight.value,
   })
 
-  forwardSeries = chart.addSeries(LineSeries, {
-    color: '#22c55e',
+  lineSeries = chart.addSeries(LineSeries, {
+    color: dirColor.value,
     lineWidth: 1.5,
-    title: '正向',
+    title: dirLabel.value,
     priceLineVisible: false,
     lastValueVisible: true,
-  })
-
-  reverseSeries = chart.addSeries(LineSeries, {
-    color: '#ef4444',
-    lineWidth: 1.5,
-    title: '反向',
-    priceLineVisible: false,
-    lastValueVisible: true,
+    // 固定刻度网格：以 computeNiceBounds 的整齐边界作为 Y 轴范围
+    autoscaleInfoProvider: () => (
+      scaleBounds
+        ? { priceRange: { minValue: scaleBounds.min, maxValue: scaleBounds.max } }
+        : null
+    ),
   })
 
   chart.subscribeCrosshairMove((param) => {
@@ -316,24 +351,21 @@ function initChart() {
       tooltip.show = false
       return
     }
-    const fwdPoint = param.seriesData.get(forwardSeries)
-    const revPoint = param.seriesData.get(reverseSeries)
-    if (!fwdPoint && !revPoint) {
+    const pt = param.seriesData.get(lineSeries)
+    if (!pt) {
       tooltip.show = false
       return
     }
 
     tooltip.time = bjSecToFull(param.time)
-    tooltip.fwd = fwdPoint ? fwdPoint.value.toFixed(2) : '—'
-    tooltip.rev = revPoint ? revPoint.value.toFixed(2) : '—'
+    tooltip.val = pt.value.toFixed(2)
 
-    const wrapRect = chartWrap.value.getBoundingClientRect()
     const chartRect = chartContainer.value.getBoundingClientRect()
     const mouseX = param.point.x
     const mouseY = param.point.y
 
-    const tooltipW = 190
-    const tooltipH = 70
+    const tooltipW = 150
+    const tooltipH = 56
     let tx = mouseX + 15
     let ty = mouseY - tooltipH - 10
 
@@ -359,50 +391,61 @@ function initChart() {
 }
 
 function computeRangeStats() {
-  if (!chart || !fwdData.length) {
-    rangeStats.value = { count: 0, startTime: '', endTime: '', fwdMax: 0, fwdMin: 0, fwdAvg: 0, revMax: 0, revMin: 0, revAvg: 0 }
+  const data = activeData()
+  if (!chart || !data.length) {
+    rangeStats.value = { count: 0, startTime: '', endTime: '', max: 0, min: 0, avg: 0 }
     return
   }
   const logicalRange = chart.timeScale().getVisibleLogicalRange()
   if (!logicalRange) return
 
   const startIdx = Math.max(0, Math.ceil(logicalRange.from))
-  const endIdx = Math.min(fwdData.length - 1, Math.floor(logicalRange.to))
+  const endIdx = Math.min(data.length - 1, Math.floor(logicalRange.to))
   if (startIdx > endIdx) return
 
-  let fMax = -Infinity, fMin = Infinity, fSum = 0
-  let rMax = -Infinity, rMin = Infinity, rSum = 0
-  let count = 0
-
+  let vMax = -Infinity, vMin = Infinity, sum = 0, count = 0
   for (let i = startIdx; i <= endIdx; i++) {
-    const fv = fwdData[i].value
-    const rv = revData[i].value
-    if (fv > fMax) fMax = fv
-    if (fv < fMin) fMin = fv
-    fSum += fv
-    if (rv > rMax) rMax = rv
-    if (rv < rMin) rMin = rv
-    rSum += rv
+    const v = data[i].value
+    if (v > vMax) vMax = v
+    if (v < vMin) vMin = v
+    sum += v
     count++
   }
-
   if (count === 0) return
   rangeStats.value = {
     count,
-    startTime: bjSecToShort(fwdData[startIdx].time),
-    endTime: bjSecToShort(fwdData[endIdx].time),
-    fwdMax: fMax, fwdMin: fMin, fwdAvg: fSum / count,
-    revMax: rMax, revMin: rMin, revAvg: rSum / count,
+    startTime: bjSecToShort(data[startIdx].time),
+    endTime: bjSecToShort(data[endIdx].time),
+    max: vMax, min: vMin, avg: sum / count,
   }
 }
 
+// 应用当前方向：换色 + 换数据 + 重算固定刻度 + 统计
+function applyDirection() {
+  if (!chart || !lineSeries) return
+  const data = activeData()
+  lineSeries.applyOptions({ color: dirColor.value, title: dirLabel.value })
+  computeNiceBounds(data)
+  lineSeries.setData(data)
+  chart.timeScale().fitContent()
+  computeRangeStats()
+}
+
+function setDirection(d) {
+  if (direction.value === d) return
+  direction.value = d
+  applyDirection()
+}
+
 function destroyChart() {
-  if (chart) { chart.remove(); chart = null; forwardSeries = null; reverseSeries = null }
+  if (chart) { chart.remove(); chart = null; lineSeries = null }
 }
 
 async function fetchData() {
   loading.value = true
   try {
+    if (!intervalSec.value || intervalSec.value < 1) intervalSec.value = 1
+
     const startUTC = new Date(startInput.value + ':00+08:00')
     const endUTC = new Date(endInput.value + ':00+08:00')
 
@@ -421,12 +464,11 @@ async function fetchData() {
     dataPointCount.value = data.length
 
     if (!chart) { await nextTick(); initChart() }
-    // Guard against initChart() failing (chart container not yet mounted)
-    if (!chart || !forwardSeries || !reverseSeries) {
+    if (!chart || !lineSeries) {
       console.warn('Chart not initialized yet, retry next tick')
       await nextTick()
       if (!chart) initChart()
-      if (!chart || !forwardSeries || !reverseSeries) {
+      if (!chart || !lineSeries) {
         console.error('Chart still null after retry — skipping setData')
         return
       }
@@ -435,7 +477,9 @@ async function fetchData() {
     fwdData = []
     revData = []
     for (const row of data) {
-      const utcMs = new Date(row.t).getTime()
+      // row.t 为裸 UTC(无时区后缀)；强制按 UTC 解析，避免随浏览器本地时区偏移
+      const _raw = row.t
+      const utcMs = new Date(/[zZ]|[+\-]\d\d:?\d\d$/.test(_raw) ? _raw : _raw + 'Z').getTime()
       const bjSec = Math.floor((utcMs + 8 * 3600000) / 1000)
       fwdData.push({ time: bjSec, value: row.fs })
       revData.push({ time: bjSec, value: row.rs })
@@ -444,9 +488,7 @@ async function fetchData() {
     fwdData.sort((a, b) => a.time - b.time)
     revData.sort((a, b) => a.time - b.time)
 
-    forwardSeries.setData(fwdData)
-    reverseSeries.setData(revData)
-    chart.timeScale().fitContent()
+    applyDirection()
   } catch (e) {
     console.error('Fetch spread chart failed:', e)
   } finally {

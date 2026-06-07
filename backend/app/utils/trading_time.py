@@ -47,9 +47,29 @@ def _parse_weekday_hour(s: str) -> tuple[int, int]:
         return -1, -1
 
 
-def _is_summer(month: int) -> bool:
-    """April (4) through October (10) = summer."""
-    return 4 <= month <= 10
+def _nth_sunday(year: int, month: int, n: int):
+    """返回某年某月的第 n 个周日的 date 对象。"""
+    from datetime import date
+    d = date(year, month, 1)
+    # weekday(): Mon=0..Sun=6。本月第一个周日的日号：
+    first_sunday = 1 + (6 - d.weekday()) % 7
+    return date(year, month, first_sunday + (n - 1) * 7)
+
+
+def _is_summer(dt) -> bool:
+    """夏令时判断（北京时间日期级）。
+
+    规则（用户指定 / 美国夏令时）：
+      夏令时：3月第二个周日 ~ 11月第一个周日
+      冬令时：其余时间
+    兼容旧调用：若传入 int(月份) 则退回粗略按月判断。
+    """
+    if isinstance(dt, int):
+        return 4 <= dt <= 10  # 向后兼容（粗略）
+    d = dt.date() if hasattr(dt, "date") else dt
+    dst_start = _nth_sunday(d.year, 3, 2)   # 3月第二个周日
+    dst_end   = _nth_sunday(d.year, 11, 1)  # 11月第一个周日
+    return dst_start <= d < dst_end
 
 
 def is_bybit_trading_hours() -> tuple[bool, str]:
@@ -69,7 +89,7 @@ def is_bybit_trading_hours() -> tuple[bool, str]:
     hour = now_bjt.hour
     month = now_bjt.month
 
-    summer = _is_summer(month)
+    summer = _is_summer(now_bjt)
     season_label = "夏令时" if summer else "冬令时"
 
     if summer:
@@ -114,7 +134,7 @@ def get_bybit_next_open_time() -> str:
     cfg = _load_config()
     now_bjt = datetime.now(_BJT)
     month = now_bjt.month
-    summer = _is_summer(month)
+    summer = _is_summer(now_bjt)
     season = "夏令时" if summer else "冬令时"
 
     if summer:
@@ -135,3 +155,77 @@ def get_bybit_next_open_time() -> str:
         return f"今天 {open_h:02d}:00 北京时间（{season}）"
 
     return f"当前为交易时间（{season}）"
+
+
+def get_next_mt5_close_dt():
+    """返回下一次 MT5 休市的北京时间 datetime；若当前已休市或检测关闭则返回 None。
+
+    Bybit MT5 服务器时区为 EET/EEST(UTC+2/+3)，每日 00:00 服务器时间有日级休市
+    (rollover)，换算北京时间为 夏令时05:00 / 冬令时06:00（即配置 close_h 的小时）。
+    每天该时刻都休市；周六那次为周末休市。因此"下一次休市"= 下一个 close_h:00。
+    """
+    cfg = _load_config()
+    if not cfg.get("enabled", True):
+        return None
+    is_open, _ = is_bybit_trading_hours()
+    if not is_open:
+        return None
+    now = datetime.now(_BJT)
+    summer = _is_summer(now)
+    if summer:
+        _, close_h = _parse_weekday_hour(cfg.get("summer_close", _DEFAULTS["summer_close"]))
+    else:
+        _, close_h = _parse_weekday_hour(cfg.get("winter_close", _DEFAULTS["winter_close"]))
+    if close_h < 0:
+        close_h = 5 if summer else 6
+    # 下一个 close_h:00（今天或明天），即每日休市时刻
+    close_dt = now.replace(hour=close_h, minute=0, second=0, microsecond=0)
+    if close_dt <= now:
+        close_dt += timedelta(days=1)
+    return close_dt
+
+
+def minutes_to_mt5_close():
+    """距离下一次 MT5 休市还有多少分钟（float）；当前已休市/检测关闭返回 None。"""
+    dt = get_next_mt5_close_dt()
+    if dt is None:
+        return None
+    return (dt - datetime.now(_BJT)).total_seconds() / 60.0
+
+
+def minutes_since_mt5_open():
+    """距离最近一次 MT5 开市/日级重开已过多少分钟（float）；当前已休市/检测关闭返回 None。
+
+    日级 rollover：每天 close_h:00（夏05:00/冬06:00）休市后立即重开，
+    故该时刻即最近一次"重开"边界；周末休市 → 周一 open_h:00 重开。
+    夏/冬令时由 _is_summer 自动处理。
+    """
+    cfg = _load_config()
+    if not cfg.get("enabled", True):
+        return None
+    is_open, _ = is_bybit_trading_hours()
+    if not is_open:
+        return None
+    now = datetime.now(_BJT)
+    summer = _is_summer(now)
+    if summer:
+        _, close_h = _parse_weekday_hour(cfg.get("summer_close", _DEFAULTS["summer_close"]))
+        _, open_h = _parse_weekday_hour(cfg.get("summer_open", _DEFAULTS["summer_open"]))
+    else:
+        _, close_h = _parse_weekday_hour(cfg.get("winter_close", _DEFAULTS["winter_close"]))
+        _, open_h = _parse_weekday_hour(cfg.get("winter_open", _DEFAULTS["winter_open"]))
+    if close_h < 0:
+        close_h = 5 if summer else 6
+    if open_h < 0:
+        open_h = 6 if summer else 7
+    # 最近一次日级 rollover 边界（<= now）
+    daily = now.replace(hour=close_h, minute=0, second=0, microsecond=0)
+    if daily > now:
+        daily -= timedelta(days=1)
+    # 本周一开市边界
+    monday = (now - timedelta(days=now.weekday())).replace(
+        hour=open_h, minute=0, second=0, microsecond=0)
+    boundary = daily
+    if monday <= now and monday > daily:
+        boundary = monday
+    return (now - boundary).total_seconds() / 60.0

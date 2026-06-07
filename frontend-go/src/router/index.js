@@ -41,12 +41,6 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/spread-analysis',
-    name: 'SpreadAnalysis',
-    component: () => import('@/views/SpreadAnalysis.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
     path: '/pending-orders',
     name: 'PendingOrders',
     component: () => import('@/views/PendingOrders.vue'),

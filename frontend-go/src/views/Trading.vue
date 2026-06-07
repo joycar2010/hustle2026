@@ -2,11 +2,44 @@
   <div class="container mx-auto px-4 py-6">
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-3xl font-bold">交易历史数据</h1>
-      <div v-if="hasData" class="flex items-center gap-2">
-        <span class="text-sm text-gray-400">套利组合总盈亏:</span>
-        <span class="text-2xl font-bold" :class="totalArbitragePnL >= 0 ? 'text-green-500' : 'text-red-500'">
-          {{ totalArbitragePnL >= 0 ? '+' : '' }}{{ totalArbitragePnL.toFixed(2) }} USDT
-        </span>
+      <div v-if="hasData" class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-gray-400">返佣前利润:</span>
+          <span class="text-lg font-bold" :class="profitBeforeRebate >= 0 ? 'text-green-500' : 'text-red-500'">
+            {{ profitBeforeRebate >= 0 ? '+' : '' }}{{ profitBeforeRebate.toFixed(2) }}
+          </span>
+        </div>
+        <span class="text-gray-600">|</span>
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-gray-400">返佣后净利润:</span>
+          <span class="text-lg font-bold" :class="netProfitAfterRebate >= 0 ? 'text-green-500' : 'text-red-500'">
+            {{ netProfitAfterRebate >= 0 ? '+' : '' }}{{ netProfitAfterRebate.toFixed(2) }}
+          </span>
+        </div>
+        <span class="text-gray-600">|</span>
+        <div class="flex items-center gap-1 text-[11px]">
+          <span class="text-gray-500">主账户:</span>
+          <span class="text-gray-400">资金费</span>
+          <span :class="(stats.fundingFee||0)>=0?'text-green-400':'text-red-400'">{{ (stats.fundingFee||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">手续费</span>
+          <span class="text-red-400">{{ (stats.totalFees||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">返佣</span>
+          <span class="text-green-400">{{ (stats.binanceRebate||0).toFixed(2) }}</span>
+        </div>
+        <span class="text-gray-600">|</span>
+        <div class="flex items-center gap-1 text-[11px]">
+          <span class="text-gray-500">对冲账户:</span>
+          <span class="text-gray-400">过夜费</span>
+          <span class="text-red-400">{{ (stats.mt5OvernightFee||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">手续费</span>
+          <span class="text-red-400">{{ (stats.mt5Fee||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">返佣</span>
+          <span class="text-green-400">{{ (stats.mt5Rebate||0).toFixed(2) }}</span>
+        </div>
       </div>
     </div>
 
@@ -74,6 +107,112 @@
       <ul class="text-yellow-200/90 text-xs space-y-0.5 ml-4 list-disc">
         <li v-for="(w, i) in queryWarnings" :key="i">{{ w }}</li>
       </ul>
+    </div>
+
+    <!-- 配对宽表: 主+冲并排同行 + 分类查询 -->
+    <div v-if="pairedTrades.length > 0" class="card mb-6">
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <h3 class="text-lg font-semibold">套利配对成交历史</h3>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-400">分类:</label>
+          <select v-model="pairFilter" class="px-3 py-1.5 bg-dark-100 border border-border-primary rounded text-sm focus:outline-none focus:border-primary">
+            <option value="all">全部 ({{ pairedTrades.length }})</option>
+            <option value="strategy">自动交易 ({{ pairedStrategyCount }})</option>
+            <option value="manual">手动交易 ({{ pairedManualCount }})</option>
+          </select>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-left text-gray-400 border-b border-gray-700">
+              <th class="pb-2 px-1">来源</th>
+              <th class="pb-2 px-1">时间(主)</th>
+              <th class="pb-2 px-1">方向</th>
+              <th class="pb-2 px-1">主账号均价</th>
+              <th class="pb-2 px-1">数量</th>
+              <th class="pb-2 px-1 bg-dark-100">价差</th>
+              <th class="pb-2 px-1 bg-dark-100">阈值</th>
+              <th class="pb-2 px-1 bg-dark-100">滑点</th>
+              <th class="pb-2 px-1">对冲均价</th>
+              <th class="pb-2 px-1">数量(对冲)</th>
+              <th class="pb-2 px-1">方向(对冲)</th>
+              <th class="pb-2 px-1">时间(对冲)</th>
+              <th class="pb-2 px-1 bg-dark-100">利润</th>
+              <th class="pb-2 px-1 bg-dark-100">手续费</th>
+              <th class="pb-2 px-1 bg-dark-100">过夜费</th>
+              <th class="pb-2 px-1 bg-dark-100">资金费</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="filteredPairedTrades.length === 0">
+              <td colspan="16" class="text-center py-8 text-gray-500">该分类下暂无配对记录</td>
+            </tr>
+            <tr v-for="p in filteredPairedTrades" :key="p.id" class="border-b border-gray-800 hover:bg-dark-200">
+              <td class="py-2 px-1">
+                <span :class="p.source === 'strategy' ? 'text-[#0ecb81] bg-[#0ecb81]/10 px-1.5 py-0.5 rounded text-[10px]' : 'text-[#fcd535] bg-[#fcd535]/10 px-1.5 py-0.5 rounded text-[10px]'">
+                  {{ p.source === 'strategy' ? '自动' : '手动' }}
+                </span>
+              </td>
+              <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_primary) }}</td>
+              <td class="py-2 px-1">
+                <span :class="p.side_primary === 'buy' ? 'text-green-500' : 'text-red-500'">
+                  {{ p.side_primary === 'buy' ? '买入' : '卖出' }}
+                </span>
+              </td>
+              <td class="py-2 px-1 font-mono">{{ p.avg_price_primary != null ? Number(p.avg_price_primary).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1 font-mono">{{ p.qty_primary != null ? Number(p.qty_primary).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.spread != null">{{ Number(p.spread).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.threshold != null">{{ Number(p.threshold).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.slippage != null"
+                      :class="p.slippage <= 0 ? 'text-green-500' : 'text-red-500'">
+                  {{ p.slippage > 0 ? '+' : '' }}{{ Number(p.slippage).toFixed(2) }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono">
+                <span v-if="p.avg_price_hedge != null">{{ Number(p.avg_price_hedge).toFixed(2) }}</span>
+                <span v-else class="text-yellow-500">未匹配</span>
+              </td>
+              <td class="py-2 px-1 font-mono">{{ p.qty_hedge != null ? Number(p.qty_hedge).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1">
+                <span v-if="p.side_hedge" :class="p.side_hedge === 'buy' ? 'text-green-500' : 'text-red-500'">
+                  {{ p.side_hedge === 'buy' ? '买入' : '卖出' }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_hedge) }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.pair_profit != null" :class="p.pair_profit >= 0 ? 'text-green-500' : 'text-red-500'">
+                  {{ p.pair_profit >= 0 ? '+' : '' }}{{ Number(p.pair_profit).toFixed(2) }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono text-red-400 bg-dark-100">{{ p.pair_total_fee != null ? Number(p.pair_total_fee).toFixed(4) : '-' }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.hedge_overnight != null && p.hedge_overnight != 0" class="text-red-400">{{ Number(p.hedge_overnight).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">0</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.funding_fee != null && p.funding_fee != 0" :class="p.funding_fee >= 0 ? 'text-green-400' : 'text-red-400'">
+                  {{ p.funding_fee >= 0 ? '+' : '' }}{{ Number(p.funding_fee).toFixed(4) }}
+                </span>
+                <span v-else class="text-gray-600">0</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-xs text-gray-500">
+        <span>说明: 价差=方向化实得价差(反向=主-对冲,正向=对冲-主); 滑点=实得价差相对触发价差的偏离,更有利为负(绿)、更差为正(红); 配对按主账号maker成交因果FIFO匹配对冲taker成交. 手动交易不展示.</span>
+      </div>
     </div>
 
     <!-- Statistics Section -->
@@ -150,6 +289,10 @@
                 </div>
               </div>
             </div>
+            <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">主账户返佣</div>
+              <div class="text-lg font-bold text-green-500">{{ (stats.binanceRebate || 0).toFixed(4) }} USDT</div>
+            </div>
           </div>
         </div>
 
@@ -174,11 +317,16 @@
               <div class="text-xs text-gray-400 mb-1">MT5手续费</div>
               <div class="text-lg font-bold text-red-500">{{ stats.mt5Fee.toFixed(2) }} USDT</div>
             </div>
-            <div class="bg-gray-800 p-3 rounded col-span-2">
+            <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">MT5已实现盈亏</div>
               <div class="text-lg font-bold" :class="(stats.mt5RealizedPnL || 0) >= 0 ? 'text-green-500' : 'text-red-500'">
                 {{ (stats.mt5RealizedPnL || 0) >= 0 ? '+' : '' }}{{ (stats.mt5RealizedPnL || 0).toFixed(2) }} USDT
               </div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">对冲账户返佣</div>
+              <div class="text-lg font-bold text-green-500">{{ (stats.mt5Rebate || 0).toFixed(2) }} USDT</div>
+              <div class="text-[10px] text-gray-500 mt-0.5">MT5返佣需确认入账格式</div>
             </div>
           </div>
         </div>
@@ -203,11 +351,13 @@
                 <th class="pb-2">类别</th>
                 <th class="pb-2">时间 (北京)</th>
                 <th class="pb-2">手续费</th>
+                <th class="pb-2">资金费</th>
+                <th class="pb-2">利润</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="accountTrades.length === 0">
-                <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
+                <td colspan="10" class="text-center py-8 text-gray-500">暂无数据</td>
               </tr>
               <tr v-for="trade in accountTrades" :key="trade.id" class="border-b border-gray-800">
                 <td class="py-3">{{ trade.symbol }}</td>
@@ -216,9 +366,9 @@
                     {{ trade.side === 'buy' ? '买入' : '卖出' }}
                   </span>
                 </td>
-                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }}</td>
                 <td>{{ trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-' }}</td>
-                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }}</td>
                 <td class="text-xs">
                   <span :class="trade.maker ? 'text-blue-500' : 'text-orange-500'">
                     {{ trade.maker ? '挂单' : '吃单' }}
@@ -230,8 +380,22 @@
                     {{ Number(trade.fee_bnb).toFixed(6) }} BNB
                   </template>
                   <template v-else>
-                    {{ trade.fee != null ? Number(trade.fee).toFixed(4) : '-' }} USDT
+                    {{ trade.fee != null ? Number(trade.fee).toFixed(4) : '-' }}
                   </template>
+                </td>
+                <td class="text-xs font-mono">
+                  <span v-if="trade.funding_fee != null && trade.funding_fee != 0"
+                        :class="trade.funding_fee >= 0 ? 'text-green-400' : 'text-red-400'">
+                    {{ trade.funding_fee >= 0 ? '+' : '' }}{{ Number(trade.funding_fee).toFixed(4) }}
+                  </span>
+                  <span v-else class="text-gray-600">0</span>
+                </td>
+                <td class="text-xs font-mono">
+                  <span v-if="trade.realizedPnl != null && trade.realizedPnl != 0"
+                        :class="trade.realizedPnl >= 0 ? 'text-green-500' : 'text-red-500'">
+                    {{ trade.realizedPnl >= 0 ? '+' : '' }}{{ Number(trade.realizedPnl).toFixed(4) }}
+                  </span>
+                  <span v-else class="text-gray-600">0</span>
                 </td>
               </tr>
             </tbody>
@@ -251,14 +415,15 @@
                 <th class="pb-2">成交价</th>
                 <th class="pb-2">成交量</th>
                 <th class="pb-2">成交额</th>
-                <th class="pb-2">过夜费</th>
                 <th class="pb-2">时间 (北京)</th>
                 <th class="pb-2">手续费</th>
+                <th class="pb-2">过夜费</th>
+                <th class="pb-2">利润</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="mt5Trades.length === 0">
-                <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
+                <td colspan="9" class="text-center py-8 text-gray-500">暂无数据</td>
               </tr>
               <tr v-for="trade in mt5Trades" :key="trade.id" class="border-b border-gray-800">
                 <td class="py-3">{{ trade.symbol }}</td>
@@ -267,12 +432,19 @@
                     {{ trade.side === 'buy' ? '买入' : '卖出' }}
                   </span>
                 </td>
-                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }}</td>
                 <td>{{ trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-' }}</td>
-                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }} USDT</td>
-                <td class="text-red-500">{{ trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00' }} USDT</td>
+                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }}</td>
                 <td class="text-xs text-gray-400">{{ formatDateTime(trade.timestamp) }}</td>
-                <td class="text-red-500">{{ trade.fee != null ? Number(trade.fee).toFixed(2) : '-' }} USDT</td>
+                <td class="text-red-500">{{ trade.fee != null ? Number(trade.fee).toFixed(2) : '-' }}</td>
+                <td class="text-red-500">{{ trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00' }}</td>
+                <td class="text-xs font-mono">
+                  <span v-if="trade.profit != null && trade.profit != 0"
+                        :class="trade.profit >= 0 ? 'text-green-500' : 'text-red-500'">
+                    {{ trade.profit >= 0 ? '+' : '' }}{{ Number(trade.profit).toFixed(2) }}
+                  </span>
+                  <span v-else class="text-gray-600">0</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -280,90 +452,6 @@
       </div>
     </div>
 
-    <!-- 配对宽表: 主+冲并排同行 + 分类查询 -->
-    <div v-if="pairedTrades.length > 0" class="card mb-6">
-      <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
-        <h3 class="text-lg font-semibold">套利配对成交历史</h3>
-        <div class="flex items-center gap-2">
-          <label class="text-sm text-gray-400">分类:</label>
-          <select v-model="pairFilter" class="px-3 py-1.5 bg-dark-100 border border-border-primary rounded text-sm focus:outline-none focus:border-primary">
-            <option value="all">全部 ({{ pairedTrades.length }})</option>
-            <option value="strategy">自动交易 ({{ pairedStrategyCount }})</option>
-            <option value="manual">手动交易 ({{ pairedManualCount }})</option>
-          </select>
-        </div>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="text-left text-gray-400 border-b border-gray-700">
-              <th class="pb-2 px-1">来源</th>
-              <th class="pb-2 px-1">时间(主)</th>
-              <th class="pb-2 px-1">方向</th>
-              <th class="pb-2 px-1">主账号均价</th>
-              <th class="pb-2 px-1">数量</th>
-              <th class="pb-2 px-1 bg-dark-100">价差</th>
-              <th class="pb-2 px-1 bg-dark-100">阈值</th>
-              <th class="pb-2 px-1 bg-dark-100">滑点</th>
-              <th class="pb-2 px-1">对冲均价</th>
-              <th class="pb-2 px-1">数量(对冲)</th>
-              <th class="pb-2 px-1">方向(对冲)</th>
-              <th class="pb-2 px-1">时间(对冲)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="filteredPairedTrades.length === 0">
-              <td colspan="12" class="text-center py-8 text-gray-500">该分类下暂无配对记录</td>
-            </tr>
-            <tr v-for="p in filteredPairedTrades" :key="p.id" class="border-b border-gray-800 hover:bg-dark-200">
-              <td class="py-2 px-1">
-                <span :class="p.source === 'strategy' ? 'text-[#0ecb81] bg-[#0ecb81]/10 px-1.5 py-0.5 rounded text-[10px]' : 'text-[#fcd535] bg-[#fcd535]/10 px-1.5 py-0.5 rounded text-[10px]'">
-                  {{ p.source === 'strategy' ? '自动' : '手动' }}
-                </span>
-              </td>
-              <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_primary) }}</td>
-              <td class="py-2 px-1">
-                <span :class="p.side_primary === 'buy' ? 'text-green-500' : 'text-red-500'">
-                  {{ p.side_primary === 'buy' ? '买入' : '卖出' }}
-                </span>
-              </td>
-              <td class="py-2 px-1 font-mono">{{ p.avg_price_primary != null ? Number(p.avg_price_primary).toFixed(2) : '-' }}</td>
-              <td class="py-2 px-1 font-mono">{{ p.qty_primary != null ? Number(p.qty_primary).toFixed(2) : '-' }}</td>
-              <td class="py-2 px-1 font-mono bg-dark-100">
-                <span v-if="p.source === 'strategy' && p.spread != null">{{ Number(p.spread).toFixed(2) }}</span>
-                <span v-else class="text-gray-600">-</span>
-              </td>
-              <td class="py-2 px-1 font-mono bg-dark-100">
-                <span v-if="p.source === 'strategy' && p.threshold != null">{{ Number(p.threshold).toFixed(2) }}</span>
-                <span v-else class="text-gray-600">-</span>
-              </td>
-              <td class="py-2 px-1 font-mono bg-dark-100">
-                <span v-if="p.source === 'strategy' && p.slippage != null"
-                      :class="p.slippage >= 0 ? 'text-green-500' : 'text-red-500'">
-                  {{ p.slippage >= 0 ? '+' : '' }}{{ Number(p.slippage).toFixed(2) }}
-                </span>
-                <span v-else class="text-gray-600">-</span>
-              </td>
-              <td class="py-2 px-1 font-mono">
-                <span v-if="p.avg_price_hedge != null">{{ Number(p.avg_price_hedge).toFixed(2) }}</span>
-                <span v-else class="text-yellow-500">未匹配</span>
-              </td>
-              <td class="py-2 px-1 font-mono">{{ p.qty_hedge != null ? Number(p.qty_hedge).toFixed(2) : '-' }}</td>
-              <td class="py-2 px-1">
-                <span v-if="p.side_hedge" :class="p.side_hedge === 'buy' ? 'text-green-500' : 'text-red-500'">
-                  {{ p.side_hedge === 'buy' ? '买入' : '卖出' }}
-                </span>
-                <span v-else class="text-gray-600">-</span>
-              </td>
-              <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_hedge) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="mt-2 text-xs text-gray-500">
-        <span>说明: 价差=主账号均价与对冲均价的绝对差值; 阈值=策略设定的开/平差值; 滑点=价差-阈值. 手动交易不展示价差/阈值/滑点.</span>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -453,10 +541,9 @@ const netProfit = computed(() => {
   return stats.value.totalReturnProfit - stats.value.totalFees - stats.value.overnightFees
 })
 
-// Computed Total Arbitrage PnL (MT5 + Binance)
-const totalArbitragePnL = computed(() => {
-  return (stats.value.mt5RealizedPnL || 0) + (stats.value.realizedPnL || 0)
-})
+// 返佣前利润 + 返佣后净利润（由后端计算）
+const profitBeforeRebate = computed(() => stats.value.profitBeforeRebate || 0)
+const netProfitAfterRebate = computed(() => stats.value.netProfitAfterRebate || 0)
 
 // 主账号（Binance/Bybit API）是否有成交
 const hasBinanceData = computed(() => accountTrades.value.length > 0)

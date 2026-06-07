@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "ic_url": "http://172.31.14.113:8021",
+  "ic_symbol": "XAUUSD",
+  "ref_url": "http://172.31.14.113:8001",
+  "ref_symbol": "XAUUSD+",
+  "api_key": "OQ6bUimHZDmXEZzJKE",
+  "trip": 0.7,
+  "recover": 0.3,
+  "poll_sec": 0.5,
+  "stale_sec": 5,
+  "heartbeat_sec": 3.0
+}

@@ -176,6 +176,20 @@ async def upsert_strategy_config(
     db: AsyncSession = Depends(get_db),
 ):
     """Create or update strategy config by type (upsert)"""
+    # 阶梯校验：开差值严格递增；平差值/总手数非递减(允许相等)
+    _en = [l for l in config_data.ladders if getattr(l, "enabled", True)]
+    for _i in range(1, len(_en)):
+        _cur, _prev = _en[_i], _en[_i - 1]
+        if _cur.openPrice <= _prev.openPrice:
+            raise HTTPException(status_code=400,
+                detail=f"阶梯{_i + 1}的开差值({_cur.openPrice})必须大于阶梯{_i}的开差值({_prev.openPrice})")
+        if _cur.threshold < _prev.threshold:
+            raise HTTPException(status_code=400,
+                detail=f"阶梯{_i + 1}的平差值({_cur.threshold})不能小于阶梯{_i}的平差值({_prev.threshold})")
+        if _cur.qtyLimit < _prev.qtyLimit:
+            raise HTTPException(status_code=400,
+                detail=f"阶梯{_i + 1}的总手数({_cur.qtyLimit})不能小于阶梯{_i}的总手数({_prev.qtyLimit})")
+
     pair_code = getattr(config_data, 'pair_code', 'XAU') or 'XAU'
     result = await db.execute(
         select(StrategyConfig).where(
@@ -1170,20 +1184,24 @@ async def sync_positions_from_exchange(
 
 class LadderConfigSchema(BaseModel):
     """Ladder configuration schema for opening strategies"""
+    model_config = {"populate_by_name": True}
+
     enabled: bool
-    opening_spread: float
-    closing_spread: float
-    total_qty: float
-    opening_trigger_count: int
-    closing_trigger_count: int
+    opening_spread: float = Field(0, alias="openPrice")
+    closing_spread: float = Field(0, alias="threshold")
+    total_qty: float = Field(0, alias="qtyLimit")
+    opening_trigger_count: int = Field(1, alias="openingSyncQty")
+    closing_trigger_count: int = Field(1, alias="closingSyncQty")
 
 
 class ClosingLadderConfigSchema(BaseModel):
     """Ladder configuration schema for closing strategies"""
+    model_config = {"populate_by_name": True}
+
     enabled: bool
-    closing_spread: float
-    total_qty: float
-    closing_trigger_count: int
+    closing_spread: float = Field(0, alias="threshold")
+    total_qty: float = Field(0, alias="qtyLimit")
+    closing_trigger_count: int = Field(1, alias="closingSyncQty")
 
 
 class ContinuousExecuteRequest(BaseModel):
@@ -1248,6 +1266,20 @@ async def execute_continuous_opening(
     if strategy_type not in ['forward', 'reverse']:
         raise HTTPException(status_code=400, detail="Invalid strategy type. Must be 'forward' or 'reverse'")
 
+    # MT5 收盘前5分钟内禁止启动（硬窗口）
+    try:
+        from app.utils.trading_time import minutes_to_mt5_close as _mins_to_close
+        _mins = _mins_to_close()
+        if _mins is not None and _mins <= 5.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MT5即将休市（{_mins:.0f}分钟内），暂不可启动策略"
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         # 1. Get accounts (with user ownership check)
         binance_account, bybit_account = await _resolve_pair_accounts(
@@ -1283,27 +1315,19 @@ async def execute_continuous_opening(
             for ladder in request.ladders
         ]
 
-        # 2.5a. Validate cumulative ladder total_qty (must be strictly increasing)
+        # 阶梯校验：开差值严格递增；平差值/总手数非递减(允许相等)
         enabled_ladders = [l for l in ladders if l.enabled]
         for i in range(1, len(enabled_ladders)):
-            if enabled_ladders[i].total_qty <= enabled_ladders[i - 1].total_qty:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
-                           f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
-                )
             if enabled_ladders[i].opening_spread <= enabled_ladders[i - 1].opening_spread:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"阶梯{i + 1}的开仓差值({enabled_ladders[i].opening_spread})必须大于"
-                           f"阶梯{i}的开仓差值({enabled_ladders[i - 1].opening_spread})"
-                )
-            if enabled_ladders[i].closing_spread <= enabled_ladders[i - 1].closing_spread:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"阶梯{i + 1}的平仓差值({enabled_ladders[i].closing_spread})必须大于"
-                           f"阶梯{i}的平仓差值({enabled_ladders[i - 1].closing_spread})"
-                )
+                raise HTTPException(status_code=400,
+                    detail=f"阶梯{i + 1}的开仓差值({enabled_ladders[i].opening_spread})必须大于阶梯{i}的开仓差值({enabled_ladders[i - 1].opening_spread})")
+            if enabled_ladders[i].closing_spread < enabled_ladders[i - 1].closing_spread:
+                raise HTTPException(status_code=400,
+                    detail=f"阶梯{i + 1}的平仓差值({enabled_ladders[i].closing_spread})不能小于阶梯{i}的平仓差值({enabled_ladders[i - 1].closing_spread})")
+            if enabled_ladders[i].total_qty < enabled_ladders[i - 1].total_qty:
+                raise HTTPException(status_code=400,
+                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})不能小于阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})")
+
 
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
@@ -1353,30 +1377,37 @@ async def execute_continuous_opening(
         # Prevents double-opening after Python crash/restart (position_manager is in-memory only)
         try:
             from app.services.hedging_pair_service import hedging_pair_service as _hps_guard
-            from app.services.binance_client import BinanceFuturesClient as _BFC_guard
-            from app.core.proxy_utils import build_proxy_url as _bpu
             _guard_pair = _hps_guard.get_pair(pair_code)
             _guard_sym_a = _guard_pair.symbol_a.symbol if _guard_pair else "XAUUSDT"
-            _guard_client = _BFC_guard(binance_account.api_key, binance_account.api_secret,
-                                       proxy_url=_bpu(binance_account.proxy_config))
-            _guard_positions = await _guard_client.get_position_risk(symbol=_guard_sym_a)
-            await _guard_client.close()
-            _target_side = "SHORT" if strategy_type == "reverse" else "LONG"
-            _existing_qty = sum(
-                abs(float(p.get("positionAmt", 0)))
-                for p in _guard_positions
-                if p.get("positionSide", "") == _target_side and float(p.get("positionAmt", 0)) != 0
-            )
-            if _existing_qty > 0:
-                _first_ladder_idx = next((i for i, l in enumerate(ladders) if l.enabled), 0)
-                _ladder_total = ladders[_first_ladder_idx].total_qty if ladders else _existing_qty
-                _seed_qty = min(_existing_qty, _ladder_total)
-                position_manager.record_opening(strategy_id, _first_ladder_idx,
-                                                f"{strategy_type}_opening", _seed_qty)
-                logger.warning(
-                    f"[POSITION_GUARD] Pre-seeded {_seed_qty}/{_ladder_total} XAU "
-                    f"({_target_side}) from existing Binance position (pair={pair_code})"
-                )
+            _existing_qty = 0.0
+            _guard_src = "WS"
+            _got_cache = False
+            # 优先读 WS 持仓缓存（position_streamer），零网络往返
+            try:
+                from app.tasks.broadcast_tasks import position_streamer as _ps
+                _bn = _ps._binance_positions.get(user_id) or _ps._binance_positions.get("_default", {})
+                if _guard_sym_a in _bn:
+                    _long_x, _short_x = _bn[_guard_sym_a]
+                    _existing_qty = _short_x if strategy_type == "reverse" else _long_x
+                    _got_cache = True
+            except Exception:
+                _got_cache = False
+            # 缓存未命中才回退 REST（经代理，慢）
+            if not _got_cache:
+                _guard_src = "REST"
+                from app.services.binance_client import BinanceFuturesClient as _BFC_guard
+                from app.core.proxy_utils import build_proxy_url as _bpu
+                _guard_client = _BFC_guard(binance_account.api_key, binance_account.api_secret,
+                                           proxy_url=_bpu(binance_account.proxy_config))
+                _guard_positions = await _guard_client.get_position_risk(symbol=_guard_sym_a)
+                await _guard_client.close()
+                for p in _guard_positions:
+                    amt = float(p.get("positionAmt", 0))
+                    if strategy_type == "reverse" and amt < 0:
+                        _existing_qty += abs(amt)
+                    elif strategy_type == "forward" and amt > 0:
+                        _existing_qty += amt
+            logger.info(f"[POSITION_GUARD] Position: {_existing_qty} XAU (pair={pair_code}, src={_guard_src})")
         except Exception as _guard_err:
             logger.warning(f"[POSITION_GUARD] Position check skipped: {_guard_err}")
 
@@ -1471,6 +1502,20 @@ async def execute_continuous_closing(
     if strategy_type not in ['forward', 'reverse']:
         raise HTTPException(status_code=400, detail="Invalid strategy type. Must be 'forward' or 'reverse'")
 
+    # MT5 收盘前5分钟内禁止启动（硬窗口）
+    try:
+        from app.utils.trading_time import minutes_to_mt5_close as _mins_to_close
+        _mins = _mins_to_close()
+        if _mins is not None and _mins <= 5.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MT5即将休市（{_mins:.0f}分钟内），暂不可启动策略"
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     try:
         # 1. Get accounts (with user ownership check)
         binance_account, bybit_account = await _resolve_pair_accounts(
@@ -1507,27 +1552,16 @@ async def execute_continuous_closing(
             for ladder in request.ladders
         ]
 
-        # 2.5a. Validate cumulative ladder total_qty (must be strictly increasing)
+        # 阶梯校验：平差值/总手数非递减(允许相等)；平仓无开差值(占位0,跳过)
         enabled_ladders = [l for l in ladders if l.enabled]
         for i in range(1, len(enabled_ladders)):
-            if enabled_ladders[i].total_qty <= enabled_ladders[i - 1].total_qty:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})必须大于"
-                           f"阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})（累计上限）"
-                )
-            if enabled_ladders[i].opening_spread <= enabled_ladders[i - 1].opening_spread:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"阶梯{i + 1}的开仓差值({enabled_ladders[i].opening_spread})必须大于"
-                           f"阶梯{i}的开仓差值({enabled_ladders[i - 1].opening_spread})"
-                )
-            if enabled_ladders[i].closing_spread <= enabled_ladders[i - 1].closing_spread:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"阶梯{i + 1}的平仓差值({enabled_ladders[i].closing_spread})必须大于"
-                           f"阶梯{i}的平仓差值({enabled_ladders[i - 1].closing_spread})"
-                )
+            if enabled_ladders[i].closing_spread < enabled_ladders[i - 1].closing_spread:
+                raise HTTPException(status_code=400,
+                    detail=f"阶梯{i + 1}的平仓差值({enabled_ladders[i].closing_spread})不能小于阶梯{i}的平仓差值({enabled_ladders[i - 1].closing_spread})")
+            if enabled_ladders[i].total_qty < enabled_ladders[i - 1].total_qty:
+                raise HTTPException(status_code=400,
+                    detail=f"阶梯{i + 1}的总手数({enabled_ladders[i].total_qty})不能小于阶梯{i}的总手数({enabled_ladders[i - 1].total_qty})")
+
 
         # 2.5. Get timing configuration for this strategy type
         from app.services.timing_config_service import TimingConfigService
@@ -1577,27 +1611,43 @@ async def execute_continuous_closing(
         # Prevents double-opening after Python crash/restart (position_manager is in-memory only)
         try:
             from app.services.hedging_pair_service import hedging_pair_service as _hps_guard
-            from app.services.binance_client import BinanceFuturesClient as _BFC_guard
-            from app.core.proxy_utils import build_proxy_url as _bpu
             _guard_pair = _hps_guard.get_pair(pair_code)
             _guard_sym_a = _guard_pair.symbol_a.symbol if _guard_pair else "XAUUSDT"
-            _guard_client = _BFC_guard(binance_account.api_key, binance_account.api_secret,
-                                       proxy_url=_bpu(binance_account.proxy_config))
-            _guard_positions = await _guard_client.get_position_risk(symbol=_guard_sym_a)
-            await _guard_client.close()
-            _target_side = "SHORT" if strategy_type == "reverse" else "LONG"
-            _existing_qty = sum(
-                abs(float(p.get("positionAmt", 0)))
-                for p in _guard_positions
-                if p.get("positionSide", "") == _target_side and float(p.get("positionAmt", 0)) != 0
-            )
+            _existing_qty = 0.0
+            _guard_src = "WS"
+            _got_cache = False
+            # 优先读 WS 持仓缓存（position_streamer），零网络往返
+            try:
+                from app.tasks.broadcast_tasks import position_streamer as _ps
+                _bn = _ps._binance_positions.get(user_id) or _ps._binance_positions.get("_default", {})
+                if _guard_sym_a in _bn:
+                    _long_x, _short_x = _bn[_guard_sym_a]
+                    _existing_qty = _short_x if strategy_type == "reverse" else _long_x
+                    _got_cache = True
+            except Exception:
+                _got_cache = False
+            # 缓存未命中才回退 REST（经代理，慢）
+            if not _got_cache:
+                _guard_src = "REST"
+                from app.services.binance_client import BinanceFuturesClient as _BFC_guard
+                from app.core.proxy_utils import build_proxy_url as _bpu
+                _guard_client = _BFC_guard(binance_account.api_key, binance_account.api_secret,
+                                           proxy_url=_bpu(binance_account.proxy_config))
+                _guard_positions = await _guard_client.get_position_risk(symbol=_guard_sym_a)
+                await _guard_client.close()
+                for p in _guard_positions:
+                    amt = float(p.get("positionAmt", 0))
+                    if strategy_type == "reverse" and amt < 0:
+                        _existing_qty += abs(amt)
+                    elif strategy_type == "forward" and amt > 0:
+                        _existing_qty += amt
             if _existing_qty > 0:
                 _first_ladder_idx = next((i for i, l in enumerate(ladders) if l.enabled), 0)
                 _ladder_total = ladders[_first_ladder_idx].total_qty if ladders else _existing_qty
                 _seed_qty = min(_existing_qty, _ladder_total)
                 logger.info(
                     f"[POSITION_GUARD] Closing strategy: Binance holds {_seed_qty}/{_ladder_total} XAU "
-                    f"({_target_side}) — V2 mapper will use capacity-based tracking (pair={pair_code})"
+                    f"(src={_guard_src}) — V2 mapper will use capacity-based tracking (pair={pair_code})"
                 )
         except Exception as _guard_err:
             logger.warning(f"[POSITION_GUARD] Position check skipped: {_guard_err}")
@@ -1705,10 +1755,28 @@ async def stop_execution(
 async def get_all_execution_tasks(
     user_id: str = Depends(get_current_user_id),
 ):
-    """Get all execution tasks"""
+    """Get all execution tasks (list form, with strategy_type, filtered by user)."""
     from app.services.execution_task_manager import execution_task_manager
 
-    tasks = execution_task_manager.get_all_tasks()
+    raw = execution_task_manager.get_all_tasks()  # {task_id: {...}}
+
+    tasks = []
+    for _tid, _info in (raw or {}).items():
+        if not isinstance(_info, dict):
+            continue
+        _sid = _info.get("strategy_id", "") or ""
+        # 仅返回当前用户的任务（strategy_id 形如 {user_id}_{pair}_{type}_continuous）
+        if user_id and not _sid.startswith(f"{user_id}_"):
+            continue
+        # 从 strategy_id 解析 strategy_type（含 opening/closing 关键字），供前端恢复按钮
+        _stype = ""
+        for _k in ("reverse_opening", "reverse_closing", "forward_opening", "forward_closing"):
+            if _k in _sid:
+                _stype = _k
+                break
+        _out = dict(_info)
+        _out["strategy_type"] = _stype
+        tasks.append(_out)
 
     return {
         "success": True,

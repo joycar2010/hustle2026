@@ -1767,6 +1767,225 @@ class PositionStreamer:
     # ------------------------------------------------------------------
 
 
+
+class MarketRateStreamer:
+    """每 10 秒广播资金费率 + 过夜费率到所有客户端 (ws:broadcast)"""
+
+    INTERVAL = 10.0
+
+    def __init__(self):
+        self.running = False
+        self._task = None
+
+    async def start(self):
+        if self.running:
+            return
+        self.running = True
+        self._task = asyncio.create_task(self._loop())
+        logger.info(f"[MarketRateStreamer] started (interval={self.INTERVAL}s)")
+
+    async def stop(self):
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("[MarketRateStreamer] stopped")
+
+    async def _fetch_funding_rate(self):
+        try:
+            from app.services.binance_client import BinanceFuturesClient
+            client = BinanceFuturesClient("", "")
+            try:
+                data = await client.get_premium_index("XAUUSDT")
+            finally:
+                await client.close()
+            fr = float(data.get("lastFundingRate", 0))
+            mp = float(data.get("markPrice", 0))
+            cpl = round(fr * mp, 4)
+            return {
+                "funding_rate": fr,
+                "funding_rate_pct": round(fr * 100, 6),
+                "mark_price": mp,
+                "next_funding_time": int(data.get("nextFundingTime", 0)),
+                "long_cost_per_lot": cpl,
+                "short_cost_per_lot": -cpl,
+            }
+        except Exception as e:
+            logger.warning(f"[MarketRateStreamer] funding rate error: {e}")
+            return None
+
+    async def _fetch_swap_rate(self):
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    "http://172.31.14.113:8001/mt5/symbol_info/XAUUSD+",
+                    headers={"X-API-Key": "OQ6bUimHZDmXEZzJKE"}
+                )
+                if resp.status_code != 200:
+                    logger.warning(f"[MarketRateStreamer] swap rate HTTP {resp.status_code}")
+                    return None
+                info = resp.json()
+                swap_long = info.get("swap_long", 0)
+                swap_short = info.get("swap_short", 0)
+                return {
+                    "long_swap_per_lot": round(swap_long / 100, 4),
+                    "short_swap_per_lot": round(swap_short / 100, 4),
+                }
+        except Exception as e:
+            logger.warning(f"[MarketRateStreamer] swap rate error: {e}")
+            return None
+
+    async def _loop(self):
+        from app.core.redis_client import redis_client as _rc
+        import json as _json
+
+        await asyncio.sleep(2)  # let other services init
+        while self.running:
+            try:
+                funding = await self._fetch_funding_rate()
+                swap = await self._fetch_swap_rate()
+                evt = {
+                    "type": "market_rates",
+                    "data": {
+                        "funding": funding,
+                        "swap": swap,
+                    }
+                }
+                await _rc.publish("ws:broadcast", _json.dumps(evt))
+            except Exception as e:
+                logger.error(f"[MarketRateStreamer] loop error: {e}")
+            await asyncio.sleep(self.INTERVAL)
+
+
+market_rate_streamer = MarketRateStreamer()
+
+
+class QuoteDivergenceMonitor:
+    """实时比对 ICMarkets XAUUSD 与 Bybit XAUUSD+ 中间价；背离>=trip 暂停下单、<=recover 恢复。
+    迟滞状态机；写 Redis quote_divergence:state（executor 软暂停闸门读取）+ 广播 ws:broadcast。"""
+
+    _CFG_PATH = '/data/hustle2026/backend/config/quote_divergence.json'
+    _DEFAULTS = {
+        "enabled": True,
+        "ic_url": "http://172.31.14.113:8021", "ic_symbol": "XAUUSD",
+        "ref_url": "http://172.31.14.113:8001", "ref_symbol": "XAUUSD+",
+        "api_key": "OQ6bUimHZDmXEZzJKE",
+        "trip": 0.7, "recover": 0.3,
+        "poll_sec": 0.5, "stale_sec": 5, "heartbeat_sec": 3.0,
+    }
+
+    def __init__(self):
+        self.running = False
+        self._task = None
+        self.diverged = False
+        self._last_broadcast = 0.0
+
+    def _load_cfg(self):
+        import json as _json
+        c = dict(self._DEFAULTS)
+        try:
+            with open(self._CFG_PATH, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+                if isinstance(data, dict):
+                    c.update(data)
+        except Exception:
+            pass
+        return c
+
+    async def start(self):
+        if self.running:
+            return
+        self.running = True
+        self._task = asyncio.create_task(self._loop())
+        logger.info("[QuoteDivergenceMonitor] started")
+
+    async def stop(self):
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("[QuoteDivergenceMonitor] stopped")
+
+    async def _fetch_mid(self, client, url, symbol, api_key):
+        resp = await client.get(f"{url}/mt5/tick/{symbol}", headers={"X-API-Key": api_key})
+        if resp.status_code != 200:
+            return None
+        d = resp.json()
+        bid = float(d.get("bid") or 0)
+        ask = float(d.get("ask") or 0)
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2.0
+        last = float(d.get("last") or 0)
+        return last if last > 0 else None
+
+    async def _loop(self):
+        from app.core.redis_client import redis_client as _rc
+        import httpx, json as _json, time as _time
+        await asyncio.sleep(3)  # let services init
+        while self.running:
+            cfg = self._load_cfg()
+            poll = float(cfg.get("poll_sec", 0.5))
+            if not cfg.get("enabled", True):
+                try:
+                    await _rc.set("quote_divergence:state",
+                                  _json.dumps({"diverged": False, "disabled": True, "ts": _time.time()}), ex=10)
+                except Exception:
+                    pass
+                await asyncio.sleep(max(1.0, poll))
+                continue
+            try:
+                trip = float(cfg.get("trip", 0.7))
+                recover = float(cfg.get("recover", 0.3))
+                api_key = cfg.get("api_key", "OQ6bUimHZDmXEZzJKE")
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    ic_mid, ref_mid = await asyncio.gather(
+                        self._fetch_mid(client, cfg["ic_url"], cfg["ic_symbol"], api_key),
+                        self._fetch_mid(client, cfg["ref_url"], cfg["ref_symbol"], api_key),
+                    )
+                if ic_mid is None or ref_mid is None:
+                    logger.warning(f"[QuoteDivergenceMonitor] tick miss ic={ic_mid} ref={ref_mid}, hold diverged={self.diverged}")
+                    await asyncio.sleep(poll)
+                    continue
+                diff = abs(ic_mid - ref_mid)
+                prev = self.diverged
+                if self.diverged:
+                    if diff <= recover:
+                        self.diverged = False
+                else:
+                    if diff >= trip:
+                        self.diverged = True
+                now = _time.time()
+                state = {"diverged": self.diverged, "diff": round(diff, 4),
+                         "ic": round(ic_mid, 3), "ref": round(ref_mid, 3),
+                         "trip": trip, "recover": recover, "ts": now}
+                try:
+                    await _rc.set("quote_divergence:state", _json.dumps(state), ex=int(cfg.get("stale_sec", 5)) * 2)
+                except Exception as e:
+                    logger.warning(f"[QuoteDivergenceMonitor] redis set err: {e}")
+                changed = (prev != self.diverged)
+                if changed or (now - self._last_broadcast) >= float(cfg.get("heartbeat_sec", 3.0)):
+                    self._last_broadcast = now
+                    try:
+                        await _rc.publish("ws:broadcast", _json.dumps({"type": "quote_divergence", "data": state}))
+                    except Exception as e:
+                        logger.warning(f"[QuoteDivergenceMonitor] publish err: {e}")
+                    if changed:
+                        logger.info(f"[QuoteDivergenceMonitor] {'DIVERGED' if self.diverged else 'NORMAL'} diff={diff:.3f} ic={ic_mid:.3f} ref={ref_mid:.3f}")
+            except Exception as e:
+                logger.error(f"[QuoteDivergenceMonitor] loop error: {e}")
+            await asyncio.sleep(poll)
+
+
+quote_divergence_monitor = QuoteDivergenceMonitor()
+
+
 position_streamer = PositionStreamer()
 
 

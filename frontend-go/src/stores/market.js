@@ -24,8 +24,11 @@ export const useMarketStore = defineStore('market', () => {
     'strategy_execution_error',
     'strategy_order_executed',
     'strategy_orders_filled',
+    'strategy_stop_confirmed',
   ])
   // Real-time position snapshot — updated on every position_snapshot WebSocket message
+  const marketRates = ref({ funding: null, swap: null })
+  const quoteDivergence = ref(null)  // 行情背离软暂停状态
   const positionSnapshot = ref({
     bybit_long_lots: 0,
     bybit_short_lots: 0,
@@ -100,6 +103,14 @@ export const useMarketStore = defineStore('market', () => {
           import('@/stores/notification').then(({ useNotificationStore }) => {
             useNotificationStore().handleRiskAlert(msg.data)
           }).catch(e => console.error('[WebSocket] risk_alert dispatch failed:', e))
+        }
+
+        if (msg.type === 'market_rates' && msg.data) {
+          marketRates.value = msg.data
+        }
+
+        if (msg.type === 'quote_divergence' && msg.data) {
+          quoteDivergence.value = msg.data
         }
 
         if (msg.type === 'position_snapshot' && msg.data) {
@@ -271,6 +282,8 @@ export const useMarketStore = defineStore('market', () => {
   })
 
   return {
+    marketRates,
+    quoteDivergence,
     marketData,
     accountBalanceData,
     connected,

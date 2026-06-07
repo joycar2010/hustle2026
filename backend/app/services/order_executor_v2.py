@@ -1361,7 +1361,7 @@ class OrderExecutorV2:
                 price=price,
                 position_side=position_side,
                 post_only=True,
-                client_order_id_prefix="s-",
+                client_order_id_prefix=f"s-{pair_code}-",
             )
         elif account.platform_id == 2:
             # Bybit Linear Contract (BXAU)

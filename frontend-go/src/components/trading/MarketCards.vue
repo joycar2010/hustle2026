@@ -1,38 +1,18 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto overflow-hidden w-full">
-    <!-- System Status Marquee -->
+    <!-- System Status Marquee (all notifications unified) -->
     <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
       <button
         @click="showSystemStatusModal = true"
-        :class="[
-          'w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
-          systemHealthy ? 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30' : 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-        ]"
+        :class="['w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer', marqueeButtonBg]"
         :title="'点击查看详细系统状态'"
       >
         <div class="marquee-container w-full overflow-hidden">
-          <div v-if="liqDangerActive"
-            class="marquee-content text-xs whitespace-nowrap text-[#ff0000] liq-flash font-bold">
-            {{ liqDangerText }} | {{ systemStatusText }}
-          </div>
-          <div v-else
-            class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-            {{ systemStatusText }}
+          <div :class="['marquee-content text-xs whitespace-nowrap', marqueeColorClass]">
+            {{ marqueeText }}
           </div>
         </div>
       </button>
-    </div>
-
-    <!-- Market Close Warning -->
-    <div v-if="!marketOpen" class="px-1.5 lg:px-1.5 md:px-2 pt-1.5 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
-      <div class="bg-[#f6465d]/15 border border-[#f6465d]/30 rounded px-3 py-1.5 flex items-center justify-center gap-2">
-        <span class="text-[#f6465d] text-xs font-medium">{{ marketMessage }}</span>
-      </div>
-    </div>
-    <div v-else-if="marketWarning" class="px-1.5 lg:px-1.5 md:px-2 pt-1.5 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
-      <div class="bg-[#f0b90b]/15 border border-[#f0b90b]/30 rounded px-3 py-1.5 flex items-center justify-center gap-2">
-        <span class="text-[#f0b90b] text-xs font-medium">{{ marketMessage }}</span>
-      </div>
     </div>
 
     <!-- Total Profit Header -->
@@ -43,6 +23,32 @@
           {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
         </span>
         <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
+      </div>
+      <!-- 主账户 / 对冲账户盈亏明细 -->
+      <div class="bg-[#1e2329] rounded p-1 flex items-center justify-between gap-1 w-full mt-1">
+        <div class="flex items-center gap-1.5 flex-1 min-w-0">
+          <span class="text-[10px] text-gray-500 whitespace-nowrap">主账户</span>
+          <span class="text-xs font-mono font-bold" :class="binanceFloatingProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ binanceFloatingProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceFloatingProfit)) }}
+          </span>
+          <span class="text-[10px] text-gray-600">|</span>
+          <span class="text-[10px] text-gray-500">资金费</span>
+          <span class="text-[10px] font-mono" :class="mainFundingFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ mainFundingFee >= 0 ? '+' : '' }}{{ mainFundingFee.toFixed(2) }}
+          </span>
+        </div>
+        <div class="w-px h-3 bg-[#2b3139]"></div>
+        <div class="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
+          <span class="text-[10px] text-gray-500 whitespace-nowrap">对冲账户</span>
+          <span class="text-xs font-mono font-bold" :class="bybitFloatingProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ bybitFloatingProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitFloatingProfit)) }}
+          </span>
+          <span class="text-[10px] text-gray-600">|</span>
+          <span class="text-[10px] text-gray-500">过夜费</span>
+          <span class="text-[10px] font-mono" :class="hedgeOvernightFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ hedgeOvernightFee >= 0 ? '+' : '' }}{{ hedgeOvernightFee.toFixed(2) }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -434,6 +440,54 @@ const liqDangerText = computed(() => {
   return parts.length ? '⚠ ' + currentPair.value + ' ' + parts.join(' | ') : ''
 })
 
+// ── 行情背离软暂停状态（后端 QuoteDivergenceMonitor 广播）──
+const quoteDivergence = computed(() => marketStore.quoteDivergence)
+const quoteDiverged = computed(() => quoteDivergence.value?.diverged === true)
+const quoteRecoveredFlash = ref(false)
+let quoteRecoverTimer = null
+watch(quoteDiverged, (now, prev) => {
+  if (prev === true && now === false) {
+    quoteRecoveredFlash.value = true
+    if (quoteRecoverTimer) clearTimeout(quoteRecoverTimer)
+    quoteRecoverTimer = setTimeout(() => { quoteRecoveredFlash.value = false }, 5000)
+  }
+})
+
+const marqueeText = computed(() => {
+  const parts = []
+  if (quoteDiverged.value) {
+    const d = quoteDivergence.value
+    parts.push(`⛔ 行情背离 ICMarkets ${d?.ic ?? '-'} vs Bybit ${d?.ref ?? '-'} 差价 ${(d?.diff ?? 0).toFixed(2)}（已暂停下单）`)
+  } else if (quoteRecoveredFlash.value) {
+    parts.push(`✓ 行情已恢复（差价 ${(quoteDivergence.value?.diff ?? 0).toFixed(2)}），已继续运行`)
+  }
+  if (liqDangerActive.value) parts.push(liqDangerText.value)
+  if (!marketOpen.value && marketMessage.value) parts.push('⛔ ' + marketMessage.value)
+  else if (marketWarning.value && marketMessage.value) parts.push('⚠ ' + marketMessage.value)
+  parts.push(systemStatusText.value)
+  return parts.join(' | ')
+})
+
+const marqueeColorClass = computed(() => {
+  if (quoteDiverged.value) return 'text-[#ff0000] liq-flash font-bold'
+  if (quoteRecoveredFlash.value) return 'text-[#0ecb81] font-bold'
+  if (liqDangerActive.value) return 'text-[#ff0000] liq-flash font-bold'
+  if (!marketOpen.value) return 'text-[#f6465d] font-bold'
+  if (marketWarning.value) return 'text-[#f0b90b] font-bold'
+  if (!systemHealthy.value) return 'text-[#f6465d]'
+  return 'text-[#0ecb81]'
+})
+
+const marqueeButtonBg = computed(() => {
+  if (quoteDiverged.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
+  if (quoteRecoveredFlash.value) return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
+  if (liqDangerActive.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
+  if (!marketOpen.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  if (marketWarning.value) return 'bg-[#f0b90b]/20 hover:bg-[#f0b90b]/30'
+  if (!systemHealthy.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
+})
+
 // Non-blocking notification overlay for liq danger
 const liqNotification = ref(null)
 
@@ -567,6 +621,35 @@ const bybitShortTotal = computed(() => {
 const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
 let bybitSwapRateTimer = null
+
+// WS-pushed market rates (10s interval from MarketRateStreamer)
+watch(() => marketStore.marketRates, (rates) => {
+  if (!rates) return
+  if (rates.funding) {
+    binanceLongFundingRate.value = rates.funding.long_cost_per_lot ?? 0
+    binanceShortFundingRate.value = rates.funding.short_cost_per_lot ?? 0
+    binanceFundingRatePct.value = rates.funding.funding_rate_pct ?? 0
+    binanceNextFundingTime.value = rates.funding.next_funding_time ?? 0
+  }
+  if (rates.swap) {
+    bybitLongSwapFee.value = rates.swap.long_swap_per_lot ?? 0
+    bybitShortSwapFee.value = rates.swap.short_swap_per_lot ?? 0
+  }
+}, { deep: true })
+
+// 主账户资金费 = 持仓量(XAU) / 100 * cost_per_lot
+const mainFundingFee = computed(() => {
+  const longFee = (binanceLongTotal.value / 100) * binanceLongFundingRate.value
+  const shortFee = (binanceShortTotal.value / 100) * binanceShortFundingRate.value
+  return longFee + shortFee
+})
+
+// 对冲过夜费 = 持仓手数 * swap_per_lot
+const hedgeOvernightFee = computed(() => {
+  const longFee = bybitLongTotal.value * bybitLongSwapFee.value
+  const shortFee = bybitShortTotal.value * bybitShortSwapFee.value
+  return longFee + shortFee
+})
 // Binance real-time funding rate (per lot = 100 XAU)
 const binanceLongFundingRate = ref(0)   // long_cost_per_lot: >0 long pays, <0 long receives
 const binanceShortFundingRate = ref(0)  // short_cost_per_lot: opposite sign
@@ -952,6 +1035,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (quoteRecoverTimer) clearTimeout(quoteRecoverTimer)
   if (lagTimer) clearInterval(lagTimer)
   if (orderFetchTimer) clearInterval(orderFetchTimer)
   // orderBookFetchTimer removed — orderbook now via WS
