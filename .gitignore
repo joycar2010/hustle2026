@@ -6,9 +6,6 @@
 /*
 !/.gitignore
 !/hustlecoin-cex/
-!/frontend/
-!/python-business/
-!/deploy/
 
 __pycache__/
 *.pyc
