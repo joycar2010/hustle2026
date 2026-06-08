@@ -1,3 +1,15 @@
+# ⚠️ This git repo is rooted at the user's HOME directory (C:\Users\Administrator).
+# Blanket-ignore everything at the repo root and allowlist only the project dirs, so
+# secrets/credentials (.ssh, .aws, .gitconfig, NTUSER.DAT, browser profile, etc.) can
+# NEVER be accidentally staged (e.g. by `git add -A`). Already-tracked project files
+# are unaffected (gitignore does not untrack).
+/*
+!/.gitignore
+!/hustlecoin-cex/
+!/frontend/
+!/python-business/
+!/deploy/
+
 __pycache__/
 *.pyc
 .env
