@@ -58,7 +58,7 @@ def list_symbol_rules(
     total = q.count()
     rules = q.order_by(SymbolRule.symbol).offset((page - 1) * size).limit(size).all()
     global_rules = _get_global_rules(db, user_id)
-    return {"items": [_to_response(r, global_rules) for r in rules], "total": total, "page": page, "size": size}
+    return {"items": [_to_response(r, global_rules) for r in rules], "total": total, "page": page, "page_size": size}
 
 
 @router.get("/{symbol}", response_model=SymbolRuleResponse)
@@ -104,8 +104,11 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
     if effective_remove is None:
         global_rules = _get_global_rules(db, user_id)
         effective_remove = global_rules.remove_spread
-    if effective_remove is not None and Decimal(str(effective_remove)) < Decimal("0.5") and not explicitly_set_repay:
-        rule.allow_repay = False
+    if effective_remove is not None and not explicitly_set_repay:
+        if Decimal(str(effective_remove)) < Decimal("0.5"):
+            rule.allow_repay = False
+        elif not rule.allow_repay:
+            rule.allow_repay = True
 
     db.commit()
     db.refresh(rule)

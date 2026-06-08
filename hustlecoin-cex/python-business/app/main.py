@@ -17,6 +17,7 @@ from app.api.master_account import router as master_account_router
 from app.api.symbol import router as symbol_router
 from app.api.engine_api import router as engine_router
 from app.api.symbol_rules import router as symbol_rules_router
+from app.api.market import router as market_router
 from app.api.account_symbol_rules import router as account_symbol_rules_router
 from app.api.auth import router as auth_router
 from app.api.coin_management import router as coin_mgmt_router
@@ -34,11 +35,13 @@ from app.api.admin_audit import router as admin_audit_router
 from app.api.admin_ai import router as admin_ai_router
 from app.api.admin_ws import router as admin_ws_router
 from app.api.admin_global_rules import router as admin_global_rules_router
+from app.api.rule_presets import router as rule_presets_router
 from app.config import settings
 from app.db.models import Base
 from app.db.session import engine, SessionLocal
 from app.middleware.auth import JWTAuthMiddleware
 from app.services.spread_reader import spread_reader
+from app.services.market_data_pusher import market_data_pusher
 from app.services import symbol_sync
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,9 @@ SPA_DIR = Path(__file__).resolve().parent.parent / "static" / "spa"
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     await spread_reader.start()
+
+    import asyncio
+    asyncio.create_task(market_data_pusher.start())
 
     if settings.symbol_sync_on_startup:
         try:
@@ -83,6 +89,7 @@ app.include_router(master_account_router)
 app.include_router(symbol_router)
 app.include_router(engine_router)
 app.include_router(symbol_rules_router)
+app.include_router(market_router)
 app.include_router(account_symbol_rules_router)
 app.include_router(auth_router)
 app.include_router(coin_mgmt_router)
@@ -100,6 +107,7 @@ app.include_router(admin_audit_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_ws_router)
 app.include_router(admin_global_rules_router)
+app.include_router(rule_presets_router)
 
 ADMIN_SPA_DIR = Path(__file__).resolve().parent.parent / "static" / "admin-spa"
 
@@ -116,9 +124,13 @@ if ADMIN_SPA_DIR.is_dir():
 if SPA_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=str(SPA_DIR / "assets")), name="spa-assets")
 
+    # index.html must never be cached, else browsers keep loading an old hashed
+    # bundle after deploys. (Assets under /assets are content-hashed → cacheable.)
+    _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
     @app.get("/{full_path:path}")
     async def spa_fallback(request: Request, full_path: str):
         file_path = SPA_DIR / full_path
-        if file_path.is_file():
+        if file_path.is_file() and full_path != "index.html":
             return FileResponse(str(file_path))
-        return FileResponse(str(SPA_DIR / "index.html"))
+        return FileResponse(str(SPA_DIR / "index.html"), headers=_NO_CACHE)
