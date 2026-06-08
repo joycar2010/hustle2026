@@ -23,12 +23,6 @@
           {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
         </span>
         <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
-        <span class="text-[10px] text-gray-600 mx-1">|</span>
-        <span class="text-xs lg:text-[10px] text-gray-400">实际利润</span>
-        <span class="text-base lg:text-sm md:text-lg font-bold font-mono" :class="actualProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-          {{ actualProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(actualProfit)) }}
-        </span>
-        <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
       </div>
       <!-- 主账户 / 对冲账户盈亏明细 -->
       <div class="bg-[#1e2329] rounded p-1 flex items-center justify-between gap-1 w-full mt-1">
@@ -602,9 +596,6 @@ const reverseActualPosition = ref(0)
 // 由 fetchAccountData / handleAccountBalanceUpdate 更新
 // key: platform_id，同平台多账户的 unrealized_pnl 会累加
 const accountsBalanceByPlatform = ref({})  // { 1: {unrealized_pnl: sum}, 2: ..., 4: ..., 5: ... }
-const dailyNetProfit = ref(null)  // 当日返佣后净利润(pnl_fast WS, 北京00:00→now)
-const binanceUpBase = ref(null)      // 上次 pnl_fast 推送的币安平台浮盈(USDT)
-const binanceMarkAtPush = ref(null)  // 上次推送时的币安标记价(用于 tick 插值)
 
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
@@ -725,12 +716,6 @@ const forwardSpread = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（来自 Binance totalUnrealizedProfit）
 // 后端 balance.unrealized_pnl 即为 Binance 账户当前持仓实时浮动盈亏（USDT）
 const binanceFloatingProfit = computed(() => {
-  // tick 级实时: 平台 5s 基准 + 实时标记价漂移(净持仓×Δmark, USDT), 每 5s 与平台重对齐
-  if (binanceUpBase.value != null && binanceMarkAtPush.value != null) {
-    const markNow = (binance.value && binance.value.mid) ? binance.value.mid : binanceMarkAtPush.value
-    const net = binanceLongTotal.value - binanceShortTotal.value
-    return binanceUpBase.value + net * (markNow - binanceMarkAtPush.value)
-  }
   const b = accountsBalanceByPlatform.value[1]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
@@ -777,9 +762,6 @@ const totalProfit = computed(() => {
   }
   return sum
 })
-
-// 实际利润 = 实时持仓盈利(浮动) + 当日返佣后净利润(与 /trading 同口径)
-const actualProfit = computed(() => totalProfit.value + (dailyNetProfit.value || 0))
 
 watch(() => marketStore.marketData, (data) => {
   if (!data) return
@@ -864,8 +846,6 @@ watch(() => marketStore.lastMessage, (message) => {
   if (!message) return
   if (message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
-  } else if (message.type === 'pnl_fast') {
-    handlePnlFast(message.data)
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
   }
@@ -901,28 +881,6 @@ function handlePositionSnapshot(data) {
   if (bybitShortTotal.value !== newBS) bybitShortPositions.value = newBS > 0 ? [{ size: newBS }] : []
   if (binanceLongTotal.value !== newCL) binanceLongPositions.value = newCL > 0 ? [{ size: newCL }] : []
   if (binanceShortTotal.value !== newCS) binanceShortPositions.value = newCS > 0 ? [{ size: newCS }] : []
-}
-
-// pnl_fast: 后端高频推送平台权威浮动盈亏 + 当日返佣后净利润 → 浮动实时同步、零REST
-function handlePnlFast(data) {
-  if (!data) return
-  const ubp = data.unrealized_by_platform || {}
-  // 捕获币安浮盈基准 + 当时标记价 → 两次推送间用实时标记价做 tick 级插值
-  if (ubp['1'] !== undefined && ubp['1'] !== null) {
-    binanceUpBase.value = parseFloat(ubp['1'])
-    binanceMarkAtPush.value = (binance.value && binance.value.mid) ? binance.value.mid : binanceMarkAtPush.value
-  }
-  if (Object.keys(ubp).length > 0) {
-    const merged = { ...accountsBalanceByPlatform.value }
-    for (const pid of Object.keys(ubp)) {
-      const p = Number(pid)
-      merged[p] = { ...(merged[p] || {}), unrealized_pnl: ubp[pid] }
-    }
-    accountsBalanceByPlatform.value = merged  // 全量重赋值触发浮动盈亏 computed 实时刷新
-  }
-  if (data.daily_net_profit !== undefined && data.daily_net_profit !== null) {
-    dailyNetProfit.value = parseFloat(data.daily_net_profit)
-  }
 }
 
 function handleAccountBalanceUpdate(data) {

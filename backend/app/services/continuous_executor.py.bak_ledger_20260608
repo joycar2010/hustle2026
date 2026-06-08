@@ -922,18 +922,9 @@ class ContinuousStrategyExecutor:
 
             logger.info(f"Position updated: {'+'if is_opening else '-'}{filled_qty}")
 
-            # 实得价差(方向化: reverse=主-对冲, forward=对冲-主) — 与历史"价差"列同口径,
-            # 供 平均点差/账本/spread_at_execution 推送 统一使用;缺均价时回退触发点差。
-            _rl_bap = exec_result.get('binance_avg_price') or 0
-            _rl_bbp = exec_result.get('bybit_avg_price') or 0
-            if _rl_bap and _rl_bbp:
-                _realized_spread = round(float((_rl_bap - _rl_bbp) if 'reverse' in strategy_type else (_rl_bbp - _rl_bap)), 4)
-            else:
-                _realized_spread = current_spread
-
             # Step 11: Push status updates
             asyncio.create_task(self._push_position_change(ladder_idx, filled_qty, position_info, ladder.total_qty))
-            await self._push_order_executed(ladder_idx, exec_result, _realized_spread)
+            await self._push_order_executed(ladder_idx, exec_result, current_spread)
 
             # Step 11.5: 记录 strategy 成交元数据 (threshold/spread) 到 Redis 供历史查询补全
             try:
@@ -954,54 +945,6 @@ class ContinuousStrategyExecutor:
                     )
             except Exception as _e_meta:
                 logger.warning(f"[META] Redis write failed for order {exec_result.get('binance_order_id')}: {_e_meta}")
-
-            # Step 11.55: 维护"在仓开仓明细账本"(Redis FIFO) — 供前端权威平均入场点差 + 逐笔明细回灌
-            # 开仓 RPUSH 一条;平仓按 FIFO 从队首消费。纯记账,异常不影响交易。
-            try:
-                if self.user_id and binance_filled_xau and binance_filled_xau > 0:
-                    from app.core.redis_client import redis_client as _rc_led
-                    import json as _json_led, time as _time_led
-                    _dir = 'reverse' if 'reverse' in strategy_type else 'forward'
-                    _ledger_key = f"pos_open_ledger:{self.user_id}:{self.pair_code}:{_dir}"
-                    _LED_TTL = 30 * 86400
-                    if is_opening:
-                        _entry = _json_led.dumps({
-                            "q": round(float(binance_filled_xau), 6),
-                            "s": _realized_spread if _realized_spread is not None else 0.0,
-                            "ladder": ladder_idx,
-                            "ts": int(_time_led.time() * 1000),
-                            "oid": exec_result.get('binance_order_id'),
-                        })
-                        await _rc_led.client.rpush(_ledger_key, _entry)
-                        await _rc_led.client.expire(_ledger_key, _LED_TTL)
-                    else:
-                        _rows = await _rc_led.client.lrange(_ledger_key, 0, -1)
-                        _remain = float(binance_filled_xau)
-                        _new = []
-                        _done = False
-                        for _raw in (_rows or []):
-                            if _done:
-                                _new.append(_raw); continue
-                            try:
-                                _e = _json_led.loads(_raw)
-                            except Exception:
-                                continue
-                            _q = float(_e.get('q') or 0)
-                            if _remain >= _q - 1e-9:
-                                _remain -= _q
-                            elif _remain > 1e-9:
-                                _e['q'] = round(_q - _remain, 6); _remain = 0.0
-                                _new.append(_json_led.dumps(_e)); _done = True
-                            else:
-                                _new.append(_raw); _done = True
-                        _pipe = _rc_led.client.pipeline(transaction=True)
-                        _pipe.delete(_ledger_key)
-                        if _new:
-                            _pipe.rpush(_ledger_key, *_new)
-                            _pipe.expire(_ledger_key, _LED_TTL)
-                        await _pipe.execute()
-            except Exception as _e_led:
-                logger.debug(f"[POS_LEDGER] update skipped: {_e_led}")
 
             # Step 11.6: 滑点保护检查 (双边成交后)
             try:
@@ -1064,52 +1007,6 @@ class ContinuousStrategyExecutor:
         logger.info(f"[ladder={ladder_idx}] Loop exited after {loop_count} iterations. pos={current_position}/{ladder.total_qty} stop_req={self.stop_requested} is_running={self.is_running}")
         return {'success': True}
 
-    async def _reload_strategy_config(self, strategy_type: str):
-        """热重载: 回读最新 DB 策略配置, 返回 (List[LadderConfig], order_qty_limit) 或 None。
-        字段映射与启动端点一致: openPrice->opening_spread, threshold->closing_spread,
-        qtyLimit->total_qty, opening/closing_sync_count->opening/closing_trigger_count,
-        opening/closing_m_coin->order_qty_limit。"""
-        from app.core.database import AsyncSessionLocal
-        from app.models.strategy import StrategyConfig
-        from sqlalchemy import select
-        from uuid import UUID as _UUID
-        _dir = 'reverse' if 'reverse' in strategy_type else 'forward'
-        try:
-            _uid = self.user_id if isinstance(self.user_id, _UUID) else _UUID(str(self.user_id))
-        except Exception:
-            _uid = self.user_id
-        async with AsyncSessionLocal() as _db:
-            _res = await _db.execute(
-                select(StrategyConfig).where(
-                    StrategyConfig.user_id == _uid,
-                    StrategyConfig.strategy_type == _dir,
-                    StrategyConfig.pair_code == self.pair_code,
-                ).order_by(StrategyConfig.create_time.desc())
-            )
-            _cfg = _res.scalars().first()
-        if not _cfg or not _cfg.ladders:
-            return None
-        _otc = int(_cfg.opening_sync_count or 1)
-        _ctc = int(_cfg.closing_sync_count or 1)
-        _lds = []
-        for _ld in _cfg.ladders:
-            try:
-                _lds.append(LadderConfig(
-                    enabled=bool(_ld.get('enabled', True)),
-                    opening_spread=float(_ld.get('openPrice', 0) or 0),
-                    closing_spread=float(_ld.get('threshold', 0) or 0),
-                    total_qty=float(_ld.get('qtyLimit', 0) or 0),
-                    opening_trigger_count=_otc,
-                    closing_trigger_count=_ctc,
-                ))
-            except Exception:
-                continue
-        if not _lds:
-            return None
-        _mc = _cfg.opening_m_coin if 'opening' in strategy_type else _cfg.closing_m_coin
-        _oql = float(_mc or 1.0)
-        return (_lds, _oql)
-
     async def _execute_continuous_v2(
         self,
         strategy_type: str,
@@ -1130,16 +1027,6 @@ class ContinuousStrategyExecutor:
         from app.services.ladder_range_mapper import LadderRangeMapper
         mapper = LadderRangeMapper(ladders)
         is_opening = 'opening' in strategy_type
-        # ── 配置热重载状态: 每 N 秒回读 DB, 变更即重建 mapper/更新 order_qty_limit(保存即生效) ──
-        import time as _t_hr
-        _hr_last = _t_hr.time()
-        _hr_interval = 3.0
-        def _hr_sig(_lds, _oql):
-            return (round(float(_oql or 0), 6),
-                    tuple((bool(l.enabled), round(float(l.opening_spread), 6), round(float(l.closing_spread), 6),
-                           round(float(l.total_qty), 6), int(l.opening_trigger_count), int(l.closing_trigger_count))
-                          for l in _lds))
-        _hr_cur = _hr_sig(ladders, order_qty_limit)
 
         logger.info(
             f"[V2] Starting position-based execution: strategy={self.strategy_id} "
@@ -1159,22 +1046,6 @@ class ContinuousStrategyExecutor:
 
         while self.is_running and not self.stop_requested:
             scan_count += 1
-
-            # ── 配置热重载: 保存策略后无需停止开/平仓即生效 ──
-            if _t_hr.time() - _hr_last >= _hr_interval:
-                _hr_last = _t_hr.time()
-                try:
-                    _fresh = await self._reload_strategy_config(strategy_type)
-                    if _fresh is not None:
-                        _f_ladders, _f_oql = _fresh
-                        _f_sig = _hr_sig(_f_ladders, _f_oql)
-                        if _f_sig != _hr_cur:
-                            mapper = LadderRangeMapper(_f_ladders)
-                            order_qty_limit = _f_oql
-                            _hr_cur = _f_sig
-                            logger.info(f"[V2][热重载] {strategy_type} 配置变更已生效: order_qty_limit={order_qty_limit}, ladders={len(_f_ladders)}")
-                except Exception as _hre:
-                    logger.debug(f"[V2][热重载] reload skipped: {_hre}")
 
             if self._active_key and scan_count % 200 == 1:
                 try:

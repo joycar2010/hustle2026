@@ -1390,12 +1390,6 @@ class PnlFastStreamer:
                     user_map.setdefault(str(acc.user_id), []).append(acc)
                 for uid, accs in user_map.items():
                     try:
-                        # 绕过 60s 缓存: 仅失效本用户账户缓存(其他用户不受影响), 取真·当前平台浮盈
-                        for _a in accs:
-                            try:
-                                account_data_service.invalidate_cache(str(_a.account_id))
-                            except Exception:
-                                pass
                         agg = await account_data_service.get_aggregated_account_data(list(accs))
                         upbp = {}
                         for a in (agg.get('accounts') or []):

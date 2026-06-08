@@ -2018,40 +2018,6 @@ async def manual_process_order(
 # 实时交易历史查询（不依赖数据库，直接从平台API获取）
 # ============================================================================
 
-async def compute_daily_net_profit(user_accs, pair_code, db):
-    """当日(北京00:00->now)返佣后净利润, 复用历史口径(_calculate_stats)。供 PnlFastStreamer。
-    netProfitAfterRebate 仅依赖 binance已实现/资金费/返佣 + mt5成交, 故 binance_trades 传 []。"""
-    from app.utils.time_utils import beijing_to_utc_ms
-    from app.services.hedging_pair_service import hedging_pair_service
-    from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2
-    pair = hedging_pair_service.get_pair(pair_code)
-    sym_a = pair.symbol_a.symbol if pair else 'XAUUSDT'
-    sym_b = pair.symbol_b.symbol if pair else 'XAUUSD+'
-    a_pid = pair.symbol_a.platform_id if pair else 1
-    b_pid = pair.symbol_b.platform_id if pair else 2
-    _now_utc = _dt2.now(_tz2.utc)
-    _now_bj = _now_utc + _td2(hours=8)
-    start_ms = beijing_to_utc_ms(_now_bj.strftime('%Y-%m-%d 00:00:00'))
-    end_ms = int(_now_utc.timestamp() * 1000)
-    b_realized = 0.0; b_funding = 0.0; b_rebate = 0.0; mt5_raw = []
-    for acc in user_accs:
-        try:
-            if (not acc.is_mt5_account) and acc.platform_id == a_pid:
-                b_realized += await _get_binance_realized_pnl(acc, start_ms, end_ms, symbol=sym_a)
-                _ft, _ = await _get_binance_funding_fee(acc, start_ms, end_ms, symbol=sym_a)
-                b_funding += _ft
-                b_rebate += await _get_binance_rebate(acc, start_ms, end_ms, symbol=sym_a)
-            elif acc.is_mt5_account and acc.platform_id == b_pid:
-                _tr = await _get_mt5_trades_realtime(acc, start_ms, end_ms, db, mt5_symbol=sym_b)
-                if _tr:
-                    mt5_raw.extend(_tr)
-        except Exception as _e:
-            logger.debug(f"[daily_net] acct {getattr(acc,'account_name','?')} skip: {_e}")
-    formatted_mt5 = _format_mt5_trades(mt5_raw)
-    stats = _calculate_stats([], formatted_mt5, b_realized, b_funding, binance_rebate=b_rebate)
-    return float(stats.get('netProfitAfterRebate', 0.0))
-
-
 @router.get("/open-entry-spread")
 async def get_open_entry_spread(
     pair_code: str = Query("XAU"),

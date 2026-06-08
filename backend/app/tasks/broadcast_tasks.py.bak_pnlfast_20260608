@@ -1347,92 +1347,6 @@ class MarketStateMonitor:
 market_state_monitor = MarketStateMonitor()
 
 
-class PnlFastStreamer:
-    """高频推送浮动盈亏(平台权威)+ 当日返佣后净利润, 供 MarketCards 实时刷新(WS, 前端零REST)。
-    浮盈每 interval(默认5s);净利润每 net_every 轮(≈10s)重算并缓存。"""
-    def __init__(self):
-        self.running = False
-        self.task = None
-        self.interval = 5
-        self.net_every = 2
-        self._net_cache = {}
-        self._cycle = 0
-
-    async def start(self):
-        if self.running:
-            return
-        self.running = True
-        self.task = asyncio.create_task(self._loop())
-        logger.info(f"PnlFastStreamer started (interval: {self.interval}s, net every {self.net_every} cycles)")
-
-    async def stop(self):
-        self.running = False
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-
-    async def _loop(self):
-        while self.running:
-            try:
-                await asyncio.sleep(self.interval)
-                self._cycle += 1
-                do_net = (self._cycle % self.net_every == 1)
-                async with get_db_session(timeout=5.0) as db:
-                    _res = await asyncio.wait_for(db.execute(select(Account).where(Account.is_active == True)), timeout=3.0)
-                    active_accounts = _res.scalars().all()
-                if not active_accounts:
-                    continue
-                user_map = {}
-                for acc in active_accounts:
-                    user_map.setdefault(str(acc.user_id), []).append(acc)
-                for uid, accs in user_map.items():
-                    try:
-                        # 绕过 60s 缓存: 仅失效本用户账户缓存(其他用户不受影响), 取真·当前平台浮盈
-                        for _a in accs:
-                            try:
-                                account_data_service.invalidate_cache(str(_a.account_id))
-                            except Exception:
-                                pass
-                        agg = await account_data_service.get_aggregated_account_data(list(accs))
-                        upbp = {}
-                        for a in (agg.get('accounts') or []):
-                            pid = a.get('platform_id')
-                            up = (a.get('balance') or {}).get('unrealized_pnl')
-                            if pid is not None and up is not None:
-                                upbp[str(pid)] = round(float(upbp.get(str(pid), 0.0)) + float(up), 4)
-                        if do_net:
-                            try:
-                                from app.api.v1.trading import compute_daily_net_profit
-                                async with get_db_session(timeout=8.0) as _db2:
-                                    _net = await compute_daily_net_profit(list(accs), 'XAU', _db2)
-                                self._net_cache[uid] = _net
-                            except Exception as _ne:
-                                logger.debug(f"[PnlFast] net calc {uid} skip: {_ne}")
-                        msg = {'type': 'pnl_fast', 'data': {
-                            'unrealized_by_platform': upbp,
-                            'daily_net_profit': self._net_cache.get(uid),
-                            'pair_code': 'XAU',
-                        }}
-                        await manager.send_to_user(msg, uid)
-                        try:
-                            from app.core.redis_client import redis_client as _rc_pf
-                            if _rc_pf.client:
-                                import json as _j_pf
-                                await _rc_pf.publish('ws:user_event', _j_pf.dumps({'user_id': uid, **msg}))
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        logger.error(f"[PnlFast] user {uid} error: {e}")
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"[PnlFast] loop error: {e}")
-                await asyncio.sleep(self.interval)
-
-
 account_balance_streamer = AccountBalanceStreamer()
 risk_metrics_streamer = RiskMetricsStreamer()
 mt5_connection_streamer = MT5ConnectionStreamer()
@@ -1948,7 +1862,6 @@ class MarketRateStreamer:
 
 
 market_rate_streamer = MarketRateStreamer()
-pnl_fast_streamer = PnlFastStreamer()
 
 
 class QuoteDivergenceMonitor:

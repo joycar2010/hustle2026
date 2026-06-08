@@ -991,22 +991,6 @@ const avgOpenSpread = computed(() => {
   return totalQty > 0 ? totalWeighted / totalQty : null
 })
 
-// 拉取后端权威"在仓开仓明细账本": 平均入场点差(A) + 逐笔明细回灌(B,免疫刷新)
-async function fetchOpenEntrySpread() {
-  try {
-    const r = await api.get('/api/v1/trading/open-entry-spread', {
-      params: { pair_code: currentPair.value || 'XAU', strategy_type: props.type }
-    })
-    const data = r.data || {}
-    const ladders = data.ladders || {}
-    const rebuilt = {}
-    for (const idx of Object.keys(ladders)) {
-      rebuilt[idx] = { currentQty: 0, totalQty: 0, status: 'completed', trades: ladders[idx].trades || [] }
-    }
-    ladderExecutionDetails.value.opening = rebuilt
-  } catch (e) { /* 静默: 账本不可用时退回实时 WS 累积 */ }
-}
-
 // 差值提醒设置（从 Risk.vue 迁移）— 读写 /api/v1/risk/alert-settings
 // 仅展示/保存当前策略类型对应的 2 个字段（forward 或 reverse 的 openPrice/closePrice），
 // 但后端接口一次性返回/接受全部字段，所以完整保留所有键以防覆盖其他字段
@@ -1124,8 +1108,6 @@ async function loadEffectiveTriggerInterval() {
 onMounted(async () => {
   // Load config from database (including enabled states)
   await loadConfigFromDB()
-  // 回灌后端权威在仓开仓明细(平均入场点差 + N笔明细,免疫刷新)
-  fetchOpenEntrySpread()
   // 建议4: 恢复后端运行中的连续执行任务状态
   try {
     const tasksR = await api.get('/api/v1/strategies/execution/tasks')
@@ -1505,8 +1487,6 @@ function handleExecutionCompleted(data) {
   if (isContinuousExecution) {
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
-    // 完成后刷新后端权威账本(平仓到 flat 时清零开仓均价)
-    fetchOpenEntrySpread()
 
     // 常规完成：释放锁
     isStopping.value[action] = false

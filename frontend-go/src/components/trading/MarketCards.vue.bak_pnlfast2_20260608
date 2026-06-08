@@ -603,8 +603,6 @@ const reverseActualPosition = ref(0)
 // key: platform_id，同平台多账户的 unrealized_pnl 会累加
 const accountsBalanceByPlatform = ref({})  // { 1: {unrealized_pnl: sum}, 2: ..., 4: ..., 5: ... }
 const dailyNetProfit = ref(null)  // 当日返佣后净利润(pnl_fast WS, 北京00:00→now)
-const binanceUpBase = ref(null)      // 上次 pnl_fast 推送的币安平台浮盈(USDT)
-const binanceMarkAtPush = ref(null)  // 上次推送时的币安标记价(用于 tick 插值)
 
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
@@ -725,12 +723,6 @@ const forwardSpread = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（来自 Binance totalUnrealizedProfit）
 // 后端 balance.unrealized_pnl 即为 Binance 账户当前持仓实时浮动盈亏（USDT）
 const binanceFloatingProfit = computed(() => {
-  // tick 级实时: 平台 5s 基准 + 实时标记价漂移(净持仓×Δmark, USDT), 每 5s 与平台重对齐
-  if (binanceUpBase.value != null && binanceMarkAtPush.value != null) {
-    const markNow = (binance.value && binance.value.mid) ? binance.value.mid : binanceMarkAtPush.value
-    const net = binanceLongTotal.value - binanceShortTotal.value
-    return binanceUpBase.value + net * (markNow - binanceMarkAtPush.value)
-  }
   const b = accountsBalanceByPlatform.value[1]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
@@ -907,11 +899,6 @@ function handlePositionSnapshot(data) {
 function handlePnlFast(data) {
   if (!data) return
   const ubp = data.unrealized_by_platform || {}
-  // 捕获币安浮盈基准 + 当时标记价 → 两次推送间用实时标记价做 tick 级插值
-  if (ubp['1'] !== undefined && ubp['1'] !== null) {
-    binanceUpBase.value = parseFloat(ubp['1'])
-    binanceMarkAtPush.value = (binance.value && binance.value.mid) ? binance.value.mid : binanceMarkAtPush.value
-  }
   if (Object.keys(ubp).length > 0) {
     const merged = { ...accountsBalanceByPlatform.value }
     for (const pid of Object.keys(ubp)) {
