@@ -2858,7 +2858,6 @@ def _build_paired_trades(binance_trades, mt5_trades, conversion_factor: float = 
         # 方向约定与触发价差 calculate_spread 一致: reverse=主-对冲, forward=对冲-主
         spread = None
         slippage = None
-        slippage_vs_trigger = None
         if avg_price_h is not None:
             _st = (g.get("strategy_type") or "")
             if "forward" in _st:
@@ -2868,22 +2867,14 @@ def _build_paired_trades(binance_trades, mt5_trades, conversion_factor: float = 
             else:
                 realized = abs(avg_price_p - avg_price_h)     # 手动单无方向, 退绝对值
             spread = round(realized, 4)
-            # 滑点 = 实得相对"设定阈值(threshold)"的偏离, 更有利为负(开/平符号化):
-            #   开仓(求高价差): threshold - realized; 平仓(求低价差): realized - threshold
-            # 与实时滑点护栏(actual_spread - threshold)同口径, 且可与表内"价差/阈值"两列对账。
-            _thr = g.get("threshold")
-            if g["source"] == "strategy" and _thr is not None and ("forward" in _st or "reverse" in _st):
-                if "opening" in _st:
-                    slippage = round(float(_thr) - realized, 4)
-                else:
-                    slippage = round(realized - float(_thr), 4)
-            # 审计列: 相对"触发瞬时真实价差(trigger_spread)"的纯执行滑点(独立, 不替代上面的"滑点")
+            # 滑点 = 实得相对"触发时实际价差(trigger_spread)"的偏离, 更有利为负:
+            #   开仓(求高价差): trigger - realized; 平仓(求低价差): realized - trigger
             _trig = g.get("trigger_spread")
             if g["source"] == "strategy" and _trig is not None and ("forward" in _st or "reverse" in _st):
                 if "opening" in _st:
-                    slippage_vs_trigger = round(float(_trig) - realized, 4)
+                    slippage = round(float(_trig) - realized, 4)
                 else:
-                    slippage_vs_trigger = round(realized - float(_trig), 4)
+                    slippage = round(realized - float(_trig), 4)
 
         # 聚合主账号费用
         primary_fee = sum(float(t.get("fee", 0)) for t in g["trades"])
@@ -2909,8 +2900,6 @@ def _build_paired_trades(binance_trades, mt5_trades, conversion_factor: float = 
             "threshold": g["threshold"],
             "spread": spread,
             "slippage": slippage,
-            "trigger_spread": g.get("trigger_spread"),
-            "slippage_vs_trigger": slippage_vs_trigger,
             "strategy_type": g.get("strategy_type"),
             "client_order_id": g.get("client_order_id"),
             "hedge_matched": hedge_total_qty > 0,

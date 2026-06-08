@@ -172,26 +172,10 @@ class OrderExecutorV2:
             pair = hedging_pair_service.get_pair(pair_code)
             conv_factor = pair.conv_factor if pair and getattr(pair, "conv_factor", None) else 100.0
 
-            # 稳健提取可用余额(get_account_data 返回 {"balance": {...available_balance...}})。
-            # 取不到 / 为 0 / 异常 一律返回 None => 放行(fail-open), 避免误判"资金不足"
-            # 而拦截(预检失败会被 V2 当作执行失败 → 可能终止策略)。
-            def _avail_of(_data):
-                try:
-                    _b = _data.get("balance") if isinstance(_data, dict) else None
-                    if isinstance(_b, dict):
-                        _v = _b.get("available_balance")
-                    elif _b is not None:
-                        _v = getattr(_b, "available_balance", None)
-                    else:
-                        _v = None
-                    return float(_v) if _v is not None else None
-                except Exception:
-                    return None
-
             # Binance (A-side) — order denominated in ounces
-            bin_data = await account_data_service.get_account_data(binance_account)
-            bin_avail = _avail_of(bin_data)
-            if bin_avail is not None and bin_avail > 0:
+            bin_bal = await account_data_service.get_account_balance(binance_account)
+            if bin_bal:
+                bin_avail = bin_bal.get("available_balance", 0) or 0
                 bin_lev = binance_account.leverage or 20
                 bin_required = (binance_price or 2700) * quantity / bin_lev
                 if bin_avail < bin_required:
@@ -202,9 +186,9 @@ class OrderExecutorV2:
                     }
 
             # Bybit (B-side) — ceiling-rounded lot qty matches the live path's amplification
-            byb_data = await account_data_service.get_account_data(bybit_account)
-            byb_avail = _avail_of(byb_data)
-            if byb_avail is not None and byb_avail > 0:
+            byb_bal = await account_data_service.get_account_balance(bybit_account)
+            if byb_bal:
+                byb_avail = byb_bal.get("available_balance", 0) or 0
                 byb_lev = bybit_account.leverage or 100
                 bybit_raw_lot = _a_to_b(quantity, pair_code) * hedge_multiplier
                 bybit_lot_ceil = _math.ceil(round(bybit_raw_lot * 100, 4)) / 100
@@ -282,17 +266,6 @@ class OrderExecutorV2:
             }
 
         binance_order_id = binance_result["order_id"]
-
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=True, hedge_close_position=False,
-                spread_threshold=spread_threshold, compare_op='>=',
-                strategy_type='reverse_opening', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=accumulated_unhedged_xau,
-            )
 
         # Step 2: Monitor A-side order — routes by platform_id
         monitor_result = await self._monitor_a_side_order(
@@ -533,17 +506,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
 
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=False, hedge_close_position=True,
-                spread_threshold=spread_threshold, compare_op='<=',
-                strategy_type='reverse_closing', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=0.0,
-            )
-
         # Step 2: Monitor A-side order — routes by platform_id
         monitor_result = await self._monitor_a_side_order(
             binance_account,
@@ -769,17 +731,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
 
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=False, hedge_close_position=False,
-                spread_threshold=spread_threshold, compare_op='>=',
-                strategy_type='forward_opening', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=accumulated_unhedged_xau,
-            )
-
         # Step 2: Monitor A-side order — routes by platform_id
         logger.info(f"[FORWARD_OPENING] >>>ENTERING MONITOR<<< order={binance_order_id} timeout={self.binance_timeout} plat={binance_account.platform_id}")
         monitor_result = await self._monitor_a_side_order(
@@ -1004,17 +955,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
         logger.info(f"[FORWARD_CLOSING] A-side order placed: order_id={binance_order_id}")
-
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=True, hedge_close_position=True,
-                spread_threshold=spread_threshold, compare_op='<=',
-                strategy_type='forward_closing', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=0.0,
-            )
 
         # Step 2: Monitor A-side order — routes by platform_id
         monitor_result = await self._monitor_a_side_order(
@@ -1568,143 +1508,6 @@ class OrderExecutorV2:
                 except Exception:
                     pass
         return 0.0
-
-    def _load_incr_cfg(self):
-        """增量对冲配置(热改、3s 缓存)。默认 enabled=False。"""
-        import time as _t, json as _j
-        _now = _t.time()
-        if getattr(self, "_incr_cfg_cache", None) is not None and (_now - getattr(self, "_incr_cfg_ts", 0)) < 3.0:
-            return self._incr_cfg_cache
-        cfg = {"enabled": False, "min_xau": 1.0, "max_unhedged_xau": 200.0, "poll_sec": 0.15}
-        try:
-            with open("/data/hustle2026/backend/config/incremental_hedge.json", "r", encoding="utf-8") as _f:
-                _d = _j.load(_f)
-                if isinstance(_d, dict):
-                    cfg.update(_d)
-        except Exception:
-            pass
-        self._incr_cfg_cache = cfg
-        self._incr_cfg_ts = _now
-        return cfg
-
-    async def _monitor_and_hedge_incrementally(self, *, binance_account, sym_a, binance_order_id,
-                                               bybit_account, sym_b, hedge_is_buy, hedge_close_position,
-                                               spread_threshold, compare_op, strategy_type,
-                                               hedge_multiplier, pair_code, accumulated_unhedged_xau):
-        """主腿(maker)部分成交 → 即时增量对冲。
-        复用 _monitor_a_side_order(终态等待 + 点差撤单, 不改);本方法并发轮询
-        _order_fill_registry 的累计成交, 逐增量发对冲 taker。返回与 execute_* 同形 dict。
-        仅在 _load_incr_cfg()["enabled"] 为真时被 execute_* 调用(默认关)。"""
-        import math as _math
-        from app.tasks.broadcast_tasks import _order_fill_registry
-        cfg = self._load_incr_cfg()
-        min_xau = float(cfg.get("min_xau", 1.0))
-        max_unhedged = float(cfg.get("max_unhedged_xau", 200.0))
-        poll = float(cfg.get("poll_sec", 0.15))
-        mult = hedge_multiplier or 1.0
-
-        st = {"stop": False, "final": None}
-        hedged_xau = 0.0
-        byb_lot = 0.0
-        byb_quote = 0.0
-        hedge_failed = False
-        cancelled_for_safety = False
-
-        async def _fire(lot):
-            if hedge_is_buy:
-                return await self._execute_bybit_market_buy(bybit_account, sym_b, lot, close_position=hedge_close_position)
-            return await self._execute_bybit_market_sell(bybit_account, sym_b, lot, close_position=hedge_close_position)
-
-        async def _hedger():
-            nonlocal hedged_xau, byb_lot, byb_quote, hedge_failed, cancelled_for_safety
-            while True:
-                rec = _order_fill_registry.get(binance_order_id, {}) or {}
-                cum = float(rec.get("filled_qty", 0) or 0)
-                if st["final"] is not None:
-                    cum = max(cum, float(st["final"]))
-                to_hedge = cum + accumulated_unhedged_xau - hedged_xau
-                if to_hedge > 0:
-                    raw_lot = _a_to_b(to_hedge, pair_code) * mult
-                    lot = _math.floor(round(raw_lot * 100, 4)) / 100.0
-                    if lot >= 0.01:
-                        try:
-                            res = await _fire(lot)
-                        except Exception as _e:
-                            res = None
-                            logger.error(f"[INCR_HEDGE] hedge fire error: {_e}")
-                        fl = (res.get("filled_qty", 0) if isinstance(res, dict) else (res or 0)) or 0
-                        ap = (res.get("avg_price", 0) if isinstance(res, dict) else 0) or 0
-                        if fl <= 0:
-                            hedge_failed = True
-                            try:
-                                await self.base_executor.cancel_binance_order(binance_account, sym_a, binance_order_id)
-                                cancelled_for_safety = True
-                            except Exception:
-                                pass
-                            logger.error(f"[INCR_HEDGE] 对冲失败,熔断撤主腿剩余 order={binance_order_id} {strategy_type}")
-                            break
-                        byb_lot += fl
-                        byb_quote += fl * ap
-                        cov_xau = _b_to_a(lot, pair_code) / mult
-                        hedged_xau += cov_xau
-                        logger.info(f"[INCR_HEDGE] {strategy_type} cum={cum:.2f} hedged={hedged_xau:.2f} "
-                                    f"+lot={lot} fl={fl} rem={max(0.0, cum + accumulated_unhedged_xau - hedged_xau):.4f}")
-                if (cum - hedged_xau) > max_unhedged and not cancelled_for_safety:
-                    try:
-                        await self.base_executor.cancel_binance_order(binance_account, sym_a, binance_order_id)
-                        cancelled_for_safety = True
-                        logger.warning(f"[INCR_HEDGE] 未对冲敞口 {cum - hedged_xau:.1f} XAU > {max_unhedged},撤主腿剩余 {strategy_type}")
-                    except Exception:
-                        pass
-                if hedge_failed:
-                    break
-                if st["stop"] and st["final"] is not None and (float(st["final"]) + accumulated_unhedged_xau - hedged_xau) < min_xau:
-                    break
-                await asyncio.sleep(poll)
-
-        monitor_task = asyncio.create_task(self._monitor_a_side_order(
-            binance_account, sym_a, binance_order_id, self.binance_timeout,
-            spread_threshold=spread_threshold, compare_op=compare_op,
-            strategy_type=strategy_type, pair_code=pair_code,
-        ))
-        hedger = asyncio.create_task(_hedger())
-        monitor_result = await monitor_task
-        final_filled = monitor_result.get("filled_qty", 0) or 0
-        binance_avg = monitor_result.get("avg_price", 0) or 0
-        binance_api_error = monitor_result.get("api_error", False)
-        st["final"] = final_filled
-        st["stop"] = True
-        try:
-            await asyncio.wait_for(hedger, timeout=max(5.0, self.bybit_timeout * 6))
-        except asyncio.TimeoutError:
-            hedger.cancel()
-            try:
-                await hedger
-            except Exception:
-                pass
-
-        byb_avg = (byb_quote / byb_lot) if byb_lot > 0 else 0.0
-        byb_xau = _b_to_a(byb_lot, pair_code)
-        is_single_leg = (final_filled > 0 and byb_xau < final_filled * mult * 0.80 and not hedge_failed)
-
-        if final_filled == 0:
-            return {"success": True, "binance_filled_qty": 0, "bybit_filled_qty": 0,
-                    "binance_avg_price": binance_avg, "bybit_avg_price": byb_avg,
-                    "binance_order_id": binance_order_id, "is_single_leg": False,
-                    "binance_api_error": binance_api_error, "incremental": True,
-                    "message": "增量:A侧未成交"}
-        if byb_lot <= 0:
-            return {"success": True, "binance_filled_qty": final_filled, "bybit_filled_qty": 0,
-                    "binance_avg_price": binance_avg, "bybit_avg_price": byb_avg,
-                    "binance_order_id": binance_order_id, "is_single_leg": False,
-                    "b_side_skipped_below_min": True, "incremental": True,
-                    "message": f"增量:成交 {final_filled} XAU 不足最小对冲手,进位"}
-        return {"success": True, "binance_filled_qty": final_filled, "bybit_filled_qty": byb_lot,
-                "binance_avg_price": binance_avg, "bybit_avg_price": byb_avg,
-                "binance_order_id": binance_order_id, "is_single_leg": is_single_leg, "incremental": True,
-                "single_leg_details": ({"binance_filled": final_filled, "bybit_filled": byb_xau,
-                                        "bybit_filled_xau": byb_xau, "unfilled_qty": final_filled - byb_xau}
-                                       if is_single_leg else None)}
 
     async def _monitor_binance_order(
         self,

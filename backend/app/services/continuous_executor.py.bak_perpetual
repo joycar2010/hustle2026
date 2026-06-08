@@ -273,8 +273,7 @@ class ContinuousStrategyExecutor:
         strategy_type: str,
         binance_account: Account,
         bybit_account: Account,
-        order_qty_limit: float,
-        opening_ceiling: float = None
+        order_qty_limit: float
     ) -> Dict:
         """
         Execute single ladder with continuous execution.
@@ -310,19 +309,6 @@ class ContinuousStrategyExecutor:
         MIN_HEDGE_LOT = 0.01         # ICMarkets minimum lot size
         loop_count = 0
         current_position = 0  # initialise so the post-loop debug block always has a value
-        # ── 开仓持仓上限硬约束：入口读一次权威真实持仓(force_fresh REST)作封顶基线 ──
-        # 免疫 WS 冷启/陈旧导致 remaining 多算 → 开仓冲破上限(实盘已观测 1→3)。
-        base_pos = None
-        if is_opening and opening_ceiling is not None and self._opening_ceiling_guard_enabled():
-            try:
-                _bp = await self._get_live_position(binance_account, strategy_type, force_fresh=True)
-                if _bp is not None and _bp >= 0:
-                    base_pos = _bp
-                    logger.info(f"[ladder={ladder_idx}] 持仓上限基线 base_pos={base_pos:.4f} ceiling={opening_ceiling}")
-                else:
-                    logger.warning(f"[ladder={ladder_idx}] base_pos 读取失败(force_fresh)，回退内存计数封顶")
-            except Exception as _bpe:
-                logger.warning(f"[ladder={ladder_idx}] base_pos 读取异常: {_bpe}，回退内存计数封顶")
         while self.is_running and not self.stop_requested:
             loop_count += 1
 
@@ -404,14 +390,6 @@ class ContinuousStrategyExecutor:
             try:
                 remaining = ladder.total_qty - current_position
                 order_qty = min(order_qty_limit, remaining)
-                # ── 开仓持仓上限硬约束：以 base_pos + 本轮实际成交 为权威持仓,按 ceiling 钳制 ──
-                if (not is_closing) and opening_ceiling is not None and base_pos is not None:
-                    effective_pos = base_pos + current_position
-                    ceiling_remaining = opening_ceiling - effective_pos
-                    if ceiling_remaining <= 1e-9:
-                        logger.info(f"[ladder={ladder_idx}] 已达持仓上限 {effective_pos:.2f}/{opening_ceiling}，停止开仓")
-                        break
-                    order_qty = min(order_qty, ceiling_remaining)
                 logger.info(f"[ladder={ladder_idx}] Order qty: {order_qty}, remaining: {remaining}, limit: {order_qty_limit}")
             except Exception as e:
                 logger.error(f"[ladder={ladder_idx}] Exception calculating order_qty: {e}")
@@ -666,9 +644,7 @@ class ContinuousStrategyExecutor:
                 self._mt5_preflight_refresh(bybit_account, _sym_b_rf)
 
             if not exec_result['success']:
-                # 平空(position_exhausted)为正常态, 由下方 INFO 记录; 其余失败才 ERROR(避免噪音告警)
-                if not (exec_result.get('position_exhausted') and not is_opening):
-                    logger.error(f"Execution failed: {exec_result.get('error')}")
+                logger.error(f"Execution failed: {exec_result.get('error')}")
 
                 # CRITICAL: MT5 position exhausted — no more position to close.
                 # Treat as normal completion (not an error) and exit the ladder loop.
@@ -988,11 +964,7 @@ class ContinuousStrategyExecutor:
             # 若本次成交已填满当前梯度的总量，直接 break 进入下一梯度或退出，
             # 无需再等 api_spam_prevention_delay（3s），避免双边成交后按钮复原延迟。
             new_position = current_position + filled_qty
-            _ceiling_done = (
-                (not is_closing) and opening_ceiling is not None and base_pos is not None
-                and (base_pos + new_position) >= opening_ceiling - 1e-9
-            )
-            if new_position >= ladder.total_qty or _ceiling_done:
+            if new_position >= ladder.total_qty:
                 logger.info(
                     f"[ladder={ladder_idx}] 目标已达成 ({new_position:.4f}/{ladder.total_qty})，"
                     f"跳过 api_spam_prevention_delay，立即退出"
@@ -1144,7 +1116,6 @@ class ContinuousStrategyExecutor:
                 binance_account=binance_account,
                 bybit_account=bybit_account,
                 order_qty_limit=order_qty_limit,
-                opening_ceiling=(active.range_upper if is_opening else None),
             )
 
             if not result['success']:
@@ -1156,16 +1127,11 @@ class ContinuousStrategyExecutor:
             # positions, so re-entering would create a zombie loop. This is the only safe
             # exit path for "B-side dry" cases.
             if result.get('position_exhausted'):
-                # 用户期望: 平仓按钮持续运行——仓位平空后不终止任务, 改为空闲待命,
-                # 等开仓策略再次建仓后继续自动平仓; 仅手动停/收盘前自动停(stop_requested)才退出。
-                # MT5 无仓时 _execute_ladder 持续返回 position_exhausted, 此处只空转(不会尝试单腿平仓), 安全。
-                if scan_count % 100 == 1:
-                    logger.info(
-                        f"[V2] 仓位已平空, 平仓循环转待命, 等待再次建仓 ({strategy_type}) "
-                        f"capacity={mapper.get_global_capacity()}"
-                    )
-                await self._sleep_or_stop(2.0)
-                continue
+                logger.info(
+                    f"[V2] Position exhausted — closing strategy fully terminated. "
+                    f"pos={global_pos}, capacity={mapper.get_global_capacity()}"
+                )
+                break
 
         logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
         await self._push_stop_confirmed(strategy_type)
@@ -1206,28 +1172,8 @@ class ContinuousStrategyExecutor:
     # REST fallback cache for _get_live_position (user_id+pair → (value, timestamp))
     _rest_pos_cache: dict = {}
     _REST_POS_CACHE_TTL = 3.0  # seconds — at most 1 REST call per 3s
-    _ocg_cache: bool = True       # 开仓持仓上限开关缓存(默认 ON)
-    _ocg_cache_ts: float = 0.0
 
-    def _opening_ceiling_guard_enabled(self) -> bool:
-        """开仓持仓上限硬约束开关(热改,3s 缓存,默认 ON)。"""
-        import time as _t, json as _j
-        _now = _t.time()
-        if getattr(ContinuousStrategyExecutor, "_ocg_cache_ts", 0.0) and (_now - ContinuousStrategyExecutor._ocg_cache_ts) < 3.0:
-            return ContinuousStrategyExecutor._ocg_cache
-        _enabled = True
-        try:
-            with open("/data/hustle2026/backend/config/opening_ceiling_guard.json", "r", encoding="utf-8") as _f:
-                _d = _j.load(_f)
-                if isinstance(_d, dict) and "enabled" in _d:
-                    _enabled = bool(_d["enabled"])
-        except Exception:
-            pass
-        ContinuousStrategyExecutor._ocg_cache = _enabled
-        ContinuousStrategyExecutor._ocg_cache_ts = _now
-        return _enabled
-
-    async def _get_live_position(self, binance_account, strategy_type: str, force_fresh: bool = False) -> float:
+    async def _get_live_position(self, binance_account, strategy_type: str) -> float:
         """Get Binance position for closing decisions — ZERO REST in normal operation.
 
         Priority:
@@ -1246,14 +1192,14 @@ class ContinuousStrategyExecutor:
             from app.tasks.broadcast_tasks import position_streamer
             user_id = self.user_id or "_default"
             bn_syms = position_streamer._binance_positions.get(user_id, {})
-            if sym_a in bn_syms and not force_fresh:
+            if sym_a in bn_syms:
                 long_v, short_v = bn_syms[sym_a]
                 if 'reverse' in strategy_type:
                     return short_v
                 else:
                     return long_v
             # Try _default user (backward compat — single user mode)
-            if user_id != "_default" and not force_fresh:
+            if user_id != "_default":
                 bn_default = position_streamer._binance_positions.get("_default", {})
                 if sym_a in bn_default:
                     long_v, short_v = bn_default[sym_a]
@@ -1269,7 +1215,7 @@ class ContinuousStrategyExecutor:
         cache_key = f"{self.user_id}:{self.pair_code}:{strategy_type}"
         cached = ContinuousStrategyExecutor._rest_pos_cache.get(cache_key)
         now = _time.time()
-        if (not force_fresh) and cached and (now - cached[1]) < ContinuousStrategyExecutor._REST_POS_CACHE_TTL:
+        if cached and (now - cached[1]) < ContinuousStrategyExecutor._REST_POS_CACHE_TTL:
             return cached[0]
 
         try:

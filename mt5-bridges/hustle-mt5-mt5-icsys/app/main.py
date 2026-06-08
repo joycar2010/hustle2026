@@ -345,7 +345,7 @@ async def account_info():
         total_swap += p.swap
 
     from_date = datetime.utcnow() - timedelta(days=30)
-    deals = mt5.history_deals_get(from_date, datetime.utcnow()) or []
+    deals = mt5.history_deals_get(from_date, datetime.utcnow() + timedelta(hours=6)) or []
     for d in deals:
         if hasattr(d, "swap") and d.swap != 0:
             total_swap += d.swap
@@ -454,7 +454,7 @@ async def history_deals(
     if not mgr.ensure():
         raise HTTPException(503, "MT5 not connected")
     from_date = datetime.utcnow() - timedelta(days=days)
-    deals = mt5.history_deals_get(from_date, datetime.utcnow()) or []
+    deals = mt5.history_deals_get(from_date, datetime.utcnow() + timedelta(hours=6)) or []
     mgr.ping()
     result = []
     for d in deals:

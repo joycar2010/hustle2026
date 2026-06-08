@@ -283,17 +283,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
 
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=True, hedge_close_position=False,
-                spread_threshold=spread_threshold, compare_op='>=',
-                strategy_type='reverse_opening', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=accumulated_unhedged_xau,
-            )
-
         # Step 2: Monitor A-side order — routes by platform_id
         monitor_result = await self._monitor_a_side_order(
             binance_account,
@@ -533,17 +522,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
 
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=False, hedge_close_position=True,
-                spread_threshold=spread_threshold, compare_op='<=',
-                strategy_type='reverse_closing', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=0.0,
-            )
-
         # Step 2: Monitor A-side order — routes by platform_id
         monitor_result = await self._monitor_a_side_order(
             binance_account,
@@ -769,17 +747,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
 
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=False, hedge_close_position=False,
-                spread_threshold=spread_threshold, compare_op='>=',
-                strategy_type='forward_opening', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=accumulated_unhedged_xau,
-            )
-
         # Step 2: Monitor A-side order — routes by platform_id
         logger.info(f"[FORWARD_OPENING] >>>ENTERING MONITOR<<< order={binance_order_id} timeout={self.binance_timeout} plat={binance_account.platform_id}")
         monitor_result = await self._monitor_a_side_order(
@@ -1004,17 +971,6 @@ class OrderExecutorV2:
 
         binance_order_id = binance_result["order_id"]
         logger.info(f"[FORWARD_CLOSING] A-side order placed: order_id={binance_order_id}")
-
-        # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
-        if self._load_incr_cfg().get("enabled"):
-            return await self._monitor_and_hedge_incrementally(
-                binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
-                hedge_is_buy=True, hedge_close_position=True,
-                spread_threshold=spread_threshold, compare_op='<=',
-                strategy_type='forward_closing', hedge_multiplier=hedge_multiplier,
-                pair_code=pair_code, accumulated_unhedged_xau=0.0,
-            )
 
         # Step 2: Monitor A-side order — routes by platform_id
         monitor_result = await self._monitor_a_side_order(

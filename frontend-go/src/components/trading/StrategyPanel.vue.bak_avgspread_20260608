@@ -35,10 +35,8 @@
       <div class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
           对冲多仓: {{ (localBybitLong * 100).toFixed(0) }} 主空仓: {{ localBinanceShort.toFixed(2) }}
-          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] ml-2">平均点差: {{ avgOpenSpread.toFixed(2) }}</span>
         </span>
         <span v-else>
-          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] mr-2">平均点差: {{ avgOpenSpread.toFixed(2) }}</span>
           主多仓: {{ localBinanceLong.toFixed(2) }} 对冲空仓: {{ (localBybitShort * 100).toFixed(0) }}
         </span>
       </div>
@@ -976,20 +974,6 @@ const statusPollingInterval = ref({ opening: null, closing: null })
 
 const ladderExecutionDetails = ref({ opening: {}, closing: {} })
 const expandedLadders = ref({ opening: {}, closing: {} })
-
-// 实际开仓的数量加权平均点差(主空仓右/主多仓左展示);纯前端,基于 ladderExecutionDetails.opening
-const avgOpenSpread = computed(() => {
-  const details = ladderExecutionDetails.value.opening
-  let totalQty = 0, totalWeighted = 0
-  for (const idx of Object.keys(details)) {
-    for (const t of (details[idx].trades || [])) {
-      const qty = t.binanceFilled || 0
-      totalQty += qty
-      totalWeighted += qty * (t.spreadAtExecution || 0)
-    }
-  }
-  return totalQty > 0 ? totalWeighted / totalQty : null
-})
 
 // 差值提醒设置（从 Risk.vue 迁移）— 读写 /api/v1/risk/alert-settings
 // 仅展示/保存当前策略类型对应的 2 个字段（forward 或 reverse 的 openPrice/closePrice），
