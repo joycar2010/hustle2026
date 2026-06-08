@@ -23,6 +23,7 @@ class CoinResponse(BaseModel):
     is_new_coin: bool
     is_delisting: bool
     allow_open: bool
+    is_risky: bool = False
     volume_24h: Optional[Decimal] = None
 
     model_config = {"from_attributes": True}
@@ -32,6 +33,7 @@ class CoinPatch(BaseModel):
     is_new_coin: Optional[bool] = None
     is_delisting: Optional[bool] = None
     allow_open: Optional[bool] = None
+    is_risky: Optional[bool] = None
 
 
 @router.get("/", response_model=list[CoinResponse])
@@ -39,6 +41,7 @@ def list_coins(
     request: Request,
     is_new_coin: Optional[bool] = Query(None),
     is_delisting: Optional[bool] = Query(None),
+    is_risky: Optional[bool] = Query(None),
     min_volume: Optional[Decimal] = Query(None),
     search: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -49,6 +52,8 @@ def list_coins(
         q = q.filter(Symbol.is_new_coin == is_new_coin)
     if is_delisting is not None:
         q = q.filter(Symbol.is_delisting == is_delisting)
+    if is_risky is not None:
+        q = q.filter(Symbol.is_risky == is_risky)
     if min_volume is not None:
         q = q.filter(Symbol.volume_24h >= min_volume)
     if search:

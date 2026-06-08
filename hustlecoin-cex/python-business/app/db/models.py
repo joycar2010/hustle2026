@@ -22,10 +22,29 @@ class Symbol(Base):
     is_new_coin = Column(Boolean, server_default='false')
     is_delisting = Column(Boolean, server_default='false')
     allow_open = Column(Boolean, server_default='true')
+    is_risky = Column(Boolean, server_default='false')
     volume_24h = Column(Numeric(20, 2), nullable=True)
     volume_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class RulePreset(Base):
+    __tablename__ = "rule_presets"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
+    name = Column(String(50), nullable=False)
+    open_spread = Column(Numeric(10, 4), nullable=True)
+    close_spread = Column(Numeric(10, 4), nullable=True)
+    order_amount = Column(Numeric(15, 2), nullable=True)
+    remove_spread = Column(Numeric(10, 4), nullable=True)
+    close_funding_ratio = Column(Numeric(10, 4), nullable=True)
+    repay_funding_ratio = Column(Numeric(10, 4), nullable=True)
+    repay_spread = Column(Numeric(10, 4), nullable=True)
+    max_daily_interest_rate = Column(Numeric(10, 6), nullable=True)
+    max_borrow_amount = Column(Numeric(15, 2), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class SubAccount(Base):
@@ -53,6 +72,7 @@ class SubAccount(Base):
     max_positions = Column(Integer, nullable=True)
     max_borrow_amount = Column(Numeric(15, 2), nullable=True)
     max_order_count = Column(Integer, nullable=True)
+    borrow_rate_per_sec = Column(Numeric(6, 2), nullable=True)  # per-account override; null=follow global
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -76,6 +96,7 @@ class GlobalRules(Base):
     user_id = Column(Integer, nullable=True)
     auto_push_spread = Column(Numeric(10, 4), default=0.8)
     remove_spread = Column(Numeric(10, 4), default=0.5)
+    borrow_spread = Column(Numeric(10, 4), default=0.5)   # 挂单点差: borrow-and-hold threshold (≤ open_spread)
     open_spread = Column(Numeric(10, 4), default=0.8)
     close_spread = Column(Numeric(10, 4), default=0.2)
     order_amount = Column(Numeric(15, 2), default=500)
@@ -94,6 +115,12 @@ class GlobalRules(Base):
     circuit_breaker_pause_sec = Column(Integer, default=300)
     max_daily_interest_rate = Column(Numeric(10, 6), nullable=True)
     repay_spread = Column(Numeric(10, 4), nullable=True)
+    # Order-quality params (desktop parity). Defaults preserve current behavior.
+    slippage_pct = Column(Numeric(10, 4), default=0.1)       # limit-price tolerance vs ask
+    follow_type = Column(String(10), default="market")        # "market" | "limit"
+    stabilize_sec = Column(Numeric(6, 2), default=0)          # wait after spot sell before futures hedge
+    tier_ratios = Column(String(120), default="")             # "0.5:30,0.8:30,1.2:40" (persisted)
+    borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

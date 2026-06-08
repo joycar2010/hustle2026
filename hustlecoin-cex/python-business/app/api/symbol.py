@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
@@ -60,3 +61,23 @@ def get_stats(db: Session = Depends(get_db)):
         "futures_tradable": futures,
         "both_tradable": both,
     }
+
+
+class RiskToggle(BaseModel):
+    is_risky: bool
+
+
+@router.get("/risky")
+def list_risky(db: Session = Depends(get_db)):
+    symbols = db.query(Symbol.symbol).filter(Symbol.is_risky == True).all()
+    return [s.symbol for s in symbols]
+
+
+@router.patch("/{symbol}/risk")
+def toggle_risk(symbol: str, data: RiskToggle, db: Session = Depends(get_db)):
+    sym = db.query(Symbol).filter(Symbol.symbol == symbol.upper()).first()
+    if not sym:
+        raise HTTPException(status_code=404, detail="Symbol not found")
+    sym.is_risky = data.is_risky
+    db.commit()
+    return {"symbol": sym.symbol, "is_risky": sym.is_risky}

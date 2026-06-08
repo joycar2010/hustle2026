@@ -79,6 +79,60 @@ async def validate_master_account(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/balance")
+async def get_master_balance(db: Session = Depends(get_db)):
+    """Master account wallet balances — same shape as sub-account balance."""
+    account = db.query(MasterAccount).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Master account not configured")
+
+    import asyncio
+    from engine.trading.binance_trading import BinanceTradingClient
+    async with BinanceTradingClient(account.api_key, account.api_secret) as client:
+        spot, margin, futures, funding, earn = await asyncio.gather(
+            client.get_spot_account(),
+            client.get_margin_account(),
+            client.get_futures_account(),
+            client.get_funding_account(),
+            client.get_simple_earn_account(),
+        )
+
+    spot_free, spot_locked = "0", "0"
+    for a in spot.get("balances", []):
+        if a["asset"] == "USDT":
+            spot_free = a.get("free", "0")
+            spot_locked = a.get("locked", "0")
+            break
+
+    funding_usdt = "0"
+    for a in (funding if isinstance(funding, list) else []):
+        if a.get("asset") == "USDT":
+            funding_usdt = a.get("free", "0")
+            break
+
+    earn_total = earn.get("totalAmountInUSDT", "0") if isinstance(earn, dict) else "0"
+
+    margin_free, margin_borrowed = "0", "0"
+    for a in margin.get("userAssets", []):
+        if a["asset"] == "USDT":
+            margin_free = a.get("free", "0")
+            margin_borrowed = a.get("borrowed", "0")
+            break
+
+    return {
+        "spot_usdt_free": spot_free,
+        "spot_usdt_locked": spot_locked,
+        "funding_usdt": funding_usdt,
+        "earn_total": earn_total,
+        "margin_level": margin.get("marginLevel", "0"),
+        "margin_usdt_free": margin_free,
+        "margin_usdt_borrowed": margin_borrowed,
+        "futures_total_balance": futures.get("totalWalletBalance", "0"),
+        "futures_available": futures.get("availableBalance", "0"),
+        "futures_unrealized_pnl": futures.get("totalUnrealizedProfit", "0"),
+    }
+
+
 @router.get("/permissions")
 async def get_master_permissions(db: Session = Depends(get_db)):
     account = db.query(MasterAccount).first()

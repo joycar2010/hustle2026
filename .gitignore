@@ -12,7 +12,11 @@ __pycache__/
 .env
 *.log
 backups/
-static/spa/assets/
+# built SPA output — shipped to the server out-of-band, not tracked in git
+# (mid-slash patterns are anchored to the repo root, so spell out the full path)
+hustlecoin-cex/python-business/static/spa/
+hustlecoin-cex/python-business/static/admin-spa/
+hustlecoin-cex/python-business/static/dashboard.html
 node_modules/
 python-business/app/app/
 python-business/engine/engine/

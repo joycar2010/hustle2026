@@ -13,7 +13,25 @@ class APIMetrics:
     last_error_time: float = 0
     last_error_msg: str = ""
     last_success_time: float = 0
+    used_weight_1m: int = 0          # latest IP used weight (reads)
+    weight_limit_1m: int = 6000      # applicable IP per-minute limit
+    weight_time: float = 0           # when IP weight was observed
+    used_uid_weight_1m: int = 0      # per-UID used weight (borrow/repay = 1500 each)
+    uid_limit_1m: int = 180000       # per-UID per-minute limit
+    uid_weight_time: float = 0       # when UID weight was observed
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def record_weight(self, w: int, limit: int = 6000):
+        with self._lock:
+            self.used_weight_1m = w
+            self.weight_limit_1m = limit
+            self.weight_time = time.time()
+
+    def record_uid_weight(self, w: int, limit: int = 180000):
+        with self._lock:
+            self.used_uid_weight_1m = w
+            self.uid_limit_1m = limit
+            self.uid_weight_time = time.time()
 
     def record_success(self):
         with self._lock:
@@ -54,3 +72,23 @@ def get_metrics(sub_account_id: int = 0) -> APIMetrics:
 
 def all_metrics_snapshot() -> dict[str, dict]:
     return {str(k): v.snapshot() for k, v in _metrics.items()}
+
+
+def global_weight_snapshot() -> dict:
+    """Freshest IP-wide used weight across all client metrics in this process.
+    IP weight is per-IP (shared), consumed by read endpoints."""
+    best_t, best_w, best_lim = 0.0, 0, 6000
+    for m in _metrics.values():
+        if m.weight_time > best_t:
+            best_t, best_w, best_lim = m.weight_time, m.used_weight_1m, m.weight_limit_1m
+    return {"used_weight_1m": best_w, "weight_time": best_t, "limit": best_lim}
+
+
+def max_uid_weight_snapshot() -> dict:
+    """Busiest UID's used weight (borrow-rate dimension). UID weight is per
+    sub-account; the account closest to its 180000 cap bounds borrow throughput."""
+    best_w, best_lim, best_t = 0, 180000, 0.0
+    for m in _metrics.values():
+        if m.used_uid_weight_1m > best_w:
+            best_w, best_lim, best_t = m.used_uid_weight_1m, m.uid_limit_1m, m.uid_weight_time
+    return {"used_uid_weight_1m": best_w, "uid_limit": best_lim, "uid_weight_time": best_t}

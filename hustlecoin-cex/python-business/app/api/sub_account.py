@@ -70,6 +70,7 @@ def _to_response(account: SubAccount) -> dict:
         "max_positions": account.max_positions,
         "max_borrow_amount": str(account.max_borrow_amount) if account.max_borrow_amount else None,
         "max_order_count": account.max_order_count,
+        "borrow_rate_per_sec": str(account.borrow_rate_per_sec) if account.borrow_rate_per_sec else None,
         "created_at": account.created_at,
         "updated_at": account.updated_at,
     }
@@ -263,6 +264,8 @@ async def get_ip_whitelist(account_id: int, db: Session = Depends(get_db)):
     account = db.query(SubAccount).get(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Sub-account not found")
+    if not account.is_enabled:
+        return {"ipRestrict": None, "ipList": []}
     try:
         restrictions = await binance_client.get_api_restrictions(account.api_key, account.api_secret)
         ip_data = await binance_client.get_ip_restriction(account.api_key, account.api_secret)
@@ -310,12 +313,14 @@ class FundParamsUpdate(BaseModel):
     max_positions: int | None = None
     max_borrow_amount: float | None = None
     max_order_count: int | None = None
+    borrow_rate_per_sec: float | None = None
 
 
 FUND_PARAM_FIELDS = {
     "order_amount", "base_margin_amount", "single_transfer_amount",
     "risk_threshold", "min_balance", "single_order_amount",
     "max_positions", "max_borrow_amount", "max_order_count",
+    "borrow_rate_per_sec",
 }
 
 
@@ -354,6 +359,7 @@ def patch_fund_params(account_id: int, data: FundParamsUpdate, db: Session = Dep
         "max_positions": account.max_positions,
         "max_borrow_amount": str(account.max_borrow_amount) if account.max_borrow_amount else None,
         "max_order_count": account.max_order_count,
+        "borrow_rate_per_sec": str(account.borrow_rate_per_sec) if account.borrow_rate_per_sec else None,
     }
 
 

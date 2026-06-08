@@ -47,7 +47,7 @@ def _log_trade(db, position_id: int, sub_account_id: int, action: str, symbol: s
     db.commit()
 
 
-async def execute_open(
+async def execute_borrow(
     sub_account_id: int,
     symbol: str,
     spread: SpreadSnapshot,
@@ -56,8 +56,12 @@ async def execute_open(
     notifier: FeishuSender,
     account_note: str,
     spread_feed: SpreadFeed = None,
-):
+    min_spread: Decimal = None,
+) -> int | None:
+    """Phase 1: borrow the coin and hold it idle in the margin account (BORROWED_IDLE).
+    Net-flat (owe coin, hold coin) — no directional exposure. Returns position id or None."""
     base_asset = symbol.replace("USDT", "")
+    confirm_spread = rules.open_spread if min_spread is None else min_spread
     db = SessionLocal()
     position = Position(
         sub_account_id=sub_account_id,
@@ -71,7 +75,7 @@ async def execute_open(
     pos_id = position.id
 
     try:
-        # check interest rate
+        # interest-rate filter
         t0 = time.monotonic()
         interest_rate = await client.get_margin_interest_rate(base_asset)
         latency = int((time.monotonic() - t0) * 1000)
@@ -80,25 +84,25 @@ async def execute_open(
             position.error_message = f"Interest rate {interest_rate} too high"
             db.commit()
             db.close()
-            return
+            return None
         position.borrow_interest_rate = interest_rate
 
-        # delay + re-confirm spread
+        # delay + re-confirm spread still above the borrow threshold
         await asyncio.sleep(rules.borrow_delay_sec)
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
-            if not current or current.spread_short <= rules.open_spread:
+            if not current or current.spread_short <= confirm_spread:
                 position.status = "FAILED"
                 position.error_message = (
                     f"Spread degraded after delay: "
-                    f"{current.spread_short if current else 'N/A'}% <= {rules.open_spread}%"
+                    f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}%"
                 )
                 db.commit()
                 db.close()
-                return
+                return None
             spread = current
 
-        # calculate quantity
+        # quantity
         lot_info = await client.get_lot_size(symbol, "spot")
         qty = usdt_to_quantity(rules.order_amount, spread.spot_ask, lot_info["stepSize"], lot_info["minQty"])
         if qty <= 0:
@@ -106,123 +110,187 @@ async def execute_open(
             position.error_message = "Order amount too small for lot size"
             db.commit()
             db.close()
-            return
+            return None
 
-        # Step 1: borrow
+        # borrow → idle
         t0 = time.monotonic()
         await client.margin_borrow(base_asset, qty)
         latency = int((time.monotonic() - t0) * 1000)
-        position.status = "BORROWED"
+        position.status = "BORROWED_IDLE"
         position.borrow_qty = qty
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
-
-        # Step 2: spot sell
-        t0 = time.monotonic()
-        sell_result = await client.spot_market_sell(symbol, qty)
-        latency = int((time.monotonic() - t0) * 1000)
-        position.status = "SPOT_SOLD"
-        position.spot_sell_qty = Decimal(str(sell_result["executedQty"]))
-        position.spot_sell_price = _avg_fill_price(sell_result)
-        position.spot_sell_order_id = str(sell_result["orderId"])
-        db.commit()
-        _log_trade(db, pos_id, sub_account_id, "SPOT_SELL", symbol, "SELL",
-                    position.spot_sell_qty, position.spot_sell_price,
-                    position.spot_sell_order_id, "SUCCESS", latency=latency)
-
-        # Step 3: futures long
-        futures_lot = await client.get_lot_size(symbol, "futures")
-        futures_qty = round_to_step(qty, futures_lot["stepSize"])
-
-        t0 = time.monotonic()
-        long_result = await client.futures_market_long(symbol, futures_qty)
-        latency = int((time.monotonic() - t0) * 1000)
-        position.status = "OPEN"
-        position.futures_long_qty = Decimal(str(long_result["executedQty"]))
-        position.futures_long_price = Decimal(str(long_result.get("avgPrice", "0")))
-        position.futures_long_order_id = str(long_result["orderId"])
-        position.open_spread = spread.spread_short
-        position.open_usdt_amount = position.spot_sell_qty * position.spot_sell_price
-        position.opened_at = datetime.now(timezone.utc)
-        db.commit()
-        _log_trade(db, pos_id, sub_account_id, "FUTURES_LONG", symbol, "BUY",
-                    position.futures_long_qty, position.futures_long_price,
-                    position.futures_long_order_id, "SUCCESS", latency=latency)
-
-        logger.info(f"Position opened: {symbol} qty={qty} spread={spread.spread_short}%")
-        await notifier.notify_position_opened(
-            account_note, symbol, spread.spread_short, qty, position.open_usdt_amount,
-        )
+        logger.info(f"Borrowed (idle): {symbol} qty={qty}")
+        return pos_id
 
     except BinanceAPIError as e:
-        logger.error(f"Open failed at {position.status}: {e}")
-        await _handle_open_failure(db, position, client, e, sub_account_id, symbol, notifier, account_note)
-    except Exception as e:
-        logger.error(f"Open failed unexpectedly: {e}", exc_info=True)
+        logger.error(f"Borrow failed: {e}")
         position.status = "FAILED"
         position.error_message = str(e)
         db.commit()
-        await notifier.notify_error(account_note, f"open {symbol}", str(e))
+        _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, status="FAILED", error=str(e))
+        await notifier.notify_error(account_note, f"borrow {symbol}", str(e))
+        return None
+    except Exception as e:
+        logger.error(f"Borrow failed unexpectedly: {e}", exc_info=True)
+        position.status = "FAILED"
+        position.error_message = str(e)
+        db.commit()
+        return None
     finally:
         db.close()
 
 
-async def _handle_open_failure(db, position, client, error, sub_account_id, symbol, notifier, account_note):
-    current = position.status
+async def execute_hedge(
+    position: Position,
+    spread: SpreadSnapshot,
+    rules: GlobalRulesSnapshot,
+    client: BinanceTradingClient,
+    notifier: FeishuSender,
+    account_note: str,
+):
+    """Phase 2: sell the borrowed coin on spot (short) + futures long (hedge).
+    BORROWED_IDLE → SPOT_SOLD → OPEN. Full rollback on failure."""
+    db = SessionLocal()
+    pos = db.query(Position).get(position.id)
+    if not pos or pos.status != "BORROWED_IDLE":
+        db.close()
+        return
+    symbol = pos.symbol
+    sub_account_id = pos.sub_account_id
+    pos_id = pos.id
+    qty = pos.borrow_qty
 
-    if current == "BORROWED":
+    try:
+        # Step 1: spot sell (short leg)
+        t0 = time.monotonic()
+        sell_result = await client.spot_market_sell(symbol, qty)
+        latency = int((time.monotonic() - t0) * 1000)
+        pos.status = "SPOT_SOLD"
+        pos.spot_sell_qty = Decimal(str(sell_result["executedQty"]))
+        pos.spot_sell_price = _avg_fill_price(sell_result)
+        pos.spot_sell_order_id = str(sell_result["orderId"])
+        db.commit()
+        _log_trade(db, pos_id, sub_account_id, "SPOT_SELL", symbol, "SELL",
+                    pos.spot_sell_qty, pos.spot_sell_price, pos.spot_sell_order_id, "SUCCESS", latency=latency)
+
+        # Stabilize before hedging (desktop parity)
+        stabilize = float(getattr(rules, "stabilize_sec", 0) or 0)
+        if stabilize > 0:
+            await asyncio.sleep(min(stabilize, 10))
+
+        # Step 2: futures long (hedge) — market (default) or marketable-limit/tiered
+        futures_lot = await client.get_lot_size(symbol, "futures")
+        futures_qty = round_to_step(qty, futures_lot["stepSize"])
+        t0 = time.monotonic()
+        if (getattr(rules, "follow_type", "market") or "market") == "limit":
+            long_result = await _futures_entry_limit(
+                client, symbol, futures_qty, rules, futures_lot, db, pos, sub_account_id,
+            )
+        else:
+            long_result = await client.futures_market_long(symbol, futures_qty)
+        latency = int((time.monotonic() - t0) * 1000)
+        pos.status = "OPEN"
+        pos.futures_long_qty = Decimal(str(long_result["executedQty"]))
+        pos.futures_long_price = Decimal(str(long_result.get("avgPrice", "0")))
+        pos.futures_long_order_id = str(long_result["orderId"])
+        pos.open_spread = spread.spread_short
+        pos.open_usdt_amount = pos.spot_sell_qty * pos.spot_sell_price
+        pos.opened_at = datetime.now(timezone.utc)
+        db.commit()
+        _log_trade(db, pos_id, sub_account_id, "FUTURES_LONG", symbol, "BUY",
+                    pos.futures_long_qty, pos.futures_long_price, pos.futures_long_order_id, "SUCCESS", latency=latency)
+
+        logger.info(f"Position opened: {symbol} qty={qty} spread={spread.spread_short}%")
+        await notifier.notify_position_opened(
+            account_note, symbol, spread.spread_short, qty, pos.open_usdt_amount,
+        )
+
+    except BinanceAPIError as e:
+        logger.error(f"Hedge failed at {pos.status}: {e}")
+        await _handle_hedge_failure(db, pos, client, e, sub_account_id, symbol, notifier, account_note)
+    except Exception as e:
+        logger.error(f"Hedge failed unexpectedly: {e}", exc_info=True)
+        pos.status = "FAILED"
+        pos.error_message = str(e)
+        db.commit()
+        await notifier.notify_error(account_note, f"hedge {symbol}", str(e))
+    finally:
+        db.close()
+
+
+async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, notifier, account_note):
+    current = pos.status
+    if current == "BORROWED_IDLE":
         # spot sell failed — repay borrow
         try:
-            await client.margin_repay(position.base_asset, position.borrow_qty)
-            _log_trade(db, position.id, sub_account_id, "ROLLBACK_REPAY", symbol,
-                        quantity=position.borrow_qty, status="SUCCESS")
+            await client.margin_repay(pos.base_asset, pos.borrow_qty)
+            _log_trade(db, pos.id, sub_account_id, "ROLLBACK_REPAY", symbol,
+                        quantity=pos.borrow_qty, status="SUCCESS")
         except Exception as re:
-            _log_trade(db, position.id, sub_account_id, "ROLLBACK_REPAY", symbol,
-                        status="FAILED", error=str(re))
-        position.status = "FAILED"
-        position.error_message = f"Spot sell failed: {error}. Borrow rolled back."
+            _log_trade(db, pos.id, sub_account_id, "ROLLBACK_REPAY", symbol, status="FAILED", error=str(re))
+        pos.status = "FAILED"
+        pos.error_message = f"Spot sell failed: {error}. Borrow rolled back."
         db.commit()
-
     elif current == "SPOT_SOLD":
         # futures long failed — buy back spot + repay
-        rollback_qty = position.spot_sell_qty if position.spot_sell_qty else position.borrow_qty
+        rollback_qty = pos.spot_sell_qty if pos.spot_sell_qty else pos.borrow_qty
         try:
             await client.spot_market_buy_qty(symbol, rollback_qty)
-            _log_trade(db, position.id, sub_account_id, "ROLLBACK_SPOT_BUY", symbol,
-                        "BUY", rollback_qty, status="SUCCESS")
+            _log_trade(db, pos.id, sub_account_id, "ROLLBACK_SPOT_BUY", symbol, "BUY", rollback_qty, status="SUCCESS")
         except Exception as re:
-            _log_trade(db, position.id, sub_account_id, "ROLLBACK_SPOT_BUY", symbol,
-                        status="FAILED", error=str(re))
+            _log_trade(db, pos.id, sub_account_id, "ROLLBACK_SPOT_BUY", symbol, status="FAILED", error=str(re))
         try:
-            total_debt, _ = await _get_asset_debt(client, position.base_asset)
-            repay_amount = total_debt if total_debt > 0 else position.borrow_qty
-            await client.margin_repay(position.base_asset, repay_amount)
-            _log_trade(db, position.id, sub_account_id, "ROLLBACK_REPAY", symbol,
-                        quantity=repay_amount, status="SUCCESS")
+            total_debt, _ = await _get_asset_debt(client, pos.base_asset)
+            repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
+            await client.margin_repay(pos.base_asset, repay_amount)
+            _log_trade(db, pos.id, sub_account_id, "ROLLBACK_REPAY", symbol, quantity=repay_amount, status="SUCCESS")
         except Exception as re:
-            _log_trade(db, position.id, sub_account_id, "ROLLBACK_REPAY", symbol,
-                        status="FAILED", error=str(re))
-        position.status = "FAILED"
-        position.error_message = f"Futures long failed: {error}. Rolled back."
+            _log_trade(db, pos.id, sub_account_id, "ROLLBACK_REPAY", symbol, status="FAILED", error=str(re))
+        pos.status = "FAILED"
+        pos.error_message = f"Futures long failed: {error}. Rolled back."
         db.commit()
-
     else:
-        position.status = "FAILED"
-        position.error_message = str(error)
+        pos.status = "FAILED"
+        pos.error_message = str(error)
         db.commit()
-
-    _log_trade(db, position.id, sub_account_id, position.status, symbol,
-                status="FAILED", error=str(error))
-    await notifier.notify_error(account_note, f"open {symbol} (rollback from {current})", str(error))
+    await notifier.notify_error(account_note, f"hedge {symbol} (rollback from {current})", str(error))
 
 
-async def execute_close(
+async def execute_open(
+    sub_account_id: int,
+    symbol: str,
+    spread: SpreadSnapshot,
+    rules: GlobalRulesSnapshot,
+    client: BinanceTradingClient,
+    notifier: FeishuSender,
+    account_note: str,
+    spread_feed: SpreadFeed = None,
+):
+    """Atomic open (borrow + hedge in one shot) — used by manual-open and as a fallback."""
+    pos_id = await execute_borrow(
+        sub_account_id, symbol, spread, rules, client, notifier, account_note,
+        spread_feed=spread_feed, min_spread=rules.open_spread,
+    )
+    if pos_id is None:
+        return
+    db = SessionLocal()
+    pos = db.query(Position).get(pos_id)
+    db.close()
+    if pos and pos.status == "BORROWED_IDLE":
+        cur = spread_feed.get_symbol(symbol) if spread_feed else None
+        await execute_hedge(pos, cur or spread, rules, client, notifier, account_note)
+
+
+async def execute_unhedge(
     position: Position,
     spread: SpreadSnapshot,
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
 ):
+    """Phase 1 of close: close the futures long + buy back the spot, leaving the coin
+    in the margin account awaiting repay. OPEN → PENDING_REPAY (net-flat, no exposure)."""
     db = SessionLocal()
     pos = db.query(Position).get(position.id)
     if not pos or pos.status != "OPEN":
@@ -244,8 +312,8 @@ async def execute_close(
                     pos.futures_long_qty, pos.futures_close_price,
                     pos.futures_close_order_id, "SUCCESS", latency=latency)
 
-        # Step 2: query actual debt (principal + interest), then spot buy with buffer
-        total_debt, interest_amount = await _get_asset_debt(client, pos.base_asset)
+        # Step 2: buy back the borrowed coin (cover the short) — keep it for manual repay
+        total_debt, _ = await _get_asset_debt(client, pos.base_asset)
         buy_qty = total_debt * FEE_BUFFER if total_debt > 0 else pos.borrow_qty
         spot_lot = await client.get_lot_size(pos.symbol, "spot")
         buy_qty = round_to_step(buy_qty, spot_lot["stepSize"])
@@ -258,13 +326,45 @@ async def execute_close(
         pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
         pos.spot_buy_price = _avg_fill_price(buy_result)
         pos.spot_buy_order_id = str(buy_result["orderId"])
-        pos.status = "SPOT_BOUGHT"
+        pos.close_spread = spread.spread_short
+        pos.status = "PENDING_REPAY"   # coin held; awaiting manual/auto repay
         db.commit()
         _log_trade(db, pos.id, pos.sub_account_id, "SPOT_BUY", pos.symbol, "BUY",
                     pos.spot_buy_qty, pos.spot_buy_price,
                     pos.spot_buy_order_id, "SUCCESS", latency=latency)
 
-        # Step 3: repay actual debt (re-query for freshness)
+        logger.info(f"Unhedged (pending repay): {pos.symbol}")
+
+    except BinanceAPIError as e:
+        logger.error(f"Unhedge failed at {pos.status}: {e}")
+        pos.error_message = str(e)
+        pos.retry_count = (pos.retry_count or 0) + 1
+        db.commit()
+        _log_trade(db, pos.id, pos.sub_account_id, "CLOSE_ERROR", pos.symbol, status="FAILED", error=str(e))
+        await notifier.notify_error(account_note, f"unhedge {pos.symbol}", str(e))
+    except Exception as e:
+        logger.error(f"Unhedge failed unexpectedly: {e}", exc_info=True)
+        pos.error_message = str(e)
+        db.commit()
+        await notifier.notify_error(account_note, f"unhedge {pos.symbol}", str(e))
+    finally:
+        db.close()
+
+
+async def execute_repay(
+    position: Position,
+    client: BinanceTradingClient,
+    notifier: FeishuSender,
+    account_note: str,
+):
+    """Phase 2 of close: repay the margin debt and finalize PnL. PENDING_REPAY → CLOSED."""
+    db = SessionLocal()
+    pos = db.query(Position).get(position.id)
+    if not pos or pos.status != "PENDING_REPAY":
+        db.close()
+        return
+
+    try:
         pos.status = "REPAYING"
         db.commit()
         total_debt, interest_amount = await _get_asset_debt(client, pos.base_asset)
@@ -277,7 +377,7 @@ async def execute_close(
         _log_trade(db, pos.id, pos.sub_account_id, "REPAY", pos.symbol,
                     quantity=repay_amount, status="SUCCESS", latency=latency)
 
-        # Calculate PnL (including fees and interest)
+        # Finalize PnL (fees + interest)
         spot_pnl = (pos.spot_sell_qty * pos.spot_sell_price) - (pos.spot_buy_qty * pos.spot_buy_price)
         futures_pnl = (pos.futures_close_price - pos.futures_long_price) * pos.futures_long_qty
         spot_sell_notional = pos.spot_sell_qty * pos.spot_sell_price
@@ -288,29 +388,43 @@ async def execute_close(
         interest_cost = interest_amount * pos.spot_buy_price if interest_amount else Decimal("0")
         pos.fee_total = total_fee + interest_cost
         pos.realized_pnl = spot_pnl + futures_pnl - total_fee - interest_cost
-        pos.close_spread = spread.spread_short
         pos.closed_at = datetime.now(timezone.utc)
         pos.status = "CLOSED"
         db.commit()
 
-        logger.info(f"Position closed: {pos.symbol} pnl={pos.realized_pnl}")
-        await notifier.notify_position_closed(account_note, pos.symbol, pos.realized_pnl, spread.spread_short)
+        logger.info(f"Position closed (repaid): {pos.symbol} pnl={pos.realized_pnl}")
+        await notifier.notify_position_closed(account_note, pos.symbol, pos.realized_pnl, pos.close_spread or Decimal("0"))
 
     except BinanceAPIError as e:
-        logger.error(f"Close failed at {pos.status}: {e}")
+        logger.error(f"Repay failed: {e}")
         pos.error_message = str(e)
-        pos.retry_count += 1
+        pos.retry_count = (pos.retry_count or 0) + 1
         db.commit()
-        _log_trade(db, pos.id, pos.sub_account_id, "CLOSE_ERROR", pos.symbol,
-                    status="FAILED", error=str(e))
-        await notifier.notify_error(account_note, f"close {pos.symbol}", str(e))
+        _log_trade(db, pos.id, pos.sub_account_id, "REPAY", pos.symbol, status="FAILED", error=str(e))
+        await notifier.notify_error(account_note, f"repay {pos.symbol}", str(e))
     except Exception as e:
-        logger.error(f"Close failed unexpectedly: {e}", exc_info=True)
+        logger.error(f"Repay failed unexpectedly: {e}", exc_info=True)
         pos.error_message = str(e)
         db.commit()
-        await notifier.notify_error(account_note, f"close {pos.symbol}", str(e))
+        await notifier.notify_error(account_note, f"repay {pos.symbol}", str(e))
     finally:
         db.close()
+
+
+async def execute_close(
+    position: Position,
+    spread: SpreadSnapshot,
+    client: BinanceTradingClient,
+    notifier: FeishuSender,
+    account_note: str,
+):
+    """Atomic close (unhedge + repay in one shot) — used by manual-close / tail cleanup."""
+    await execute_unhedge(position, spread, client, notifier, account_note)
+    db = SessionLocal()
+    pos = db.query(Position).get(position.id)
+    db.close()
+    if pos and pos.status == "PENDING_REPAY":
+        await execute_repay(pos, client, notifier, account_note)
 
 
 async def execute_borrow_only_repay(
@@ -373,3 +487,115 @@ def _avg_fill_price(order_result: dict) -> Decimal:
         return Decimal("0")
     weighted = sum(Decimal(f["price"]) * Decimal(f["qty"]) for f in fills)
     return weighted / total_qty
+
+
+# ─── Limit / tiered futures entry (hedge-safe: always reconciles to full hedge) ───
+
+LIMIT_WAIT_SEC = 2.0       # max wait per limit tranche before fallback
+LIMIT_POLL_SEC = 0.3
+
+
+def _parse_tiers(tier_ratios: str) -> list[tuple[Decimal, Decimal]]:
+    """Parse "0.5:30,0.8:30,1.2:40" -> [(offset_pct, qty_pct), ...].
+    Returns [] when empty/invalid (caller falls back to a single tranche)."""
+    if not tier_ratios or not tier_ratios.strip():
+        return []
+    out: list[tuple[Decimal, Decimal]] = []
+    try:
+        for part in tier_ratios.split(","):
+            off, q = part.split(":")
+            out.append((Decimal(off.strip()), Decimal(q.strip())))
+    except Exception:
+        return []
+    total = sum(q for _, q in out)
+    if total <= 0:
+        return []
+    return out
+
+
+async def _poll_fill(client: BinanceTradingClient, symbol: str, order_id: str,
+                     timeout: float) -> tuple[Decimal, Decimal]:
+    """Poll a futures order until FILLED or timeout. Returns (executedQty, avgPrice)."""
+    waited = 0.0
+    eq, ap = Decimal("0"), Decimal("0")
+    while waited < timeout:
+        try:
+            o = await client.futures_get_order(symbol, order_id)
+            eq = Decimal(str(o.get("executedQty", "0")))
+            ap = Decimal(str(o.get("avgPrice", "0")))
+            if o.get("status") in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(LIMIT_POLL_SEC)
+        waited += LIMIT_POLL_SEC
+    return eq, ap
+
+
+async def _futures_entry_limit(client: BinanceTradingClient, symbol: str, total_qty: Decimal,
+                               rules, futures_lot: dict, db, pos, sub_account_id) -> dict:
+    """Marketable-limit (+ optional tiered) futures long, capping slippage but
+    ALWAYS reconciling any unfilled remainder with a market order so the spot leg
+    is never left unhedged. Returns a dict shaped like a market-order result."""
+    step = futures_lot["stepSize"]
+    min_qty = Decimal(str(futures_lot.get("minQty", "0")))
+    slippage = (rules.slippage_pct or Decimal("0.1")) / Decimal("100")
+
+    # fresh ask for accurate limit pricing
+    try:
+        book = await client.futures_book_ticker(symbol)
+        ask = Decimal(str(book.get("askPrice") or book.get("a") or "0"))
+    except Exception:
+        ask = Decimal("0")
+    tick = await client.get_futures_tick_size(symbol)
+
+    tiers = _parse_tiers(rules.tier_ratios)
+    if not tiers:
+        tiers = [(rules.slippage_pct or Decimal("0.1"), Decimal("100"))]
+
+    fills: list[tuple[Decimal, Decimal]] = []
+    filled = Decimal("0")
+
+    if ask > 0:
+        for offset_pct, qty_pct in tiers:
+            qty_i = round_to_step(total_qty * qty_pct / Decimal("100"), step)
+            if qty_i <= 0:
+                continue
+            # marketable limit: ask uplifted by max(offset, slippage cap)
+            uplift = max(offset_pct / Decimal("100"), slippage)
+            price = round_to_step(ask * (Decimal("1") + uplift), tick)
+            try:
+                res = await client.futures_limit_long(symbol, qty_i, price)
+                oid = str(res["orderId"])
+                eq, ap = await _poll_fill(client, symbol, oid, LIMIT_WAIT_SEC)
+                if eq < qty_i:
+                    try:
+                        await client.futures_cancel_order(symbol, oid)
+                    except Exception:
+                        pass
+                if eq > 0:
+                    fills.append((eq, ap)); filled += eq
+                    _log_trade(db, pos.id, sub_account_id, "FUTURES_LIMIT_FILL", symbol, "BUY",
+                                eq, ap, oid, "SUCCESS")
+            except Exception as e:
+                logger.warning(f"Limit tranche failed {symbol} {qty_i}@{price}: {e}")
+
+    # Reconcile to full hedge with a market order (safety invariant).
+    remaining = round_to_step(total_qty - filled, step)
+    last_id = None
+    if remaining >= min_qty and remaining > 0:
+        mres = await client.futures_market_long(symbol, remaining)
+        meq = Decimal(str(mres.get("executedQty", "0")))
+        map_ = Decimal(str(mres.get("avgPrice", "0")))
+        last_id = str(mres.get("orderId", ""))
+        if meq > 0:
+            fills.append((meq, map_)); filled += meq
+            _log_trade(db, pos.id, sub_account_id, "FUTURES_MARKET_FALLBACK", symbol, "BUY",
+                        meq, map_, last_id, "SUCCESS")
+
+    avg = (sum(q * p for q, p in fills) / filled) if filled > 0 else Decimal("0")
+    return {
+        "executedQty": str(filled),
+        "avgPrice": str(avg),
+        "orderId": last_id or (str(int(pos.id)) if not fills else "limit"),
+    }

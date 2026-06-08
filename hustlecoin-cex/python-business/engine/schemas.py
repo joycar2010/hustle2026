@@ -13,6 +13,7 @@ class PositionResponse(BaseModel):
     open_spread: Optional[Decimal] = None
     borrow_qty: Optional[Decimal] = None
     spot_sell_price: Optional[Decimal] = None
+    futures_long_qty: Optional[Decimal] = None
     futures_long_price: Optional[Decimal] = None
     open_usdt_amount: Optional[Decimal] = None
     close_spread: Optional[Decimal] = None
@@ -131,3 +132,8 @@ class HealthResponse(BaseModel):
     api_metrics: dict[str, APIMetricsResponse] = {}
     spread_count: int = 0
     uptime_sec: Optional[int] = None
+    used_weight_1m: int = 0
+    weight_limit: int = 6000
+    weight_age_sec: Optional[int] = None
+    throttle_rate: float = 0.0  # per-symbol borrow throughput (req/s) under current weight headroom
+    agg_borrow_rate: float = 0.0  # Σ per-account effective borrow rate (req/s)

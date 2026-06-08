@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class GlobalRulesSnapshot:
     auto_push_spread: Decimal = Decimal("0.8")
     remove_spread: Decimal = Decimal("0.5")
+    borrow_spread: Decimal = Decimal("0.5")
     open_spread: Decimal = Decimal("0.8")
     close_spread: Decimal = Decimal("0.2")
     order_amount: Decimal = Decimal("500")
@@ -30,6 +31,11 @@ class GlobalRulesSnapshot:
     futures_liquidation_threshold: Decimal | None = None
     repay_spread: Decimal | None = None
     max_daily_interest_rate: Decimal | None = None
+    slippage_pct: Decimal = Decimal("0.1")
+    follow_type: str = "market"
+    stabilize_sec: Decimal = Decimal("0")
+    tier_ratios: str = ""
+    borrow_rate_per_sec: Decimal = Decimal("2")
 
 
 @dataclass(frozen=True)
@@ -87,6 +93,7 @@ class ConfigLoader:
                 self.global_rules = GlobalRulesSnapshot(
                     auto_push_spread=rules.auto_push_spread,
                     remove_spread=rules.remove_spread,
+                    borrow_spread=rules.borrow_spread if getattr(rules, "borrow_spread", None) is not None else Decimal("0.5"),
                     open_spread=rules.open_spread,
                     close_spread=rules.close_spread,
                     order_amount=rules.order_amount,
@@ -102,6 +109,11 @@ class ConfigLoader:
                     futures_liquidation_threshold=rules.futures_liquidation_threshold,
                     repay_spread=rules.repay_spread,
                     max_daily_interest_rate=rules.max_daily_interest_rate,
+                    slippage_pct=rules.slippage_pct if rules.slippage_pct is not None else Decimal("0.1"),
+                    follow_type=rules.follow_type or "market",
+                    stabilize_sec=rules.stabilize_sec if rules.stabilize_sec is not None else Decimal("0"),
+                    tier_ratios=rules.tier_ratios or "",
+                    borrow_rate_per_sec=rules.borrow_rate_per_sec if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
                 )
 
             fund = db.query(FundRules).first()
