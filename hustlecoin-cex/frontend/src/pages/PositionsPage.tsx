@@ -26,7 +26,7 @@ export function PositionsPage() {
 
   const fetchData = async () => {
     try {
-      const data = await getPositions('OPEN')
+      const data = await getPositions('ACTIVE')
       setPositions(data)
     } finally {
       setLoading(false)

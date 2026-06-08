@@ -11,6 +11,7 @@ export interface Coin {
   is_new_coin: boolean
   is_delisting: boolean
   allow_open: boolean
+  is_risky: boolean
   volume_24h: string | null
 }
 

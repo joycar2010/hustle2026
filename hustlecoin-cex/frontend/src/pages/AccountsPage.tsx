@@ -4,7 +4,7 @@ import {
   getMasterAccount, updateMasterAccount, validateMasterAccount,
   createSubAccount, getIpWhitelist, updateSubAccountKeys,
   deleteSubAccount, updateSubAccount, getApiPermissions,
-  checkPermissions, getMasterPermissions,
+  checkPermissions, getMasterPermissions, getMasterBalance,
 } from '@/api/accounts'
 import { getAccountBalance } from '@/api/engine'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -129,6 +129,8 @@ export function AccountsPage() {
   const [masterPermLoading, setMasterPermLoading] = useState(false)
   const [masterIpRestrict, setMasterIpRestrict] = useState<boolean | null>(null)
   const [masterPermError, setMasterPermError] = useState<string | null>(null)
+  const [masterBalance, setMasterBalance] = useState<BalanceInfo | null>(null)
+  const [masterBalanceLoading, setMasterBalanceLoading] = useState(false)
   const [masterAccountName, setMasterAccountName] = useState('')
   const [masterKey, setMasterKey] = useState('')
   const [masterSecret, setMasterSecret] = useState('')
@@ -171,10 +173,22 @@ export function AccountsPage() {
       .finally(() => setMasterPermLoading(false))
   }, [masterExpanded, masterAccount])
 
-  // Fetch IP info for all accounts on load
+  // Fetch master balance when expanded
+  useEffect(() => {
+    if (!masterExpanded || !masterAccount || masterBalance) return
+    let cancelled = false
+    setMasterBalanceLoading(true)
+    getMasterBalance()
+      .then((d) => { if (!cancelled) setMasterBalance(d) })
+      .catch(() => addToast('获取主账户余额失败', 'error'))
+      .finally(() => { if (!cancelled) setMasterBalanceLoading(false) })
+    return () => { cancelled = true }
+  }, [masterExpanded, masterAccount, masterBalance, addToast])
+
+  // Fetch IP info for enabled accounts on load
   useEffect(() => {
     if (accounts.length === 0) return
-    accounts.forEach((a) => {
+    accounts.filter((a) => a.is_enabled).forEach((a) => {
       getIpWhitelist(a.id)
         .then((data: IpInfo) => setIpInfos((prev) => ({ ...prev, [a.id]: data })))
         .catch(() => {})
@@ -213,6 +227,18 @@ export function AccountsPage() {
       addToast('获取余额失败', 'error')
     }
   }
+
+  const handleFetchMasterBalance = useCallback(async () => {
+    setMasterBalanceLoading(true)
+    try {
+      const data = await getMasterBalance()
+      setMasterBalance(data)
+    } catch {
+      addToast('获取主账户余额失败', 'error')
+    } finally {
+      setMasterBalanceLoading(false)
+    }
+  }, [addToast])
 
   const handleRefreshAll = async () => {
     setRefreshingAll(true)
@@ -305,6 +331,63 @@ export function AccountsPage() {
                     <span className="font-mono text-[11px]">{masterAccount.api_secret_masked}</span>
                     <span className="text-muted-foreground">创建时间</span>
                     <span>{new Date(masterAccount.created_at).toLocaleString('zh-CN')}</span>
+                  </div>
+
+                  {/* Master Balance */}
+                  <div className="space-y-1.5 border-t pt-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] text-muted-foreground font-medium">账户余额</p>
+                      <button
+                        onClick={handleFetchMasterBalance}
+                        disabled={masterBalanceLoading}
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                        title="刷新余额"
+                      >
+                        <RefreshCw size={12} className={cn(masterBalanceLoading && 'animate-spin')} />
+                      </button>
+                    </div>
+                    {masterBalance ? (
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">现货</span>
+                          <span className="tabular-nums font-mono">{formatNumber(masterBalance.spot_usdt_free)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">资金</span>
+                          <span className="tabular-nums font-mono">{formatNumber(masterBalance.funding_usdt)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">理财</span>
+                          <span className="tabular-nums font-mono">{formatNumber(masterBalance.earn_total)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">杠杆可用</span>
+                          <span className="tabular-nums font-mono">{formatNumber(masterBalance.margin_usdt_free)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">借入</span>
+                          <span className={cn('tabular-nums font-mono', parseFloat(masterBalance.margin_usdt_borrowed) > 0 && 'text-negative')}>{formatNumber(masterBalance.margin_usdt_borrowed)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">风险值</span>
+                          <span className="tabular-nums font-mono">{parseFloat(masterBalance.margin_level) >= 999 ? '∞' : formatNumber(masterBalance.margin_level)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">合约</span>
+                          <span className="tabular-nums font-mono">{formatNumber(masterBalance.futures_total_balance)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">合约可用</span>
+                          <span className="tabular-nums font-mono">{formatNumber(masterBalance.futures_available)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">未实现盈亏</span>
+                          <span className={cn('tabular-nums font-mono', parseFloat(masterBalance.futures_unrealized_pnl) > 0 ? 'text-positive' : parseFloat(masterBalance.futures_unrealized_pnl) < 0 ? 'text-negative' : '')}>{formatNumber(masterBalance.futures_unrealized_pnl)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">{masterBalanceLoading ? '加载中...' : '点击刷新加载余额'}</span>
+                    )}
                   </div>
 
                   {/* Master Permissions */}

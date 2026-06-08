@@ -21,6 +21,7 @@ interface SubAccount {
   single_order_amount: string | null
   max_positions: number | null
   max_borrow_amount: string | null
+  borrow_rate_per_sec: string | null
 }
 
 interface AccountBalance {
@@ -475,7 +476,9 @@ export function RulesPage() {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [editingCells, setEditingCells] = useState<Record<string, string>>({})
-  const [maxBorrowToggle, setMaxBorrowToggle] = useState(false)
+  const [maxBorrowToggle, setMaxBorrowToggle] = useState(() => {
+    try { return localStorage.getItem('hc_borrow_display_mode') === 'usdt' } catch { return false }
+  })
   const [transferAccount, setTransferAccount] = useState<SubAccount | null>(null)
   const addToast = useToastStore((s) => s.addToast)
 
@@ -633,7 +636,10 @@ export function RulesPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <TogglePill label="划转失败提醒" active={!!feishu.enable_transfer_fail_alert} onChange={(v) => updateFBool('enable_transfer_fail_alert', v)} />
               <TogglePill label="新增借币提醒" active={!!feishu.enable_new_borrow_alert} onChange={(v) => updateFBool('enable_new_borrow_alert', v)} />
-              <TogglePill label="最大可借金额" active={maxBorrowToggle} onChange={setMaxBorrowToggle} />
+              <TogglePill label="最大可借金额" active={maxBorrowToggle} onChange={(v) => {
+                setMaxBorrowToggle(v)
+                try { localStorage.setItem('hc_borrow_display_mode', v ? 'usdt' : 'qty') } catch { /* ignore */ }
+              }} />
             </div>
           </div>
 
@@ -675,6 +681,7 @@ export function RulesPage() {
                   <th className="px-1.5 py-1.5 text-right font-medium">单笔划</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">保底额</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">挂单单笔</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="每账户借币速率(次/秒)，留空跟随全局">借速</th>
                   <th className="px-1.5 py-1.5 text-center font-medium">操作</th>
                 </tr>
               </thead>
@@ -695,6 +702,7 @@ export function RulesPage() {
                       <EditableCell accountId={a.id} field="single_transfer_amount" value={a.single_transfer_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
                       <EditableCell accountId={a.id} field="min_balance" value={a.min_balance} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
                       <EditableCell accountId={a.id} field="single_order_amount" value={a.single_order_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
+                      <EditableCell accountId={a.id} field="borrow_rate_per_sec" value={a.borrow_rate_per_sec} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
                       <td className="px-1.5 py-1 text-center">
                         <button
                           onClick={() => setTransferAccount(a)}
@@ -707,7 +715,7 @@ export function RulesPage() {
                   )
                 })}
                 {accounts.length === 0 && (
-                  <tr><td colSpan={13} className="px-2 py-4 text-center text-muted-foreground">无子账户</td></tr>
+                  <tr><td colSpan={14} className="px-2 py-4 text-center text-muted-foreground">无子账户</td></tr>
                 )}
               </tbody>
             </table>
@@ -772,6 +780,7 @@ export function RulesPage() {
               <InlineField label="手动移除尾单清理金额" value={gv('max_loss_per_position')} onChange={(v) => updateG('max_loss_per_position', v)} suffix="U" width="w-10" />
             </div>
             <div className="flex items-center gap-4 flex-wrap text-[11px]">
+              <InlineField label="挂单点差" value={gv('borrow_spread')} onChange={(v) => updateG('borrow_spread', v)} width="w-10" />
               <InlineField label="开仓点差" value={gv('open_spread')} onChange={(v) => updateG('open_spread', v)} width="w-10" />
               <InlineField label="单笔下单额" value={gv('order_amount')} onChange={(v) => updateG('order_amount', v)} width="w-10" />
               <InlineField label="借币延迟开仓" value={gv('borrow_delay_sec')} onChange={(v) => updateG('borrow_delay_sec', v)} suffix="秒" width="w-8" />
@@ -787,9 +796,37 @@ export function RulesPage() {
               <span className="text-muted-foreground">还币: 资息倍率 &lt;</span>
               <InlineField value={gv('repay_funding_ratio')} onChange={(v) => updateG('repay_funding_ratio', v)} width="w-10" />
             </div>
+            {/* 下单质量(高级) — 桌面参数对齐 */}
+            <div className="flex items-center gap-4 flex-wrap text-[11px] pt-1 border-t border-border/40">
+              <span className="text-muted-foreground/70 text-[10px]">下单质量(高级)</span>
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground">跟单方式</span>
+                <select
+                  value={(gv('follow_type') || 'market')}
+                  onChange={(e) => updateG('follow_type', e.target.value)}
+                  className="bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
+                >
+                  <option value="market">市价</option>
+                  <option value="limit">限价</option>
+                </select>
+              </div>
+              <InlineField label="滑点" value={gv('slippage_pct')} onChange={(v) => updateG('slippage_pct', v)} suffix="%" width="w-10" />
+              <InlineField label="现货成交后等待" value={gv('stabilize_sec')} onChange={(v) => updateG('stabilize_sec', v)} suffix="秒" width="w-8" />
+              <InlineField label="分层建仓" value={gv('tier_ratios')} onChange={(v) => updateG('tier_ratios', v)} width="w-28" />
+            </div>
+            {/* 限流：每账户借币配速 */}
+            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="text-muted-foreground/70 text-[10px]">限流</span>
+              <InlineField label="每账户借币速率" value={gv('borrow_rate_per_sec')} onChange={(v) => updateG('borrow_rate_per_sec', v)} suffix="次/秒" width="w-10" />
+              <span className="text-muted-foreground/60 text-[10px]">单 UID 硬顶 2/秒(180000÷1500)；多账户聚合 = 本值×账户数</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground/60 -mt-1">
+              限价：合约腿用可成交限价(挂价≥卖一×(1+滑点))封顶滑点，超时未成交自动市价补齐——永不留敞口。分层格式「偏移%:数量%」如 0.5:30,0.8:30,1.2:40。受控测试请先用小额单笔下单额验证。
+            </div>
+
             <div className="flex items-center justify-between flex-wrap text-[11px]">
               <div className="flex items-center gap-1">
-                <span className="text-muted-foreground">首次推送后</span>
+                <span className="text-muted-foreground">首次借币后</span>
                 <InlineField value={gv('repay_ban_minutes')} onChange={(v) => updateG('repay_ban_minutes', v)} width="w-10" />
                 <span className="text-muted-foreground">分钟内禁止自动还币</span>
               </div>

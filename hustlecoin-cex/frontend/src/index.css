@@ -73,3 +73,11 @@ body {
 .animate-flash {
   animation: value-flash 1s ease-out;
 }
+
+@keyframes marquee-scroll {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+.animate-marquee {
+  animation: marquee-scroll 20s linear infinite;
+}

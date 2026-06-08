@@ -3,13 +3,23 @@ import { Badge } from '@/components/ui/badge'
 import { getEngineHealth, type EngineHealth } from '@/api/engine'
 import {
   Activity, AlertTriangle, ChevronDown, ChevronUp,
-  Heart, Server, Zap,
+  Heart, Server, Zap, Gauge, Clock,
 } from 'lucide-react'
 
 const STATUS_CONFIG = {
   HEALTHY: { label: '正常', variant: 'success' as const, icon: Heart },
   DEGRADED: { label: '异常', variant: 'warning' as const, icon: AlertTriangle },
   UNHEALTHY: { label: '故障', variant: 'destructive' as const, icon: AlertTriangle },
+}
+
+function fmtUptime(sec: number): string {
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (d > 0) return `${d}d${h}h`
+  if (h > 0) return `${h}h${m}m`
+  return `${m}m${String(s).padStart(2, '0')}s`
 }
 
 export function EngineHealthBar() {
@@ -36,6 +46,12 @@ export function EngineHealthBar() {
   const Icon = cfg.icon
   const staleWorkers = health.workers.filter(w => w.heartbeat_stale)
   const runningWorkers = health.workers.filter(w => w.status === 'RUNNING')
+  const isRunning = health.engine_status === 'RUNNING'
+  const usedWeight = health.used_weight_1m ?? 0
+  const weightLimit = health.weight_limit || 6000
+  const weightPct = Math.min(100, Math.round((usedWeight / weightLimit) * 100))
+  const weightColor = weightPct >= 85 ? 'text-negative' : weightPct >= 60 ? 'text-yellow-500' : 'text-positive'
+  const weightBar = weightPct >= 85 ? 'bg-negative' : weightPct >= 60 ? 'bg-yellow-500' : 'bg-positive'
   const totalMetrics = Object.values(health.api_metrics).reduce(
     (acc, m) => ({
       calls: acc.calls + m.total_calls,
@@ -58,6 +74,29 @@ export function EngineHealthBar() {
 
         <span className="text-muted-foreground">|</span>
 
+        {/* engine mode (挂单中/已停止) + uptime */}
+        <div className="flex items-center gap-1.5">
+          <Badge variant={isRunning ? 'success' : 'secondary'}>{isRunning ? '挂单中' : '已停止'}</Badge>
+          {isRunning && health.uptime_sec != null && (
+            <span className="flex items-center gap-0.5 text-muted-foreground">
+              <Clock className="h-3 w-3" />{fmtUptime(health.uptime_sec)}
+            </span>
+          )}
+        </div>
+
+        <span className="text-muted-foreground">|</span>
+
+        {/* SAPI weight gauge */}
+        <div className="flex items-center gap-1" title={`SAPI 权重 ${usedWeight}/${weightLimit} (1分钟IP限额)${health.weight_age_sec != null ? ` · ${health.weight_age_sec}s前` : ''}`}>
+          <Gauge className={`h-3 w-3 ${weightColor}`} />
+          <span className={weightColor}>权重 {usedWeight}/{weightLimit}</span>
+          <span className="hidden sm:inline-block w-12 h-1.5 rounded-full bg-muted overflow-hidden align-middle">
+            <span className={`block h-full ${weightBar}`} style={{ width: `${weightPct}%` }} />
+          </span>
+        </div>
+
+        <span className="text-muted-foreground">|</span>
+
         <div className="flex items-center gap-1">
           <Server className="h-3 w-3 text-muted-foreground" />
           <span>{runningWorkers.length} Worker</span>
@@ -74,6 +113,14 @@ export function EngineHealthBar() {
           {health.stuck_positions.length > 0 && (
             <Badge variant="destructive" className="ml-1">{health.stuck_positions.length} 卡住</Badge>
           )}
+        </div>
+
+        <span className="text-muted-foreground">|</span>
+
+        {/* 聚合借速 = min( Σ 各账户配速[每账户≤2/s 单UID硬顶], 共享IP预算上限 ) */}
+        <div className="flex items-center gap-1" title="可持续聚合借速 = min( Σ 各启用子账户配速[每账户封顶 2/s 单UID硬顶], 共享IP预算上限 ) (req/s)">
+          <Gauge className="h-3 w-3 text-primary" />
+          <span>聚合借速 <span className="text-primary font-mono">{(health.agg_borrow_rate ?? 0).toFixed(1)}</span>/s</span>
         </div>
 
         <span className="text-muted-foreground">|</span>

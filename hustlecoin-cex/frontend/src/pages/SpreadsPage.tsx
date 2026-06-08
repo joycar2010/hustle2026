@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useSpreadStore, type SpreadData } from '@/stores/spreadStore'
+import { useMarketDataStore } from '@/stores/marketDataStore'
 import { getSpreads } from '@/api/spreads'
 import { pushSymbol, getPushedSymbols } from '@/api/engine'
 import { getGlobalRules, getSymbolRules, addToBlacklist } from '@/api/rules'
@@ -8,6 +9,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { useToastStore } from '@/components/ui/toast'
 import { createChart, type IChartApi, CandlestickSeries, HistogramSeries, ColorType, type UTCTimestamp } from 'lightweight-charts'
 import { MoreVertical } from 'lucide-react'
+
+// Surface real HTTP status/detail so failures are diagnosable instead of silently empty.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function errMsg(e: any): string {
+  const status = e?.response?.status
+  const detail = e?.response?.data?.detail ?? e?.message
+  return status ? `${status}${detail ? ': ' + detail : ''}` : (detail || '未知错误')
+}
 
 type Tab = 'spreads' | 'kline' | 'rankings'
 
@@ -39,6 +48,7 @@ export function SpreadsPage() {
 function SpreadsTab() {
   const spreads = useSpreadStore((s) => s.spreads)
   const setBulk = useSpreadStore((s) => s.setBulk)
+  const marketData = useMarketDataStore((s) => s.marketData)
   const [search, setSearch] = useState('')
   const [globalRules, setGlobalRules] = useState<Record<string, unknown>>({})
   const [symbolRulesMap, setSymbolRulesMap] = useState<Map<string, { open: number; close: number }>>(new Map())
@@ -143,6 +153,8 @@ function SpreadsTab() {
               <th className="px-2 py-1.5 text-right font-medium">当期</th>
               <th className="px-2 py-1.5 text-right font-medium">开仓</th>
               <th className="px-2 py-1.5 text-right font-medium">平仓</th>
+              <th className="px-2 py-1.5 text-right font-medium">资</th>
+              <th className="px-2 py-1.5 text-right font-medium">资倍</th>
               <th className="px-2 py-1.5 text-right font-medium">决</th>
               <th className="px-2 py-1.5 text-center font-medium">推送</th>
               <th className="px-1 py-1.5 font-medium md:hidden w-8"></th>
@@ -159,6 +171,7 @@ function SpreadsTab() {
               const isPushed = pushedSymbols.has(s.symbol)
               const openActual = s.spread_short
               const closeActual = s.fut_bid !== 0 ? (s.spot_ask - s.fut_bid) / s.fut_bid * 100 : 0
+              const mi = marketData.get(s.symbol)
               return (
                 <tr
                   key={s.symbol}
@@ -181,6 +194,20 @@ function SpreadsTab() {
                   <td className="px-2 py-1 text-right tabular-nums font-mono">
                     <span className={closeActual <= symClose ? 'text-positive' : 'text-foreground'}>{closeActual.toFixed(2)}</span>
                     <span className="text-muted-foreground text-[9px] ml-0.5">/{symClose.toFixed(2)}</span>
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums font-mono">
+                    {mi ? (
+                      <span className={mi.funding_rate >= 0 ? 'text-positive' : 'text-negative'}>
+                        {(mi.funding_rate * 100).toFixed(2)}
+                      </span>
+                    ) : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums font-mono">
+                    {mi && mi.ratio !== 0 ? (
+                      <span className={mi.ratio >= 0 ? 'text-positive' : 'text-negative'}>
+                        {mi.ratio.toFixed(2)}
+                      </span>
+                    ) : <span className="text-muted-foreground">-</span>}
                   </td>
                   <td className="px-2 py-1 text-right font-medium text-positive">
                     {direction}
@@ -209,7 +236,7 @@ function SpreadsTab() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-muted-foreground text-xs">
+                <td colSpan={11} className="py-8 text-center text-muted-foreground text-xs">
                   {search ? '未找到匹配币种' : '等待利差数据...'}
                 </td>
               </tr>
@@ -364,8 +391,8 @@ function KlineTab() {
         const change = ((last.close - first.open) / first.open) * 100
         setOhlc({ o: last.open, h: last.high, l: last.low, c: last.close, change })
       }
-    } catch {
-      addToast('K线加载失败', 'error')
+    } catch (e) {
+      addToast(`K线加载失败: ${errMsg(e)}`, 'error')
     } finally {
       setLoading(false)
     }
@@ -474,16 +501,18 @@ function RankingsTab() {
   const [gainers5min, setGainers5min] = useState<RankingItem[]>([])
   const [historical, setHistorical] = useState<HistoryScoreItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
 
   const fetchRankings = useCallback(() => {
     getRankings()
       .then((data) => {
+        setErr(null)
         setGainers(data.gainers || [])
         setLosers(data.losers || [])
         setGainers5min(data.gainers_5min || [])
         setHistorical(data.historical || [])
       })
-      .catch(() => {})
+      .catch((e) => setErr(errMsg(e)))
       .finally(() => setLoading(false))
   }, [])
 
@@ -497,6 +526,7 @@ function RankingsTab() {
 
   return (
     <div className="space-y-3">
+      {err && <div className="rounded border border-negative/40 bg-negative/10 px-3 py-1.5 text-[11px] text-negative">涨幅榜加载失败: {err}</div>}
       <p className="text-[10px] text-muted-foreground">数据来源: AiCoin · 每30秒自动刷新 · 历史分数持续累加</p>
 
       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 xl:grid-cols-4">

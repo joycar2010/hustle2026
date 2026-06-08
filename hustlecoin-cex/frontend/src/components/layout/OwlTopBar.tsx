@@ -6,8 +6,27 @@ import { useEngineStore } from '@/stores/engineStore'
 import { useBalanceStore } from '@/stores/balanceStore'
 import { useUiStore } from '@/stores/uiStore'
 import { startAllWorkers, stopAllWorkers, pushSymbol } from '@/api/engine'
+import { getMasterBalance } from '@/api/accounts'
 import { useToastStore } from '@/components/ui/toast'
 import { cn, formatNumber } from '@/lib/utils'
+
+// 顶栏「合约账户/保/可」取主账户的 U 本位合约钱包（非子账户汇总）
+function useMasterFutures() {
+  const [m, setM] = useState({ total: 0, available: 0 })
+  useEffect(() => {
+    let cancelled = false
+    const fetchIt = () => getMasterBalance()
+      .then((d) => { if (!cancelled) setM({
+        total: parseFloat(d.futures_total_balance || '0'),
+        available: parseFloat(d.futures_available || '0'),
+      }) })
+      .catch(() => {})
+    fetchIt()
+    const t = setInterval(fetchIt, 30000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [])
+  return m
+}
 
 const navTabs = [
   { to: '/dashboard', label: '主控台' },
@@ -154,6 +173,7 @@ function MobileNavDrawer() {
   const logout = useAuthStore((s) => s.logout)
   const username = useAuthStore((s) => s.username)
   const balanceSummary = useBalanceStore((s) => s.summary)
+  const masterFut = useMasterFutures()
   const wsLatency = useBalanceStore((s) => s.wsLatency)
   const workers = useEngineStore((s) => s.workers)
   const engineStatus = useEngineStore((s) => s.status)
@@ -216,9 +236,9 @@ function MobileNavDrawer() {
         <div className="p-3 border-b border-border space-y-2">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wider">账户概要</div>
           <div className="grid grid-cols-2 gap-2 text-[11px]">
-            <div className="text-muted-foreground">合约账户 <span className="text-foreground font-mono">{formatNumber(balanceSummary.futuresTotal, 0)}</span></div>
-            <div className="text-muted-foreground">保证金 <span className="text-foreground font-mono">{formatNumber(balanceSummary.futuresMargin, 0)}</span></div>
-            <div className="text-muted-foreground">可用 <span className="text-foreground font-mono">{formatNumber(balanceSummary.futuresAvailable, 0)}</span></div>
+            <div className="text-muted-foreground">合约账户 <span className="text-foreground font-mono">{formatNumber(masterFut.total, 0)}</span></div>
+            <div className="text-muted-foreground">保证金 <span className="text-foreground font-mono">{formatNumber(masterFut.total - masterFut.available, 0)}</span></div>
+            <div className="text-muted-foreground">可用 <span className="text-foreground font-mono">{formatNumber(masterFut.available, 0)}</span></div>
             <div className="text-muted-foreground">合约 <span className="text-primary">{posCount}</span>/<span>{totalContracts}</span></div>
             <div className="text-muted-foreground">引擎 <span className={isRunning ? 'text-positive' : 'text-negative'}>{runningCount}</span>/{workers.length}</div>
             {wsLatency > 0 && (
@@ -279,6 +299,7 @@ export function OwlTopBar() {
   const engineStatus = useEngineStore((s) => s.status)
   const workers = useEngineStore((s) => s.workers)
   const balanceSummary = useBalanceStore((s) => s.summary)
+  const masterFut = useMasterFutures()
   const wsLatency = useBalanceStore((s) => s.wsLatency)
   const setMobileNavOpen = useUiStore((s) => s.setMobileNavOpen)
   const addToast = useToastStore((s) => s.addToast)
@@ -379,15 +400,15 @@ export function OwlTopBar() {
         <div className="hidden md:flex items-center gap-3 text-[11px] text-muted-foreground shrink-0">
           <span>
             合约账户{' '}
-            <span className="text-foreground font-mono">{formatNumber(balanceSummary.futuresTotal, 0)}</span>
+            <span className="text-foreground font-mono">{formatNumber(masterFut.total, 0)}</span>
           </span>
           <span>
             保{' '}
-            <span className="text-foreground font-mono">{formatNumber(balanceSummary.futuresMargin, 0)}</span>
+            <span className="text-foreground font-mono">{formatNumber(masterFut.total - masterFut.available, 0)}</span>
           </span>
           <span>
             可{' '}
-            <span className="text-foreground font-mono">{formatNumber(balanceSummary.futuresAvailable, 0)}</span>
+            <span className="text-foreground font-mono">{formatNumber(masterFut.available, 0)}</span>
           </span>
           <Clock />
           <span>

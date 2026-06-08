@@ -6,12 +6,14 @@ export interface AccountBalance {
   spot_usdt_free: number
   margin_usdt_free: number
   margin_usdt_borrowed: number
+  margin_net_usdt?: number
   margin_level: number
   futures_total: number
   futures_available: number
   futures_unrealized_pnl: number
   bnb_free: number
   bnb_interest: number
+  symbol_margin?: Record<string, { free: number; max_borrowable: number; daily_interest_rate: number }>
 }
 
 interface BalanceSummary {

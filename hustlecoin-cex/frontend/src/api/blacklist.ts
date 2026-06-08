@@ -5,8 +5,8 @@ export async function getBlacklist() {
   return data
 }
 
-export async function addToBlacklist(symbol: string) {
-  const { data } = await client.post('/api/blacklist/', { symbol })
+export async function addToBlacklist(symbol: string, reason?: string) {
+  const { data } = await client.post('/api/blacklist/', { symbol, reason: reason || null })
   return data
 }
 
@@ -15,7 +15,7 @@ export async function removeFromBlacklist(symbol: string) {
   return data
 }
 
-export async function batchAddBlacklist(symbols: string[]) {
-  const { data } = await client.post('/api/blacklist/batch', { symbols })
+export async function batchAddBlacklist(symbols: string[], reason?: string) {
+  const { data } = await client.post('/api/blacklist/bulk', { symbols, reason: reason || null })
   return data
 }

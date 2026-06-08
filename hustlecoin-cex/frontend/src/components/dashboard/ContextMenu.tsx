@@ -41,6 +41,7 @@ export function ContextMenu({ x, y, symbol, position, isPushed, isAccountRow, su
       ? [{ key: 'remove_slot', label: '移除币种（50U保护）' }]
       : [{ key: 'push_symbol', label: '推送借币' }]
     ),
+    ...(!position ? [{ key: 'manual_open', label: '手动开仓' }] : []),
     { key: 'resume_slot', label: '恢复下单' },
     { key: 'blacklist', label: '加入黑名单' },
     { key: 'batch_remove', label: '批量移除无持仓' },
@@ -57,6 +58,8 @@ export function ContextMenu({ x, y, symbol, position, isPushed, isAccountRow, su
   const posActions = position
     ? [
         { key: 'divider', label: '' },
+        ...(position.status === 'BORROWED_IDLE' ? [{ key: 'manual_hedge', label: '手动对冲' }] : []),
+        ...(position.status === 'PENDING_REPAY' ? [{ key: 'manual_repay', label: '手动还币' }] : []),
         { key: 'force_close', label: '强制平仓' },
         { key: 'transfer', label: '划转资金' },
         { key: 'view_detail', label: '查看详情' },

@@ -51,9 +51,24 @@ export async function stopWorker(id: number) {
   return data
 }
 
+export interface TradeLogEntry {
+  id: number
+  position_id: number | null
+  action: string
+  symbol: string
+  side: string | null
+  quantity: string | null
+  price: string | null
+  order_id: string | null
+  status: string
+  error_message: string | null
+  latency_ms: number | null
+  created_at: string
+}
+
 export async function getTradeLogs(params?: Record<string, string>) {
-  const { data } = await client.get('/api/engine/logs', { params })
-  return data
+  const { data } = await client.get('/api/engine/trade-logs', { params })
+  return data as TradeLogEntry[]
 }
 
 export async function getAccountBalance(id: number) {
@@ -100,6 +115,32 @@ export async function partialRepay(subAccountId: number, symbol: string, amount:
   return data
 }
 
+export async function manualOpen(subAccountId: number, symbol: string, orderAmount?: number) {
+  const { data } = await client.post('/api/engine/manual-open', {
+    sub_account_id: subAccountId,
+    symbol,
+    order_amount: orderAmount ?? null,
+  })
+  return data
+}
+
+export async function manualClose(positionId: number) {
+  const { data } = await client.post('/api/engine/manual-close', {
+    position_id: positionId,
+  })
+  return data
+}
+
+export async function manualHedge(positionId: number) {
+  const { data } = await client.post('/api/engine/manual-hedge', { position_id: positionId })
+  return data
+}
+
+export async function manualRepay(positionId: number) {
+  const { data } = await client.post('/api/engine/manual-repay', { position_id: positionId })
+  return data
+}
+
 export interface WorkerHealth {
   scope: string
   status: string
@@ -137,6 +178,12 @@ export interface EngineHealth {
   open_positions: number
   api_metrics: Record<string, APIMetrics>
   spread_count: number
+  uptime_sec?: number | null
+  used_weight_1m?: number
+  weight_limit?: number
+  weight_age_sec?: number | null
+  throttle_rate?: number
+  agg_borrow_rate?: number
 }
 
 export async function getEngineHealth(): Promise<EngineHealth> {

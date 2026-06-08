@@ -4,7 +4,7 @@ import { useToastStore } from '@/components/ui/toast'
 import { extractError } from '@/api/client'
 import { cn, formatNumber } from '@/lib/utils'
 
-type Filter = 'all' | 'new' | 'delisting'
+type Filter = 'all' | 'new' | 'delisting' | 'risky'
 
 export function CoinManagementPage() {
   const [coins, setCoins] = useState<Coin[]>([])
@@ -68,18 +68,30 @@ export function CoinManagementPage() {
     }
   }, [addToast])
 
+  const handleToggleRisky = useCallback(async (symbol: string, current: boolean) => {
+    try {
+      await patchCoin(symbol, { is_risky: !current })
+      addToast(`${symbol} 风险标记${!current ? '已开启' : '已清除'}`, 'success')
+      setCoins((prev) => prev.map((c) => c.symbol === symbol ? { ...c, is_risky: !current } : c))
+    } catch (err: unknown) {
+      addToast(extractError(err, '操作失败'), 'error')
+    }
+  }, [addToast])
+
   const filtered = useMemo(() => {
     const q = search.toUpperCase()
     return coins.filter((c) => {
       if (q && !c.symbol.includes(q)) return false
       if (filter === 'new') return c.is_new_coin
       if (filter === 'delisting') return c.is_delisting
+      if (filter === 'risky') return c.is_risky
       return true
     })
   }, [coins, filter, search])
 
   const newCount = coins.filter((c) => c.is_new_coin).length
   const delistCount = coins.filter((c) => c.is_delisting).length
+  const riskyCount = coins.filter((c) => c.is_risky).length
 
   if (loading) return <p className="py-8 text-center text-muted-foreground text-xs">加载中...</p>
 
@@ -95,7 +107,7 @@ export function CoinManagementPage() {
           {syncing ? '同步中...' : '同步交易量'}
         </button>
         <div className="flex gap-1 ml-2">
-          {(['all', 'new', 'delisting'] as Filter[]).map((f) => (
+          {(['all', 'new', 'delisting', 'risky'] as Filter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -104,7 +116,7 @@ export function CoinManagementPage() {
                 filter === f ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
               )}
             >
-              {f === 'all' ? '全部' : f === 'new' ? `新币(${newCount})` : `下架(${delistCount})`}
+              {f === 'all' ? '全部' : f === 'new' ? `新币(${newCount})` : f === 'delisting' ? `下架(${delistCount})` : `风险(${riskyCount})`}
             </button>
           ))}
         </div>
@@ -128,6 +140,7 @@ export function CoinManagementPage() {
               <th className="px-2 py-1 text-right font-medium">24h交易量</th>
               <th className="px-2 py-1 text-center font-medium">新币</th>
               <th className="px-2 py-1 text-center font-medium">下架</th>
+              <th className="px-2 py-1 text-center font-medium">风险</th>
               <th className="px-2 py-1 text-center font-medium">允许开仓</th>
               <th className="px-2 py-1 text-center font-medium">活跃</th>
             </tr>
@@ -174,6 +187,17 @@ export function CoinManagementPage() {
                 </td>
                 <td className="px-2 py-1 text-center">
                   <button
+                    onClick={() => handleToggleRisky(c.symbol, c.is_risky)}
+                    className={cn(
+                      'px-1.5 py-0.5 rounded text-[10px]',
+                      c.is_risky ? 'bg-negative/20 text-negative' : 'text-muted-foreground hover:bg-accent',
+                    )}
+                  >
+                    {c.is_risky ? '⚠风险' : '-'}
+                  </button>
+                </td>
+                <td className="px-2 py-1 text-center">
+                  <button
                     onClick={() => handleToggleOpen(c.symbol, c.allow_open)}
                     className={cn(
                       'px-1.5 py-0.5 rounded text-[10px]',
@@ -192,7 +216,7 @@ export function CoinManagementPage() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-muted-foreground text-xs">
+                <td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">
                   {search ? '未找到匹配币种' : '暂无数据'}
                 </td>
               </tr>

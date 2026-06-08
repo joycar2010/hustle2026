@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
-import { getPositionsHistory } from '@/api/engine'
+import { useEffect, useState, useCallback, useMemo, Fragment } from 'react'
+import { getPositionsHistory, getTradeLogs, type TradeLogEntry } from '@/api/engine'
 import { getSubAccounts } from '@/api/accounts'
 import { cn, formatNumber, pnlColor } from '@/lib/utils'
 import dayjs from 'dayjs'
@@ -40,6 +40,23 @@ export function HistoryPage() {
   const [accountFilter, setAccountFilter] = useState<string>('')
   const [page, setPage] = useState(1)
   const [summary, setSummary] = useState({ total_pnl: '0', total_funding_fee: '0', total_interest: '0', net_pnl: '0', count: 0 })
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [logsMap, setLogsMap] = useState<Map<number, TradeLogEntry[]>>(new Map())
+  const [logsLoading, setLogsLoading] = useState<number | null>(null)
+
+  const toggleDetail = useCallback((posId: number) => {
+    setExpandedId((cur) => {
+      if (cur === posId) return null
+      if (!logsMap.has(posId)) {
+        setLogsLoading(posId)
+        getTradeLogs({ position_id: String(posId), size: '50' })
+          .then((logs) => setLogsMap((m) => new Map(m).set(posId, logs)))
+          .catch(() => setLogsMap((m) => new Map(m).set(posId, [])))
+          .finally(() => setLogsLoading(null))
+      }
+      return posId
+    })
+  }, [logsMap])
 
   useEffect(() => {
     getSubAccounts().then(setAccounts).catch(() => {})
@@ -170,25 +187,32 @@ export function HistoryPage() {
               <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">加载中...</td></tr>
             ) : groups.length === 0 ? (
               <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">暂无平仓记录</td></tr>
-            ) : groups.map((g) =>
-              g.positions.map((p, idx) => {
+            ) : groups.map((g) => {
+              const groupHasExpanded = g.positions.some((p) => p.id === expandedId)
+              const dateRowSpan = g.positions.length + (groupHasExpanded ? 1 : 0)
+              return g.positions.map((p, idx) => {
                 const pnl = parseFloat(p.realized_pnl || '0')
                 const funding = parseFloat(p.cumulative_funding_fee || '0')
                 const interest = parseFloat(p.cumulative_interest || '0')
                 const net = pnl + funding - interest
                 const isFirst = idx === 0
+                const isExpanded = expandedId === p.id
                 return (
-                  <tr key={p.id} className="border-b border-border/30 hover:bg-[#1a1a22]/60">
+                  <Fragment key={p.id}>
+                  <tr
+                    onClick={() => toggleDetail(p.id)}
+                    className="border-b border-border/30 hover:bg-[#1a1a22]/60 cursor-pointer"
+                  >
                     {isFirst && (
                       <>
                         <td
-                          rowSpan={g.positions.length}
+                          rowSpan={dateRowSpan}
                           className="px-3 py-1.5 text-left align-top tabular-nums text-foreground border-r border-border/50 bg-[#0d0d14]/40"
                         >
                           {g.dateLabel}
                         </td>
                         <td
-                          rowSpan={g.positions.length}
+                          rowSpan={dateRowSpan}
                           className={cn(
                             'px-3 py-1.5 text-center align-top tabular-nums font-mono border-r-2 border-border bg-[#0d0d14]/40',
                             pnlColor(g.dayProfit)
@@ -198,7 +222,10 @@ export function HistoryPage() {
                         </td>
                       </>
                     )}
-                    <td className="px-3 py-1.5 text-center font-medium">{p.symbol.replace('USDT', '')}</td>
+                    <td className="px-3 py-1.5 text-center font-medium">
+                      <span className="text-muted-foreground mr-1">{isExpanded ? '▾' : '▸'}</span>
+                      {p.symbol.replace('USDT', '')}
+                    </td>
                     <td className="px-3 py-1.5 text-center text-muted-foreground tabular-nums">
                       {p.account_note || p.sub_account_id}
                     </td>
@@ -225,9 +252,53 @@ export function HistoryPage() {
                       {formatNumber(net)}
                     </td>
                   </tr>
+                  {isExpanded && (
+                    <tr key={`${p.id}-detail`} className="border-b border-border/30 bg-[#0a0a10]">
+                      <td colSpan={5} className="px-3 py-2">
+                        {logsLoading === p.id ? (
+                          <div className="text-muted-foreground text-[10px]">加载明细...</div>
+                        ) : (logsMap.get(p.id)?.length ?? 0) === 0 ? (
+                          <div className="text-muted-foreground text-[10px]">无执行明细</div>
+                        ) : (
+                          <table className="w-full text-[10px] font-mono">
+                            <thead>
+                              <tr className="text-muted-foreground">
+                                <th className="text-left font-medium pr-3 py-0.5">动作</th>
+                                <th className="text-left font-medium pr-3">方向</th>
+                                <th className="text-right font-medium pr-3">数量</th>
+                                <th className="text-right font-medium pr-3">价格</th>
+                                <th className="text-left font-medium pr-3">订单号</th>
+                                <th className="text-center font-medium pr-3">状态</th>
+                                <th className="text-right font-medium pr-3">延迟ms</th>
+                                <th className="text-left font-medium">时间</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {logsMap.get(p.id)!.map((log) => (
+                                <tr key={log.id} className="border-t border-border/20">
+                                  <td className="pr-3 py-0.5 text-foreground">{log.action}</td>
+                                  <td className="pr-3 text-muted-foreground">{log.side || '-'}</td>
+                                  <td className="pr-3 text-right tabular-nums">{log.quantity ? fmtVal(log.quantity, 4) : '-'}</td>
+                                  <td className="pr-3 text-right tabular-nums">{log.price ? fmtVal(log.price, 6) : '-'}</td>
+                                  <td className="pr-3 text-muted-foreground/70">{log.order_id || '-'}</td>
+                                  <td className={cn('pr-3 text-center', log.status === 'SUCCESS' ? 'text-positive' : 'text-negative')}>
+                                    {log.status}
+                                    {log.error_message ? <span className="text-negative/70" title={log.error_message}> ⚠</span> : null}
+                                  </td>
+                                  <td className="pr-3 text-right tabular-nums text-muted-foreground">{log.latency_ms ?? '-'}</td>
+                                  <td className="text-muted-foreground">{dayjs(log.created_at).format('HH:mm:ss')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })
-            )}
+            })}
           </tbody>
         </table>
       </div>

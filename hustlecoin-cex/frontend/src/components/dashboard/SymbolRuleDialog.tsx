@@ -7,6 +7,7 @@ import {
   resetAccountSymbolRule,
   batchUpdateAccountSymbolRules,
 } from '@/api/accountSymbolRules'
+import { listPresets, createPreset, type RulePreset } from '@/api/rulePresets'
 import { useToastStore } from '@/components/ui/toast'
 
 interface SymbolRuleDialogProps {
@@ -48,16 +49,21 @@ export function SymbolRuleDialog({ symbol, initialAccountId, onClose }: SymbolRu
   const [batchFields, setBatchFields] = useState<Record<string, string>>({})
   const [batchAccounts, setBatchAccounts] = useState<number[]>([])
   const [cellMenu, setCellMenu] = useState<{ x: number; y: number; fieldKey: string } | null>(null)
+  const [presets, setPresets] = useState<RulePreset[]>([])
+  const [presetName, setPresetName] = useState('')
+  const [showSavePreset, setShowSavePreset] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
 
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true)
       try {
-        const [rule, accts] = await Promise.all([
+        const [rule, accts, presetList] = await Promise.all([
           getSymbolRule(symbol).catch(() => ({})),
           getSubAccounts(true),
+          listPresets().catch(() => []),
         ])
+        setPresets(presetList)
         setSymbolRule(rule)
         setAccounts(accts)
 
@@ -219,8 +225,63 @@ export function SymbolRuleDialog({ symbol, initialAccountId, onClose }: SymbolRu
         </div>
 
         {activeTab === 'common' && (
-          <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-4 text-[11px] text-muted-foreground flex-wrap">
             <span>来源: <span className="text-primary">{source}</span></span>
+            {presets.length > 0 && (
+              <select
+                className="bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
+                defaultValue=""
+                onChange={(e) => {
+                  const p = presets.find(x => x.id === Number(e.target.value))
+                  if (!p) return
+                  const filled: Record<string, unknown> = { ...symbolRule }
+                  for (const { key } of NUMERIC_FIELDS) {
+                    if (p[key as keyof RulePreset] != null) filled[key] = p[key as keyof RulePreset]
+                  }
+                  setSymbolRule(filled)
+                  addToast(`已填充预设 "${p.name}"`, 'info')
+                  e.target.value = ''
+                }}
+              >
+                <option value="">选择预设...</option>
+                {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            <button
+              onClick={() => setShowSavePreset(!showSavePreset)}
+              className="px-1.5 py-0.5 text-[10px] border border-border rounded hover:bg-accent/50"
+            >
+              保存为预设
+            </button>
+            {showSavePreset && (
+              <span className="inline-flex items-center gap-1">
+                <input
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="预设名称"
+                  className="w-20 bg-[#1a1a22] border border-border rounded px-1 py-0.5 text-[10px] text-foreground focus:outline-none focus:border-primary"
+                />
+                <button
+                  onClick={async () => {
+                    if (!presetName.trim()) { addToast('请输入预设名称', 'error'); return }
+                    try {
+                      const payload: Record<string, unknown> = { name: presetName.trim() }
+                      for (const { key } of NUMERIC_FIELDS) {
+                        if (symbolRule[key] != null && symbolRule[key] !== '') payload[key] = Number(symbolRule[key])
+                      }
+                      const created = await createPreset(payload)
+                      setPresets(prev => [...prev, created])
+                      setShowSavePreset(false)
+                      setPresetName('')
+                      addToast(`预设 "${created.name}" 已保存`, 'success')
+                    } catch { addToast('保存预设失败', 'error') }
+                  }}
+                  className="px-1.5 py-0.5 text-[10px] bg-primary/20 text-primary rounded"
+                >
+                  确认
+                </button>
+              </span>
+            )}
           </div>
         )}
 

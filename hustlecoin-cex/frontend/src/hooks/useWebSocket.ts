@@ -3,6 +3,9 @@ import { useAuthStore } from '@/stores/authStore'
 import { useSpreadStore } from '@/stores/spreadStore'
 import { useEngineStore } from '@/stores/engineStore'
 import { useBalanceStore } from '@/stores/balanceStore'
+import { useBanStore } from '@/stores/banStore'
+import { useSymbolStatusStore } from '@/stores/symbolStatusStore'
+import { useMarketDataStore } from '@/stores/marketDataStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const RECONNECT_BASE = 1000
@@ -21,6 +24,9 @@ export function useWebSocket() {
   const setBalances = useBalanceStore((s) => s.setBalances)
   const setSummary = useBalanceStore((s) => s.setSummary)
   const setWsLatency = useBalanceStore((s) => s.setWsLatency)
+  const setBans = useBanStore((s) => s.setBans)
+  const setSymbolStatuses = useSymbolStatusStore((s) => s.setStatuses)
+  const setMarketData = useMarketDataStore((s) => s.setMarketData)
 
   const connect = useCallback(() => {
     if (!token) return
@@ -70,6 +76,21 @@ export function useWebSocket() {
               })
             }
             break
+          case 'ban_update':
+            if (msg.data?.sub_account_id && msg.data?.bans) {
+              setBans(msg.data.sub_account_id, msg.data.bans)
+            }
+            break
+          case 'symbol_status':
+            if (msg.data?.sub_account_id && msg.data?.statuses) {
+              setSymbolStatuses(msg.data.sub_account_id, msg.data.statuses)
+            }
+            break
+          case 'market_data':
+            if (msg.data) {
+              setMarketData(msg.data)
+            }
+            break
           case 'notification':
             window.dispatchEvent(new CustomEvent('ws:notification', { detail: msg.data }))
             break
@@ -99,7 +120,7 @@ export function useWebSocket() {
     ws.onerror = () => {
       ws.close()
     }
-  }, [token, setBulk, updateWorkerFromWs, setBalances, setSummary, setWsLatency])
+  }, [token, setBulk, updateWorkerFromWs, setBalances, setSummary, setWsLatency, setBans, setSymbolStatuses, setMarketData])
 
   useEffect(() => {
     connect()

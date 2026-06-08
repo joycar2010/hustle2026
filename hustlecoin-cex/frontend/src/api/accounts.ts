@@ -52,7 +52,7 @@ export async function getMasterAccount() {
 }
 
 export async function updateMasterAccount(body: Record<string, unknown>) {
-  const { data } = await client.put('/api/master-account/', body)
+  const { data } = await client.post('/api/master-account/', body)
   return data
 }
 
@@ -103,5 +103,10 @@ export async function checkPermissions(body: { api_key: string; api_secret: stri
 
 export async function getMasterPermissions() {
   const { data } = await client.get('/api/master-account/permissions')
+  return data
+}
+
+export async function getMasterBalance() {
+  const { data } = await client.get('/api/master-account/balance')
   return data
 }

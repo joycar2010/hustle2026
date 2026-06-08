@@ -5,11 +5,12 @@ import { OwlTreeTable, type Position, type SymbolRuleInfo } from '@/components/d
 import { EngineHealthBar } from '@/components/dashboard/EngineHealthBar'
 import { TransferDialog } from '@/components/dashboard/TransferDialog'
 import { SymbolRuleDialog } from '@/components/dashboard/SymbolRuleDialog'
-import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, partialRepay } from '@/api/engine'
+import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, partialRepay, manualOpen, manualClose, manualHedge, manualRepay, getEngineHealth } from '@/api/engine'
 import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
 import { getCoins } from '@/api/coins'
+import { getRiskySymbols } from '@/api/symbols'
 import type { SpreadData } from '@/stores/spreadStore'
 
 interface SubAccount {
@@ -29,9 +30,18 @@ export function DashboardPage() {
   const [ruleAccountId, setRuleAccountId] = useState<number | undefined>()
   const [symbolRulesMap, setSymbolRulesMap] = useState<Map<string, SymbolRuleInfo>>(new Map())
   const [delistingSymbols, setDelistingSymbols] = useState<Set<string>>(new Set())
+  const [riskySymbols, setRiskySymbols] = useState<Set<string>>(new Set())
+  const [throttleRate, setThrottleRate] = useState(0)
+
+  useEffect(() => {
+    const fetchThrottle = () => getEngineHealth().then((h) => setThrottleRate(h.throttle_rate ?? 0)).catch(() => {})
+    fetchThrottle()
+    const t = setInterval(fetchThrottle, 15000)
+    return () => clearInterval(t)
+  }, [])
 
   const refreshPositions = useCallback(() => {
-    getPositions('OPEN').then(setPositions).catch(() => {})
+    getPositions('ACTIVE').then(setPositions).catch(() => {})
   }, [])
 
   const refreshPushed = useCallback(() => {
@@ -39,7 +49,7 @@ export function DashboardPage() {
   }, [])
 
   const refreshSymbolRules = useCallback(() => {
-    getSymbolRules(500).then((data: { items?: Array<{ symbol: string; allow_remove: boolean; allow_repay: boolean; open_spread: number | null; close_spread: number | null; order_amount: number | null; source: string }> }) => {
+    getSymbolRules(500).then((data: { items?: Array<{ symbol: string; allow_remove: boolean; allow_repay: boolean; open_spread: number | null; close_spread: number | null; order_amount: number | null; close_funding_ratio: number | null; source: string }> }) => {
       const m = new Map<string, SymbolRuleInfo>()
       for (const r of data.items || []) {
         m.set(r.symbol, {
@@ -48,6 +58,7 @@ export function DashboardPage() {
           open_spread: r.open_spread,
           close_spread: r.close_spread,
           order_amount: r.order_amount,
+          close_funding_ratio: r.close_funding_ratio ?? null,
           source: r.source || 'global',
         })
       }
@@ -61,6 +72,12 @@ export function DashboardPage() {
     }).catch(() => {})
   }, [])
 
+  const refreshRiskySymbols = useCallback(() => {
+    getRiskySymbols().then((syms) => {
+      setRiskySymbols(new Set(syms))
+    }).catch(() => {})
+  }, [])
+
   // Initial data load — no polling, WebSocket handles live updates
   useEffect(() => {
     fetchDashboard()
@@ -70,7 +87,8 @@ export function DashboardPage() {
     refreshPushed()
     refreshSymbolRules()
     refreshDelistingCoins()
-  }, [fetchDashboard, setBulk, refreshPositions, refreshPushed, refreshSymbolRules, refreshDelistingCoins])
+    refreshRiskySymbols()
+  }, [fetchDashboard, setBulk, refreshPositions, refreshPushed, refreshSymbolRules, refreshDelistingCoins, refreshRiskySymbols])
 
   // Refresh pushed symbols on push events
   useEffect(() => {
@@ -96,10 +114,11 @@ export function DashboardPage() {
         if (idx >= 0) {
           const updated = [...prev]
           updated[idx] = { ...updated[idx], ...detail }
-          if (detail.status === 'CLOSED') return updated.filter(p => p.id !== detail.id)
+          // drop only on terminal states; keep OPEN/BORROWED_IDLE/PENDING_REPAY
+          if (detail.status === 'CLOSED' || detail.status === 'FAILED') return updated.filter(p => p.id !== detail.id)
           return updated
         }
-        if (detail.status === 'OPEN') return [detail, ...prev]
+        if (['OPEN', 'BORROWED_IDLE', 'PENDING_REPAY'].includes(detail.status)) return [detail, ...prev]
         return prev
       })
     }
@@ -152,9 +171,48 @@ export function DashboardPage() {
         }
         break
       }
+      case 'manual_open': {
+        if (accounts.length === 0) { alert('无可用子账户'); break }
+        let accId = accounts[0].id
+        if (accounts.length > 1) {
+          const list = accounts.map((a, i) => `${i + 1}. ${a.note} (#${a.id})`).join('\n')
+          const pick = prompt(`手动开仓 ${symbol}\n选择账户:\n${list}\n\n输入序号:`)
+          if (!pick) break
+          const idx = parseInt(pick, 10) - 1
+          if (isNaN(idx) || idx < 0 || idx >= accounts.length) { alert('无效序号'); break }
+          accId = accounts[idx].id
+        }
+        const amtStr = prompt(`手动开仓 ${symbol} @ 账户#${accId}\n下单金额(USDT, 留空用全局规则):`)
+        if (amtStr === null) break
+        const amt = amtStr.trim() ? parseFloat(amtStr) : undefined
+        if (amtStr.trim() && (isNaN(amt as number) || (amt as number) <= 0)) { alert('请输入有效金额'); break }
+        manualOpen(accId, symbol, amt)
+          .then((r) => { alert(r.message || '开仓已提交'); refreshPositions() })
+          .catch((e) => alert(`开仓失败: ${e.response?.data?.detail || e.message}`))
+        break
+      }
       case 'force_close':
         if (position) {
-          alert(`强制平仓 ${symbol} #${position.id} — 功能开发中`)
+          if (!confirm(`确认强制平仓 ${symbol} #${position.id}？\n账户: ${position.account_note || '#' + position.sub_account_id}\n将立即市价平仓+买回+还币。`)) break
+          manualClose(position.id)
+            .then((r) => { alert(`${r.message}　盈亏: ${r.realized_pnl}`); refreshPositions() })
+            .catch((e) => alert(`平仓失败: ${e.response?.data?.detail || e.message}`))
+        }
+        break
+      case 'manual_hedge':
+        if (position) {
+          if (!confirm(`确认手动对冲 ${symbol} #${position.id}？\n将卖出借来的现货(做空)+合约市价跟多。`)) break
+          manualHedge(position.id)
+            .then((r) => { alert(r.message || '对冲完成'); refreshPositions() })
+            .catch((e) => alert(`对冲失败: ${e.response?.data?.detail || e.message}`))
+        }
+        break
+      case 'manual_repay':
+        if (position) {
+          if (!confirm(`确认手动还币 ${symbol} #${position.id}？\n将买回的现币还清杠杆负债，持仓结算平仓。`)) break
+          manualRepay(position.id)
+            .then((r) => { alert(`${r.message}　盈亏: ${r.realized_pnl ?? '-'}`); refreshPositions() })
+            .catch((e) => alert(`还币失败: ${e.response?.data?.detail || e.message}`))
         }
         break
       case 'partial_repay': {
@@ -195,16 +253,25 @@ export function DashboardPage() {
       default:
         break
     }
-  }, [pushedSymbols, positions, refreshPushed, refreshPositions])
+  }, [pushedSymbols, positions, accounts, refreshPushed, refreshPositions])
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
+      {riskySymbols.size > 0 && (
+        <div className="bg-red-500/10 border-b border-red-500/20 overflow-hidden shrink-0">
+          <div className="animate-marquee whitespace-nowrap py-1 text-[11px] text-red-500 font-medium">
+            &#9888; 风险币种警告: {[...riskySymbols].join(', ')} — 请注意仓位风险管理 &#9888;
+          </div>
+        </div>
+      )}
       <EngineHealthBar />
       <OwlTreeTable
         positions={positions}
         pushedSymbols={pushedSymbols}
         symbolRules={symbolRulesMap}
         delistingSymbols={delistingSymbols}
+        riskySymbols={riskySymbols}
+        throttleRate={throttleRate}
         onAction={handleAction}
       />
       {showTransfer && (
