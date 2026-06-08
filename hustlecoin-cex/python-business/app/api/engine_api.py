@@ -64,7 +64,12 @@ def list_positions(
     if sub_account_id:
         q = q.filter(Position.sub_account_id == sub_account_id)
     if status:
-        q = q.filter(Position.status == status.upper())
+        st = status.upper()
+        if st == "ACTIVE":
+            # dashboard-visible live states: hedged + borrowed-idle + pending-repay
+            q = q.filter(Position.status.in_(["OPEN", "BORROWED_IDLE", "PENDING_REPAY"]))
+        else:
+            q = q.filter(Position.status == st)
     if symbol:
         q = q.filter(Position.symbol == symbol.upper())
     q = q.order_by(Position.id.desc())
@@ -488,10 +493,21 @@ def push_symbol(symbol: str, request: Request):
 
 
 @router.delete("/push-symbol/{symbol}")
-def remove_pushed_symbol(symbol: str, request: Request):
+def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    r = _redis()
     sym = symbol.upper()
+
+    sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
+    if sub_ids:
+        open_count = db.query(Position).filter(
+            Position.sub_account_id.in_(sub_ids),
+            Position.symbol == sym,
+            Position.status == "OPEN",
+        ).count()
+        if open_count > 0:
+            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {open_count} 个持仓未平")
+
+    r = _redis()
     key = _user_redis_key(user_id, "push_commands")
     r.rpush(key, json.dumps({"action": "remove", "symbol": sym}))
     r.expire(key, 120)
@@ -524,6 +540,219 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
         await client.margin_repay(base_asset, data.amount)
 
     return {"message": f"Repaid {data.amount} {base_asset} for account {account.note}"}
+
+
+# ─── Manual Open / Close (executed API-side, works regardless of engine state) ───
+
+
+def _build_spread_snapshot(symbol: str):
+    """Build a SpreadSnapshot from the Redis spreads hash for manual execution."""
+    from engine.spread_feed import SpreadSnapshot
+    raw = _redis().hget("spreads", symbol)
+    if not raw:
+        return None
+    p = json.loads(raw)
+    return SpreadSnapshot(
+        symbol=p["symbol"],
+        spot_bid=Decimal(str(p["spot_bid"])),
+        spot_ask=Decimal(str(p["spot_ask"])),
+        fut_bid=Decimal(str(p["fut_bid"])),
+        fut_ask=Decimal(str(p["fut_ask"])),
+        spread_long=Decimal(str(p["spread_long"])),
+        spread_short=Decimal(str(p["spread_short"])),
+        ts=p["ts"],
+    )
+
+
+def _load_global_rules_snapshot(db: Session, user_id: int):
+    from app.db.models import GlobalRules
+    from engine.config_loader import GlobalRulesSnapshot, DEFAULT_GLOBAL
+    rules = (db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
+             or db.query(GlobalRules).first())
+    if not rules:
+        return DEFAULT_GLOBAL
+    return GlobalRulesSnapshot(
+        auto_push_spread=rules.auto_push_spread,
+        remove_spread=rules.remove_spread,
+        open_spread=rules.open_spread,
+        close_spread=rules.close_spread,
+        order_amount=rules.order_amount,
+        close_funding_ratio=rules.close_funding_ratio,
+        repay_funding_ratio=rules.repay_funding_ratio,
+        borrow_delay_sec=rules.borrow_delay_sec,
+        confirm_delay_sec=rules.confirm_delay_sec,
+        confirm_skip_spread=rules.confirm_skip_spread,
+        repay_ban_minutes=rules.repay_ban_minutes,
+        interest_filter=rules.interest_filter,
+        max_positions=rules.max_positions or 10,
+        auto_start_on_boot=bool(rules.auto_start_on_boot),
+        futures_liquidation_threshold=rules.futures_liquidation_threshold,
+        repay_spread=rules.repay_spread,
+        max_daily_interest_rate=rules.max_daily_interest_rate,
+        slippage_pct=getattr(rules, "slippage_pct", None) or Decimal("0.1"),
+        follow_type=getattr(rules, "follow_type", None) or "market",
+        stabilize_sec=getattr(rules, "stabilize_sec", None) or Decimal("0"),
+        tier_ratios=getattr(rules, "tier_ratios", None) or "",
+    )
+
+
+class ManualOpenRequest(BaseModel):
+    sub_account_id: int
+    symbol: str
+    order_amount: Decimal | None = None  # override global order_amount for this open
+
+
+@router.post("/manual-open")
+async def manual_open(data: ManualOpenRequest, request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    account = db.query(SubAccount).filter(
+        SubAccount.id == data.sub_account_id, SubAccount.user_id == user_id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+    if not account.is_enabled:
+        raise HTTPException(status_code=400, detail="账户已禁用，无法开仓")
+
+    symbol = data.symbol.upper()
+    spread = _build_spread_snapshot(symbol)
+    if not spread:
+        raise HTTPException(status_code=400, detail=f"无 {symbol} 行情数据，无法开仓")
+
+    import dataclasses
+    rules = _load_global_rules_snapshot(db, user_id)
+    if data.order_amount and data.order_amount > 0:
+        rules = dataclasses.replace(rules, order_amount=data.order_amount)
+
+    from engine.trading.binance_trading import BinanceTradingClient
+    from engine.trading.order_executor import execute_open
+    from engine.notify.feishu_sender import FeishuSender
+    notifier = FeishuSender()
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret,
+                                        sub_account_id=account.id) as client:
+            # spread_feed=None → skip the post-delay re-confirm; manual open forces
+            # at the current spread (interest-rate filter still applies).
+            await execute_open(
+                account.id, symbol, spread, rules, client, notifier, account.note,
+                spread_feed=None,
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"开仓失败: {e}")
+
+    latest = db.query(Position).filter(
+        Position.sub_account_id == account.id, Position.symbol == symbol,
+    ).order_by(Position.id.desc()).first()
+    if latest and latest.status == "OPEN":
+        return {"message": f"开仓成功 {symbol} @ {account.note}", "position_id": latest.id, "status": "OPEN"}
+    detail = latest.error_message if latest else "未知错误"
+    return {"message": f"开仓未完成 {symbol}: {detail}", "status": latest.status if latest else "FAILED"}
+
+
+class ManualCloseRequest(BaseModel):
+    position_id: int
+
+
+@router.post("/manual-close")
+async def manual_close(data: ManualCloseRequest, request: Request, db: Session = Depends(get_db)):
+    user_id = get_current_user_id(request)
+    position = db.query(Position).filter(
+        Position.id == data.position_id, Position.user_id == user_id,
+    ).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+    if position.status != "OPEN":
+        raise HTTPException(status_code=400, detail=f"持仓状态为 {position.status}，无法平仓")
+
+    account = db.query(SubAccount).filter(SubAccount.id == position.sub_account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+
+    spread = _build_spread_snapshot(position.symbol)
+    if not spread:
+        # Close still works without live spread; use zeros only for the recorded close_spread.
+        from engine.spread_feed import SpreadSnapshot
+        spread = SpreadSnapshot(position.symbol, Decimal("0"), Decimal("0"),
+                                Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), 0)
+
+    from engine.trading.binance_trading import BinanceTradingClient
+    from engine.trading.order_executor import execute_close
+    from engine.notify.feishu_sender import FeishuSender
+    notifier = FeishuSender()
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret,
+                                        sub_account_id=account.id) as client:
+            await execute_close(position, spread, client, notifier, account.note)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"平仓失败: {e}")
+
+    db.refresh(position)
+    return {"message": f"平仓完成 {position.symbol}", "status": position.status,
+            "realized_pnl": str(position.realized_pnl or 0)}
+
+
+class ManualPositionRequest(BaseModel):
+    position_id: int
+
+
+@router.post("/manual-hedge")
+async def manual_hedge(data: ManualPositionRequest, request: Request, db: Session = Depends(get_db)):
+    """手动对冲：把 BORROWED_IDLE 持仓卖现货+合约跟多 → OPEN。"""
+    user_id = get_current_user_id(request)
+    position = db.query(Position).filter(
+        Position.id == data.position_id, Position.user_id == user_id,
+    ).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+    if position.status != "BORROWED_IDLE":
+        raise HTTPException(status_code=400, detail=f"持仓状态为 {position.status}，无法对冲")
+    account = db.query(SubAccount).filter(SubAccount.id == position.sub_account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+    spread = _build_spread_snapshot(position.symbol)
+    if not spread:
+        raise HTTPException(status_code=400, detail=f"无 {position.symbol} 行情数据，无法对冲")
+    rules = _load_global_rules_snapshot(db, user_id)
+    from engine.trading.binance_trading import BinanceTradingClient
+    from engine.trading.order_executor import execute_hedge
+    from engine.notify.feishu_sender import FeishuSender
+    notifier = FeishuSender()
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret,
+                                        sub_account_id=account.id) as client:
+            await execute_hedge(position, spread, rules, client, notifier, account.note)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"对冲失败: {e}")
+    db.refresh(position)
+    return {"message": f"对冲完成 {position.symbol}", "status": position.status}
+
+
+@router.post("/manual-repay")
+async def manual_repay(data: ManualPositionRequest, request: Request, db: Session = Depends(get_db)):
+    """手动还币：把 PENDING_REPAY 持仓的杠杆负债还清 → CLOSED。"""
+    user_id = get_current_user_id(request)
+    position = db.query(Position).filter(
+        Position.id == data.position_id, Position.user_id == user_id,
+    ).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+    if position.status != "PENDING_REPAY":
+        raise HTTPException(status_code=400, detail=f"持仓状态为 {position.status}，无法还币")
+    account = db.query(SubAccount).filter(SubAccount.id == position.sub_account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+    from engine.trading.binance_trading import BinanceTradingClient
+    from engine.trading.order_executor import execute_repay
+    from engine.notify.feishu_sender import FeishuSender
+    notifier = FeishuSender()
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret,
+                                        sub_account_id=account.id) as client:
+            await execute_repay(position, client, notifier, account.note)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"还币失败: {e}")
+    db.refresh(position)
+    return {"message": f"还币完成 {position.symbol}", "status": position.status,
+            "realized_pnl": str(position.realized_pnl or 0)}
 
 
 # ─── Engine Start/Stop Control ───
@@ -651,6 +880,82 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     elif any_stale or len(stuck) > 0:
         overall = "DEGRADED"
 
+    # uptime from global engine state
+    uptime_sec = None
+    if global_state and global_state.started_at and engine_status == "RUNNING":
+        uptime_sec = int((now - global_state.started_at).total_seconds())
+
+    # IP-wide used weight (published to Redis by engine workers + balance_pusher)
+    used_weight, weight_limit, weight_age = 0, 6000, None
+    throttle_rate = 0.0
+    try:
+        r = _redis()
+        raw = r.get("engine:weight:latest")
+        if raw:
+            wd = json.loads(raw)
+            used_weight = int(wd.get("used_weight_1m", 0))
+            weight_limit = int(wd.get("limit", 6000))
+            if wd.get("weight_time"):
+                weight_age = int(datetime.now(timezone.utc).timestamp() - float(wd["weight_time"]))
+        # Per-symbol borrow throttle (req/s): borrow/repay are UID-weighted (1500 each,
+        # limit 180000 → 2/s/account), NOT IP-weighted. Use the busiest UID's remaining
+        # headroom spread across the user's pushed symbols.
+        UID_PER_BORROW = 1500
+        uid_used, uid_limit = 0, 180000
+        uraw = r.get("engine:uid_weight:latest")
+        if uraw:
+            ud = json.loads(uraw)
+            uid_used = int(ud.get("used_uid_weight_1m", 0))
+            uid_limit = int(ud.get("uid_limit", 180000))
+        pushed_raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
+        pushed_count = len(json.loads(pushed_raw)) if pushed_raw else 0
+        uid_headroom = max(0, uid_limit - uid_used)
+        per_acct_ceiling = uid_headroom / UID_PER_BORROW / 60  # UID hard ceiling (~2/s)
+        # honor configurable per-account target rate (GlobalRules.borrow_rate_per_sec)
+        try:
+            from app.db.models import GlobalRules
+            gr = (db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
+                  or db.query(GlobalRules).first())
+            cfg_rate = float(gr.borrow_rate_per_sec) if gr and gr.borrow_rate_per_sec is not None else 2.0
+        except Exception:
+            cfg_rate = 2.0
+        per_acct = min(per_acct_ceiling, cfg_rate)
+        if pushed_count > 0:
+            throttle_rate = round(per_acct / pushed_count, 3)
+    except Exception:
+        pass
+
+    # Aggregate borrow rate for the dashboard — folds in the two REAL ceilings so the
+    # number reflects what can actually be sustained, not an inflated paper sum:
+    #   (1) Per-UID hard cap: every account ≤ 180000/1500/60 = 2.0 borrow/s. Clamp each
+    #       account's configured rate to UID_HARD_CEIL before summing, so a single
+    #       account mis-set to e.g. 9.6 can no longer make the aggregate lie.
+    #   (2) Shared IP budget: the borrow call is 0 IP weight, but each borrow cycle drags
+    #       read calls (interest/lot/book) off the host-wide IP budget. That shared budget
+    #       caps the whole host's borrow cadence no matter how many UIDs are added.
+    UID_HARD_CEIL = 180000 / 1500 / 60  # 2.0 borrow/s per UID
+    # Conservative IP weight charged by the reads around one borrow cycle; calibrate from
+    # the per-cycle X-SAPI-USED-IP-WEIGHT-1M delta if it needs tightening.
+    IP_WEIGHT_PER_BORROW_CYCLE = 10
+    agg_borrow_rate = 0.0
+    try:
+        from app.db.models import GlobalRules
+        gr = (db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
+              or db.query(GlobalRules).first())
+        default_rate = float(gr.borrow_rate_per_sec) if gr and gr.borrow_rate_per_sec is not None else 2.0
+        subs = db.query(SubAccount).filter(
+            SubAccount.user_id == user_id, SubAccount.is_enabled == True,
+        ).all()
+        uid_capped_sum = sum(
+            min(float(s.borrow_rate_per_sec) if s.borrow_rate_per_sec else default_rate, UID_HARD_CEIL)
+            for s in subs
+        )
+        # host-shared IP ceiling (steady-state from the published IP weight limit)
+        ip_host_ceiling = (weight_limit / IP_WEIGHT_PER_BORROW_CYCLE / 60) if weight_limit else float("inf")
+        agg_borrow_rate = round(min(uid_capped_sum, ip_host_ceiling), 2)
+    except Exception:
+        pass
+
     return HealthResponse(
         status=overall,
         engine_status=engine_status,
@@ -659,4 +964,10 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         open_positions=total_open,
         api_metrics=api_metrics,
         spread_count=spread_count,
+        uptime_sec=uptime_sec,
+        used_weight_1m=used_weight,
+        weight_limit=weight_limit,
+        weight_age_sec=weight_age,
+        throttle_rate=throttle_rate,
+        agg_borrow_rate=agg_borrow_rate,
     )

@@ -14,7 +14,44 @@ logger = logging.getLogger(__name__)
 SPOT_BASE = "https://api.binance.com"
 FUTURES_BASE = "https://fapi.binance.com"
 
-_global_semaphore = asyncio.Semaphore(10)
+_global_semaphore = asyncio.Semaphore(20)
+
+# ── Per-account UID-weight pacer (per-sub-account configurable target rate) ──
+# borrow AND repay both POST /margin/borrow-repay at 1500 UID weight each and draw
+# from the SAME 180000/min UID budget, so BOTH must be spaced through this one pacer
+# per sub-account to its configured req/s. The reactive UID governor is the hard cap.
+_DEFAULT_BORROW_RATE: float = 2.0
+_borrow_rate: dict[int, float] = {}            # sub_account_id -> rate (req/s)
+_borrow_last_ts: dict[int, float] = {}
+_borrow_locks: dict[int, "asyncio.Lock"] = {}
+
+
+def set_borrow_rate(sub_account_id: int, rate) -> None:
+    """Set the per-account borrow pacing rate. sub_account_id=0 sets the default."""
+    try:
+        r = float(rate)
+        if r <= 0:
+            return
+        if sub_account_id == 0:
+            global _DEFAULT_BORROW_RATE
+            _DEFAULT_BORROW_RATE = r
+        else:
+            _borrow_rate[sub_account_id] = r
+    except (TypeError, ValueError):
+        pass
+
+
+async def _pace_borrow(sub_account_id: int) -> None:
+    rate = _borrow_rate.get(sub_account_id, _DEFAULT_BORROW_RATE)
+    if not rate or rate <= 0:
+        return
+    interval = 1.0 / rate
+    lock = _borrow_locks.setdefault(sub_account_id, asyncio.Lock())
+    async with lock:
+        wait = interval - (time.monotonic() - _borrow_last_ts.get(sub_account_id, 0.0))
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _borrow_last_ts[sub_account_id] = time.monotonic()
 
 
 class BinanceTradingClient:
@@ -54,6 +91,15 @@ class BinanceTradingClient:
             params = {}
         if signed:
             params = self._sign(params)
+
+        # Backoff is COMPUTED while holding the semaphore but SLEPT after releasing it,
+        # so a throttled/429 response never keeps a concurrency slot parked idle.
+        backoff = 0.0
+        retry_after = 0
+        status = 0
+        err = None
+        result = None
+
         async with _global_semaphore, self._semaphore:
             if method == "GET":
                 resp = await self._client.get(url, params=params, headers=self._headers())
@@ -64,37 +110,89 @@ class BinanceTradingClient:
             else:
                 raise ValueError(f"Unsupported method: {method}")
 
-            weight = resp.headers.get("X-MBX-USED-WEIGHT-1M") or resp.headers.get("X-MBX-USED-WEIGHT-1m")
-            if weight and int(weight) > 1000:
-                await asyncio.sleep(1)
+            # Two independent SAPI rate dimensions (verified by header probe):
+            #  • UID weight (X-SAPI-USED-UID-WEIGHT-1M, limit 180000): borrow/repay = 1500
+            #    each, 0 IP weight. Per sub-account → pace EACH account to ~2/s here.
+            #  • IP weight (X-SAPI-USED-IP-WEIGHT-1M, limit ~12000): read endpoints; shared
+            #    across all accounts on this host. spot/futures use X-MBX-USED-WEIGHT-1M.
+            h = resp.headers
+            uid_w = h.get("X-SAPI-USED-UID-WEIGHT-1M") or h.get("x-sapi-used-uid-weight-1m")
+            sapi_ip = h.get("X-SAPI-USED-IP-WEIGHT-1M") or h.get("x-sapi-used-ip-weight-1m")
+            mbx_w = h.get("X-MBX-USED-WEIGHT-1M") or h.get("X-MBX-USED-WEIGHT-1m")
 
-            if resp.status_code == 429:
+            # ── Per-UID governor (borrow rate path) — record now, back off after unlock ──
+            if uid_w:
+                try:
+                    u = int(uid_w)
+                    metrics.record_uid_weight(u, 180000)
+                    r = u / 180000
+                    if r >= 0.92:
+                        backoff = max(backoff, 2.0)
+                    elif r >= 0.85:
+                        backoff = max(backoff, 0.6)
+                except ValueError:
+                    pass
+
+            # ── IP governor (read path, shared host budget) ──
+            ip_used, ip_limit = None, 6000
+            if sapi_ip:
+                ip_used, ip_limit = sapi_ip, 12000
+            elif mbx_w:
+                ip_used = mbx_w
+                ip_limit = 2400 if "fapi.binance.com" in url else 6000
+            if ip_used:
+                try:
+                    w = int(ip_used)
+                    metrics.record_weight(w, ip_limit)
+                    r = w / ip_limit
+                    if r >= 0.90:
+                        backoff = max(backoff, 2.0)
+                    elif r >= 0.80:
+                        backoff = max(backoff, 1.0)
+                    elif r >= 0.65:
+                        backoff = max(backoff, 0.4)
+                except ValueError:
+                    pass
+
+            status = resp.status_code
+            if status == 429:
                 metrics.record_rate_limit()
                 retry_after = int(resp.headers.get("Retry-After", 5))
-                logger.warning(f"Rate limited, sleeping {retry_after}s")
-                await asyncio.sleep(retry_after)
-                params.pop("timestamp", None)
-                params.pop("signature", None)
-                return await self._request(method, url, params, signed=True)
-
-            if resp.status_code >= 400:
+            elif status >= 400:
                 data = resp.json()
                 msg = data.get("msg", resp.text)
-                metrics.record_error(f"[{resp.status_code}] {msg}")
-                raise BinanceAPIError(resp.status_code, data.get("code", 0), msg)
+                metrics.record_error(f"[{status}] {msg}")
+                err = BinanceAPIError(status, data.get("code", 0), msg)
+            else:
+                metrics.record_success()
+                result = resp.json()
+        # ── semaphore released: safe to sleep now without starving other requests ──
 
-            metrics.record_success()
-            return resp.json()
+        if status == 429:
+            logger.warning(f"Rate limited, sleeping {retry_after}s")
+            await asyncio.sleep(retry_after)
+            params.pop("timestamp", None)
+            params.pop("signature", None)
+            return await self._request(method, url, params, signed=True)
+
+        if backoff > 0:
+            await asyncio.sleep(backoff)
+
+        if err is not None:
+            raise err
+        return result
 
     # ---- Margin ----
 
     async def margin_borrow(self, asset: str, amount: Decimal) -> dict:
+        await _pace_borrow(self._sub_account_id)  # per-account配速 (可配, 默认2/s)
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
             "asset": asset, "amount": str(amount),
             "type": "BORROW", "isIsolated": "FALSE",
         })
 
     async def margin_repay(self, asset: str, amount: Decimal) -> dict:
+        await _pace_borrow(self._sub_account_id)  # repay = 1500 UID, shares borrow budget → same pacer
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
             "asset": asset, "amount": str(amount),
             "type": "REPAY", "isIsolated": "FALSE",
@@ -110,6 +208,12 @@ class BinanceTradingClient:
         if data and len(data) > 0:
             return Decimal(str(data[0].get("dailyInterestRate", "0")))
         return Decimal("0")
+
+    async def get_max_borrowable(self, asset: str) -> Decimal:
+        data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/maxBorrowable", {
+            "asset": asset,
+        })
+        return Decimal(str(data.get("amount", "0")))
 
     # ---- Spot Orders ----
 
@@ -148,6 +252,42 @@ class BinanceTradingClient:
             "symbol": symbol, "side": "SELL", "type": "MARKET",
             "quantity": str(quantity), "reduceOnly": "true",
         })
+
+    async def futures_limit_long(self, symbol: str, quantity: Decimal, price: Decimal) -> dict:
+        return await self._request("POST", f"{FUTURES_BASE}/fapi/v1/order", {
+            "symbol": symbol, "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
+            "quantity": str(quantity), "price": str(price),
+        })
+
+    async def futures_get_order(self, symbol: str, order_id: str) -> dict:
+        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/order", {
+            "symbol": symbol, "orderId": str(order_id),
+        })
+
+    async def futures_cancel_order(self, symbol: str, order_id: str) -> dict:
+        return await self._request("DELETE", f"{FUTURES_BASE}/fapi/v1/order", {
+            "symbol": symbol, "orderId": str(order_id),
+        })
+
+    async def futures_book_ticker(self, symbol: str) -> dict:
+        """Best bid/ask for the futures symbol (fresh, for limit pricing)."""
+        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/ticker/bookTicker", {
+            "symbol": symbol,
+        }, signed=False)
+
+    async def get_futures_tick_size(self, symbol: str) -> Decimal:
+        """PRICE_FILTER tickSize for the futures symbol (for limit price rounding)."""
+        now = time.time()
+        if not self._futures_exchange_info or now - self._futures_exchange_info_ts > 3600:
+            # populate cache via get_lot_size path
+            await self.get_lot_size(symbol, "futures")
+        info = self._futures_exchange_info or {}
+        for s in info.get("symbols", []):
+            if s["symbol"] == symbol:
+                for f in s.get("filters", []):
+                    if f["filterType"] == "PRICE_FILTER":
+                        return Decimal(str(f["tickSize"]))
+        return Decimal("0.0001")
 
     async def get_futures_position(self, symbol: str) -> dict | None:
         data = await self._request("GET", f"{FUTURES_BASE}/fapi/v2/positionRisk", {
