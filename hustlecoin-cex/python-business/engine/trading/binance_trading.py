@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import logging
 import time
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 import httpx
 
@@ -189,6 +189,45 @@ class BinanceTradingClient:
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
             "asset": asset, "amount": str(amount),
             "type": "BORROW", "isIsolated": "FALSE",
+        })
+
+    async def margin_borrow_otoco(self, symbol: str, qty: Decimal) -> dict:
+        """借币 via IOC OTOCO —— 与 coinmini 1.92 (ui/gui.py) 完全同款流程:
+          下单 POST /margin/order/otoco, sideEffectType=MARGIN_BUY, workingTimeInForce=IOC,
+          卖价 = spot_bid×1.5, 数量 = qty; MARGIN_BUY 触发自动借币到账, IOC 卖单 1.5x 无人接
+          秒撤 → 连带撤销两张保护买单(STOP_LOSS_LIMIT@1.05× / LIMIT_MAKER@0.933×),
+          三单全 EXPIRED,借来的币留在手上(可用=已借)。
+        注: coinmini 不设 autoRepayAtCancel(实测币安默认即"借币不冲销"),此处保持一致。
+        与 borrow-repay 同为 1500 UID 权重,故同样过 _pace_borrow 配速。"""
+        await _pace_borrow(self._sub_account_id)
+
+        def _floor(v: Decimal, s: Decimal) -> Decimal:
+            return (v / s).to_integral_value(rounding=ROUND_DOWN) * s if s > 0 else v
+
+        book = await self._request("GET", f"{SPOT_BASE}/api/v3/ticker/bookTicker",
+                                   {"symbol": symbol}, signed=False)
+        bid = Decimal(str(book.get("bidPrice") or book.get("b") or "0"))
+        if bid <= 0:
+            raise BinanceAPIError(0, 0, f"otoco borrow: no bid for {symbol}")
+        info = await self._request("GET", f"{SPOT_BASE}/api/v3/exchangeInfo",
+                                   {"symbol": symbol}, signed=False)
+        flt = {f["filterType"]: f for f in info["symbols"][0]["filters"]}
+        tick = Decimal(str(flt["PRICE_FILTER"]["tickSize"]))
+        step = Decimal(str(flt["LOT_SIZE"]["stepSize"]))
+
+        limit_price = _floor(bid * Decimal("1.5"), tick)        # 卖价 = spot_bid × 1.5
+        pa = _floor(limit_price * Decimal("1.05"), tick)        # STOP_LOSS_LIMIT BUY
+        pb = _floor(limit_price * Decimal("0.933"), tick)       # LIMIT_MAKER BUY
+        q = _floor(qty, step)
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/order/otoco", {
+            "symbol": symbol,
+            "workingType": "LIMIT", "workingSide": "SELL",
+            "workingPrice": str(limit_price), "workingQuantity": str(q), "workingTimeInForce": "IOC",
+            "pendingSide": "BUY", "pendingQuantity": str(q),
+            "pendingAboveType": "STOP_LOSS_LIMIT", "pendingAbovePrice": str(pa),
+            "pendingAboveStopPrice": str(pa), "pendingAboveTimeInForce": "GTC",
+            "pendingBelowType": "LIMIT_MAKER", "pendingBelowPrice": str(pb),
+            "sideEffectType": "MARGIN_BUY", "isIsolated": "FALSE",
         })
 
     async def margin_repay(self, asset: str, amount: Decimal) -> dict:

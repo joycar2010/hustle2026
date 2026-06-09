@@ -113,8 +113,13 @@ async def execute_borrow(
             return None
 
         # borrow → idle
+        # borrow_via_otoco=True 时走 coinmini 同款 IOC OTOCO 借币(MARGIN_BUY/IOC/卖价1.5x,
+        # 三单 EXPIRED、币留手上);默认 False 走 borrow-repay,不改变现网行为。
         t0 = time.monotonic()
-        await client.margin_borrow(base_asset, qty)
+        if getattr(rules, "borrow_via_otoco", False):
+            await client.margin_borrow_otoco(symbol, qty)
+        else:
+            await client.margin_borrow(base_asset, qty)
         latency = int((time.monotonic() - t0) * 1000)
         position.status = "BORROWED_IDLE"
         position.borrow_qty = qty
