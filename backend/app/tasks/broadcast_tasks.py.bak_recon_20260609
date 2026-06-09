@@ -1411,12 +1411,6 @@ class PnlFastStreamer:
                                 self._net_cache[uid] = _net
                             except Exception as _ne:
                                 logger.debug(f"[PnlFast] net calc {uid} skip: {_ne}")
-                            try:
-                                from app.api.v1.trading import reconcile_open_ledger_spreads
-                                async with get_db_session(timeout=10.0) as _db3:
-                                    await reconcile_open_ledger_spreads(list(accs), 'XAU', _db3)
-                            except Exception as _re:
-                                logger.debug(f"[PnlFast] ledger reconcile {uid} skip: {_re}")
                         msg = {'type': 'pnl_fast', 'data': {
                             'unrealized_by_platform': upbp,
                             'daily_net_profit': self._net_cache.get(uid),
