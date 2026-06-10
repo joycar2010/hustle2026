@@ -126,7 +126,7 @@ class ContinuousStrategyExecutor:
     # Fix: query MT5 symbol_info.trade_mode (must == 4 / TRADE_FULL) on the FIRST
     # trade after a >2h idle gap. Subsequent trades short-circuit on the cache.
     _mt5_trade_mode_verified_at: dict = {}
-    MT5_PREFLIGHT_TTL_S: float = 2 * 3600.0
+    MT5_PREFLIGHT_TTL_S: float = 30.0  # SEC 2h→30s: 实时复探券商可交易状态,堵日级rollover/突发停盘的单腿盲区 20260609
 
     async def _ensure_mt5_trade_mode(self, bybit_account, sym_b: str) -> bool:
         """Pre-trade gate: only the FIRST trade after >2h idle actually probes
@@ -666,6 +666,20 @@ class ContinuousStrategyExecutor:
                 self._mt5_preflight_refresh(bybit_account, _sym_b_rf)
 
             if not exec_result['success']:
+                # ── 资金/保证金达上限: 良性暂缓开仓(不报错/不告警/不停策略/按钮不复位), 待平仓释放保证金后自动继续 ──
+                _bres0 = exec_result.get('binance_result') or {}
+                _ec0 = str(_bres0.get('error_code'))
+                _bf0 = exec_result.get('binance_filled_qty', 0) or 0
+                if is_opening and _bf0 == 0 and (
+                    exec_result.get('margin_precheck_failed')
+                    or (_bres0.get('terminal_error') and _ec0 in ('-2019', '-2018', '-4051'))
+                ):
+                    if loop_count % 50 == 1:
+                        logger.info(f"[ladder={ladder_idx}] 主账号保证金达上限，暂缓开仓，待平仓释放后自动继续 ({exec_result.get('error')})")
+                    self.trigger_mgr.reset()
+                    await self._push_trigger_reset(ladder_idx, strategy_type)
+                    await self._sleep_or_stop(max(self.api_spam_prevention_delay, 2.0))
+                    continue
                 # 平空(position_exhausted)为正常态, 由下方 INFO 记录; 其余失败才 ERROR(避免噪音告警)
                 if not (exec_result.get('position_exhausted') and not is_opening):
                     logger.error(f"Execution failed: {exec_result.get('error')}")
@@ -1164,7 +1178,7 @@ class ContinuousStrategyExecutor:
             if _t_hr.time() - _hr_last >= _hr_interval:
                 _hr_last = _t_hr.time()
                 try:
-                    _fresh = await self._reload_strategy_config(strategy_type)
+                    _fresh = await asyncio.wait_for(self._reload_strategy_config(strategy_type), timeout=5.0)
                     if _fresh is not None:
                         _f_ladders, _f_oql = _fresh
                         _f_sig = _hr_sig(_f_ladders, _f_oql)
@@ -1207,6 +1221,20 @@ class ContinuousStrategyExecutor:
                         self.stop_requested = True
                         break
 
+            # ── MT5 当前休市硬闸: 休市中只等待, 绝不下单(防主腿先成交、对冲跟不上的单腿) ──
+            try:
+                from app.utils.trading_time import is_bybit_trading_hours as _is_mkt_open
+                _mkt_open, _mkt_reason = _is_mkt_open()
+            except Exception as _mkt_e:
+                _mkt_open, _mkt_reason = True, ""  # 判定异常→放行(下游 MT5 预检兜底), 不误锁交易
+                if scan_count % 200 == 1:
+                    logger.warning(f"[V2][MT5休市] 开/休市判定异常, 暂放行交由 MT5 预检兜底: {_mkt_e}")
+            if not _mkt_open:
+                if scan_count % 50 == 1:
+                    logger.info(f"[V2][MT5休市] 当前休市({_mkt_reason}), 等待开市, 暂不下单 {strategy_type}")
+                await self._sleep_or_stop(2.0)
+                continue
+
             # ── 行情背离软暂停：ICMarkets 行情停顿/背离时只暂停下单，恢复后自动继续 ──
             if await self._is_quote_diverged():
                 if scan_count % 50 == 1:
@@ -1214,13 +1242,17 @@ class ContinuousStrategyExecutor:
                 await self._sleep_or_stop(0.5)
                 continue
 
-            live_pos = await self._get_live_position(binance_account, strategy_type)
+            try:
+                live_pos = await asyncio.wait_for(self._get_live_position(binance_account, strategy_type), timeout=8.0)
+            except Exception as _lpe:
+                logger.warning(f"[V2] live_pos 读取超时/失败, 本轮跳过: {_lpe}")
+                live_pos = -1.0
             if live_pos < 0:
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
 
             try:
-                current_spread = await self._get_current_spread(strategy_type)
+                current_spread = await asyncio.wait_for(self._get_current_spread(strategy_type), timeout=8.0)
             except Exception as e:
                 logger.warning(f"[V2] Failed to get spread: {e}")
                 await asyncio.sleep(self.trigger_check_interval)
