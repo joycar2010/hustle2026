@@ -119,7 +119,7 @@ async def _get_active_mt5_symbols(db: AsyncSession) -> set:
 
 
 async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
-    """获取 MT5 平仓 deal（entry==1），覆盖所有活跃产品对的 MT5 符号"""
+    """获取 MT5 平仓 deal（entry==1），从该 account 下所有活跃 bridge 聚合并按 ticket 去重"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
     api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
     headers = {"X-Api-Key": api_key} if api_key else {}
@@ -131,45 +131,50 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession
                 MT5Client.is_active == True,
                 MT5Client.is_system_service == False,
                 MT5Client.bridge_service_port.isnot(None),
-            ).order_by(MT5Client.priority).limit(1)
+            ).order_by(MT5Client.priority)
         )
-        bridge_port = result.scalar_one_or_none()
+        bridge_ports = [row[0] for row in result.fetchall()]
     except Exception:
-        bridge_port = None
+        bridge_ports = []
 
-    if not bridge_port:
+    if not bridge_ports:
         return []
 
     start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
-    end_dt = datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc)
-    days = max(1, int((end_dt - start_dt).total_seconds() / 86400) + 1)
+    now_utc = datetime.now(tz=timezone.utc)
+    days = max(1, int((now_utc - start_dt).total_seconds() / 86400) + 2)
     days = min(days, 365)
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as http:
-            resp = await http.get(
-                f"{bridge_host}:{bridge_port}/mt5/history/deals",
-                headers=headers, params={"days": days},
-            )
-            resp.raise_for_status()
-            all_deals = resp.json().get("deals", [])
-    except Exception as e:
-        logger.error(f"MT5 Bridge deals fetch failed [{account.account_name}]: {e}")
-        return []
+    seen_tickets = set()
+    all_deals = []
+    for port in bridge_ports:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as http:
+                resp = await http.get(
+                    f"{bridge_host}:{port}/mt5/history/deals",
+                    headers=headers, params={"days": days},
+                )
+                resp.raise_for_status()
+                for d in resp.json().get("deals", []):
+                    ticket = d.get("ticket")
+                    if ticket and ticket not in seen_tickets:
+                        seen_tickets.add(ticket)
+                        all_deals.append(d)
+        except Exception as e:
+            logger.warning(f"MT5 deals fetch from port {port} failed [{account.account_name}]: {e}")
 
-    target_symbols = await _get_active_mt5_symbols(db)
     start_ts = start_ms / 1000
     end_ts = end_ms / 1000
     return [
         d for d in all_deals
-        if d.get("symbol") in target_symbols
+        if d.get("symbol")
         and start_ts <= mt5_server_ts_to_utc(int(d.get("time", 0))) <= end_ts
         and d.get("entry", 0) == 1
     ]
 
 
 async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
-    """获取 MT5 入出金记录（entry=0, symbol 为空的 deals = deposit/withdrawal）"""
+    """获取 MT5 入出金记录，从该 account 下所有活跃 bridge 聚合并按 ticket 去重"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
     api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
     headers = {"X-Api-Key": api_key} if api_key else {}
@@ -181,31 +186,37 @@ async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int, db: AsyncSes
                 MT5Client.is_active == True,
                 MT5Client.is_system_service == False,
                 MT5Client.bridge_service_port.isnot(None),
-            ).order_by(MT5Client.priority).limit(1)
+            ).order_by(MT5Client.priority)
         )
-        bridge_port = result.scalar_one_or_none()
+        bridge_ports = [row[0] for row in result.fetchall()]
     except Exception:
-        bridge_port = None
+        bridge_ports = []
 
-    if not bridge_port:
+    if not bridge_ports:
         return []
 
     start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
-    end_dt = datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc)
-    days = max(1, int((end_dt - start_dt).total_seconds() / 86400) + 1)
+    now_utc = datetime.now(tz=timezone.utc)
+    days = max(1, int((now_utc - start_dt).total_seconds() / 86400) + 2)
     days = min(days, 365)
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as http:
-            resp = await http.get(
-                f"{bridge_host}:{bridge_port}/mt5/history/deals",
-                headers=headers, params={"days": days},
-            )
-            resp.raise_for_status()
-            all_deals = resp.json().get("deals", [])
-    except Exception as e:
-        logger.error(f"MT5 Bridge cashflow fetch failed [{account.account_name}]: {e}")
-        return []
+    seen_tickets = set()
+    all_deals = []
+    for port in bridge_ports:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as http:
+                resp = await http.get(
+                    f"{bridge_host}:{port}/mt5/history/deals",
+                    headers=headers, params={"days": days},
+                )
+                resp.raise_for_status()
+                for d in resp.json().get("deals", []):
+                    ticket = d.get("ticket")
+                    if ticket and ticket not in seen_tickets:
+                        seen_tickets.add(ticket)
+                        all_deals.append(d)
+        except Exception as e:
+            logger.warning(f"MT5 cashflow fetch from port {port} failed [{account.account_name}]: {e}")
 
     start_ts = start_ms / 1000
     end_ts = end_ms / 1000
@@ -426,6 +437,8 @@ async def get_daily_pnl(
                     "realized_pnl": round(float(v), 2),
                     "funding_fee": 0,
                     "net_pnl": round(float(v), 2),
+                    "mt5_pnl": 0,
+                    "binance_pnl": 0,
                     "trade_count": 0,
                     "win_count": 0,
                     "platform_breakdown": {
@@ -474,6 +487,7 @@ async def get_daily_pnl(
     d_end = _date.fromisoformat(end_date)
     prev_date = (d_start - timedelta(days=1)).isoformat()
 
+    # NAV 计算包含所有活跃 MT5 账户（SUM 天然处理多账户迁移场景）
     mt5_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.is_mt5_account]
     binance_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.platform_id == 1]
 
@@ -481,9 +495,7 @@ async def get_daily_pnl(
         mt5_account_ids, prev_date, end_date, db
     ) if mt5_account_ids else {}
 
-    binance_upnl_by_date = await _fetch_daily_closing_upnl(
-        binance_account_ids, prev_date, end_date, db
-    ) if binance_account_ids else {}
+
 
     # 2) Binance 全量 income（PnL = 所有已结算收入（不含 TRANSFER）+ UPL 变动）
     binance_income_pnl = defaultdict(float)
@@ -497,7 +509,7 @@ async def get_daily_pnl(
 
     if platform in ("all", "mt5"):
         for account in accounts:
-            if not account.is_mt5_account or str(account.account_id) not in _bound_b_ids:
+            if not account.is_mt5_account or not account.is_active:
                 continue
             cf_deals = await _fetch_mt5_cashflows(account, start_ms, end_ms, db)
             for d in cf_deals:
@@ -536,7 +548,7 @@ async def get_daily_pnl(
     mt5_wins = defaultdict(int)
     if platform in ("all", "mt5"):
         for account in accounts:
-            if not account.is_mt5_account or str(account.account_id) not in _bound_b_ids:
+            if not account.is_mt5_account or not account.is_active:
                 continue
             deals = await _fetch_mt5_deals(account, start_ms, end_ms, db)
             for d in deals:
@@ -550,26 +562,18 @@ async def get_daily_pnl(
                     mt5_wins[dk] += 1
 
     # 6) 按日组装：Binance(income-based) + MT5(NAV-based)
-    #    Binance PnL = 所有已结算收入(不含TRANSFER) + unrealized_pnl 变动
-    #    MT5 PnL = NAV 变化 - 入出金
+    #    Binance PnL = 纯 income-based（已结算收入，不含 TRANSFER 和 UPnL）
+    #    MT5 PnL = deals-based (profit + swap + commission per closed trade)
     daily_list = []
-    prev_mt5_nav = mt5_nav_by_date.get(prev_date)
-    prev_binance_upnl = binance_upnl_by_date.get(prev_date)
     current = d_start
     while current <= d_end:
         dk = current.isoformat()
-        today_mt5_nav = mt5_nav_by_date.get(dk)
-        today_binance_upnl = binance_upnl_by_date.get(dk)
 
-        # Binance: income-based PnL
+        # Binance: pure income-based PnL (no UPnL)
         binance_pnl = binance_income_pnl.get(dk, 0)
-        if prev_binance_upnl is not None and today_binance_upnl is not None:
-            binance_pnl += (today_binance_upnl - prev_binance_upnl)
 
-        # MT5: NAV-based PnL
-        mt5_pnl = 0.0
-        if prev_mt5_nav is not None and today_mt5_nav is not None and today_mt5_nav > 0 and prev_mt5_nav > 0:
-            mt5_pnl = (today_mt5_nav - prev_mt5_nav) - mt5_cashflows.get(dk, 0)
+        # MT5: deals-based PnL (profit + swap + commission from closed trades)
+        mt5_pnl = mt5_rpnl.get(dk, 0) + mt5_swap.get(dk, 0) + mt5_comm.get(dk, 0)
 
         net_pnl = binance_pnl + mt5_pnl
 
@@ -578,6 +582,8 @@ async def get_daily_pnl(
             "realized_pnl": round(binance_rpnl.get(dk, 0) + mt5_rpnl.get(dk, 0), 2),
             "funding_fee": round(binance_ff.get(dk, 0), 2),
             "net_pnl": round(net_pnl, 2),
+            "mt5_pnl": round(mt5_pnl, 2),
+            "binance_pnl": round(binance_pnl, 2),
             "trade_count": binance_trades.get(dk, 0) + mt5_trades.get(dk, 0),
             "win_count": binance_wins.get(dk, 0) + mt5_wins.get(dk, 0),
             "platform_breakdown": {
@@ -593,14 +599,10 @@ async def get_daily_pnl(
             },
         })
 
-        if today_mt5_nav is not None and today_mt5_nav > 0:
-            prev_mt5_nav = today_mt5_nav
-        if today_binance_upnl is not None:
-            prev_binance_upnl = today_binance_upnl
         current += timedelta(days=1)
 
     summary = _compute_summary(daily_list)
-    resp = {"daily_pnl": daily_list, "summary": summary, "data_source": "nav_based"}
+    resp = {"daily_pnl": daily_list, "summary": summary, "data_source": "income_deals_based"}
     _cache_set(cache_key, resp)
 
     logger.info(f"[PnL-NAV] user={current_user.username}, range={start_date}~{end_date}, "
