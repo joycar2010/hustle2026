@@ -7,14 +7,12 @@
         <input
           type="datetime-local"
           v-model="startInput"
-          @change="quickRange = null"
           class="bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
         />
         <label class="text-[10px] text-[#6b7280]">结束:</label>
         <input
           type="datetime-local"
           v-model="endInput"
-          @change="quickRange = null"
           class="bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
         />
 
@@ -39,28 +37,6 @@
                 : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
             ]"
           >反向</button>
-        </div>
-        <!-- 快捷时间范围(点差走势筛选): 最近1/2小时 -->
-        <label class="text-[10px] text-[#6b7280]">范围:</label>
-        <div class="flex rounded border border-[#2d2d3d] overflow-hidden">
-          <button
-            @click="setQuickRange(1)"
-            :class="[
-              'px-3 py-1 text-[10px] border-r border-[#2d2d3d] transition-colors',
-              quickRange === 1
-                ? 'bg-[#fcd535] text-black font-medium'
-                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
-            ]"
-          >1小时</button>
-          <button
-            @click="setQuickRange(2)"
-            :class="[
-              'px-3 py-1 text-[10px] transition-colors',
-              quickRange === 2
-                ? 'bg-[#fcd535] text-black font-medium'
-                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
-            ]"
-          >2小时</button>
         </div>
 
         <!-- 记录频率(秒) -->
@@ -272,7 +248,6 @@ const dataPointCount = ref(0)
 
 // 套利方向：forward=正向(绿) / reverse=反向(红)
 const direction = ref('forward')
-const quickRange = ref(null)  // 快捷时间范围(小时); null=自定义
 const dirColor = computed(() => direction.value === 'forward' ? '#22c55e' : '#ef4444')
 const dirLabel = computed(() => direction.value === 'forward' ? '正向' : '反向')
 
@@ -454,15 +429,6 @@ function applyDirection() {
   lineSeries.setData(data)
   chart.timeScale().fitContent()
   computeRangeStats()
-}
-
-function setQuickRange(hours) {
-  quickRange.value = hours
-  const nowD = new Date()
-  const startD = new Date(nowD.getTime() - hours * 3600000)
-  startInput.value = getBJLocalISO(startD)
-  endInput.value = getBJLocalISO(nowD)
-  fetchData()
 }
 
 function setDirection(d) {

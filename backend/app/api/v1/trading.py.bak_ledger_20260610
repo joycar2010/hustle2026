@@ -2167,7 +2167,6 @@ async def get_open_entry_spread(
             ladders.setdefault(idx, {"trades": []})
             ladders[idx]["trades"].append({
                 "binanceFilled": round(q, 4),
-                "mt5Filled": round(float(e.get('m') or 0), 4),
                 "spreadAtExecution": round(s, 4),
                 "timestamp": e.get('ts'),
             })

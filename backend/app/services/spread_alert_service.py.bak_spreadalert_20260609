@@ -59,15 +59,6 @@ class SpreadAlertService:
         - 反向平仓: 点差 <= reverseClosePrice 且连续满足 reverseCloseSyncCount 次
         - 空值: 不触发任何提醒
         """
-        # ── MT5 休市时不发任何差值提醒(此时 MT5 行情停更/失真, 反向/正向点差告警均为误报) ──
-        try:
-            from app.utils.trading_time import is_bybit_trading_hours as _is_mkt_open
-            _mkt_open, _ = _is_mkt_open()
-            if not _mkt_open:
-                return
-        except Exception:
-            pass
-
         alerts_to_send = []
 
         # 初始化用户的计数器

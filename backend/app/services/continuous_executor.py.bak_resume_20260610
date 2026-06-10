@@ -981,7 +981,6 @@ class ContinuousStrategyExecutor:
                     if is_opening:
                         _entry = _json_led.dumps({
                             "q": round(float(binance_filled_xau), 6),
-                            "m": round(float(exec_result.get('bybit_filled_qty', 0) or 0), 6),
                             "s": _realized_spread if _realized_spread is not None else 0.0,
                             "ladder": ladder_idx,
                             "ts": int(_time_led.time() * 1000),
@@ -1207,7 +1206,7 @@ class ContinuousStrategyExecutor:
                     logger.info(
                         f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_HARD_MIN}，硬停 {strategy_type}"
                     )
-                    self.stop_reason = 'market_close'; await self._mark_resume_pending(strategy_type)
+                    self.stop_reason = 'market_close'
                     self.stop_requested = True
                     break
                 elif _mins <= _SOFT_MIN:
@@ -1218,7 +1217,7 @@ class ContinuousStrategyExecutor:
                             f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_SOFT_MIN}，软停 {strategy_type}"
                             f"（启动时={_start_mins:.1f}分钟，可手动重启运行至收盘前{_HARD_MIN}分钟）"
                         )
-                        self.stop_reason = 'market_close'; await self._mark_resume_pending(strategy_type)
+                        self.stop_reason = 'market_close'
                         self.stop_requested = True
                         break
 
@@ -1264,12 +1263,6 @@ class ContinuousStrategyExecutor:
             if live_pos < 0:
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
-
-            # 实仓为0自动对账: 清陈旧开仓账本(force_fresh复核, 20s持续+60s节流, 不影响交易)
-            try:
-                await self._reconcile_ledger_if_flat(binance_account, strategy_type, live_pos)
-            except Exception:
-                pass
 
             try:
                 current_spread = await asyncio.wait_for(self._get_current_spread(strategy_type), timeout=8.0)
@@ -1351,42 +1344,6 @@ class ContinuousStrategyExecutor:
         logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
         await self._push_stop_confirmed(strategy_type)
         return {'success': True, 'message': 'Execution completed'}
-
-    async def _reconcile_ledger_if_flat(self, binance_account, strategy_type, live_pos):
-        # 实仓为0时自动对账: 清空陈旧开仓账本。force_fresh REST 复核防WS瞬时假0; 持续>=20s; 60s节流。
-        import time as _t
-        if live_pos is None or live_pos > 0.01:
-            self._flat_since = None
-            return
-        _now = _t.time()
-        if getattr(self, "_flat_since", None) is None:
-            self._flat_since = _now
-            return
-        if _now - self._flat_since < 20:
-            return
-        if _now - getattr(self, "_last_ledger_recon_ts", 0.0) < 60:
-            return
-        self._last_ledger_recon_ts = _now
-        try:
-            from app.core.redis_client import redis_client as _rc
-            _dir = 'reverse' if 'reverse' in strategy_type else 'forward'
-            _key = f"pos_open_ledger:{self.user_id}:{self.pair_code}:{_dir}"
-            if not await _rc.client.llen(_key):
-                return
-            _fresh = await self._get_live_position(binance_account, strategy_type, force_fresh=True)
-            if _fresh is not None and _fresh <= 0.01:
-                await _rc.client.delete(_key)
-                logger.info(f"[POS_LEDGER] 实仓为0(fresh={_fresh})自动对账: 已清空陈旧账本 {_key}")
-        except Exception as _e:
-            logger.debug(f"[POS_LEDGER] reconcile skipped: {_e}")
-
-    async def _mark_resume_pending(self, strategy_type):
-        # mark resume-pending on close-gate auto-stop (only running-then-auto-stopped gets marked)
-        try:
-            from app.services.strategy_resume_service import mark_resume_pending
-            await mark_resume_pending(self.user_id, self.pair_code, strategy_type)
-        except Exception as _e:
-            logger.warning(f'[RESUME] mark pending failed: {_e}')
 
     async def _is_quote_diverged(self) -> bool:
         """读取行情背离监控写入的 Redis 标记（无 HTTP）。

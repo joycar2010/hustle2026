@@ -126,7 +126,7 @@ class ContinuousStrategyExecutor:
     # Fix: query MT5 symbol_info.trade_mode (must == 4 / TRADE_FULL) on the FIRST
     # trade after a >2h idle gap. Subsequent trades short-circuit on the cache.
     _mt5_trade_mode_verified_at: dict = {}
-    MT5_PREFLIGHT_TTL_S: float = 30.0  # SEC 2h→30s: 实时复探券商可交易状态,堵日级rollover/突发停盘的单腿盲区 20260609
+    MT5_PREFLIGHT_TTL_S: float = 2 * 3600.0
 
     async def _ensure_mt5_trade_mode(self, bybit_account, sym_b: str) -> bool:
         """Pre-trade gate: only the FIRST trade after >2h idle actually probes
@@ -666,20 +666,6 @@ class ContinuousStrategyExecutor:
                 self._mt5_preflight_refresh(bybit_account, _sym_b_rf)
 
             if not exec_result['success']:
-                # ── 资金/保证金达上限: 良性暂缓开仓(不报错/不告警/不停策略/按钮不复位), 待平仓释放保证金后自动继续 ──
-                _bres0 = exec_result.get('binance_result') or {}
-                _ec0 = str(_bres0.get('error_code'))
-                _bf0 = exec_result.get('binance_filled_qty', 0) or 0
-                if is_opening and _bf0 == 0 and (
-                    exec_result.get('margin_precheck_failed')
-                    or (_bres0.get('terminal_error') and _ec0 in ('-2019', '-2018', '-4051'))
-                ):
-                    if loop_count % 50 == 1:
-                        logger.info(f"[ladder={ladder_idx}] 主账号保证金达上限，暂缓开仓，待平仓释放后自动继续 ({exec_result.get('error')})")
-                    self.trigger_mgr.reset()
-                    await self._push_trigger_reset(ladder_idx, strategy_type)
-                    await self._sleep_or_stop(max(self.api_spam_prevention_delay, 2.0))
-                    continue
                 # 平空(position_exhausted)为正常态, 由下方 INFO 记录; 其余失败才 ERROR(避免噪音告警)
                 if not (exec_result.get('position_exhausted') and not is_opening):
                     logger.error(f"Execution failed: {exec_result.get('error')}")
@@ -981,7 +967,6 @@ class ContinuousStrategyExecutor:
                     if is_opening:
                         _entry = _json_led.dumps({
                             "q": round(float(binance_filled_xau), 6),
-                            "m": round(float(exec_result.get('bybit_filled_qty', 0) or 0), 6),
                             "s": _realized_spread if _realized_spread is not None else 0.0,
                             "ladder": ladder_idx,
                             "ts": int(_time_led.time() * 1000),
@@ -1179,7 +1164,7 @@ class ContinuousStrategyExecutor:
             if _t_hr.time() - _hr_last >= _hr_interval:
                 _hr_last = _t_hr.time()
                 try:
-                    _fresh = await asyncio.wait_for(self._reload_strategy_config(strategy_type), timeout=5.0)
+                    _fresh = await self._reload_strategy_config(strategy_type)
                     if _fresh is not None:
                         _f_ladders, _f_oql = _fresh
                         _f_sig = _hr_sig(_f_ladders, _f_oql)
@@ -1207,7 +1192,7 @@ class ContinuousStrategyExecutor:
                     logger.info(
                         f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_HARD_MIN}，硬停 {strategy_type}"
                     )
-                    self.stop_reason = 'market_close'; await self._mark_resume_pending(strategy_type)
+                    self.stop_reason = 'market_close'
                     self.stop_requested = True
                     break
                 elif _mins <= _SOFT_MIN:
@@ -1218,36 +1203,9 @@ class ContinuousStrategyExecutor:
                             f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_SOFT_MIN}，软停 {strategy_type}"
                             f"（启动时={_start_mins:.1f}分钟，可手动重启运行至收盘前{_HARD_MIN}分钟）"
                         )
-                        self.stop_reason = 'market_close'; await self._mark_resume_pending(strategy_type)
+                        self.stop_reason = 'market_close'
                         self.stop_requested = True
                         break
-
-            # ── MT5 当前休市硬闸: 休市中只等待, 绝不下单(防主腿先成交、对冲跟不上的单腿) ──
-            try:
-                from app.utils.trading_time import is_bybit_trading_hours as _is_mkt_open
-                _mkt_open, _mkt_reason = _is_mkt_open()
-            except Exception as _mkt_e:
-                _mkt_open, _mkt_reason = True, ""  # 判定异常→放行(下游 MT5 预检兜底), 不误锁交易
-                if scan_count % 200 == 1:
-                    logger.warning(f"[V2][MT5休市] 开/休市判定异常, 暂放行交由 MT5 预检兜底: {_mkt_e}")
-            if not _mkt_open:
-                if scan_count % 50 == 1:
-                    logger.info(f"[V2][MT5休市] 当前休市({_mkt_reason}), 等待开市, 暂不下单 {strategy_type}")
-                await self._sleep_or_stop(2.0)
-                continue
-
-            # ── 开市预热闸: 开市后未满本交易对预热分钟数(XAU 1min/ICXAU 2min, 见 config/open_warmup.json), 只等待不下单 ──
-            try:
-                from app.utils.trading_time import minutes_since_mt5_open as _mins_open, open_warmup_minutes as _warmup_min
-                _since_open = _mins_open()
-                _warmup_m = _warmup_min(self.pair_code)
-            except Exception:
-                _since_open, _warmup_m = None, 0.0
-            if _since_open is not None and _warmup_m > 0 and _since_open < _warmup_m:
-                if scan_count % 50 == 1:
-                    logger.info(f"[V2][开市预热] {self.pair_code} 开市{_since_open:.1f}min < {_warmup_m:.0f}min, 暂不下单 {strategy_type}")
-                await self._sleep_or_stop(2.0)
-                continue
 
             # ── 行情背离软暂停：ICMarkets 行情停顿/背离时只暂停下单，恢复后自动继续 ──
             if await self._is_quote_diverged():
@@ -1256,23 +1214,13 @@ class ContinuousStrategyExecutor:
                 await self._sleep_or_stop(0.5)
                 continue
 
-            try:
-                live_pos = await asyncio.wait_for(self._get_live_position(binance_account, strategy_type), timeout=8.0)
-            except Exception as _lpe:
-                logger.warning(f"[V2] live_pos 读取超时/失败, 本轮跳过: {_lpe}")
-                live_pos = -1.0
+            live_pos = await self._get_live_position(binance_account, strategy_type)
             if live_pos < 0:
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
 
-            # 实仓为0自动对账: 清陈旧开仓账本(force_fresh复核, 20s持续+60s节流, 不影响交易)
             try:
-                await self._reconcile_ledger_if_flat(binance_account, strategy_type, live_pos)
-            except Exception:
-                pass
-
-            try:
-                current_spread = await asyncio.wait_for(self._get_current_spread(strategy_type), timeout=8.0)
+                current_spread = await self._get_current_spread(strategy_type)
             except Exception as e:
                 logger.warning(f"[V2] Failed to get spread: {e}")
                 await asyncio.sleep(self.trigger_check_interval)
@@ -1351,42 +1299,6 @@ class ContinuousStrategyExecutor:
         logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
         await self._push_stop_confirmed(strategy_type)
         return {'success': True, 'message': 'Execution completed'}
-
-    async def _reconcile_ledger_if_flat(self, binance_account, strategy_type, live_pos):
-        # 实仓为0时自动对账: 清空陈旧开仓账本。force_fresh REST 复核防WS瞬时假0; 持续>=20s; 60s节流。
-        import time as _t
-        if live_pos is None or live_pos > 0.01:
-            self._flat_since = None
-            return
-        _now = _t.time()
-        if getattr(self, "_flat_since", None) is None:
-            self._flat_since = _now
-            return
-        if _now - self._flat_since < 20:
-            return
-        if _now - getattr(self, "_last_ledger_recon_ts", 0.0) < 60:
-            return
-        self._last_ledger_recon_ts = _now
-        try:
-            from app.core.redis_client import redis_client as _rc
-            _dir = 'reverse' if 'reverse' in strategy_type else 'forward'
-            _key = f"pos_open_ledger:{self.user_id}:{self.pair_code}:{_dir}"
-            if not await _rc.client.llen(_key):
-                return
-            _fresh = await self._get_live_position(binance_account, strategy_type, force_fresh=True)
-            if _fresh is not None and _fresh <= 0.01:
-                await _rc.client.delete(_key)
-                logger.info(f"[POS_LEDGER] 实仓为0(fresh={_fresh})自动对账: 已清空陈旧账本 {_key}")
-        except Exception as _e:
-            logger.debug(f"[POS_LEDGER] reconcile skipped: {_e}")
-
-    async def _mark_resume_pending(self, strategy_type):
-        # mark resume-pending on close-gate auto-stop (only running-then-auto-stopped gets marked)
-        try:
-            from app.services.strategy_resume_service import mark_resume_pending
-            await mark_resume_pending(self.user_id, self.pair_code, strategy_type)
-        except Exception as _e:
-            logger.warning(f'[RESUME] mark pending failed: {_e}')
 
     async def _is_quote_diverged(self) -> bool:
         """读取行情背离监控写入的 Redis 标记（无 HTTP）。
