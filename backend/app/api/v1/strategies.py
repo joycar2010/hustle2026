@@ -1451,6 +1451,13 @@ async def execute_continuous_opening(
         task_id = execution_task_manager.start_task(executor, coro)
 
 
+        try:
+            from app.services.strategy_resume_service import record_start_snapshot
+            _rsm_action = (f"{strategy_type}_opening" if "_opening_continuous" in strategy_id else f"{strategy_type}_closing")
+            await record_start_snapshot(user_id, pair_code, _rsm_action, request)
+        except Exception as _rec_e:
+            logger.warning(f"[RESUME] snapshot record failed: {_rec_e}")
+
         return {
             "success": True,
             "task_id": task_id,
@@ -1692,6 +1699,13 @@ async def execute_continuous_closing(
         task_id = execution_task_manager.start_task(executor, coro)
 
 
+        try:
+            from app.services.strategy_resume_service import record_start_snapshot
+            _rsm_action = (f"{strategy_type}_opening" if "_opening_continuous" in strategy_id else f"{strategy_type}_closing")
+            await record_start_snapshot(user_id, pair_code, _rsm_action, request)
+        except Exception as _rec_e:
+            logger.warning(f"[RESUME] snapshot record failed: {_rec_e}")
+
         return {
             "success": True,
             "task_id": task_id,
@@ -1736,6 +1750,15 @@ async def stop_execution(
     """Stop continuous execution task"""
     from app.services.execution_task_manager import execution_task_manager
 
+    # manual stop -> clear resume pending+snapshot so it will NOT auto-resume after open
+    try:
+        _info = execution_task_manager.get_status(task_id)
+        _sid = (_info or {}).get("strategy_id")
+        if _sid:
+            from app.services.strategy_resume_service import clear_on_manual_stop_by_strategy_id
+            await clear_on_manual_stop_by_strategy_id(_sid)
+    except Exception:
+        pass
     stopped = await execution_task_manager.stop_task(task_id)
 
     if not stopped:

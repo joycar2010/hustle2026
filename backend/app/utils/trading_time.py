@@ -229,3 +229,23 @@ def minutes_since_mt5_open():
     if monday <= now and monday > daily:
         boundary = monday
     return (now - boundary).total_seconds() / 60.0
+
+
+_OPEN_WARMUP_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "open_warmup.json")
+_OPEN_WARMUP_DEFAULTS = {"XAU": 1.0, "ICXAU": 2.0}
+
+
+def open_warmup_minutes(pair_code):
+    # 开市后该交易对需等待的预热分钟数; config/open_warmup.json 可热改; 缺失/异常回退内置默认; 未知对回退 default 或 0
+    try:
+        with open(_OPEN_WARMUP_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        if isinstance(cfg, dict) and "config" in cfg and isinstance(cfg["config"], dict):
+            cfg = cfg["config"]
+        if pair_code in cfg:
+            return float(cfg[pair_code])
+        if "default" in cfg:
+            return float(cfg["default"])
+    except Exception:
+        pass
+    return float(_OPEN_WARMUP_DEFAULTS.get(pair_code, 0.0))

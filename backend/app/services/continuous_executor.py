@@ -1206,7 +1206,7 @@ class ContinuousStrategyExecutor:
                     logger.info(
                         f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_HARD_MIN}，硬停 {strategy_type}"
                     )
-                    self.stop_reason = 'market_close'
+                    self.stop_reason = 'market_close'; await self._mark_resume_pending(strategy_type)
                     self.stop_requested = True
                     break
                 elif _mins <= _SOFT_MIN:
@@ -1217,7 +1217,7 @@ class ContinuousStrategyExecutor:
                             f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_SOFT_MIN}，软停 {strategy_type}"
                             f"（启动时={_start_mins:.1f}分钟，可手动重启运行至收盘前{_HARD_MIN}分钟）"
                         )
-                        self.stop_reason = 'market_close'
+                        self.stop_reason = 'market_close'; await self._mark_resume_pending(strategy_type)
                         self.stop_requested = True
                         break
 
@@ -1232,6 +1232,19 @@ class ContinuousStrategyExecutor:
             if not _mkt_open:
                 if scan_count % 50 == 1:
                     logger.info(f"[V2][MT5休市] 当前休市({_mkt_reason}), 等待开市, 暂不下单 {strategy_type}")
+                await self._sleep_or_stop(2.0)
+                continue
+
+            # ── 开市预热闸: 开市后未满本交易对预热分钟数(XAU 1min/ICXAU 2min, 见 config/open_warmup.json), 只等待不下单 ──
+            try:
+                from app.utils.trading_time import minutes_since_mt5_open as _mins_open, open_warmup_minutes as _warmup_min
+                _since_open = _mins_open()
+                _warmup_m = _warmup_min(self.pair_code)
+            except Exception:
+                _since_open, _warmup_m = None, 0.0
+            if _since_open is not None and _warmup_m > 0 and _since_open < _warmup_m:
+                if scan_count % 50 == 1:
+                    logger.info(f"[V2][开市预热] {self.pair_code} 开市{_since_open:.1f}min < {_warmup_m:.0f}min, 暂不下单 {strategy_type}")
                 await self._sleep_or_stop(2.0)
                 continue
 
@@ -1331,6 +1344,14 @@ class ContinuousStrategyExecutor:
         logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
         await self._push_stop_confirmed(strategy_type)
         return {'success': True, 'message': 'Execution completed'}
+
+    async def _mark_resume_pending(self, strategy_type):
+        # mark resume-pending on close-gate auto-stop (only running-then-auto-stopped gets marked)
+        try:
+            from app.services.strategy_resume_service import mark_resume_pending
+            await mark_resume_pending(self.user_id, self.pair_code, strategy_type)
+        except Exception as _e:
+            logger.warning(f'[RESUME] mark pending failed: {_e}')
 
     async def _is_quote_diverged(self) -> bool:
         """读取行情背离监控写入的 Redis 标记（无 HTTP）。

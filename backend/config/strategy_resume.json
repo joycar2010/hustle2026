@@ -1,0 +1,4 @@
+{
+  "_comment": "开市后自动恢复总开关。enabled=false 可秒关(热生效, 监控每轮读取)。只恢复开市前在运行且被收盘闸自动停的按钮, 按对预热 XAU1/ICXAU2。",
+  "enabled": true
+}
