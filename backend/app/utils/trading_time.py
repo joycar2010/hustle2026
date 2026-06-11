@@ -104,6 +104,11 @@ def is_bybit_trading_hours() -> tuple[bool, str]:
         open_wd, open_h = 0, 6 if summer else 7
         close_wd, close_h = 5, 5 if summer else 6
 
+    # 日级休市闸(20260612): 每日 close_h:00 收市 → open_h:00 才开市(夏05:00-06:00/冬06:00-07:00 北京),
+    # 期间为日级停盘(原代码漏建模, 误判为开市→自动恢复进冻结报价→单腿)。夏冬令由季节取值自动正确。
+    if close_h <= hour < open_h:
+        return False, f"MT5休市中（{season_label}，日级休市{close_h:02d}:00-{open_h:02d}:00）"
+
     # Saturday after close hour / Sunday = closed
     if weekday == 5 and hour >= close_h:
         return False, f"MT5休市中（{season_label}，周六{close_h:02d}:00后休市）"
@@ -218,8 +223,8 @@ def minutes_since_mt5_open():
         close_h = 5 if summer else 6
     if open_h < 0:
         open_h = 6 if summer else 7
-    # 最近一次日级 rollover 边界（<= now）
-    daily = now.replace(hour=close_h, minute=0, second=0, microsecond=0)
+    # 最近一次日级"重开"边界(<= now): 重开=open_h:00(夏06/冬07), 非close_h(收市点)!
+    daily = now.replace(hour=open_h, minute=0, second=0, microsecond=0)
     if daily > now:
         daily -= timedelta(days=1)
     # 本周一开市边界

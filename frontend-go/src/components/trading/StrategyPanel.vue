@@ -104,10 +104,10 @@
               <div class="text-xs text-gray-400 mb-0.5">主账号 资金费/手</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceLongFundingRate ?? 0) / 100).toFixed(2) }}
+                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceLongFundingRate ?? 0)).toFixed(2) }}
                 </span>
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceLongFundingRate ?? 0) / 100).toFixed(2) }}
+                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceLongFundingRate ?? 0)).toFixed(2) }}
                 </span>
               </div>
               <div class="text-[10px] text-gray-500 mt-0.5">费率: {{ (marketCardsRef.binanceFundingRatePct ?? 0).toFixed(4) }}%</div>
@@ -889,6 +889,10 @@ watch([() => marketStore.positionSnapshot, alertPairCode], ([snap]) => {
   const incomingAllZero = (ml === 0 && ms === 0 && bl === 0 && bs === 0)
   const currentHasPosition = (localBybitLong.value !== 0 || localBybitShort.value !== 0 ||
                               localBinanceLong.value !== 0 || localBinanceShort.value !== 0)
+  // 主腿(币安)读数可靠,始终采纳——不参与"全为零"防闪烁拒绝;修复全平到0时主多仓/主空仓卡住(只动这两腿)
+  localBinanceLong.value = bl
+  localBinanceShort.value = bs
+  // 对冲腿(MT5桥)可能瞬时读0闪烁,保留原"全为零"防抖(阈值与逻辑不变,现仅作用于对冲两腿)
   if (incomingAllZero && currentHasPosition) {
     _consecutiveZeroCount++
     // Allow zero-update if: close event signaled OR confirmed by consecutive zero snapshots
@@ -903,8 +907,6 @@ watch([() => marketStore.positionSnapshot, alertPairCode], ([snap]) => {
   }
   localBybitLong.value = ml
   localBybitShort.value = ms
-  localBinanceLong.value = bl
-  localBinanceShort.value = bs
 }, { immediate: true })
 const currentSpread = ref(0)
 const closingSpread = ref(0)
@@ -1126,25 +1128,10 @@ onMounted(async () => {
   await loadConfigFromDB()
   // 回灌后端权威在仓开仓明细(平均入场点差 + N笔明细,免疫刷新)
   fetchOpenEntrySpread()
-  // 建议4: 恢复后端运行中的连续执行任务状态
-  try {
-    const tasksR = await api.get('/api/v1/strategies/execution/tasks')
-    const tasks = tasksR.data?.tasks || []
-    for (const t of tasks) {
-      if (t.status === 'running' && t.strategy_id?.includes(props.type)) {
-        if (t.strategy_type?.includes('opening')) {
-          continuousExecutionEnabled.value.opening = true
-          continuousExecutionTaskId.value.opening = t.task_id
-          startStatusPolling('opening')
-        }
-        if (t.strategy_type?.includes('closing')) {
-          continuousExecutionEnabled.value.closing = true
-          continuousExecutionTaskId.value.closing = t.task_id
-          startStatusPolling('closing')
-        }
-      }
-    }
-  } catch {}
+  // 建议4+fix#2: 按后端真实运行态校准按钮(载入) + 挂可见性变化/15s定时持续校准
+  await syncContinuousRunningState()
+  document.addEventListener('visibilitychange', _onVisibilitySync)
+  _runStateSyncTimer = setInterval(syncContinuousRunningState, 15000)
 
 
   // Load alert settings (spread thresholds) from Risk API
@@ -2361,6 +2348,49 @@ async function stopContinuousExecution(action) {
     strategyStore.release(`${props.type}_${action}`)
   }
 }
+
+// fix#2(20260612): 按后端真实运行态校准4按钮(自动恢复/断连/切标签后, 按钮与后端一致)
+async function syncContinuousRunningState() {
+  let tasks
+  try {
+    const r = await api.get('/api/v1/strategies/execution/tasks')
+    tasks = r.data?.tasks || []
+  } catch { return }
+  const running = { opening: null, closing: null }
+  for (const t of tasks) {
+    if (t.status === 'running' && t.strategy_id?.includes(props.type)) {
+      if (t.strategy_type?.includes('opening')) running.opening = t.task_id
+      if (t.strategy_type?.includes('closing')) running.closing = t.task_id
+    }
+  }
+  for (const action of ['opening', 'closing']) {
+    const beTaskId = running[action]
+    const feTaskId = continuousExecutionTaskId.value[action]
+    if (beTaskId) {
+      if (!continuousExecutionEnabled.value[action] || feTaskId !== beTaskId) {
+        continuousExecutionEnabled.value[action] = true
+        continuousExecutionTaskId.value[action] = beTaskId
+        const cur = continuousExecutionStatus.value[action]
+        if (!cur || cur.status !== 'running') continuousExecutionStatus.value[action] = { status: 'running' }
+        startStatusPolling(action)
+      }
+    } else if (feTaskId) {
+      const st = continuousExecutionStatus.value[action]?.status
+      if (st !== 'completed' && st !== 'failed') continuousExecutionStatus.value[action] = null
+      continuousExecutionEnabled.value[action] = false
+      continuousExecutionTaskId.value[action] = null
+      stopStatusPolling(action)
+    }
+  }
+}
+let _runStateSyncTimer = null
+function _onVisibilitySync() {
+  if (document.visibilityState === 'visible') syncContinuousRunningState()
+}
+onUnmounted(() => {
+  try { document.removeEventListener('visibilitychange', _onVisibilitySync) } catch (e) {}
+  if (_runStateSyncTimer) { clearInterval(_runStateSyncTimer); _runStateSyncTimer = null }
+})
 
 function startStatusPolling(action) {
   if (statusPollingInterval.value[action]) {
