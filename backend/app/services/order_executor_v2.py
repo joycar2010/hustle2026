@@ -138,6 +138,7 @@ class OrderExecutorV2:
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
         self.spread_check_interval = 0.1   # 0.5→0.1: 100ms guard tick, faster reaction to unfavorable spread drift
         self.spread_cancel_tolerance = 0.2  # 0.5→0.2: tighter ribbon; cancel when spread moves 0.2 against us
+        self.guard_mt5_cache_s = 0.2  # 护栏MT5腿微缓存窗口s: 币安腿WS实时, MT5腿每0.2s取一次(零币安REST)
         self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
         self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
         self.mt5_deal_recheck_wait = 1.0  # 2.0→1.0: 二次确认等待时间缩短
@@ -1644,6 +1645,15 @@ class OrderExecutorV2:
                             logger.error(f"[INCR_HEDGE] 对冲失败,熔断撤主腿剩余 order={binance_order_id} {strategy_type}")
                             break
                         byb_lot += fl
+                        if ap <= 0:
+                            # MT5桥常回 avg=0 → 用成交后即时MT5报价作成交价代理(买跟单≈ask/卖跟单≈bid),
+                            # 不延迟跟单;使 byb_avg 真实→修好实得点差/账本/成交后滑点护栏(此前对MT5对被skip)
+                            try:
+                                from app.services.market_service import market_data_service as _mds_h
+                                _mq_h = await _mds_h.get_bybit_quote(sym_b)
+                                ap = (_mq_h.ask_price if hedge_is_buy else _mq_h.bid_price) or 0.0
+                            except Exception as _e_px:
+                                logger.debug(f"[INCR_HEDGE] mt5 px proxy failed: {_e_px}")
                         byb_quote += fl * ap
                         cov_xau = _b_to_a(lot, pair_code) / mult
                         hedged_xau += cov_xau
@@ -1749,7 +1759,8 @@ class OrderExecutorV2:
                 if spread_threshold is None or compare_op is None or strategy_type is None:
                     return
                 from app.services.market_service import market_data_service
-                tolerance = self.spread_cancel_tolerance
+                tolerance = float(self._load_incr_cfg().get('spread_cancel_tolerance', self.spread_cancel_tolerance))  # 热配:挂单期撤单容差
+                _mt5_cache = {'q': None, 'ts': 0.0}  # MT5腿微缓存(本订单监控周期内, 限内部桥负载)
                 while not fill_event.is_set():
                     await asyncio.sleep(self.spread_check_interval)
                     if fill_event.is_set():
@@ -1759,13 +1770,18 @@ class OrderExecutorV2:
                         # not the default XAU. Mismatched symbols = guard reads wrong
                         # spread = never fires = unfavorable drift goes unchecked.
                         sym_a_g, sym_b_g = _get_pair_symbols(pair_code)
-                        market_data = await market_data_service.get_current_spread(
-                            binance_symbol=sym_a_g, bybit_symbol=sym_b_g
-                        )
-                        spreads = market_data_service.calculate_spread(
-                            market_data.binance_quote,
-                            market_data.bybit_quote
-                        )
+                        # 实时取价·零币安REST: 币安腿读WS内存价(主动推送,不占REST限频),
+                        # MT5腿每 guard_mt5_cache_s(默认0.2s)刷新一次(内部桥,非币安)。
+                        # 原走 get_current_spread(use_cache=True) 的1s Redis缓存→护栏100ms空转读旧值,看不见成交前点差塌陷。
+                        _bq_g = await market_data_service.get_binance_quote(sym_a_g)
+                        _now_g = asyncio.get_event_loop().time()
+                        if _mt5_cache['q'] is None or (_now_g - _mt5_cache['ts']) >= self.guard_mt5_cache_s:
+                            _mt5q_g = await market_data_service.get_bybit_quote(sym_b_g)
+                            _mt5_cache['q'] = _mt5q_g
+                            _mt5_cache['ts'] = _now_g
+                        else:
+                            _mt5q_g = _mt5_cache['q']
+                        spreads = market_data_service.calculate_spread(_bq_g, _mt5q_g)
                         if strategy_type == 'reverse_closing':
                             current_spread = spreads.reverse_exit_spread
                         elif strategy_type == 'reverse_opening':

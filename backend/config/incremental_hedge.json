@@ -1,6 +1,7 @@
 {
   "enabled": true,
   "min_xau": 1.0,
-  "max_unhedged_xau": 3.0,
-  "poll_sec": 0.15
+  "max_unhedged_xau": 2.0,
+  "poll_sec": 0.08,
+  "spread_cancel_tolerance": 0.2
 }
