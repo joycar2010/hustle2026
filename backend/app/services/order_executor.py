@@ -280,6 +280,7 @@ class OrderExecutor:
                 "partially_filled": filled_qty > 0 and filled_qty < total_qty,
                 "filled_qty": filled_qty,
                 "total_qty": total_qty,
+                "avg_price": float(result.get("avgPrice", 0) or 0),
                 "data": result,
             }
         except Exception as e:

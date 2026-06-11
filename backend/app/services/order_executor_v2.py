@@ -1844,6 +1844,7 @@ class OrderExecutorV2:
                             _order_fill_registry[order_id] = {
                                 "filled_qty": rest_filled,
                                 "status": rest_status,
+                                "avg_price": float(rest_result.get("avg_price", 0) or 0),
                             }
                             logger.info(
                                 f"[BINANCE_MONITOR] REST heartbeat detected terminal state for "
@@ -1925,6 +1926,11 @@ class OrderExecutorV2:
                         if final_status.get("success"):
                             rest_filled = final_status.get("filled_qty", 0.0)
                             rest_status = final_status.get("status", "")
+                            _bap_rest = float(final_status.get("avg_price", 0) or 0)
+                            if _bap_rest > 0:
+                                _rec_h = _order_fill_registry.get(order_id, {}) or {}
+                                _rec_h["avg_price"] = _bap_rest
+                                _order_fill_registry[order_id] = _rec_h
                             if rest_filled > filled_qty:
                                 filled_qty = rest_filled
                                 logger.info(
@@ -1982,7 +1988,8 @@ class OrderExecutorV2:
             return {
                 "filled_qty": record.get("filled_qty", 0.0),
                 "spread_cancelled": False,
-                "api_error": False
+                "api_error": False,
+                "avg_price": record.get("avg_price", 0.0)
             }
 
         finally:

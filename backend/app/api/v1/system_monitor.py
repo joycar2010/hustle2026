@@ -129,6 +129,27 @@ def check_mt5_clients() -> List[Dict[str, Any]]:
         return []
 
 
+# ── 真实 MT5 健康(供状态页/流): 任一活跃桥 /health=mt5:true。SDK直连版在Linux恒false不可作准 ──
+_mt5_online_cache = {"ts": 0.0, "val": False}
+
+
+async def mt5_overall_online() -> bool:
+    """真实 MT5 连通性: 复用 check_mt5_clients(桥 /health 探活), 放线程池避免阻塞事件循环; 5s 缓存限频。"""
+    import asyncio, time
+    now = time.time()
+    if now - _mt5_online_cache["ts"] < 5.0:
+        return _mt5_online_cache["val"]
+    try:
+        clients = await asyncio.get_event_loop().run_in_executor(None, check_mt5_clients)
+        act = [c for c in clients if c.get("is_active")]
+        val = any(c.get("online") for c in (act or clients))
+    except Exception:
+        val = False
+    _mt5_online_cache["ts"] = now
+    _mt5_online_cache["val"] = val
+    return val
+
+
 def read_cert_bytes(domain: str) -> Optional[bytes]:
     cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
     try:

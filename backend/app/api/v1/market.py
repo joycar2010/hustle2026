@@ -12,11 +12,11 @@ router = APIRouter()
 async def get_connection_status():
     """Get MT5 connection status and health information"""
     try:
-        mt5_client = realtime_service.mt5_client
-        status = mt5_client.get_connection_status()
-
+        # 真实健康以 HTTP 桥 /health 为准(SDK直连版 realtime_service.mt5_client 在Linux恒false)
+        from app.api.v1.system_monitor import mt5_overall_online
+        _online = await mt5_overall_online()
         return {
-            "mt5": status,
+            "mt5": {"connected": _online, "healthy": _online, "connection_failures": 0},
             "service_running": realtime_service.running,
         }
     except Exception as e:

@@ -42,6 +42,14 @@ def _setup_logging():
     # Suppress noisy SQLAlchemy engine logs in production
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
+    # 日志卫生(2026-06-11): 压制高频热路径/扇出噪声 — 仅降日志音量, 不改任何取数/交易行为
+    logging.getLogger("httpx").setLevel(logging.WARNING)            # 每个HTTP请求INFO(MT5 tick轮询~58行/s)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("app.services.mt5_http_client").setLevel(logging.ERROR)   # "no tick for SYM" WARNING刷屏
+    logging.getLogger("app.services.account_service").setLevel(logging.WARNING) # 余额/保证金/资金费 逐账号扇出INFO
+    logging.getLogger("app.api.v1.trading").setLevel(logging.WARNING)           # Formatted/Stats/Fetching deals 重算INFO
+    logging.getLogger("app.services.agent.market_snapshot").setLevel(logging.ERROR)  # testgo无go(8080)每5s重试失败WARNING
+
 _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
@@ -506,8 +514,7 @@ async def maintenance_guard(request: Request, call_next):
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    print(f"[REQUEST] {request.method} {request.url.path}")
-    logger.info(f"[REQUEST] {request.method} {request.url.path}")
+    logger.debug(f"[REQUEST] {request.method} {request.url.path}")
     if "mt5-clients" in request.url.path:
         print(f"[MT5-CLIENTS REQUEST] Headers: {dict(request.headers)}")
         print(f"[MT5-CLIENTS REQUEST] Method: {request.method}")
@@ -522,8 +529,7 @@ async def log_requests(request: Request, call_next):
         print(f"[MT5-CLIENTS RESPONSE] Status: {response.status_code}")
         logger.info(f"[MT5-CLIENTS RESPONSE] Status: {response.status_code}")
 
-    print(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
-    logger.info(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
+    logger.debug(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
     return response
 
 

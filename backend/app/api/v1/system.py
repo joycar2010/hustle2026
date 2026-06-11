@@ -2117,14 +2117,11 @@ async def get_system_status(
         bybit_ok = False
         mt5_ok = False
         try:
-            from app.services.realtime_market_service import market_data_service
-            # Binance: live tick from binance_ws (cached every 250ms)
             binance_ok = bool(websocket_connected)
-            # Bybit/MT5: market_data_service holds the latest tick fetch result
-            mt5_client = getattr(market_data_service, "mt5_client", None)
-            mt5_ok = bool(mt5_client and getattr(mt5_client, "connected", False))
-            # Bybit currently uses MT5 bridge as the source of truth for the gold pair, so they share status
-            bybit_ok = mt5_ok
+            # MT5/Bybit 真实健康以 HTTP 桥 /health 为准(SDK直连版 mt5_client 在Linux恒false, 不可作准)
+            from app.api.v1.system_monitor import mt5_overall_online
+            mt5_ok = await mt5_overall_online()
+            bybit_ok = mt5_ok  # 金对以 MT5 桥为真值源, Bybit 与 MT5 共用桥状态
         except Exception:
             pass
 
