@@ -59,11 +59,12 @@
             {{ w.net_pnl >= 0 ? '+' : '' }}{{ w.net_pnl.toFixed(0) }}
           </div>
         </div>
-        <div class="flex items-center gap-3 mt-3 text-[10px] text-text-tertiary">
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#0ecb81]"></span> >1%</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#0ecb81]/40"></span> 0~1%</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#f6465d]/40"></span> -0.5~0%</span>
-          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#f6465d]"></span> &lt;-0.5%</span>
+        <div class="flex items-center gap-3 mt-3 text-[10px] text-text-tertiary flex-wrap">
+          <span class="text-text-tertiary">金额(USDT)·深=大:</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#0ecb81]"></span> ≥ +{{ heatThreshold.toFixed(0) }}</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#0ecb81]/40"></span> 0 ~ +{{ heatThreshold.toFixed(0) }}</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#f6465d]/40"></span> -{{ heatThreshold.toFixed(0) }} ~ 0</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-[#f6465d]"></span> ≤ -{{ heatThreshold.toFixed(0) }}</span>
         </div>
       </div>
     </div>
@@ -92,7 +93,7 @@ const ck = ref(0)
 const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
 const thisWeekPnl = computed(() => {
-  const ws = dayjs().startOf('week').format('YYYY-MM-DD')
+  const _n = dayjs(); const ws = _n.subtract((_n.day() + 6) % 7, 'day').format('YYYY-MM-DD')  // 周一起
   return dailyList.value.filter(d => d.date >= ws).reduce((s, d) => s + d.net_pnl, 0)
 })
 const thisMonthPnl = computed(() => {
@@ -116,9 +117,17 @@ const comboChart = computed(() => {
 
 const comboOpts = { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(0,0,0,0.85)' } }, scales: { x: { grid: { display: false }, ticks: { color: '#666', font: { size: 9 } } }, y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 10 } } } } }
 
+// 自适应阈值: 非零周收益绝对值的中位数, 作为“大额”分界(适配不同账户量级)
+const heatThreshold = computed(() => {
+  const a = weeklyData.value.map(x => Math.abs(x.net_pnl)).filter(v => v > 0.005).sort((p, q) => p - q)
+  if (!a.length) return 1
+  return Math.max(1, a[Math.floor(a.length / 2)])
+})
 function heatColor(v) {
-  if (v > 0) return v > 10 ? 'bg-[#0ecb81] text-dark-300' : 'bg-[#0ecb81]/40 text-[#0ecb81]'
-  if (v < -5) return 'bg-[#f6465d] text-white'
+  const t = heatThreshold.value
+  if (v >= t) return 'bg-[#0ecb81] text-dark-300'
+  if (v > 0) return 'bg-[#0ecb81]/40 text-[#0ecb81]'
+  if (v <= -t) return 'bg-[#f6465d] text-white'
   if (v < 0) return 'bg-[#f6465d]/40 text-[#f6465d]'
   return 'bg-dark-200 text-text-tertiary'
 }

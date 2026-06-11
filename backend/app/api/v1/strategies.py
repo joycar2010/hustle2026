@@ -1837,3 +1837,66 @@ async def list_slippage_events(
         offset=offset,
     )
     return {"events": events}
+
+
+# ── 对冲腿强平后 用户收口: 币安 maker 平裸腿(单腿告警弹框的"确认收口"按钮) ──
+class HedgeCloseoutRequest(BaseModel):
+    pair_code: str = "XAU"
+    qty: Optional[float] = None
+
+
+@router.post("/hedge/closeout")
+async def hedge_closeout(
+    request: HedgeCloseoutRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """对冲腿被强平后, 用户点'确认收口' → 币安 maker(post-only/GTX) 平掉裸露的币安主腿。"""
+    from app.services.binance_client import BinanceFuturesClient
+    from app.core.proxy_utils import build_proxy_url
+    from app.services.hedging_pair_service import hedging_pair_service
+    pair_code = request.pair_code or "XAU"
+    binance_account, _bb = await _resolve_pair_accounts(db, user_id, pair_code)
+    if not binance_account:
+        raise HTTPException(status_code=404, detail="未找到该对的币安主账号绑定")
+    _pair = hedging_pair_service.get_pair(pair_code)
+    symbol = _pair.symbol_a.symbol if _pair else "XAUUSDT"
+    client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
+                                  proxy_url=build_proxy_url(binance_account.proxy_config))
+    try:
+        positions = await client.get_position_risk(symbol=symbol)
+        naked = None
+        for p in (positions or []):
+            if abs(float(p.get("positionAmt", 0) or 0)) > 1e-8:
+                naked = p
+                break
+        if not naked:
+            return {"success": True, "message": symbol + " 当前无裸露持仓, 无需收口"}
+        amt = float(naked.get("positionAmt", 0))
+        position_side = naked.get("positionSide") or ("LONG" if amt > 0 else "SHORT")
+        close_qty = abs(amt)
+        if request.qty and float(request.qty) > 0:
+            close_qty = min(close_qty, float(request.qty))
+        side = "SELL" if amt > 0 else "BUY"
+        _ps = position_side if position_side in ("LONG", "SHORT") else None
+        res = await client.place_maker_order(symbol=symbol, side=side, order_type="LIMIT",
+                                             quantity=close_qty, position_side=_ps,
+                                             client_order_id_prefix="m-closeout")
+        oid = res.get("orderId") if isinstance(res, dict) else None
+        logger.warning("[HEDGE_CLOSEOUT] user=" + str(user_id) + " " + symbol + " " + side + " "
+                       + str(close_qty) + " maker post-only orderId=" + str(oid))
+        return {"success": True,
+                "message": "已挂币安 maker 平仓单: " + side + " " + str(close_qty) + " " + symbol
+                           + "（post-only/GTX）, orderId=" + str(oid),
+                "order": res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[HEDGE_CLOSEOUT] failed user=" + str(user_id) + ": " + str(e))
+        raise HTTPException(status_code=500, detail="收口失败: " + str(e))
+    finally:
+        try:
+            await client.close()
+        except Exception:
+            pass
+

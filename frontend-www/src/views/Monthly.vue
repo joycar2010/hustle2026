@@ -58,7 +58,7 @@
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
           <span class="text-sm font-bold mb-3 block">全年日收益热力图</span>
           <div class="overflow-x-auto">
-            <div class="grid gap-[2px]" style="grid-template-columns: repeat(53, 10px); grid-template-rows: repeat(7, 10px);">
+            <div class="grid gap-[2px]" style="grid-auto-flow: column; grid-template-columns: repeat(53, 10px); grid-template-rows: repeat(7, 10px);">
               <div v-for="(d, i) in calendarDays" :key="i"
                 :title="d.date + ': ' + (d.pnl != null ? fmtPnl(d.pnl) : '无数据')"
                 class="w-[10px] h-[10px] rounded-[2px]"
@@ -161,7 +161,7 @@ const calendarDays = computed(() => {
   for (const d of dailyList.value) pnlMap[d.date] = d.net_pnl
   const days = []
   const yearStart = dayjs().startOf('year')
-  const startDay = yearStart.startOf('week') // align to Sunday
+  const startDay = yearStart.subtract((yearStart.day() + 6) % 7, 'day') // align to Monday(周一起)
   for (let i = 0; i < 53 * 7; i++) {
     const date = startDay.add(i, 'day')
     if (date.isAfter(dayjs())) { days.push({ date: '', pnl: null }); continue }

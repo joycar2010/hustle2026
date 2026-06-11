@@ -78,7 +78,8 @@ export async function fetchFundFlow(days) {
 export function aggregateWeekly(dailyList) {
   const weeks = {}
   for (const d of dailyList) {
-    const weekStart = dayjs(d.date).startOf('week').format('YYYY-MM-DD')
+    const _dd = dayjs(d.date)
+    const weekStart = _dd.subtract((_dd.day() + 6) % 7, 'day').format('YYYY-MM-DD')  // 周一起
     if (!weeks[weekStart]) weeks[weekStart] = { week: weekStart, net_pnl: 0, trade_count: 0, days: 0 }
     weeks[weekStart].net_pnl += d.net_pnl
     weeks[weekStart].trade_count += d.trade_count

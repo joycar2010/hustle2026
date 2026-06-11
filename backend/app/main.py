@@ -161,6 +161,8 @@ async def init_mt5_and_monitoring():
         await market_state_monitor.start()  # MT5 休市/开市状态监控
         from app.services.strategy_resume_service import strategy_resume_monitor
         await strategy_resume_monitor.start()  # 开市后自动恢复(按对预热), 仅恢复收盘自动停的按钮
+        from app.services.hedge_stopout_service import hedge_stopout_monitor
+        await hedge_stopout_monitor.start()  # 对冲腿强平检测+单腿告警(只读)
         await binance_position_pusher.start()  # Binance User Data Stream，<100ms 持仓更新
         await snapshot_request_listener.start()  # On-demand snapshot listener (Go Hub → Python)
         await market_rate_streamer.start()  # 资金费+过夜费率 10s 广播
