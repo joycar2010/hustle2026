@@ -126,9 +126,11 @@ class ContinuousStrategyExecutor:
     # Fix: query MT5 symbol_info.trade_mode (must == 4 / TRADE_FULL) on the FIRST
     # trade after a >2h idle gap. Subsequent trades short-circuit on the cache.
     _mt5_trade_mode_verified_at: dict = {}
-    MT5_PREFLIGHT_TTL_S: float = 30.0  # SEC 2h→30s: 实时复探券商可交易状态,堵日级rollover/突发停盘的单腿盲区 20260609
+    _mt5_last_full: dict = {}   # (bridge,sym)->bool 上次探测是否FULL, 检测复开市(非FULL→FULL)
+    _mt5_reopen_at: dict = {}   # (bridge,sym)->ts 检测到复开市时刻, 供复开市预热(与日级/周末口径一致)
+    MT5_PREFLIGHT_TTL_S: float = 10.0  # 30s→10s(20260611): 更频繁复探券商XAU实时可交易状态, 精确抓取节假日/盘中分时段休市(品种特定/与时区无关)
 
-    async def _ensure_mt5_trade_mode(self, bybit_account, sym_b: str) -> bool:
+    async def _ensure_mt5_trade_mode(self, bybit_account, sym_b: str, pair_code: str = None) -> bool:
         """Pre-trade gate: only the FIRST trade after >2h idle actually probes
         MT5 trade_mode. Subsequent trades short-circuit on cached verification."""
         import time as _t, os, httpx
@@ -157,16 +159,35 @@ class ContinuousStrategyExecutor:
             info = r.json()
             tmode_raw = info.get("trade_mode")
             if tmode_raw is None:
-                logger.info(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} old bridge (no trade_mode field) - proceeding optimistically")
-                ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
-                return True
+                # 去乐观放行(20260611): 无法确认 trade_mode==FULL 不臆测可交易, 本轮 defer(下轮重试)。
+                # 仅 4 按钮套利执行经此预检; 紧急手动交易不受影响。当前各桥均回 trade_mode, 不影响正常交易。
+                logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} no trade_mode field - 无法确认可交易, deferring(去乐观放行)")
+                ContinuousStrategyExecutor._mt5_last_full[key] = False
+                return False
             tmode = int(tmode_raw)
             if tmode == 4:
+                # 复开市检测: 上次非FULL → 本次FULL = 复开市
+                if ContinuousStrategyExecutor._mt5_last_full.get(key) is False:
+                    ContinuousStrategyExecutor._mt5_reopen_at[key] = now
+                ContinuousStrategyExecutor._mt5_last_full[key] = True
+                # 复开市预热: 节假日/分时段复开市同样走预热(与日级/周末一致: XAU/BXAU 1min, ICXAU 2min)
+                _ro = ContinuousStrategyExecutor._mt5_reopen_at.get(key)
+                if _ro is not None and pair_code:
+                    try:
+                        from app.utils.trading_time import open_warmup_minutes as _owm
+                        _warm_s = float(_owm(pair_code)) * 60.0
+                    except Exception:
+                        _warm_s = 0.0
+                    if _warm_s > 0 and (now - _ro) < _warm_s:
+                        if (now - _ro) < 2.0:
+                            logger.info(f"[MT5_PREFLIGHT] {sym_b}({pair_code}) 复开市, 预热 {int(_warm_s)}s defer(与日级/周末一致)")
+                        return False
                 ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
-                logger.info(f"[MT5_PREFLIGHT] OK {sym_b}@{bridge_url} trade_mode=FULL verified, next probe in {int(self.MT5_PREFLIGHT_TTL_S/60)}min unless idle")
+                logger.info(f"[MT5_PREFLIGHT] OK {sym_b}@{bridge_url} trade_mode=FULL verified, next probe in {int(self.MT5_PREFLIGHT_TTL_S)}s unless idle")
                 return True
             mode_name = {0:"DISABLED",1:"LONGONLY",2:"SHORTONLY",3:"CLOSEONLY",4:"FULL"}.get(tmode, str(tmode))
             logger.warning(f"[MT5_PREFLIGHT] BLOCK {sym_b}@{bridge_url} trade_mode={mode_name} ({tmode}) - MT5 broker not fully open yet; deferring iter")
+            ContinuousStrategyExecutor._mt5_last_full[key] = False
             return False
         except Exception as e:
             logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} probe error: {e} - refusing first trade (safe default)")
@@ -175,13 +196,9 @@ class ContinuousStrategyExecutor:
     def _mt5_preflight_refresh(self, bybit_account, sym_b: str) -> None:
         """Touch verified-at timestamp on every successful round-trip so cache
         stays warm during active trading; only goes cold during real idle."""
-        import time as _t
-        try:
-            from app.services.order_executor_v2 import _get_trading_bridge_url
-            bridge_url = _get_trading_bridge_url(str(bybit_account.account_id))
-            ContinuousStrategyExecutor._mt5_trade_mode_verified_at[(bridge_url, sym_b)] = _t.time()
-        except Exception:
-            pass
+        # 20260611 no-op: 不再每笔成功就焐热缓存(否则活跃交易中永不复探, 会掩盖盘中分时段休市)。
+        # 改由 _ensure_mt5_trade_mode 按 MT5_PREFLIGHT_TTL_S(10s) 定期复探, 精确抓取节假日/突发休市。
+        return
 
     async def execute_reverse_opening_continuous(
         self,
@@ -530,7 +547,7 @@ class ContinuousStrategyExecutor:
             # Step 7.5: MT5 first-trade preflight (probes only after >2h idle).
             # Active trading short-circuits this via cached verified-at (<1us).
             _sym_a_pf, _sym_b_pf, _ = _get_pair_config(self.pair_code)
-            if not await self._ensure_mt5_trade_mode(bybit_account, _sym_b_pf):
+            if not await self._ensure_mt5_trade_mode(bybit_account, _sym_b_pf, self.pair_code):
                 logger.warning(
                     f"[ladder={ladder_idx}] MT5 preflight refused - deferring iter "
                     f"(no A-side order placed; will retry next trigger cycle)"
