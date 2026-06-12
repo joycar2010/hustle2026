@@ -42,6 +42,7 @@ from app.db.session import engine, SessionLocal
 from app.middleware.auth import JWTAuthMiddleware
 from app.services.spread_reader import spread_reader
 from app.services.market_data_pusher import market_data_pusher
+from app.services.balance_pusher import balance_pusher
 from app.services import symbol_sync
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,9 @@ async def lifespan(app: FastAPI):
 
     import asyncio
     asyncio.create_task(market_data_pusher.start())
+    # 子账户余额/风险推送(dashboard 爆率/最大可借/现币/风险/保证金/可用 列的数据源)。
+    # 历史上 .start() 从未被调用 → balance:updates 永不发布 → 这些列一直显示「-」。
+    await balance_pusher.start()
 
     if settings.symbol_sync_on_startup:
         try:

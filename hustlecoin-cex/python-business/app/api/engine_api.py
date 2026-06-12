@@ -131,10 +131,12 @@ def get_dashboard(request: Request, db: Session = Depends(get_db)):
     ).first()
     engine_status = global_state.status if global_state else "STOPPED"
 
+    # 仅当前存在子账户对应的 worker(过滤已删账户残留行;顶栏「引擎 X/Y」分母据此)
+    _scopes = _live_worker_scopes(db, user_id)
     workers = db.query(EngineState).filter(
         EngineState.user_id == user_id,
-        EngineState.scope != "global",
-    ).all()
+        EngineState.scope.in_(_scopes),
+    ).all() if _scopes else []
 
     total_open = _user_positions(db, user_id).filter(Position.status == "OPEN").count()
     total_closed = _user_positions(db, user_id).filter(Position.status == "CLOSED").count()
