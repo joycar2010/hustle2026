@@ -302,22 +302,40 @@ class Worker:
             logger.error(f"Initiate borrow failed {symbol}: {e}")
 
     async def _hedge_position(self, position: Position, spread: SpreadSnapshot, account_note: str):
-        """Phase 2: sell spot + futures long. BORROWED_IDLE → OPEN."""
+        """Phase 2: sell spot + futures long. BORROWED_IDLE → OPEN.
+        hedge_via_master 开启时合约腿用共享主账户 client;主账户 client 不可用则
+        不动现货(留 BORROWED_IDLE 重试),绝不回退到子账户 key 打合约。"""
         from engine.trading.order_executor import execute_hedge
         try:
+            fc = None
+            if getattr(self.config.global_rules, "hedge_via_master", False):
+                from engine.trading.master_client import get_master_futures_client
+                fc = await get_master_futures_client(self._user_id)
+                if fc is None:
+                    logger.warning(f"hedge_via_master: master client unavailable; "
+                                   f"{position.symbol} stays BORROWED_IDLE")
+                    return
             await execute_hedge(
                 position, spread, self.config.global_rules,
                 self._trading_client, self._notifier, account_note,
+                futures_client=fc,
             )
         except Exception as e:
             logger.error(f"Hedge failed {position.symbol}: {e}")
 
     async def _unhedge_position(self, position: Position, spread: SpreadSnapshot, account_note: str):
-        """Close hedge (futures close + spot buy back), leave coin pending repay."""
+        """Close hedge (futures close + spot buy back), leave coin pending repay.
+        合约腿按持仓归属(hedge_account)选 client,与开关当前值无关。"""
         from engine.trading.order_executor import execute_unhedge
         try:
+            fc = None
+            if getattr(position, "hedge_account", None) == "master":
+                from engine.trading.master_client import get_master_futures_client
+                fc = await get_master_futures_client(self._user_id)
+                # fc=None 时 execute_unhedge 内部留 OPEN 等重试
             await execute_unhedge(
                 position, spread, self._trading_client, self._notifier, account_note,
+                futures_client=fc,
             )
             self._repay_ban[position.symbol] = datetime.now(timezone.utc)
         except Exception as e:

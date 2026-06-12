@@ -346,6 +346,21 @@ class BinanceTradingClient:
                 return p
         return None
 
+    async def futures_position_risk(self, symbol: str) -> dict | None:
+        """positionRisk entry for the symbol even with zero positionAmt (leverage/mode读取用)."""
+        data = await self._request("GET", f"{FUTURES_BASE}/fapi/v2/positionRisk", {
+            "symbol": symbol,
+        })
+        for p in data:
+            if p["symbol"] == symbol:
+                return p
+        return None
+
+    async def get_position_mode(self) -> bool:
+        """True = dual-side (双向持仓). 引擎下单不带 positionSide,要求单向模式."""
+        data = await self._request("GET", f"{FUTURES_BASE}/fapi/v1/positionSide/dual")
+        return bool(data.get("dualSidePosition", False))
+
     async def get_futures_account(self) -> dict:
         return await self._request("GET", f"{FUTURES_BASE}/fapi/v2/account")
 
@@ -386,10 +401,11 @@ class BinanceTradingClient:
         }, signed=False)
         return Decimal(str(data.get("lastFundingRate", "0")))
 
-    async def get_funding_income(self, symbol: str) -> list:
-        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", {
-            "symbol": symbol, "incomeType": "FUNDING_FEE", "limit": "100",
-        })
+    async def get_funding_income(self, symbol: str, start_time: int | None = None) -> list:
+        params = {"symbol": symbol, "incomeType": "FUNDING_FEE", "limit": "100"}
+        if start_time:
+            params["startTime"] = str(int(start_time))
+        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", params)
 
     async def get_lot_size(self, symbol: str, market: str = "spot") -> dict:
         cache_key = f"{market}:{symbol}"

@@ -123,6 +123,7 @@ class GlobalRules(Base):
     borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
     borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTO/OTOCO;False=borrow-repay
     otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 2=OTO(2单撤)/3=OTOCO(3单撤)
+    hedge_via_master = Column(Boolean, default=False)         # True=合约对冲腿用主账户 key;False=三腿同子账户(原行为)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

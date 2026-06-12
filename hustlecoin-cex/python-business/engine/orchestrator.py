@@ -91,11 +91,14 @@ class Orchestrator:
     def _get_enabled_accounts(self) -> set[int]:
         db = SessionLocal()
         try:
-            accounts = db.query(SubAccount.id).filter(
+            q = db.query(SubAccount.id).filter(
                 SubAccount.is_enabled == True,
                 SubAccount.margin_enabled == True,
-                SubAccount.futures_enabled == True,
-            ).all()
-            return {a.id for a in accounts}
+            )
+            # hedge_via_master: 合约腿在主账户,子 key 无需合约权限 —— 不再以
+            # futures_enabled 作为 worker 准入条件(否则收回子 key 合约权限会连借币腿一起停摆)
+            if not getattr(self.config.global_rules, "hedge_via_master", False):
+                q = q.filter(SubAccount.futures_enabled == True)
+            return {a.id for a in q.all()}
         finally:
             db.close()

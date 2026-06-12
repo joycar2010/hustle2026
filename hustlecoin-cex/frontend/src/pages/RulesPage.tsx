@@ -840,6 +840,17 @@ export function RulesPage() {
               </select>
               <span className="text-muted-foreground/60 text-[10px]">开启=coinmini 同款 IOC 挂单借币;2 单撤单更省、反滥用压力更低</span>
             </div>
+            {/* 对冲腿账户：子账户(原行为) / 主账户(子账户现货空+主账户合约多) */}
+            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="text-muted-foreground/70 text-[10px]">对冲腿</span>
+              <button
+                onClick={() => setGlobalRules((p) => ({ ...p, hedge_via_master: !(p.hedge_via_master === true || p.hedge_via_master === 'true') }))}
+                className={`px-2 py-0.5 rounded text-[11px] ${(globalRules.hedge_via_master === true || globalRules.hedge_via_master === 'true') ? 'bg-positive/20 text-positive' : 'bg-accent text-muted-foreground'}`}
+              >
+                {(globalRules.hedge_via_master === true || globalRules.hedge_via_master === 'true') ? '主账户合约对冲' : '子账户合约对冲'}
+              </button>
+              <span className="text-muted-foreground/60 text-[10px]">主账户模式: 借币/现货在各子账户,合约多腿统一打主账户(需主账户已配置且为单向持仓)</span>
+            </div>
             <div className="text-[10px] text-muted-foreground/60 -mt-1">
               限价：合约腿用可成交限价(挂价≥卖一×(1+滑点))封顶滑点，超时未成交自动市价补齐——永不留敞口。分层格式「偏移%:数量%」如 0.5:30,0.8:30,1.2:40。受控测试请先用小额单笔下单额验证。
             </div>

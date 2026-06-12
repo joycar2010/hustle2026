@@ -55,6 +55,9 @@ class Position(Base):
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)
     user_id = Column(Integer, nullable=True)
+    # 合约腿执行账户: NULL/"sub"=子账户自身(原行为), "master"=主账户(hedge_via_master)。
+    # 平仓/资金费按此归属选 client,与全局开关解耦(开关中途翻转不影响存量仓位)。
+    hedge_account = Column(String(10), nullable=True)
 
 
 class TradeLog(Base):

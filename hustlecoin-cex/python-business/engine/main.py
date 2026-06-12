@@ -178,6 +178,8 @@ async def _main():
         await ue.stop()
         logger.info(f"Stopped engine for user {uid}")
 
+    from engine.trading.master_client import close_all as close_master_clients
+    await close_master_clients()
     await spread_feed.stop()
 
     db = SessionLocal()
@@ -340,7 +342,12 @@ async def _clear_account_positions(orchestrator: Orchestrator, account_id: int):
             logger.warning(f"No spread for {pos.symbol}, skipping close")
             continue
         try:
-            await execute_close(pos, spread, worker._trading_client, notifier, account_note)
+            fc = None
+            if getattr(pos, "hedge_account", None) == "master":
+                from engine.trading.master_client import get_master_futures_client
+                fc = await get_master_futures_client(orchestrator.user_id)
+            await execute_close(pos, spread, worker._trading_client, notifier, account_note,
+                                futures_client=fc)
             logger.info(f"Cleared position {pos.symbol} for account {account_id}")
         except Exception as e:
             logger.error(f"Failed to clear position {pos.symbol}: {e}")

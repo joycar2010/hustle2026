@@ -366,17 +366,32 @@ async def cleanup_tail_positions(
         if not account:
             continue
         try:
+            from contextlib import AsyncExitStack
             from engine.trading.binance_trading import BinanceTradingClient
             from engine.notify.feishu_sender import FeishuSender
             from engine.trading.order_executor import execute_close
             from engine.spread_feed import SpreadSnapshot
 
-            async with BinanceTradingClient(account.api_key, account.api_secret) as client:
+            master = None
+            if getattr(pos, "hedge_account", None) == "master":
+                master = _load_master_account(db, user_id)
+                if not master:
+                    errors.append(f"{pos.symbol}#{pos.id}: 合约腿在主账户但主账户未配置")
+                    continue
+
+            async with AsyncExitStack() as stack:
+                client = await stack.enter_async_context(
+                    BinanceTradingClient(account.api_key, account.api_secret))
+                fc = None
+                if master:
+                    fc = await stack.enter_async_context(BinanceTradingClient(
+                        master.api_key, master.api_secret, sub_account_id=-(user_id or 1)))
                 dummy_spread = SpreadSnapshot(
                     symbol=pos.symbol, spot_bid=0, spot_ask=0,
                     fut_bid=0, fut_ask=0, spread_long=0, spread_short=0, ts=0,
                 )
-                await execute_close(pos, dummy_spread, client, FeishuSender(), account.note or f"#{account.id}")
+                await execute_close(pos, dummy_spread, client, FeishuSender(),
+                                    account.note or f"#{account.id}", futures_client=fc)
                 closed += 1
         except Exception as e:
             errors.append(f"{pos.symbol}#{pos.id}: {e}")
@@ -593,7 +608,19 @@ def _load_global_rules_snapshot(db: Session, user_id: int):
         follow_type=getattr(rules, "follow_type", None) or "market",
         stabilize_sec=getattr(rules, "stabilize_sec", None) or Decimal("0"),
         tier_ratios=getattr(rules, "tier_ratios", None) or "",
+        borrow_spread=getattr(rules, "borrow_spread", None) if getattr(rules, "borrow_spread", None) is not None else Decimal("0.5"),
+        borrow_rate_per_sec=getattr(rules, "borrow_rate_per_sec", None) if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
+        borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
+        otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
+        hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),
     )
+
+
+def _load_master_account(db: Session, user_id: int):
+    """user_id 行优先;兼容历史 upsert 不写 user_id 的 NULL 行。"""
+    return (db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
+            or db.query(MasterAccount).filter(MasterAccount.user_id.is_(None)).first()
+            or db.query(MasterAccount).first())
 
 
 class ManualOpenRequest(BaseModel):
@@ -623,18 +650,30 @@ async def manual_open(data: ManualOpenRequest, request: Request, db: Session = D
     if data.order_amount and data.order_amount > 0:
         rules = dataclasses.replace(rules, order_amount=data.order_amount)
 
+    master = None
+    if getattr(rules, "hedge_via_master", False):
+        master = _load_master_account(db, user_id)
+        if not master:
+            raise HTTPException(status_code=400, detail="已开启主账户对冲,但主账户未配置")
+
+    from contextlib import AsyncExitStack
     from engine.trading.binance_trading import BinanceTradingClient
     from engine.trading.order_executor import execute_open
     from engine.notify.feishu_sender import FeishuSender
     notifier = FeishuSender()
     try:
-        async with BinanceTradingClient(account.api_key, account.api_secret,
-                                        sub_account_id=account.id) as client:
+        async with AsyncExitStack() as stack:
+            client = await stack.enter_async_context(BinanceTradingClient(
+                account.api_key, account.api_secret, sub_account_id=account.id))
+            fc = None
+            if master:
+                fc = await stack.enter_async_context(BinanceTradingClient(
+                    master.api_key, master.api_secret, sub_account_id=-(user_id or 1)))
             # spread_feed=None → skip the post-delay re-confirm; manual open forces
             # at the current spread (interest-rate filter still applies).
             await execute_open(
                 account.id, symbol, spread, rules, client, notifier, account.note,
-                spread_feed=None,
+                spread_feed=None, futures_client=fc,
             )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"开仓失败: {e}")
@@ -674,14 +713,27 @@ async def manual_close(data: ManualCloseRequest, request: Request, db: Session =
         spread = SpreadSnapshot(position.symbol, Decimal("0"), Decimal("0"),
                                 Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), 0)
 
+    master = None
+    if getattr(position, "hedge_account", None) == "master":
+        master = _load_master_account(db, user_id)
+        if not master:
+            raise HTTPException(status_code=400, detail="该持仓合约腿在主账户,但主账户未配置")
+
+    from contextlib import AsyncExitStack
     from engine.trading.binance_trading import BinanceTradingClient
     from engine.trading.order_executor import execute_close
     from engine.notify.feishu_sender import FeishuSender
     notifier = FeishuSender()
     try:
-        async with BinanceTradingClient(account.api_key, account.api_secret,
-                                        sub_account_id=account.id) as client:
-            await execute_close(position, spread, client, notifier, account.note)
+        async with AsyncExitStack() as stack:
+            client = await stack.enter_async_context(BinanceTradingClient(
+                account.api_key, account.api_secret, sub_account_id=account.id))
+            fc = None
+            if master:
+                fc = await stack.enter_async_context(BinanceTradingClient(
+                    master.api_key, master.api_secret, sub_account_id=-(user_id or 1)))
+            await execute_close(position, spread, client, notifier, account.note,
+                                futures_client=fc)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"平仓失败: {e}")
 
@@ -712,14 +764,27 @@ async def manual_hedge(data: ManualPositionRequest, request: Request, db: Sessio
     if not spread:
         raise HTTPException(status_code=400, detail=f"无 {position.symbol} 行情数据，无法对冲")
     rules = _load_global_rules_snapshot(db, user_id)
+    master = None
+    if getattr(rules, "hedge_via_master", False):
+        master = _load_master_account(db, user_id)
+        if not master:
+            raise HTTPException(status_code=400, detail="已开启主账户对冲,但主账户未配置")
+
+    from contextlib import AsyncExitStack
     from engine.trading.binance_trading import BinanceTradingClient
     from engine.trading.order_executor import execute_hedge
     from engine.notify.feishu_sender import FeishuSender
     notifier = FeishuSender()
     try:
-        async with BinanceTradingClient(account.api_key, account.api_secret,
-                                        sub_account_id=account.id) as client:
-            await execute_hedge(position, spread, rules, client, notifier, account.note)
+        async with AsyncExitStack() as stack:
+            client = await stack.enter_async_context(BinanceTradingClient(
+                account.api_key, account.api_secret, sub_account_id=account.id))
+            fc = None
+            if master:
+                fc = await stack.enter_async_context(BinanceTradingClient(
+                    master.api_key, master.api_secret, sub_account_id=-(user_id or 1)))
+            await execute_hedge(position, spread, rules, client, notifier, account.note,
+                                futures_client=fc)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"对冲失败: {e}")
     db.refresh(position)

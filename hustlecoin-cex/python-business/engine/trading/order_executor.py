@@ -28,6 +28,49 @@ async def _get_asset_debt(client: BinanceTradingClient, asset: str) -> tuple[Dec
     return Decimal("0"), Decimal("0")
 
 
+def _fc_symbol_lock(fc, symbol: str) -> asyncio.Lock:
+    """Per-symbol lock attached to the futures client. hedge_via_master 下该 client 被
+    全部 worker 共享 —— 同 symbol 的开/平在共享净仓上必须串行,避免 reduceOnly 拒单/过量平仓。
+    (子账户自有 client 时各 worker 各一份锁表,无跨账户竞争,加锁无副作用。)"""
+    locks = getattr(fc, "_symbol_locks", None)
+    if locks is None:
+        locks = {}
+        fc._symbol_locks = locks
+    return locks.setdefault(symbol, asyncio.Lock())
+
+
+_precheck_warn_ts: dict[str, float] = {}
+
+
+async def _master_margin_precheck(fc, symbol, qty, spread, notifier, account_note) -> bool:
+    """hedge_via_master: 对冲前查主账户合约可用余额(按该 symbol 当前杠杆估算所需保证金,
+    留 10% 缓冲)。不足或查询异常 → False,调用方把持仓留在 BORROWED_IDLE 等下轮,
+    绝不进入「卖出→合约失败→回滚」的空转(主账户欠资是全 worker 共模故障)。"""
+    try:
+        price = spread.fut_ask if (getattr(spread, "fut_ask", None) and spread.fut_ask > 0) else spread.spot_ask
+        pr = await fc.futures_position_risk(symbol)
+        lev = Decimal(str((pr or {}).get("leverage") or "20"))
+        if lev <= 0:
+            lev = Decimal("20")
+        acct = await fc.get_futures_account()
+        avail = Decimal(str(acct.get("availableBalance", "0")))
+        need = (qty * price / lev) * Decimal("1.1")
+        if avail >= need:
+            return True
+        now = time.monotonic()
+        if now - _precheck_warn_ts.get(symbol, 0) > 300:
+            _precheck_warn_ts[symbol] = now
+            logger.warning(f"hedge_via_master: master avail {avail} < need {need:.4f} ({symbol}); hold BORROWED_IDLE")
+            await notifier.notify_error(
+                account_note, f"hedge {symbol}",
+                f"主账户合约可用余额不足: {avail} < {need:.2f} USDT,持仓停在待对冲",
+            )
+        return False
+    except Exception as e:
+        logger.warning(f"hedge_via_master: precheck failed {symbol}: {e}; hold BORROWED_IDLE")
+        return False
+
+
 def _log_trade(db, position_id: int, sub_account_id: int, action: str, symbol: str,
                side: str = None, quantity: Decimal = None, price: Decimal = None,
                order_id: str = None, status: str = "SUCCESS", error: str = None, latency: int = None):
@@ -193,9 +236,12 @@ async def execute_hedge(
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
+    futures_client: BinanceTradingClient = None,
 ):
     """Phase 2: sell the borrowed coin on spot (short) + futures long (hedge).
-    BORROWED_IDLE → SPOT_SOLD → OPEN. Full rollback on failure."""
+    BORROWED_IDLE → SPOT_SOLD → OPEN. Full rollback on failure.
+    futures_client: hedge_via_master 时传主账户 client(合约腿);None=合约同子账户(原行为)。"""
+    fc = futures_client if futures_client is not None else client
     db = SessionLocal()
     pos = db.query(Position).get(position.id)
     if not pos or pos.status != "BORROWED_IDLE":
@@ -206,6 +252,13 @@ async def execute_hedge(
     pos_id = pos.id
     qty = pos.borrow_qty
 
+    # 主账户模式: 卖出前先预检合约保证金,欠资不动现货(留 BORROWED_IDLE 重试)
+    if futures_client is not None:
+        if not await _master_margin_precheck(futures_client, symbol, qty, spread, notifier, account_note):
+            db.close()
+            return
+
+    fut_filled = {"qty": Decimal("0")}   # 合约腿已成交量(失败时平残腿用)
     try:
         # Step 1: spot sell (short leg) —— 按「单笔挂单」(order_amount) 分批卖出降低冲击;
         # 合约腿仍按实际卖出总量一次性对冲(回滚逻辑不变)。借量≤单笔时退化为单批=原行为。
@@ -249,17 +302,22 @@ async def execute_hedge(
             await asyncio.sleep(min(stabilize, 10))
 
         # Step 2: futures long (hedge) — market (default) or marketable-limit/tiered
-        futures_lot = await client.get_lot_size(symbol, "futures")
+        # fc=master(hedge_via_master) 或子账户自身;同 symbol 在共享净仓上串行(per-symbol 锁)
+        futures_lot = await fc.get_lot_size(symbol, "futures")
         futures_qty = round_to_step(qty, futures_lot["stepSize"])
         t0 = time.monotonic()
-        if (getattr(rules, "follow_type", "market") or "market") == "limit":
-            long_result = await _futures_entry_limit(
-                client, symbol, futures_qty, rules, futures_lot, db, pos, sub_account_id,
-            )
-        else:
-            long_result = await client.futures_market_long(symbol, futures_qty)
+        async with _fc_symbol_lock(fc, symbol):
+            if (getattr(rules, "follow_type", "market") or "market") == "limit":
+                long_result = await _futures_entry_limit(
+                    fc, symbol, futures_qty, rules, futures_lot, db, pos, sub_account_id,
+                    fill_tracker=fut_filled,
+                )
+            else:
+                long_result = await fc.futures_market_long(symbol, futures_qty)
+                fut_filled["qty"] = Decimal(str(long_result.get("executedQty", "0")))
         latency = int((time.monotonic() - t0) * 1000)
         pos.status = "OPEN"
+        pos.hedge_account = "master" if futures_client is not None else "sub"
         pos.futures_long_qty = Decimal(str(long_result["executedQty"]))
         pos.futures_long_price = Decimal(str(long_result.get("avgPrice", "0")))
         pos.futures_long_order_id = str(long_result["orderId"])
@@ -277,7 +335,8 @@ async def execute_hedge(
 
     except BinanceAPIError as e:
         logger.error(f"Hedge failed at {pos.status}: {e}")
-        await _handle_hedge_failure(db, pos, client, e, sub_account_id, symbol, notifier, account_note)
+        await _handle_hedge_failure(db, pos, client, e, sub_account_id, symbol, notifier, account_note,
+                                    futures_client=futures_client, futures_filled=fut_filled["qty"])
     except Exception as e:
         logger.error(f"Hedge failed unexpectedly: {e}", exc_info=True)
         pos.status = "FAILED"
@@ -288,7 +347,8 @@ async def execute_hedge(
         db.close()
 
 
-async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, notifier, account_note):
+async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, notifier, account_note,
+                                futures_client=None, futures_filled: Decimal = Decimal("0")):
     current = pos.status
     if current == "BORROWED_IDLE":
         # spot sell failed — repay borrow
@@ -302,7 +362,18 @@ async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, 
         pos.error_message = f"Spot sell failed: {error}. Borrow rolled back."
         db.commit()
     elif current == "SPOT_SOLD":
-        # futures long failed — buy back spot + repay
+        # futures long failed — close any partial futures fill first (master 残腿不平会污染共享净仓),
+        # then buy back spot + repay
+        if futures_filled and futures_filled > 0:
+            fcr = futures_client if futures_client is not None else client
+            try:
+                async with _fc_symbol_lock(fcr, symbol):
+                    await fcr.futures_market_close(symbol, futures_filled)
+                _log_trade(db, pos.id, sub_account_id, "ROLLBACK_FUTURES_CLOSE", symbol, "SELL",
+                            futures_filled, status="SUCCESS")
+            except Exception as re:
+                _log_trade(db, pos.id, sub_account_id, "ROLLBACK_FUTURES_CLOSE", symbol,
+                            status="FAILED", error=str(re))
         rollback_qty = pos.spot_sell_qty if pos.spot_sell_qty else pos.borrow_qty
         try:
             await client.spot_market_buy_qty(symbol, rollback_qty)
@@ -335,6 +406,7 @@ async def execute_open(
     notifier: FeishuSender,
     account_note: str,
     spread_feed: SpreadFeed = None,
+    futures_client: BinanceTradingClient = None,
 ):
     """Atomic open (borrow + hedge in one shot) — used by manual-open and as a fallback."""
     pos_id = await execute_borrow(
@@ -348,7 +420,8 @@ async def execute_open(
     db.close()
     if pos and pos.status == "BORROWED_IDLE":
         cur = spread_feed.get_symbol(symbol) if spread_feed else None
-        await execute_hedge(pos, cur or spread, rules, client, notifier, account_note)
+        await execute_hedge(pos, cur or spread, rules, client, notifier, account_note,
+                            futures_client=futures_client)
 
 
 async def execute_unhedge(
@@ -357,21 +430,31 @@ async def execute_unhedge(
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
+    futures_client: BinanceTradingClient = None,
 ):
     """Phase 1 of close: close the futures long + buy back the spot, leaving the coin
-    in the margin account awaiting repay. OPEN → PENDING_REPAY (net-flat, no exposure)."""
+    in the margin account awaiting repay. OPEN → PENDING_REPAY (net-flat, no exposure).
+    合约腿按开仓归属(pos.hedge_account)选 client —— master 开的仓必须用 master 平,
+    与全局开关当前值无关;master client 缺失时不动仓位,留 OPEN 等重试。"""
     db = SessionLocal()
     pos = db.query(Position).get(position.id)
     if not pos or pos.status != "OPEN":
         db.close()
         return
+    on_master = getattr(pos, "hedge_account", None) == "master"
+    if on_master and futures_client is None:
+        logger.warning(f"Unhedge {pos.symbol}: hedged on master but master client unavailable; retry later")
+        db.close()
+        return
+    fc = futures_client if on_master else client
 
     try:
         # Step 1: close futures
         pos.status = "CLOSING_FUTURES"
         db.commit()
         t0 = time.monotonic()
-        close_result = await client.futures_market_close(pos.symbol, pos.futures_long_qty)
+        async with _fc_symbol_lock(fc, pos.symbol):
+            close_result = await fc.futures_market_close(pos.symbol, pos.futures_long_qty)
         latency = int((time.monotonic() - t0) * 1000)
         pos.futures_close_price = Decimal(str(close_result.get("avgPrice", "0")))
         pos.futures_close_order_id = str(close_result["orderId"])
@@ -486,9 +569,11 @@ async def execute_close(
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
+    futures_client: BinanceTradingClient = None,
 ):
     """Atomic close (unhedge + repay in one shot) — used by manual-close / tail cleanup."""
-    await execute_unhedge(position, spread, client, notifier, account_note)
+    await execute_unhedge(position, spread, client, notifier, account_note,
+                          futures_client=futures_client)
     db = SessionLocal()
     pos = db.query(Position).get(position.id)
     db.close()
@@ -602,7 +687,8 @@ async def _poll_fill(client: BinanceTradingClient, symbol: str, order_id: str,
 
 
 async def _futures_entry_limit(client: BinanceTradingClient, symbol: str, total_qty: Decimal,
-                               rules, futures_lot: dict, db, pos, sub_account_id) -> dict:
+                               rules, futures_lot: dict, db, pos, sub_account_id,
+                               fill_tracker: dict = None) -> dict:
     """Marketable-limit (+ optional tiered) futures long, capping slippage but
     ALWAYS reconciling any unfilled remainder with a market order so the spot leg
     is never left unhedged. Returns a dict shaped like a market-order result."""
@@ -644,6 +730,8 @@ async def _futures_entry_limit(client: BinanceTradingClient, symbol: str, total_
                         pass
                 if eq > 0:
                     fills.append((eq, ap)); filled += eq
+                    if fill_tracker is not None:
+                        fill_tracker["qty"] = filled
                     _log_trade(db, pos.id, sub_account_id, "FUTURES_LIMIT_FILL", symbol, "BUY",
                                 eq, ap, oid, "SUCCESS")
             except Exception as e:
@@ -659,6 +747,8 @@ async def _futures_entry_limit(client: BinanceTradingClient, symbol: str, total_
         last_id = str(mres.get("orderId", ""))
         if meq > 0:
             fills.append((meq, map_)); filled += meq
+            if fill_tracker is not None:
+                fill_tracker["qty"] = filled
             _log_trade(db, pos.id, sub_account_id, "FUTURES_MARKET_FALLBACK", symbol, "BUY",
                         meq, map_, last_id, "SUCCESS")
 

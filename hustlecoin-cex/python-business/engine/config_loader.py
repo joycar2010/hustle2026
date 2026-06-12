@@ -38,6 +38,7 @@ class GlobalRulesSnapshot:
     borrow_rate_per_sec: Decimal = Decimal("2")
     borrow_via_otoco: bool = False
     otoco_legs: int = 2
+    hedge_via_master: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class ConfigLoader:
                     borrow_rate_per_sec=rules.borrow_rate_per_sec if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
                     borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
                     otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
+                    hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),
                 )
 
             fund = db.query(FundRules).first()
