@@ -295,6 +295,7 @@ class Worker:
                 self._notifier, account_note,
                 spread_feed=self.spread_feed,
                 min_spread=getattr(self.config.global_rules, "borrow_spread", self.config.global_rules.open_spread),
+                user_id=self._user_id,
             )
             self._last_borrow_at[symbol] = datetime.now(timezone.utc)  # C4 ban countdown
         except Exception as e:

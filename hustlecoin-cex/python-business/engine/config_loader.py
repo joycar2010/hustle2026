@@ -36,6 +36,7 @@ class GlobalRulesSnapshot:
     stabilize_sec: Decimal = Decimal("0")
     tier_ratios: str = ""
     borrow_rate_per_sec: Decimal = Decimal("2")
+    borrow_via_otoco: bool = False
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class ConfigLoader:
                     stabilize_sec=rules.stabilize_sec if rules.stabilize_sec is not None else Decimal("0"),
                     tier_ratios=rules.tier_ratios or "",
                     borrow_rate_per_sec=rules.borrow_rate_per_sec if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
+                    borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
                 )
 
             fund = db.query(FundRules).first()

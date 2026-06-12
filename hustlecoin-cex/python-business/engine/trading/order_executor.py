@@ -57,6 +57,7 @@ async def execute_borrow(
     account_note: str,
     spread_feed: SpreadFeed = None,
     min_spread: Decimal = None,
+    user_id: int = None,
 ) -> int | None:
     """Phase 1: borrow the coin and hold it idle in the margin account (BORROWED_IDLE).
     Net-flat (owe coin, hold coin) — no directional exposure. Returns position id or None."""
@@ -102,9 +103,18 @@ async def execute_borrow(
                 return None
             spread = current
 
-        # quantity
+        # quantity —— 单笔金额优先取该币种「单一规则」(SymbolRule.order_amount),未设则用 /rules 全局
+        eff_amount = rules.order_amount
+        if user_id is not None:
+            from app.db.models import SymbolRule
+            sr = db.query(SymbolRule).filter(
+                SymbolRule.user_id == user_id,
+                SymbolRule.symbol.in_([symbol, base_asset]),
+            ).first()
+            if sr and sr.order_amount is not None:
+                eff_amount = sr.order_amount
         lot_info = await client.get_lot_size(symbol, "spot")
-        qty = usdt_to_quantity(rules.order_amount, spread.spot_ask, lot_info["stepSize"], lot_info["minQty"])
+        qty = usdt_to_quantity(eff_amount, spread.spot_ask, lot_info["stepSize"], lot_info["minQty"])
         if qty <= 0:
             position.status = "FAILED"
             position.error_message = "Order amount too small for lot size"

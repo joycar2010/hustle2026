@@ -121,6 +121,7 @@ class GlobalRules(Base):
     stabilize_sec = Column(Numeric(6, 2), default=0)          # wait after spot sell before futures hedge
     tier_ratios = Column(String(120), default="")             # "0.5:30,0.8:30,1.2:40" (persisted)
     borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
+    borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTOCO;False=borrow-repay
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
