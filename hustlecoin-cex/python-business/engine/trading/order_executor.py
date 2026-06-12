@@ -42,33 +42,69 @@ def _fc_symbol_lock(fc, symbol: str) -> asyncio.Lock:
 _precheck_warn_ts: dict[str, float] = {}
 
 
-async def _master_margin_precheck(fc, symbol, qty, spread, notifier, account_note) -> bool:
+async def _master_margin_precheck(fc, symbol, qty, spread, notifier, account_note) -> Decimal | None:
     """hedge_via_master: 对冲前查主账户合约可用余额(按该 symbol 当前杠杆估算所需保证金,
-    留 10% 缓冲)。不足或查询异常 → False,调用方把持仓留在 BORROWED_IDLE 等下轮,
-    绝不进入「卖出→合约失败→回滚」的空转(主账户欠资是全 worker 共模故障)。"""
+    留 10% 缓冲)。带账户级预留(挂在共享 client 上的 in-flight 计数,锁内比较+占用),
+    防止多 worker 并发用同一余额各自通过。通过返回预留额(调用方 finally 归还),
+    不足或查询异常 → None,调用方把持仓留在 BORROWED_IDLE 等下轮 —— 绝不进入
+    「卖出→合约失败→回滚」的空转(主账户欠资是全 worker 共模故障)。"""
     try:
         price = spread.fut_ask if (getattr(spread, "fut_ask", None) and spread.fut_ask > 0) else spread.spot_ask
         pr = await fc.futures_position_risk(symbol)
         lev = Decimal(str((pr or {}).get("leverage") or "20"))
         if lev <= 0:
             lev = Decimal("20")
-        acct = await fc.get_futures_account()
-        avail = Decimal(str(acct.get("availableBalance", "0")))
         need = (qty * price / lev) * Decimal("1.1")
-        if avail >= need:
-            return True
+
+        rlock = getattr(fc, "_reserve_lock", None)
+        if rlock is None:
+            rlock = asyncio.Lock()
+            fc._reserve_lock = rlock
+        async with rlock:
+            acct = await fc.get_futures_account()
+            avail = Decimal(str(acct.get("availableBalance", "0")))
+            reserved = getattr(fc, "_margin_reserved", Decimal("0"))
+            if avail - reserved >= need:
+                fc._margin_reserved = reserved + need
+                return need
         now = time.monotonic()
         if now - _precheck_warn_ts.get(symbol, 0) > 300:
             _precheck_warn_ts[symbol] = now
-            logger.warning(f"hedge_via_master: master avail {avail} < need {need:.4f} ({symbol}); hold BORROWED_IDLE")
+            logger.warning(f"hedge_via_master: master avail insufficient for {symbol} (need≈{need:.4f}); hold BORROWED_IDLE")
             await notifier.notify_error(
                 account_note, f"hedge {symbol}",
-                f"主账户合约可用余额不足: {avail} < {need:.2f} USDT,持仓停在待对冲",
+                f"主账户合约可用余额不足(需≈{need:.2f} USDT),持仓停在待对冲",
             )
-        return False
+        return None
     except Exception as e:
         logger.warning(f"hedge_via_master: precheck failed {symbol}: {e}; hold BORROWED_IDLE")
-        return False
+        return None
+
+
+def _release_margin_reserve(fc, amount: Decimal):
+    if fc is None or amount is None:
+        return
+    try:
+        fc._margin_reserved = max(Decimal("0"), getattr(fc, "_margin_reserved", Decimal("0")) - amount)
+    except Exception:
+        pass
+
+
+async def _query_filled_by_client_id(fc, symbol: str, coid: str) -> Decimal:
+    """下单响应丢失(超时/5xx「状态未知」)后,按 clientOrderId 复核实际成交量。
+    -2013(订单不存在)= 未送达 → 0;查询连续失败按 0 计但留告警日志。"""
+    for _ in range(3):
+        try:
+            o = await fc.futures_get_order_by_client_id(symbol, coid)
+            return Decimal(str(o.get("executedQty", "0")))
+        except BinanceAPIError as e:
+            if e.api_code == -2013:
+                return Decimal("0")
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    logger.error(f"ambiguous futures order unresolved: {symbol} clientOrderId={coid} — verify manually")
+    return Decimal("0")
 
 
 def _log_trade(db, position_id: int, sub_account_id: int, action: str, symbol: str,
@@ -112,6 +148,7 @@ async def execute_borrow(
         symbol=symbol,
         base_asset=base_asset,
         status="PENDING_BORROW",
+        user_id=user_id,
     )
     db.add(position)
     db.commit()
@@ -243,18 +280,27 @@ async def execute_hedge(
     futures_client: hedge_via_master 时传主账户 client(合约腿);None=合约同子账户(原行为)。"""
     fc = futures_client if futures_client is not None else client
     db = SessionLocal()
-    pos = db.query(Position).get(position.id)
-    if not pos or pos.status != "BORROWED_IDLE":
+    # 跨进程互斥(API 手动对冲 vs 引擎自动): DB 级 CAS 认领,只有一方能推进
+    claimed = db.query(Position).filter(
+        Position.id == position.id, Position.status == "BORROWED_IDLE",
+    ).update({"status": "HEDGING"}, synchronize_session=False)
+    db.commit()
+    if not claimed:
         db.close()
         return
+    pos = db.query(Position).get(position.id)
     symbol = pos.symbol
     sub_account_id = pos.sub_account_id
     pos_id = pos.id
     qty = pos.borrow_qty
 
-    # 主账户模式: 卖出前先预检合约保证金,欠资不动现货(留 BORROWED_IDLE 重试)
+    # 主账户模式: 卖出前先预检+预留合约保证金,欠资不动现货(回到 BORROWED_IDLE 重试)
+    reserved = None
     if futures_client is not None:
-        if not await _master_margin_precheck(futures_client, symbol, qty, spread, notifier, account_note):
+        reserved = await _master_margin_precheck(futures_client, symbol, qty, spread, notifier, account_note)
+        if reserved is None:
+            pos.status = "BORROWED_IDLE"
+            db.commit()
             db.close()
             return
 
@@ -313,8 +359,17 @@ async def execute_hedge(
                     fill_tracker=fut_filled,
                 )
             else:
-                long_result = await fc.futures_market_long(symbol, futures_qty)
-                fut_filled["qty"] = Decimal(str(long_result.get("executedQty", "0")))
+                # 带 clientOrderId: 响应丢失(超时/5xx 状态未知)时可复核实际成交量,
+                # 保证失败回滚的残腿平仓拿到真实已成交量而非 0
+                coid = f"hx{pos_id}t{int(time.time() * 1000) % 10**10}"
+                try:
+                    long_result = await fc.futures_market_long(symbol, futures_qty,
+                                                               new_client_order_id=coid)
+                    fut_filled["qty"] = Decimal(str(long_result.get("executedQty", "0")))
+                except BinanceAPIError as fe:
+                    if fe.api_code == -1007 or fe.http_code >= 500:
+                        fut_filled["qty"] = await _query_filled_by_client_id(fc, symbol, coid)
+                    raise
         latency = int((time.monotonic() - t0) * 1000)
         pos.status = "OPEN"
         pos.hedge_account = "master" if futures_client is not None else "sub"
@@ -338,19 +393,19 @@ async def execute_hedge(
         await _handle_hedge_failure(db, pos, client, e, sub_account_id, symbol, notifier, account_note,
                                     futures_client=futures_client, futures_filled=fut_filled["qty"])
     except Exception as e:
+        # 非 API 异常同样走回滚(可能已卖出现货/已部分成交合约,只置 FAILED 会裸留敞口)
         logger.error(f"Hedge failed unexpectedly: {e}", exc_info=True)
-        pos.status = "FAILED"
-        pos.error_message = str(e)
-        db.commit()
-        await notifier.notify_error(account_note, f"hedge {symbol}", str(e))
+        await _handle_hedge_failure(db, pos, client, e, sub_account_id, symbol, notifier, account_note,
+                                    futures_client=futures_client, futures_filled=fut_filled["qty"])
     finally:
+        _release_margin_reserve(futures_client, reserved)
         db.close()
 
 
 async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, notifier, account_note,
                                 futures_client=None, futures_filled: Decimal = Decimal("0")):
     current = pos.status
-    if current == "BORROWED_IDLE":
+    if current in ("BORROWED_IDLE", "HEDGING"):
         # spot sell failed — repay borrow
         try:
             await client.margin_repay(pos.base_asset, pos.borrow_qty)
@@ -448,10 +503,19 @@ async def execute_unhedge(
         return
     fc = futures_client if on_master else client
 
+    # 跨进程互斥(API 手动平仓 vs 引擎自动): DB 级 CAS 认领 —— master 共享净仓下
+    # 双平会误吃其他子账户的对冲腿,留下账面无感知的裸现货空头
+    claimed = db.query(Position).filter(
+        Position.id == pos.id, Position.status == "OPEN",
+    ).update({"status": "CLOSING_FUTURES"}, synchronize_session=False)
+    db.commit()
+    if not claimed:
+        db.close()
+        return
+    db.refresh(pos)
+
     try:
         # Step 1: close futures
-        pos.status = "CLOSING_FUTURES"
-        db.commit()
         t0 = time.monotonic()
         async with _fc_symbol_lock(fc, pos.symbol):
             close_result = await fc.futures_market_close(pos.symbol, pos.futures_long_qty)
@@ -515,10 +579,17 @@ async def execute_repay(
     if not pos or pos.status != "PENDING_REPAY":
         db.close()
         return
+    # 跨进程互斥: CAS 认领,防手动还币与引擎自动还币双发(双倍 repay 会动用账户其他资产)
+    claimed = db.query(Position).filter(
+        Position.id == pos.id, Position.status == "PENDING_REPAY",
+    ).update({"status": "REPAYING"}, synchronize_session=False)
+    db.commit()
+    if not claimed:
+        db.close()
+        return
+    db.refresh(pos)
 
     try:
-        pos.status = "REPAYING"
-        db.commit()
         total_debt, interest_amount = await _get_asset_debt(client, pos.base_asset)
         repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
         t0 = time.monotonic()
@@ -587,6 +658,7 @@ async def execute_borrow_only_repay(
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
+    user_id: int = None,
 ):
     """C6: Repay a borrow-only position (never opened) and record interest in history."""
     base_asset = symbol.replace("USDT", "")
@@ -603,6 +675,7 @@ async def execute_borrow_only_repay(
             symbol=symbol,
             base_asset=base_asset,
             status="CLOSED",
+            user_id=user_id,
             borrow_qty=total_debt - interest_amount,
             repay_qty=total_debt,
             repay_interest=interest_amount,
@@ -725,9 +798,21 @@ async def _futures_entry_limit(client: BinanceTradingClient, symbol: str, total_
                 eq, ap = await _poll_fill(client, symbol, oid, LIMIT_WAIT_SEC)
                 if eq < qty_i:
                     try:
-                        await client.futures_cancel_order(symbol, oid)
+                        cres = await client.futures_cancel_order(symbol, oid)
+                        eq = Decimal(str(cres.get("executedQty") or eq))
+                        ap = Decimal(str(cres.get("avgPrice") or ap))
                     except Exception:
                         pass
+                    # 最后一次轮询与撤单生效之间可能有新成交 —— 以订单终态为准,
+                    # 否则 filled 低估 → 市价兜底超买 + 回滚平不净(master 共仓残腿)
+                    for _ in range(3):
+                        try:
+                            o = await client.futures_get_order(symbol, oid)
+                            eq = Decimal(str(o.get("executedQty", "0")))
+                            ap = Decimal(str(o.get("avgPrice", "0")))
+                            break
+                        except Exception:
+                            await asyncio.sleep(0.3)
                 if eq > 0:
                     fills.append((eq, ap)); filled += eq
                     if fill_tracker is not None:

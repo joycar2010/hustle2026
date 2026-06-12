@@ -101,14 +101,20 @@ class BinanceTradingClient:
         result = None
 
         async with _global_semaphore, self._semaphore:
-            if method == "GET":
-                resp = await self._client.get(url, params=params, headers=self._headers())
-            elif method == "POST":
-                resp = await self._client.post(url, params=params, headers=self._headers())
-            elif method == "DELETE":
-                resp = await self._client.delete(url, params=params, headers=self._headers())
-            else:
-                raise ValueError(f"Unsupported method: {method}")
+            try:
+                if method == "GET":
+                    resp = await self._client.get(url, params=params, headers=self._headers())
+                elif method == "POST":
+                    resp = await self._client.post(url, params=params, headers=self._headers())
+                elif method == "DELETE":
+                    resp = await self._client.delete(url, params=params, headers=self._headers())
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
+            except (httpx.TimeoutException, httpx.TransportError) as te:
+                # 传输层失败 ≠ 订单未送达(可能已成交)。包成 ambiguous BinanceAPIError,
+                # 让失败处理统一走回滚分支(api_code=-1007 与币安"执行状态未知"同义)。
+                metrics.record_error(f"[transport] {te}")
+                raise BinanceAPIError(0, -1007, f"transport error (execution status UNKNOWN): {te}")
 
             # Two independent SAPI rate dimensions (verified by header probe):
             #  • UID weight (X-SAPI-USED-UID-WEIGHT-1M, limit 180000): borrow/repay = 1500
@@ -289,11 +295,15 @@ class BinanceTradingClient:
 
     # ---- Futures Orders ----
 
-    async def futures_market_long(self, symbol: str, quantity: Decimal) -> dict:
-        return await self._request("POST", f"{FUTURES_BASE}/fapi/v1/order", {
+    async def futures_market_long(self, symbol: str, quantity: Decimal,
+                                  new_client_order_id: str = None) -> dict:
+        params = {
             "symbol": symbol, "side": "BUY", "type": "MARKET",
             "quantity": str(quantity),
-        })
+        }
+        if new_client_order_id:
+            params["newClientOrderId"] = new_client_order_id
+        return await self._request("POST", f"{FUTURES_BASE}/fapi/v1/order", params)
 
     async def futures_market_close(self, symbol: str, quantity: Decimal) -> dict:
         return await self._request("POST", f"{FUTURES_BASE}/fapi/v1/order", {
@@ -310,6 +320,12 @@ class BinanceTradingClient:
     async def futures_get_order(self, symbol: str, order_id: str) -> dict:
         return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/order", {
             "symbol": symbol, "orderId": str(order_id),
+        })
+
+    async def futures_get_order_by_client_id(self, symbol: str, client_order_id: str) -> dict:
+        """按自定义 clientOrderId 查单 —— 下单响应丢失(超时/5xx)时复核实际成交量。"""
+        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/order", {
+            "symbol": symbol, "origClientOrderId": client_order_id,
         })
 
     async def futures_cancel_order(self, symbol: str, order_id: str) -> dict:
@@ -402,10 +418,26 @@ class BinanceTradingClient:
         return Decimal(str(data.get("lastFundingRate", "0")))
 
     async def get_funding_income(self, symbol: str, start_time: int | None = None) -> list:
-        params = {"symbol": symbol, "incomeType": "FUNDING_FEE", "limit": "100"}
-        if start_time:
-            params["startTime"] = str(int(start_time))
-        return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", params)
+        """FUNDING_FEE income since start_time, paginated (limit 1000/页,最多 10 页)。
+        无 start_time 时保持旧语义: 单页最近 100 条。"""
+        if not start_time:
+            return await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", {
+                "symbol": symbol, "incomeType": "FUNDING_FEE", "limit": "100",
+            })
+        out: list = []
+        cursor = int(start_time)
+        for _ in range(10):
+            page = await self._request("GET", f"{FUTURES_BASE}/fapi/v1/income", {
+                "symbol": symbol, "incomeType": "FUNDING_FEE",
+                "limit": "1000", "startTime": str(cursor),
+            })
+            if not page:
+                break
+            out.extend(page)
+            if len(page) < 1000:
+                break
+            cursor = int(page[-1].get("time", cursor)) + 1
+        return out
 
     async def get_lot_size(self, symbol: str, market: str = "spot") -> dict:
         cache_key = f"{market}:{symbol}"

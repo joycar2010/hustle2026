@@ -113,7 +113,8 @@ class Worker:
 
                     if now - last_funding_check > 1800:
                         from engine.fund.funding_collector import collect_funding_fees
-                        await collect_funding_fees(self._trading_client, self.sub_account_id)
+                        await collect_funding_fees(self._trading_client, self.sub_account_id,
+                                                   user_id=self._user_id)
                         last_funding_check = now
 
                     # C5: scan for manually borrowed assets every 60 seconds
@@ -386,6 +387,7 @@ class Worker:
             await execute_borrow_only_repay(
                 self.sub_account_id, symbol,
                 self._trading_client, self._notifier, account_note,
+                user_id=self._user_id,
             )
             logger.info(f"Auto repaid borrow-only: {symbol}")
         except Exception as e:
@@ -500,6 +502,7 @@ class Worker:
         "PENDING_BORROW": "排队中",
         "BORROWED": "借币中",
         "BORROWED_IDLE": "待对冲",
+        "HEDGING": "开仓中",
         "SPOT_SOLD": "开仓中",
         "CLOSING_FUTURES": "平仓中",
         "FUTURES_CLOSED": "平仓中",

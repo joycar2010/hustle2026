@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 _clients: dict[int, BinanceTradingClient] = {}
 _failed_at: dict[int, float] = {}     # 负缓存: 上次创建失败时间
 _FAIL_TTL = 60.0
-_init_lock: asyncio.Lock | None = None
+_init_locks: dict[int, asyncio.Lock] = {}   # per-key,避免跨 user 串行
+_closed = False                              # close_all 后拒绝重建(停机竞态防护)
 
 
 def _load_master(user_id: int | None) -> MasterAccount | None:
@@ -40,19 +41,22 @@ def _load_master(user_id: int | None) -> MasterAccount | None:
 
 async def get_master_futures_client(user_id: int | None) -> BinanceTradingClient | None:
     """共享 master 合约 client(进程级生命周期,懒加载)。不可用返回 None。"""
-    global _init_lock
-    if _init_lock is None:
-        _init_lock = asyncio.Lock()
+    if _closed:
+        return None
     key = user_id or 0
     client = _clients.get(key)
     if client is not None:
         return client
     if time.monotonic() - _failed_at.get(key, -_FAIL_TTL) < _FAIL_TTL:
         return None
-    async with _init_lock:
+    lock = _init_locks.setdefault(key, asyncio.Lock())
+    async with lock:
         client = _clients.get(key)
         if client is not None:
             return client
+        # 锁内复检负缓存: 失败风暴时排队 waiter 不再逐个重试整套初始化
+        if _closed or time.monotonic() - _failed_at.get(key, -_FAIL_TTL) < _FAIL_TTL:
+            return None
         m = await asyncio.to_thread(_load_master, user_id)
         if not m or not m.api_key or not m.api_secret:
             logger.warning(f"hedge_via_master: master account not configured (user={user_id})")
@@ -83,6 +87,8 @@ async def get_master_futures_client(user_id: int | None) -> BinanceTradingClient
 
 
 async def close_all():
+    global _closed
+    _closed = True
     for key, client in list(_clients.items()):
         try:
             await client.__aexit__(None, None, None)

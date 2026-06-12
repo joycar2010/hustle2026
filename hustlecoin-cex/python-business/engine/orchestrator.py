@@ -88,6 +88,14 @@ class Orchestrator:
                 logger.error(f"Delisting scan error: {e}")
             await asyncio.sleep(300)
 
+    # 有这些状态在场的账户必须保有 worker(平仓/还币/资金费/风控都在 worker 循环里),
+    # 即使准入规则(futures_enabled / hedge_via_master 回退)已不再放行它开新仓
+    _IN_FLIGHT_STATUSES = (
+        "OPEN", "BORROWED_IDLE", "PENDING_REPAY", "PENDING_BORROW", "BORROWED",
+        "HEDGING", "SPOT_SOLD", "CLOSING_FUTURES", "FUTURES_CLOSED",
+        "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
+    )
+
     def _get_enabled_accounts(self) -> set[int]:
         db = SessionLocal()
         try:
@@ -99,6 +107,18 @@ class Orchestrator:
             # futures_enabled 作为 worker 准入条件(否则收回子 key 合约权限会连借币腿一起停摆)
             if not getattr(self.config.global_rules, "hedge_via_master", False):
                 q = q.filter(SubAccount.futures_enabled == True)
-            return {a.id for a in q.all()}
+            ids = {a.id for a in q.all()}
+
+            # 在场持仓账户保留: 开关 True→False 回退后,futures_enabled=False 账户的
+            # 存量 master 仓位不能失去 worker(否则无人触发 unhedge/repay,利息空烧)
+            from engine.models import Position
+            base = {a.id for a in db.query(SubAccount.id).filter(
+                SubAccount.is_enabled == True, SubAccount.margin_enabled == True,
+            ).all()}
+            holders = {r.sub_account_id for r in db.query(Position.sub_account_id).filter(
+                Position.status.in_(self._IN_FLIGHT_STATUSES),
+            ).distinct().all()}
+            ids |= (holders & base)
+            return ids
         finally:
             db.close()

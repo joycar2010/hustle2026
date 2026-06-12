@@ -19,6 +19,9 @@ from engine.orchestrator import Orchestrator
 
 logger = logging.getLogger("engine")
 
+# 在途账户清理任务(clear_account 命令派生) —— 停机时先排空再关 client,防 use-after-close
+_clear_tasks: set[asyncio.Task] = set()
+
 
 class UserEngine:
     def __init__(self, user_id: int, spread_feed: SpreadFeed):
@@ -174,6 +177,15 @@ async def _main():
     reconcile_task.cancel()
     command_task.cancel()
 
+    # 在途清仓任务是多腿交易,必须完整结束后才能关 worker/master client
+    if _clear_tasks:
+        logger.info(f"Waiting for {len(_clear_tasks)} in-flight clear task(s)...")
+        done, pending = await asyncio.wait(set(_clear_tasks), timeout=60)
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     for uid, ue in user_engines.items():
         await ue.stop()
         logger.info(f"Stopped engine for user {uid}")
@@ -232,9 +244,11 @@ async def _command_consumer_loop(
                         account_id = cmd.get("account_id")
                         if account_id and uid in user_engines:
                             orch = user_engines[uid].orchestrator
-                            asyncio.create_task(
+                            t = asyncio.create_task(
                                 _clear_account_positions(orch, account_id)
                             )
+                            _clear_tasks.add(t)
+                            t.add_done_callback(_clear_tasks.discard)
 
             keys = await r.keys("engine:*:commands")
             for key in keys:

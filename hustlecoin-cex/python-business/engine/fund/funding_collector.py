@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 async def collect_funding_fees(
     client: BinanceTradingClient,
     sub_account_id: int,
+    user_id: int = None,
 ):
     """累计资金费/利息 → funding_rate_ratio(驱动自动平仓/还币的口径)。
 
@@ -40,7 +41,9 @@ async def collect_funding_fees(
                     if not master_fc_tried:
                         master_fc_tried = True
                         from engine.trading.master_client import get_master_futures_client
-                        master_fc = await get_master_futures_client(pos.user_id)
+                        # 用调用方传入的 user_id(SubAccount.user_id)——pos.user_id 存量行可能为 NULL
+                        master_fc = await get_master_futures_client(
+                            user_id if user_id is not None else pos.user_id)
                     if master_fc is None:
                         continue   # master client 不可用,跳过本轮(不写错误口径)
                     fc = master_fc
@@ -51,8 +54,11 @@ async def collect_funding_fees(
 
                 if on_master and pos.futures_long_qty:
                     # 主账户共仓: 按全用户同 symbol 在场 master 持仓的量比分摊
+                    eff_uid = user_id if user_id is not None else pos.user_id
+                    uid_cond = (Position.user_id == eff_uid) if eff_uid is not None \
+                        else Position.user_id.is_(None)
                     total_qty = db.query(Position).filter(
-                        Position.user_id == pos.user_id,
+                        uid_cond,
                         Position.symbol == pos.symbol,
                         Position.status == "OPEN",
                         Position.hedge_account == "master",

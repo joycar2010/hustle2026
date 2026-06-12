@@ -386,6 +386,7 @@ async def cleanup_tail_positions(
                 if master:
                     fc = await stack.enter_async_context(BinanceTradingClient(
                         master.api_key, master.api_secret, sub_account_id=-(user_id or 1)))
+                    await _assert_master_one_way(fc)
                 dummy_spread = SpreadSnapshot(
                     symbol=pos.symbol, spot_bid=0, spot_ask=0,
                     fut_bid=0, fut_ask=0, spread_long=0, spread_short=0, ts=0,
@@ -621,6 +622,13 @@ def _load_master_account(db: Session, user_id: int):
     return (db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
             or db.query(MasterAccount).filter(MasterAccount.user_id.is_(None)).first()
             or db.query(MasterAccount).first())
+
+
+async def _assert_master_one_way(fc):
+    """主账户必须单向持仓 —— 下单不带 positionSide,双向模式会先卖现货再 -4061 回滚。
+    引擎进程的 master_client 注册表在创建时断言;API 进程直建 client 须同样校验。"""
+    if await fc.get_position_mode():
+        raise ValueError("主账户处于双向持仓模式,请先在币安合约设置切回单向持仓")
 
 
 class ManualOpenRequest(BaseModel):
