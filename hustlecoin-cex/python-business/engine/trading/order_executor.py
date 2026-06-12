@@ -207,17 +207,41 @@ async def execute_hedge(
     qty = pos.borrow_qty
 
     try:
-        # Step 1: spot sell (short leg)
-        t0 = time.monotonic()
-        sell_result = await client.spot_market_sell(symbol, qty)
-        latency = int((time.monotonic() - t0) * 1000)
-        pos.status = "SPOT_SOLD"
-        pos.spot_sell_qty = Decimal(str(sell_result["executedQty"]))
-        pos.spot_sell_price = _avg_fill_price(sell_result)
-        pos.spot_sell_order_id = str(sell_result["orderId"])
-        db.commit()
-        _log_trade(db, pos_id, sub_account_id, "SPOT_SELL", symbol, "SELL",
-                    pos.spot_sell_qty, pos.spot_sell_price, pos.spot_sell_order_id, "SUCCESS", latency=latency)
+        # Step 1: spot sell (short leg) —— 按「单笔挂单」(order_amount) 分批卖出降低冲击;
+        # 合约腿仍按实际卖出总量一次性对冲(回滚逻辑不变)。借量≤单笔时退化为单批=原行为。
+        spot_lot = await client.get_lot_size(symbol, "spot")
+        order_amt = Decimal(str(getattr(rules, "order_amount", 0) or 0))
+        price_ref = spread.spot_ask if (spread.spot_ask and spread.spot_ask > 0) else Decimal("0")
+        per_batch = round_to_step(order_amt / price_ref, spot_lot["stepSize"]) if (order_amt > 0 and price_ref > 0) else qty
+        if per_batch <= 0:
+            per_batch = qty
+        total_sold = Decimal("0"); total_value = Decimal("0"); last_oid = ""
+        remaining = qty
+        first = True
+        while remaining > 0:
+            b = round_to_step(per_batch if remaining > per_batch else remaining, spot_lot["stepSize"])
+            if b <= 0:
+                break
+            t0 = time.monotonic()
+            sell_result = await client.spot_market_sell(symbol, b)
+            latency = int((time.monotonic() - t0) * 1000)
+            fqty = Decimal(str(sell_result["executedQty"]))
+            fprice = _avg_fill_price(sell_result)
+            total_sold += fqty
+            total_value += fqty * fprice
+            last_oid = str(sell_result["orderId"])
+            if first:
+                pos.status = "SPOT_SOLD"; first = False
+            pos.spot_sell_qty = total_sold
+            pos.spot_sell_price = (total_value / total_sold) if total_sold > 0 else fprice
+            pos.spot_sell_order_id = last_oid
+            db.commit()
+            _log_trade(db, pos_id, sub_account_id, "SPOT_SELL", symbol, "SELL",
+                        fqty, fprice, last_oid, "SUCCESS", latency=latency)
+            remaining = round_to_step(qty - total_sold, spot_lot["stepSize"])
+        if total_sold <= 0:
+            raise BinanceAPIError(0, 0, "spot sell filled 0")
+        qty = total_sold  # 合约按实际卖出量对冲
 
         # Stabilize before hedging (desktop parity)
         stabilize = float(getattr(rules, "stabilize_sec", 0) or 0)
