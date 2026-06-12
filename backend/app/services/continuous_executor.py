@@ -1112,7 +1112,7 @@ class ContinuousStrategyExecutor:
                 _bap = exec_result.get('binance_avg_price', 0) or 0
                 _bbp = exec_result.get('bybit_avg_price', 0) or 0
                 if _b_filled > 0 and _bb_filled > 0 and _bap > 0 and _bbp > 0 and self.user_id:
-                    actual_spread = abs(_bap - _bbp)
+                    actual_spread = round(float((_bap - _bbp) if 'reverse' in strategy_type else (_bbp - _bap)), 4)  # 方向化(与1031行同口径), 修正abs()致正向假大滑点
                     slippage_val = actual_spread - (spread_threshold or 0)
                     from app.services.slippage_guard import record_and_check as _slip_check
                     await _slip_check(
