@@ -121,7 +121,8 @@ class GlobalRules(Base):
     stabilize_sec = Column(Numeric(6, 2), default=0)          # wait after spot sell before futures hedge
     tier_ratios = Column(String(120), default="")             # "0.5:30,0.8:30,1.2:40" (persisted)
     borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
-    borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTOCO;False=borrow-repay
+    borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTO/OTOCO;False=borrow-repay
+    otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 2=OTO(2单撤)/3=OTOCO(3单撤)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -189,6 +190,7 @@ class SymbolRule(Base):
     allow_repay = Column(Boolean, server_default='true')
     max_daily_interest_rate = Column(Numeric(10, 6), nullable=True)
     repay_spread = Column(Numeric(10, 4), nullable=True)
+    max_borrow_amount = Column(Numeric(15, 2), nullable=True)   # 金额限制(借币金额上限,USDT);null=跟随账户/全局
     source = Column(String(10), server_default='custom')
     is_temporary = Column(Boolean, server_default='false')
     created_at = Column(DateTime(timezone=True), server_default=func.now())

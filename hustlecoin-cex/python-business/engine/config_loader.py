@@ -37,6 +37,7 @@ class GlobalRulesSnapshot:
     tier_ratios: str = ""
     borrow_rate_per_sec: Decimal = Decimal("2")
     borrow_via_otoco: bool = False
+    otoco_legs: int = 2
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ class ConfigLoader:
                     tier_ratios=rules.tier_ratios or "",
                     borrow_rate_per_sec=rules.borrow_rate_per_sec if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
                     borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
+                    otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
                 )
 
             fund = db.query(FundRules).first()

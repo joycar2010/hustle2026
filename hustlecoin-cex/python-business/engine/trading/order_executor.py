@@ -103,18 +103,48 @@ async def execute_borrow(
                 return None
             spread = current
 
-        # quantity —— 单笔金额优先取该币种「单一规则」(SymbolRule.order_amount),未设则用 /rules 全局
-        eff_amount = rules.order_amount
-        if user_id is not None:
-            from app.db.models import SymbolRule
-            sr = db.query(SymbolRule).filter(
-                SymbolRule.user_id == user_id,
-                SymbolRule.symbol.in_([symbol, base_asset]),
-            ).first()
-            if sr and sr.order_amount is not None:
-                eff_amount = sr.order_amount
+        # quantity
         lot_info = await client.get_lot_size(symbol, "spot")
-        qty = usdt_to_quantity(eff_amount, spread.spot_ask, lot_info["stepSize"], lot_info["minQty"])
+        price = spread.spot_ask
+        from app.db.models import SymbolRule, AccountSymbolRule, SubAccount
+        # 「金额限制」(借币金额上限,USDT)解析: 账户单币 → 单币通用 → 子账户全局
+        cap_usdt = None
+        asr = db.query(AccountSymbolRule).filter(
+            AccountSymbolRule.sub_account_id == sub_account_id,
+            AccountSymbolRule.symbol.in_([symbol, base_asset]),
+        ).first()
+        if asr and asr.max_borrow_amount is not None:
+            cap_usdt = asr.max_borrow_amount
+        if cap_usdt is None and user_id is not None:
+            sr = db.query(SymbolRule).filter(
+                SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
+            ).first()
+            if sr and sr.max_borrow_amount is not None:
+                cap_usdt = sr.max_borrow_amount
+        if cap_usdt is None:
+            sa = db.query(SubAccount).get(sub_account_id)
+            if sa and sa.max_borrow_amount is not None:
+                cap_usdt = sa.max_borrow_amount
+
+        if getattr(rules, "borrow_via_otoco", False) and cap_usdt is not None and Decimal(str(cap_usdt)) > 0:
+            # OTOCO 借币: 借满「金额限制」∩ maxBorrowable(币捏手上,后续按单笔分批对冲)
+            try:
+                max_borrowable = await client.get_max_borrowable(base_asset)
+            except Exception:
+                max_borrowable = Decimal("0")
+            cap_qty = Decimal(str(cap_usdt)) / price if price > 0 else Decimal("0")
+            target = min(cap_qty, max_borrowable) if max_borrowable > 0 else cap_qty
+            qty = round_to_step(target, lot_info["stepSize"])
+        else:
+            # 单笔金额(order_amount): 单一规则覆盖 → 全局
+            eff_amount = rules.order_amount
+            if user_id is not None:
+                sr2 = db.query(SymbolRule).filter(
+                    SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
+                ).first()
+                if sr2 and sr2.order_amount is not None:
+                    eff_amount = sr2.order_amount
+            qty = usdt_to_quantity(eff_amount, price, lot_info["stepSize"], lot_info["minQty"])
         if qty <= 0:
             position.status = "FAILED"
             position.error_message = "Order amount too small for lot size"
@@ -127,7 +157,7 @@ async def execute_borrow(
         # 三单 EXPIRED、币留手上);默认 False 走 borrow-repay,不改变现网行为。
         t0 = time.monotonic()
         if getattr(rules, "borrow_via_otoco", False):
-            await client.margin_borrow_otoco(symbol, qty)
+            await client.margin_borrow_otoco(symbol, qty, legs=int(getattr(rules, "otoco_legs", 2) or 2))
         else:
             await client.margin_borrow(base_asset, qty)
         latency = int((time.monotonic() - t0) * 1000)

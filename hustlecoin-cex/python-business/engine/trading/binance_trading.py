@@ -191,14 +191,13 @@ class BinanceTradingClient:
             "type": "BORROW", "isIsolated": "FALSE",
         })
 
-    async def margin_borrow_otoco(self, symbol: str, qty: Decimal) -> dict:
-        """借币 via IOC OTOCO —— 与 coinmini 1.92 (ui/gui.py) 完全同款流程:
-          下单 POST /margin/order/otoco, sideEffectType=MARGIN_BUY, workingTimeInForce=IOC,
-          卖价 = spot_bid×1.5, 数量 = qty; MARGIN_BUY 触发自动借币到账, IOC 卖单 1.5x 无人接
-          秒撤 → 连带撤销两张保护买单(STOP_LOSS_LIMIT@1.05× / LIMIT_MAKER@0.933×),
-          三单全 EXPIRED,借来的币留在手上(可用=已借)。
-        注: coinmini 不设 autoRepayAtCancel(实测币安默认即"借币不冲销"),此处保持一致。
-        与 borrow-repay 同为 1500 UID 权重,故同样过 _pace_borrow 配速。"""
+    async def margin_borrow_otoco(self, symbol: str, qty: Decimal, legs: int = 2) -> dict:
+        """借币 via IOC OTO/OTOCO —— coinmini 1.92 同款"挂单借币"流程:
+          MARGIN_BUY 触发自动借币到账;working SELL LIMIT @ spot_bid×1.5、IOC 无人接秒撤;
+          连带撤销保护买单(legs=3: STOP_LOSS_LIMIT@1.05× + LIMIT_MAKER@0.933×;
+          legs=2: 仅 LIMIT_MAKER@0.933×)。所有单 EXPIRED,借来的币留手上(可用=已借)。
+        legs=2 走 /margin/order/oto(2 张撤单,反滥用压力更低,默认);legs=3 走 /margin/order/otoco。
+        注: 不设 autoRepayAtCancel(实测币安默认即"借币不冲销")。同样过 _pace_borrow 配速(1500 UID 量级)。"""
         await _pace_borrow(self._sub_account_id)
 
         def _floor(v: Decimal, s: Decimal) -> Decimal:
@@ -216,9 +215,19 @@ class BinanceTradingClient:
         step = Decimal(str(flt["LOT_SIZE"]["stepSize"]))
 
         limit_price = _floor(bid * Decimal("1.5"), tick)        # 卖价 = spot_bid × 1.5
-        pa = _floor(limit_price * Decimal("1.05"), tick)        # STOP_LOSS_LIMIT BUY
+        pa = _floor(limit_price * Decimal("1.05"), tick)        # STOP_LOSS_LIMIT BUY (legs=3)
         pb = _floor(limit_price * Decimal("0.933"), tick)       # LIMIT_MAKER BUY
         q = _floor(qty, step)
+
+        if legs == 2:
+            return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/order/oto", {
+                "symbol": symbol,
+                "workingType": "LIMIT", "workingSide": "SELL",
+                "workingPrice": str(limit_price), "workingQuantity": str(q), "workingTimeInForce": "IOC",
+                "pendingType": "LIMIT_MAKER", "pendingSide": "BUY",
+                "pendingQuantity": str(q), "pendingPrice": str(pb),
+                "sideEffectType": "MARGIN_BUY", "isIsolated": "FALSE",
+            })
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/order/otoco", {
             "symbol": symbol,
             "workingType": "LIMIT", "workingSide": "SELL",
