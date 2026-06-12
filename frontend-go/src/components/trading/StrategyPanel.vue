@@ -104,10 +104,10 @@
               <div class="text-xs text-gray-400 mb-0.5">主账号 资金费/手</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceLongFundingRate ?? 0)).toFixed(2) }}
+                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceLongFundingRate ?? 0)).toFixed(2) }}
+                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
               </div>
               <div class="text-[10px] text-gray-500 mt-0.5">费率: {{ (marketCardsRef.binanceFundingRatePct ?? 0).toFixed(4) }}%</div>

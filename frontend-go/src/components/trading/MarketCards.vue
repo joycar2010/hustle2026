@@ -639,6 +639,7 @@ watch(() => marketStore.marketRates, (rates) => {
     binanceShortFundingRate.value = rates.funding.short_cost_per_lot ?? 0
     binanceFundingRatePct.value = rates.funding.funding_rate_pct ?? 0
     binanceNextFundingTime.value = rates.funding.next_funding_time ?? 0
+    binanceMarkPrice.value = rates.funding.mark_price ?? 0
   }
   if (rates.swap) {
     bybitLongSwapFee.value = rates.swap.long_swap_per_lot ?? 0
@@ -664,6 +665,7 @@ const binanceLongFundingRate = ref(0)   // long_cost_per_lot: >0 long pays, <0 l
 const binanceShortFundingRate = ref(0)  // short_cost_per_lot: opposite sign
 const binanceFundingRatePct = ref(0)    // raw rate percentage for display
 const binanceNextFundingTime = ref(0)   // next settlement timestamp ms
+const binanceMarkPrice = ref(0)         // XAUUSDT mark price — 供"资金费/手"按 (pct/100)*mark 算,免 per-lot 污染
 let fundingRateTimer = null
 
 // USD/USDT exchange rate
@@ -1529,6 +1531,7 @@ async function fetchBinanceFundingRate() {
     binanceShortFundingRate.value = data.short_cost_per_lot ?? 0
     binanceFundingRatePct.value = data.funding_rate_pct ?? 0
     binanceNextFundingTime.value = data.next_funding_time ?? 0
+    binanceMarkPrice.value = data.mark_price ?? 0
   } catch (error) {
     console.error('Failed to fetch Binance funding rate:', error)
   }
@@ -1545,6 +1548,7 @@ defineExpose({
   binanceLongFundingRate,
   binanceShortFundingRate,
   binanceFundingRatePct,
+  binanceMarkPrice,
   binanceNextFundingTime,
   binanceLongTotal,
   binanceShortTotal,

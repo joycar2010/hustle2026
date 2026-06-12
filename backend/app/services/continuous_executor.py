@@ -291,7 +291,8 @@ class ContinuousStrategyExecutor:
         binance_account: Account,
         bybit_account: Account,
         order_qty_limit: float,
-        opening_ceiling: float = None
+        opening_ceiling: float = None,
+        mapper=None
     ) -> Dict:
         """
         Execute single ladder with continuous execution.
@@ -327,6 +328,10 @@ class ContinuousStrategyExecutor:
         MIN_HEDGE_LOT = 0.01         # ICMarkets minimum lot size
         loop_count = 0
         current_position = 0  # initialise so the post-loop debug block always has a value
+        # ── 阶梯重判退出: 防"锁死在次优阶梯"(如平仓死等下层阈值, 而不去平已满足条件的上层阶梯) ──
+        import time as _t_re
+        _last_reeval = _t_re.time()
+        _REEVAL_INTERVAL_S = 12.0
         # ── 开仓持仓上限硬约束：入口读一次权威真实持仓(force_fresh REST)作封顶基线 ──
         # 免疫 WS 冷启/陈旧导致 remaining 多算 → 开仓冲破上限(实盘已观测 1→3)。
         base_pos = None
@@ -342,6 +347,43 @@ class ContinuousStrategyExecutor:
                 logger.warning(f"[ladder={ladder_idx}] base_pos 读取异常: {_bpe}，回退内存计数封顶")
         while self.is_running and not self.stop_requested:
             loop_count += 1
+
+            # ── 阶梯重判: 每~12s 重读持仓+点差, 并"重读最新DB配置重建mapper"(捕捉运行中改的总手数); 若最优阶梯已变为另一个阶梯, 或开仓时本阶梯按新总手数已满 → 退出本阶梯交还V2主循环重选 ──
+            # 修两类锁死: ①平仓死等下层阈值不去平上层(如锁阶梯2不平阶梯3); ②开仓运行中把本阶梯总手数改小后, _execute_ladder 仍按旧total死等开下一手、进不了下一阶梯。
+            if mapper is not None and (_t_re.time() - _last_reeval >= _REEVAL_INTERVAL_S):
+                _last_reeval = _t_re.time()
+                try:
+                    _re_pos = await asyncio.wait_for(self._get_live_position(binance_account, strategy_type), timeout=8.0)
+                    if _re_pos is not None and _re_pos >= 0:
+                        _re_spread = await self._get_current_spread(strategy_type)
+                        # 重读最新DB配置重建 mapper(捕捉运行中改的总手数); 失败则退用启动时 mapper
+                        _eval_mapper = mapper
+                        _f_ladders = None
+                        try:
+                            _fresh = await asyncio.wait_for(self._reload_strategy_config(strategy_type), timeout=4.0)
+                            if _fresh:
+                                from app.services.ladder_range_mapper import LadderRangeMapper as _LRM
+                                _f_ladders, _ = _fresh
+                                _eval_mapper = _LRM(_f_ladders)
+                        except Exception:
+                            pass
+                        _re_active = (_eval_mapper.get_active_ladder_for_opening(_re_pos, _re_spread) if is_opening
+                                      else _eval_mapper.get_active_ladder_for_closing(_re_pos, _re_spread))
+                        _switch = (_re_active is not None and _re_active.index != ladder_idx)
+                        # 开仓: 本阶梯按新配置的累计上限已 <= 当前持仓 → 本阶梯已满(防按旧total继续超开/空转)
+                        _cur_full = False
+                        if is_opening and _f_ladders is not None and ladder_idx < len(_f_ladders):
+                            try:
+                                _cur_new_total = float(_f_ladders[ladder_idx].total_qty or 0)
+                                if _re_pos >= _cur_new_total - 1e-6:
+                                    _cur_full = True
+                            except Exception:
+                                pass
+                        if _switch or _cur_full:
+                            logger.info(f"[ladder={ladder_idx}] 阶梯重判: pos={_re_pos:.2f} spread={_re_spread:.3f} 新最优={_re_active.index if _re_active else None} 本阶梯满={_cur_full} ({strategy_type}) → 退出本阶梯交还主循环重选")
+                            break
+                except Exception as _ree:
+                    logger.debug(f"[ladder={ladder_idx}] 阶梯重判 skipped: {_ree}")
 
             # Step 1: Check position
             # Get memory position (how much we've opened/closed so far)
@@ -1452,6 +1494,7 @@ class ContinuousStrategyExecutor:
                 bybit_account=bybit_account,
                 order_qty_limit=order_qty_limit,
                 opening_ceiling=(active.range_upper if is_opening else None),
+                mapper=mapper,
             )
 
             if not result['success']:
