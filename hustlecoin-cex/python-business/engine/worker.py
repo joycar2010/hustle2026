@@ -33,6 +33,7 @@ class Worker:
         self._margin_safe = True
         self._symbol_rules: dict[str, dict] = {}
         self._symbol_statuses: dict[str, str] = {}
+        self._glitch_logged: dict[str, datetime] = {}
         self._user_id: int | None = None
         self._account_max_borrow: Decimal | None = None
         self._account_max_positions: int | None = None
@@ -193,7 +194,7 @@ class Worker:
         # ── UNHEDGE: OPEN → PENDING_REPAY at close_spread (or funding ratio) ──
         for pos in open_positions:
             spread = self.spread_feed.get_symbol(pos.symbol)
-            if not spread:
+            if not self._spread_sane(spread):            # 行情 glitch 护栏
                 continue
             if not self._is_repay_allowed(pos.symbol):   # C3
                 continue
@@ -214,6 +215,8 @@ class Worker:
             if not self._is_repay_allowed(pos.symbol):
                 continue
             spread = self.spread_feed.get_symbol(pos.symbol)
+            if spread is not None and not self._spread_sane(spread):  # glitch → 本轮不还
+                continue
             do_repay = False
             if repay_spread is not None and repay_spread > 0 and spread and spread.spread_short < repay_spread:
                 do_repay = True
@@ -232,7 +235,7 @@ class Worker:
             if sym in open_symbol_counts:
                 continue
             spread = self.spread_feed.get_symbol(sym)
-            if not spread:
+            if not self._spread_sane(spread):
                 continue
             if spread.spread_short < rules.close_spread:
                 await self._borrow_only_repay(sym, account_note)
@@ -247,7 +250,7 @@ class Worker:
             if len(open_positions) >= max_positions:
                 break
             spread = self.spread_feed.get_symbol(pos.symbol)
-            if not spread:
+            if not self._spread_sane(spread):            # glitch → 不在坏点差上对冲开仓
                 continue
             if spread.spread_short > rules.open_spread:
                 await self._hedge_position(pos, spread, account_note)
@@ -273,7 +276,9 @@ class Worker:
                 if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                     continue
                 spread = self.spread_feed.get_symbol(symbol)
-                if not spread or spread.spread_short <= borrow_spread:
+                if not self._spread_sane(spread):        # glitch → 不在坏点差上借币开仓
+                    continue
+                if spread.spread_short <= borrow_spread:
                     continue
                 await self._initiate_borrow(symbol, spread, account_note)
                 active_symbols.add(symbol)
@@ -449,6 +454,35 @@ class Worker:
             self._symbol_rules = rules_map
         finally:
             db.close()
+
+    def _spread_sane(self, spread) -> bool:
+        """行情 glitch 护栏: 价格非正 / 点差幅度超过 max_spread_pct 时判定为坏数据,
+        跳过该币种本轮所有下单/平仓决策(canary 实测 CRV 点差瞬时 6.6% 触发误开仓)。
+        max_spread_pct=0 时关闭护栏(沿用原行为)。"""
+        if spread is None:
+            return False
+        try:
+            if (spread.spot_ask <= 0 or spread.spot_bid <= 0 or
+                    spread.fut_ask <= 0 or spread.fut_bid <= 0):
+                self._note_glitch(spread.symbol, "non-positive price")
+                return False
+            ceiling = float(getattr(self.config.global_rules, "max_spread_pct", 3.0) or 0)
+            if ceiling > 0 and (abs(float(spread.spread_short)) > ceiling or
+                                abs(float(spread.spread_long)) > ceiling):
+                self._note_glitch(spread.symbol,
+                                  f"spread {spread.spread_short}/{spread.spread_long}% > {ceiling}%")
+                return False
+        except Exception:
+            return False
+        return True
+
+    def _note_glitch(self, symbol: str, reason: str):
+        """每币种每 60s 最多记一条 glitch 日志,避免刷屏。"""
+        now = datetime.now(timezone.utc)
+        last = self._glitch_logged.get(symbol)
+        if not last or (now - last).total_seconds() > 60:
+            self._glitch_logged[symbol] = now
+            logger.warning(f"行情护栏: 跳过 {symbol} (坏数据: {reason})")
 
     def _is_repay_allowed(self, symbol: str) -> bool:
         rule = self._symbol_rules.get(symbol)

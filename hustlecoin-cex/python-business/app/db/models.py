@@ -124,6 +124,7 @@ class GlobalRules(Base):
     borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTO/OTOCO;False=borrow-repay
     otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 2=OTO(2单撤)/3=OTOCO(3单撤)
     hedge_via_master = Column(Boolean, default=False)         # True=合约对冲腿用主账户 key;False=三腿同子账户(原行为)
+    max_spread_pct = Column(Numeric(10, 4), default=3.0)      # 点差合理性上限(%): 超过视为行情glitch,跳过该币种下单/平仓(0=不启用)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

@@ -311,21 +311,30 @@ export function OwlTopBar() {
 
   const isRunning = engineStatus === 'RUNNING'
 
+  const fetchWorkers = useEngineStore((s) => s.fetchWorkers)
+
   const handleToggleEngine = useCallback(async () => {
     setToggling(true)
     try {
       if (isRunning) {
         await stopAllWorkers()
-        addToast('引擎停止信号已发送', 'success')
+        addToast('停止挂单信号已发送', 'success')
       } else {
         await startAllWorkers()
-        addToast('引擎启动信号已发送', 'success')
+        addToast('启动挂单信号已发送', 'success')
+      }
+      // 引擎经 Redis 异步处理启停(~3s 生效),轮询回读直到按钮状态翻转或超时
+      const target = isRunning ? 'STOPPED' : 'RUNNING'
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        await fetchWorkers()
+        if (useEngineStore.getState().status === target) break
       }
     } catch {
       addToast('操作失败，请重试', 'error')
     }
     setToggling(false)
-  }, [isRunning, addToast])
+  }, [isRunning, addToast, fetchWorkers])
 
   const handlePush = useCallback(async () => {
     const sym = pushInput.trim().toUpperCase()
@@ -366,7 +375,7 @@ export function OwlTopBar() {
             toggling && 'opacity-50 cursor-not-allowed',
           )}
         >
-          {isRunning ? '暂停引擎' : '启动引擎'}
+          {toggling ? '处理中…' : (isRunning ? '停止挂单' : '启动挂单')}
         </button>
 
         {/* Push symbol input — desktop only */}

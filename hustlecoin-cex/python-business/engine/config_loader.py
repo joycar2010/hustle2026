@@ -39,6 +39,7 @@ class GlobalRulesSnapshot:
     borrow_via_otoco: bool = False
     otoco_legs: int = 2
     hedge_via_master: bool = False
+    max_spread_pct: Decimal = Decimal("3.0")
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,7 @@ class ConfigLoader:
                     borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
                     otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
                     hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),
+                    max_spread_pct=rules.max_spread_pct if getattr(rules, "max_spread_pct", None) is not None else Decimal("3.0"),
                 )
 
             fund = db.query(FundRules).first()

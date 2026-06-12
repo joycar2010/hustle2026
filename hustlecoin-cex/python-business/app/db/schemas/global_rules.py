@@ -26,6 +26,7 @@ class GlobalRulesUpdate(BaseModel):
     borrow_via_otoco: Optional[bool] = None
     otoco_legs: Optional[int] = None
     hedge_via_master: Optional[bool] = None
+    max_spread_pct: Optional[Decimal] = None
 
 
 class GlobalRulesResponse(BaseModel):
@@ -51,6 +52,7 @@ class GlobalRulesResponse(BaseModel):
     borrow_via_otoco: Optional[bool] = False
     otoco_legs: Optional[int] = 2
     hedge_via_master: Optional[bool] = False
+    max_spread_pct: Optional[Decimal] = 3.0
     updated_at: datetime
 
     model_config = {"from_attributes": True}
