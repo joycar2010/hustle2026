@@ -681,7 +681,7 @@ export function RulesPage() {
                   <th className="px-1.5 py-1.5 text-right font-medium">单笔划</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">保底额</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">挂单单笔</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium" title="每账户借币速率(次/秒)，留空跟随全局">借速</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="每账户借币金额上限(USDT,=maxBorrowable 封顶)，留空跟随全局">金额限制</th>
                   <th className="px-1.5 py-1.5 text-center font-medium">操作</th>
                 </tr>
               </thead>
@@ -702,7 +702,7 @@ export function RulesPage() {
                       <EditableCell accountId={a.id} field="single_transfer_amount" value={a.single_transfer_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
                       <EditableCell accountId={a.id} field="min_balance" value={a.min_balance} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
                       <EditableCell accountId={a.id} field="single_order_amount" value={a.single_order_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
-                      <EditableCell accountId={a.id} field="borrow_rate_per_sec" value={a.borrow_rate_per_sec} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
+                      <EditableCell accountId={a.id} field="max_borrow_amount" value={a.max_borrow_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
                       <td className="px-1.5 py-1 text-center">
                         <button
                           onClick={() => setTransferAccount(a)}
@@ -819,6 +819,26 @@ export function RulesPage() {
               <span className="text-muted-foreground/70 text-[10px]">限流</span>
               <InlineField label="每账户借币速率" value={gv('borrow_rate_per_sec')} onChange={(v) => updateG('borrow_rate_per_sec', v)} suffix="次/秒" width="w-10" />
               <span className="text-muted-foreground/60 text-[10px]">单 UID 硬顶 2/秒(180000÷1500)；多账户聚合 = 本值×账户数</span>
+            </div>
+            {/* 借币方式：IOC OTOCO 开关 + 撤单腿数 */}
+            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="text-muted-foreground/70 text-[10px]">借币方式</span>
+              <button
+                onClick={() => setGlobalRules((p) => ({ ...p, borrow_via_otoco: !(p.borrow_via_otoco === true || p.borrow_via_otoco === 'true') }))}
+                className={`px-2 py-0.5 rounded text-[11px] ${(globalRules.borrow_via_otoco === true || globalRules.borrow_via_otoco === 'true') ? 'bg-positive/20 text-positive' : 'bg-accent text-muted-foreground'}`}
+              >
+                {(globalRules.borrow_via_otoco === true || globalRules.borrow_via_otoco === 'true') ? 'IOC OTOCO 挂单借币' : 'borrow-repay 直接借'}
+              </button>
+              <span className="text-muted-foreground/70 text-[10px]">撤单腿数</span>
+              <select
+                value={String(globalRules.otoco_legs ?? 2)}
+                onChange={(e) => setGlobalRules((p) => ({ ...p, otoco_legs: Number(e.target.value) }))}
+                className="bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
+              >
+                <option value="2">2 单 (OTO)</option>
+                <option value="3">3 单 (OTOCO)</option>
+              </select>
+              <span className="text-muted-foreground/60 text-[10px]">开启=coinmini 同款 IOC 挂单借币;2 单撤单更省、反滥用压力更低</span>
             </div>
             <div className="text-[10px] text-muted-foreground/60 -mt-1">
               限价：合约腿用可成交限价(挂价≥卖一×(1+滑点))封顶滑点，超时未成交自动市价补齐——永不留敞口。分层格式「偏移%:数量%」如 0.5:30,0.8:30,1.2:40。受控测试请先用小额单笔下单额验证。
