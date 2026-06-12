@@ -297,9 +297,11 @@ class BinanceTradingClient:
 
     async def futures_market_long(self, symbol: str, quantity: Decimal,
                                   new_client_order_id: str = None) -> dict:
+        # newOrderRespType=RESULT: fapi 市价单默认 ACK 应答 executedQty=0(成交异步),
+        # RESULT 等撮合结果返回真实 executedQty/avgPrice —— 否则落库 0 量,平仓 -1102
         params = {
             "symbol": symbol, "side": "BUY", "type": "MARKET",
-            "quantity": str(quantity),
+            "quantity": str(quantity), "newOrderRespType": "RESULT",
         }
         if new_client_order_id:
             params["newClientOrderId"] = new_client_order_id
@@ -309,6 +311,7 @@ class BinanceTradingClient:
         return await self._request("POST", f"{FUTURES_BASE}/fapi/v1/order", {
             "symbol": symbol, "side": "SELL", "type": "MARKET",
             "quantity": str(quantity), "reduceOnly": "true",
+            "newOrderRespType": "RESULT",
         })
 
     async def futures_limit_long(self, symbol: str, quantity: Decimal, price: Decimal) -> dict:

@@ -90,6 +90,25 @@ def _release_margin_reserve(fc, amount: Decimal):
         pass
 
 
+async def _confirm_futures_result(fc, symbol: str, result: dict) -> dict:
+    """市价单应答 executedQty=0 时(ACK 语义/撮合未回),按 orderId 轮询终态补齐。"""
+    try:
+        if Decimal(str(result.get("executedQty", "0") or "0")) > 0:
+            return result
+        oid = result.get("orderId")
+        if not oid:
+            return result
+        for _ in range(5):
+            await asyncio.sleep(0.3)
+            o = await fc.futures_get_order(symbol, str(oid))
+            if Decimal(str(o.get("executedQty", "0") or "0")) > 0 or \
+               o.get("status") in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                return o
+        return result
+    except Exception:
+        return result
+
+
 async def _query_filled_by_client_id(fc, symbol: str, coid: str) -> Decimal:
     """下单响应丢失(超时/5xx「状态未知」)后,按 clientOrderId 复核实际成交量。
     -2013(订单不存在)= 未送达 → 0;查询连续失败按 0 计但留告警日志。"""
@@ -321,6 +340,11 @@ async def execute_hedge(
             b = round_to_step(per_batch if remaining > per_batch else remaining, spot_lot["stepSize"])
             if b <= 0:
                 break
+            # 尾批名义额低于现货 NOTIONAL 下限(5U)会被 -1013 拒掉并触发整单回滚 ——
+            # 已卖出部分时直接收尾,剩余借币留在账户(净持平,还币时按全部负债买回)
+            if total_sold > 0 and price_ref > 0 and b * price_ref < Decimal("5.5"):
+                logger.info(f"Hedge {symbol}: tail batch {b} below min notional, selling stops at {total_sold}")
+                break
             t0 = time.monotonic()
             sell_result = await client.spot_market_sell(symbol, b)
             latency = int((time.monotonic() - t0) * 1000)
@@ -365,6 +389,7 @@ async def execute_hedge(
                 try:
                     long_result = await fc.futures_market_long(symbol, futures_qty,
                                                                new_client_order_id=coid)
+                    long_result = await _confirm_futures_result(fc, symbol, long_result)
                     fut_filled["qty"] = Decimal(str(long_result.get("executedQty", "0")))
                 except BinanceAPIError as fe:
                     if fe.api_code == -1007 or fe.http_code >= 500:
@@ -462,11 +487,12 @@ async def execute_open(
     account_note: str,
     spread_feed: SpreadFeed = None,
     futures_client: BinanceTradingClient = None,
+    user_id: int = None,
 ):
     """Atomic open (borrow + hedge in one shot) — used by manual-open and as a fallback."""
     pos_id = await execute_borrow(
         sub_account_id, symbol, spread, rules, client, notifier, account_note,
-        spread_feed=spread_feed, min_spread=rules.open_spread,
+        spread_feed=spread_feed, min_spread=rules.open_spread, user_id=user_id,
     )
     if pos_id is None:
         return
@@ -519,6 +545,7 @@ async def execute_unhedge(
         t0 = time.monotonic()
         async with _fc_symbol_lock(fc, pos.symbol):
             close_result = await fc.futures_market_close(pos.symbol, pos.futures_long_qty)
+            close_result = await _confirm_futures_result(fc, pos.symbol, close_result)
         latency = int((time.monotonic() - t0) * 1000)
         pos.futures_close_price = Decimal(str(close_result.get("avgPrice", "0")))
         pos.futures_close_order_id = str(close_result["orderId"])
@@ -530,9 +557,13 @@ async def execute_unhedge(
 
         # Step 2: buy back the borrowed coin (cover the short) — keep it for manual repay
         total_debt, _ = await _get_asset_debt(client, pos.base_asset)
-        buy_qty = total_debt * FEE_BUFFER if total_debt > 0 else pos.borrow_qty
+        target = total_debt * FEE_BUFFER if total_debt > 0 else pos.borrow_qty
         spot_lot = await client.get_lot_size(pos.symbol, "spot")
-        buy_qty = round_to_step(buy_qty, spot_lot["stepSize"])
+        buy_qty = round_to_step(target, spot_lot["stepSize"])
+        # 现货手续费从收到的币里扣 —— 向下取整会吃掉 FEE_BUFFER(实收<负债,还币 -3041),
+        # 不足目标时向上多凑一个步长
+        if buy_qty < target:
+            buy_qty += Decimal(str(spot_lot["stepSize"]))
 
         pos.status = "CLOSING_SPOT"
         db.commit()
@@ -590,10 +621,32 @@ async def execute_repay(
     db.refresh(pos)
 
     try:
-        total_debt, interest_amount = await _get_asset_debt(client, pos.base_asset)
+        margin_info = await client.get_margin_account()
+        total_debt, interest_amount, free_bal = Decimal("0"), Decimal("0"), Decimal("0")
+        for a in margin_info.get("userAssets", []):
+            if a["asset"] == pos.base_asset:
+                total_debt = Decimal(str(a.get("borrowed", "0"))) + Decimal(str(a.get("interest", "0")))
+                interest_amount = Decimal(str(a.get("interest", "0")))
+                free_bal = Decimal(str(a.get("free", "0")))
+                break
         repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
+        # free 不足全额还(手续费扣币/历史粉尘): 按 free 封顶,粉尘负债留账
+        # (低于现货最小名义额无法补买,留待下次同币种平仓一并覆盖)
+        if Decimal("0") < free_bal < repay_amount:
+            logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount}, "
+                           f"repaying free (dust {repay_amount - free_bal} stays)")
+            repay_amount = free_bal
         t0 = time.monotonic()
-        await client.margin_repay(pos.base_asset, repay_amount)
+        # 买回后立即还币会踩杠杆账户结算延迟(-3041 Balance is not enough)—— 重试等结算
+        for attempt in range(4):
+            try:
+                await client.margin_repay(pos.base_asset, repay_amount)
+                break
+            except BinanceAPIError as re_err:
+                if re_err.api_code == -3041 and attempt < 3:
+                    await asyncio.sleep(1.5)
+                    continue
+                raise
         latency = int((time.monotonic() - t0) * 1000)
         pos.repay_qty = repay_amount
         pos.repay_interest = interest_amount
@@ -620,6 +673,7 @@ async def execute_repay(
 
     except BinanceAPIError as e:
         logger.error(f"Repay failed: {e}")
+        pos.status = "PENDING_REPAY"   # 回退可重试态(REPAYING 无人消费会永久卡死)
         pos.error_message = str(e)
         pos.retry_count = (pos.retry_count or 0) + 1
         db.commit()

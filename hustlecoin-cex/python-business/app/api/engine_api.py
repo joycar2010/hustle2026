@@ -681,7 +681,7 @@ async def manual_open(data: ManualOpenRequest, request: Request, db: Session = D
             # at the current spread (interest-rate filter still applies).
             await execute_open(
                 account.id, symbol, spread, rules, client, notifier, account.note,
-                spread_feed=None, futures_client=fc,
+                spread_feed=None, futures_client=fc, user_id=user_id,
             )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"开仓失败: {e}")
