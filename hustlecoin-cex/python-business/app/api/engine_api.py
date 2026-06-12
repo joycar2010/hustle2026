@@ -864,11 +864,22 @@ def stop_engine(request: Request, db: Session = Depends(get_db)):
     return {"message": "Engine stop signal sent"}
 
 
+def _live_worker_scopes(db: Session, user_id: int) -> list[str]:
+    """当前仍存在的子账户对应的 worker scope。用于过滤掉已删除子账户残留的
+    engine_state(sub:N)僵尸行 —— 它们 heartbeat 永久过期、显示「超时」却无法删除。"""
+    sub_ids = [r.id for r in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
+    return [f"sub:{i}" for i in sub_ids]
+
+
 @router.get("/workers/status")
 def workers_status(request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
+    scopes = _live_worker_scopes(db, user_id)
+    if not scopes:
+        return {"workers": []}
     workers = db.query(EngineState).filter(
-        EngineState.user_id == user_id, EngineState.scope != "global",
+        EngineState.user_id == user_id,
+        EngineState.scope.in_(scopes),
     ).all()
     return {"workers": [EngineStateResponse.model_validate(w) for w in workers]}
 
@@ -894,9 +905,11 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     engine_status = global_state.status if global_state else "STOPPED"
 
     now = datetime.now(timezone.utc)
+    scopes = _live_worker_scopes(db, user_id)
     worker_rows = db.query(EngineState).filter(
-        EngineState.user_id == user_id, EngineState.scope != "global",
-    ).all()
+        EngineState.user_id == user_id,
+        EngineState.scope.in_(scopes),
+    ).all() if scopes else []
 
     workers = []
     any_stale = False
