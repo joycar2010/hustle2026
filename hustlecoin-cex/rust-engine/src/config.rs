@@ -1,9 +1,17 @@
+use rust_decimal::Decimal;
 use std::env;
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub redis_url: String,
     pub symbols: Vec<String>,
+    /// 任一腿(现货/合约)超过此毫秒数未更新 → 视为 stale,不发布点差。
+    /// 防止 live腿×stale腿 算出假大点差(WS 单 symbol 流静默死亡 / 整币停更)。
+    pub max_staleness_ms: i64,
+    /// 点差幅度绝对值超过此值(%)→ 视为坏数据不发布(兜底:T 仍刷新的冻结盘口 /
+    /// 已下架/熔断合约 emit 0 价等,ts 护栏抓不到的情形)。给宽容默认,只挡明显异常。
+    pub max_spread_pct: Decimal,
 }
 
 impl AppConfig {
@@ -11,9 +19,26 @@ impl AppConfig {
         let redis_url =
             env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
+        let max_staleness_ms = env::var("MAX_STALENESS_MS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(10_000);
+
+        let max_spread_pct = env::var("MAX_SPREAD_PCT")
+            .ok()
+            .and_then(|v| Decimal::from_str(&v).ok())
+            .filter(|v| *v > Decimal::ZERO)
+            .unwrap_or_else(|| Decimal::from(8));
+
         let symbols = get_top_futures_symbols();
 
-        Self { redis_url, symbols }
+        Self {
+            redis_url,
+            symbols,
+            max_staleness_ms,
+            max_spread_pct,
+        }
     }
 }
 

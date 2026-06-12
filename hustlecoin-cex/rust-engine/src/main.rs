@@ -9,8 +9,9 @@ use crate::redis_pub::RedisPublisher;
 use crate::spread::calculator;
 use crate::types::{LatencyStats, TickerData};
 use dashmap::DashMap;
+use rust_decimal::Decimal;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
 
@@ -77,7 +78,15 @@ async fn main() {
     });
 
     // Main loop: process ticker updates and calculate spreads
-    process_updates(update_rx, tickers, publisher, stats).await;
+    process_updates(
+        update_rx,
+        tickers,
+        publisher,
+        stats,
+        cfg.max_staleness_ms,
+        cfg.max_spread_pct,
+    )
+    .await;
 }
 
 async fn process_updates(
@@ -85,28 +94,59 @@ async fn process_updates(
     tickers: Arc<DashMap<String, (TickerData, TickerData)>>,
     publisher: Arc<RedisPublisher>,
     stats: Arc<Mutex<LatencyStats>>,
+    max_staleness_ms: i64,
+    max_spread_pct: Decimal,
 ) {
-    info!("Spread processor started, waiting for ticker updates...");
+    info!(
+        max_staleness_ms,
+        max_spread_pct = %max_spread_pct,
+        "Spread processor started, waiting for ticker updates..."
+    );
 
     let mut update_count: u64 = 0;
     let mut publish_count: u64 = 0;
+    let mut stale_skipped: u64 = 0;
+    let mut divergent_skipped: u64 = 0;
     let mut last_log = Instant::now();
 
     while let Some(symbol) = update_rx.recv().await {
         let start = Instant::now();
 
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let mut stale = false;
         let snapshot = tickers.get(&symbol).and_then(|pair| {
             let (spot, futures) = pair.value();
+            // 新鲜度护栏: 任一腿超过阈值未更新 → 不发布(live腿×stale腿=假点差,真因)。
+            // spot 无事件时间用本地 now() 戳;futures 用币安 T(事件时间)。任一冻结即此处拦下。
+            if now_ms - spot.ts > max_staleness_ms || now_ms - futures.ts > max_staleness_ms {
+                stale = true;
+                return None;
+            }
             calculator::calculate(&symbol, spot, futures)
         });
 
-        if let Some(snapshot) = snapshot {
-            publisher.publish_spread(&snapshot).await;
-            publish_count += 1;
+        if stale {
+            stale_skipped += 1;
+        }
 
-            let elapsed_us = start.elapsed().as_micros() as u64;
-            let mut s = stats.lock().await;
-            s.record(elapsed_us);
+        if let Some(snapshot) = snapshot {
+            // 兜底护栏: 点差幅度异常(冻结盘口/熔断/下架合约)→ 不发布坏数据
+            if snapshot.spread_short.abs() > max_spread_pct
+                || snapshot.spread_long.abs() > max_spread_pct
+            {
+                divergent_skipped += 1;
+            } else {
+                publisher.publish_spread(&snapshot).await;
+                publish_count += 1;
+
+                let elapsed_us = start.elapsed().as_micros() as u64;
+                let mut s = stats.lock().await;
+                s.record(elapsed_us);
+            }
         }
 
         update_count += 1;
@@ -121,11 +161,15 @@ async fn process_updates(
             info!(
                 updates_30s = update_count,
                 publishes_30s = publish_count,
+                stale_skipped_30s = stale_skipped,
+                divergent_skipped_30s = divergent_skipped,
                 active_pairs = active,
                 "Throughput"
             );
             update_count = 0;
             publish_count = 0;
+            stale_skipped = 0;
+            divergent_skipped = 0;
             last_log = Instant::now();
         }
     }
