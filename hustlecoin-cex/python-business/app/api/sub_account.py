@@ -186,13 +186,20 @@ def delete_sub_account(
     account = db.query(SubAccount).get(account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Sub-account not found")
+    note = account.note
     if hard:
+        # 硬删除时一并清掉该账户的 engine_state(sub:N)行,否则残留为永久「超时」
+        # 的僵尸 worker(显示却删不掉)。软禁用保留账户,其 worker 行仍有效不清。
+        from engine.models import EngineState
+        db.query(EngineState).filter(EngineState.scope == f"sub:{account_id}").delete(
+            synchronize_session=False
+        )
         db.delete(account)
     else:
         account.is_enabled = False
     db.commit()
     action = "deleted" if hard else "disabled"
-    return {"message": f"Sub-account {account.note} {action}"}
+    return {"message": f"Sub-account {note} {action}"}
 
 
 @router.put("/{account_id}/keys", response_model=SubAccountResponse)
