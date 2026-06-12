@@ -557,6 +557,14 @@ class ContinuousStrategyExecutor:
 
             # Step 8: Execute order
             logger.info(f"[ladder={ladder_idx}] Executing {strategy_type}: {order_qty} units")
+            # ── 容量护栏(feature b): 在途开仓单期间, 若热重载把本阶梯累计上限降到 < 已开+在途 → 撤在途s-单并结束本阶梯 ──
+            _cap_stop = asyncio.Event()
+            _cap_guard_task = None
+            if is_opening:
+                self._cap_cancel = False
+                _pos_before_cap = (base_pos if base_pos is not None else 0.0) + current_position
+                _cap_guard_task = asyncio.create_task(self._capacity_reduce_guard(
+                    strategy_type, binance_account, ladder_idx, _pos_before_cap, order_qty, _cap_stop))
             try:
                 exec_result = await self._execute_order(
                     strategy_type,
@@ -614,6 +622,26 @@ class ContinuousStrategyExecutor:
                     "error": f"Execution exception: {e}",
                     "halted_after_crash": True,
                 }
+            finally:
+                _cap_stop.set()
+                if _cap_guard_task is not None:
+                    _cap_guard_task.cancel()
+                    try:
+                        await _cap_guard_task
+                    except Exception:
+                        pass
+
+            # ── 容量护栏触发: 在途开仓单已撤(本阶梯新累计上限 < 已开+在途) → 记录已成交部分后干净结束本阶梯 ──
+            if is_opening and getattr(self, '_cap_cancel', False):
+                self._cap_cancel = False
+                _cap_bf = exec_result.get('binance_filled_qty', 0) if isinstance(exec_result, dict) else 0
+                if _cap_bf and _cap_bf > 0:
+                    self.position_mgr.record_opening(self.strategy_id, ladder_idx, strategy_type, _cap_bf)
+                    asyncio.create_task(self._delayed_single_leg_check(
+                        strategy_type=strategy_type, exec_result=exec_result,
+                        binance_account=binance_account, bybit_account=bybit_account, pre_snapshot=pre_snapshot))
+                logger.warning(f"[ladder={ladder_idx}] 容量护栏: {getattr(self, '_cap_cancel_reason', '')} → 结束本阶梯(V2主循环将按新配置重判)")
+                break
 
             logger.info(f"[ladder={ladder_idx}] Result — success={exec_result.get('success')}, binance_filled={exec_result.get('binance_filled_qty')}, bybit_filled={exec_result.get('bybit_filled_qty')}")
 
@@ -1141,6 +1169,87 @@ class ContinuousStrategyExecutor:
         _mc = _cfg.opening_m_coin if 'opening' in strategy_type else _cfg.closing_m_coin
         _oql = float(_mc or 1.0)
         return (_lds, _oql)
+
+    async def _cancel_own_a_side_orders(self, account) -> int:
+        """撤掉本策略(clientOrderId 前缀 's-')在 A 侧(sym_a)的挂单, 保留人工应急('m-')单。返回撤单数。
+        与 _execute_ladder Step 7.9 同口径(只撤自己的)。"""
+        sym_a, _, _ = _get_pair_config(self.pair_code)
+        from app.core.proxy_utils import build_proxy_url
+        _n = 0
+        try:
+            if account.platform_id == 1:
+                from app.services.binance_client import BinanceFuturesClient
+                _c = BinanceFuturesClient(account.api_key, account.api_secret, proxy_url=build_proxy_url(account.proxy_config))
+                try:
+                    _open = await _c.get_open_orders(symbol=sym_a)
+                    _own = [o for o in (_open or []) if str(o.get("clientOrderId", "")).startswith("s-")]
+                    for _od in _own:
+                        try:
+                            await _c.cancel_order(sym_a, _od["orderId"]); _n += 1
+                        except Exception:
+                            pass
+                finally:
+                    await _c.close()
+            elif account.platform_id == 2:
+                from app.services.bybit_client import BybitV5Client
+                _c = BybitV5Client(api_key=account.api_key, api_secret=account.api_secret, proxy_url=build_proxy_url(account.proxy_config))
+                try:
+                    _open = await _c.get_open_orders(category='linear', symbol=sym_a)
+                    _list = (_open or {}).get('list', []) if isinstance(_open, dict) else (_open or [])
+                    _own = [o for o in _list if str(o.get('orderLinkId', '') or o.get('clientOrderId', '')).startswith('s-')]
+                    for _od in _own:
+                        try:
+                            _oid = _od.get('orderId') or _od.get('order_id')
+                            if _oid:
+                                await _c.cancel_order(category='linear', symbol=sym_a, order_id=_oid); _n += 1
+                        except Exception:
+                            pass
+                finally:
+                    await _c.close()
+        except Exception as _e:
+            logger.warning(f"[capacity-guard] cancel own A-side orders failed: {_e}")
+        return _n
+
+    async def _capacity_reduce_guard(self, strategy_type, account, ladder_idx, pos_before, order_qty, stop_event):
+        """Feature(b): 在途开仓单期间, 每~1.5s 只读 DB 策略配置(不打交易所);
+        若用户保存把本阶梯累计总手数降到使 (pos_before + order_qty) 超过新上限,
+        则撤掉本策略在途 s- 开仓单, 置 self._cap_cancel 让 _execute_ladder 干净结束本阶梯。
+        仅作用于开仓; 仅在真实容量缩小时触发; 撤单只撤自己的(保留人工 m-)。"""
+        if 'opening' not in strategy_type:
+            return
+        try:
+            while not stop_event.is_set():
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=1.5)
+                    return  # 订单已结束(stop_event 置位), 退出护栏
+                except asyncio.TimeoutError:
+                    pass
+                try:
+                    _fresh = await asyncio.wait_for(self._reload_strategy_config(strategy_type), timeout=4.0)
+                except Exception:
+                    continue
+                if not _fresh:
+                    continue
+                _f_ladders, _ = _fresh
+                if ladder_idx < len(_f_ladders):
+                    _new_ceiling = float(_f_ladders[ladder_idx].total_qty or 0)
+                elif _f_ladders:
+                    _new_ceiling = float(_f_ladders[-1].total_qty or 0)
+                else:
+                    continue
+                if pos_before + order_qty > _new_ceiling + 1e-6:
+                    _cancelled = await self._cancel_own_a_side_orders(account)
+                    self._cap_cancel = True
+                    self._cap_cancel_reason = (
+                        f"保存即生效·撤在途: 阶梯{ladder_idx}新累计上限={_new_ceiling:.2f} "
+                        f"< 已开{pos_before:.2f}+在途{order_qty:.2f}(撤{_cancelled}张s-在途单)")
+                    logger.warning(f"[ladder={ladder_idx}] {self._cap_cancel_reason}")
+                    stop_event.set()
+                    return
+        except asyncio.CancelledError:
+            return
+        except Exception as _e:
+            logger.debug(f"[capacity-guard] guard error: {_e}")
 
     async def _execute_continuous_v2(
         self,

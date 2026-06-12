@@ -2661,14 +2661,43 @@ class BinancePositionPusher:
                 continue
 
         non_zero = {s: v for s, v in by_symbol.items() if v != (0.0, 0.0)}
+
+        # Reconcile cache vs this authoritative REST snapshot (symbol=None ->
+        # ALL open positions). A cached non-zero symbol absent from non_zero was
+        # closed (here, externally, or while a WS ACCOUNT_UPDATE was missed) ->
+        # zero it, but only after 2 consecutive absent REST cycles (~6s) so a
+        # freshly-opened position missed by an in-flight pre-open REST snapshot
+        # is not wrongly zeroed (it reappears next cycle, resetting the count).
+        # Without this a stale non-zero (e.g. 主多仓 5 -> 全平) never returns to 0;
+        # the 3s REST loop is the floor, WS ACCOUNT_UPDATE is sub-second.
+        if not hasattr(self, "_rest_absent_count"):
+            self._rest_absent_count = {}
+        prev = position_streamer._binance_positions.get(user_id, {}) if user_id else {}
+        _stale_zeroed = []
+        for _sym, _pv in list(prev.items()):
+            _k = (user_id, _sym)
+            if _pv != (0.0, 0.0) and _sym not in non_zero:
+                _c = self._rest_absent_count.get(_k, 0) + 1
+                if _c >= 2:
+                    position_streamer.set_binance_positions(0.0, 0.0, user_id=user_id, symbol=_sym)
+                    _stale_zeroed.append(_sym)
+                    self._rest_absent_count.pop(_k, None)
+                else:
+                    self._rest_absent_count[_k] = _c
+            else:
+                self._rest_absent_count.pop(_k, None)
+
         if not non_zero:
-            logger.info(f"[BinancePositionPusher] bootstrap {api_key[:8]}…: all positions = 0")
+            if _stale_zeroed:
+                logger.info(
+                    f"[BinancePositionPusher] REST reconcile {api_key[:8]}… user={user_id} "
+                    f"-> cleared stale {_stale_zeroed}; all positions 0"
+                )
             return
 
         # Compare with cache BEFORE overwriting — only log when position actually changed
         _changed = False
         try:
-            prev = position_streamer._binance_positions.get(user_id, {}) if user_id else {}
             for _s, _v in non_zero.items():
                 _pv = prev.get(_s, (0.0, 0.0))
                 if abs(_pv[0] - _v[0]) > 0.001 or abs(_pv[1] - _v[1]) > 0.001:
@@ -2678,10 +2707,11 @@ class BinancePositionPusher:
             _changed = True
         for sym, (long_v, short_v) in non_zero.items():
             position_streamer.set_binance_positions(long_v, short_v, user_id=user_id, symbol=sym)
-        if _changed:
+        if _changed or _stale_zeroed:
             logger.info(
                 f"[BinancePositionPusher] bootstrap {api_key[:8]}… user={user_id} "
                 f"symbols={list(non_zero.keys())} counts={non_zero}"
+                + (f" cleared_stale={_stale_zeroed}" if _stale_zeroed else "")
             )
 
 
