@@ -621,19 +621,27 @@ async def execute_repay(
     db.refresh(pos)
 
     try:
-        margin_info = await client.get_margin_account()
-        total_debt, interest_amount, free_bal = Decimal("0"), Decimal("0"), Decimal("0")
-        for a in margin_info.get("userAssets", []):
-            if a["asset"] == pos.base_asset:
-                total_debt = Decimal(str(a.get("borrowed", "0"))) + Decimal(str(a.get("interest", "0")))
-                interest_amount = Decimal(str(a.get("interest", "0")))
-                free_bal = Decimal(str(a.get("free", "0")))
+        # 买回的币入杠杆账户有结算延迟 —— 轮询等 free 覆盖负债(最长 ~8s),
+        # 再决定全额还/按 free 封顶,避免把settlement-lag误判成粉尘留下整笔欠债
+        async def _read_debt_free():
+            mi = await client.get_margin_account()
+            for a in mi.get("userAssets", []):
+                if a["asset"] == pos.base_asset:
+                    return (Decimal(str(a.get("borrowed", "0"))) + Decimal(str(a.get("interest", "0"))),
+                            Decimal(str(a.get("interest", "0"))),
+                            Decimal(str(a.get("free", "0"))))
+            return Decimal("0"), Decimal("0"), Decimal("0")
+
+        total_debt, interest_amount, free_bal = await _read_debt_free()
+        for _ in range(6):
+            if total_debt <= 0 or free_bal >= total_debt:
                 break
+            await asyncio.sleep(1.3)
+            total_debt, interest_amount, free_bal = await _read_debt_free()
         repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
-        # free 不足全额还(手续费扣币/历史粉尘): 按 free 封顶,粉尘负债留账
-        # (低于现货最小名义额无法补买,留待下次同币种平仓一并覆盖)
+        # 等满后 free 仍不足(手续费扣币的真实小额缺口): 按 free 封顶,真·粉尘留账
         if Decimal("0") < free_bal < repay_amount:
-            logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount}, "
+            logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount} after settle wait, "
                            f"repaying free (dust {repay_amount - free_bal} stays)")
             repay_amount = free_bal
         t0 = time.monotonic()

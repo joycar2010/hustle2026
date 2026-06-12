@@ -91,7 +91,10 @@ class ConfigLoader:
     def _reload(self):
         db: Session = SessionLocal()
         try:
-            rules = db.query(GlobalRules).first()
+            # 按 user_id 取本用户规则行;legacy(user_id=None)引擎回退 first()
+            rq = db.query(GlobalRules)
+            rules = (rq.filter(GlobalRules.user_id == self.user_id).first()
+                     if self.user_id is not None else rq.first())
             if rules:
                 self.global_rules = GlobalRulesSnapshot(
                     auto_push_spread=rules.auto_push_spread,
