@@ -274,7 +274,7 @@ export function DashboardPage() {
         const subId = (extra?.subAccountId as number | undefined) ?? position?.sub_account_id
         if (!subId) break
         getMaxBorrowable(subId, symbol)
-          .then((d: { amount?: string | number }) => alert(`${symbol} @ 账户#${subId}\n最大可借: ${d.amount ?? d}`))
+          .then((d: { max_borrowable?: string; asset?: string }) => alert(`${d.asset || symbol} @ 账户#${subId}\n最大可借: ${d.max_borrowable ?? '-'}`))
           .catch((e) => alert(`查询失败: ${e.response?.data?.detail || e.message}`))
         break
       }

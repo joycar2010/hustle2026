@@ -273,6 +273,20 @@ class BinanceTradingClient:
         })
         return Decimal(str(data.get("amount", "0")))
 
+    async def get_loan_records(self, txn_type: str = "BORROW", asset: str = None, size: int = 20) -> dict:
+        """币安全仓借/还流水(原始 REST 对账用)。txn_type=BORROW/REPAY。返回 {rows,total}。"""
+        params = {"type": txn_type, "size": str(size), "current": "1", "isIsolated": "FALSE"}
+        if asset:
+            params["asset"] = asset
+        return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", params)
+
+    async def get_interest_history(self, asset: str = None, size: int = 20) -> dict:
+        """币安全仓利息流水(原始 REST 对账用)。返回 {rows,total}。"""
+        params = {"size": str(size), "current": "1"}
+        if asset:
+            params["asset"] = asset
+        return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/interestHistory", params)
+
     # ---- Spot Orders ----
 
     async def spot_market_sell(self, symbol: str, quantity: Decimal, is_margin: bool = True) -> dict:

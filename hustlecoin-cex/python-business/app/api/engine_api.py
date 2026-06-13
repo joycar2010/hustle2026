@@ -314,6 +314,36 @@ async def get_max_borrowable(account_id: int, asset: str, request: Request, db: 
     return {"asset": asset.upper(), "max_borrowable": str(amount)}
 
 
+@router.get("/accounts/{account_id}/loan-history")
+async def get_loan_history(
+    account_id: int,
+    request: Request,
+    type: str = Query("BORROW"),
+    asset: str = Query(None),
+    size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """币安全仓 借/还/利息 原始流水(对账用)。type=BORROW/REPAY/INTEREST。"""
+    user_id = get_current_user_id(request)
+    account = db.query(SubAccount).filter(
+        SubAccount.id == account_id, SubAccount.user_id == user_id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+    from engine.trading.binance_trading import BinanceTradingClient, BinanceAPIError
+    t = (type or "BORROW").upper()
+    a = asset.upper() if asset else None
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret) as client:
+            if t == "INTEREST":
+                data = await client.get_interest_history(asset=a, size=size)
+            else:
+                data = await client.get_loan_records(txn_type=t, asset=a, size=size)
+    except BinanceAPIError as e:
+        raise HTTPException(status_code=400, detail=f"查询失败: {e.message}")
+    return {"type": t, "rows": data.get("rows", []), "total": data.get("total", 0)}
+
+
 class TailCleanupRequest(BaseModel):
     max_usdt_amount: Decimal = Decimal("10")
 

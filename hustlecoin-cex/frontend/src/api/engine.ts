@@ -99,6 +99,11 @@ export async function cleanupTailPositions(maxUsdtAmount = 10) {
   return data
 }
 
+export async function getLoanHistory(id: number, type: 'BORROW' | 'REPAY' | 'INTEREST', asset?: string, size = 30): Promise<{ type: string; rows: Record<string, unknown>[]; total: number }> {
+  const { data } = await client.get(`/api/engine/accounts/${id}/loan-history`, { params: { type, asset, size } })
+  return data
+}
+
 export async function manualTransfer(id: number, body: Record<string, unknown>) {
   const { data } = await client.post(`/api/engine/accounts/${id}/transfer`, body)
   return data

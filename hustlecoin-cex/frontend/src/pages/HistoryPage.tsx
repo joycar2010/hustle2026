@@ -1,8 +1,25 @@
 import { useEffect, useState, useCallback, useMemo, Fragment } from 'react'
-import { getPositionsHistory, getTradeLogs, type TradeLogEntry } from '@/api/engine'
+import { getPositionsHistory, getTradeLogs, getLoanHistory, type TradeLogEntry } from '@/api/engine'
 import { getSubAccounts } from '@/api/accounts'
 import { cn, formatNumber, pnlColor } from '@/lib/utils'
 import dayjs from 'dayjs'
+
+type HistTab = 'closed' | 'loan'
+
+export function HistoryPage() {
+  const [tab, setTab] = useState<HistTab>('closed')
+  const tabCls = (t: HistTab) =>
+    `px-3 py-1.5 text-xs border-b-2 transition-colors ${tab === t ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground'}`
+  return (
+    <div className="space-y-0">
+      <div className="flex items-center gap-1 px-3 bg-[#0d0d14] border-b border-border">
+        <button onClick={() => setTab('closed')} className={tabCls('closed')}>平仓历史</button>
+        <button onClick={() => setTab('loan')} className={tabCls('loan')}>借贷流水</button>
+      </div>
+      {tab === 'closed' ? <ClosedHistoryTab /> : <LoanHistoryTab />}
+    </div>
+  )
+}
 
 interface HistoryPosition {
   id: number
@@ -31,7 +48,7 @@ interface DateGroup {
   positions: HistoryPosition[]
 }
 
-export function HistoryPage() {
+function ClosedHistoryTab() {
   const [items, setItems] = useState<HistoryPosition[]>([])
   const [loading, setLoading] = useState(true)
   const [startDate, setStartDate] = useState('')
@@ -126,13 +143,6 @@ export function HistoryPage() {
 
   return (
     <div className="space-y-0">
-      {/* Title bar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-[#0d0d14] border-b border-border">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">平仓历史</span>
-        </div>
-      </div>
-
       {/* Filter + Summary row */}
       <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-[11px] bg-[#111118] border-b border-border">
         <div className="flex items-center gap-1.5">
@@ -323,6 +333,104 @@ export function HistoryPage() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── 借贷流水(币安原始 借/还/利息 REST 流水,逐子账户对账) ───
+
+const LOAN_TYPES = [
+  { key: 'BORROW' as const, label: '借币' },
+  { key: 'REPAY' as const, label: '还币' },
+  { key: 'INTEREST' as const, label: '利息' },
+]
+
+function LoanHistoryTab() {
+  const [accounts, setAccounts] = useState<SubAccount[]>([])
+  const [accId, setAccId] = useState<number>(0)
+  const [type, setType] = useState<'BORROW' | 'REPAY' | 'INTEREST'>('BORROW')
+  const [asset, setAsset] = useState('')
+  const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    getSubAccounts(true).then((a: SubAccount[]) => {
+      setAccounts(a)
+      if (a.length && !accId) setAccId(a[0].id)
+    }).catch(() => {})
+  }, [accId])
+
+  const fetchRows = useCallback(() => {
+    if (!accId) return
+    setLoading(true); setErr('')
+    getLoanHistory(accId, type, asset.trim() ? asset.trim().toUpperCase() : undefined, 50)
+      .then((d) => setRows(d.rows || []))
+      .catch((e) => { setErr(e?.response?.data?.detail || '查询失败'); setRows([]) })
+      .finally(() => setLoading(false))
+  }, [accId, type, asset])
+
+  useEffect(() => { fetchRows() }, [fetchRows])
+
+  const num = (v: unknown, d = 6) => { const n = parseFloat(String(v ?? '')); return isNaN(n) ? '-' : n.toFixed(d) }
+  const ts = (r: Record<string, unknown>) => {
+    const t = (r.timestamp ?? r.interestAccuredTime) as number | undefined
+    return t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-'
+  }
+
+  return (
+    <div className="space-y-0">
+      <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-[11px] bg-[#111118] border-b border-border">
+        <select value={accId} onChange={(e) => setAccId(Number(e.target.value))}
+          className="bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary">
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.note} (#{a.id})</option>)}
+        </select>
+        <div className="flex rounded border border-border overflow-hidden">
+          {LOAN_TYPES.map((t) => (
+            <button key={t.key} onClick={() => setType(t.key)}
+              className={`px-2.5 py-0.5 text-[11px] border-r border-border last:border-0 ${type === t.key ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-accent/50'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <input value={asset} onChange={(e) => setAsset(e.target.value)} placeholder="资产(可选,如 CRV)"
+          className="w-28 bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary" />
+        <button onClick={fetchRows} className="px-2 py-0.5 rounded border border-border text-[11px] text-muted-foreground hover:text-foreground">刷新</button>
+        <span className="text-muted-foreground ml-auto">{rows.length} 条 · 数据直取币安 REST</span>
+      </div>
+
+      {err && <div className="px-3 py-1.5 text-[11px] text-negative bg-negative/10 border-b border-negative/20">{err}</div>}
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-[11px]">
+          <thead>
+            <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
+              <th className="px-3 py-1.5 text-left font-medium">时间</th>
+              <th className="px-3 py-1.5 text-left font-medium">资产</th>
+              <th className="px-3 py-1.5 text-right font-medium">{type === 'INTEREST' ? '本金' : '数量'}</th>
+              {type !== 'BORROW' && <th className="px-3 py-1.5 text-right font-medium">利息</th>}
+              {type === 'INTEREST' && <th className="px-3 py-1.5 text-right font-medium">日利率</th>}
+              <th className="px-3 py-1.5 text-left font-medium">{type === 'INTEREST' ? '类型' : '状态'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">加载中...</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">无流水</td></tr>
+            ) : rows.map((r, i) => (
+              <tr key={(r.txId as string) || i} className="border-b border-border/30 hover:bg-[#1a1a22]/60">
+                <td className="px-3 py-1 text-muted-foreground font-mono tabular-nums whitespace-nowrap">{ts(r)}</td>
+                <td className="px-3 py-1 font-medium">{String(r.asset ?? '-')}</td>
+                <td className="px-3 py-1 text-right font-mono tabular-nums">{num(r.principal ?? r.amount)}</td>
+                {type !== 'BORROW' && <td className="px-3 py-1 text-right font-mono tabular-nums text-amber-400">{num(r.interest)}</td>}
+                {type === 'INTEREST' && <td className="px-3 py-1 text-right font-mono tabular-nums">{r.interestRate ? (parseFloat(String(r.interestRate)) * 100).toFixed(4) + '%' : '-'}</td>}
+                <td className="px-3 py-1 text-muted-foreground">{String(r.status ?? r.type ?? '-')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
