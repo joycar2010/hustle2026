@@ -1839,6 +1839,47 @@ async def list_slippage_events(
     return {"events": events}
 
 
+@router.post("/slippage-pause/{pair_code}/resume")
+async def slippage_pause_resume(
+    pair_code: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """滑点暂停弹框点「确认」: 强制清除暂停, 运行中的策略循环下一轮即恢复下单(立即继续自动交易)."""
+    from app.services.slippage_guard import force_clear
+    await force_clear(user_id, pair_code, reason="user_modal_force_resume")
+    return {"success": True, "message": "已强制恢复, 自动交易继续", "pair_code": pair_code}
+
+
+@router.post("/slippage-pause/{pair_code}/stop")
+async def slippage_pause_stop(
+    pair_code: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """滑点暂停弹框点「取消」: 停掉该用户该交易对所有运行中的连续策略(开/平), 暂停态保留."""
+    from app.services.execution_task_manager import execution_task_manager
+    raw = execution_task_manager.get_all_tasks() or {}
+    stopped = []
+    for _tid, _info in list(raw.items()):
+        if not isinstance(_info, dict):
+            continue
+        _sid = _info.get("strategy_id", "") or ""
+        if not _sid.startswith(f"{user_id}_"):
+            continue
+        if f"_{pair_code}_" not in _sid:  # 仅该交易对(strategy_id={user}_{pair}_{type}_continuous)
+            continue
+        try:
+            from app.services.strategy_resume_service import clear_on_manual_stop_by_strategy_id
+            await clear_on_manual_stop_by_strategy_id(_sid)
+        except Exception:
+            pass
+        try:
+            if await execution_task_manager.stop_task(_tid):
+                stopped.append(_tid)
+        except Exception:
+            pass
+    return {"success": True, "message": f"已停止 {len(stopped)} 个策略", "stopped": stopped, "pair_code": pair_code}
+
+
 # ── 对冲腿强平后 用户收口: 币安 maker 平裸腿(单腿告警弹框的"确认收口"按钮) ──
 class HedgeCloseoutRequest(BaseModel):
     pair_code: str = "XAU"

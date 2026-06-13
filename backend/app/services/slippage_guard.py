@@ -19,9 +19,10 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-LEVEL_1_THRESHOLD = 0.9
-LEVEL_2_THRESHOLD = 1.2
-AUTO_RESUME_S = 600  # 10 minutes
+LEVEL_1_THRESHOLD = 1.2
+LEVEL_2_THRESHOLD = 1.5
+AUTO_RESUME_S = 180  # 3 minutes
+L2_CONSEC_REQUIRED = 4  # |s|>L2 连续达此次数才触发二级暂停(原为2次)
 REDIS_TTL = 86400    # 24 hours
 
 # Redis key format:
@@ -81,7 +82,7 @@ async def record_and_check(
         if existing and existing.get("level") == 1:
             triggered_level = 2
             logger.warning(f"[SLIPPAGE_GUARD] L1 → L2 upgrade triggered")
-        elif consec >= 2:
+        elif consec >= L2_CONSEC_REQUIRED:
             triggered_level = 2
 
     # Level 1: 0.9 < |s| <= 1.2
@@ -108,8 +109,8 @@ async def record_and_check(
     state = {
         "level": triggered_level,
         "reason": (
-            f"单次滑点{abs_slip:.4f} > 0.9" if triggered_level == 1
-            else f"连续2次滑点超过1.2 (本次={abs_slip:.4f})"
+            f"单次滑点{abs_slip:.4f} > {LEVEL_1_THRESHOLD}" if triggered_level == 1
+            else f"连续{L2_CONSEC_REQUIRED}次滑点超过{LEVEL_2_THRESHOLD} (本次={abs_slip:.4f})"
         ),
         "trigger_time": now_ts,
         "auto_resume_at": (now_ts + AUTO_RESUME_S) if triggered_level == 1 else None,
@@ -125,6 +126,15 @@ async def record_and_check(
         REDIS_TTL,
         json.dumps(state, default=str),
     )
+
+    # 实时推送弹框事件: 经 ws:user_event -> rust-engine send_to_user -> 前端 SlippagePauseModal
+    # (二级暂停需用户「确认(强制恢复)/取消(停止)」; 一级也推, 前端只对 level==2 阻断弹框)
+    try:
+        await redis_cli.publish("ws:user_event", json.dumps(
+            {"user_id": str(user_id), "type": "slippage_pause", "data": state},
+            default=str, ensure_ascii=False))
+    except Exception as _pe:
+        logger.warning(f"[SLIPPAGE_GUARD] ws push failed: {_pe}")
 
     # 写入审计表 + 发送飞书 (异步, 不阻塞 executor)
     import asyncio as _asyncio
@@ -214,9 +224,17 @@ async def get_pause_state(user_id: str, pair_code: str) -> Optional[Dict]:
 
 
 async def is_paused(user_id: str, pair_code: str) -> Tuple[bool, Optional[Dict]]:
-    """启动策略前检查."""
+    """启动策略前 / 网关每单检查. L1 到点(auto_resume_at)且用户未交互 -> 按需自动恢复.
+    (原后台 auto_resume_tick worker 因 app 用 lifespan、@app.on_event(startup) 被忽略而从未启动, 此处兜底自愈.)"""
     state = await get_pause_state(user_id, pair_code)
-    return (state is not None, state)
+    if state is None:
+        return (False, None)
+    if state.get("level") == 1 and not state.get("user_interacted"):
+        _auto_at = state.get("auto_resume_at")
+        if _auto_at and int(time.time()) >= int(_auto_at):
+            await force_clear(user_id, pair_code, reason="auto_resume_expired_on_check")
+            return (False, None)
+    return (True, state)
 
 
 async def mark_user_interaction(user_id: str, pair_code: str) -> None:
