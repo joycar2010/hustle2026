@@ -14,7 +14,7 @@ from app.api.feishu import router as feishu_router
 from app.api.blacklist import router as blacklist_router
 from app.api.sub_account import router as sub_account_router
 from app.api.master_account import router as master_account_router
-from app.api.symbol import router as symbol_router
+# /api/symbols 路由已收敛到 /api/coins(coins 表),symbol.py 路由下线
 from app.api.engine_api import router as engine_router
 from app.api.symbol_rules import router as symbol_rules_router
 from app.api.market import router as market_router
@@ -90,7 +90,6 @@ app.include_router(feishu_router)
 app.include_router(blacklist_router)
 app.include_router(sub_account_router)
 app.include_router(master_account_router)
-app.include_router(symbol_router)
 app.include_router(engine_router)
 app.include_router(symbol_rules_router)
 app.include_router(market_router)

@@ -10,7 +10,6 @@ import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
 import { getCoins } from '@/api/coins'
-import { getRiskySymbols } from '@/api/symbols'
 import type { SpreadData } from '@/stores/spreadStore'
 
 interface SubAccount {
@@ -73,8 +72,9 @@ export function DashboardPage() {
   }, [])
 
   const refreshRiskySymbols = useCallback(() => {
-    getRiskySymbols().then((syms) => {
-      setRiskySymbols(new Set(syms))
+    // 风险币种统一以 coins 表(is_risky,经币管页维护)为唯一源,替代已下线的 /api/symbols/risky
+    getCoins({ is_risky: 'true' }).then((coins) => {
+      setRiskySymbols(new Set(coins.filter((c) => c.is_risky).map((c) => c.symbol)))
     }).catch(() => {})
   }, [])
 
