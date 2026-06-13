@@ -61,6 +61,16 @@ async def lifespan(app: FastAPI):
     # 历史上 .start() 从未被调用 → balance:updates 永不发布 → 这些列一直显示「-」。
     await balance_pusher.start()
 
+    # 币安 API 文档变动检测:播种通知模板 + 启动周期检测(变动→跑马灯+飞书告警)
+    try:
+        from app.services.doc_checker import doc_checker, ensure_doc_template
+        db = SessionLocal()
+        ensure_doc_template(db)
+        db.close()
+        asyncio.create_task(doc_checker.start())
+    except Exception as e:
+        logger.warning(f"DocChecker startup failed (non-fatal): {e}")
+
     if settings.symbol_sync_on_startup:
         try:
             db = SessionLocal()
