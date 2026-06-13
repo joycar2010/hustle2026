@@ -298,7 +298,6 @@ export function OwlTopBar() {
   const username = useAuthStore((s) => s.username)
   const engineStatus = useEngineStore((s) => s.status)
   const workers = useEngineStore((s) => s.workers)
-  const balanceSummary = useBalanceStore((s) => s.summary)
   const masterFut = useMasterFutures()
   const wsLatency = useBalanceStore((s) => s.wsLatency)
   const setMobileNavOpen = useUiStore((s) => s.setMobileNavOpen)
@@ -353,8 +352,6 @@ export function OwlTopBar() {
   }, [handlePush])
 
   const runningCount = workers.filter((w) => w.status === 'RUNNING').length
-  const posCount = balanceSummary.positionCount
-  const totalContracts = balanceSummary.totalContracts
 
   return (
     <>
@@ -420,11 +417,7 @@ export function OwlTopBar() {
             <span className="text-foreground font-mono">{formatNumber(masterFut.available, 0)}</span>
           </span>
           <Clock />
-          <span>
-            合约{' '}
-            <span className="text-primary">{posCount}</span>
-            /<span className="text-muted-foreground">{totalContracts}</span>
-          </span>
+          {/* 「合约 未平/累计」已移到状态条(EngineHealthBar)最右侧 */}
           <span>
             引擎{' '}
             <span className={isRunning ? 'text-positive' : 'text-negative'}>{runningCount}</span>

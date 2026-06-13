@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { getEngineHealth, type EngineHealth } from '@/api/engine'
+import { useBalanceStore } from '@/stores/balanceStore'
 import {
   Activity, AlertTriangle, ChevronDown, ChevronUp,
   Heart, Server, Zap, Gauge, Clock,
@@ -26,6 +27,7 @@ export function EngineHealthBar() {
   const [health, setHealth] = useState<EngineHealth | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState(false)
+  const balanceSummary = useBalanceStore((s) => s.summary)  // 顶栏「合约 未平/累计」移到此
 
   const fetchHealth = useCallback(() => {
     getEngineHealth()
@@ -128,7 +130,7 @@ export function EngineHealthBar() {
           </>
         )}
 
-        {/* 持仓 — 移到状态条最右侧(全队未平仓数 + 卡住数) */}
+        {/* 持仓 + 合约 — 移到状态条最右侧 */}
         <span className="text-muted-foreground">|</span>
         <div className="flex items-center gap-1">
           <Activity className="h-3 w-3 text-muted-foreground" />
@@ -136,6 +138,11 @@ export function EngineHealthBar() {
           {health.stuck_positions.length > 0 && (
             <Badge variant="destructive" className="ml-1">{health.stuck_positions.length} 卡住</Badge>
           )}
+        </div>
+
+        <span className="text-muted-foreground">|</span>
+        <div className="flex items-center gap-1" title="合约: 未平仓 / 累计持仓数">
+          <span>合约 <span className="text-primary">{balanceSummary.positionCount}</span>/<span className="text-muted-foreground">{balanceSummary.totalContracts}</span></span>
         </div>
 
         <div className="ml-auto">
