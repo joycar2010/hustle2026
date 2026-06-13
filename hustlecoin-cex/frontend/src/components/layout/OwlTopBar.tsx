@@ -10,6 +10,14 @@ import { getMasterBalance } from '@/api/accounts'
 import { useToastStore } from '@/components/ui/toast'
 import { cn, formatNumber } from '@/lib/utils'
 
+// 推送币种归一化:用户常只填币名(如 HOT),自动补全成 USDT 交易对(HOTUSDT)。
+// 否则裸"HOT"会进 pushed 列表却无点差/不可交易 → 看起来「无法推送」。
+function normalizeSymbol(raw: string): string {
+  const s = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (!s) return ''
+  return s.endsWith('USDT') ? s : `${s}USDT`
+}
+
 // 顶栏「合约账户/保/可」取主账户的 U 本位合约钱包（非子账户汇总）
 function useMasterFutures() {
   const [m, setM] = useState({ total: 0, available: 0 })
@@ -186,18 +194,23 @@ function MobileNavDrawer() {
 
   const [pushInput, setPushInput] = useState('')
   const [pushing, setPushing] = useState(false)
+  const addToast = useToastStore((s) => s.addToast)
 
   const handlePush = useCallback(async () => {
-    const sym = pushInput.trim().toUpperCase()
+    const sym = normalizeSymbol(pushInput)
     if (!sym) return
     setPushing(true)
     try {
       await pushSymbol(sym)
       setPushInput('')
       window.dispatchEvent(new CustomEvent('pushed:refresh'))
-    } catch { /* ignore */ }
+      addToast(`已推送 ${sym}`, 'success')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      addToast(err.response?.data?.detail || `推送 ${sym} 失败`, 'error')
+    }
     setPushing(false)
-  }, [pushInput])
+  }, [pushInput, addToast])
 
   if (!mobileNavOpen) return null
 
@@ -336,16 +349,20 @@ export function OwlTopBar() {
   }, [isRunning, addToast, fetchWorkers])
 
   const handlePush = useCallback(async () => {
-    const sym = pushInput.trim().toUpperCase()
+    const sym = normalizeSymbol(pushInput)
     if (!sym) return
     setPushing(true)
     try {
       await pushSymbol(sym)
       setPushInput('')
       window.dispatchEvent(new CustomEvent('pushed:refresh'))
-    } catch { /* ignore */ }
+      addToast(`已推送 ${sym}`, 'success')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      addToast(err.response?.data?.detail || `推送 ${sym} 失败`, 'error')
+    }
     setPushing(false)
-  }, [pushInput])
+  }, [pushInput, addToast])
 
   const handlePushKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handlePush()

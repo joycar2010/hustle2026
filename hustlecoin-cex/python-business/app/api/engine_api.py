@@ -528,10 +528,18 @@ def get_pushed_symbols(request: Request):
 
 
 @router.post("/push-symbol/{symbol}")
-def push_symbol(symbol: str, request: Request):
+def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     r = _redis()
-    sym = symbol.upper()
+    sym = symbol.upper().strip()
+    if not sym.endswith("USDT"):
+        sym = f"{sym}USDT"
+    # 校验:必须是可交易币种(在 symbols 表且 active/margin/futures)且有点差,
+    # 否则推送进去也借不了、看不到数据,徒增「无法推送」困惑。
+    from app.db.models import Symbol
+    s = db.query(Symbol).filter(Symbol.symbol == sym).first()
+    if not s or not (s.is_active and s.margin_tradable and s.futures_tradable):
+        raise HTTPException(status_code=400, detail=f"{sym} 不可交易(非借币/合约支持的 USDT 交易对)")
     key = _user_redis_key(user_id, "push_commands")
     r.rpush(key, json.dumps({"action": "push", "symbol": sym}))
     r.expire(key, 120)
