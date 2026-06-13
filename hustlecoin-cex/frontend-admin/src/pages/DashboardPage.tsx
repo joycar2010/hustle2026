@@ -4,6 +4,7 @@ import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatNumber } from '@/lib/utils'
+import { AdminMarquee } from '@/components/AdminMarquee'
 import {
   Server, Database, Activity, Users, TrendingUp, Globe, Shield,
   RefreshCw, Clock, Wifi, WifiOff, Bell, BellOff, Bot, Zap,
@@ -64,6 +65,9 @@ export function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* 后台内置跑马灯:API 文档变动等告警(轮询近 24h marquee 广播) */}
+      <AdminMarquee />
 
       {/* Row 1: Core Business (3 columns) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

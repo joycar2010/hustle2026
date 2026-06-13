@@ -588,6 +588,29 @@ def broadcast_notification(req: BroadcastRequest, request: Request, db: Session 
     return {"message": "Notification broadcasted"}
 
 
+@router.get("/recent-marquee")
+def recent_marquee(request: Request, limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
+    """admin 后台内置跑马灯数据源:近 24h 的 marquee 广播(含 API 文档变动等告警)。"""
+    require_admin(request)
+    import datetime
+    since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
+    logs = (db.query(NotificationLog)
+            .filter(NotificationLog.channel == "marquee", NotificationLog.status == "sent",
+                    NotificationLog.created_at >= since)
+            .order_by(NotificationLog.id.desc()).limit(limit).all())
+    return {
+        "items": [
+            {
+                "id": l.id,
+                "title": l.template_name,
+                "content": l.content or "",
+                "created_at": str(l.created_at) if l.created_at else None,
+            }
+            for l in logs
+        ]
+    }
+
+
 # ─── Logs ───
 
 @router.get("/logs")

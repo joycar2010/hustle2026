@@ -489,6 +489,18 @@ export async function listNotificationTemplates() {
   return data as NotificationTemplate[]
 }
 
+export interface MarqueeItem {
+  id: number
+  title: string
+  content: string
+  created_at: string | null
+}
+
+export async function getRecentMarquee(limit = 10) {
+  const { data } = await client.get('/api/admin/notifications/recent-marquee', { params: { limit } })
+  return (data?.items || []) as MarqueeItem[]
+}
+
 export async function updateNotificationTemplate(id: number, body: Partial<NotificationTemplate>) {
   const { data } = await client.put(`/api/admin/notifications/templates/${id}`, body)
   return data
