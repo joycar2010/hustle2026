@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { getEngineHealth, type EngineHealth } from '@/api/engine'
+import { getEngineHealth, restartWorker, startWorker, stopWorker, type EngineHealth } from '@/api/engine'
 import { useBalanceStore } from '@/stores/balanceStore'
+import { useToastStore } from '@/components/ui/toast'
 import {
   Activity, AlertTriangle, ChevronDown, ChevronUp,
   Heart, Server, Zap, Gauge, Clock,
@@ -28,12 +29,28 @@ export function EngineHealthBar() {
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState(false)
   const balanceSummary = useBalanceStore((s) => s.summary)  // 顶栏「合约 未平/累计」移到此
+  const addToast = useToastStore((s) => s.addToast)
 
   const fetchHealth = useCallback(() => {
     getEngineHealth()
       .then((d) => { setHealth(d); setError(false) })
       .catch(() => setError(true))
   }, [])
+
+  // 单 worker 操作: scope=sub:N → id=N;操作后延迟回读(reconcile ~10s 生效)
+  const workerAction = useCallback(async (scope: string, kind: 'restart' | 'stop' | 'start') => {
+    const id = parseInt(scope.replace('sub:', ''), 10)
+    if (isNaN(id)) return
+    const fn = kind === 'restart' ? restartWorker : kind === 'stop' ? stopWorker : startWorker
+    try {
+      const r = await fn(id)
+      addToast(r.message || '已发送', 'success')
+      setTimeout(fetchHealth, 2000)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      addToast(err.response?.data?.detail || '操作失败', 'error')
+    }
+  }, [addToast, fetchHealth])
 
   useEffect(() => {
     fetchHealth()
@@ -166,6 +183,24 @@ export function EngineHealthBar() {
                       </Badge>
                       {w.heartbeat_stale && (
                         <Badge variant="warning">超时</Badge>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); workerAction(w.scope, 'restart') }}
+                        className="px-1.5 py-0.5 rounded border border-border text-[10px] text-primary hover:bg-accent/50"
+                        title="重启该 worker(卡死/超时时单独重启,不影响其他)"
+                      >重启</button>
+                      {w.status === 'RUNNING' ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); workerAction(w.scope, 'stop') }}
+                          className="px-1.5 py-0.5 rounded border border-border text-[10px] text-negative hover:bg-accent/50"
+                          title="停用该子账户(有在场持仓则保留至平仓)"
+                        >停</button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); workerAction(w.scope, 'start') }}
+                          className="px-1.5 py-0.5 rounded border border-border text-[10px] text-positive hover:bg-accent/50"
+                          title="启用该子账户"
+                        >启</button>
                       )}
                     </div>
                   </div>

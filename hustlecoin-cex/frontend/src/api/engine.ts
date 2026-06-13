@@ -51,6 +51,11 @@ export async function stopWorker(id: number) {
   return data
 }
 
+export async function restartWorker(id: number) {
+  const { data } = await client.post(`/api/engine/workers/${id}/restart`)
+  return data
+}
+
 export interface TradeLogEntry {
   id: number
   position_id: number | null

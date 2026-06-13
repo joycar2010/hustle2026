@@ -41,6 +41,32 @@ class Orchestrator:
         self._tasks.clear()
         logger.info("Orchestrator stopped")
 
+    async def restart_worker(self, account_id: int):
+        """单独重启某 worker(运维:卡死/心跳超时时无需整体停启)。取消并移除其 task,
+        立即对账重建(若该账户仍启用或有在场持仓)。其余 worker 不受影响。"""
+        w = self._workers.get(account_id)
+        if w:
+            logger.info(f"Restarting worker for sub-account {account_id}")
+            try:
+                await w.stop()
+            except Exception:
+                pass
+            t = self._tasks.get(account_id)
+            if t:
+                t.cancel()
+                try:
+                    await asyncio.gather(t, return_exceptions=True)
+                except Exception:
+                    pass
+            self._workers.pop(account_id, None)
+            self._tasks.pop(account_id, None)
+        else:
+            logger.info(f"restart_worker: sub-account {account_id} 无在运行 worker,尝试对账拉起")
+        try:
+            await self._reconcile()
+        except Exception as e:
+            logger.error(f"restart_worker reconcile error: {e}")
+
     async def _supervisor_loop(self):
         while self._running:
             try:

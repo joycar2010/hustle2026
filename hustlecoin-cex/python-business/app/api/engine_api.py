@@ -907,6 +907,48 @@ def stop_engine(request: Request, db: Session = Depends(get_db)):
     return {"message": "Engine stop signal sent"}
 
 
+def _owned_sub(db: Session, user_id: int, account_id: int) -> SubAccount:
+    acc = db.query(SubAccount).filter(
+        SubAccount.id == account_id, SubAccount.user_id == user_id,
+    ).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+    return acc
+
+
+@router.post("/workers/{account_id}/restart")
+def restart_one_worker(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """单独重启某子账户的 worker(卡死/心跳超时时无需整体停启)。经 Redis 命令 →
+    orchestrator.restart_worker 取消并重建该 task,其余 worker 不动。"""
+    user_id = get_current_user_id(request)
+    _owned_sub(db, user_id, account_id)
+    r = _redis()
+    r.rpush(f"engine:{user_id}:commands", json.dumps({"action": "restart_worker", "account_id": account_id}))
+    r.expire(f"engine:{user_id}:commands", 120)
+    return {"message": f"worker #{account_id} 重启信号已发送"}
+
+
+@router.post("/workers/{account_id}/stop")
+def stop_one_worker(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """停用单个 worker = 禁用该子账户(is_enabled=False);orchestrator 下轮对账停其 worker。
+    注:若该账户尚有在场持仓,worker 会被保留以管理平仓/还币(不会孤儿化),属预期安全行为。"""
+    user_id = get_current_user_id(request)
+    acc = _owned_sub(db, user_id, account_id)
+    acc.is_enabled = False
+    db.commit()
+    return {"message": f"worker #{account_id} 已停用(约10s内生效;有在场持仓则保留至平仓)"}
+
+
+@router.post("/workers/{account_id}/start")
+def start_one_worker(account_id: int, request: Request, db: Session = Depends(get_db)):
+    """启用单个 worker = 启用该子账户(is_enabled=True);orchestrator 下轮对账拉起。"""
+    user_id = get_current_user_id(request)
+    acc = _owned_sub(db, user_id, account_id)
+    acc.is_enabled = True
+    db.commit()
+    return {"message": f"worker #{account_id} 已启用(约10s内拉起)"}
+
+
 def _live_worker_scopes(db: Session, user_id: int) -> list[str]:
     """当前仍存在的子账户对应的 worker scope。用于过滤掉已删除子账户残留的
     engine_state(sub:N)僵尸行 —— 它们 heartbeat 永久过期、显示「超时」却无法删除。"""

@@ -249,6 +249,11 @@ async def _command_consumer_loop(
                             )
                             _clear_tasks.add(t)
                             t.add_done_callback(_clear_tasks.discard)
+                    elif cmd["action"] == "restart_worker":
+                        account_id = cmd.get("account_id")
+                        if account_id and uid in user_engines:
+                            orch = user_engines[uid].orchestrator
+                            asyncio.create_task(orch.restart_worker(account_id))
 
             keys = await r.keys("engine:*:commands")
             for key in keys:
