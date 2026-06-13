@@ -313,6 +313,7 @@ export function OwlTopBar() {
   const workers = useEngineStore((s) => s.workers)
   const masterFut = useMasterFutures()
   const wsLatency = useBalanceStore((s) => s.wsLatency)
+  const wsConnected = useUiStore((s) => s.wsConnected)
   const setMobileNavOpen = useUiStore((s) => s.setMobileNavOpen)
   const addToast = useToastStore((s) => s.addToast)
   const [pushInput, setPushInput] = useState('')
@@ -449,6 +450,15 @@ export function OwlTopBar() {
               ms
             </span>
           )}
+          {/* WS 连接状态灯 + 点击手动重连(行情卡死时一键自愈,无需刷新整页) */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('ws:manual-reconnect'))}
+            title={wsConnected ? '行情已连接 · 点击重连' : '行情已断开 · 点击重连'}
+            className="flex items-center gap-1 px-1 rounded hover:bg-accent transition-colors"
+          >
+            <span className={cn('h-2 w-2 rounded-full', wsConnected ? 'bg-positive' : 'bg-negative animate-pulse')} />
+            <span className={wsConnected ? 'text-positive' : 'text-negative'}>{wsConnected ? '在线' : '离线'}</span>
+          </button>
         </div>
 
         {/* Nav tabs — desktop only */}
