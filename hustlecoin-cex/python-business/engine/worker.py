@@ -34,6 +34,7 @@ class Worker:
         self._symbol_rules: dict[str, dict] = {}
         self._symbol_statuses: dict[str, str] = {}
         self._glitch_logged: dict[str, datetime] = {}
+        self._symbol_volumes: dict[str, float] = {}   # symbol -> 24h成交量(USDT),交易护栏用
         self._user_id: int | None = None
         self._account_max_borrow: Decimal | None = None
         self._account_max_positions: int | None = None
@@ -270,6 +271,8 @@ class Worker:
                     continue
                 if symbol in active_symbols:          # already borrowed / open / pending
                     continue
+                if not self._volume_ok(symbol):       # 成交量护栏:薄盘币不借
+                    continue
                 if self._is_banned(symbol):
                     continue
                 sym_rule = self._symbol_rules.get(symbol, {})
@@ -372,6 +375,7 @@ class Worker:
             candidates = {
                 sym for sym, sp in self.spread_feed.get_all().items()
                 if sym in tradable_symbols and float(sp.spread_short) >= threshold
+                and self._volume_ok(sym)   # 成交量护栏:低量薄盘不自动推送
             }
             if not candidates:
                 return
@@ -502,14 +506,23 @@ class Worker:
     def _load_tradable_symbols(self) -> set[str]:
         db = SessionLocal()
         try:
-            symbols = db.query(Symbol.symbol).filter(
+            rows = db.query(Symbol.symbol, Symbol.volume_24h).filter(
                 Symbol.is_active == True,
                 Symbol.margin_tradable == True,
                 Symbol.futures_tradable == True,
             ).all()
-            return {s.symbol for s in symbols}
+            # 同时刷新成交量 map(交易护栏:低量币不自动推送/借币)
+            self._symbol_volumes = {r.symbol: float(r.volume_24h or 0) for r in rows}
+            return {r.symbol for r in rows}
         finally:
             db.close()
+
+    def _volume_ok(self, symbol: str) -> bool:
+        """24h 成交量护栏:低于 min_volume_24h 的薄盘币不参与自动推送/借币(0=关闭)。"""
+        min_vol = float(getattr(self.config.global_rules, "min_volume_24h", 0) or 0)
+        if min_vol <= 0:
+            return True
+        return self._symbol_volumes.get(symbol, 0) >= min_vol
 
     def _load_open_positions(self) -> list[Position]:
         db = SessionLocal()

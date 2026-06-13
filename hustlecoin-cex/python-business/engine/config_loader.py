@@ -40,6 +40,7 @@ class GlobalRulesSnapshot:
     otoco_legs: int = 2
     hedge_via_master: bool = False
     max_spread_pct: Decimal = Decimal("3.0")
+    min_volume_24h: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ class ConfigLoader:
                     otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
                     hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),
                     max_spread_pct=rules.max_spread_pct if getattr(rules, "max_spread_pct", None) is not None else Decimal("3.0"),
+                    min_volume_24h=rules.min_volume_24h if getattr(rules, "min_volume_24h", None) is not None else Decimal("0"),
                 )
 
             fund = db.query(FundRules).first()

@@ -27,6 +27,7 @@ class GlobalRulesUpdate(BaseModel):
     otoco_legs: Optional[int] = None
     hedge_via_master: Optional[bool] = None
     max_spread_pct: Optional[Decimal] = None
+    min_volume_24h: Optional[Decimal] = None
 
 
 class GlobalRulesResponse(BaseModel):
@@ -53,6 +54,7 @@ class GlobalRulesResponse(BaseModel):
     otoco_legs: Optional[int] = 2
     hedge_via_master: Optional[bool] = False
     max_spread_pct: Optional[Decimal] = 3.0
+    min_volume_24h: Optional[Decimal] = 0
     updated_at: datetime
 
     model_config = {"from_attributes": True}

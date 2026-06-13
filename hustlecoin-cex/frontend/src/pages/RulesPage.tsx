@@ -914,6 +914,8 @@ export function RulesPage() {
               <span className="text-muted-foreground/60 text-[10px]">主账户模式: 借币/现货在各子账户,合约多腿统一打主账户(需主账户已配置且为单向持仓)</span>
               <InlineField label="点差护栏" value={gv('max_spread_pct')} onChange={(v) => updateG('max_spread_pct', v)} suffix="%" width="w-10" />
               <span className="text-muted-foreground/60 text-[10px]">点差幅度超此值视为行情glitch跳过下单/平仓(防坏价误开仓;0=关闭)</span>
+              <InlineField label="成交量护栏" value={gv('min_volume_24h')} onChange={(v) => updateG('min_volume_24h', v)} suffix="U" width="w-20" />
+              <span className="text-muted-foreground/60 text-[10px]">24h成交量低于此值的薄盘币不自动推送/借币(交易护栏;0=关闭)</span>
             </div>
             <div className="text-[10px] text-muted-foreground/60 -mt-1">
               限价：合约腿用可成交限价(挂价≥卖一×(1+滑点))封顶滑点，超时未成交自动市价补齐——永不留敞口。分层格式「偏移%:数量%」如 0.5:30,0.8:30,1.2:40。受控测试请先用小额单笔下单额验证。
