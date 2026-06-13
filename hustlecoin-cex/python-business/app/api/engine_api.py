@@ -428,54 +428,87 @@ async def manual_transfer(account_id: int, data: TransferRequest, request: Reque
     return {"message": f"Transferred {data.amount} {data.asset} from {data.from_wallet} to {data.to_wallet}", "tranId": result.get("tranId")}
 
 
+# 钱包 → 币安万向划转账户类型
+_UT_ACCT_TYPE = {"spot": "SPOT", "futures": "USDT_FUTURE", "margin": "MARGIN"}
+
+
 class CrossTransferRequest(BaseModel):
-    target_type: str
-    target_sub_account_id: int | None = None
     asset: str = "USDT"
     amount: Decimal
+    direction: str = "out"            # out=本账户(account_id)转出, in=本账户转入
+    counterparty_type: str = "master"  # master | sub
+    counterparty_sub_account_id: int | None = None
+    from_wallet: str = "spot"          # spot | futures | margin
+    to_wallet: str = "spot"
+    # 旧字段兼容(原仅支持 本账户→master / 本账户→sub)
+    target_type: str | None = None
+    target_sub_account_id: int | None = None
 
 
 @router.post("/accounts/{account_id}/transfer-cross")
 async def cross_account_transfer(account_id: int, data: CrossTransferRequest, request: Request, db: Session = Depends(get_db)):
+    """主/子账户互转(master↔sub、sub↔sub)。一律用【主账户】key 调 universalTransfer:
+    direction=out 本账户转出, in 本账户转入;对手方 master(email 省略)或另一子账户。"""
     user_id = get_current_user_id(request)
-    account = db.query(SubAccount).filter(
+    anchor = db.query(SubAccount).filter(
         SubAccount.id == account_id, SubAccount.user_id == user_id,
     ).first()
-    if not account:
+    if not anchor:
         raise HTTPException(status_code=404, detail="Sub-account not found")
 
-    from engine.trading.binance_trading import BinanceTradingClient
+    cp_type = data.counterparty_type or data.target_type or "master"
+    cp_sub_id = data.counterparty_sub_account_id or data.target_sub_account_id
+    if cp_type not in ("master", "sub"):
+        raise HTTPException(status_code=400, detail="counterparty_type 必须是 master 或 sub")
+    if data.direction not in ("out", "in"):
+        raise HTTPException(status_code=400, detail="direction 必须是 out 或 in")
 
-    if data.target_type == "master":
-        async with BinanceTradingClient(account.api_key, account.api_secret) as client:
-            result = await client.sub_to_master(data.asset, data.amount)
-        return {"message": f"Transferred {data.amount} {data.asset} to master account", "tranId": result.get("tranId")}
+    # universalTransfer 是主账户专属端点,任何方向都用主账户 key
+    master = _load_master_account(db, user_id)
+    if not master:
+        raise HTTPException(status_code=400, detail="主账户未配置,无法跨账户划转")
 
-    elif data.target_type == "sub":
-        if not data.target_sub_account_id:
-            raise HTTPException(status_code=400, detail="target_sub_account_id is required for sub-to-sub transfer")
-        target = db.query(SubAccount).filter(
-            SubAccount.id == data.target_sub_account_id, SubAccount.user_id == user_id,
+    # 对手方 email(master → None 省略表示主账户)+ 标签
+    if cp_type == "master":
+        cp_email, cp_label = None, "主账户"
+    else:
+        if not cp_sub_id:
+            raise HTTPException(status_code=400, detail="子↔子划转需指定对手子账户")
+        cp = db.query(SubAccount).filter(
+            SubAccount.id == cp_sub_id, SubAccount.user_id == user_id,
         ).first()
-        if not target:
-            raise HTTPException(status_code=404, detail="Target sub-account not found")
+        if not cp:
+            raise HTTPException(status_code=404, detail="对手子账户不存在")
+        cp_email, cp_label = cp.email, (cp.note or f"#{cp.id}")
 
-        master = db.query(MasterAccount).filter(MasterAccount.user_id == user_id).first()
-        if not master:
-            raise HTTPException(status_code=400, detail="Master account not configured, required for sub-to-sub transfer")
+    from_acct = _UT_ACCT_TYPE.get((data.from_wallet or "spot").lower(), "SPOT")
+    to_acct = _UT_ACCT_TYPE.get((data.to_wallet or "spot").lower(), "SPOT")
 
+    # from_wallet/to_wallet 恒指实际转账的「源钱包/目标钱包」(与方向无关)
+    if data.direction == "out":      # 本账户 → 对手方
+        from_email, to_email = anchor.email, cp_email
+        src_label, dst_label = (anchor.note or f"#{anchor.id}"), cp_label
+    else:                            # 对手方 → 本账户
+        from_email, to_email = cp_email, anchor.email
+        src_label, dst_label = cp_label, (anchor.note or f"#{anchor.id}")
+
+    if from_email == to_email:
+        raise HTTPException(status_code=400, detail="源账户与目标账户不能相同")
+
+    from engine.trading.binance_trading import BinanceTradingClient, BinanceAPIError
+    try:
         async with BinanceTradingClient(master.api_key, master.api_secret) as client:
             result = await client.universal_transfer(
-                from_email=account.email,
-                to_email=target.email,
-                from_account_type="SPOT",
-                to_account_type="SPOT",
-                asset=data.asset,
-                amount=data.amount,
+                asset=data.asset, amount=data.amount,
+                from_account_type=from_acct, to_account_type=to_acct,
+                from_email=from_email, to_email=to_email,
             )
-        return {"message": f"Transferred {data.amount} {data.asset} from {account.note} to {target.note}", "tranId": result.get("tranId")}
-    else:
-        raise HTTPException(status_code=400, detail="Invalid target_type, must be 'master' or 'sub'")
+    except BinanceAPIError as e:
+        raise HTTPException(status_code=400, detail=f"划转失败: {e.message}")
+    return {
+        "message": f"已划转 {data.amount} {data.asset}: {src_label} → {dst_label}",
+        "tranId": result.get("tranId"),
+    }
 
 
 def _redis():
@@ -975,6 +1008,7 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
 
     # IP-wide used weight (published to Redis by engine workers + balance_pusher)
     used_weight, weight_limit, weight_age = 0, 6000, None
+    uid_used, uid_limit = 0, 180000   # 借币 UID 权重(顶栏「UID」),即使 redis 异常也要有定义
     throttle_rate = 0.0
     try:
         r = _redis()
@@ -989,7 +1023,6 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         # limit 180000 → 2/s/account), NOT IP-weighted. Use the busiest UID's remaining
         # headroom spread across the user's pushed symbols.
         UID_PER_BORROW = 1500
-        uid_used, uid_limit = 0, 180000
         uraw = r.get("engine:uid_weight:latest")
         if uraw:
             ud = json.loads(uraw)
@@ -1056,6 +1089,8 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         used_weight_1m=used_weight,
         weight_limit=weight_limit,
         weight_age_sec=weight_age,
+        uid_used_1m=uid_used,
+        uid_limit=uid_limit,
         throttle_rate=throttle_rate,
         agg_borrow_rate=agg_borrow_rate,
     )

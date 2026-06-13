@@ -47,8 +47,9 @@ export function EngineHealthBar() {
   const staleWorkers = health.workers.filter(w => w.heartbeat_stale)
   const runningWorkers = health.workers.filter(w => w.status === 'RUNNING')
   const isRunning = health.engine_status === 'RUNNING'
-  const usedWeight = health.used_weight_1m ?? 0
-  const weightLimit = health.weight_limit || 6000
+  // 顶栏「UID」= 借币 UID 权重(1500/次,限额 180000)—— 借币的真实硬约束
+  const usedWeight = health.uid_used_1m ?? 0
+  const weightLimit = health.uid_limit || 180000
   const weightPct = Math.min(100, Math.round((usedWeight / weightLimit) * 100))
   const weightColor = weightPct >= 85 ? 'text-negative' : weightPct >= 60 ? 'text-yellow-500' : 'text-positive'
   const weightBar = weightPct >= 85 ? 'bg-negative' : weightPct >= 60 ? 'bg-yellow-500' : 'bg-positive'
@@ -86,10 +87,10 @@ export function EngineHealthBar() {
 
         <span className="text-muted-foreground">|</span>
 
-        {/* SAPI weight gauge */}
-        <div className="flex items-center gap-1" title={`SAPI 权重 ${usedWeight}/${weightLimit} (1分钟IP限额)${health.weight_age_sec != null ? ` · ${health.weight_age_sec}s前` : ''}`}>
+        {/* UID 借币权重 gauge(1500/次,限额 180000) */}
+        <div className="flex items-center gap-1" title={`UID 借币权重 ${usedWeight}/${weightLimit} (1分钟单UID限额,借币 1500/次)${health.weight_age_sec != null ? ` · ${health.weight_age_sec}s前` : ''}`}>
           <Gauge className={`h-3 w-3 ${weightColor}`} />
-          <span className={weightColor}>权重 {usedWeight}/{weightLimit}</span>
+          <span className={weightColor}>UID {usedWeight}/{weightLimit}</span>
           <span className="hidden sm:inline-block w-12 h-1.5 rounded-full bg-muted overflow-hidden align-middle">
             <span className={`block h-full ${weightBar}`} style={{ width: `${weightPct}%` }} />
           </span>
@@ -102,16 +103,6 @@ export function EngineHealthBar() {
           <span>{runningWorkers.length} Worker</span>
           {staleWorkers.length > 0 && (
             <Badge variant="warning" className="ml-1">{staleWorkers.length} 超时</Badge>
-          )}
-        </div>
-
-        <span className="text-muted-foreground">|</span>
-
-        <div className="flex items-center gap-1">
-          <Activity className="h-3 w-3 text-muted-foreground" />
-          <span>{health.open_positions} 持仓</span>
-          {health.stuck_positions.length > 0 && (
-            <Badge variant="destructive" className="ml-1">{health.stuck_positions.length} 卡住</Badge>
           )}
         </div>
 
@@ -136,6 +127,16 @@ export function EngineHealthBar() {
             <span className="text-negative">API错误: {totalMetrics.errors}</span>
           </>
         )}
+
+        {/* 持仓 — 移到状态条最右侧(全队未平仓数 + 卡住数) */}
+        <span className="text-muted-foreground">|</span>
+        <div className="flex items-center gap-1">
+          <Activity className="h-3 w-3 text-muted-foreground" />
+          <span>{health.open_positions} 持仓</span>
+          {health.stuck_positions.length > 0 && (
+            <Badge variant="destructive" className="ml-1">{health.stuck_positions.length} 卡住</Badge>
+          )}
+        </div>
 
         <div className="ml-auto">
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}

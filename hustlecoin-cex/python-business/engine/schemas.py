@@ -135,5 +135,7 @@ class HealthResponse(BaseModel):
     used_weight_1m: int = 0
     weight_limit: int = 6000
     weight_age_sec: Optional[int] = None
+    uid_used_1m: int = 0           # 借币 UID 权重用量(1500/次,顶栏「UID」显示)
+    uid_limit: int = 180000        # 单 UID 权重上限
     throttle_rate: float = 0.0  # per-symbol borrow throughput (req/s) under current weight headroom
     agg_borrow_rate: float = 0.0  # Σ per-account effective borrow rate (req/s)

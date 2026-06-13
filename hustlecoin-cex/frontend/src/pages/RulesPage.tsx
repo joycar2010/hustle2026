@@ -201,6 +201,9 @@ function TransferModal({
   const [transferring, setTransferring] = useState(false)
   const [targetType, setTargetType] = useState<'master' | 'sub'>('master')
   const [targetSubId, setTargetSubId] = useState<number>(0)
+  const [crossDir, setCrossDir] = useState<'out' | 'in'>('out')   // out=本账户转出, in=本账户转入
+  const [crossFromWallet, setCrossFromWallet] = useState<WalletType>('spot')
+  const [crossToWallet, setCrossToWallet] = useState<WalletType>('spot')
   const addToast = useToastStore((s) => s.addToast)
 
   const wallets: WalletType[] = ['spot', 'futures', 'margin']
@@ -232,19 +235,23 @@ function TransferModal({
   const handleCrossTransfer = async () => {
     const num = parseFloat(amount)
     if (!num || num <= 0) { addToast('请输入有效金额', 'error'); return }
-    if (targetType === 'sub' && !targetSubId) { addToast('请选择目标子账户', 'error'); return }
+    if (targetType === 'sub' && !targetSubId) { addToast('请选择对手子账户', 'error'); return }
     setTransferring(true)
     try {
       await crossAccountTransfer(account.id, {
-        target_type: targetType,
-        target_sub_account_id: targetType === 'sub' ? targetSubId : undefined,
+        direction: crossDir,
+        counterparty_type: targetType,
+        counterparty_sub_account_id: targetType === 'sub' ? targetSubId : undefined,
+        from_wallet: crossFromWallet,
+        to_wallet: crossToWallet,
         asset: 'USDT',
         amount: num,
       })
-      const targetLabel = targetType === 'master'
+      const cpLabel = targetType === 'master'
         ? '主账户'
         : accounts.find((a) => a.id === targetSubId)?.note || `#${targetSubId}`
-      addToast(`划转成功: ${account.note} → ${targetLabel} ${num} USDT`, 'success')
+      const [src, dst] = crossDir === 'out' ? [account.note, cpLabel] : [cpLabel, account.note]
+      addToast(`划转成功: ${src} → ${dst} ${num} USDT`, 'success')
       onSuccess(); onClose()
     } catch (err: unknown) {
       addToast(extractError(err, '划转失败'), 'error')
@@ -378,62 +385,117 @@ function TransferModal({
             </>
           ) : (
             <>
-              {/* Target type selector */}
-              <div className="space-y-1.5">
-                <span className="text-[12px] text-muted-foreground font-medium">划转目标</span>
-                <div className="flex rounded-lg overflow-hidden border border-border">
-                  <button
-                    onClick={() => setTargetType('master')}
-                    className={`flex-1 py-2.5 text-center text-[12px] font-medium transition-colors ${
-                      targetType === 'master' ? 'bg-primary text-white' : 'bg-[#1a1a22] text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    主账户
-                  </button>
-                  <button
-                    onClick={() => setTargetType('sub')}
-                    className={`flex-1 py-2.5 text-center text-[12px] font-medium transition-colors ${
-                      targetType === 'sub' ? 'bg-primary text-white' : 'bg-[#1a1a22] text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    其他子账户
-                  </button>
+              {/* 方向 + 对手账户 selectors */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <span className="text-[12px] text-muted-foreground font-medium">方向</span>
+                  <div className="flex rounded-lg overflow-hidden border border-border">
+                    <button
+                      onClick={() => setCrossDir('out')}
+                      className={`flex-1 py-2.5 text-center text-[12px] font-medium transition-colors ${
+                        crossDir === 'out' ? 'bg-primary text-white' : 'bg-[#1a1a22] text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      本账户转出
+                    </button>
+                    <button
+                      onClick={() => setCrossDir('in')}
+                      className={`flex-1 py-2.5 text-center text-[12px] font-medium transition-colors ${
+                        crossDir === 'in' ? 'bg-primary text-white' : 'bg-[#1a1a22] text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      本账户转入
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[12px] text-muted-foreground font-medium">对手账户</span>
+                  <div className="flex rounded-lg overflow-hidden border border-border">
+                    <button
+                      onClick={() => setTargetType('master')}
+                      className={`flex-1 py-2.5 text-center text-[12px] font-medium transition-colors ${
+                        targetType === 'master' ? 'bg-primary text-white' : 'bg-[#1a1a22] text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      主账户
+                    </button>
+                    <button
+                      onClick={() => setTargetType('sub')}
+                      className={`flex-1 py-2.5 text-center text-[12px] font-medium transition-colors ${
+                        targetType === 'sub' ? 'bg-primary text-white' : 'bg-[#1a1a22] text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      其他子账户
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Direction visualization */}
-              <div className="flex items-center justify-center gap-3 text-[13px] py-1">
-                <span className="px-3 py-1.5 rounded border border-primary/30 bg-primary/10 text-primary font-medium">{account.note}</span>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
-                  <path d="M5 12h14m0 0l-4-4m4 4l-4 4" />
-                </svg>
-                {targetType === 'master' ? (
-                  <span className="px-3 py-1.5 rounded border border-positive/30 bg-positive/10 text-positive font-medium">主账户</span>
-                ) : (
+              {targetType === 'sub' && (
+                <select
+                  value={targetSubId}
+                  onChange={(e) => setTargetSubId(Number(e.target.value))}
+                  className="w-full bg-[#1a1a22] border border-border rounded-lg px-3 py-2 text-[13px] text-foreground focus:outline-none focus:border-primary"
+                >
+                  <option value={0}>选择对手子账户</option>
+                  {otherAccounts.map((a) => {
+                    const b = balances[a.id]
+                    const total = b ? Math.round(parseFloat(b.spot_usdt_free) + parseFloat(b.margin_usdt_free) + parseFloat(b.futures_available)) : 0
+                    return (
+                      <option key={a.id} value={a.id}>
+                        {a.note} ({a.email}) — {total} U
+                      </option>
+                    )
+                  })}
+                </select>
+              )}
+
+              {/* Direction visualization (源 → 目标,随方向) */}
+              {(() => {
+                const cpLabel = targetType === 'master' ? '主账户'
+                  : (otherAccounts.find((a) => a.id === targetSubId)?.note || '对手子账户')
+                const [srcL, dstL] = crossDir === 'out' ? [account.note, cpLabel] : [cpLabel, account.note]
+                return (
+                  <div className="flex items-center justify-center gap-3 text-[13px] py-1">
+                    <span className="px-3 py-1.5 rounded border border-primary/30 bg-primary/10 text-primary font-medium">{srcL}</span>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+                      <path d="M5 12h14m0 0l-4-4m4 4l-4 4" />
+                    </svg>
+                    <span className="px-3 py-1.5 rounded border border-positive/30 bg-positive/10 text-positive font-medium">{dstL}</span>
+                  </div>
+                )
+              })()}
+
+              {/* 源/目标 钱包 */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <span className="text-[12px] text-muted-foreground font-medium">源钱包</span>
                   <select
-                    value={targetSubId}
-                    onChange={(e) => setTargetSubId(Number(e.target.value))}
-                    className="bg-[#1a1a22] border border-border rounded-lg px-3 py-1.5 text-[13px] text-foreground focus:outline-none focus:border-primary"
+                    value={crossFromWallet}
+                    onChange={(e) => setCrossFromWallet(e.target.value as WalletType)}
+                    className="w-full bg-[#1a1a22] border border-border rounded-lg px-3 py-2 text-[13px] text-foreground focus:outline-none focus:border-primary"
                   >
-                    <option value={0}>选择子账户</option>
-                    {otherAccounts.map((a) => {
-                      const b = balances[a.id]
-                      const total = b ? Math.round(parseFloat(b.spot_usdt_free) + parseFloat(b.margin_usdt_free) + parseFloat(b.futures_available)) : 0
-                      return (
-                        <option key={a.id} value={a.id}>
-                          {a.note} ({a.email}) — {total} U
-                        </option>
-                      )
-                    })}
+                    {wallets.map((w) => <option key={w} value={w}>{WALLET_LABELS[w]}</option>)}
                   </select>
-                )}
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-[12px] text-muted-foreground font-medium">目标钱包</span>
+                  <select
+                    value={crossToWallet}
+                    onChange={(e) => setCrossToWallet(e.target.value as WalletType)}
+                    className="w-full bg-[#1a1a22] border border-border rounded-lg px-3 py-2 text-[13px] text-foreground focus:outline-none focus:border-primary"
+                  >
+                    {wallets.map((w) => <option key={w} value={w}>{WALLET_LABELS[w]}</option>)}
+                  </select>
+                </div>
               </div>
 
-              {/* Source account balance summary */}
+              {/* 本账户余额 summary */}
               <div className="text-[11px] text-muted-foreground bg-[#1a1a22] rounded p-2.5 flex items-center gap-4">
-                <span>现货: <span className="text-foreground font-mono">{balance ? Math.round(parseFloat(balance.spot_usdt_free)) : 0}</span></span>
-                <span>全仓: <span className="text-foreground font-mono">{balance ? Math.round(parseFloat(balance.margin_usdt_free)) : 0}</span></span>
-                <span>合约: <span className="text-foreground font-mono">{balance ? Math.round(parseFloat(balance.futures_available)) : 0}</span></span>
+                <span className="text-muted-foreground/60">{account.note}:</span>
+                <span>现货 <span className="text-foreground font-mono">{balance ? Math.round(parseFloat(balance.spot_usdt_free)) : 0}</span></span>
+                <span>全仓 <span className="text-foreground font-mono">{balance ? Math.round(parseFloat(balance.margin_usdt_free)) : 0}</span></span>
+                <span>合约 <span className="text-foreground font-mono">{balance ? Math.round(parseFloat(balance.futures_available)) : 0}</span></span>
               </div>
 
               {/* Amount + Transfer button */}
@@ -455,7 +517,7 @@ function TransferModal({
               </div>
 
               <p className="text-[10px] text-muted-foreground/60">
-                {targetType === 'master' ? '从子账户现货钱包划转到主账户' : '通过主账户中转，从现货钱包到现货钱包'}
+                经主账户万向划转(需主账户开启「万向划转」权限);主账户↔子账户、子账户↔子账户均可,源/目标钱包可选现货/全仓/合约。
               </p>
             </>
           )}

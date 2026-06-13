@@ -182,6 +182,8 @@ export interface EngineHealth {
   used_weight_1m?: number
   weight_limit?: number
   weight_age_sec?: number | null
+  uid_used_1m?: number
+  uid_limit?: number
   throttle_rate?: number
   agg_borrow_rate?: number
 }

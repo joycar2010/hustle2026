@@ -4,6 +4,7 @@ import hmac
 import logging
 import time
 from decimal import Decimal, ROUND_DOWN
+from urllib.parse import urlencode
 
 import httpx
 
@@ -75,12 +76,14 @@ class BinanceTradingClient:
         if self._client:
             await self._client.aclose()
 
-    def _sign(self, params: dict) -> dict:
+    def _sign(self, params: dict) -> str:
+        """返回已签名的完整 querystring。签名串与实际发送串必须逐字节一致 ——
+        故用 urlencode(与发送同款编码),否则含 @ 等特殊字符的参数(如 email)
+        会因 httpx 把 @→%40 与朴素 join 不一致而 -1022 签名错误。"""
         params["timestamp"] = int(time.time() * 1000)
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        query = urlencode(params)
         sig = hmac.new(self._api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
-        params["signature"] = sig
-        return params
+        return f"{query}&signature={sig}"
 
     def _headers(self) -> dict:
         return {"X-MBX-APIKEY": self._api_key}
@@ -89,8 +92,9 @@ class BinanceTradingClient:
         metrics = get_metrics(self._sub_account_id)
         if params is None:
             params = {}
-        if signed:
-            params = self._sign(params)
+        # 预先编码成 querystring 并直接拼到 URL,绕过 httpx 的二次编码 —— 保证「签名串==发送串」
+        qs = self._sign(params) if signed else urlencode(params)
+        full_url = f"{url}?{qs}" if qs else url
 
         # Backoff is COMPUTED while holding the semaphore but SLEPT after releasing it,
         # so a throttled/429 response never keeps a concurrency slot parked idle.
@@ -103,11 +107,11 @@ class BinanceTradingClient:
         async with _global_semaphore, self._semaphore:
             try:
                 if method == "GET":
-                    resp = await self._client.get(url, params=params, headers=self._headers())
+                    resp = await self._client.get(full_url, headers=self._headers())
                 elif method == "POST":
-                    resp = await self._client.post(url, params=params, headers=self._headers())
+                    resp = await self._client.post(full_url, headers=self._headers())
                 elif method == "DELETE":
-                    resp = await self._client.delete(url, params=params, headers=self._headers())
+                    resp = await self._client.delete(full_url, headers=self._headers())
                 else:
                     raise ValueError(f"Unsupported method: {method}")
             except (httpx.TimeoutException, httpx.TransportError) as te:
@@ -402,6 +406,29 @@ class BinanceTradingClient:
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/asset/transfer", {
             "type": transfer_type, "asset": asset, "amount": str(amount),
         })
+
+    async def universal_transfer(
+        self, asset: str, amount: Decimal,
+        from_account_type: str = "SPOT", to_account_type: str = "SPOT",
+        from_email: str = None, to_email: str = None,
+    ) -> dict:
+        """主/子账户万向划转 —— 必须用【主账户】API key 调用。
+        fromEmail/toEmail 省略=主账户;支持 master↔sub、sub↔sub 任意方向。
+        账户类型: SPOT(现货)/USDT_FUTURE(U本位合约)/COIN_FUTURE/MARGIN(全仓杠杆)/ISOLATED_MARGIN。
+        需主账户 key 开启「万向划转」权限,否则币安返回权限错误。"""
+        params = {
+            "fromAccountType": from_account_type,
+            "toAccountType": to_account_type,
+            "asset": asset,
+            "amount": str(amount),
+        }
+        if from_email:
+            params["fromEmail"] = from_email
+        if to_email:
+            params["toEmail"] = to_email
+        return await self._request(
+            "POST", f"{SPOT_BASE}/sapi/v1/sub-account/universalTransfer", params,
+        )
 
     # ---- Utilities ----
 
