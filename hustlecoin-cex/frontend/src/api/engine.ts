@@ -81,6 +81,19 @@ export async function getMaxBorrowable(id: number, symbol: string) {
   return data
 }
 
+export interface TailPosition {
+  id: number; symbol: string; sub_account_id: number
+  open_usdt_amount: string; borrow_qty: string; opened_at: string
+}
+export async function listTailPositions(maxUsdt = 10): Promise<TailPosition[]> {
+  const { data } = await client.get('/api/engine/positions/tail', { params: { max_usdt: maxUsdt } })
+  return data
+}
+export async function cleanupTailPositions(maxUsdtAmount = 10) {
+  const { data } = await client.post('/api/engine/positions/tail/cleanup', { max_usdt_amount: maxUsdtAmount })
+  return data
+}
+
 export async function manualTransfer(id: number, body: Record<string, unknown>) {
   const { data } = await client.post(`/api/engine/accounts/${id}/transfer`, body)
   return data

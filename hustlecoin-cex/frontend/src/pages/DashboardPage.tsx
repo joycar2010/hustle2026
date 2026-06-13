@@ -5,7 +5,7 @@ import { OwlTreeTable, type Position, type SymbolRuleInfo } from '@/components/d
 import { EngineHealthBar } from '@/components/dashboard/EngineHealthBar'
 import { TransferDialog } from '@/components/dashboard/TransferDialog'
 import { SymbolRuleDialog } from '@/components/dashboard/SymbolRuleDialog'
-import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, partialRepay, manualOpen, manualClose, manualHedge, manualRepay, getEngineHealth } from '@/api/engine'
+import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, partialRepay, manualOpen, manualClose, manualHedge, manualRepay, getEngineHealth, listTailPositions, cleanupTailPositions, getMaxBorrowable } from '@/api/engine'
 import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
@@ -250,6 +250,34 @@ export function DashboardPage() {
           alert(`持仓详情 ${symbol} #${position.id}\n状态: ${position.status}\n账户: ${position.account_note || '#' + position.sub_account_id}\n借币: ${position.borrow_qty}\n开仓利差: ${position.open_spread}%\n资金费: ${position.cumulative_funding_fee || '-'}\n利息: ${position.cumulative_interest || '-'}`)
         }
         break
+      case 'cleanup_tail': {
+        const maxStr = prompt('清理尾仓:平掉名义价值 ≤ N USDT 的碎仓\n输入阈值 (默认 10):', '10')
+        if (maxStr === null) break
+        const maxU = maxStr.trim() ? parseFloat(maxStr) : 10
+        if (isNaN(maxU) || maxU <= 0) { alert('请输入有效阈值'); break }
+        listTailPositions(maxU)
+          .then((tails) => {
+            if (!tails.length) { alert(`无 ≤ ${maxU}U 的尾仓`); return }
+            const list = tails.map((t) => `${t.symbol} #${t.id}  ${parseFloat(t.open_usdt_amount).toFixed(1)}U`).join('\n')
+            if (!confirm(`发现 ${tails.length} 个尾仓 (≤${maxU}U),将逐个市价平仓+买回+还币:\n\n${list}\n\n确认清理?`)) return
+            cleanupTailPositions(maxU)
+              .then((r: { message?: string; closed?: number; errors?: string[] }) => {
+                alert(`${r.message || '清理完成'}${r.errors && r.errors.length ? '\n\n错误:\n' + r.errors.join('\n') : ''}`)
+                refreshPositions()
+              })
+              .catch((e) => alert(`清理失败: ${e.response?.data?.detail || e.message}`))
+          })
+          .catch((e) => alert(`查询尾仓失败: ${e.response?.data?.detail || e.message}`))
+        break
+      }
+      case 'refresh_borrowable': {
+        const subId = (extra?.subAccountId as number | undefined) ?? position?.sub_account_id
+        if (!subId) break
+        getMaxBorrowable(subId, symbol)
+          .then((d: { amount?: string | number }) => alert(`${symbol} @ 账户#${subId}\n最大可借: ${d.amount ?? d}`))
+          .catch((e) => alert(`查询失败: ${e.response?.data?.detail || e.message}`))
+        break
+      }
       default:
         break
     }

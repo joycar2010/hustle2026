@@ -929,6 +929,11 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
           )}
           title={compact ? '切换为树形多账户视图' : '切换为紧凑单账户视图（折叠子账户）'}
         >{compact ? '紧凑' : '树形'}</button>
+        <button
+          onClick={() => onAction('cleanup_tail', '')}
+          className="px-1.5 py-0.5 rounded border border-border text-[10px] hover:bg-accent/50 text-amber-400"
+          title="清理碎仓:批量平掉名义价值低于阈值(默认10U)的尾仓"
+        >清理尾仓</button>
         <span>持仓 <span className="text-foreground">{posCount}</span> 币种</span>
         <span>推送 <span className="text-primary">{pushedSymbols.length}</span></span>
         <span>金额 <span className="text-foreground font-mono">{formatNumber(totalUsdt, 0)}</span></span>
