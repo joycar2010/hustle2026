@@ -3,6 +3,7 @@ import { useSpreadStore, type SpreadData } from '@/stores/spreadStore'
 import { useMarketDataStore } from '@/stores/marketDataStore'
 import { getSpreads } from '@/api/spreads'
 import { pushSymbol, getPushedSymbols } from '@/api/engine'
+import { getCoins } from '@/api/coins'
 import { getGlobalRules, getSymbolRules, addToBlacklist } from '@/api/rules'
 import { getKlineData, searchCoin, getRankings, type CoinSearchItem, type RankingItem, type HistoryScoreItem } from '@/api/market'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,6 +20,14 @@ function errMsg(e: any): string {
 }
 
 type Tab = 'spreads' | 'kline' | 'rankings'
+
+// 24h 成交量(USDT)简显: 亿/万
+function fmtVol(v: number | undefined): string {
+  if (!v || v <= 0) return '-'
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
+  if (v >= 1e4) return (v / 1e4).toFixed(0) + '万'
+  return v.toFixed(0)
+}
 
 export function SpreadsPage() {
   const [tab, setTab] = useState<Tab>('spreads')
@@ -54,10 +63,13 @@ function SpreadsTab() {
   const [symbolRulesMap, setSymbolRulesMap] = useState<Map<string, { open: number; close: number }>>(new Map())
   const [pushedSymbols, setPushedSymbols] = useState<Set<string>>(new Set())
   const [minSpread, setMinSpread] = useState(0)
+  const [minVol, setMinVol] = useState(0)   // 24h 成交量门槛(USDT),过滤低流动性薄盘
+  const [volMap, setVolMap] = useState<Map<string, number>>(new Map())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol: string } | null>(null)
 
   useEffect(() => {
     getSpreads().then((data: SpreadData[]) => setBulk(data)).catch(() => {})
+    getCoins().then((coins) => setVolMap(new Map(coins.map((c) => [c.symbol, parseFloat(c.volume_24h || '0') || 0])))).catch(() => {})
     getGlobalRules().then(setGlobalRules).catch(() => {})
     getSymbolRules().then((resp: { items?: Array<{ symbol: string; effective_open_spread: number | string | null; effective_close_spread: number | string | null }> }) => {
       const m = new Map<string, { open: number; close: number }>()
@@ -84,13 +96,16 @@ function SpreadsTab() {
     if (minSpread > 0) {
       result = result.filter((s) => Math.max(Math.abs(s.spread_long), Math.abs(s.spread_short)) >= minSpread)
     }
+    if (minVol > 0) {
+      result = result.filter((s) => (volMap.get(s.symbol) ?? 0) >= minVol)
+    }
     result.sort(
       (a, b) =>
         Math.max(Math.abs(b.spread_long), Math.abs(b.spread_short)) -
         Math.max(Math.abs(a.spread_long), Math.abs(a.spread_short)),
     )
     return result
-  }, [spreads, search, minSpread])
+  }, [spreads, search, minSpread, minVol, volMap])
 
   const handlePush = useCallback(async (symbol: string) => {
     try {
@@ -140,6 +155,19 @@ function SpreadsTab() {
           <option value={1.0}>&gt; 1.0%</option>
           <option value={2.0}>&gt; 2.0%</option>
         </select>
+        <select
+          value={minVol}
+          onChange={(e) => setMinVol(parseFloat(e.target.value))}
+          className="bg-[#1a1a22] border border-border rounded px-1.5 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
+          title="按 24h 成交量过滤低流动性薄盘(点差易虚高/glitch)"
+        >
+          <option value={0}>全部成交量</option>
+          <option value={1000000}>&gt; 100万</option>
+          <option value={5000000}>&gt; 500万</option>
+          <option value={10000000}>&gt; 1000万</option>
+          <option value={50000000}>&gt; 5000万</option>
+          <option value={100000000}>&gt; 1亿</option>
+        </select>
         <span className="text-[11px] text-muted-foreground ml-auto">{filtered.length} / {totalCount} 币种</span>
       </div>
 
@@ -155,6 +183,7 @@ function SpreadsTab() {
               <th className="px-2 py-1.5 text-right font-medium">平仓</th>
               <th className="px-2 py-1.5 text-right font-medium">资</th>
               <th className="px-2 py-1.5 text-right font-medium">资倍</th>
+              <th className="px-2 py-1.5 text-right font-medium">24h量</th>
               <th className="px-2 py-1.5 text-right font-medium">决</th>
               <th className="px-2 py-1.5 text-center font-medium">推送</th>
               <th className="px-1 py-1.5 font-medium md:hidden w-8"></th>
@@ -209,6 +238,9 @@ function SpreadsTab() {
                       </span>
                     ) : <span className="text-muted-foreground">-</span>}
                   </td>
+                  <td className="px-2 py-1 text-right tabular-nums font-mono text-muted-foreground">
+                    {fmtVol(volMap.get(s.symbol))}
+                  </td>
                   <td className="px-2 py-1 text-right font-medium text-positive">
                     {direction}
                   </td>
@@ -236,7 +268,7 @@ function SpreadsTab() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={11} className="py-8 text-center text-muted-foreground text-xs">
+                <td colSpan={12} className="py-8 text-center text-muted-foreground text-xs">
                   {search ? '未找到匹配币种' : '等待利差数据...'}
                 </td>
               </tr>
