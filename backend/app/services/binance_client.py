@@ -186,6 +186,41 @@ def _make_client_order_id(prefix: str) -> str:
     return f"{prefix}{_b36(ts_ms)}{rand4}"
 
 
+import asyncio as _aio_thr
+import time as _time_thr
+
+
+class _BinanceRestThrottle:
+    """后台币安 REST 权重令牌桶(P4)。交易关键 REST(下单/撤单/查单/撤全部/listenKey)不经此、直接放行;
+    仅已知后台读(account/balance/positionRisk/openOrders/income/premium...)走此桶。
+    正常用量远低于额度 -> 不触发;仅突发时排队后台读(永不拖延下单/成交确认 -> 不引入滑点)。
+    额度 30 权重/秒 = 1800/分钟,留 600/分钟给交易+余量,总 < 币安 2400/分钟红线。"""
+    __slots__ = ("_rate", "_cap", "_tokens", "_last", "_lock")
+
+    def __init__(self, weight_per_sec: float = 30.0, burst: float = 400.0):
+        self._rate = weight_per_sec
+        self._cap = burst
+        self._tokens = burst
+        self._last = _time_thr.monotonic()
+        self._lock = _aio_thr.Lock()
+
+    async def acquire(self, weight: int = 5) -> None:
+        w = float(max(1, weight))
+        while True:
+            async with self._lock:
+                now = _time_thr.monotonic()
+                self._tokens = min(self._cap, self._tokens + (now - self._last) * self._rate)
+                self._last = now
+                if self._tokens >= w:
+                    self._tokens -= w
+                    return
+                wait = (w - self._tokens) / self._rate
+            await _aio_thr.sleep(min(wait, 2.0))
+
+
+_binance_rest_throttle = _BinanceRestThrottle()
+
+
 class BinanceFuturesClient:
     """Async client for Binance Futures API"""
 
@@ -309,6 +344,26 @@ class BinanceFuturesClient:
         **kwargs,
     ) -> Dict[str, Any]:
         """Make HTTP request to Binance API"""
+        # ── P4 限速: 交易关键(下单/撤单/查单/撤全部/listenKey)豁免; 已知后台读走权重令牌桶 ──
+        _ep = endpoint or ""
+        _high = _ep.endswith("/order") or ("allOpenOrders" in _ep) or ("batchOrders" in _ep) or ("listenKey" in _ep)
+        if (not use_spot_api) and (not _high):
+            _w = None
+            if "/openOrders" in _ep:
+                _w = 40
+            elif "/income" in _ep:
+                _w = 30
+            elif "/commissionRate" in _ep:
+                _w = 20
+            elif any(_k in _ep for _k in ("/account", "/balance", "/positionRisk", "/userTrades", "/allOrders")):
+                _w = 5
+            elif any(_k in _ep for _k in ("/premiumIndex", "/ticker", "/klines", "/fundingRate", "/exchangeInfo", "/time", "/price", "/bookTicker")):
+                _w = 2
+            if _w is not None:
+                try:
+                    await _binance_rest_throttle.acquire(_w)
+                except Exception:
+                    pass
         base_url = self.spot_base_url if use_spot_api else self.base_url
         url = f"{base_url}{endpoint}"
         headers = {}

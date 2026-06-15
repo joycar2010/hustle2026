@@ -79,7 +79,7 @@ class AccountDataService:
 
     def __init__(self):
         self._cache = {}
-        self._cache_ttl = 60  # Cache for 60 seconds (increased to reduce API calls)
+        self._cache_ttl = 120  # 60->120 降频防币安限频
 
     def _get_cache_key(self, account_id: str, data_type: str) -> str:
         """Generate cache key"""

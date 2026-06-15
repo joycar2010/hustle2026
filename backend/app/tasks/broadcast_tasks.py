@@ -317,7 +317,7 @@ class RiskMetricsStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        self.interval = 30  # Update interval in seconds (every 30s)
+        self.interval = 60  # 30->60 降频防币安限频
         self.broadcast_count = 0
         self.last_broadcast_time = None
         self.error_count = 0
@@ -738,7 +738,7 @@ class MT5ConnectionStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        self.interval = 30  # Update interval in seconds (every 30s)
+        self.interval = 60  # 30->60 降频防币安限频
         self.broadcast_count = 0
         self.last_broadcast_time = None
         self.error_count = 0
@@ -875,7 +875,7 @@ class PendingOrdersStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        self.interval = 2  # Update interval: 2 seconds
+        self.interval = 10  # 2->10 降频防币安限频
         self.broadcast_count = 0
         self.last_broadcast_time = None
         self.error_count = 0
@@ -1353,7 +1353,7 @@ class PnlFastStreamer:
     def __init__(self):
         self.running = False
         self.task = None
-        self.interval = 5
+        self.interval = 15  # 5->15 降频防币安限频
         self.net_every = 2
         self._net_cache = {}
         self._cycle = 0
@@ -2227,7 +2227,7 @@ class BinancePositionPusher:
         # PositionStreamer broadcast picks up the fresh cache, so end-to-end
         # latency = SYNC_INTERVAL + ~1s.
         from app.services.binance_client import BinanceFuturesClient
-        SYNC_INTERVAL = 3.0  # 3s REST poll → max ~4s position staleness in UI
+        SYNC_INTERVAL = 15.0  # 3s->15s 降频防币安限频(WS为主, REST仅floor)
         # Stagger across accounts to spread API load
         await asyncio.sleep(1.0)
         while self.running:

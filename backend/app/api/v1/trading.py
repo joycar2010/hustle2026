@@ -2490,8 +2490,16 @@ async def _get_binance_funding_fee(account, start_time_ms, end_time_ms, symbol=N
         await client.close()
 
 
+_REBATE_CACHE: dict = {}  # (api_key16,start_ms,end_min,sym)->(rebate,monotonic_ts); 防 PnL 轮询反复打币安
+
+
 async def _get_binance_rebate(account, start_time_ms, end_time_ms, symbol=None):
-    """获取 Binance 返佣汇总（COMMISSION_REBATE income type）。"""
+    """获取 Binance 返佣汇总（COMMISSION_REBATE income type）。带 10min 缓存, 降频防币安限频。"""
+    import time as _t_rb
+    _rb_key = (str(getattr(account, "api_key", ""))[:16], int(start_time_ms), int(end_time_ms) // 60000, symbol or "XAUUSDT")
+    _rb_hit = _REBATE_CACHE.get(_rb_key)
+    if _rb_hit and (_t_rb.monotonic() - _rb_hit[1]) < 600:
+        return _rb_hit[0]
     from app.services.binance_client import BinanceFuturesClient
     _CHUNK_MS = 6 * 24 * 60 * 60 * 1000 + 23 * 60 * 60 * 1000 + 59 * 60 * 1000
     client = BinanceFuturesClient(account.api_key, account.api_secret,
@@ -2512,6 +2520,7 @@ async def _get_binance_rebate(account, start_time_ms, end_time_ms, symbol=None):
             total_rebate += sum(float(item.get("income", 0)) for item in income_data)
             chunk_start = chunk_end + 1
         logger.info(f"Binance rebate: {total_rebate:.4f} USDT")
+        _REBATE_CACHE[_rb_key] = (total_rebate, _t_rb.monotonic())
         return total_rebate
     except Exception as e:
         logger.error(f"Failed to get Binance rebate: {str(e)}")

@@ -1391,6 +1391,20 @@ class ContinuousStrategyExecutor:
                         break
 
             # ── MT5 当前休市硬闸: 休市中只等待, 绝不下单(防主腿先成交、对冲跟不上的单腿) ──
+            # ── 连接健康闸: 主账号币安WS / 对冲MT5桥 任一掉线 -> 暂停(不开不平)+推送暂停态; 恢复后自动续跑(防掉线期主腿成交、对冲跟不上的单腿) ──
+            _conn_reason = await self._connection_down_reason(binance_account, bybit_account)
+            if _conn_reason:
+                if not getattr(self, "_conn_paused", False):
+                    self._conn_paused = True
+                    await self._push_connection_status(strategy_type, True, _conn_reason)
+                    logger.warning(f"[CONN_GATE] {strategy_type} 暂停: {_conn_reason} (连接恢复后自动续跑)")
+                await self._sleep_or_stop(2.0)
+                continue
+            elif getattr(self, "_conn_paused", False):
+                self._conn_paused = False
+                await self._push_connection_status(strategy_type, False, "连接已恢复")
+                logger.info(f"[CONN_GATE] {strategy_type} 连接已恢复, 续跑")
+
             try:
                 from app.utils.trading_time import is_bybit_trading_hours as _is_mkt_open
                 _mkt_open, _mkt_reason = _is_mkt_open()
@@ -1572,6 +1586,65 @@ class ContinuousStrategyExecutor:
             return bool(st.get('diverged'))
         except Exception:
             return False
+
+    async def _connection_down_reason(self, binance_account, bybit_account):
+        """主账号(币安市场WS)或对冲账号(MT5桥)掉线检测。返回原因str或None。
+        零币安REST: 币安读WS内存(connected+报价新鲜), MT5探桥/health(mt5:true,5s缓存)。
+        掉线/探测异常一律判掉线(fail-closed, 宁可暂停也不单腿)。"""
+        import time as _t_cg
+        # 主账号币安: 市场WS 连接 + 报价新鲜(零REST)
+        try:
+            from app.services.binance_ws_client import binance_ws
+            if not binance_ws.connected:
+                return "主账号币安连接中断"
+            _sa, _sb, _ = _get_pair_config(self.pair_code)
+            _q = binance_ws.get_quote(_sa)
+            if _q and _q.get("ts") and (_t_cg.time() * 1000 - float(_q.get("ts")) > 30000):
+                return "主账号币安行情中断(报价停更)"
+        except Exception:
+            return "主账号币安连接中断"
+        # 对冲账号: MT5桥 /health(mt5:true), 5s缓存防每轮打桥
+        try:
+            _now = _t_cg.monotonic()
+            _cache = getattr(self, "_mt5_health_cache", None)
+            if _cache is not None and (_now - _cache[1]) < 5.0:
+                if not _cache[0]:
+                    return "对冲账号(MT5)连接中断"
+            else:
+                from app.services.order_executor_v2 import _get_trading_bridge_url
+                import httpx as _httpx
+                _burl = _get_trading_bridge_url(str(bybit_account.account_id))
+                _ok = False
+                async with _httpx.AsyncClient(timeout=4.0) as _hc:
+                    _r = await _hc.get(f"{_burl}/health")
+                    _ok = (_r.status_code == 200 and bool((_r.json() or {}).get("mt5")))
+                self._mt5_health_cache = (_ok, _now)
+                if not _ok:
+                    return "对冲账号(MT5)连接中断"
+        except Exception:
+            try:
+                self._mt5_health_cache = (False, _t_cg.monotonic())
+            except Exception:
+                pass
+            return "对冲账号(MT5)连接中断"
+        return None
+
+    async def _push_connection_status(self, strategy_type, paused, reason):
+        """推送连接暂停/恢复给前端(ws:user_event, type=connection_pause)。"""
+        try:
+            if not self.user_id:
+                return
+            from app.core.redis_client import redis_client as _rc
+            import json as _json
+            evt = {
+                "user_id": str(self.user_id),
+                "type": "connection_pause",
+                "data": {"paused": bool(paused), "reason": reason,
+                         "pair_code": self.pair_code, "strategy_type": strategy_type},
+            }
+            await _rc.publish("ws:user_event", _json.dumps(evt, ensure_ascii=False))
+        except Exception as _e:
+            logger.debug(f"[CONN_GATE] push status failed: {_e}")
 
     async def _push_stop_confirmed(self, strategy_type: str):
         """Push stop confirmation event after graceful stop completes."""

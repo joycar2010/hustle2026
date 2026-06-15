@@ -6,6 +6,7 @@
     <NotificationPopup v-if="isAuthenticated" />
     <HedgeStopoutModal v-if="isAuthenticated" />
     <SlippagePauseModal v-if="isAuthenticated" />
+    <ConnectionPauseBanner v-if="isAuthenticated" />
   </div>
 </template>
 
@@ -17,6 +18,7 @@ import Navbar from '@/components/Navbar.vue'
 import NotificationPopup from '@/components/NotificationPopup.vue'
 import HedgeStopoutModal from '@/components/HedgeStopoutModal.vue'
 import SlippagePauseModal from '@/components/SlippagePauseModal.vue'
+import ConnectionPauseBanner from '@/components/ConnectionPauseBanner.vue'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
 
 const authStore = useAuthStore()
