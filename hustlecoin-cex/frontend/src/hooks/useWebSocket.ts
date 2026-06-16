@@ -94,6 +94,10 @@ export function useWebSocket() {
           case 'notification':
             window.dispatchEvent(new CustomEvent('ws:notification', { detail: msg.data }))
             break
+          case 'pushed_update':
+            // 推送列表变化(任意来源:本页/其它页/外部)→ 通知 dashboard 实时刷新
+            window.dispatchEvent(new CustomEvent('pushed:refresh', { detail: msg.data }))
+            break
           case 'pong':
             if (pingSentAt.current > 0) {
               setWsLatency(Date.now() - pingSentAt.current)

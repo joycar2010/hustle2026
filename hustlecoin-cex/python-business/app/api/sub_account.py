@@ -3,9 +3,11 @@ import logging
 from datetime import datetime, timezone
 from enum import Enum
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
+
+from app.db.schemas import validators as _V
 
 from app.db.models import SubAccount, MasterAccount
 from app.db.models_proxy import AccountProxyBinding, ProxyPool, IpipgoOrder
@@ -15,6 +17,7 @@ from app.db.schemas.sub_account import (
 )
 from app.db.schemas.common import MessageResponse
 from app.db.session import get_db
+from app.middleware.permissions import get_current_user_id
 from app.services import binance_client
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,7 @@ def _to_response(account: SubAccount) -> dict:
         "id": account.id,
         "note": account.note,
         "email": account.email,
-        "api_key": account.api_key,
+        "api_key": _mask_secret(account.api_key),
         "api_secret_masked": _mask_secret(account.api_secret),
         "is_enabled": account.is_enabled,
         "margin_enabled": account.margin_enabled,
@@ -76,12 +79,24 @@ def _to_response(account: SubAccount) -> dict:
     }
 
 
+def _owned_sub(db: Session, account_id: int, request: Request) -> SubAccount:
+    """按登录用户取本人子账户;不属于当前用户(或不存在)一律 404。
+    收口跨用户越权读/写:coin 端点只有本前端在用,admin 走 /api/admin/users/* 管理他人账户。"""
+    uid = get_current_user_id(request)
+    acct = db.query(SubAccount).filter(SubAccount.id == account_id, SubAccount.user_id == uid).first()
+    if not acct:
+        raise HTTPException(status_code=404, detail="Sub-account not found")
+    return acct
+
+
 @router.get("/")
 def list_sub_accounts(
+    request: Request,
     enabled_only: bool = Query(False),
     db: Session = Depends(get_db),
 ):
-    q = db.query(SubAccount)
+    uid = get_current_user_id(request)
+    q = db.query(SubAccount).filter(SubAccount.user_id == uid)
     if enabled_only:
         q = q.filter(SubAccount.is_enabled == True)
     accounts = q.order_by(SubAccount.id).all()
@@ -130,10 +145,13 @@ async def check_permissions(body: CheckPermBody):
 @router.post("/", response_model=SubAccountResponse, status_code=201)
 async def create_sub_account(
     data: SubAccountCreate,
+    request: Request,
     validate: bool = Query(False),
     db: Session = Depends(get_db),
 ):
+    uid = get_current_user_id(request)
     account = SubAccount(
+        user_id=uid,
         note=data.note,
         email=data.email,
         api_key=data.api_key,
@@ -158,18 +176,14 @@ async def create_sub_account(
 
 
 @router.get("/{account_id}", response_model=SubAccountResponse)
-def get_sub_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+def get_sub_account(account_id: int, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     return _to_response(account)
 
 
 @router.put("/{account_id}", response_model=SubAccountResponse)
-def update_sub_account(account_id: int, data: SubAccountUpdate, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+def update_sub_account(account_id: int, data: SubAccountUpdate, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(account, field, value)
     db.commit()
@@ -180,12 +194,11 @@ def update_sub_account(account_id: int, data: SubAccountUpdate, db: Session = De
 @router.delete("/{account_id}", response_model=MessageResponse)
 def delete_sub_account(
     account_id: int,
+    request: Request,
     hard: bool = Query(False),
     db: Session = Depends(get_db),
 ):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+    account = _owned_sub(db, account_id, request)
     note = account.note
     if hard:
         # 硬删除时一并清掉该账户的 engine_state(sub:N)行,否则残留为永久「超时」
@@ -206,12 +219,11 @@ def delete_sub_account(
 async def update_keys(
     account_id: int,
     data: SubAccountKeyUpdate,
+    request: Request,
     validate: bool = Query(False),
     db: Session = Depends(get_db),
 ):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+    account = _owned_sub(db, account_id, request)
 
     if validate:
         result = await binance_client.validate_api_key(data.api_key, data.api_secret)
@@ -227,10 +239,8 @@ async def update_keys(
 
 
 @router.post("/{account_id}/validate", response_model=SubAccountValidation)
-async def validate_sub_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+async def validate_sub_account(account_id: int, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
 
     result = await binance_client.validate_api_key(account.api_key, account.api_secret)
     if result.is_valid:
@@ -247,19 +257,15 @@ async def validate_sub_account(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{account_id}/permissions")
-async def get_sub_account_permissions(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+async def get_sub_account_permissions(account_id: int, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     data = await binance_client.get_api_restrictions(account.api_key, account.api_secret)
     return data
 
 
 @router.post("/{account_id}/toggle", response_model=SubAccountResponse)
-def toggle_sub_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+def toggle_sub_account(account_id: int, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     account.is_enabled = not account.is_enabled
     db.commit()
     db.refresh(account)
@@ -267,10 +273,8 @@ def toggle_sub_account(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{account_id}/ip-whitelist")
-async def get_ip_whitelist(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+async def get_ip_whitelist(account_id: int, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     if not account.is_enabled:
         return {"ipRestrict": None, "ipList": []}
     try:
@@ -285,10 +289,8 @@ async def get_ip_whitelist(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{account_id}/ip-whitelist")
-async def update_ip_whitelist(account_id: int, body: IpWhitelistUpdate, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+async def update_ip_whitelist(account_id: int, body: IpWhitelistUpdate, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     if not body.ip_list:
         raise HTTPException(status_code=400, detail="IP 列表不能为空")
     try:
@@ -299,10 +301,8 @@ async def update_ip_whitelist(account_id: int, body: IpWhitelistUpdate, db: Sess
 
 
 @router.delete("/{account_id}/ip-whitelist/{ip}")
-async def remove_ip_from_whitelist(account_id: int, ip: str, db: Session = Depends(get_db)):
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+async def remove_ip_from_whitelist(account_id: int, ip: str, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
     try:
         result = await binance_client.remove_ip_restriction(account.api_key, account.api_secret, ip)
         return result
@@ -322,6 +322,27 @@ class FundParamsUpdate(BaseModel):
     max_order_count: int | None = None
     borrow_rate_per_sec: float | None = None
 
+    @field_validator("order_amount", "base_margin_amount", "single_transfer_amount",
+                     "min_balance", "single_order_amount", "max_borrow_amount")
+    @classmethod
+    def _v_amount(cls, v, info):
+        return _V.rng(v, 0, 1_000_000_000_000, info.field_name)
+
+    @field_validator("risk_threshold")
+    @classmethod
+    def _v_risk(cls, v, info):
+        return _V.rng(v, 0, 1000, info.field_name)
+
+    @field_validator("borrow_rate_per_sec")
+    @classmethod
+    def _v_rate(cls, v, info):
+        return _V.rng(v, 0, 2, info.field_name)
+
+    @field_validator("max_positions", "max_order_count")
+    @classmethod
+    def _v_count(cls, v, info):
+        return _V.rng(v, 0, 100000, info.field_name)
+
 
 FUND_PARAM_FIELDS = {
     "order_amount", "base_margin_amount", "single_transfer_amount",
@@ -332,17 +353,21 @@ FUND_PARAM_FIELDS = {
 
 
 @router.patch("/{account_id}/fund-params")
-def patch_fund_params(account_id: int, data: FundParamsUpdate, db: Session = Depends(get_db)):
+def patch_fund_params(account_id: int, data: FundParamsUpdate, request: Request, db: Session = Depends(get_db)):
     from decimal import Decimal
+    import json
     import math
 
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+    account = _owned_sub(db, account_id, request)
 
     update_data = data.model_dump(exclude_unset=True)
+    diffs: dict = {}
     for field, value in update_data.items():
         if field in FUND_PARAM_FIELDS:
+            old = getattr(account, field, None)
+            if str(old) != str(value):
+                diffs[f"acct{account_id}.{field}"] = [None if old is None else str(old),
+                                                      None if value is None else str(value)]
             setattr(account, field, value)
 
     # E1: auto-enforce min_balance >= 30% of single_order_amount
@@ -354,6 +379,11 @@ def patch_fund_params(account_id: int, data: FundParamsUpdate, db: Session = Dep
 
     db.commit()
     db.refresh(account)
+    if diffs:
+        try:
+            request.state.audit_details = json.dumps(diffs, ensure_ascii=False)[:3900]
+        except Exception:
+            pass
     return {
         "id": account.id,
         "note": account.note,
@@ -371,15 +401,13 @@ def patch_fund_params(account_id: int, data: FundParamsUpdate, db: Session = Dep
 
 
 @router.post("/{account_id}/clear")
-async def clear_sub_account(account_id: int, body: ClearAccountBody, db: Session = Depends(get_db)):
+async def clear_sub_account(account_id: int, body: ClearAccountBody, request: Request, db: Session = Depends(get_db)):
     import json
     import redis
     from app.config import settings
     from engine.models import Position
 
-    account = db.query(SubAccount).get(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Sub-account not found")
+    account = _owned_sub(db, account_id, request)
 
     account.is_enabled = False
     db.commit()

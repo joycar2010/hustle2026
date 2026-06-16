@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Eye, EyeOff } from 'lucide-react'
 import { useSpreadStore, type SpreadData } from '@/stores/spreadStore'
 import { useBalanceStore, type AccountBalance } from '@/stores/balanceStore'
@@ -150,6 +151,16 @@ function statusColorCls(s: string): string {
   return 'text-muted-foreground'
 }
 
+// 内联参数标签块的一个 chip：灰标签 + 着色值(coinmini 同款 "开0.88 平1.36 …")
+function Chip({ label, value, cls }: { label: string; value: React.ReactNode; cls?: string }) {
+  return (
+    <span className="mr-1.5 whitespace-nowrap">
+      <span className="text-muted-foreground/50">{label}</span>
+      <span className={cn('ml-0.5 font-mono tabular-nums', cls)}>{value}</span>
+    </span>
+  )
+}
+
 // ─── CoinHeaderRow ───
 
 const CoinHeaderRow = memo(function CoinHeaderRow({
@@ -159,7 +170,6 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   isMobile,
   isDelisting,
   isRisky,
-  borrowDisplayUsdt,
   symbolStatus,
   marketInfo,
   throttleRate,
@@ -167,6 +177,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   onContextMenu,
   onDoubleClick,
   onMobileMenu,
+  onOpenRules,
 }: {
   group: SymbolGroup
   isExpanded: boolean
@@ -182,6 +193,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   onContextMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
+  onOpenRules: () => void
 }) {
   const hasPos = group.positions.length > 0
   // 开仓点差 = spread_short = (spot_bid-fut_ask)/fut_ask×100 (%)，与交易引擎/规则口径一致
@@ -195,6 +207,20 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
 
   const rule = group.ruleInfo
   const hasCustomRule = rule && rule.source === 'custom' && (rule.open_spread != null || rule.close_spread != null)
+  const isCustom = rule?.source === 'custom'
+
+  // 行情参数块:开(实时可开)/平(实时可平)/资/时/限/息
+  const paramBlock = (
+    <td className={cn('px-1.5 py-1 text-left', spreadFlash)}>
+      <Chip label="开" value={openPct != null ? formatNumber(openPct, 2) : '-'} cls="text-positive" />
+      {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 2) : '-'} cls="text-negative" />}
+      <Chip label="资" value={marketInfo ? (marketInfo.funding_rate * 100).toFixed(2) : '-'}
+        cls={marketInfo && marketInfo.funding_rate >= 0 ? 'text-positive' : 'text-negative'} />
+      {!isMobile && <Chip label="时" value={marketInfo ? marketInfo.funding_interval : '-'} cls="text-muted-foreground" />}
+      {!isMobile && <Chip label="限" value={marketInfo && marketInfo.funding_cap > 0 ? (marketInfo.funding_cap * 100).toFixed(0) : '-'} cls="text-amber-400" />}
+      {!isMobile && <Chip label="息" value={marketInfo && marketInfo.daily_interest > 0 ? `${(marketInfo.daily_interest * 100).toFixed(2)}%` : '-'} cls="text-amber-400" />}
+    </td>
+  )
 
   return (
     <tr
@@ -221,128 +247,23 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
           <span className="ml-1 text-[9px] text-muted-foreground">{dhText}</span>
         )}
       </td>
-      {/* 现-期 — 合约腿名义价值(USDT)；tooltip 给出张数 */}
+      {/* 财务列:汇总行兼"列标签"(coinmini 同款,与标题行合并);数字在子账户行 */}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap" title="合约腿名义价值(USDT)">现-期</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">爆率</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">最大可借</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">现币</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">借币</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">借币金额</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">风险</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">保证金</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-muted-foreground/45 whitespace-nowrap">可用</td>}
+      {/* 参数块(行情) */}
+      {paramBlock}
+      {/* 推/状态 — 推送时间 */}
       {!isMobile && (
-        <td
-          className="px-1 py-1 text-right tabular-nums font-mono text-[10px]"
-          title={group.futQty != null ? `合约张数: ${formatNumber(group.futQty, 4)}　名义价值: ${formatNumber(group.futNotional ?? 0, 2)} USDT` : undefined}
-        >
-          {group.futNotional != null ? formatNumber(group.futNotional, 0) : '-'}
-        </td>
-      )}
-      {/* 爆率 — liquidation pct */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.liquidationPct != null ? (
-            <span className={group.liquidationPct > 80 ? 'text-negative' : group.liquidationPct > 50 ? 'text-yellow-400' : 'text-positive'}>
-              {formatNumber(group.liquidationPct, 1)}%
-            </span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 最大借 — max borrowable (qty or USDT based on toggle) */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.totalMaxBorrow != null
-            ? borrowDisplayUsdt
-              ? formatNumber(group.totalMaxBorrow * (group.spread?.spot_bid ?? 0), 0)
-              : formatNumber(group.totalMaxBorrow, 2)
-            : '-'}
-        </td>
-      )}
-      {/* 现币 — current borrowable */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.totalFree != null ? formatNumber(group.totalFree, 4) : '-'}
-        </td>
-      )}
-      {/* 借币 */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.totalQty > 0 ? formatNumber(group.totalQty, 4) : '-'}
-        </td>
-      )}
-      {/* 金额 */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.totalUsdt > 0 ? formatNumber(group.totalUsdt, 0) : '-'}
-        </td>
-      )}
-      {/* 风险 — aggregated margin level */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.minMarginLevel != null ? (
-            <span className={group.minMarginLevel > 2 ? 'text-positive' : group.minMarginLevel > 1.3 ? 'text-yellow-400' : 'text-negative'}>
-              {formatNumber(group.minMarginLevel, 2)}
-            </span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 保证金 — margin USDT free */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.totalMarginFree != null ? formatNumber(group.totalMarginFree, 0) : '-'}
-        </td>
-      )}
-      {/* 可用 — futures available */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {group.totalFutAvail != null ? formatNumber(group.totalFutAvail, 0) : '-'}
-        </td>
-      )}
-      {/* 润 — 已下沉到子账户明细，币种汇总行不显示 */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px] text-muted-foreground">-</td>
-      )}
-      {/* 开 — 开仓点差 % (spread_short) */}
-      <td className={cn('px-1 py-1 text-right tabular-nums font-mono text-[10px]', spreadFlash)}>
-        {openPct != null ? (
-          <span className="text-positive">{formatNumber(openPct, 2)}</span>
-        ) : '-'}
-      </td>
-      {/* 平 — 平仓点差 % (spread_long) */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {closePct != null ? (
-            <span className="text-negative">{formatNumber(closePct, 2)}</span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 资 — real-time funding rate (%) */}
-      <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-        {marketInfo ? (
-          <span className={marketInfo.funding_rate >= 0 ? 'text-positive' : 'text-negative'}>
-            {(marketInfo.funding_rate * 100).toFixed(2)}
-          </span>
-        ) : '-'}
-      </td>
-      {/* 时 — funding interval hours */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px] text-muted-foreground">
-          {marketInfo ? marketInfo.funding_interval : '-'}
-        </td>
-      )}
-      {/* 限 — funding rate cap */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {marketInfo && marketInfo.funding_cap > 0 ? (
-            <span className="text-amber-400">{(marketInfo.funding_cap * 100).toFixed(1)}</span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 息 — daily interest rate */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-          {marketInfo && marketInfo.daily_interest > 0 ? (
-            <span className="text-amber-400">{(marketInfo.daily_interest * 100).toFixed(4)}%</span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 推/时 — push time */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right whitespace-nowrap text-[10px]">
+        <td className="px-1.5 py-1 text-right whitespace-nowrap text-[10px]">
           {group.pushTime ? (
-            <span className="text-muted-foreground">{group.pushTime}</span>
+            <span className="text-muted-foreground">推 {group.pushTime}</span>
           ) : group.isPushed ? (
             <span className="text-primary text-[9px]">已推</span>
           ) : (
@@ -350,14 +271,16 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
           )}
         </td>
       )}
-      {/* 资倍 — 资息倍率 (signed: 负费率=成本) */}
-      <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px]">
-        {marketInfo && marketInfo.ratio !== 0 ? (
-          <span className={marketInfo.ratio >= 0 ? 'text-positive' : 'text-negative'}>
-            {formatNumber(marketInfo.ratio, 2)}
-          </span>
-        ) : '-'}
-      </td>
+      {/* 资息 — 资息倍率 (signed: 负费率=成本) */}
+      {!isMobile && (
+        <td className="px-1.5 py-1 text-right tabular-nums font-mono text-[10px]">
+          {marketInfo && marketInfo.ratio !== 0 ? (
+            <span className={marketInfo.ratio >= 0 ? 'text-positive' : 'text-negative'}>
+              {formatNumber(marketInfo.ratio, 2)}
+            </span>
+          ) : '-'}
+        </td>
+      )}
       {/* 单 — custom rule indicator */}
       {!isMobile && (
         <td
@@ -374,39 +297,33 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
           ) : '-'}
         </td>
       )}
-      {/* 移 — allow_remove */}
-      {!isMobile && (
-        <td className="px-0.5 py-1 text-center text-[10px]">
-          {rule ? (
-            <span className={rule.allow_remove ? 'text-positive' : 'text-negative'}>●</span>
-          ) : (
-            <span className="text-positive">●</span>
-          )}
-        </td>
-      )}
-      {/* 还 — allow_repay */}
-      {!isMobile && (
-        <td className="px-0.5 py-1 text-center text-[10px]">
-          {rule ? (
-            <span className={rule.allow_repay ? 'text-positive' : 'text-negative'}>●</span>
-          ) : (
-            <span className="text-positive">●</span>
-          )}
-        </td>
-      )}
-      {/* 状态 — symbol operational status */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-center whitespace-nowrap text-[10px]">
-          {symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
-          ) : '-'}
-        </td>
-      )}
       {/* 速率 — 当前限流余量下每币借币速率 (req/s)，全局值 */}
       {!isMobile && (
         <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px] text-muted-foreground"
             title="当前限流余量下每币可借速率 (req/s)">
           {throttleRate && throttleRate > 0 ? `${throttleRate.toFixed(2)}/s` : '-'}
+        </td>
+      )}
+      {/* 移/还 — allow_remove / allow_repay 文字指示 */}
+      {!isMobile && (
+        <td className="px-1 py-1 text-center whitespace-nowrap text-[10px]">
+          <span className={rule && rule.allow_remove === false ? 'text-negative' : 'text-positive'}>移</span>
+          <span className="mx-0.5 text-muted-foreground/40">·</span>
+          <span className={rule && rule.allow_repay === false ? 'text-negative' : 'text-positive'}>还</span>
+        </td>
+      )}
+      {/* 规则 — 通用规则→跳全局规则设置(/rules);单一规则→打开该币种单一规则弹窗 */}
+      {!isMobile && (
+        <td
+          className="px-1.5 py-1 text-center whitespace-nowrap text-[10px] cursor-pointer hover:bg-accent/30"
+          title={isCustom ? (rule ? ruleTooltip(rule) : '点击设置该币种单一规则') : '点击打开全局规则设置(/rules)'}
+          onClick={(e) => { e.stopPropagation(); if (isCustom) onDoubleClick(group.symbol); else onOpenRules() }}
+        >
+          {symbolStatus ? (
+            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
+          ) : (
+            <span className={isCustom ? 'text-amber-400' : 'text-muted-foreground'}>{isCustom ? '单一规则' : '通用规则'}</span>
+          )}
         </td>
       )}
       {/* mobile action button */}
@@ -451,6 +368,25 @@ const SubAccountRow = memo(function SubAccountRow({
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
 }) {
+  // 持仓经济参数块:润(净盈亏)/资(累计资金费)/开(开仓点差)/息(当日利率)/累息(累计利息)/平(平仓点差)
+  const profit = parseFloat(pos.realized_pnl || '0')
+    + parseFloat(pos.cumulative_funding_fee || '0')
+    - parseFloat(pos.cumulative_interest || '0')
+  const cumFunding = parseFloat(pos.cumulative_funding_fee || '0')
+  const cumInterest = parseFloat(pos.cumulative_interest || '0')
+  const paramBlock = (
+    <td className="px-1.5 py-0.5 text-left">
+      <Chip label="润" value={formatNumber(profit, 2)} cls={pnlColor(profit)} />
+      {!isMobile && <Chip label="资" value={formatNumber(cumFunding, 2)} cls={cumFunding >= 0 ? 'text-positive' : 'text-negative'} />}
+      <Chip label="开" value={pos.open_spread ? formatNumber(pos.open_spread, 2) : '-'} cls="text-positive" />
+      {!isMobile && <Chip label="息" value={marketInfo && marketInfo.daily_interest > 0 ? `${(marketInfo.daily_interest * 100).toFixed(2)}%` : '-'} cls="text-amber-400" />}
+      {!isMobile && <Chip label="累息" value={formatNumber(cumInterest, 2)} cls="text-negative" />}
+      {!isMobile && <Chip label="平" value={pos.close_spread ? formatNumber(pos.close_spread, 2) : '--'} cls="text-negative" />}
+    </td>
+  )
+
+  const numCell = 'px-1 py-0.5 text-right tabular-nums font-mono text-[10px]'
+
   return (
     <tr
       className="border-b border-border/10 hover:bg-accent/10 cursor-pointer text-[11px] bg-[#0c0c11]"
@@ -471,17 +407,15 @@ const SubAccountRow = memo(function SubAccountRow({
         const price = spread?.fut_bid ?? 0
         const val = qty * price
         return (
-          <td
-            className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]"
-            title={qty > 0 ? `合约张数: ${formatNumber(qty, 4)}　名义价值: ${formatNumber(val, 2)} USDT` : undefined}
-          >
+          <td className={numCell}
+            title={qty > 0 ? `合约张数: ${formatNumber(qty, 4)}　名义价值: ${formatNumber(val, 2)} USDT` : undefined}>
             {val > 0 ? formatNumber(val, 0) : '-'}
           </td>
         )
       })()}
       {/* 爆率 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {balance && balance.margin_level > 0 ? (() => {
             const pct = (1.1 / balance.margin_level) * 100
             return (
@@ -494,17 +428,23 @@ const SubAccountRow = memo(function SubAccountRow({
       )}
       {/* 最大借 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-          {balance?.symbol_margin?.[pos.symbol]?.max_borrowable != null
-            ? borrowDisplayUsdt
-              ? formatNumber(balance.symbol_margin[pos.symbol].max_borrowable * (spread?.spot_bid ?? 0), 0)
-              : formatNumber(balance.symbol_margin[pos.symbol].max_borrowable, 2)
-            : '-'}
+        <td className={numCell}>
+          {(() => {
+            const sm = balance?.symbol_margin?.[pos.symbol]
+            if (!sm) return '-'
+            // 币安杠杆池无可借库存(-3045)→ 显式标「无券」,区别于"0"与"无数据"
+            if (sm.no_inventory && !(sm.max_borrowable > 0)) {
+              return <span className="text-amber-500/80" title="币安杠杆池当前无该币可借库存">无券</span>
+            }
+            return borrowDisplayUsdt
+              ? formatNumber(sm.max_borrowable * (spread?.spot_bid ?? 0), 0)
+              : formatNumber(sm.max_borrowable, 2)
+          })()}
         </td>
       )}
       {/* 现币 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {balance?.symbol_margin?.[pos.symbol]?.free != null
             ? formatNumber(balance.symbol_margin[pos.symbol].free, 4)
             : '-'}
@@ -512,19 +452,19 @@ const SubAccountRow = memo(function SubAccountRow({
       )}
       {/* 借币 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {formatNumber(pos.borrow_qty, 4)}
         </td>
       )}
-      {/* 金额 */}
+      {/* 借币金额 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {pos.open_usdt_amount ? formatNumber(pos.open_usdt_amount) : '-'}
         </td>
       )}
       {/* 风险 — margin level */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {balance ? (
             <span className={balance.margin_level > 2 ? 'text-positive' : balance.margin_level > 1.3 ? 'text-yellow-400' : 'text-negative'}>
               {formatNumber(balance.margin_level, 2)}
@@ -534,105 +474,54 @@ const SubAccountRow = memo(function SubAccountRow({
       )}
       {/* 保证金 — 杠杆账户净权益(USDT)，回退可用USDT */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {balance ? formatNumber(balance.margin_net_usdt ?? balance.margin_usdt_free, 0) : '-'}
         </td>
       )}
       {/* 可用 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
+        <td className={numCell}>
           {balance ? formatNumber(balance.futures_available, 0) : '-'}
         </td>
       )}
-      {/* 润 — 持仓净盈亏 (已实现+资金费-利息) */}
+      {/* 参数块(持仓经济) */}
+      {paramBlock}
+      {/* 推/状态 — 子账户行此列显示状态 / 持仓时长 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-          {(() => {
-            const profit = parseFloat(pos.realized_pnl || '0')
-              + parseFloat(pos.cumulative_funding_fee || '0')
-              - parseFloat(pos.cumulative_interest || '0')
-            return <span className={pnlColor(profit)}>{formatNumber(profit, 2)}</span>
-          })()}
-        </td>
-      )}
-      {/* 开 — 开仓点差 % (spread_short) */}
-      <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-        {spread ? (
-          <span className="text-positive">{formatNumber(spread.spread_short, 2)}</span>
-        ) : '-'}
-      </td>
-      {/* 平 — 平仓点差 % (spread_long) */}
-      {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-          {spread ? (
-            <span className="text-negative">{formatNumber(spread.spread_long, 2)}</span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 资 — funding rate (%) */}
-      <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-        {marketInfo ? (
-          <span className={marketInfo.funding_rate >= 0 ? 'text-positive' : 'text-negative'}>
-            {(marketInfo.funding_rate * 100).toFixed(2)}
-          </span>
-        ) : '-'}
-      </td>
-      {/* 时 — funding interval */}
-      {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px] text-muted-foreground">
-          {marketInfo ? marketInfo.funding_interval : '-'}
-        </td>
-      )}
-      {/* 限 — funding cap */}
-      {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-          {marketInfo && marketInfo.funding_cap > 0 ? (
-            <span className="text-amber-400">{(marketInfo.funding_cap * 100).toFixed(1)}</span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 息 — daily interest rate from market data */}
-      {!isMobile && (
-        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-          {marketInfo && marketInfo.daily_interest > 0 ? (
-            <span className="text-amber-400">{(marketInfo.daily_interest * 100).toFixed(4)}%</span>
-          ) : '-'}
-        </td>
-      )}
-      {/* 推/时 → duration or ban countdown */}
-      {!isMobile && (
-        <td className="px-1 py-0.5 text-right whitespace-nowrap text-[10px]">
-          {banRemaining != null && banRemaining > 0 ? (
-            <span className="text-red-500 font-mono">{Math.floor(banRemaining / 60)}:{String(banRemaining % 60).padStart(2, '0')}</span>
+        <td className="px-1.5 py-0.5 text-right whitespace-nowrap text-[10px]">
+          {symbolStatus ? (
+            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
           ) : (
             <span className="text-muted-foreground">{durationText(pos.opened_at)}</span>
           )}
         </td>
       )}
-      {/* 资倍 — 资息倍率 (signed) */}
-      <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px]">
-        {marketInfo && marketInfo.ratio !== 0 ? (
-          <span className={marketInfo.ratio >= 0 ? 'text-positive' : 'text-negative'}>
-            {formatNumber(marketInfo.ratio, 2)}
-          </span>
-        ) : '-'}
-      </td>
-      {/* 单 — empty for sub-account rows */}
-      {!isMobile && <td className="px-0.5 py-0.5"></td>}
-      {/* 移 — empty */}
-      {!isMobile && <td className="px-0.5 py-0.5"></td>}
-      {/* 还 — empty */}
-      {!isMobile && <td className="px-0.5 py-0.5"></td>}
-      {/* 状态 — operational status */}
+      {/* 资息 — 该持仓资息倍率 */}
       {!isMobile && (
-        <td className="px-1 py-0.5 text-center whitespace-nowrap text-[10px]">
-          {symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
+        <td className={numCell}>
+          {pos.funding_rate_ratio != null && parseFloat(pos.funding_rate_ratio) !== 0 ? (
+            <span className={parseFloat(pos.funding_rate_ratio) >= 0 ? 'text-positive' : 'text-negative'}>
+              {formatNumber(pos.funding_rate_ratio, 2)}
+            </span>
           ) : '-'}
         </td>
       )}
-      {/* 速率 — 仅币种汇总行显示，子账户行留空 */}
+      {/* 单 — 子账户行留空 */}
+      {!isMobile && <td className="px-0.5 py-0.5"></td>}
+      {/* 速率 — 子账户行留空 */}
       {!isMobile && <td className="px-1 py-0.5"></td>}
+      {/* 移/还 — 封禁倒计时 */}
+      {!isMobile && (
+        <td className="px-1 py-0.5 text-center whitespace-nowrap text-[10px]">
+          {banRemaining != null && banRemaining > 0 ? (
+            <span className="text-red-500 font-mono">{Math.floor(banRemaining / 60)}:{String(banRemaining % 60).padStart(2, '0')}</span>
+          ) : (
+            <span className="text-muted-foreground/40">—</span>
+          )}
+        </td>
+      )}
+      {/* 规则 — 子账户行留空 */}
+      {!isMobile && <td className="px-1.5 py-0.5"></td>}
       {/* mobile action button */}
       {isMobile && (
         <td className="px-0.5 py-0.5 text-center">
@@ -753,8 +642,13 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
             return t < min ? t : min
           }, Infinity)
         : null
+      // 推送时间:日 + HH:MM:SS(coinmini 同款 "推06 16:08:56")
       const pushTime = earliest && earliest < Infinity
-        ? new Date(earliest).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        ? (() => {
+            const d = new Date(earliest)
+            const p2 = (n: number) => String(n).padStart(2, '0')
+            return `${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+          })()
         : null
 
       const ruleInfo = symbolRules?.get(symbol) ?? null
@@ -863,6 +757,9 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
     onAction('set_rule', symbol, undefined, subAccountId ? { initialAccountId: subAccountId } : undefined)
   }, [onAction])
 
+  const navigate = useNavigate()
+  const handleOpenRules = useCallback(() => navigate('/rules'), [navigate])
+
   useEffect(() => {
     const close = () => setContextMenu(null)
     window.addEventListener('click', close)
@@ -883,7 +780,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
   const totalInterest = groups.reduce((s, g) => s + g.totalInterest, 0)
   const totalProfit = totalFunding - totalInterest
 
-  const colCount = isMobile ? 6 : 25
+  const colCount = isMobile ? 4 : 18
 
   return (
     <div className="flex flex-col h-full">
@@ -944,37 +841,8 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
 
       {/* Table */}
       <div className={cn('flex-1 overflow-auto', !wsConnected && 'opacity-60')}>
-        <table className={cn('w-full', !isMobile && 'min-w-[1300px]')}>
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-[#0d0d14] text-[10px] text-muted-foreground border-b border-border">
-              <th className="px-1.5 py-1 text-left font-medium w-5"></th>
-              <th className="px-1.5 py-1 text-left font-medium">币种</th>
-              {!isMobile && <th className="px-1 py-1 text-right font-medium" title="合约腿名义价值 (合约张数 × 期货买价, USDT)。悬停单元格看张数">现-期</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">爆率</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">最大可借</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">现币</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">借币</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">借币金额</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">风险</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">保证金</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">可用</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">润</th>}
-              <th className="px-1 py-1 text-right font-medium">开</th>
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">平</th>}
-              <th className="px-1 py-1 text-right font-medium">资</th>
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">时</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">限</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">息</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">推/时</th>}
-              <th className="px-1 py-1 text-right font-medium">资倍</th>
-              {!isMobile && <th className="px-0.5 py-1 text-center font-medium">单</th>}
-              {!isMobile && <th className="px-0.5 py-1 text-center font-medium">移</th>}
-              {!isMobile && <th className="px-0.5 py-1 text-center font-medium">还</th>}
-              {!isMobile && <th className="px-0.5 py-1 text-center font-medium">状态</th>}
-              {!isMobile && <th className="px-1 py-1 text-right font-medium">速率</th>}
-              {isMobile && <th className="px-0.5 py-1 w-7"></th>}
-            </tr>
-          </thead>
+        <table className={cn('w-full', !isMobile && 'min-w-[1100px]')}>
+          {/* 标题行已与 CoinHeaderRow 合并(coinmini 同款):每个币种汇总行兼列标签,不再单独 sticky 表头 */}
           <tbody>
             {groups.map((g) => {
               const isExp = !compact && expanded.has(g.symbol)
@@ -998,6 +866,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
                   onContextMenu={handleContextMenu}
                   onDoubleClick={handleDoubleClick}
                   onMobileMenu={handleMobileMenu}
+                  onOpenRules={handleOpenRules}
                 />
               )
             })}
@@ -1050,6 +919,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   onContextMenu,
   onDoubleClick,
   onMobileMenu,
+  onOpenRules,
 }: {
   group: SymbolGroup
   isExpanded: boolean
@@ -1068,6 +938,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   onContextMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
+  onOpenRules: () => void
 }) {
   const headerStatus = useMemo(() => {
     const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '点差不符']
@@ -1094,6 +965,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
         onContextMenu={onContextMenu}
         onDoubleClick={onDoubleClick}
         onMobileMenu={onMobileMenu}
+        onOpenRules={onOpenRules}
       />
       {isExpanded && group.positions.map((pos) => {
         const banKey = `${pos.sub_account_id}:${pos.symbol}`

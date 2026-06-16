@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 
 from app.db.session import SessionLocal
 from engine.models import Position, TradeLog
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 TAKER_FEE_RATE = Decimal("0.00075")
 FEE_BUFFER = Decimal("1.0015")
+BORROW_FRESH_MS = 3000   # 借币二次确认: 点差快照超此毫秒数视为陈旧,不在已死/过期点差上完成借币
 
 
 async def _get_asset_debt(client: BinanceTradingClient, asset: str) -> tuple[Decimal, Decimal]:
@@ -40,14 +41,76 @@ def _fc_symbol_lock(fc, symbol: str) -> asyncio.Lock:
 
 
 _precheck_warn_ts: dict[str, float] = {}
+_topup_ts: dict[str, float] = {}
+
+
+def _load_fund_floor_and_sources() -> tuple[Decimal, list[str]]:
+    """读全局 FundRules:(源钱包留底 base_margin_amount, 给合约钱包供资的源顺序)。
+    源取 transfer_order 中的非 futures 项(spot/margin),空则默认 [spot, margin]。同步,to_thread 调。"""
+    db = SessionLocal()
+    try:
+        from app.db.models import FundRules
+        fr = db.query(FundRules).first()
+        floor = Decimal(str(fr.base_margin_amount)) if fr and fr.base_margin_amount is not None else Decimal("0")
+        raw = (fr.transfer_order if fr and fr.transfer_order else "spot,margin")
+        sources = [s.strip() for s in raw.split(",") if s.strip() in ("spot", "margin")]
+        if not sources:
+            sources = ["spot", "margin"]
+        return floor, sources
+    finally:
+        db.close()
+
+
+async def _topup_master_futures(fc, symbol: str, deficit: Decimal) -> bool:
+    """hedge_via_master 主账户合约钱包欠资时,从主账户 spot/margin 钱包**账户内**划入 USDT
+    (fc.transfer,非跨账户),让对冲能继续。源钱包留底 base_margin_amount,按 transfer_order
+    顺序累计补足 deficit;30s/币种 节流防循环。任一笔成功返回 True。
+    任何异常静默(不抛),调用方据再查结果决定放行或回退 hold —— 绝不因补给失败把持仓推入回滚空转。"""
+    now = time.monotonic()
+    if now - _topup_ts.get(symbol, 0) < 30:
+        return False
+    _topup_ts[symbol] = now
+    try:
+        floor, sources = await asyncio.to_thread(_load_fund_floor_and_sources)
+        remaining = deficit.quantize(Decimal("0.01"), rounding=ROUND_UP)
+        moved = Decimal("0")
+        for src in sources:
+            if remaining <= 0:
+                break
+            try:
+                if src == "spot":
+                    acct = await fc.get_spot_account()
+                    free = next((Decimal(str(b.get("free", "0"))) for b in acct.get("balances", [])
+                                 if b.get("asset") == "USDT"), Decimal("0"))
+                    ttype = "MAIN_UMFUTURE"
+                else:  # margin
+                    acct = await fc.get_margin_account()
+                    free = next((Decimal(str(a.get("free", "0"))) for a in acct.get("userAssets", [])
+                                 if a.get("asset") == "USDT"), Decimal("0"))
+                    ttype = "MARGIN_UMFUTURE"
+                pullable = free - floor
+                amt = min(remaining, pullable).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                if amt <= 0:
+                    continue
+                await fc.transfer(ttype, "USDT", amt)
+                moved += amt
+                remaining -= amt
+                logger.info(f"hedge_via_master topup: {amt} USDT {src}->futures (master) for {symbol}")
+            except Exception as e:
+                logger.warning(f"hedge_via_master topup {src}->futures failed ({symbol}): {e}")
+                continue
+        return moved > 0
+    except Exception as e:
+        logger.warning(f"hedge_via_master topup failed {symbol}: {e}")
+        return False
 
 
 async def _master_margin_precheck(fc, symbol, qty, spread, notifier, account_note) -> Decimal | None:
     """hedge_via_master: 对冲前查主账户合约可用余额(按该 symbol 当前杠杆估算所需保证金,
     留 10% 缓冲)。带账户级预留(挂在共享 client 上的 in-flight 计数,锁内比较+占用),
-    防止多 worker 并发用同一余额各自通过。通过返回预留额(调用方 finally 归还),
-    不足或查询异常 → None,调用方把持仓留在 BORROWED_IDLE 等下轮 —— 绝不进入
-    「卖出→合约失败→回滚」的空转(主账户欠资是全 worker 共模故障)。"""
+    防止多 worker 并发用同一余额各自通过。通过返回预留额(调用方 finally 归还)。
+    欠资时先尝试主账户内自动补给(spot/margin→futures)再复检一次;仍不足或查询异常 → None,
+    调用方把持仓留在 BORROWED_IDLE 等下轮 —— 绝不进入「卖出→合约失败→回滚」的空转。"""
     try:
         price = spread.fut_ask if (getattr(spread, "fut_ask", None) and spread.fut_ask > 0) else spread.spot_ask
         pr = await fc.futures_position_risk(symbol)
@@ -67,13 +130,26 @@ async def _master_margin_precheck(fc, symbol, qty, spread, notifier, account_not
             if avail - reserved >= need:
                 fc._margin_reserved = reserved + need
                 return need
+            deficit = need - (avail - reserved)
+
+        # 欠资 → 主账户内自动补给(锁外做转账/查询,避免占用 reserve 锁阻塞其他 worker),再复检一次
+        if await _topup_master_futures(fc, symbol, deficit):
+            async with rlock:
+                acct = await fc.get_futures_account()
+                avail = Decimal(str(acct.get("availableBalance", "0")))
+                reserved = getattr(fc, "_margin_reserved", Decimal("0"))
+                if avail - reserved >= need:
+                    fc._margin_reserved = reserved + need
+                    logger.info(f"hedge_via_master: {symbol} 自动补给后合约保证金已满足(need≈{need:.4f})")
+                    return need
+
         now = time.monotonic()
         if now - _precheck_warn_ts.get(symbol, 0) > 300:
             _precheck_warn_ts[symbol] = now
             logger.warning(f"hedge_via_master: master avail insufficient for {symbol} (need≈{need:.4f}); hold BORROWED_IDLE")
             await notifier.notify_error(
                 account_note, f"hedge {symbol}",
-                f"主账户合约可用余额不足(需≈{need:.2f} USDT),持仓停在待对冲",
+                f"主账户合约可用余额不足(需≈{need:.2f} USDT),自动补给未能补足,持仓停在待对冲",
             )
         return None
     except Exception as e:
@@ -187,15 +263,17 @@ async def execute_borrow(
             return None
         position.borrow_interest_rate = interest_rate
 
-        # delay + re-confirm spread still above the borrow threshold
+        # delay + re-confirm spread still above the borrow threshold(含 ts 新鲜度,防陈旧缓存)
         await asyncio.sleep(rules.borrow_delay_sec)
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
-            if not current or current.spread_short <= confirm_spread:
+            now_ms = int(time.time() * 1000)
+            fresh = bool(current and getattr(current, "ts", 0) and now_ms - int(current.ts) <= BORROW_FRESH_MS)
+            if not fresh or current.spread_short <= confirm_spread:
                 position.status = "FAILED"
                 position.error_message = (
-                    f"Spread degraded after delay: "
-                    f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}%"
+                    f"Spread degraded/stale after delay: "
+                    f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}% 或快照陈旧"
                 )
                 db.commit()
                 db.close()
@@ -232,11 +310,19 @@ async def execute_borrow(
             except Exception:
                 max_borrowable = Decimal("0")
             cap_qty = Decimal(str(cap_usdt)) / price if price > 0 else Decimal("0")
-            target = min(cap_qty, max_borrowable) if max_borrowable > 0 else cap_qty
+            # collateral_ratio 安全垫:不借满 maxBorrowable,按比例留出抵押冗余(1=借满,旧行为)
+            ratio = Decimal(str(getattr(rules, "collateral_ratio", 1) or 1))
+            if ratio <= 0 or ratio > 1:
+                ratio = Decimal("1")
+            eff_max = max_borrowable * ratio
+            target = min(cap_qty, eff_max) if eff_max > 0 else cap_qty
             qty = round_to_step(target, lot_info["stepSize"])
         else:
-            # 单笔金额(order_amount): 单一规则覆盖 → 全局
+            # 单笔金额(order_amount)优先级: 单币规则(SymbolRule) > 子账户(single_order_amount) > 全局
             eff_amount = rules.order_amount
+            sa_ord = db.query(SubAccount).get(sub_account_id)
+            if sa_ord and getattr(sa_ord, "single_order_amount", None):
+                eff_amount = sa_ord.single_order_amount
             if user_id is not None:
                 sr2 = db.query(SymbolRule).filter(
                     SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
@@ -250,6 +336,31 @@ async def execute_borrow(
             db.commit()
             db.close()
             return None
+
+        # min_borrow_usdt 下限:名义低于此跳过,不做尘埃单(0=不启用)
+        min_usdt = Decimal(str(getattr(rules, "min_borrow_usdt", 0) or 0))
+        if min_usdt > 0 and qty * price < min_usdt:
+            position.status = "FAILED"
+            position.error_message = f"Borrow notional {float(qty * price):.2f} < min_borrow_usdt {float(min_usdt)}"
+            db.commit()
+            db.close()
+            return None
+
+        # 借币前最终二次确认: 算 qty 期间(get_lot_size / maxBorrowable REST)又过去若干 ms,
+        # 重读最新点差,确认仍新鲜且 ≥ 阈值 → 否则放弃,减少在已消失点差上完成 ~160ms 借币。
+        if spread_feed:
+            latest = spread_feed.get_symbol(symbol)
+            now_ms = int(time.time() * 1000)
+            fresh = bool(latest and getattr(latest, "ts", 0) and now_ms - int(latest.ts) <= BORROW_FRESH_MS)
+            if not fresh or latest.spread_short <= confirm_spread:
+                position.status = "FAILED"
+                position.error_message = (
+                    f"Spread vanished/stale before borrow: "
+                    f"{latest.spread_short if latest else 'N/A'} (需 >{confirm_spread}, 新鲜<{BORROW_FRESH_MS}ms)"
+                )
+                db.commit()
+                db.close()
+                return None
 
         # borrow → idle
         # borrow_via_otoco=True 时走 coinmini 同款 IOC OTOCO 借币(MARGIN_BUY/IOC/卖价1.5x,
@@ -265,6 +376,10 @@ async def execute_borrow(
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
         logger.info(f"Borrowed (idle): {symbol} qty={qty}")
+        try:
+            await notifier.notify_new_borrow(account_note, symbol, qty, qty * price)
+        except Exception as e:
+            logger.debug(f"notify_new_borrow failed: {e}")
         return pos_id
 
     except BinanceAPIError as e:
@@ -273,7 +388,19 @@ async def execute_borrow(
         position.error_message = str(e)
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, status="FAILED", error=str(e))
-        await notifier.notify_error(account_note, f"borrow {symbol}", str(e))
+        # -3045 = 币安杠杆池该币无可借库存(稳定状态)→ 设无券冷却,避免 worker 每周期重试打爆 SAPI。
+        # 写 Redis 短期 key(TTL 自动过期),worker 借币前检查跳过。
+        if "-3045" in str(e):
+            try:
+                import redis as _r
+                from app.config import settings as _s
+                rc = _r.from_url(_s.redis_url, decode_responses=True)
+                rc.set(f"engine:noinv:{symbol}", "1", ex=300)
+                rc.close()
+            except Exception:
+                pass
+        else:
+            await notifier.notify_error(account_note, f"borrow {symbol}", str(e))
         return None
     except Exception as e:
         logger.error(f"Borrow failed unexpectedly: {e}", exc_info=True)
@@ -293,6 +420,7 @@ async def execute_hedge(
     notifier: FeishuSender,
     account_note: str,
     futures_client: BinanceTradingClient = None,
+    user_id: int = None,
 ):
     """Phase 2: sell the borrowed coin on spot (short) + futures long (hedge).
     BORROWED_IDLE → SPOT_SOLD → OPEN. Full rollback on failure.
@@ -310,6 +438,37 @@ async def execute_hedge(
     pos = db.query(Position).get(position.id)
     symbol = pos.symbol
     sub_account_id = pos.sub_account_id
+
+    # 每币种执行质量覆盖(slippage_pct / follow_type): 账户·币种 → 单币种 → 全局,空则跟随上层
+    try:
+        import dataclasses
+        from app.db.models import SymbolRule as _SR, AccountSymbolRule as _ASR
+        _base = symbol.replace("USDT", "")
+        ov_slip = ov_follow = None
+        _asr = db.query(_ASR).filter(
+            _ASR.sub_account_id == sub_account_id, _ASR.symbol.in_([symbol, _base]),
+        ).first()
+        if _asr is not None:
+            ov_slip, ov_follow = _asr.slippage_pct, _asr.follow_type
+        if (ov_slip is None or not ov_follow) and user_id is not None:
+            _sr = db.query(_SR).filter(
+                _SR.user_id == user_id, _SR.symbol.in_([symbol, _base]),
+            ).first()
+            if _sr is not None:
+                if ov_slip is None:
+                    ov_slip = _sr.slippage_pct
+                if not ov_follow:
+                    ov_follow = _sr.follow_type
+        _repl = {}
+        if ov_slip is not None:
+            _repl["slippage_pct"] = ov_slip
+        if ov_follow:
+            _repl["follow_type"] = ov_follow
+        if _repl:
+            rules = dataclasses.replace(rules, **_repl)
+            logger.debug(f"per-symbol exec override {symbol}: {_repl}")
+    except Exception as _e:
+        logger.debug(f"per-symbol override resolve failed {symbol}: {_e}")
     pos_id = pos.id
     qty = pos.borrow_qty
 
@@ -603,8 +762,11 @@ async def execute_repay(
     client: BinanceTradingClient,
     notifier: FeishuSender,
     account_note: str,
+    fee_spot: Decimal = None,
+    fee_futures: Decimal = None,
 ):
-    """Phase 2 of close: repay the margin debt and finalize PnL. PENDING_REPAY → CLOSED."""
+    """Phase 2 of close: repay the margin debt and finalize PnL. PENDING_REPAY → CLOSED.
+    fee_spot/fee_futures: 可配双腿吃单费率(仅影响 PnL 口径);None 时回退 TAKER_FEE_RATE,保留旧行为。"""
     db = SessionLocal()
     pos = db.query(Position).get(position.id)
     if not pos or pos.status != "PENDING_REPAY":
@@ -668,7 +830,11 @@ async def execute_repay(
         spot_buy_notional = pos.spot_buy_qty * pos.spot_buy_price
         futures_open_notional = pos.futures_long_qty * pos.futures_long_price
         futures_close_notional = pos.futures_long_qty * pos.futures_close_price
-        total_fee = (spot_sell_notional + spot_buy_notional + futures_open_notional + futures_close_notional) * TAKER_FEE_RATE
+        # 双腿吃单费率(可配): 现货腿与合约腿分开,None 回退硬编码常量(旧行为)
+        f_spot = Decimal(str(fee_spot)) if fee_spot is not None else TAKER_FEE_RATE
+        f_fut = Decimal(str(fee_futures)) if fee_futures is not None else TAKER_FEE_RATE
+        total_fee = (spot_sell_notional + spot_buy_notional) * f_spot \
+            + (futures_open_notional + futures_close_notional) * f_fut
         interest_cost = interest_amount * pos.spot_buy_price if interest_amount else Decimal("0")
         pos.fee_total = total_fee + interest_cost
         pos.realized_pnl = spot_pnl + futures_pnl - total_fee - interest_cost

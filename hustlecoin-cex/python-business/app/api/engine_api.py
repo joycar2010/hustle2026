@@ -91,7 +91,7 @@ def positions_summary(request: Request, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/positions/{position_id}", response_model=PositionResponse)
+@router.get("/positions/{position_id:int}", response_model=PositionResponse)
 def get_position(position_id: int, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     pos = _user_positions(db, user_id).filter(Position.id == position_id).first()
@@ -578,6 +578,8 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     current = set(json.loads(raw)) if raw else set()
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
+    # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
+    r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
     return {"message": f"Pushed {sym}"}
 
 
@@ -605,6 +607,7 @@ def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(ge
     current = set(json.loads(raw)) if raw else set()
     current.discard(sym)
     r.set(ps_key, json.dumps(sorted(current)))
+    r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
     return {"message": f"Removed {sym}"}
 
 

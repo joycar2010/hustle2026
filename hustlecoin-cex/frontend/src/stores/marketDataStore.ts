@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export interface MarketInfo {
   funding_rate: number
+  mark_price: number
   funding_interval: number
   funding_cap: number
   daily_interest: number

@@ -60,11 +60,30 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
     listener_task = None
     flush_task = None
 
+    # 黑名单(本用户 ∪ 全局系统死币如 HOMEUSDT)— WS 利差推送据此排除
+    def _load_blacklist():
+        from app.db.session import SessionLocal
+        from app.db.models import Blacklist
+        from sqlalchemy import or_
+        db = SessionLocal()
+        try:
+            q = db.query(Blacklist.symbol)
+            if ws_user_id is not None:
+                q = q.filter(or_(Blacklist.user_id == ws_user_id, Blacklist.user_id.is_(None)))
+            else:
+                q = q.filter(Blacklist.user_id.is_(None))
+            return {s[0].upper() for s in q.all() if s[0]}
+        except Exception:
+            return set()
+        finally:
+            db.close()
+    blacklist_syms = await asyncio.to_thread(_load_blacklist)
+
     try:
-        # Send initial spread snapshot
+        # Send initial spread snapshot(排除黑名单)
         try:
             from app.services.spread_reader import spread_reader
-            all_spreads = spread_reader.get_all()
+            all_spreads = [s for s in spread_reader.get_all() if s.symbol.upper() not in blacklist_syms]
             await ws.send_json({
                 "type": "spread_snapshot",
                 "data": [json.loads(s.model_dump_json()) for s in all_spreads],
@@ -84,7 +103,7 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
             logger.warning(f"Failed to send initial balance snapshot: {e}")
 
         pubsub = redis_conn.pubsub()
-        await pubsub.subscribe("spread:updates", "position:updates", "worker:status", "balance:updates", "notification:broadcast", "ban:updates", "symbol_status:updates", "market:updates")
+        await pubsub.subscribe("spread:updates", "position:updates", "worker:status", "balance:updates", "notification:broadcast", "ban:updates", "symbol_status:updates", "market:updates", "pushed:updates")
 
         batch: dict[str, dict] = {}
         batch_lock = asyncio.Lock()
@@ -110,6 +129,8 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                 data_str = msg["data"]
 
                 if channel == "spread:updates":
+                    if str(data_str).upper() in blacklist_syms:
+                        continue  # 黑名单/死币不推送到利差监控
                     raw = await redis_conn.hget("spreads", data_str)
                     if raw:
                         parsed = json.loads(raw)
@@ -165,6 +186,15 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                     try:
                         parsed = json.loads(data_str)
                         await ws.send_json({"type": "market_data", "data": parsed})
+                    except Exception:
+                        pass
+
+                elif channel == "pushed:updates":
+                    try:
+                        parsed = json.loads(data_str)
+                        if ws_user_id and parsed.get("user_id") != ws_user_id:
+                            continue
+                        await ws.send_json({"type": "pushed_update", "data": parsed})
                     except Exception:
                         pass
 

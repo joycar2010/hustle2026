@@ -20,6 +20,18 @@ export async function updateFundRules(body: Record<string, unknown>) {
   return data
 }
 
+// 单事务保存 feishu + global + fund(原子 + 乐观锁);409 = 期间被他人修改
+export async function saveAllRules(body: {
+  feishu?: Record<string, unknown>
+  global_rules?: Record<string, unknown>
+  fund_rules?: Record<string, unknown>
+  expected_global_version?: number
+  expected_fund_version?: number
+}): Promise<{ global_version: number; fund_version: number; changed: number }> {
+  const { data } = await client.put('/api/rules/save-all', body)
+  return data
+}
+
 export async function getSymbolRules(size = 500) {
   const { data } = await client.get('/api/symbol-rules/', { params: { size } })
   return data

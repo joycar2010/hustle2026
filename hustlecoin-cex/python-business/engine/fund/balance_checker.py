@@ -42,6 +42,7 @@ async def auto_balance_check(
                     await notifier.send(
                         "自动划转",
                         f"账户: {account_note}\n风险值: {margin_level}\n划入: {transfer_amount} USDT ({source}→margin)",
+                        throttle_key=f"autotransfer:{account_note}",
                     )
                     return
                 except Exception as e:
@@ -57,6 +58,7 @@ async def auto_balance_check(
                     await notifier.send(
                         "余额划出",
                         f"账户: {account_note}\n风险值: {margin_level}\n划出: {excess} USDT (margin→spot)",
+                        throttle_key=f"excessout:{account_note}",
                     )
                 except Exception as e:
                     logger.warning(f"Auto-balance excess transfer failed: {e}")

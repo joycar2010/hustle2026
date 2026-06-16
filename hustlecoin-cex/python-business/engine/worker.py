@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 MAX_POSITIONS_PER_ACCOUNT = 10
 MAX_PER_SYMBOL = 3
+SPREAD_FRESH_MS = 10_000   # 借币门:快照 ts 超此毫秒数视为 feed 停更/陈旧,不在死数据上开仓(与 rust 新鲜度护栏对齐)
 
 
 class Worker:
@@ -34,7 +35,10 @@ class Worker:
         self._symbol_rules: dict[str, dict] = {}
         self._symbol_statuses: dict[str, str] = {}
         self._glitch_logged: dict[str, datetime] = {}
-        self._symbol_volumes: dict[str, float] = {}   # symbol -> 24h成交量(USDT),交易护栏用
+        self._symbol_volumes: dict[str, float] = {}   # symbol -> 现货24h成交量(USDT),交易护栏用
+        self._symbol_futures_volumes: dict[str, float] = {}   # symbol -> 合约24h成交量(USDT),双腿量过滤用
+        self._above_since: dict[str, datetime] = {}   # symbol -> 点差首次超借币阈时间(filter_duration_ms 防抖)
+        self._removed_ban: dict[str, datetime] = {}   # symbol -> 退出时间(removed_cooldown_minutes 再借冷却)
         self._user_id: int | None = None
         self._account_max_borrow: Decimal | None = None
         self._account_max_positions: int | None = None
@@ -65,6 +69,7 @@ class Worker:
 
         from engine.notify.feishu_sender import FeishuSender
         self._notifier = FeishuSender()
+        self._notifier.user_id = self._user_id   # 飞书机器人告警按本 user 的 feishu_open_id 路由
 
         self._redis = aioredis.from_url(settings.redis_url, decode_responses=True)
 
@@ -77,6 +82,11 @@ class Worker:
         last_health_check = 0
         last_funding_check = 0
         last_borrow_scan = 0
+        last_clock_check = 0
+        last_inspection = 0
+        last_futmargin_check = 0
+        last_balance_check = 0
+        last_debtconv_check = 0
 
         try:
             async with self._trading_client:
@@ -95,12 +105,30 @@ class Worker:
                         from engine.fund.risk_monitor import check_margin_risk
                         self._margin_safe = await check_margin_risk(
                             self._trading_client, fund_rules, self._notifier, account_note,
+                            sub_account_id=self.sub_account_id,
                         )
                         last_risk_check = now
 
+                    if now - last_futmargin_check > 30:
+                        await self._check_futures_margin(account_note)
+                        last_futmargin_check = now
+
+                    # 主→子 保证金自动平衡(仅 hedge_via_master;子账户设了单笔划才动钱)
+                    if now - last_balance_check > 30 and getattr(self.config.global_rules, "hedge_via_master", False):
+                        from engine.fund.margin_balancer import auto_balance_margin
+                        _open = await asyncio.to_thread(self._load_open_positions)
+                        await auto_balance_margin(
+                            self._trading_client, self.sub_account_id, self._user_id,
+                            fund_rules, self._notifier, account_note, bool(_open),
+                        )
+                        last_balance_check = now
+
                     if now - last_bnb_check > fund_rules.bnb_convert_interval_sec:
                         from engine.fund.bnb_manager import run_bnb_check
-                        await run_bnb_check(self._trading_client, fund_rules, self._notifier, account_note)
+                        await run_bnb_check(
+                            self._trading_client, fund_rules, self._notifier, account_note,
+                            bnb_burn_enabled=getattr(self.config.global_rules, "bnb_burn_enabled", None),
+                        )
                         last_bnb_check = now
 
                     if now - last_debt_check > fund_rules.usdt_debt_interval_sec:
@@ -108,10 +136,26 @@ class Worker:
                         await run_usdt_debt_check(self._trading_client, fund_rules, self._notifier, account_note)
                         last_debt_check = now
 
+                    if now - last_debtconv_check > fund_rules.debt_convert_interval_sec:
+                        from engine.fund.debt_converter import run_debt_convert
+                        await run_debt_convert(self._trading_client, self.sub_account_id,
+                                               self.spread_feed, self._notifier, account_note)
+                        last_debtconv_check = now
+
                     if now - last_health_check > 300:
                         from engine.fund.health_monitor import run_health_check
                         await run_health_check(self._notifier)
                         last_health_check = now
+
+                    if now - last_clock_check > 300:
+                        from engine.fund.clock_monitor import run_clock_check
+                        await run_clock_check(self._notifier, self._redis)
+                        last_clock_check = now
+
+                    if now - last_inspection > 1800:   # 抗延迟巡检每 30min(redis 锁内部去重)
+                        from engine.fund.inspection import run_inspection
+                        await run_inspection(self._redis, self._notifier)
+                        last_inspection = now
 
                     if now - last_funding_check > 1800:
                         from engine.fund.funding_collector import collect_funding_fees
@@ -195,8 +239,23 @@ class Worker:
         # ── UNHEDGE: OPEN → PENDING_REPAY at close_spread (or funding ratio) ──
         for pos in open_positions:
             spread = self.spread_feed.get_symbol(pos.symbol)
-            if not self._spread_sane(spread):            # 行情 glitch 护栏
+            if not self._spread_sane(spread):            # 行情 glitch 护栏(PnL 也需 sane 价)
                 continue
+            # ── STOP-LOSS: 单仓最大亏损 — 盯市浮亏达上限即强制平仓(优先于点差/资费/冷却)──
+            max_loss = getattr(rules, "max_loss_per_position", None)
+            if max_loss is not None and max_loss > 0:
+                upnl = self._position_unrealized_pnl(pos, spread)
+                if upnl is not None and upnl <= -Decimal(str(max_loss)):
+                    logger.warning(f"Stop-loss {pos.symbol}#{pos.id}: 浮亏 {upnl:.2f} <= -{max_loss} USDT, 强制平仓")
+                    try:
+                        await self._notifier.notify_error(
+                            account_note, f"止损 {pos.symbol}",
+                            f"单仓浮亏 {upnl:.2f} USDT 触及上限 -{max_loss},强制平仓(合约平+现货买回,余下按还币规则)",
+                        )
+                    except Exception:
+                        pass
+                    await self._unhedge_position(pos, spread, account_note)
+                    continue
             if not self._is_repay_allowed(pos.symbol):   # C3
                 continue
             if self._is_borrow_banned(pos.symbol):        # C4
@@ -264,6 +323,9 @@ class Worker:
         if can_borrow:
             pushed = await asyncio.to_thread(self._load_pushed_symbols)
             borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)
+            # 开仓阈值缓冲: 实际要求点差 ≥ 借币点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留,行为不变)
+            eff_borrow = float(borrow_spread) + float(getattr(rules, "open_spread_buffer", 0) or 0)
+            no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
             for symbol in pushed:
                 if not self._running or active_count >= max_positions:
                     break
@@ -271,9 +333,13 @@ class Worker:
                     continue
                 if symbol in active_symbols:          # already borrowed / open / pending
                     continue
+                if symbol in no_inventory:            # 杠杆池无可借库存冷却(避免每周期重试打爆 SAPI)
+                    continue
                 if not self._volume_ok(symbol):       # 成交量护栏:薄盘币不借
                     continue
                 if self._is_banned(symbol):
+                    continue
+                if self._is_removed_banned(symbol):   # 移除/平仓冷却:退出后短期不再借
                     continue
                 sym_rule = self._symbol_rules.get(symbol, {})
                 if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
@@ -281,9 +347,12 @@ class Worker:
                 spread = self.spread_feed.get_symbol(symbol)
                 if not self._spread_sane(spread):        # glitch → 不在坏点差上借币开仓
                     continue
-                if spread.spread_short <= borrow_spread:
+                if not self._spread_fresh(spread):       # feed 停更/快照陈旧 → 不在已死数据上借
                     continue
-                await self._initiate_borrow(symbol, spread, account_note)
+                # filter_duration_ms 防抖 + 开仓阈值缓冲:点差需持续超(借币点差+buffer)才借
+                if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
+                    continue
+                await self._initiate_borrow(symbol, spread, eff_borrow, account_note)
                 active_symbols.add(symbol)
                 active_count += 1
 
@@ -294,16 +363,17 @@ class Worker:
         if self._cycle_count % 10 == 0:
             await self._update_state("RUNNING", active_positions=len(open_positions))
 
-    async def _initiate_borrow(self, symbol: str, spread: SpreadSnapshot, account_note: str):
-        """Phase 1: borrow at 挂单点差, hold idle."""
+    async def _initiate_borrow(self, symbol: str, spread: SpreadSnapshot, eff_borrow: float, account_note: str):
+        """Phase 1: borrow at 挂单点差(含开仓缓冲), hold idle。eff_borrow=借币点差+open_spread_buffer。"""
         from engine.trading.order_executor import execute_borrow
+        from decimal import Decimal as _D
         try:
             await execute_borrow(
                 self.sub_account_id, symbol, spread,
                 self.config.global_rules, self._trading_client,
                 self._notifier, account_note,
                 spread_feed=self.spread_feed,
-                min_spread=getattr(self.config.global_rules, "borrow_spread", self.config.global_rules.open_spread),
+                min_spread=_D(str(eff_borrow)),   # 二次确认按含缓冲的阈值,且 execute_borrow 内借币前会再校验新鲜度+阈值
                 user_id=self._user_id,
             )
             self._last_borrow_at[symbol] = datetime.now(timezone.utc)  # C4 ban countdown
@@ -327,7 +397,7 @@ class Worker:
             await execute_hedge(
                 position, spread, self.config.global_rules,
                 self._trading_client, self._notifier, account_note,
-                futures_client=fc,
+                futures_client=fc, user_id=self._user_id,
             )
         except Exception as e:
             logger.error(f"Hedge failed {position.symbol}: {e}")
@@ -346,7 +416,9 @@ class Worker:
                 position, spread, self._trading_client, self._notifier, account_note,
                 futures_client=fc,
             )
-            self._repay_ban[position.symbol] = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            self._repay_ban[position.symbol] = now
+            self._removed_ban[position.symbol] = now   # 退出 → 进入再借冷却窗
         except Exception as e:
             logger.error(f"Unhedge failed {position.symbol}: {e}")
 
@@ -354,9 +426,65 @@ class Worker:
         """Repay margin debt → CLOSED (auto path; manual path via API)."""
         from engine.trading.order_executor import execute_repay
         try:
-            await execute_repay(position, self._trading_client, self._notifier, account_note)
+            await execute_repay(
+                position, self._trading_client, self._notifier, account_note,
+                fee_spot=getattr(self.config.global_rules, "taker_fee_spot", None),
+                fee_futures=getattr(self.config.global_rules, "taker_fee_futures", None),
+            )
         except Exception as e:
             logger.error(f"Repay failed {position.symbol}: {e}")
+
+    async def _check_futures_margin(self, account_note: str):
+        """合约账户距爆仓安全垫 < margin_rate_alert% 告警(纯告警,不动仓)。
+        安全垫 = (totalMarginBalance − totalMaintMargin)/totalMarginBalance ×100,越低越接近强平。
+        hedge_via_master 看主账户合约(全对冲腿所在),否则看子账户自身合约。
+        跨子账户用 Redis 去重(每 user 每 ~25s 仅一次,避免 5 个 worker 重复查主账户)。"""
+        try:
+            self._notifier._ensure_config()
+            thr = self._notifier.margin_rate_alert
+            if thr is None or Decimal(str(thr)) <= 0:
+                return
+            from app.services.notifier import throttle_ok
+            if not await asyncio.to_thread(throttle_ok, f"futmargin:check:{self._user_id}", 25, 1):
+                return
+            if getattr(self.config.global_rules, "hedge_via_master", False):
+                from engine.trading.master_client import get_master_futures_client
+                fc = await get_master_futures_client(self._user_id)
+            else:
+                fc = self._trading_client
+            if fc is None:
+                return
+            acct = await fc.get_futures_account()
+            mb = Decimal(str(acct.get("totalMarginBalance", "0")))
+            mm = Decimal(str(acct.get("totalMaintMargin", "0")))
+            if mb <= 0 or mm <= 0:
+                return  # 无合约持仓/无维持保证金 = 无强平风险
+            buffer_pct = (mb - mm) / mb * Decimal("100")
+            if buffer_pct < Decimal(str(thr)):
+                await self._notifier.notify_futures_margin(account_note, buffer_pct, Decimal(str(thr)))
+        except Exception as e:
+            logger.debug(f"futures margin check failed: {e}")
+
+    def _position_unrealized_pnl(self, position: Position, spread: SpreadSnapshot) -> Decimal | None:
+        """OPEN 仓盯市未实现 PnL(USDT,盈正亏负),供单仓止损判定。
+        按平仓侧成交价估两腿:现货空腿买回=spot_ask、合约多腿平仓=fut_bid;
+        加累计资金费(USDT,收正付负),减累计借币利息(币本位×现价换 USDT)。
+        现货溢价走阔→两腿合计转负=亏(方向正确)。缺字段/价格异常返回 None(不触发止损,安全)。"""
+        try:
+            ssq = position.spot_sell_qty
+            ssp = position.spot_sell_price
+            flq = position.futures_long_qty
+            flp = position.futures_long_price
+            if not (ssq and ssp and flq and flp and spread
+                    and spread.spot_ask > 0 and spread.fut_bid > 0):
+                return None
+            spot_leg = (Decimal(str(ssp)) - spread.spot_ask) * Decimal(str(ssq))   # 空现货: 卖价-买回价
+            fut_leg = (spread.fut_bid - Decimal(str(flp))) * Decimal(str(flq))      # 多合约: 平价-开价
+            funding = Decimal(str(position.cumulative_funding_fee or 0))            # USDT
+            interest_usdt = Decimal(str(position.cumulative_interest or 0)) * spread.spot_ask  # 币本位→USDT
+            return spot_leg + fut_leg + funding - interest_usdt
+        except Exception:
+            return None
 
     def _load_pushed_symbols(self) -> set[str]:
         """The user's actively-pushed symbols (trade gate). Synchronous Redis read."""
@@ -369,13 +497,27 @@ class Worker:
         except Exception:
             return set()
 
+    def _load_no_inventory(self) -> set[str]:
+        """无券冷却中的币(借币 -3045 后由 order_executor 写 engine:noinv:{symbol} EX300)。
+        借币前批量读,避免对稳定无券的币每周期重试打爆 SAPI(全局共享,非 per-user)。"""
+        try:
+            import redis as _redis_sync
+            r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
+            keys = r.keys("engine:noinv:*")
+            r.close()
+            return {k.split("engine:noinv:", 1)[1] for k in keys}
+        except Exception:
+            return set()
+
     async def _auto_push(self, threshold: float, tradable_symbols: set[str]):
         """Add symbols whose spread_short ≥ auto_push_spread to the user's pushed set."""
         try:
             candidates = {
                 sym for sym, sp in self.spread_feed.get_all().items()
-                if sym in tradable_symbols and float(sp.spread_short) >= threshold
+                if sym in tradable_symbols and sym not in self.config.blacklist  # 黑名单不进推送
+                and float(sp.spread_short) >= threshold
                 and self._volume_ok(sym)   # 成交量护栏:低量薄盘不自动推送
+                and not self._is_removed_banned(sym)   # 移除/平仓冷却内不重新推送
             }
             if not candidates:
                 return
@@ -383,12 +525,49 @@ class Worker:
             raw = await self._redis.get(key)
             current = set(json.loads(raw)) if raw else set()
             new = candidates - current
-            if new:
-                current |= candidates
+            if not new:
+                return
+            # 二次确认推送:点差≥confirm_skip_spread 直推;否则等 confirm_delay_sec 复核防抖(防瞬时跳点误推)
+            rules = self.config.global_rules
+            cd = int(getattr(rules, "confirm_delay_sec", 0) or 0)
+            skip = float(getattr(rules, "confirm_skip_spread", 0) or 0)
+            immediate, need_confirm = set(), set()
+            for sym in new:
+                sp = self.spread_feed.get_symbol(sym)
+                s = float(sp.spread_short) if sp else 0.0
+                if cd <= 0 or (skip > 0 and s >= skip):
+                    immediate.add(sym)
+                else:
+                    need_confirm.add(sym)
+            if immediate:
+                current |= immediate
                 await self._redis.set(key, json.dumps(sorted(current)))
-                logger.info(f"Auto-pushed {len(new)} symbols (spread≥{threshold}): {sorted(new)[:10]}")
+                logger.info(f"Auto-pushed {len(immediate)} (spread≥{threshold}, 直推): {sorted(immediate)[:10]}")
+            if need_confirm and cd > 0:
+                asyncio.create_task(self._confirm_push(need_confirm, threshold, cd, key))
         except Exception as e:
             logger.debug(f"Auto-push failed: {e}")
+
+    async def _confirm_push(self, syms: set[str], threshold: float, cd: int, key: str):
+        """二次确认:等 cd 秒后复核点差仍≥阈值才推(防瞬时跳点误推)。后台执行,不阻塞主循环。"""
+        try:
+            await asyncio.sleep(cd)
+            ok = {
+                s for s in syms
+                if (sp := self.spread_feed.get_symbol(s)) and float(sp.spread_short) >= threshold
+                and self._volume_ok(s) and not self._is_removed_banned(s)
+            }
+            if not ok:
+                return
+            raw = await self._redis.get(key)
+            current = set(json.loads(raw)) if raw else set()
+            add = ok - current
+            if add:
+                current |= ok
+                await self._redis.set(key, json.dumps(sorted(current)))
+                logger.info(f"Auto-pushed {len(add)} after 2nd-confirm({cd}s): {sorted(add)[:10]}")
+        except Exception as e:
+            logger.debug(f"confirm_push failed: {e}")
 
     async def _borrow_only_repay(self, symbol: str, account_note: str):
         from engine.trading.order_executor import execute_borrow_only_repay
@@ -480,6 +659,15 @@ class Worker:
             return False
         return True
 
+    def _spread_fresh(self, spread) -> bool:
+        """新鲜度护栏: 快照 ts 距今超过 SPREAD_FRESH_MS 视为 feed 停更/陈旧,不据此开仓。
+        防 rust 停发/孤儿后 python 缓存残留旧值被拿来借币。注:依赖 57 与 95 时钟一致,
+        偏差由 clock_monitor 监控告警。"""
+        if spread is None or not getattr(spread, "ts", 0):
+            return False
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        return (now_ms - int(spread.ts)) <= SPREAD_FRESH_MS
+
     def _note_glitch(self, symbol: str, reason: str):
         """每币种每 60s 最多记一条 glitch 日志,避免刷屏。"""
         now = datetime.now(timezone.utc)
@@ -503,26 +691,67 @@ class Worker:
         ban_seconds = self.config.global_rules.repay_ban_minutes * 60
         return elapsed < ban_seconds
 
+    def _is_removed_banned(self, symbol: str) -> bool:
+        """移除/平仓冷却: 同币退出后 removed_cooldown_minutes 分钟内禁止再借(0=不启用)。"""
+        mins = int(getattr(self.config.global_rules, "removed_cooldown_minutes", 0) or 0)
+        if mins <= 0:
+            return False
+        ts = self._removed_ban.get(symbol)
+        if not ts:
+            return False
+        if (datetime.now(timezone.utc) - ts).total_seconds() >= mins * 60:
+            self._removed_ban.pop(symbol, None)
+            return False
+        return True
+
     def _load_tradable_symbols(self) -> set[str]:
         db = SessionLocal()
         try:
-            rows = db.query(Symbol.symbol, Symbol.volume_24h).filter(
+            q = db.query(Symbol.symbol, Symbol.volume_24h, Symbol.futures_volume_24h).filter(
                 Symbol.is_active == True,
                 Symbol.margin_tradable == True,
                 Symbol.futures_tradable == True,
-            ).all()
-            # 同时刷新成交量 map(交易护栏:低量币不自动推送/借币)
+                Symbol.allow_open == True,        # /coins「允许开仓」硬门:禁止开仓的币不进可交易集
+                Symbol.is_delisting == False,     # 下架中的币不开
+            )
+            if bool(getattr(self.config.global_rules, "block_risky_open", False)):
+                q = q.filter(Symbol.is_risky == False)   # 可选硬拦:开启后风险币也不开
+            rows = q.all()
+            # 同时刷新现货/合约成交量 map(双腿量过滤:低量币不自动推送/借币)
             self._symbol_volumes = {r.symbol: float(r.volume_24h or 0) for r in rows}
+            self._symbol_futures_volumes = {r.symbol: float(r.futures_volume_24h or 0) for r in rows}
             return {r.symbol for r in rows}
         finally:
             db.close()
 
     def _volume_ok(self, symbol: str) -> bool:
-        """24h 成交量护栏:低于 min_volume_24h 的薄盘币不参与自动推送/借币(0=关闭)。"""
-        min_vol = float(getattr(self.config.global_rules, "min_volume_24h", 0) or 0)
-        if min_vol <= 0:
+        """双腿 24h 成交量护栏:现货<min_volume_24h 或 合约<min_volume_24h_futures 的薄盘币
+        不参与自动推送/借币(各自 0=该腿不启用)。"""
+        min_spot = float(getattr(self.config.global_rules, "min_volume_24h", 0) or 0)
+        if min_spot > 0 and self._symbol_volumes.get(symbol, 0) < min_spot:
+            return False
+        min_fut = float(getattr(self.config.global_rules, "min_volume_24h_futures", 0) or 0)
+        if min_fut > 0 and self._symbol_futures_volumes.get(symbol, 0) < min_fut:
+            return False
+        return True
+
+    def _spread_persisted(self, symbol: str, value: float, threshold: float) -> bool:
+        """信号级防抖(coinmini filter_duration_ms 同款):点差需持续超阈达 N 毫秒才放行。
+        - value <= threshold:清零计时并拒绝(同旧的 `spread<=borrow_spread → continue`)
+        - filter_duration_ms<=0:不启用,value>threshold 即放行(完全保留旧行为)
+        - 否则:首次超阈记时间戳,持续 ≥ N ms 才放行,中途跌回阈下则清零重计。"""
+        if value <= threshold:
+            self._above_since.pop(symbol, None)
+            return False
+        dur_ms = int(getattr(self.config.global_rules, "filter_duration_ms", 0) or 0)
+        if dur_ms <= 0:
             return True
-        return self._symbol_volumes.get(symbol, 0) >= min_vol
+        now = datetime.now(timezone.utc)
+        since = self._above_since.get(symbol)
+        if since is None:
+            self._above_since[symbol] = now
+            return False
+        return (now - since).total_seconds() * 1000 >= dur_ms
 
     def _load_open_positions(self) -> list[Position]:
         db = SessionLocal()

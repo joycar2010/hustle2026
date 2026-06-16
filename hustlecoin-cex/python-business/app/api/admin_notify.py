@@ -41,6 +41,8 @@ class FeishuConfigUpdate(BaseModel):
     leverage_risk_alert: float | None = None
     enable_transfer_fail_alert: bool | None = None
     enable_new_borrow_alert: bool | None = None
+    enable_borrow_success_alert: bool | None = None
+    enable_repay_success_alert: bool | None = None
 
 
 @router.get("/feishu-config")
@@ -82,7 +84,8 @@ def update_feishu_config(req: FeishuConfigUpdate, request: Request, db: Session 
 
     for field in ("webhook_url", "secret_key", "alert_interval_sec", "alert_count",
                   "margin_rate_alert", "leverage_risk_alert",
-                  "enable_transfer_fail_alert", "enable_new_borrow_alert"):
+                  "enable_transfer_fail_alert", "enable_new_borrow_alert",
+                  "enable_borrow_success_alert", "enable_repay_success_alert"):
         val = getattr(req, field)
         if val is not None:
             setattr(config, field, val)
@@ -111,7 +114,8 @@ def update_user_feishu_config(user_id: int, req: FeishuConfigUpdate, request: Re
 
     for field in ("webhook_url", "secret_key", "alert_interval_sec", "alert_count",
                   "margin_rate_alert", "leverage_risk_alert",
-                  "enable_transfer_fail_alert", "enable_new_borrow_alert"):
+                  "enable_transfer_fail_alert", "enable_new_borrow_alert",
+                  "enable_borrow_success_alert", "enable_repay_success_alert"):
         val = getattr(req, field)
         if val is not None:
             setattr(config, field, val)

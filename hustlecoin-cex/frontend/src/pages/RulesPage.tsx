@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGlobalRules, updateGlobalRules, getFundRules, updateFundRules } from '@/api/rules'
-import { getFeishuConfig, updateFeishuConfig, testFeishuConfig } from '@/api/feishu'
-import { getSubAccounts, patchSubAccountFundParams } from '@/api/accounts'
+import { getGlobalRules, getFundRules, saveAllRules } from '@/api/rules'
+import { getFeishuConfig, testFeishuConfig } from '@/api/feishu'
+import { getSubAccounts, patchSubAccountFundParams, getMasterBalance } from '@/api/accounts'
 import { getAccountBalance, manualTransfer, crossAccountTransfer } from '@/api/engine'
 import { useToastStore } from '@/components/ui/toast'
 import { extractError } from '@/api/client'
@@ -72,6 +72,8 @@ function InlineField({
   suffix,
   prefix,
   width = 'w-12',
+  muted = false,
+  title,
 }: {
   label?: string
   value: string | number
@@ -79,17 +81,22 @@ function InlineField({
   suffix?: string
   prefix?: string
   width?: string
+  muted?: boolean      // true=该项未接入引擎,整体灰显 + tooltip 说明(防运营误判)
+  title?: string
 }) {
+  // muted 项:文字/输入框统一压到 40% 透明度,鼠标悬停看 title 说明;不改任何保存/绑定逻辑
+  const labelCls = muted ? 'text-muted-foreground/40' : 'text-muted-foreground'
+  const inputCls = muted ? 'opacity-40' : ''
   return (
-    <span className="inline-flex items-center gap-1 text-[11px]">
-      {prefix && <span className="text-muted-foreground">{prefix}</span>}
-      {label && <span className="text-muted-foreground">{label}</span>}
+    <span className={`inline-flex items-center gap-1 text-[11px] ${muted ? 'cursor-help' : ''}`} title={title}>
+      {prefix && <span className={labelCls}>{prefix}</span>}
+      {label && <span className={labelCls}>{label}{muted ? '*' : ''}</span>}
       <input
         value={String(value ?? '')}
         onChange={(e) => onChange(e.target.value)}
-        className={`${width} bg-transparent border-b border-border text-center text-foreground font-mono tabular-nums text-[11px] focus:outline-none focus:border-primary py-0.5`}
+        className={`${width} bg-transparent border-b border-border text-center text-foreground font-mono tabular-nums text-[11px] focus:outline-none focus:border-primary py-0.5 ${inputCls}`}
       />
-      {suffix && <span className="text-muted-foreground">{suffix}</span>}
+      {suffix && <span className={labelCls}>{suffix}</span>}
     </span>
   )
 }
@@ -121,6 +128,7 @@ function EditableCell({
   accountId,
   field,
   value,
+  dirty,
   editingCells,
   setEditingCells,
   onSave,
@@ -128,6 +136,7 @@ function EditableCell({
   accountId: number
   field: string
   value: string | null
+  dirty?: boolean
   editingCells: Record<string, string>
   setEditingCells: (c: Record<string, string>) => void
   onSave: (id: number, field: string, value: string) => void
@@ -169,7 +178,7 @@ function EditableCell({
 
   return (
     <td
-      className="px-1.5 py-1 text-right font-mono cursor-pointer hover:bg-primary/10"
+      className={`px-1.5 py-1 text-right font-mono cursor-pointer hover:bg-primary/10 ${dirty ? 'text-amber-400 bg-amber-400/5' : ''}`}
       onClick={() => setEditingCells({ ...editingCells, [key]: value ?? '' })}
     >
       {value ?? <span className="text-muted-foreground">-</span>}
@@ -538,10 +547,13 @@ export function RulesPage() {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [editingCells, setEditingCells] = useState<Record<string, string>>({})
+  const [fundEdits, setFundEdits] = useState<Record<string, string>>({})   // 子账户资金参数暂存(批量确认前不落库)
+  const [committingFund, setCommittingFund] = useState(false)
   const [maxBorrowToggle, setMaxBorrowToggle] = useState(() => {
     try { return localStorage.getItem('hc_borrow_display_mode') === 'usdt' } catch { return false }
   })
   const [transferAccount, setTransferAccount] = useState<SubAccount | null>(null)
+  const [masterBalance, setMasterBalance] = useState<Record<string, string> | null>(null)  // 主账户余额(可转口径源)
   const addToast = useToastStore((s) => s.addToast)
 
   const fetchAll = useCallback(() => {
@@ -551,6 +563,7 @@ export function RulesPage() {
       getGlobalRules().then(setGlobalRules).catch(() => {}),
       getFundRules().then(setFundRules).catch(() => {}),
       getSubAccounts().then(setAccounts).catch(() => {}),
+      getMasterBalance().then((b) => setMasterBalance(b as Record<string, string>)).catch(() => setMasterBalance(null)),
     ]).finally(() => setLoading(false))
   }, [])
 
@@ -575,14 +588,20 @@ export function RulesPage() {
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      await Promise.all([
-        updateFeishuConfig(feishu),
-        updateGlobalRules(globalRules),
-        updateFundRules(fundRules),
-      ])
+      const res = await saveAllRules({
+        feishu,
+        global_rules: globalRules,
+        fund_rules: fundRules,
+        expected_global_version: typeof globalRules.version === 'number' ? globalRules.version : undefined,
+        expected_fund_version: typeof fundRules.version === 'number' ? fundRules.version : undefined,
+      })
+      // 回写版本号,避免下次保存误报 409
+      setGlobalRules((p) => ({ ...p, version: res.global_version }))
+      setFundRules((p) => ({ ...p, version: res.fund_version }))
       addToast('保存成功', 'success')
     } catch (err: unknown) {
-      addToast(extractError(err, '保存失败'), 'error')
+      const status = (err as { response?: { status?: number } })?.response?.status
+      addToast(extractError(err, status === 409 ? '配置已被他人修改,请刷新后重试' : '保存失败'), 'error')
     }
     setSaving(false)
   }, [feishu, globalRules, fundRules, addToast])
@@ -598,51 +617,60 @@ export function RulesPage() {
     setTesting(false)
   }, [addToast])
 
-  const handleFundParamSave = useCallback(async (accountId: number, field: string, value: string) => {
-    try {
-      await patchSubAccountFundParams(accountId, { [field]: value || null })
-      addToast('已保存', 'success')
+  // ⑩ 失焦不再直接落库,改为暂存到 fundEdits,统一「保存改动」批量确认后才写
+  const stageFundEdit = useCallback((accountId: number, field: string, value: string) => {
+    const key = `${accountId}-${field}`
+    setFundEdits((prev) => {
+      const account = accounts.find((a) => a.id === accountId)
+      const original = String(account?.[field as keyof SubAccount] ?? '')
+      const next = { ...prev }
+      if (String(value ?? '') === original) delete next[key]   // 改回原值=不算改动
+      else next[key] = value
+      return next
+    })
+  }, [accounts])
 
-      // E1: 30% linkage — when single_order_amount changes, ensure min_balance >= 30%
-      if (field === 'single_order_amount' && value) {
-        const orderAmt = parseFloat(value)
-        if (!isNaN(orderAmt) && orderAmt > 0) {
-          const minRequired = Math.ceil(orderAmt * 0.3)
-          const account = accounts.find(a => a.id === accountId)
-          const currentMin = parseFloat(account?.min_balance || '0') || 0
-          if (currentMin < minRequired) {
-            await patchSubAccountFundParams(accountId, { min_balance: String(minRequired) })
-            setAccounts(prev => prev.map(a =>
-              a.id === accountId ? { ...a, single_order_amount: value, min_balance: String(minRequired) } : a,
-            ))
-            addToast(`保底额已自动调整为 ${minRequired} (挂单单笔的30%)`, 'info')
-            return
+  const discardFundEdits = useCallback(() => setFundEdits({}), [])
+
+  const commitFundEdits = useCallback(async () => {
+    const keys = Object.keys(fundEdits)
+    if (keys.length === 0) { addToast('无改动', 'info'); return }
+    if (!confirm(`确认保存 ${keys.length} 项子账户资金参数改动?这些直接影响实盘借币/风控。`)) return
+    // 按账户分组,一次 patch 多字段
+    const byAccount: Record<number, Record<string, string | null>> = {}
+    for (const k of keys) {
+      const sep = k.indexOf('-')
+      const id = Number(k.slice(0, sep))
+      const field = k.slice(sep + 1)
+      ;(byAccount[id] ??= {})[field] = fundEdits[k] || null
+    }
+    setCommittingFund(true)
+    try {
+      for (const [idStr, patch] of Object.entries(byAccount)) {
+        const id = Number(idStr)
+        // E1: 单笔挂单变更时,保底额自动 ≥ 30%
+        if (patch.single_order_amount) {
+          const orderAmt = parseFloat(patch.single_order_amount)
+          if (!isNaN(orderAmt) && orderAmt > 0) {
+            const minRequired = Math.ceil(orderAmt * 0.3)
+            const account = accounts.find((a) => a.id === id)
+            const currentMin = parseFloat((patch.min_balance ?? account?.min_balance ?? '0') || '0') || 0
+            if (currentMin < minRequired) patch.min_balance = String(minRequired)
           }
         }
+        await patchSubAccountFundParams(id, patch)
+        setAccounts((prev) => prev.map((a) => a.id === id ? { ...a, ...patch } as SubAccount : a))
       }
-
-      setAccounts(prev => prev.map(a =>
-        a.id === accountId ? { ...a, [field]: value || null } : a,
-      ))
+      addToast(`已保存 ${keys.length} 项`, 'success')
+      setFundEdits({})
     } catch (err: unknown) {
       addToast(extractError(err, '保存失败'), 'error')
     }
-  }, [addToast, accounts])
+    setCommittingFund(false)
+  }, [fundEdits, accounts, addToast])
 
-  const totalMarginFree = accounts.reduce((s, a) => {
-    const b = balances[a.id]
-    return s + (b ? parseFloat(b.margin_usdt_free) || 0 : 0)
-  }, 0)
-
-  const totalFuturesAvail = accounts.reduce((s, a) => {
-    const b = balances[a.id]
-    return s + (b ? parseFloat(b.futures_available) || 0 : 0)
-  }, 0)
-
-  const totalSpotFree = accounts.reduce((s, a) => {
-    const b = balances[a.id]
-    return s + (b ? parseFloat(b.spot_usdt_free) || 0 : 0)
-  }, 0)
+  // 可转口径 = 主账户余额(自动划转对应主账户操作),不再用子账户合计
+  const mbNum = (k: string) => (masterBalance ? Math.round(parseFloat(masterBalance[k]) || 0) : null)
 
   if (loading) {
     return <p className="py-8 text-center text-muted-foreground text-xs">加载中...</p>
@@ -692,16 +720,23 @@ export function RulesPage() {
               </button>
             </div>
             <div className="flex items-center gap-4 flex-wrap">
-              <InlineField label="合约爆仓率提醒 <" value={fv('margin_rate_alert')} onChange={(v) => updateF('margin_rate_alert', v)} suffix="%" width="w-10" />
+              <InlineField label="合约爆仓率提醒 <" value={fv('margin_rate_alert')} onChange={(v) => updateF('margin_rate_alert', v)} suffix="%" width="w-10" title="合约距爆仓安全垫(=(保证金余额−维持保证金)÷保证金余额×100)低于此 % 即告警;hedge_via_master 看主账户合约。0=禁用。已接入引擎生效" />
               <InlineField label="杠杆风险率提醒 <" value={fv('leverage_risk_alert')} onChange={(v) => updateF('leverage_risk_alert', v)} width="w-12" />
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <TogglePill label="划转失败提醒" active={!!feishu.enable_transfer_fail_alert} onChange={(v) => updateFBool('enable_transfer_fail_alert', v)} />
               <TogglePill label="新增借币提醒" active={!!feishu.enable_new_borrow_alert} onChange={(v) => updateFBool('enable_new_borrow_alert', v)} />
-              <TogglePill label="最大可借金额" active={maxBorrowToggle} onChange={(v) => {
+              <TogglePill label="借币成功提醒" active={feishu.enable_borrow_success_alert !== false} onChange={(v) => updateFBool('enable_borrow_success_alert', v)} />
+              <TogglePill label="还币成功提醒" active={feishu.enable_repay_success_alert !== false} onChange={(v) => updateFBool('enable_repay_success_alert', v)} />
+            </div>
+            {/* 显示偏好(仅切换表格展示口径,不改变任何交易行为)—— 与上方功能开关分区 */}
+            <div className="flex items-center gap-2 flex-wrap pt-1.5 border-t border-border/40">
+              <span className="text-muted-foreground/60 text-[10px]">显示</span>
+              <TogglePill label="最大可借金额(U/数量)" active={maxBorrowToggle} onChange={(v) => {
                 setMaxBorrowToggle(v)
                 try { localStorage.setItem('hc_borrow_display_mode', v ? 'usdt' : 'qty') } catch { /* ignore */ }
               }} />
+              <span className="text-muted-foreground/50 text-[9px]">仅切换「金额限制」列展示口径,不影响行为</span>
             </div>
           </div>
 
@@ -720,15 +755,28 @@ export function RulesPage() {
               </select>
             </div>
             <div className="flex items-center gap-5 text-[11px]">
-              <span className="text-muted-foreground">全仓可转: <span className="text-foreground font-mono tabular-nums">{Math.round(totalMarginFree)}</span></span>
-              <span className="text-muted-foreground">合约可转: <span className="text-foreground font-mono tabular-nums">{Math.round(totalFuturesAvail)}</span></span>
-              <span className="text-muted-foreground">现货可转: <span className="text-foreground font-mono tabular-nums">{Math.round(totalSpotFree)}</span></span>
+              <span className="text-positive/80 text-[10px]">主账户</span>
+              <span className="text-muted-foreground">全仓可转: <span className="text-foreground font-mono tabular-nums">{mbNum('margin_usdt_free') ?? '-'}</span></span>
+              <span className="text-muted-foreground">合约可转: <span className="text-foreground font-mono tabular-nums">{mbNum('futures_available') ?? '-'}</span></span>
+              <span className="text-muted-foreground">现货可转: <span className="text-foreground font-mono tabular-nums">{mbNum('spot_usdt_free') ?? '-'}</span></span>
+              <span className="text-muted-foreground/50 text-[9px]">(主账户余额;自动划转对应主账户)</span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] pt-1 border-t border-border/30">
+              <InlineField label="主账户保留下限" value={frv('base_margin_amount')} onChange={(v) => updateFR('base_margin_amount', v)} suffix="U" width="w-14" title="自动补子账户保证金时,主账户(现货+合约可用+全仓)USDT 总额须保留此值、不被动用,护住对冲保证金不被抽干;每次补入额=min(请求额, 主账户总可用−此值)。0=不保留" />
+              <span className="text-muted-foreground/50 text-[9px]">自动平衡补子账户时,主账户保底此额,护对冲保证金不被抽干</span>
             </div>
           </div>
 
           {/* -- Sub-Account Table -- */}
+          {Object.keys(fundEdits).length > 0 && (
+            <div className="flex items-center gap-2 text-[11px] bg-amber-400/10 border border-amber-400/30 rounded px-2 py-1">
+              <span className="text-amber-400">未保存 {Object.keys(fundEdits).length} 项资金参数改动(失焦仅暂存,需确认才落库)</span>
+              <button onClick={commitFundEdits} disabled={committingFund} className="ml-auto px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/80 disabled:opacity-40">{committingFund ? '保存中...' : '保存改动'}</button>
+              <button onClick={discardFundEdits} className="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-accent">放弃</button>
+            </div>
+          )}
           <div className="bg-[#111118] rounded border border-border overflow-x-auto">
-            <table className="w-full min-w-[750px] text-[11px] border-collapse">
+            <table className="w-full text-[11px] border-collapse [&_th]:px-1 [&_td]:px-1">
               <thead>
                 <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
                   <th className="px-1.5 py-1.5 text-left font-medium">备注</th>
@@ -739,17 +787,22 @@ export function RulesPage() {
                   <th className="px-1.5 py-1.5 text-right font-medium">可</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">可转</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">风险</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium">风控阈</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium">单笔划</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium">保底额</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium">挂单单笔</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium" title="每账户借币金额上限(USDT,=maxBorrowable 封顶)，留空跟随全局">金额限制</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="风控预警阈值:保证金水平低于此值即软暂停该子账户下单;有值则覆盖全局「风险值阈值」。已接入引擎生效">风控阈</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="风险值低于风控阈时,每周期从主账户(按划转顺序)补入该金额 USDT 到子账户保证金,直到风险值恢复;留空=该子账户不自动平衡。需 hedge_via_master + 主账户有余额。已接入引擎生效">单笔划</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="子账户保证金保底 USDT:低于此从主账户补足;无持仓且富余时把多余划回主账户(保底留此额)。已接入引擎生效">保底额</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="该子账户单笔下单额(USDT):有值则覆盖全局「单笔金额」;优先级 单币种规则 > 子账户 > 全局。已接入引擎生效">挂单单笔</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="每账户借币金额上限(USDT,=maxBorrowable 封顶)，留空跟随全局;此列已接入引擎生效">金额限制</th>
                   <th className="px-1.5 py-1.5 text-center font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {accounts.map((a) => {
                   const bal = balances[a.id]
+                  const fcv = (field: string): string | null => {
+                    const key = `${a.id}-${field}`
+                    return key in fundEdits ? fundEdits[key] : ((a[field as keyof SubAccount] ?? null) as string | null)
+                  }
+                  const fcd = (field: string) => `${a.id}-${field}` in fundEdits
                   return (
                     <tr key={a.id} className="border-b border-border/30 hover:bg-[#1a1a22]/60">
                       <td className="px-1.5 py-1 font-medium">{a.note}</td>
@@ -760,11 +813,11 @@ export function RulesPage() {
                       <td className="px-1.5 py-1 text-right font-mono tabular-nums">{bal ? Math.round(parseFloat(bal.futures_available)) : '-'}</td>
                       <td className="px-1.5 py-1 text-right font-mono tabular-nums">{bal ? Math.round(parseFloat(bal.margin_usdt_free)) : '-'}</td>
                       <td className="px-1.5 py-1 text-right font-mono tabular-nums">{bal ? parseFloat(bal.margin_level).toFixed(2) : '-'}</td>
-                      <EditableCell accountId={a.id} field="risk_threshold" value={a.risk_threshold} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
-                      <EditableCell accountId={a.id} field="single_transfer_amount" value={a.single_transfer_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
-                      <EditableCell accountId={a.id} field="min_balance" value={a.min_balance} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
-                      <EditableCell accountId={a.id} field="single_order_amount" value={a.single_order_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
-                      <EditableCell accountId={a.id} field="max_borrow_amount" value={a.max_borrow_amount} editingCells={editingCells} setEditingCells={setEditingCells} onSave={handleFundParamSave} />
+                      <EditableCell accountId={a.id} field="risk_threshold" value={fcv('risk_threshold')} dirty={fcd('risk_threshold')} editingCells={editingCells} setEditingCells={setEditingCells} onSave={stageFundEdit} />
+                      <EditableCell accountId={a.id} field="single_transfer_amount" value={fcv('single_transfer_amount')} dirty={fcd('single_transfer_amount')} editingCells={editingCells} setEditingCells={setEditingCells} onSave={stageFundEdit} />
+                      <EditableCell accountId={a.id} field="min_balance" value={fcv('min_balance')} dirty={fcd('min_balance')} editingCells={editingCells} setEditingCells={setEditingCells} onSave={stageFundEdit} />
+                      <EditableCell accountId={a.id} field="single_order_amount" value={fcv('single_order_amount')} dirty={fcd('single_order_amount')} editingCells={editingCells} setEditingCells={setEditingCells} onSave={stageFundEdit} />
+                      <EditableCell accountId={a.id} field="max_borrow_amount" value={fcv('max_borrow_amount')} dirty={fcd('max_borrow_amount')} editingCells={editingCells} setEditingCells={setEditingCells} onSave={stageFundEdit} />
                       <td className="px-1.5 py-1 text-center">
                         <button
                           onClick={() => setTransferAccount(a)}
@@ -782,12 +835,26 @@ export function RulesPage() {
               </tbody>
             </table>
           </div>
+          <p className="text-[9px] text-muted-foreground/50 px-1">
+            全列已接入引擎:风控阈(风险下限,触发自动补保证金/下单暂停)、单笔划(每次从主账户补入额)、保底额(子账户保证金保底)、挂单单笔(覆盖全局下单额)、金额限制(借币封顶)。主→子自动平衡需 hedge_via_master + 主账户 USDT 充足;留空「单笔划」=该子账户不自动平衡(仅手动划转)。
+          </p>
         </div>
 
         {/* ====== RIGHT COLUMN ====== */}
         <div className="flex-1 space-y-3 min-w-0">
           {/* -- BNB Management -- */}
           <div className="bg-[#111118] rounded border border-border p-3 space-y-2.5">
+            {/* BNB 抵扣手续费开关(每用户,作用于本用户各子账户) */}
+            <div className="flex items-center gap-2 flex-wrap text-[11px] pb-1.5 border-b border-border/40">
+              <span className="text-muted-foreground">BNB 抵扣手续费</span>
+              <button
+                onClick={() => setGlobalRules((p) => ({ ...p, bnb_burn_enabled: !(p.bnb_burn_enabled === true || p.bnb_burn_enabled === 'true') }))}
+                className={`px-2 py-0.5 rounded text-[11px] ${(globalRules.bnb_burn_enabled === true || globalRules.bnb_burn_enabled === 'true') ? 'bg-positive/20 text-positive' : 'bg-accent text-muted-foreground'}`}
+              >
+                {(globalRules.bnb_burn_enabled === true || globalRules.bnb_burn_enabled === 'true') ? '已开启(下单+杠杆利息)' : '已关闭'}
+              </button>
+              <span className="text-muted-foreground/60 text-[10px]">引擎对本用户各子账户统一下发 spotBNBBurn/interestBNBBurn;保存后于下个 BNB 检查周期生效</span>
+            </div>
             <div className="flex items-center flex-wrap gap-1 text-[11px]">
               <span className="text-muted-foreground">全仓BNB抵扣手续费数量</span>
               <InlineField value={frv('bnb_min_quantity')} onChange={(v) => updateFR('bnb_min_quantity', v)} width="w-10" />
@@ -815,12 +882,13 @@ export function RulesPage() {
                 suffix="分钟"
                 width="w-10"
               />
-              <span className="text-muted-foreground">全仓负债转换间隔</span>
+              <span className="text-muted-foreground" title="残留负债清理:每此间隔清掉子账户「无持仓的小额(<50U)非USDT币种欠款」(持币足额直接还/缺口小额买回补还)。已接入引擎生效">全仓负债转换间隔</span>
               <InlineField
                 value={debtIntervalHr}
                 onChange={(v) => updateFR('debt_convert_interval_sec', String((parseFloat(v) || 0) * 3600))}
                 suffix="小时"
                 width="w-8"
+                title="残留负债清理间隔:清子账户无持仓的小额币种残留欠款。已接入引擎生效"
               />
             </div>
           </div>
@@ -831,15 +899,15 @@ export function RulesPage() {
               <InlineField label="自动推送点差" value={gv('auto_push_spread')} onChange={(v) => updateG('auto_push_spread', v)} width="w-10" />
               <InlineField label="日利息拦截" value={gv('interest_filter')} onChange={(v) => updateG('interest_filter', v)} suffix="%" width="w-10" />
             </div>
-            <div className="flex items-center gap-3 flex-wrap text-[11px]">
-              <InlineField label="推送二次确认" value={gv('confirm_delay_sec')} onChange={(v) => updateG('confirm_delay_sec', v)} suffix="秒" width="w-8" />
+            <div className="flex items-center gap-3 flex-wrap text-[11px]" title="自动推送二次确认:点差达标的币先等此秒数复核点差仍≥推送阈值才推(防瞬时跳点误推);点差≥下方值则直推不等。已接入引擎生效">
+              <InlineField label="推送二次确认" value={gv('confirm_delay_sec')} onChange={(v) => updateG('confirm_delay_sec', v)} suffix="秒" width="w-8" title="自动推送前的二次确认等待秒数;0=不二次确认直推。已接入引擎生效" />
               <span className="text-muted-foreground">点差≥</span>
-              <InlineField value={gv('confirm_skip_spread')} onChange={(v) => updateG('confirm_skip_spread', v)} width="w-8" />
+              <InlineField value={gv('confirm_skip_spread')} onChange={(v) => updateG('confirm_skip_spread', v)} width="w-8" title="点差≥此值直接推送,跳过二次确认等待。已接入引擎生效" />
               <span className="text-muted-foreground">直接推送(不二次确认)</span>
             </div>
             <div className="flex items-center gap-6 flex-wrap text-[11px]">
               <InlineField label="点差不足移除" value={gv('remove_spread')} onChange={(v) => updateG('remove_spread', v)} width="w-10" />
-              <InlineField label="手动移除尾单清理金额" value={gv('max_loss_per_position')} onChange={(v) => updateG('max_loss_per_position', v)} suffix="U" width="w-10" />
+              <InlineField label="单仓最大亏损" value={gv('max_loss_per_position')} onChange={(v) => updateG('max_loss_per_position', v)} suffix="U" width="w-10" title="单仓盯市浮亏达此 USDT 即强制平仓(合约平+现货买回,余下按还币规则);留空或 0=禁用。已接入引擎生效" />
             </div>
             <div className="flex items-center gap-4 flex-wrap text-[11px]">
               <InlineField label="挂单点差" value={gv('borrow_spread')} onChange={(v) => updateG('borrow_spread', v)} width="w-10" />
@@ -857,68 +925,6 @@ export function RulesPage() {
               <InlineField value={gv('repay_spread')} onChange={(v) => updateG('repay_spread', v)} width="w-10" />
               <span className="text-muted-foreground">还币: 资息倍率 &lt;</span>
               <InlineField value={gv('repay_funding_ratio')} onChange={(v) => updateG('repay_funding_ratio', v)} width="w-10" />
-            </div>
-            {/* 下单质量(高级) — 桌面参数对齐 */}
-            <div className="flex items-center gap-4 flex-wrap text-[11px] pt-1 border-t border-border/40">
-              <span className="text-muted-foreground/70 text-[10px]">下单质量(高级)</span>
-              <div className="flex items-center gap-1">
-                <span className="text-muted-foreground">跟单方式</span>
-                <select
-                  value={(gv('follow_type') || 'market')}
-                  onChange={(e) => updateG('follow_type', e.target.value)}
-                  className="bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
-                >
-                  <option value="market">市价</option>
-                  <option value="limit">限价</option>
-                </select>
-              </div>
-              <InlineField label="滑点" value={gv('slippage_pct')} onChange={(v) => updateG('slippage_pct', v)} suffix="%" width="w-10" />
-              <InlineField label="现货成交后等待" value={gv('stabilize_sec')} onChange={(v) => updateG('stabilize_sec', v)} suffix="秒" width="w-8" />
-              <InlineField label="分层建仓" value={gv('tier_ratios')} onChange={(v) => updateG('tier_ratios', v)} width="w-28" />
-            </div>
-            {/* 限流：每账户借币配速 */}
-            <div className="flex items-center gap-2 flex-wrap text-[11px]">
-              <span className="text-muted-foreground/70 text-[10px]">限流</span>
-              <InlineField label="每账户借币速率" value={gv('borrow_rate_per_sec')} onChange={(v) => updateG('borrow_rate_per_sec', v)} suffix="次/秒" width="w-10" />
-              <span className="text-muted-foreground/60 text-[10px]">单 UID 硬顶 2/秒(180000÷1500)；多账户聚合 = 本值×账户数</span>
-            </div>
-            {/* 借币方式：IOC OTOCO 开关 + 撤单腿数 */}
-            <div className="flex items-center gap-2 flex-wrap text-[11px]">
-              <span className="text-muted-foreground/70 text-[10px]">借币方式</span>
-              <button
-                onClick={() => setGlobalRules((p) => ({ ...p, borrow_via_otoco: !(p.borrow_via_otoco === true || p.borrow_via_otoco === 'true') }))}
-                className={`px-2 py-0.5 rounded text-[11px] ${(globalRules.borrow_via_otoco === true || globalRules.borrow_via_otoco === 'true') ? 'bg-positive/20 text-positive' : 'bg-accent text-muted-foreground'}`}
-              >
-                {(globalRules.borrow_via_otoco === true || globalRules.borrow_via_otoco === 'true') ? 'IOC OTOCO 挂单借币' : 'borrow-repay 直接借'}
-              </button>
-              <span className="text-muted-foreground/70 text-[10px]">撤单腿数</span>
-              <select
-                value={String(globalRules.otoco_legs ?? 2)}
-                onChange={(e) => setGlobalRules((p) => ({ ...p, otoco_legs: Number(e.target.value) }))}
-                className="bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary"
-              >
-                <option value="2">2 单 (OTO)</option>
-                <option value="3">3 单 (OTOCO)</option>
-              </select>
-              <span className="text-muted-foreground/60 text-[10px]">开启=coinmini 同款 IOC 挂单借币;2 单撤单更省、反滥用压力更低</span>
-            </div>
-            {/* 对冲腿账户：子账户(原行为) / 主账户(子账户现货空+主账户合约多) */}
-            <div className="flex items-center gap-2 flex-wrap text-[11px]">
-              <span className="text-muted-foreground/70 text-[10px]">对冲腿</span>
-              <button
-                onClick={() => setGlobalRules((p) => ({ ...p, hedge_via_master: !(p.hedge_via_master === true || p.hedge_via_master === 'true') }))}
-                className={`px-2 py-0.5 rounded text-[11px] ${(globalRules.hedge_via_master === true || globalRules.hedge_via_master === 'true') ? 'bg-positive/20 text-positive' : 'bg-accent text-muted-foreground'}`}
-              >
-                {(globalRules.hedge_via_master === true || globalRules.hedge_via_master === 'true') ? '主账户合约对冲' : '子账户合约对冲'}
-              </button>
-              <span className="text-muted-foreground/60 text-[10px]">主账户模式: 借币/现货在各子账户,合约多腿统一打主账户(需主账户已配置且为单向持仓)</span>
-              <InlineField label="点差护栏" value={gv('max_spread_pct')} onChange={(v) => updateG('max_spread_pct', v)} suffix="%" width="w-10" />
-              <span className="text-muted-foreground/60 text-[10px]">点差幅度超此值视为行情glitch跳过下单/平仓(防坏价误开仓;0=关闭)</span>
-              <InlineField label="成交量护栏" value={gv('min_volume_24h')} onChange={(v) => updateG('min_volume_24h', v)} suffix="U" width="w-20" />
-              <span className="text-muted-foreground/60 text-[10px]">24h成交量低于此值的薄盘币不自动推送/借币(交易护栏;0=关闭)</span>
-            </div>
-            <div className="text-[10px] text-muted-foreground/60 -mt-1">
-              限价：合约腿用可成交限价(挂价≥卖一×(1+滑点))封顶滑点，超时未成交自动市价补齐——永不留敞口。分层格式「偏移%:数量%」如 0.5:30,0.8:30,1.2:40。受控测试请先用小额单笔下单额验证。
             </div>
 
             <div className="flex items-center justify-between flex-wrap text-[11px]">

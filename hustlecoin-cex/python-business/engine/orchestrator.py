@@ -24,9 +24,34 @@ class Orchestrator:
 
     async def start(self):
         self._running = True
+        await asyncio.to_thread(self._recover_stale_pending_borrow)
         asyncio.create_task(self._supervisor_loop())
         asyncio.create_task(self._delisting_scan_loop())
         logger.info("Orchestrator started")
+
+    def _recover_stale_pending_borrow(self):
+        """启动时回收僵尸 PENDING_BORROW:此状态是借币前的瞬态排队(尚未动用资金/下单),
+        正常路径秒级转 BORROWED_IDLE/FAILED;若进程在此期间被 kill(重启),会永久卡住占位
+        且 worker 视其为 active 不再重试。超龄(>2min)一律置 FAILED 释放占位(安全:无敞口)。"""
+        from datetime import timedelta
+        db = SessionLocal()
+        try:
+            from engine.models import Position
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
+            q = db.query(Position).filter(Position.status == "PENDING_BORROW", Position.created_at < cutoff)
+            if self.user_id is not None:
+                q = q.filter(Position.user_id == self.user_id)
+            stale = q.all()
+            for p in stale:
+                p.status = "FAILED"
+                p.error_message = "stale PENDING_BORROW recovered on engine restart"
+            if stale:
+                db.commit()
+                logger.warning(f"Recovered {len(stale)} stale PENDING_BORROW positions → FAILED")
+        except Exception as e:
+            logger.error(f"recover_stale_pending_borrow failed: {e}")
+        finally:
+            db.close()
 
     async def stop(self):
         self._running = False

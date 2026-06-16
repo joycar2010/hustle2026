@@ -13,10 +13,13 @@ logger = logging.getLogger(__name__)
 PREMIUM_INDEX_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 FUNDING_INFO_URL = "https://fapi.binance.com/fapi/v1/fundingInfo"
 INTEREST_RATE_URL = "https://www.binance.com/bapi/margin/v1/public/margin/vip/spec/list-all"
+SPOT_EXINFO_URL = "https://api.binance.com/api/v3/exchangeInfo"
+FUT_EXINFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 
 REFRESH_INTERVAL = 30
 STATIC_REFRESH_MULTIPLIER = 10  # refresh static data every 10 cycles = 5 min
 INTEREST_CACHE_KEY = "market:interest_rates"  # Redis backup for last-good interest rates
+UNIVERSE_KEY = "engine:universe"  # Rust 引擎订阅集:现货∩合约 USDT 可交易对(随上/退市动态刷新)
 
 
 class MarketDataPusher:
@@ -100,6 +103,30 @@ class MarketDataPusher:
             except Exception as e:
                 logger.warning(f"Failed to fetch interest rates: {e}")
 
+            # 刷新 Rust 引擎订阅宇宙 engine:universe = 现货∩合约 USDT 可交易对。
+            # 随币安上/退市动态更新;只在两腿 exchangeInfo 都成功取到时才覆写(避免抖动清空)。
+            try:
+                spot_resp, fut_resp = await asyncio.gather(
+                    client.get(SPOT_EXINFO_URL), client.get(FUT_EXINFO_URL),
+                )
+                if spot_resp.status_code == 200 and fut_resp.status_code == 200:
+                    spot_syms = {
+                        s["symbol"] for s in spot_resp.json().get("symbols", [])
+                        if s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT"
+                    }
+                    fut_syms = {
+                        s["symbol"] for s in fut_resp.json().get("symbols", [])
+                        if s.get("status") == "TRADING"
+                        and s.get("contractType") == "PERPETUAL"
+                        and s.get("quoteAsset") == "USDT"
+                    }
+                    universe = sorted(spot_syms & fut_syms)
+                    if universe:  # 非空才写,防 exchangeInfo 异常空集清空订阅
+                        await self._redis.set(UNIVERSE_KEY, json.dumps(universe))
+                        logger.debug(f"Refreshed engine:universe: {len(universe)} symbols")
+            except Exception as e:
+                logger.warning(f"Failed to refresh engine:universe: {e}")
+
     async def _fetch_and_publish(self):
         async with httpx.AsyncClient(timeout=10) as client:
             try:
@@ -121,6 +148,7 @@ class MarketDataPusher:
             info = self._funding_info.get(symbol, {})
             interest = self._interest_rates.get(asset, 0)
             funding_rate = float(item.get("lastFundingRate", "0"))
+            mark_price = float(item.get("markPrice", "0") or 0)   # 合约 mark 价(/spreads 开仓/平仓 基差锚)
             interval = info.get("interval", 8)
             cap = info.get("cap", 0)
 
@@ -135,6 +163,7 @@ class MarketDataPusher:
 
             market_data[symbol] = {
                 "funding_rate": funding_rate,
+                "mark_price": mark_price,
                 "funding_interval": interval,
                 "funding_cap": cap,
                 "daily_interest": interest,

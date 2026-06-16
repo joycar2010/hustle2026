@@ -256,6 +256,14 @@ class BinanceTradingClient:
             "type": "REPAY", "isIsolated": "FALSE",
         })
 
+    async def set_bnb_burn(self, spot: bool = True, interest: bool = True) -> dict:
+        """开/关 BNB 抵扣手续费: spotBNBBurn=现货&杠杆下单手续费, interestBNBBurn=杠杆利息。
+        幂等开关,每次按期望状态下发即可纠偏。"""
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/bnbBurn", {
+            "spotBNBBurn": "true" if spot else "false",
+            "interestBNBBurn": "true" if interest else "false",
+        })
+
     async def get_margin_account(self) -> dict:
         return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/account")
 

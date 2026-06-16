@@ -20,6 +20,7 @@ class BalancePusher:
         self._running = False
         self._max_borrow_tick = 0
         self._max_borrow_cache: dict[int, dict[str, float]] = {}  # account_id -> {asset: amount}
+        self._no_inventory: dict[str, bool] = {}  # asset -> True 表示币安杠杆池无可借库存(-3045)
         self._interest_rate_cache: dict[str, float] = {}  # asset -> daily_interest_rate (global)
 
     async def start(self):
@@ -109,8 +110,14 @@ class BalancePusher:
                                 try:
                                     amt = await client.get_max_borrowable(asset)
                                     mb_results[asset] = float(amt)
-                                except Exception:
-                                    mb_results[asset] = mb_results.get(asset, 0)
+                                    self._no_inventory[asset] = False
+                                except Exception as e:
+                                    # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
+                                    if "-3045" in str(e):
+                                        mb_results[asset] = 0.0
+                                        self._no_inventory[asset] = True
+                                    else:
+                                        mb_results[asset] = mb_results.get(asset, 0)
                                 if asset not in interest_fetched:
                                     try:
                                         rate = await client.get_margin_interest_rate(asset)
@@ -139,6 +146,7 @@ class BalancePusher:
                                 "free": float(a.get("free", "0")),
                                 "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
+                                "no_inventory": self._no_inventory.get(asset_name, False),
                             }
 
                     # Pushed-but-not-held assets aren't in userAssets — still surface
@@ -150,6 +158,7 @@ class BalancePusher:
                                 "free": 0.0,
                                 "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
+                                "no_inventory": self._no_inventory.get(asset_name, False),
                             }
 
                     spot_free = "0"

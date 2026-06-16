@@ -13,7 +13,7 @@ export interface AccountBalance {
   futures_unrealized_pnl: number
   bnb_free: number
   bnb_interest: number
-  symbol_margin?: Record<string, { free: number; max_borrowable: number; daily_interest_rate: number }>
+  symbol_margin?: Record<string, { free: number; max_borrowable: number; daily_interest_rate: number; no_inventory?: boolean }>
 }
 
 interface BalanceSummary {

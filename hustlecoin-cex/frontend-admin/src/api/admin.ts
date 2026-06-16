@@ -798,6 +798,7 @@ export interface GlobalRulesData {
   username?: string
   auto_push_spread: string
   remove_spread: string
+  borrow_spread: string
   open_spread: string
   close_spread: string
   order_amount: string
@@ -816,6 +817,26 @@ export interface GlobalRulesData {
   max_positions: number
   auto_start_on_boot: boolean
   futures_liquidation_threshold: string | null
+  // 系统后端规则字段
+  follow_type?: string
+  slippage_pct?: string | null
+  stabilize_sec?: string | null
+  tier_ratios?: string
+  borrow_rate_per_sec?: string | null
+  borrow_via_otoco?: boolean
+  otoco_legs?: number
+  hedge_via_master?: boolean
+  max_spread_pct?: string | null
+  min_volume_24h?: string | null
+  min_volume_24h_futures?: string | null
+  block_risky_open?: boolean
+  filter_duration_ms?: number
+  min_borrow_usdt?: string | null
+  collateral_ratio?: string | null
+  removed_cooldown_minutes?: number
+  open_spread_buffer?: string | null
+  taker_fee_spot?: string | null
+  taker_fee_futures?: string | null
   updated_at: string | null
 }
 

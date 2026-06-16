@@ -37,4 +37,19 @@ impl RedisPublisher {
             error!(error = %e, symbol = %snapshot.symbol, "Redis write failed");
         }
     }
+
+    /// 把 30s 吞吐/护栏计数写到 Redis,供 python 巡检读取(SET engine:throughput, 90s 过期)。
+    pub async fn set_throughput(&self, json: &str) {
+        let mut conn = self.conn.lock().await;
+        let r: Result<(), redis::RedisError> = redis::cmd("SET")
+            .arg("engine:throughput")
+            .arg(json)
+            .arg("EX")
+            .arg(90)
+            .query_async(&mut *conn)
+            .await;
+        if let Err(e) = r {
+            error!(error = %e, "Redis throughput write failed");
+        }
+    }
 }

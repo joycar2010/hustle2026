@@ -1,17 +1,3 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, func
-
-from app.db.models import Base
-
-
-class PendingBlacklist(Base):
-    __tablename__ = "pending_blacklist"
-
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String(20), nullable=False)
-    reason = Column(String(500), nullable=True)
-    source = Column(String(50), default="binance_announcement")
-    announcement_title = Column(Text, nullable=True)
-    announcement_url = Column(String(500), nullable=True)
-    is_confirmed = Column(Boolean, default=False)
-    confirmed_by = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+# PendingBlacklist 已统一到 app.db.models(规范定义,含全部列)。
+# 此处仅做兼容性再导出,避免重复定义同一张表(双注册会触发 SQLAlchemy "Table already defined")。
+from app.db.models import PendingBlacklist  # noqa: F401

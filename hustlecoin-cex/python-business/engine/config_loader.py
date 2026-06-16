@@ -1,8 +1,9 @@
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import GlobalRules, FundRules, Blacklist
@@ -41,6 +42,17 @@ class GlobalRulesSnapshot:
     hedge_via_master: bool = False
     max_spread_pct: Decimal = Decimal("3.0")
     min_volume_24h: Decimal = Decimal("0")
+    min_volume_24h_futures: Decimal = Decimal("0")
+    block_risky_open: bool = False
+    filter_duration_ms: int = 0
+    min_borrow_usdt: Decimal = Decimal("0")
+    collateral_ratio: Decimal = Decimal("1")
+    taker_fee_spot: Decimal = Decimal("0.00075")
+    taker_fee_futures: Decimal = Decimal("0.00075")
+    bnb_burn_enabled: bool = False
+    removed_cooldown_minutes: int = 0
+    open_spread_buffer: Decimal = Decimal("0")
+    max_loss_per_position: Decimal | None = None   # 单仓最大亏损止损(USDT,None/0=禁用)
 
 
 @dataclass(frozen=True)
@@ -63,6 +75,19 @@ class FundRulesSnapshot:
 
 DEFAULT_GLOBAL = GlobalRulesSnapshot()
 DEFAULT_FUND = FundRulesSnapshot()
+
+# 「系统后端规则」(/rules 黄框)= 全局系统设置,由 user_id IS NULL 行主管,对所有用户一致;
+# admin /admin/global-rules「系统后端规则」TAB 编辑。per-user worker 的这些字段从 NULL 行覆盖。
+_SYSTEM_FIELDS = (
+    "follow_type", "slippage_pct", "stabilize_sec", "tier_ratios", "borrow_rate_per_sec",
+    "borrow_via_otoco", "otoco_legs", "hedge_via_master", "max_spread_pct", "min_volume_24h",
+    "min_volume_24h_futures", "block_risky_open", "filter_duration_ms", "min_borrow_usdt",
+    "collateral_ratio", "removed_cooldown_minutes", "open_spread_buffer",
+    "taker_fee_spot", "taker_fee_futures",
+)
+_SYS_BOOL = {"borrow_via_otoco", "hedge_via_master", "block_risky_open"}
+_SYS_INT = {"otoco_legs", "filter_duration_ms", "removed_cooldown_minutes"}
+_SYS_STR = {"follow_type", "tier_ratios"}
 
 
 class ConfigLoader:
@@ -93,10 +118,12 @@ class ConfigLoader:
     def _reload(self):
         db: Session = SessionLocal()
         try:
-            # 按 user_id 取本用户规则行;legacy(user_id=None)引擎回退 first()
+            # 按 user_id 取本用户规则行;legacy(user_id=None)引擎确定性取 user_id IS NULL 行
+            # (多行表 .first() 无序,UPDATE 后会漂行 —— 与 /rules 读写口径对齐)
             rq = db.query(GlobalRules)
             rules = (rq.filter(GlobalRules.user_id == self.user_id).first()
-                     if self.user_id is not None else rq.first())
+                     if self.user_id is not None
+                     else rq.filter(GlobalRules.user_id.is_(None)).order_by(GlobalRules.id).first())
             if rules:
                 self.global_rules = GlobalRulesSnapshot(
                     auto_push_spread=rules.auto_push_spread,
@@ -127,9 +154,38 @@ class ConfigLoader:
                     hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),
                     max_spread_pct=rules.max_spread_pct if getattr(rules, "max_spread_pct", None) is not None else Decimal("3.0"),
                     min_volume_24h=rules.min_volume_24h if getattr(rules, "min_volume_24h", None) is not None else Decimal("0"),
+                    min_volume_24h_futures=rules.min_volume_24h_futures if getattr(rules, "min_volume_24h_futures", None) is not None else Decimal("0"),
+                    block_risky_open=bool(getattr(rules, "block_risky_open", False)),
+                    filter_duration_ms=int(getattr(rules, "filter_duration_ms", 0) or 0),
+                    min_borrow_usdt=rules.min_borrow_usdt if getattr(rules, "min_borrow_usdt", None) is not None else Decimal("0"),
+                    collateral_ratio=rules.collateral_ratio if getattr(rules, "collateral_ratio", None) is not None else Decimal("1"),
+                    taker_fee_spot=rules.taker_fee_spot if getattr(rules, "taker_fee_spot", None) is not None else Decimal("0.00075"),
+                    taker_fee_futures=rules.taker_fee_futures if getattr(rules, "taker_fee_futures", None) is not None else Decimal("0.00075"),
+                    bnb_burn_enabled=bool(getattr(rules, "bnb_burn_enabled", False)),
+                    removed_cooldown_minutes=int(getattr(rules, "removed_cooldown_minutes", 0) or 0),
+                    open_spread_buffer=rules.open_spread_buffer if getattr(rules, "open_spread_buffer", None) is not None else Decimal("0"),
+                    max_loss_per_position=getattr(rules, "max_loss_per_position", None),
                 )
 
-            fund = db.query(FundRules).first()
+            # 系统后端规则(黄框)由全局 NULL 行主管:per-user worker 把这些字段从 NULL 行覆盖
+            # (admin「系统后端规则」TAB 编辑;per-user 行的同名字段忽略,对所有用户一致)
+            if rules is not None and self.user_id is not None:
+                sysrow = rq.filter(GlobalRules.user_id.is_(None)).order_by(GlobalRules.id).first()
+                if sysrow is not None:
+                    ov = {}
+                    for f in _SYSTEM_FIELDS:
+                        v = getattr(sysrow, f, None)
+                        if v is None:
+                            continue
+                        ov[f] = bool(v) if f in _SYS_BOOL else int(v) if f in _SYS_INT else str(v) if f in _SYS_STR else v
+                    if ov:
+                        self.global_rules = replace(self.global_rules, **ov)
+
+            # 资金规则按 user 隔离;legacy(user_id=None)引擎确定性取 NULL 行
+            fq = db.query(FundRules)
+            fund = (fq.filter(FundRules.user_id == self.user_id).first()
+                    if self.user_id is not None
+                    else fq.filter(FundRules.user_id.is_(None)).order_by(FundRules.id).first())
             if fund:
                 self.fund_rules = FundRulesSnapshot(
                     bnb_min_quantity=fund.bnb_min_quantity,
@@ -148,7 +204,11 @@ class ConfigLoader:
                     transfer_order=fund.transfer_order,
                 )
 
-            bl = db.query(Blacklist).all()
+            # 黑名单 = 本用户黑名单 ∪ 全局系统黑名单(user_id IS NULL:死币/借币池无券等,对所有用户生效)
+            blq = db.query(Blacklist)
+            bl = (blq.filter(or_(Blacklist.user_id == self.user_id, Blacklist.user_id.is_(None))).all()
+                  if self.user_id is not None
+                  else blq.filter(Blacklist.user_id.is_(None)).all())
             self.blacklist = {b.symbol for b in bl}
             logger.debug(f"Config reloaded: {len(self.blacklist)} blacklisted symbols")
         finally:

@@ -13,6 +13,8 @@ class FeishuConfigUpdate(BaseModel):
     leverage_risk_alert: Optional[Decimal] = None
     enable_transfer_fail_alert: Optional[bool] = None
     enable_new_borrow_alert: Optional[bool] = None
+    enable_borrow_success_alert: Optional[bool] = None
+    enable_repay_success_alert: Optional[bool] = None
 
 
 class FeishuConfigResponse(BaseModel):
@@ -25,6 +27,8 @@ class FeishuConfigResponse(BaseModel):
     leverage_risk_alert: Decimal
     enable_transfer_fail_alert: bool
     enable_new_borrow_alert: bool
+    enable_borrow_success_alert: Optional[bool] = True
+    enable_repay_success_alert: Optional[bool] = True
     updated_at: datetime
 
     model_config = {"from_attributes": True}

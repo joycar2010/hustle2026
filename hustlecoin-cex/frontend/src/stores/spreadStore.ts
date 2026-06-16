@@ -53,10 +53,12 @@ export const useSpreadStore = create<SpreadState>((set, get) => ({
     })
   },
 
+  // 整表替换(非合并):Redis 已不再发布的死币/退市币不会残留。
+  // 之前用 new Map(state.spreads) 合并 → 死币(HIGH/ATA 退市后引擎停发)永远冻结在表里。
   setBulk: (items) => {
-    set((state) => {
-      const newMap = new Map(state.spreads)
-      let maxTs = state.lastUpdateTs
+    set(() => {
+      const newMap = new Map<string, SpreadData>()
+      let maxTs = 0
       for (const item of items) {
         const parsed: SpreadData = {
           symbol: item.symbol,

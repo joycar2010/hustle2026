@@ -54,8 +54,12 @@ export function SpreadsPage() {
 
 // ─── Spreads Tab (original SpreadsPage content) ───
 
+// 单腿超过此时长未更新视为死币/冻结 → 不显示(用 store 内最新 ts 作参照,免客户端时钟偏差)
+const SPREAD_STALE_DEFAULT_SEC = 300   // 利差监控新鲜阈值默认值(秒);实际值由 admin「系统后端规则」spread_stale_sec 配
+
 function SpreadsTab() {
   const spreads = useSpreadStore((s) => s.spreads)
+  const lastUpdateTs = useSpreadStore((s) => s.lastUpdateTs)
   const setBulk = useSpreadStore((s) => s.setBulk)
   const marketData = useMarketDataStore((s) => s.marketData)
   const [search, setSearch] = useState('')
@@ -84,8 +88,18 @@ function SpreadsTab() {
     getPushedSymbols().then((d) => setPushedSymbols(new Set(d.pushed_symbols || []))).catch(() => {})
   }, [setBulk])
 
+  // 定时整表刷新:setBulk 现为整表替换,周期性拉取可剪掉引擎已停发的死币
+  useEffect(() => {
+    const t = setInterval(() => {
+      getSpreads().then((data: SpreadData[]) => setBulk(data)).catch(() => {})
+    }, 20_000)
+    return () => clearInterval(t)
+  }, [setBulk])
+
   const openSpread = parseFloat(String(globalRules.open_spread ?? 0.8))
   const closeSpread = parseFloat(String(globalRules.close_spread ?? 0.2))
+  // 利差监控新鲜阈值(秒→ms),由 admin「系统后端规则」spread_stale_sec 配,缺省 300s
+  const staleMs = (parseInt(String(globalRules.spread_stale_sec ?? SPREAD_STALE_DEFAULT_SEC)) || SPREAD_STALE_DEFAULT_SEC) * 1000
 
   const totalCount = spreads.size
 
@@ -93,19 +107,19 @@ function SpreadsTab() {
     const items = Array.from(spreads.values())
     const q = search.toUpperCase()
     let result = q ? items.filter((s) => s.symbol.includes(q)) : items
+    // 剔除死币/冻结:某币 ts 比全表最新 ts 落后超过阈值 → 引擎已停发(退市/盘口冻结),不显示陈旧值
+    if (lastUpdateTs > 0) {
+      result = result.filter((s) => lastUpdateTs - s.ts <= staleMs)
+    }
     if (minSpread > 0) {
-      result = result.filter((s) => Math.max(Math.abs(s.spread_long), Math.abs(s.spread_short)) >= minSpread)
+      result = result.filter((s) => Math.abs(s.spread_short) >= minSpread)
     }
     if (minVol > 0) {
       result = result.filter((s) => (volMap.get(s.symbol) ?? 0) >= minVol)
     }
-    result.sort(
-      (a, b) =>
-        Math.max(Math.abs(b.spread_long), Math.abs(b.spread_short)) -
-        Math.max(Math.abs(a.spread_long), Math.abs(a.spread_short)),
-    )
+    result.sort((a, b) => b.spread_short - a.spread_short)   // 按开仓值(spread_short)降序,与参照系统一致
     return result
-  }, [spreads, search, minSpread, minVol, volMap])
+  }, [spreads, search, minSpread, minVol, volMap, lastUpdateTs, staleMs])
 
   const handlePush = useCallback(async (symbol: string) => {
     try {
@@ -180,9 +194,7 @@ function SpreadsTab() {
               <th className="px-2 py-1.5 text-left font-medium">币种</th>
               <th className="px-2 py-1.5 text-right font-medium">当期</th>
               <th className="px-2 py-1.5 text-right font-medium">开仓</th>
-              <th className="px-2 py-1.5 text-right font-medium">平仓</th>
-              <th className="px-2 py-1.5 text-right font-medium">资</th>
-              <th className="px-2 py-1.5 text-right font-medium">资倍</th>
+              <th className="px-2 py-1.5 text-right font-medium">清仓</th>
               <th className="px-2 py-1.5 text-right font-medium">24h量</th>
               <th className="px-2 py-1.5 text-right font-medium">决</th>
               <th className="px-2 py-1.5 text-center font-medium">推送</th>
@@ -191,16 +203,19 @@ function SpreadsTab() {
           </thead>
           <tbody>
             {filtered.map((s) => {
-              const isLongBetter = s.spread_long >= s.spread_short
-              const currentSpread = isLongBetter ? s.spread_long : s.spread_short
-              const direction = isLongBetter ? '期多' : '期空'
               const sr = symbolRulesMap.get(s.symbol)
               const symOpen = sr ? sr.open : openSpread
               const symClose = sr ? sr.close : closeSpread
               const isPushed = pushedSymbols.has(s.symbol)
-              const openActual = s.spread_short
-              const closeActual = s.fut_bid !== 0 ? (s.spot_ask - s.fut_bid) / s.fut_bid * 100 : 0
               const mi = marketData.get(s.symbol)
+              // 开仓/平仓以合约 mark 为锚(mark 缺失用合约 mid 兜底):开仓=公允基差,平仓=开仓+一来回滑点
+              // 开仓/清仓 口径对齐 coinmini 参照源(server_proxy.py / gui.py):
+              // 开仓 =(spot_bid−fut_ask)/fut_ask×100(=引擎 spread_short:卖现货吃bid+买合约吃ask)
+              // 清仓 = |(fut_bid−spot_ask)/fut_bid×100|(平仓侧基差取绝对值,gui.py abs(cv))
+              const openActual = s.spread_short
+              const closeActual = s.fut_bid !== 0 ? Math.abs((s.fut_bid - s.spot_ask) / s.fut_bid * 100) : 0
+              // 当期 = 当期资金费率(premiumIndex.lastFundingRate ×100)
+              const funding = mi ? mi.funding_rate * 100 : null
               return (
                 <tr
                   key={s.symbol}
@@ -213,8 +228,10 @@ function SpreadsTab() {
                   <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">币安现货</td>
                   <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">币安期货</td>
                   <td className="px-2 py-1 font-medium whitespace-nowrap">{s.symbol.replace('USDT', '')}</td>
-                  <td className="px-2 py-1 text-right tabular-nums font-mono text-foreground">
-                    {currentSpread >= 0 ? '' : ''}{currentSpread.toFixed(2)}
+                  <td className="px-2 py-1 text-right tabular-nums font-mono">
+                    {funding !== null ? (
+                      <span className={funding >= 0 ? 'text-positive' : 'text-negative'}>{funding.toFixed(2)}</span>
+                    ) : <span className="text-muted-foreground">-</span>}
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums font-mono">
                     <span className={openActual >= symOpen ? 'text-positive' : 'text-foreground'}>{openActual.toFixed(2)}</span>
@@ -224,25 +241,11 @@ function SpreadsTab() {
                     <span className={closeActual <= symClose ? 'text-positive' : 'text-foreground'}>{closeActual.toFixed(2)}</span>
                     <span className="text-muted-foreground text-[9px] ml-0.5">/{symClose.toFixed(2)}</span>
                   </td>
-                  <td className="px-2 py-1 text-right tabular-nums font-mono">
-                    {mi ? (
-                      <span className={mi.funding_rate >= 0 ? 'text-positive' : 'text-negative'}>
-                        {(mi.funding_rate * 100).toFixed(2)}
-                      </span>
-                    ) : <span className="text-muted-foreground">-</span>}
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums font-mono">
-                    {mi && mi.ratio !== 0 ? (
-                      <span className={mi.ratio >= 0 ? 'text-positive' : 'text-negative'}>
-                        {mi.ratio.toFixed(2)}
-                      </span>
-                    ) : <span className="text-muted-foreground">-</span>}
-                  </td>
                   <td className="px-2 py-1 text-right tabular-nums font-mono text-muted-foreground">
                     {fmtVol(volMap.get(s.symbol))}
                   </td>
                   <td className="px-2 py-1 text-right font-medium text-positive">
-                    {direction}
+                    期多
                   </td>
                   <td className="px-2 py-1 text-center">
                     {isPushed ? (
@@ -268,7 +271,7 @@ function SpreadsTab() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={12} className="py-8 text-center text-muted-foreground text-xs">
+                <td colSpan={10} className="py-8 text-center text-muted-foreground text-xs">
                   {search ? '未找到匹配币种' : '等待利差数据...'}
                 </td>
               </tr>

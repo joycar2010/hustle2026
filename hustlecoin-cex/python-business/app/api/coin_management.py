@@ -99,7 +99,7 @@ def patch_coin(symbol: str, data: CoinPatch, request: Request, db: Session = Dep
 
 @router.post("/sync-volume")
 async def sync_volume(request: Request, db: Session = Depends(get_db)):
-    from engine.trading.binance_trading import BinanceTradingClient, SPOT_BASE
+    from engine.trading.binance_trading import BinanceTradingClient, SPOT_BASE, FUTURES_BASE
     from datetime import datetime, timezone
 
     user_id = get_current_user_id(request)
@@ -109,10 +109,16 @@ async def sync_volume(request: Request, db: Session = Depends(get_db)):
 
     async with BinanceTradingClient(master.api_key, master.api_secret) as client:
         tickers = await client._request("GET", f"{SPOT_BASE}/api/v3/ticker/24hr", signed=False)
+        # 合约腿 24h 成交额(双腿量过滤用);失败不影响现货采集
+        try:
+            fut_tickers = await client._request("GET", f"{FUTURES_BASE}/fapi/v1/ticker/24hr", signed=False)
+        except Exception:
+            fut_tickers = []
 
     updated = 0
     now = datetime.now(timezone.utc)
     ticker_map = {t["symbol"]: Decimal(str(t.get("quoteVolume", "0"))) for t in tickers}
+    fut_map = {t["symbol"]: Decimal(str(t.get("quoteVolume", "0"))) for t in fut_tickers}
 
     symbols = db.query(Symbol).filter(Symbol.is_active == True).all()
     for sym in symbols:
@@ -121,6 +127,9 @@ async def sync_volume(request: Request, db: Session = Depends(get_db)):
             sym.volume_24h = vol
             sym.volume_updated_at = now
             updated += 1
+        fvol = fut_map.get(sym.symbol)
+        if fvol is not None:
+            sym.futures_volume_24h = fvol
 
     db.commit()
-    return {"message": f"Updated volume for {updated} symbols"}
+    return {"message": f"Updated volume for {updated} symbols (现货+合约双腿)"}

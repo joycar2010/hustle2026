@@ -20,6 +20,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 user = getattr(request.state, "user", None)
                 user_id = getattr(request.state, "user_id", None)
                 ip = request.client.host if request.client else None
+                # 处理器可在 request.state.audit_details 写入字段级 before/after diff(JSON)
+                details = getattr(request.state, "audit_details", None)
                 db = SessionLocal()
                 try:
                     log = AuditLog(
@@ -28,6 +30,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                         action=request.method,
                         resource=request.url.path,
                         ip_address=ip,
+                        details=details,
                     )
                     db.add(log)
                     db.commit()

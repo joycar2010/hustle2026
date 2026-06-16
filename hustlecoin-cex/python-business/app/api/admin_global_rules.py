@@ -52,13 +52,11 @@ def broadcast_rules(request: Request, db: Session = Depends(get_db)):
     users = db.query(User).filter(User.is_active == True).all()
     updated = 0
     fields = [
-        "auto_push_spread", "remove_spread", "open_spread", "close_spread",
+        "auto_push_spread", "remove_spread", "borrow_spread", "open_spread", "close_spread",
         "order_amount", "close_funding_ratio", "repay_funding_ratio",
         "borrow_delay_sec", "confirm_delay_sec", "confirm_skip_spread",
         "repay_ban_minutes", "interest_filter", "max_loss_per_position",
-        "circuit_breaker_spread_pct", "circuit_breaker_pause_sec",
-        "max_daily_interest_rate", "repay_spread", "max_positions",
-        "auto_start_on_boot", "futures_liquidation_threshold",
+        "repay_spread", "max_positions", "auto_start_on_boot",
     ]
 
     for u in users:
@@ -94,6 +92,7 @@ def _rules_to_dict(r: GlobalRules) -> dict:
         "user_id": r.user_id,
         "auto_push_spread": str(r.auto_push_spread),
         "remove_spread": str(r.remove_spread),
+        "borrow_spread": str(r.borrow_spread) if r.borrow_spread is not None else None,
         "open_spread": str(r.open_spread),
         "close_spread": str(r.close_spread),
         "order_amount": str(r.order_amount),
@@ -112,5 +111,26 @@ def _rules_to_dict(r: GlobalRules) -> dict:
         "max_positions": r.max_positions,
         "auto_start_on_boot": r.auto_start_on_boot,
         "futures_liquidation_threshold": str(r.futures_liquidation_threshold) if r.futures_liquidation_threshold else None,
+        # 系统后端规则字段(黄框)
+        "follow_type": getattr(r, "follow_type", None) or "market",
+        "slippage_pct": str(r.slippage_pct) if getattr(r, "slippage_pct", None) is not None else None,
+        "stabilize_sec": str(r.stabilize_sec) if getattr(r, "stabilize_sec", None) is not None else None,
+        "tier_ratios": getattr(r, "tier_ratios", None) or "",
+        "borrow_rate_per_sec": str(r.borrow_rate_per_sec) if getattr(r, "borrow_rate_per_sec", None) is not None else None,
+        "borrow_via_otoco": bool(getattr(r, "borrow_via_otoco", False)),
+        "otoco_legs": getattr(r, "otoco_legs", 2),
+        "hedge_via_master": bool(getattr(r, "hedge_via_master", False)),
+        "max_spread_pct": str(r.max_spread_pct) if getattr(r, "max_spread_pct", None) is not None else None,
+        "min_volume_24h": str(r.min_volume_24h) if getattr(r, "min_volume_24h", None) is not None else None,
+        "min_volume_24h_futures": str(r.min_volume_24h_futures) if getattr(r, "min_volume_24h_futures", None) is not None else None,
+        "block_risky_open": bool(getattr(r, "block_risky_open", False)),
+        "filter_duration_ms": getattr(r, "filter_duration_ms", 0),
+        "min_borrow_usdt": str(r.min_borrow_usdt) if getattr(r, "min_borrow_usdt", None) is not None else None,
+        "collateral_ratio": str(r.collateral_ratio) if getattr(r, "collateral_ratio", None) is not None else None,
+        "removed_cooldown_minutes": getattr(r, "removed_cooldown_minutes", 0),
+        "open_spread_buffer": str(r.open_spread_buffer) if getattr(r, "open_spread_buffer", None) is not None else None,
+        "taker_fee_spot": str(r.taker_fee_spot) if getattr(r, "taker_fee_spot", None) is not None else None,
+        "taker_fee_futures": str(r.taker_fee_futures) if getattr(r, "taker_fee_futures", None) is not None else None,
+        "spread_stale_sec": getattr(r, "spread_stale_sec", None),
         "updated_at": str(r.updated_at) if r.updated_at else None,
     }

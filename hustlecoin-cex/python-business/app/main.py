@@ -36,6 +36,7 @@ from app.api.admin_ai import router as admin_ai_router
 from app.api.admin_ws import router as admin_ws_router
 from app.api.admin_global_rules import router as admin_global_rules_router
 from app.api.rule_presets import router as rule_presets_router
+from app.api.rules_save import router as rules_save_router
 from app.config import settings
 from app.db.models import Base
 from app.db.session import engine, SessionLocal
@@ -121,6 +122,7 @@ app.include_router(admin_ai_router)
 app.include_router(admin_ws_router)
 app.include_router(admin_global_rules_router)
 app.include_router(rule_presets_router)
+app.include_router(rules_save_router)
 
 ADMIN_SPA_DIR = Path(__file__).resolve().parent.parent / "static" / "admin-spa"
 

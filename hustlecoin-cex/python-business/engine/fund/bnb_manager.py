@@ -14,8 +14,17 @@ async def run_bnb_check(
     rules: FundRulesSnapshot,
     notifier: FeishuSender,
     account_note: str,
+    bnb_burn_enabled: bool | None = None,
 ):
     try:
+        # BNB 抵扣开关(每用户):仅在显式开启(True)时下发 spot/interestBNBBurn=on;
+        # 关闭/默认时不主动改账户现状,避免把用户在币安手动开的抵扣悄悄关掉。
+        if bnb_burn_enabled:
+            try:
+                await client.set_bnb_burn(spot=True, interest=True)
+            except Exception as be:
+                logger.warning(f"set_bnb_burn(on) failed for {account_note}: {be}")
+
         balances = await client.get_bnb_balance()
         bnb_free = balances.get("margin", Decimal("0"))
 

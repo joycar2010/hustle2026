@@ -326,7 +326,7 @@ export function AccountsPage() {
                     <span className="text-muted-foreground">账号</span>
                     <span>{masterAccount.account_name || '未设置'}</span>
                     <span className="text-muted-foreground">API Key</span>
-                    <span className="font-mono text-[11px]">{masterAccount.api_key.slice(0, 8)}...{masterAccount.api_key.slice(-4)}</span>
+                    <span className="font-mono text-[11px]">{masterAccount.api_key}</span>
                     <span className="text-muted-foreground">Secret</span>
                     <span className="font-mono text-[11px]">{masterAccount.api_secret_masked}</span>
                     <span className="text-muted-foreground">创建时间</span>
@@ -927,7 +927,7 @@ function AccountDetailDrawer({ account, balance, ipInfo: parentIpInfo, onClose, 
               </Badge>
 
               <span className="text-muted-foreground">API Key</span>
-              <span className="font-mono text-[11px]">{account.api_key.slice(0, 8)}...{account.api_key.slice(-4)}</span>
+              <span className="font-mono text-[11px]">{account.api_key}</span>
 
               <span className="text-muted-foreground">Secret</span>
               <span className="font-mono text-[11px]">{account.api_secret_masked}</span>
