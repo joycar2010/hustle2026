@@ -234,13 +234,17 @@ class BinanceFuturesClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
+        # 防挂死(20260616): aiohttp 默认无总超时, 代理 socket 卡住会让
+        # 撤单/下单/查仓等任一请求永久阻塞, 进而僵死整个策略循环(14:55 平仓挂死根因)。
+        # 统一注入硬超时: 总 12s / 连接 5s / 单次读 10s。交易关键请求耗时正常 <5s, 余量充足。
+        _to = aiohttp.ClientTimeout(total=12.0, connect=5.0, sock_read=10.0)
         if self.session is None or self.session.closed:
             if self.proxy_url and self.proxy_url != 'direct' and \
                     self.proxy_url.startswith(('socks5://', 'socks4://', 'socks://')):
                 try:
                     from aiohttp_socks import ProxyConnector
                     connector = ProxyConnector.from_url(self.proxy_url)
-                    self.session = aiohttp.ClientSession(connector=connector)
+                    self.session = aiohttp.ClientSession(connector=connector, timeout=_to)
                     self._proxy_via_connector = True
                 except ImportError:
                     import logging as _log
@@ -248,10 +252,10 @@ class BinanceFuturesClient:
                         "aiohttp-socks not installed; SOCKS5 proxy disabled. "
                         "Run: pip install aiohttp-socks"
                     )
-                    self.session = aiohttp.ClientSession()
+                    self.session = aiohttp.ClientSession(timeout=_to)
                     self._proxy_via_connector = False
             else:
-                self.session = aiohttp.ClientSession()
+                self.session = aiohttp.ClientSession(timeout=_to)
                 self._proxy_via_connector = False
         return self.session
 

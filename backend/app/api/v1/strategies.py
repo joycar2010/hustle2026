@@ -1357,7 +1357,7 @@ async def execute_continuous_opening(
         order_executor_v2.max_retries = api_retry_times
         order_executor_v2.order_check_interval = order_check_interval
         order_executor_v2.spread_check_interval = spread_check_interval
-        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.5)
+        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.35)  # 默认0.5→0.35: 与 incremental_hedge.json 统一; TimingConfig 暂无此字段故恒取默认
         order_executor_v2.spread_cancel_tolerance = _spread_cancel_tolerance
         order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
         order_executor_v2.api_retry_delay = api_retry_delay
@@ -1598,7 +1598,7 @@ async def execute_continuous_closing(
         order_executor_v2.max_retries = api_retry_times
         order_executor_v2.order_check_interval = order_check_interval
         order_executor_v2.spread_check_interval = spread_check_interval
-        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.5)
+        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.35)  # 默认0.5→0.35: 与 incremental_hedge.json 统一; TimingConfig 暂无此字段故恒取默认
         order_executor_v2.spread_cancel_tolerance = _spread_cancel_tolerance
         order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
         order_executor_v2.api_retry_delay = api_retry_delay
@@ -1751,9 +1751,15 @@ async def stop_execution(
     from app.services.execution_task_manager import execution_task_manager
 
     # manual stop -> clear resume pending+snapshot so it will NOT auto-resume after open
+    # 兜底(20260616): task_id 失配(前端持旧id/经RESUME换新id/已被cleanup)时, get_status 返回
+    # None 会漏清 → 残留snapshot使已停策略在服务重启后被自恢复拉回。此处从内存活任务按 task_id
+    # 反查 strategy_id 兜底; 即便仍解析不到, 循环退出钩子 _push_stop_confirmed 会做最终自清。
     try:
         _info = execution_task_manager.get_status(task_id)
         _sid = (_info or {}).get("strategy_id")
+        if not _sid:
+            _all = execution_task_manager.get_all_tasks() or {}
+            _sid = ((_all.get(task_id) or {}) if isinstance(_all, dict) else {}).get("strategy_id")
         if _sid:
             from app.services.strategy_resume_service import clear_on_manual_stop_by_strategy_id
             await clear_on_manual_stop_by_strategy_id(_sid)

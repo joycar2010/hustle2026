@@ -608,14 +608,22 @@ class ContinuousStrategyExecutor:
                 _cap_guard_task = asyncio.create_task(self._capacity_reduce_guard(
                     strategy_type, binance_account, ladder_idx, _pos_before_cap, order_qty, _cap_stop))
             try:
-                exec_result = await self._execute_order(
-                    strategy_type,
-                    binance_account,
-                    bybit_account,
-                    order_qty,
-                    binance_price,
-                    bybit_price,
-                    spread_threshold,
+                # 防挂死(20260616): 给整条下单/对冲执行加 25s 总超时兜底。
+                # 正常一次 forward/reverse 执行 <5s; 25s 留单腿重试余量。
+                # 超时抛 asyncio.TimeoutError → 被下方 except Exception 接住 →
+                # 走 HALT 分支干净退出本阶梯循环(而非无限挂死拖垮全部策略)。
+                # 退出后由重启自恢复/下次触发周期带新配置重新评估。
+                exec_result = await asyncio.wait_for(
+                    self._execute_order(
+                        strategy_type,
+                        binance_account,
+                        bybit_account,
+                        order_qty,
+                        binance_price,
+                        bybit_price,
+                        spread_threshold,
+                    ),
+                    timeout=25.0,
                 )
             except Exception as e:
                 logger.error(f"[ladder={ladder_idx}] CRITICAL: Exception executing order: {e}", exc_info=True)
@@ -1662,6 +1670,19 @@ class ContinuousStrategyExecutor:
                 self.user_id
             )
 
+            # 防自动重启(20260616): 手动停时循环自清 Redis snapshot+pending,
+            # 确保不被 recover_running_after_restart/StrategyResumeMonitor 在服务重启后拉回。
+            # 根因=停止端点曾依赖 task_id 查 strategy_id 才清, task_id 失配(前端持旧id/
+            # 经RESUME换新id)即漏清→残留snapshot成定时炸弹。此处用 self.strategy_id 精确自清,
+            # 无 task_id 查找、无竞态, 覆盖所有手动停路径。
+            # market_close 自动停故意 mark_resume_pending(隔日开市恢复), 必须跳过不清。
+            if getattr(self, 'stop_reason', None) != 'market_close':
+                try:
+                    from app.services.strategy_resume_service import clear_on_manual_stop_by_strategy_id
+                    await clear_on_manual_stop_by_strategy_id(self.strategy_id)
+                except Exception as _clr_e:
+                    logger.warning(f"[RESUME] self-clear on stop failed for {self.strategy_id}: {_clr_e}")
+
     # REST fallback cache for _get_live_position (user_id+pair → (value, timestamp))
     _rest_pos_cache: dict = {}
     _REST_POS_CACHE_TTL = 3.0  # seconds — at most 1 REST call per 3s
@@ -1734,11 +1755,18 @@ class ContinuousStrategyExecutor:
         try:
             if not hasattr(binance_account, 'binance_client'):
                 from app.services.binance_client import BinanceFuturesClient
+                from app.core.proxy_utils import build_proxy_url
                 binance_account.binance_client = BinanceFuturesClient(
                     api_key=binance_account.api_key,
-                    api_secret=binance_account.api_secret
+                    api_secret=binance_account.api_secret,
+                    proxy_url=build_proxy_url(binance_account.proxy_config),   # 必须走账户socks5代理,否则直连出口IP→币安-2015
                 )
-            positions = await binance_account.binance_client.get_position_risk(symbol=sym_a)
+            # 防 socks5 代理偶发卡住 → 无超时 await 永久挂死整个 V2 循环(cq002 启动即无反应的根因)。
+            # 超时则抛 TimeoutError 走下方 except → 回退陈旧缓存/-1，循环降级继续而非死锁。
+            positions = await asyncio.wait_for(
+                binance_account.binance_client.get_position_risk(symbol=sym_a),
+                timeout=8.0,
+            )
             total = 0.0
             for pos in positions:
                 amt = float(pos.get('positionAmt', 0))
@@ -2140,13 +2168,16 @@ class ContinuousStrategyExecutor:
             # Init Binance client if needed
             if not hasattr(binance_account, 'binance_client'):
                 from app.services.binance_client import BinanceFuturesClient
+                from app.core.proxy_utils import build_proxy_url
                 binance_account.binance_client = BinanceFuturesClient(
                     api_key=binance_account.api_key,
-                    api_secret=binance_account.api_secret
+                    api_secret=binance_account.api_secret,
+                    proxy_url=build_proxy_url(binance_account.proxy_config),   # 必须走账户socks5代理,否则直连出口IP→币安-2015
                 )
 
             sym_a, sym_b, conv_factor = _get_pair_config(self.pair_code)
-            binance_positions = await binance_account.binance_client.get_position_risk(symbol=sym_a)
+            binance_positions = await asyncio.wait_for(
+                binance_account.binance_client.get_position_risk(symbol=sym_a), timeout=8.0)  # 代理卡住防挂死
             binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
             # Use HTTP bridge for MT5 positions (MT5Client requires Windows)
@@ -2244,11 +2275,14 @@ class ContinuousStrategyExecutor:
             try:
                 if not hasattr(binance_account, 'binance_client'):
                     from app.services.binance_client import BinanceFuturesClient
+                    from app.core.proxy_utils import build_proxy_url
                     binance_account.binance_client = BinanceFuturesClient(
                         api_key=binance_account.api_key,
-                        api_secret=binance_account.api_secret
+                        api_secret=binance_account.api_secret,
+                        proxy_url=build_proxy_url(binance_account.proxy_config),   # 必须走账户socks5代理,否则直连出口IP→币安-2015
                     )
-                binance_positions = await binance_account.binance_client.get_position_risk(symbol=sym_a)
+                binance_positions = await asyncio.wait_for(
+                    binance_account.binance_client.get_position_risk(symbol=sym_a), timeout=8.0)  # 代理卡住防挂死
                 post_binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
 
                 bybit_qty_lot = 0.0

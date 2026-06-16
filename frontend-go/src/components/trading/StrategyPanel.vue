@@ -1354,7 +1354,21 @@ function handleTriggerProgress(data) {
     }
   }
 
-  // trigger progress log removed for performance
+  // 防进度条不更新(20260616): continuous 执行的进度推送(strategy_id 以 _continuous 结尾)一律
+  // 走连续执行分支并写进度条。原先依赖 continuousExecutionEnabled[action]===true,若策略由后端
+  // 自恢复拉起/页面刷新致前端 enabled 未同步,进度会被错误写进 triggerCount → 进度条不动。
+  if (isContinuousExecution) {
+    if (!continuousExecutionEnabled.value[data.action]) {
+      continuousExecutionEnabled.value[data.action] = true
+    }
+    continuousExecutionTriggerProgress.value[data.action] = {
+      current: data.current_count,
+      required: data.required_count,
+      triggerSpread: data.current_spread ?? null,
+      threshold: data.threshold ?? null,
+    }
+    return
+  }
 
   // Check if this is for continuous execution
   const isContinuous = continuousExecutionEnabled.value[data.action]
@@ -1618,15 +1632,15 @@ function handleOrdersFilled(data) {
 
   console.log(`[WebSocket] orders_filled → ${panelType} ${resolvedAction}: binance=${binance_filled} bybit=${bybit_filled}`)
 
-  // 常规流程：释放锁、恢复按钮
-  isStopping.value[resolvedAction] = false
-  continuousExecutionEnabled.value[resolvedAction] = false
-  continuousExecutionTriggerProgress.value[resolvedAction] = { current: 0, required: 0, triggerSpread: null, threshold: null }
-  stopStatusPolling(resolvedAction)
-  strategyStore.release(`${props.type}_${resolvedAction}`)
+  // ⚠️ 连续阶梯策略：一次"双边成交"只是【开/平了一手】，策略仍在继续逐手加仓到总手数。
+  // 不能在这里复位按钮 / 关运行态 / 清进度 / 释放锁 / 停轮询——否则按钮会在第一手成交后
+  // 就翻回初始态、进度条被清空（cq001「1手后按钮复位」、hcz987「能成交看不到进度」的根因）。
+  // 真正的复位只应由 strategy_stop_confirmed(手动停) 或 strategy_execution_completed(阶梯满) 触发。
+  // 这里只做：回灌后端权威开仓账本(让平均入场点差/明细随每手成交即时更新) + 通知 + 刷新持仓。
+  fetchOpenEntrySpread()
 
   notificationStore.showStrategyNotification(
-    `${resolvedAction === 'opening' ? '开仓' : '平仓'}双边成交完成！Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU, MT5: ${bybit_filled?.toFixed ? bybit_filled.toFixed(2) : bybit_filled} XAU`,
+    `${resolvedAction === 'opening' ? '开仓' : '平仓'}双边成交一手！Binance: ${binance_filled?.toFixed ? binance_filled.toFixed(2) : binance_filled} XAU, MT5: ${bybit_filled?.toFixed ? bybit_filled.toFixed(2) : bybit_filled} XAU`,
     'success'
   )
 

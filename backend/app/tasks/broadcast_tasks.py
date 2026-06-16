@@ -440,6 +440,17 @@ class RiskMetricsStreamer:
             if not user_ids:
                 return
 
+            # 连接池护栏：先在会话外完成各用户聚合（数秒级交易所/MT5 I/O，且通常命中
+            # account_data_service 缓存），再开短会话做 risk_settings 查询与告警写入，
+            # 避免持有 DB 连接跨网络 I/O（idle-in-transaction 打爆连接池）。
+            agg_by_user = {}
+            for _uid, _accs in user_accounts.items():
+                try:
+                    _user_accs = user_accounts_map.get(_uid, _accs)
+                    agg_by_user[_uid] = await account_data_service.get_aggregated_account_data(list(_user_accs))
+                except Exception as _agg_e:
+                    logger.warning(f"[BROADCAST] risk-alert aggregate failed for {_uid}: {_agg_e}")
+
             # Open a new database session for risk settings query
             async with get_db_session(timeout=5.0) as db:
                 # Batch query: Get all risk settings for active users in one query
@@ -461,11 +472,10 @@ class RiskMetricsStreamer:
                         if not risk_settings:
                             continue
 
-                        # Get per-user aggregated data
-                        user_accs = user_accounts_map.get(user_id, accounts)
-                        aggregated_data = await account_data_service.get_aggregated_account_data(
-                            list(user_accs)
-                        )
+                        # 聚合数据已在会话外预取（见上），直接取用，避免持有 DB 连接跨网络 I/O
+                        aggregated_data = agg_by_user.get(user_id)
+                        if not aggregated_data:
+                            continue
 
                         # Initialize risk alert service
                         risk_alert_service = RiskAlertService(db)
@@ -933,6 +943,11 @@ class PendingOrdersStreamer:
                             )
                         )
                         accounts = result.scalars().all()
+                        # 连接池护栏：db 仅用于上面的账户查询；下面是逐账户交易所 REST 拉取(慢)。
+                        # 立即归还连接，避免持有跨网络 I/O 超过 PG idle_in_transaction_session_timeout(2min)
+                        # 被杀（"connection is closed"）。__aexit__ 再次 close 幂等无害；
+                        # expire_on_commit=False，关闭后账户 ORM 已加载列仍可安全读取。
+                        await db.close()
 
                         # Skip MT5 accounts even if platform_id==2 (Bybit row
                         # occasionally used as the MT5 parent row).
@@ -1750,11 +1765,13 @@ class PositionStreamer:
 
             async def _fetch_one(uid: str, url: str):
                 try:
-                    async with httpx.AsyncClient(timeout=3.0) as cli:
-                        resp = await cli.get(f"{url}/mt5/positions", headers=headers)
-                        if resp.status_code != 200:
-                            return uid, None  # bridge error → signal LKG fallback
-                        positions = resp.json().get("positions", [])
+                    # 复用共享 AsyncClient(防每秒×N桥反复构建SSL上下文阻塞事件循环)
+                    from app.core.shared_http import get_shared_async_client
+                    cli = get_shared_async_client()
+                    resp = await cli.get(f"{url}/mt5/positions", headers=headers, timeout=3.0)
+                    if resp.status_code != 200:
+                        return uid, None  # bridge error → signal LKG fallback
+                    positions = resp.json().get("positions", [])
                 except Exception as e:
                     logger.debug(f"[PositionStreamer] Bridge {url} (user {uid}) error: {e}")
                     return uid, None
@@ -1841,8 +1858,10 @@ class PositionStreamer:
             bridge_url = PositionStreamer._bridge_url_cache or os.getenv("MT5_BRIDGE_URL", "http://172.31.14.113:8002")
 
             _, sym_b = _get_pair_symbols()
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{bridge_url}/mt5/positions", params={"symbol": sym_b}, headers=headers)
+            from app.core.shared_http import get_shared_async_client
+            client = get_shared_async_client()
+            if True:
+                resp = await client.get(f"{bridge_url}/mt5/positions", params={"symbol": sym_b}, headers=headers, timeout=5.0)
                 if resp.status_code != 200:
                     return 0.0, 0.0
                 positions = resp.json().get("positions", [])
@@ -1911,11 +1930,13 @@ class MarketRateStreamer:
 
     async def _fetch_swap_rate(self):
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            from app.core.shared_http import get_shared_async_client
+            client = get_shared_async_client()
+            if True:
                 resp = await client.get(
                     "http://172.31.14.113:8001/mt5/symbol_info/XAUUSD+",
-                    headers={"X-API-Key": "OQ6bUimHZDmXEZzJKE"}
+                    headers={"X-API-Key": "OQ6bUimHZDmXEZzJKE"},
+                    timeout=5.0,
                 )
                 if resp.status_code != 200:
                     logger.warning(f"[MarketRateStreamer] swap rate HTTP {resp.status_code}")
@@ -2037,7 +2058,9 @@ class QuoteDivergenceMonitor:
                 trip = float(cfg.get("trip", 0.7))
                 recover = float(cfg.get("recover", 0.3))
                 api_key = cfg.get("api_key", "OQ6bUimHZDmXEZzJKE")
-                async with httpx.AsyncClient(timeout=3.0) as client:
+                from app.core.shared_http import get_shared_async_client
+                client = get_shared_async_client()
+                if True:
                     ic_mid, ref_mid = await asyncio.gather(
                         self._fetch_mid(client, cfg["ic_url"], cfg["ic_symbol"], api_key),
                         self._fetch_mid(client, cfg["ref_url"], cfg["ref_symbol"], api_key),

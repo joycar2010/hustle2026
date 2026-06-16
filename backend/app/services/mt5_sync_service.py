@@ -29,6 +29,10 @@ class MT5SyncService:
         self.sync_interval = sync_interval
         self.running = False
         self._task = None
+        # 防事件循环阻塞(20260616): 复用单个 AsyncClient, SSL 上下文只构建一次、连接池复用。
+        # 原先每轮对每个MT5客户端新建 AsyncClient(+Connection:close)→ 每次触发同步
+        # load_ssl_context_verify(CPU密集)阻塞事件循环 → 全站策略循环间歇停摆数分钟。
+        self._http = None
 
     async def sync_client_status(self, db: AsyncSession):
         """同步所有 MT5 客户端状态"""
@@ -59,14 +63,16 @@ class MT5SyncService:
                             logger.debug(f"Client {client.client_id} marked as disconnected (no instance)")
                         continue
 
-                    # 检查桥接服务健康
+                    # 检查桥接服务健康 — 复用单个 AsyncClient(防事件循环阻塞)
                     try:
-                        async with httpx.AsyncClient(timeout=2.0, headers={"Connection": "close"}) as http_client:
-                            # 先检查桥接服务是否运行
-                            health_resp = await http_client.get(
-                                f"http://{instance.server_ip}:{instance.service_port}/health"
-                            )
+                        if self._http is None:
+                            self._http = httpx.AsyncClient(timeout=2.0)
+                        # 先检查桥接服务是否运行
+                        health_resp = await self._http.get(
+                            f"http://{instance.server_ip}:{instance.service_port}/health"
+                        )
 
+                        if True:
                             if health_resp.status_code == 200:
                                 health_data = health_resp.json()
                                 mt5_connected = health_data.get("mt5", False)
@@ -143,6 +149,14 @@ class MT5SyncService:
             except asyncio.CancelledError:
                 pass
             self._task = None
+
+        # 关闭复用的 AsyncClient
+        if self._http is not None:
+            try:
+                await self._http.aclose()
+            except Exception:
+                pass
+            self._http = None
 
         logger.info("MT5 sync service stopped")
 
