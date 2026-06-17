@@ -141,7 +141,10 @@ async def _replay_launch(user_id, pair_code, action, payload_json):
 
 
 async def _try_resume_one(member):
-    from app.utils.trading_time import is_bybit_trading_hours, minutes_since_mt5_open, open_warmup_minutes
+    from app.utils.trading_time import (
+        is_bybit_trading_hours, minutes_since_mt5_open, open_warmup_minutes,
+        minutes_to_mt5_close, SOFT_STOP_BUFFER_MIN,
+    )
     from app.services.execution_task_manager import execution_task_manager
     user_id, pair_code, action = _split(member)
     if not user_id or action not in _VALID_ACTIONS:
@@ -155,6 +158,17 @@ async def _try_resume_one(member):
         pass
     is_open, _ = is_bybit_trading_hours()
     if not is_open:
+        return
+    # 收盘前缓冲期闸门(2026-06-18新增): continuous_executor 的软/硬停在此窗口内
+    # 主动停掉策略，是夏令时强制的安全停止点；is_bybit_trading_hours() 在窗口内仍判"开市"，
+    # 若不在此拦截，本函数会在软停后的下一次30s巡检里把刚停掉的策略原样拉回(实测仅隔15秒)。
+    # pending 标记保留不清，等真正越过收盘缓冲期后再按下方"开市+预热"逻辑自动恢复，
+    # 此闸门内唯一能启动策略的途径只剩用户手动点击(execute_continuous_* 的另一调用方)。
+    try:
+        _mtc = minutes_to_mt5_close()
+    except Exception:
+        _mtc = None
+    if _mtc is not None and _mtc <= SOFT_STOP_BUFFER_MIN:
         return
     so = minutes_since_mt5_open()
     wm = open_warmup_minutes(pair_code)

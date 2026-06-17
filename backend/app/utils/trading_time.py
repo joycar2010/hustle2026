@@ -13,6 +13,12 @@ from datetime import datetime, timezone, timedelta
 _BJT = timezone(timedelta(hours=8))
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'market_closure.json')
 
+# 收盘前安全停缓冲(夏令时强制特殊时间点，数值不可随意改动):
+# 距收盘<=SOFT 软停(仅停"一直运行"的，允许手动重启运行至HARD)；<=HARD 硬停(全部停，禁止启动)。
+# continuous_executor 的软/硬停判定与 strategy_resume_service 的"自动恢复禁入"闸门共用此处常量，避免两处数值漂移。
+SOFT_STOP_BUFFER_MIN = 15.0
+HARD_STOP_BUFFER_MIN = 5.0
+
 # Defaults (Beijing Time)
 _DEFAULTS = {
     "enabled": True,

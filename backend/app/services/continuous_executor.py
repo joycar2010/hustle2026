@@ -1369,13 +1369,15 @@ class ContinuousStrategyExecutor:
         import time as _hb_t_ak; _active_key_last_set = float('-inf')
 
         # MT5 收盘自动停：记录启动时距收盘分钟数，用于区分"收盘前一直运行"与"手动重启"
-        from app.utils.trading_time import minutes_to_mt5_close as _mins_to_close
+        from app.utils.trading_time import (
+            minutes_to_mt5_close as _mins_to_close,
+            SOFT_STOP_BUFFER_MIN as _SOFT_MIN,
+            HARD_STOP_BUFFER_MIN as _HARD_MIN,
+        )
         try:
             _start_mins = _mins_to_close()
         except Exception:
             _start_mins = None
-        _SOFT_MIN = 15.0   # 收盘前15分钟：软停（仅停"一直运行"的，允许手动重启）
-        _HARD_MIN = 5.0    # 收盘前5分钟：硬停（全部停，禁止启动）
 
         while self.is_running and not self.stop_requested:
             scan_count += 1
