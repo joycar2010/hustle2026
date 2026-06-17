@@ -133,11 +133,11 @@ class OrderExecutorV2:
 
     def __init__(self):
         self.binance_timeout = 1.5  # 3.0→1.5: 缩短Maker等待，减少A→B价格漂移
-        self.bybit_timeout = 1.0  # 0.3→1.0: ICMarkets撮合需要更多等待时间
+        self.bybit_timeout = 0.3  # 1.0→0.3: 轮询循环已覆盖等待逻辑，初始睡眠冗余；缩短至0.3s减少A→B价格漂移窗口
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
         self.spread_check_interval = 0.1   # 0.5→0.1: 100ms guard tick, faster reaction to unfavorable spread drift
-        self.spread_cancel_tolerance = 0.2  # 0.5→0.2: tighter ribbon; cancel when spread moves 0.2 against us
+        self.spread_cancel_tolerance = 0.35  # 0.2→0.35: 挂单期撤单容差(单向:仅点差朝【不利】方向偏离>该值才撤,有利方向不撤,给maker更多成交时间)。三条maker监控(binance/bybit-linear/gateio)统一真源=config/incremental_hedge.json 的 spread_cancel_tolerance(热配);此为其回退默认
         self.guard_mt5_cache_s = 0.2  # 护栏MT5腿微缓存窗口s: 币安腿WS实时, MT5腿每0.2s取一次(零币安REST)
         self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
         self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
@@ -2795,7 +2795,7 @@ class OrderExecutorV2:
                                 "forward_closing": spreads.forward_exit_spread,
                             }
                             cs = spread_map.get(strategy_type, 0.0)
-                            tol = 0.5
+                            tol = self.spread_cancel_tolerance  # 统一容差真源(随 incremental_hedge.json 热配/启动覆盖, 默认0.35), 不再硬编码0.5
                             ok = (compare_op == ">=" and cs >= spread_threshold - tol) or \
                                  (compare_op == "<=" and cs <= spread_threshold + tol)
                             if not ok:
