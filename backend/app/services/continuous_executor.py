@@ -542,7 +542,11 @@ class ContinuousStrategyExecutor:
 
             # Step 7.9: Cancel any lingering open orders on A-side before placing new one
             # Prevents order accumulation on the exchange when previous cancels failed
-            try:
+            # 防挂死(20260617): 整段加 wait_for(8s) 兜底——这是清理性动作(撤遗留挂单),
+            # 不是核心交易步骤;若代理/交易所REST在get_open_orders/cancel_order上卡住
+            # (实测SOCKS5代理C层阻塞可绕过aiohttp内部12s超时),宁可跳过清理继续往下
+            # 走Step8正常下单,也不能让整个策略循环卡死(实测100%卡死点正是这里)。
+            async def _step79_cancel_lingering():
                 sym_a, _, _ = _get_pair_config(self.pair_code)
                 from app.core.proxy_utils import build_proxy_url
                 if binance_account.platform_id == 1:
@@ -599,6 +603,10 @@ class ContinuousStrategyExecutor:
                             )
                     finally:
                         await _cancel_client.close()
+            try:
+                await asyncio.wait_for(_step79_cancel_lingering(), timeout=8.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[ladder={ladder_idx}] Pre-order cleanup timeout(8s,可能代理/REST阻塞) - 跳过清理直接下单")
             except Exception as e:
                 logger.warning(f"[ladder={ladder_idx}] Failed to cancel lingering orders: {e}")
 
