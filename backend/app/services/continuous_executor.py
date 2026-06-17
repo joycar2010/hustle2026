@@ -95,6 +95,8 @@ class ContinuousStrategyExecutor:
         # 优化: 停止信号事件 — 收到停止时立即唤醒空闲 sleep
         self._stop_event = asyncio.Event()
         self._binance_account = None
+        # 心跳看门狗(20260617): 每轮循环更新; 看门狗监控, 长时间不更新=挂死->cancel+自恢复(方案B)
+        self._last_heartbeat = None  # set on loop entry; monotonic seconds
 
     async def _init_redis(self):
         if not hasattr(self, '_redis') or self._redis is None:
@@ -347,6 +349,7 @@ class ContinuousStrategyExecutor:
                 logger.warning(f"[ladder={ladder_idx}] base_pos 读取异常: {_bpe}，回退内存计数封顶")
         while self.is_running and not self.stop_requested:
             loop_count += 1
+            import time as _hb_t; self._last_heartbeat = _hb_t.monotonic()  # 心跳
 
             # ── 阶梯重判: 每~12s 重读持仓+点差, 并"重读最新DB配置重建mapper"(捕捉运行中改的总手数); 若最优阶梯已变为另一个阶梯, 或开仓时本阶梯按新总手数已满 → 退出本阶梯交还V2主循环重选 ──
             # 修两类锁死: ①平仓死等下层阈值不去平上层(如锁阶梯2不平阶梯3); ②开仓运行中把本阶梯总手数改小后, _execute_ladder 仍按旧total死等开下一手、进不了下一阶梯。
@@ -1351,6 +1354,7 @@ class ContinuousStrategyExecutor:
 
         while self.is_running and not self.stop_requested:
             scan_count += 1
+            import time as _hb_t2; self._last_heartbeat = _hb_t2.monotonic()  # 心跳
 
             # ── 配置热重载: 保存策略后无需停止开/平仓即生效 ──
             if _t_hr.time() - _hr_last >= _hr_interval:
