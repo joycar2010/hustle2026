@@ -17,6 +17,18 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ── 共享 httpx 客户端(MT5 bridge health): 消除反复创建AsyncClient触发C层SSL重建阻塞事件循环 ──
+# 同 [[testgo-event-loop-ssl-stall]] 根治模式。所有 _connection_down_reason 共用此单例。
+import httpx as _httpx_shared
+_mt5_health_client: _httpx_shared.AsyncClient | None = None
+
+def _get_mt5_health_client() -> _httpx_shared.AsyncClient:
+    global _mt5_health_client
+    if _mt5_health_client is None or _mt5_health_client.is_closed:
+        _mt5_health_client = _httpx_shared.AsyncClient(timeout=4.0)
+    return _mt5_health_client
+
+
 
 def _get_pair_config(pair_code: str = "XAU"):
     """Get symbol names and conversion factor from hedging pair config, with fallback"""
@@ -153,8 +165,8 @@ class ContinuousStrategyExecutor:
         api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", ""))
         headers = {"X-Api-Key": api_key} if api_key else {}
         try:
-            async with httpx.AsyncClient(timeout=3.0) as c:
-                r = await c.get(f"{bridge_url}/mt5/symbol_info/{sym_b}", headers=headers)
+            c = _get_mt5_health_client()
+            r = await c.get(f"{bridge_url}/mt5/symbol_info/{sym_b}", headers=headers)
             if r.status_code != 200:
                 logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} http={r.status_code} - refusing first trade")
                 return False
@@ -1408,7 +1420,12 @@ class ContinuousStrategyExecutor:
 
             # ── MT5 当前休市硬闸: 休市中只等待, 绝不下单(防主腿先成交、对冲跟不上的单腿) ──
             # ── 连接健康闸: 主账号币安WS / 对冲MT5桥 任一掉线 -> 暂停(不开不平)+推送暂停态; 恢复后自动续跑(防掉线期主腿成交、对冲跟不上的单腿) ──
-            _conn_reason = await self._connection_down_reason(binance_account, bybit_account)
+            try:
+                _conn_reason = await asyncio.wait_for(
+                    self._connection_down_reason(binance_account, bybit_account), timeout=6.0)
+            except asyncio.TimeoutError:
+                _conn_reason = "连接检测超时(可能SSL阻塞)"
+                logger.warning(f"[CONN_GATE] _connection_down_reason timeout 6s ({strategy_type})")
             if _conn_reason:
                 if not getattr(self, "_conn_paused", False):
                     self._conn_paused = True
@@ -1631,9 +1648,9 @@ class ContinuousStrategyExecutor:
                 import httpx as _httpx
                 _burl = _get_trading_bridge_url(str(bybit_account.account_id))
                 _ok = False
-                async with _httpx.AsyncClient(timeout=4.0) as _hc:
-                    _r = await _hc.get(f"{_burl}/health")
-                    _ok = (_r.status_code == 200 and bool((_r.json() or {}).get("mt5")))
+                _hc = _get_mt5_health_client()
+                _r = await _hc.get(f"{_burl}/health")
+                _ok = (_r.status_code == 200 and bool((_r.json() or {}).get("mt5")))
                 self._mt5_health_cache = (_ok, _now)
                 if not _ok:
                     return "对冲账号(MT5)连接中断"
