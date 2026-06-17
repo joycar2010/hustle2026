@@ -176,7 +176,7 @@
               <span class="text-[#0ecb81]">{{ formatPrice(binanceOrderBook.ask_price) }}</span>
             </div>
             <div v-if="askOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
-              挂{{ askOrderCount }}
+              挂{{ askOrderCount }}<span v-if="userAskOrder.source" class="ml-0.5">{{ userAskOrder.source === 'manual' ? '⚙手动' : (userAskOrder.source === 'strategy' ? '策略' : '') }}</span>
             </div>
           </div>
           <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139] relative cursor-pointer hover:border-[#3b4149] transition-colors" @click="showPendingOrdersModal('BID')">
@@ -190,7 +190,7 @@
               <span class="text-[#3b82f6]">{{ formatVolume(binanceOrderBook.bid_volume) }}</span>
             </div>
             <div v-if="bidOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
-              挂{{ bidOrderCount }}
+              挂{{ bidOrderCount }}<span v-if="userBidOrder.source" class="ml-0.5">{{ userBidOrder.source === 'manual' ? '⚙手动' : (userBidOrder.source === 'strategy' ? '策略' : '') }}</span>
             </div>
           </div>
         </div>
@@ -587,6 +587,9 @@ const userBidOrder = ref({ price: 0, quantity: 0 })
 const showModal = ref(false)
 const modalType = ref('') // 'ASK' or 'BID'
 const pendingOrders = ref([])
+// (20260617) 委托标志事件驱动: order_id -> {side,price,quantity,source,symbol,ts}
+// WS事件(pending_order_event)即时增删; 3s轮询全量对账(兜底防漏)。4个标志ref由它派生。
+const pendingOrderMap = ref({})
 let orderFetchTimer = null
 
 // Order book data
@@ -849,6 +852,8 @@ watch(() => marketStore.marketData, (data) => {
 
 // Watch global pair selection — refresh all market data when pair changes
 watch(currentPair, () => {
+  pendingOrderMap.value = {}
+  recomputePendingMarkers()
   fetchOrderBook()
   fetchBinanceFundingRate()
   fetchBybitSwapRate()
@@ -870,6 +875,8 @@ watch(() => marketStore.lastMessage, (message) => {
     handlePnlFast(message.data)
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
+  } else if (message.type === 'pending_order_event') {
+    handlePendingOrderEvent(message.data)
   }
 }, { deep: false })
 
@@ -1208,37 +1215,73 @@ async function fetchAccountData() {
   }
 }
 
+// 从 pendingOrderMap 派生 4 个标志 ref (事件与轮询共用同一派生逻辑 → 单一真源)
+function recomputePendingMarkers() {
+  const list = Object.values(pendingOrderMap.value)
+  const asks = list.filter(o => o.side === 'sell')
+  const bids = list.filter(o => o.side === 'buy')
+  askOrderCount.value = asks.length
+  bidOrderCount.value = bids.length
+  const askP = asks.filter(o => o.price > 0)
+  const bidP = bids.filter(o => o.price > 0)
+  userAskOrder.value = askP.length
+    ? (() => { const b = askP.reduce((a, c) => (a.price < c.price ? a : c)); return { price: b.price || 0, quantity: b.quantity || 0, source: b.source } })()
+    : { price: 0, quantity: 0 }
+  userBidOrder.value = bidP.length
+    ? (() => { const b = bidP.reduce((a, c) => (a.price > c.price ? a : c)); return { price: b.price || 0, quantity: b.quantity || 0, source: b.source } })()
+    : { price: 0, quantity: 0 }
+}
+
+// WS 事件驱动: maker 下单/撤单即时增删 (来源 source: manual/strategy/unknown)
+function handlePendingOrderEvent(data) {
+  if (!data) return
+  // 只关心当前 pair 的币安主账号 symbol, 避免他对的单串台
+  const wantSym = (pairConfig.value && pairConfig.value.binance) ? pairConfig.value.binance : null
+  if (wantSym && data.symbol && data.symbol !== wantSym) return
+  const oid = data.order_id != null ? String(data.order_id) : null
+  if (!oid) return
+  const m = { ...pendingOrderMap.value }
+  if (data.kind === 'add') {
+    m[oid] = {
+      side: (data.side || '').toLowerCase(),
+      // maker priceMatch=QUEUE 时后端 price 可能为 null → 先记 0, 轮询对账会补真实挂单价
+      price: data.price != null ? Number(data.price) : 0,
+      quantity: data.quantity != null ? Number(data.quantity) : 0,
+      source: data.source || 'unknown',
+      symbol: data.symbol || wantSym,
+      ts: Date.now(),
+    }
+  } else if (data.kind === 'remove') {
+    delete m[oid]
+  }
+  pendingOrderMap.value = m
+  recomputePendingMarkers()
+}
+
 async function fetchPendingOrderCounts() {
+  // 轮询: 全量对账 pendingOrderMap (兜底防 WS 漏事件 / 补 QUEUE 真实挂单价 / 清成交消失的单)
   try {
     const response = await api.get('/api/v1/trading/orders/realtime')
     const orders = response.data || []
-
-    console.log('[fetchPendingOrderCounts] Fetched orders:', orders.length, orders)
-
-    // Count ASK and BID orders (backend returns lowercase 'buy' and 'sell')
-    const askCount = orders.filter(order => order.side === 'sell').length
-    const bidCount = orders.filter(order => order.side === 'buy').length
-
-    askOrderCount.value = askCount
-    bidOrderCount.value = bidCount
-
-    // 提取最新代表挂单 (ASK 取最低价, BID 取最高价 — 最贴近成交的那笔)
-    const askOrders = orders.filter(o => o.side === 'sell' && o.price > 0)
-    const bidOrders = orders.filter(o => o.side === 'buy' && o.price > 0)
-    if (askOrders.length > 0) {
-      const best = askOrders.reduce((a, b) => (a.price < b.price ? a : b))
-      userAskOrder.value = { price: best.price || 0, quantity: best.quantity || 0 }
-    } else {
-      userAskOrder.value = { price: 0, quantity: 0 }
+    const wantSym = (pairConfig.value && pairConfig.value.binance) ? pairConfig.value.binance : null
+    const fresh = {}
+    for (const o of orders) {
+      if (o.platform && o.platform !== 'binance') continue       // 委托标志只反映主账号币安
+      if (wantSym && o.symbol && o.symbol !== wantSym) continue
+      const oid = String(o.id || '')
+      if (!oid) continue
+      fresh[oid] = {
+        side: (o.side || '').toLowerCase(),
+        price: Number(o.price) || 0,
+        quantity: Number(o.quantity) || 0,
+        source: o.source || 'unknown',
+        symbol: o.symbol || wantSym,
+        ts: Date.now(),
+      }
     }
-    if (bidOrders.length > 0) {
-      const best = bidOrders.reduce((a, b) => (a.price > b.price ? a : b))
-      userBidOrder.value = { price: best.price || 0, quantity: best.quantity || 0 }
-    } else {
-      userBidOrder.value = { price: 0, quantity: 0 }
-    }
-
-    console.log('[fetchPendingOrderCounts] ASK count:', askCount, 'BID count:', bidCount)
+    // 对账: 以 REST 全量为权威, 直接替换 (清掉已成交/已撤、补 QUEUE 真实价)
+    pendingOrderMap.value = fresh
+    recomputePendingMarkers()
   } catch (error) {
     console.error('Failed to fetch pending orders:', error)
   }

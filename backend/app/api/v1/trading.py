@@ -1,12 +1,12 @@
 """Trading history API endpoints"""
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Response, status
 from typing import Optional, List
 from datetime import datetime, date, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from app.core.security import get_current_user, get_current_user_id
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.platform import PlatformId
 from app.models.user import User
 from app.models.order import OrderRecord
@@ -14,8 +14,11 @@ from app.models.account import Account
 # Order executor service removed - manual trading disabled
 # from app.services.order_executor import order_executor
 from app.services.market_service import market_data_service
+from app.services.strategy_status_pusher import status_pusher
 from app.core.proxy_utils import build_proxy_url
 import asyncio
+import json
+import time as _time_sf
 try:
     import MetaTrader5 as mt5
     MT5_AVAILABLE = True
@@ -617,7 +620,6 @@ async def get_realtime_pending_orders(
     days: int = Query(default=7, ge=1, le=90, description="历史查询天数（仅状态非挂单中时有效）"),
     pair_code: Optional[str] = Query(default=None, description="可选：按当前产品对过滤对应的平台 symbol"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
     """Real-time order list across all user accounts that have a REST
     open-orders endpoint: Binance (1), Bybit (2), Gate.io (4), OKX (5).
@@ -641,7 +643,10 @@ async def get_realtime_pending_orders(
         from app.services.okx_client import OKXClient
         from app.services.hedging_pair_service import hedging_pair_service
 
-        accounts, accounts_map = await _get_user_accounts(db, current_user.user_id)
+        # 短会话仅取账户列表后即归还连接；下面的 _collect_*(逐账户交易所 REST 拉单，
+        # 高频轮询端点)不再持有 DB 连接，避免 idle-in-transaction 堆积打爆连接池。
+        async with AsyncSessionLocal() as _db:
+            accounts, accounts_map = await _get_user_accounts(_db, current_user.user_id)
         if not accounts:
             return []
 
@@ -700,7 +705,9 @@ async def get_realtime_pending_orders(
                         "price":      float(order.get("price") or 0),
                         "status":     ui_status,
                         "symbol":     order.get("symbol", target_symbol),
-                        "source":     "strategy",
+                        "source":     ("manual" if str(order.get("clientOrderId", "") or "").startswith("m-")
+                                       else "strategy" if str(order.get("clientOrderId", "") or "").startswith("s-")
+                                       else "unknown"),
                         "filled_qty": float(order.get("executedQty") or 0),
                         "order_type": order.get("type", ""),
                     })
@@ -871,6 +878,7 @@ async def get_realtime_pending_orders(
 
 class PairOnlyRequest(BaseModel):
     pair_code: str = "XAU"  # current trading pair — routes to correct accounts
+    request_id: Optional[str] = None  # client-supplied idempotency / WS-correlation id
 
 class ManualOrderRequest(BaseModel):
     exchange: str  # "binance" or "bybit"
@@ -880,6 +888,7 @@ class ManualOrderRequest(BaseModel):
     account_id: Optional[str] = None
     price: Optional[float] = None  # custom price; None = auto (bid/ask)
     order_type: Optional[str] = None  # "maker" or "taker"; None = auto
+    request_id: Optional[str] = None  # client-supplied idempotency / WS-correlation id
 
 
 
@@ -894,6 +903,48 @@ async def _push_position_after_trade(user_id: str):
             await asyncio.sleep(1.5)
             await position_streamer.push_snapshot_for_user(user_id)
         asyncio.create_task(_delayed())
+    except Exception:
+        pass
+
+# ── Emergency manual-trading: single-flight + fire-and-forget infra ──
+_manual_inflight: dict = {}        # (user_id, action, pair_code) -> expiry_monotonic
+_MANUAL_INFLIGHT_TTL = 6.0
+_manual_bg_tasks: set = set()
+
+def _claim_manual_inflight(user_id, action, pair_code) -> bool:
+    now = _time_sf.monotonic()
+    key = (str(user_id), action, str(pair_code))
+    cur = _manual_inflight.get(key)
+    if cur and cur > now:
+        return False
+    _manual_inflight[key] = now + _MANUAL_INFLIGHT_TTL
+    return True
+
+def _release_manual_inflight(user_id, action, pair_code):
+    _manual_inflight.pop((str(user_id), action, str(pair_code)), None)
+
+def _spawn_manual(coro):
+    t = asyncio.create_task(coro)
+    _manual_bg_tasks.add(t)
+    t.add_done_callback(_manual_bg_tasks.discard)
+    return t
+
+async def _run_manual_execution(user_id, request_id, action, pair_code, legs_factory):
+    user_id = str(user_id)
+    success, results, err = False, [], None
+    try:
+        success, results = await legs_factory()
+    except Exception as e:
+        logger.error(f"[manual:{action}] background exec failed: {e}", exc_info=True)
+        err = str(e)
+    finally:
+        _release_manual_inflight(user_id, action, pair_code)
+    try:
+        await status_pusher.push_manual_trade_result(user_id, request_id, action, bool(success), results, err)
+    except Exception:
+        pass
+    try:
+        await _push_position_after_trade(user_id)
     except Exception:
         pass
 
@@ -1098,12 +1149,14 @@ async def place_manual_order(
         # Resolve symbols from pair config
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
 
-        # Get current market prices using pair-specific symbols
-        spread_data = await market_data_service.get_current_spread(
-            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
-
-        # P2: Server-side price deviation validation
+        # Quote/price: only fetch a quote when a CUSTOM price needs the server-side
+        # deviation guard. Binance maker uses priceMatch=QUEUE (price ignored) and the
+        # hedge auto-price uses Market — neither needs a quote. Skipping it avoids the
+        # slow MT5-bridge get_bybit_quote round-trip on the ACK path → instant 202.
+        price = req.price if req.price else None
         if req.price:
+            spread_data = await market_data_service.get_current_spread(
+                binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=True)
             if req.exchange == PlatformId.BINANCE.key:
                 _ref_mid = (spread_data.binance_quote.bid_price + spread_data.binance_quote.ask_price) / 2
             else:
@@ -1118,82 +1171,81 @@ async def place_manual_order(
                 if _dev > 0.02:
                     logger.warning(f"[manual/order] price={req.price} deviates {_dev*100:.1f}% from mid={_ref_mid:.2f}")
 
-        # Determine symbol and price logic based on 4 scenarios
-        bid_a = spread_data.binance_quote.bid_price
-        ask_a = spread_data.binance_quote.ask_price
+        symbol = _sym_a if req.exchange == PlatformId.BINANCE.key else _sym_b
 
-        if req.exchange == PlatformId.BINANCE.key:
-            symbol = _sym_a
-            if req.price:
-                price = req.price
-            elif req.side == "buy":
-                price = bid_a
-            else:
-                price = ask_a
-        else:
-            symbol = _sym_b
+        # ── single-flight claim BEFORE the ACK (validation already passed) ──
+        request_id = (getattr(req, 'request_id', None) or uuid.uuid4().hex)
+        action = 'order'
+        if not _claim_manual_inflight(current_user.user_id, action, req.pair_code):
+            raise HTTPException(status_code=409, detail='重复指令执行中，请勿重复点击')
 
-        from app.services.order_executor import order_executor
+        async def _legs():
+            # Runs AFTER the 202 ACK. Uses only detached account objects +
+            # captured plain values — never the request `db` session.
+            from app.services.order_executor import order_executor
 
-        if req.exchange == PlatformId.BINANCE.key:
-            # Scenarios 1 & 2: primary account -> maker (PostOnly)
-            result = await order_executor.place_binance_order(
-                account=target_account,
-                symbol=symbol,
-                side="BUY" if req.side == "buy" else "SELL",
-                order_type="LIMIT",
-                quantity=req.quantity,
-                price=price,
-                position_side="LONG" if req.side == "buy" else "SHORT",
-                post_only=True,
-                client_order_id_prefix="m-",
-            )
-        else:
-            # Scenarios 3 & 4: hedge account
-            bybit_qty = round(float(req.quantity), 2)
-            if req.price:
-                # Scenario 4: fixed price -> limit order
-                result = await order_executor.place_bybit_order(
+            if req.exchange == PlatformId.BINANCE.key:
+                # Scenarios 1 & 2: primary account -> maker (PostOnly)
+                result = await order_executor.place_binance_order(
                     account=target_account,
                     symbol=symbol,
-                    side="Buy" if req.side == "buy" else "Sell",
-                    order_type="Limit",
-                    quantity=str(bybit_qty),
-                    price=str(req.price),
-                    close_position=False,
+                    side="BUY" if req.side == "buy" else "SELL",
+                    order_type="LIMIT",
+                    quantity=req.quantity,
+                    price=price,
+                    position_side="LONG" if req.side == "buy" else "SHORT",
+                    post_only=True,
+                    client_order_id_prefix="m-",
                 )
             else:
-                # Scenario 3: no price -> taker/market
-                result = await order_executor.place_bybit_order(
-                    account=target_account,
-                    symbol=symbol,
-                    side="Buy" if req.side == "buy" else "Sell",
-                    order_type="Market",
-                    quantity=str(bybit_qty),
-                    price=None,
-                    close_position=False,
-                )
+                # Scenarios 3 & 4: hedge account
+                bybit_qty = round(float(req.quantity), 2)
+                if req.price:
+                    # Scenario 4: fixed price -> limit order
+                    result = await order_executor.place_bybit_order(
+                        account=target_account,
+                        symbol=symbol,
+                        side="Buy" if req.side == "buy" else "Sell",
+                        order_type="Limit",
+                        quantity=str(bybit_qty),
+                        price=str(req.price),
+                        close_position=False,
+                    )
+                else:
+                    # Scenario 3: no price -> taker/market
+                    result = await order_executor.place_bybit_order(
+                        account=target_account,
+                        symbol=symbol,
+                        side="Buy" if req.side == "buy" else "Sell",
+                        order_type="Market",
+                        quantity=str(bybit_qty),
+                        price=None,
+                        close_position=False,
+                    )
 
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
+            leg_ok = bool(result.get("success"))
+            leg = {
+                "leg": req.exchange,
+                "success": leg_ok,
+                "order_id": result.get("order_id"),
+                "error": None if leg_ok else result.get("error", "Order failed"),
+            }
+            if leg_ok:
+                # Trigger immediate position snapshot so frontend updates without waiting 30s
+                try:
+                    from app.websocket.manager import manager as ws_manager
+                    from app.tasks.broadcast_tasks import account_balance_streamer
+                    account_balance_streamer.trigger_immediate_refresh()
+                except Exception:
+                    pass
+            return leg_ok, [leg]
 
-        # Trigger immediate position snapshot so frontend updates without waiting 30s
-        try:
-            from app.websocket.manager import manager as ws_manager
-            from app.tasks.broadcast_tasks import account_balance_streamer
-            account_balance_streamer.trigger_immediate_refresh()
-        except Exception:
-            pass
-
-        asyncio.create_task(_push_position_after_trade(current_user.user_id))
-
-        return {
-            "success": True,
-            "exchange": req.exchange,
-            "side": req.side,
-            "quantity": req.quantity,
-            "order_id": result.get("order_id"),
-        }
+        _spawn_manual(_run_manual_execution(str(current_user.user_id), request_id, action, req.pair_code, _legs))
+        return Response(
+            status_code=status.HTTP_202_ACCEPTED,
+            media_type='application/json',
+            content=json.dumps({'success': True, 'accepted': True, 'request_id': request_id, 'action': action}),
+        )
 
     except HTTPException:
         raise
@@ -1222,153 +1274,175 @@ async def close_all_positions(
         # Resolve symbols from pair config
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
 
-        # Get current market prices using pair-specific symbols
-        spread_data = await market_data_service.get_current_spread(
-            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
-
-        # Import order executor
-        from app.services.order_executor import order_executor
-
-        results = []
-
         # Resolve Binance (A-side) via pair binding
         binance_account = await _resolve_manual_target_account(db, current_user.user_id, PlatformId.BINANCE.key, req.pair_code)
-
-        if binance_account:
-            try:
-                # Get Binance positions
-                from app.services.binance_client import BinanceFuturesClient
-                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
-                                               proxy_url=build_proxy_url(binance_account.proxy_config))
-                try:
-                    _hpair = _get_hedging_pair_by_code(req.pair_code)
-                    _sym_a = _hpair[0] if _hpair else "XAUUSDT"
-                    positions = await client.get_position_risk(_sym_a)
-
-                    for pos in positions:
-                        position_amt = float(pos.get("positionAmt", 0))
-                        if position_amt == 0:
-                            continue
-
-                        # 多单用ask价平仓，空单用bid价平仓
-                        if position_amt > 0:  # LONG position
-                            price = spread_data.binance_quote.ask_price
-                            side = "SELL"
-                            position_side = "LONG"
-                        else:  # SHORT position
-                            price = spread_data.binance_quote.bid_price
-                            side = "BUY"
-                            position_side = "SHORT"
-                            position_amt = abs(position_amt)
-
-                        result = await order_executor.place_binance_order(
-                            account=binance_account,
-                            symbol=_sym_a,
-                            side=side,
-                            order_type="LIMIT",
-                            quantity=position_amt,
-                            price=price,
-                            position_side=position_side,
-                            post_only=True,
-                            client_order_id_prefix="m-",
-                        )
-
-                        results.append({
-                            "exchange": PlatformId.BINANCE.key,
-                            "position_side": position_side,
-                            "quantity": position_amt,
-                            "price": price,
-                            "success": result.get("success"),
-                            "order_id": result.get("order_id"),
-                        })
-                finally:
-                    await client.close()
-            except Exception as e:
-                logger.error(f"Binance close positions error: {str(e)}", exc_info=True)
-                results.append({"exchange": PlatformId.BINANCE.key, "error": str(e)})
-
         # Resolve hedge (B-side) via pair binding
         bybit_account = await _resolve_manual_target_account(db, current_user.user_id, PlatformId.BYBIT.key, req.pair_code)
 
+        # S4: do NOT ACK-with-empty — if nothing is bound, fail synchronously.
+        if not binance_account and not bybit_account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"交易对 {req.pair_code} 未绑定任何账户，无法平仓"
+            )
+
+        # Binance close is a maker order (priceMatch=QUEUE) → price ignored; no quote needed.
+        _bin_ask = None
+        _bin_bid = None
+        _hpair = _get_hedging_pair_by_code(req.pair_code)
+        _sym_a_pos = _hpair[0] if _hpair else "XAUUSDT"
+        _sym_b_hedge = _hpair[1] if _hpair else "XAUUSD+"
+
+        # S1: resolve the MT5 bridge URL/headers on the REQUEST db NOW (pre-ACK),
+        # capture as plain strings — _legs must never touch the request `db`.
+        hedge_bridge_url = None
+        hedge_headers = {}
         if bybit_account:
-            try:
-                # Use existing per-ticket close via MT5 Bridge HTTP.
-                # 旧代码 import MetaTrader5 → Linux 永远失败 (dead code).
-                _hpair = _get_hedging_pair_by_code(req.pair_code)
-                _sym_b = _hpair[1] if _hpair else "XAUUSD+"
+            import os
+            from app.models.mt5_client import MT5Client as MT5ClientModel
+            from sqlalchemy import select as _sa_sel
+            api_key = os.getenv("MT5_API_KEY", "")
+            hedge_bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
+            _mc = (await db.execute(
+                _sa_sel(MT5ClientModel)
+                .where(MT5ClientModel.account_id == bybit_account.account_id)
+                .where(MT5ClientModel.is_active == True)
+                .where(MT5ClientModel.is_system_service == False)
+                .order_by(MT5ClientModel.priority)
+                .limit(1)
+            )).scalar_one_or_none()
+            if _mc and _mc.bridge_url:
+                hedge_bridge_url = _mc.bridge_url
+            elif _mc and _mc.bridge_service_port:
+                hedge_bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+            hedge_headers = {"X-Api-Key": api_key} if api_key else {}
 
-                # First query positions via bridge to know what's open
-                import os, httpx
-                from app.models.mt5_client import MT5Client as MT5ClientModel
-                from sqlalchemy import select as _sa_sel
+        # ── single-flight claim BEFORE the ACK (validation already passed) ──
+        request_id = (getattr(req, 'request_id', None) or uuid.uuid4().hex)
+        action = 'close-all'
+        if not _claim_manual_inflight(current_user.user_id, action, req.pair_code):
+            raise HTTPException(status_code=409, detail='重复指令执行中，请勿重复点击')
 
-                api_key = os.getenv("MT5_API_KEY", "")
-                bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
-                _mc = (await db.execute(
-                    _sa_sel(MT5ClientModel)
-                    .where(MT5ClientModel.account_id == bybit_account.account_id)
-                    .where(MT5ClientModel.is_active == True)
-                    .where(MT5ClientModel.is_system_service == False)
-                    .order_by(MT5ClientModel.priority)
-                    .limit(1)
-                )).scalar_one_or_none()
-                if _mc and _mc.bridge_url:
-                    bridge_url = _mc.bridge_url
-                elif _mc and _mc.bridge_service_port:
-                    bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
-                headers = {"X-Api-Key": api_key} if api_key else {}
+        async def _legs():
+            # Runs AFTER the 202 ACK. SEQUENTIAL. Uses only detached account
+            # objects + plain captured values — never the request `db`.
+            from app.services.order_executor import order_executor
+            results = []
 
-                async with httpx.AsyncClient(timeout=10.0) as _http:
-                    r = await _http.get(
-                        f"{bridge_url}/mt5/positions",
-                        params={"symbol": _sym_b},
-                        headers=headers,
-                    )
-                    positions = r.json().get("positions", []) if r.status_code == 200 else []
+            if binance_account:
+                try:
+                    # Get Binance positions
+                    from app.services.binance_client import BinanceFuturesClient
+                    client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
+                                                   proxy_url=build_proxy_url(binance_account.proxy_config))
+                    try:
+                        positions = await client.get_position_risk(_sym_a_pos)
 
-                # Aggregate by side: type 0 = LONG, type 1 = SHORT
-                long_vol = round(sum(float(p.get("volume", 0)) for p in positions if int(p.get("type", -1)) == 0), 2)
-                short_vol = round(sum(float(p.get("volume", 0)) for p in positions if int(p.get("type", -1)) == 1), 2)
+                        for pos in positions:
+                            position_amt = float(pos.get("positionAmt", 0))
+                            if position_amt == 0:
+                                continue
 
-                if long_vol > 0:
-                    close_long = await _close_mt5_hedge_by_ticket_aggregation(
-                        target_account=bybit_account,
-                        symbol=_sym_b,
-                        position_type=0,  # LONG
-                        requested_volume=long_vol,
-                    )
-                    results.append({
-                        "exchange": PlatformId.BYBIT.key,
-                        "position_type": "LONG",
-                        "quantity": long_vol,
-                        "success": close_long.get("success"),
-                        "filled_volume": close_long.get("filled_volume"),
-                    })
-                if short_vol > 0:
-                    close_short = await _close_mt5_hedge_by_ticket_aggregation(
-                        target_account=bybit_account,
-                        symbol=_sym_b,
-                        position_type=1,  # SHORT
-                        requested_volume=short_vol,
-                    )
-                    results.append({
-                        "exchange": PlatformId.BYBIT.key,
-                        "position_type": "SHORT",
-                        "quantity": short_vol,
-                        "success": close_short.get("success"),
-                        "filled_volume": close_short.get("filled_volume"),
-                    })
-            except Exception as e:
-                logger.error(f"MT5 close positions error: {str(e)}", exc_info=True)
-                results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
+                            # 多单用ask价平仓，空单用bid价平仓
+                            if position_amt > 0:  # LONG position
+                                price = _bin_ask
+                                side = "SELL"
+                                position_side = "LONG"
+                            else:  # SHORT position
+                                price = _bin_bid
+                                side = "BUY"
+                                position_side = "SHORT"
+                                position_amt = abs(position_amt)
 
-        asyncio.create_task(_push_position_after_trade(current_user.user_id))
+                            result = await order_executor.place_binance_order(
+                                account=binance_account,
+                                symbol=_sym_a_pos,
+                                side=side,
+                                order_type="LIMIT",
+                                quantity=position_amt,
+                                price=price,
+                                position_side=position_side,
+                                post_only=True,
+                                client_order_id_prefix="m-",
+                            )
 
-        return {
-            "success": True,
-            "results": results,
-            "message": f"Closed {len(results)} positions"
-        }
+                            results.append({
+                                "leg": PlatformId.BINANCE.key,
+                                "position_side": position_side,
+                                "quantity": position_amt,
+                                "price": price,
+                                "success": bool(result.get("success")),
+                                "order_id": result.get("order_id"),
+                                "error": None if result.get("success") else result.get("error"),
+                            })
+                    finally:
+                        await client.close()
+                except Exception as e:
+                    logger.error(f"Binance close positions error: {str(e)}", exc_info=True)
+                    results.append({"leg": PlatformId.BINANCE.key, "success": False, "error": str(e)})
+
+            if bybit_account:
+                try:
+                    # Use existing per-ticket close via MT5 Bridge HTTP.
+                    # 旧代码 import MetaTrader5 → Linux 永远失败 (dead code).
+                    # bridge_url/headers were resolved pre-ACK on the request db.
+                    import httpx
+
+                    async with httpx.AsyncClient(timeout=10.0) as _http:
+                        r = await _http.get(
+                            f"{hedge_bridge_url}/mt5/positions",
+                            params={"symbol": _sym_b_hedge},
+                            headers=hedge_headers,
+                        )
+                        positions = r.json().get("positions", []) if r.status_code == 200 else []
+
+                    # Aggregate by side: type 0 = LONG, type 1 = SHORT
+                    long_vol = round(sum(float(p.get("volume", 0)) for p in positions if int(p.get("type", -1)) == 0), 2)
+                    short_vol = round(sum(float(p.get("volume", 0)) for p in positions if int(p.get("type", -1)) == 1), 2)
+
+                    if long_vol > 0:
+                        close_long = await _close_mt5_hedge_by_ticket_aggregation(
+                            target_account=bybit_account,
+                            symbol=_sym_b_hedge,
+                            position_type=0,  # LONG
+                            requested_volume=long_vol,
+                        )
+                        results.append({
+                            "leg": PlatformId.BYBIT.key,
+                            "position_type": "LONG",
+                            "quantity": long_vol,
+                            "success": bool(close_long.get("success")),
+                            "filled_volume": close_long.get("filled_volume"),
+                            "error": None if close_long.get("success") else close_long.get("error"),
+                        })
+                    if short_vol > 0:
+                        close_short = await _close_mt5_hedge_by_ticket_aggregation(
+                            target_account=bybit_account,
+                            symbol=_sym_b_hedge,
+                            position_type=1,  # SHORT
+                            requested_volume=short_vol,
+                        )
+                        results.append({
+                            "leg": PlatformId.BYBIT.key,
+                            "position_type": "SHORT",
+                            "quantity": short_vol,
+                            "success": bool(close_short.get("success")),
+                            "filled_volume": close_short.get("filled_volume"),
+                            "error": None if close_short.get("success") else close_short.get("error"),
+                        })
+                except Exception as e:
+                    logger.error(f"MT5 close positions error: {str(e)}", exc_info=True)
+                    results.append({"leg": PlatformId.BYBIT.key, "success": False, "error": str(e)})
+
+            all_ok = all(r.get("success") for r in results) if results else True
+            return all_ok, results
+
+        _spawn_manual(_run_manual_execution(str(current_user.user_id), request_id, action, req.pair_code, _legs))
+        return Response(
+            status_code=status.HTTP_202_ACCEPTED,
+            media_type='application/json',
+            content=json.dumps({'success': True, 'accepted': True, 'request_id': request_id, 'action': action}),
+        )
 
     except HTTPException:
         raise
@@ -1581,6 +1655,7 @@ class ClosePositionRequest(BaseModel):
     quantity: float = 0  # quantity to close; 0 = close all of that position type
     price: Optional[float] = None  # custom price; None = auto
     order_type: Optional[str] = None  # "maker" or "taker"; None = auto
+    request_id: Optional[str] = None  # client-supplied idempotency / WS-correlation id
 
 
 
@@ -1611,12 +1686,13 @@ async def close_short_position(
                 detail=f"交易对 {req.pair_code} 未绑定{'主' if req.exchange == 'binance' else '对冲'}账户，请在设置中配置 pair-account 绑定"
             )
 
-        # Get current market prices
+        # Quote only needed for the custom-price deviation guard; Binance close is a
+        # maker (priceMatch=QUEUE, price ignored). Skip the slow MT5 quote on auto-price → instant 202.
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
-        spread_data = await market_data_service.get_current_spread(
-            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
-
+        price = req.price if req.price else None
         if req.price:
+            spread_data = await market_data_service.get_current_spread(
+                binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=True)
             _ref_mid = ((spread_data.binance_quote.bid_price + spread_data.binance_quote.ask_price) / 2
                         if req.exchange == PlatformId.BINANCE.key else
                         (spread_data.bybit_quote.bid_price + spread_data.bybit_quote.ask_price) / 2)
@@ -1626,28 +1702,39 @@ async def close_short_position(
                     raise HTTPException(status_code=400, detail=f"挂单价偏离市场价超过5% ({_dev*100:.1f}%)，拒绝下单")
                 if _dev > 0.02:
                     logger.warning(f"[manual/close-short] price={req.price} deviates {_dev*100:.1f}% from mid={_ref_mid:.2f}")
+        symbol = _sym_a if req.exchange == PlatformId.BINANCE.key else _sym_b
 
-        if req.exchange == PlatformId.BINANCE.key:
-            price = req.price if req.price else spread_data.binance_quote.ask_price
-            symbol = _sym_a
-        else:
-            symbol = _sym_b
+        # ── single-flight claim BEFORE the ACK (validation already passed) ──
+        request_id = (getattr(req, 'request_id', None) or uuid.uuid4().hex)
+        action = 'close-short'
+        if not _claim_manual_inflight(current_user.user_id, action, req.pair_code):
+            raise HTTPException(status_code=409, detail='重复指令执行中，请勿重复点击')
 
-        from app.services.order_executor import order_executor
+        async def _legs():
+            # Runs AFTER the 202 ACK. Uses only the detached target_account +
+            # plain captured values — never the request `db`.
+            from app.services.order_executor import order_executor
 
-        if req.exchange == PlatformId.BINANCE.key:
-            result = await order_executor.place_binance_order(
-                account=target_account,
-                symbol=symbol,
-                side="BUY",
-                position_side="SHORT",
-                order_type="LIMIT",
-                quantity=float(req.quantity),
-                price=price,
-                post_only=True,
-                client_order_id_prefix="m-",
-            )
-        else:
+            if req.exchange == PlatformId.BINANCE.key:
+                result = await order_executor.place_binance_order(
+                    account=target_account,
+                    symbol=symbol,
+                    side="BUY",
+                    position_side="SHORT",
+                    order_type="LIMIT",
+                    quantity=float(req.quantity),
+                    price=price,
+                    post_only=True,
+                    client_order_id_prefix="m-",
+                )
+                leg_ok = bool(result.get("success"))
+                return leg_ok, [{
+                    "leg": req.exchange,
+                    "success": leg_ok,
+                    "order_id": result.get("order_id"),
+                    "error": None if leg_ok else result.get("error", "Order failed"),
+                }]
+
             if req.price:
                 result = await order_executor.place_bybit_order(
                     account=target_account,
@@ -1658,38 +1745,36 @@ async def close_short_position(
                     price=str(req.price),
                     close_position=True,
                 )
-                if not result.get("success"):
-                    raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
-                asyncio.create_task(_push_position_after_trade(current_user.user_id))
-                return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
+                leg_ok = bool(result.get("success"))
+                return leg_ok, [{
+                    "leg": req.exchange,
+                    "success": leg_ok,
+                    "order_id": result.get("order_id"),
+                    "error": None if leg_ok else result.get("error", "Order failed"),
+                }]
+
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
                 symbol=symbol,
                 position_type=1,
                 requested_volume=float(req.quantity),
             )
-            if not close_result["success"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{'空仓平多'} failed: {close_result.get('error') or 'no position closed'}"
-                )
-            asyncio.create_task(_push_position_after_trade(current_user.user_id))
-            return {
-                "success": True,
-                "filled_volume": close_result["filled_volume"],
-                "remaining_volume": close_result["remaining"],
-                "details": close_result["details"],
-                "quantity": req.quantity,
-                "exchange": req.exchange,
-            }
+            leg_ok = bool(close_result.get("success"))
+            return leg_ok, [{
+                "leg": req.exchange,
+                "success": leg_ok,
+                "filled_volume": close_result.get("filled_volume"),
+                "remaining_volume": close_result.get("remaining"),
+                "details": close_result.get("details"),
+                "error": None if leg_ok else (close_result.get("error") or "no position closed"),
+            }]
 
-        asyncio.create_task(_push_position_after_trade(current_user.user_id))
-        return {
-            "success": result.get("success"),
-            "order_id": result.get("order_id"),
-            "quantity": req.quantity,
-            "exchange": req.exchange,
-        }
+        _spawn_manual(_run_manual_execution(str(current_user.user_id), request_id, action, req.pair_code, _legs))
+        return Response(
+            status_code=status.HTTP_202_ACCEPTED,
+            media_type='application/json',
+            content=json.dumps({'success': True, 'accepted': True, 'request_id': request_id, 'action': action}),
+        )
 
     except HTTPException:
         raise
@@ -1723,12 +1808,13 @@ async def close_long_position(
                 detail=f"交易对 {req.pair_code} 未绑定{'主' if req.exchange == 'binance' else '对冲'}账户，请在设置中配置 pair-account 绑定"
             )
 
-        # Get current market prices
+        # Quote only needed for the custom-price deviation guard; Binance close is a
+        # maker (priceMatch=QUEUE, price ignored). Skip the slow MT5 quote on auto-price → instant 202.
         _sym_a, _sym_b = _get_pair_symbols(req.pair_code)
-        spread_data = await market_data_service.get_current_spread(
-            binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=False)
-
+        price = req.price if req.price else None
         if req.price:
+            spread_data = await market_data_service.get_current_spread(
+                binance_symbol=_sym_a, bybit_symbol=_sym_b, use_cache=True)
             _ref_mid = ((spread_data.binance_quote.bid_price + spread_data.binance_quote.ask_price) / 2
                         if req.exchange == PlatformId.BINANCE.key else
                         (spread_data.bybit_quote.bid_price + spread_data.bybit_quote.ask_price) / 2)
@@ -1738,28 +1824,39 @@ async def close_long_position(
                     raise HTTPException(status_code=400, detail=f"挂单价偏离市场价超过5% ({_dev*100:.1f}%)，拒绝下单")
                 if _dev > 0.02:
                     logger.warning(f"[manual/close-long] price={req.price} deviates {_dev*100:.1f}% from mid={_ref_mid:.2f}")
+        symbol = _sym_a if req.exchange == PlatformId.BINANCE.key else _sym_b
 
-        if req.exchange == PlatformId.BINANCE.key:
-            price = req.price if req.price else spread_data.binance_quote.bid_price
-            symbol = _sym_a
-        else:
-            symbol = _sym_b
+        # ── single-flight claim BEFORE the ACK (validation already passed) ──
+        request_id = (getattr(req, 'request_id', None) or uuid.uuid4().hex)
+        action = 'close-long'
+        if not _claim_manual_inflight(current_user.user_id, action, req.pair_code):
+            raise HTTPException(status_code=409, detail='重复指令执行中，请勿重复点击')
 
-        from app.services.order_executor import order_executor
+        async def _legs():
+            # Runs AFTER the 202 ACK. Uses only the detached target_account +
+            # plain captured values — never the request `db`.
+            from app.services.order_executor import order_executor
 
-        if req.exchange == PlatformId.BINANCE.key:
-            result = await order_executor.place_binance_order(
-                account=target_account,
-                symbol=symbol,
-                side="SELL",
-                position_side="LONG",
-                order_type="LIMIT",
-                quantity=float(req.quantity),
-                price=price,
-                post_only=True,
-                client_order_id_prefix="m-",
-            )
-        else:
+            if req.exchange == PlatformId.BINANCE.key:
+                result = await order_executor.place_binance_order(
+                    account=target_account,
+                    symbol=symbol,
+                    side="SELL",
+                    position_side="LONG",
+                    order_type="LIMIT",
+                    quantity=float(req.quantity),
+                    price=price,
+                    post_only=True,
+                    client_order_id_prefix="m-",
+                )
+                leg_ok = bool(result.get("success"))
+                return leg_ok, [{
+                    "leg": req.exchange,
+                    "success": leg_ok,
+                    "order_id": result.get("order_id"),
+                    "error": None if leg_ok else result.get("error", "Order failed"),
+                }]
+
             if req.price:
                 result = await order_executor.place_bybit_order(
                     account=target_account,
@@ -1770,38 +1867,36 @@ async def close_long_position(
                     price=str(req.price),
                     close_position=True,
                 )
-                if not result.get("success"):
-                    raise HTTPException(status_code=400, detail=result.get("error", "Order failed"))
-                asyncio.create_task(_push_position_after_trade(current_user.user_id))
-                return {"success": True, "order_id": result.get("order_id"), "quantity": req.quantity, "exchange": req.exchange}
+                leg_ok = bool(result.get("success"))
+                return leg_ok, [{
+                    "leg": req.exchange,
+                    "success": leg_ok,
+                    "order_id": result.get("order_id"),
+                    "error": None if leg_ok else result.get("error", "Order failed"),
+                }]
+
             close_result = await _close_mt5_hedge_by_ticket_aggregation(
                 target_account=target_account,
                 symbol=symbol,
                 position_type=0,
                 requested_volume=float(req.quantity),
             )
-            if not close_result["success"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{'多仓平空'} failed: {close_result.get('error') or 'no position closed'}"
-                )
-            asyncio.create_task(_push_position_after_trade(current_user.user_id))
-            return {
-                "success": True,
-                "filled_volume": close_result["filled_volume"],
-                "remaining_volume": close_result["remaining"],
-                "details": close_result["details"],
-                "quantity": req.quantity,
-                "exchange": req.exchange,
-            }
+            leg_ok = bool(close_result.get("success"))
+            return leg_ok, [{
+                "leg": req.exchange,
+                "success": leg_ok,
+                "filled_volume": close_result.get("filled_volume"),
+                "remaining_volume": close_result.get("remaining"),
+                "details": close_result.get("details"),
+                "error": None if leg_ok else (close_result.get("error") or "no position closed"),
+            }]
 
-        asyncio.create_task(_push_position_after_trade(current_user.user_id))
-        return {
-            "success": result.get("success"),
-            "order_id": result.get("order_id"),
-            "quantity": req.quantity,
-            "exchange": req.exchange,
-        }
+        _spawn_manual(_run_manual_execution(str(current_user.user_id), request_id, action, req.pair_code, _legs))
+        return Response(
+            status_code=status.HTTP_202_ACCEPTED,
+            media_type='application/json',
+            content=json.dumps({'success': True, 'accepted': True, 'request_id': request_id, 'action': action}),
+        )
 
     except HTTPException:
         raise
@@ -1822,154 +1917,153 @@ async def cancel_all_orders(
         if not accounts:
             raise HTTPException(status_code=404, detail="No trading accounts found")
 
-        # Import order executor
-        from app.services.order_executor import order_executor
-
-        results = []
-
         # Resolve Binance (A-side) via pair binding
         binance_account = await _resolve_manual_target_account(db, current_user.user_id, PlatformId.BINANCE.key, req.pair_code)
-
-        if binance_account:
-            try:
-                from app.services.binance_client import BinanceFuturesClient
-                client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
-                                               proxy_url=build_proxy_url(binance_account.proxy_config))
-                try:
-                    _hpair = _get_hedging_pair_by_code(req.pair_code)
-                    _sym_a = _hpair[0] if _hpair else "XAUUSDT"
-                    open_orders = await client.get_open_orders(_sym_a)
-
-                    # SAFETY (方案 A): only cancel manual ("m-" prefix) and
-                    # legacy/no-prefix orders. Strategy orders ("s-" prefix) are
-                    # owned by the running ContinuousStrategyExecutor and MUST
-                    # be preserved — user should stop the strategy from the
-                    # strategy panel if they want to cancel those.
-                    skipped_strategy = 0
-                    for order in open_orders:
-                        coid = str(order.get("clientOrderId", "") or "")
-                        if coid.startswith("s-"):
-                            skipped_strategy += 1
-                            continue
-                        order_id = order.get("orderId")
-                        result = await order_executor.cancel_binance_order(
-                            binance_account,
-                            _sym_a,
-                            order_id
-                        )
-
-                        results.append({
-                            "exchange": PlatformId.BINANCE.key,
-                            "order_id": order_id,
-                            "client_order_id": coid,
-                            "success": result.get("success") if isinstance(result, dict) else True,
-                        })
-                    if skipped_strategy:
-                        logger.info(
-                            f"[manual/cancel-all] Binance: kept {skipped_strategy} strategy orders "
-                            f"(s- prefix). Stop strategy from panel to cancel those."
-                        )
-                finally:
-                    await client.close()
-            except Exception as e:
-                logger.error(f"Binance cancel orders error: {str(e)}", exc_info=True)
-                results.append({"exchange": PlatformId.BINANCE.key, "error": str(e)})
-
-        # Cancel hedge-side (MT5) orders via Bridge HTTP
-        # NOTE: 旧代码用 import MetaTrader5 → Linux 永远失败 (dead code)
-        # 现改为通过 MT5 Bridge HTTP 调用 /mt5/orders (查询) + /mt5/order/cancel
+        # Resolve hedge-side (B-side / MT5) via pair binding
         hedge_account = await _resolve_manual_target_account(
             db, current_user.user_id, PlatformId.BYBIT.key, req.pair_code
         )
+
+        # S4: do NOT ACK-with-empty — if nothing is bound, fail synchronously.
+        if not binance_account and not hedge_account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"交易对 {req.pair_code} 未绑定任何账户，无法撤单"
+            )
+
+        _hpair = _get_hedging_pair_by_code(req.pair_code)
+        _sym_a_open = _hpair[0] if _hpair else "XAUUSDT"
+        _sym_b_open = _hpair[1] if _hpair else "XAUUSD+"
+
+        # S1: resolve the MT5 bridge URL/headers on the REQUEST db NOW (pre-ACK),
+        # capture as plain strings — _legs must never touch the request `db`.
+        hedge_bridge_url = None
+        hedge_headers = {}
         if hedge_account:
-            try:
-                import os, httpx
-                from app.models.mt5_client import MT5Client as MT5ClientModel
-                from sqlalchemy import select as _sa_sel
+            import os
+            from app.models.mt5_client import MT5Client as MT5ClientModel
+            from sqlalchemy import select as _sa_sel
+            api_key = os.getenv("MT5_API_KEY", "")
+            hedge_bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
+            _mc = (await db.execute(
+                _sa_sel(MT5ClientModel)
+                .where(MT5ClientModel.account_id == hedge_account.account_id)
+                .where(MT5ClientModel.is_active == True)
+                .where(MT5ClientModel.is_system_service == False)
+                .order_by(MT5ClientModel.priority)
+                .limit(1)
+            )).scalar_one_or_none()
+            if _mc and _mc.bridge_url:
+                hedge_bridge_url = _mc.bridge_url
+            elif _mc and _mc.bridge_service_port:
+                hedge_bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+            hedge_headers = {"X-Api-Key": api_key} if api_key else {}
 
-                _hpair = _get_hedging_pair_by_code(req.pair_code)
-                _sym_b = _hpair[1] if _hpair else "XAUUSD+"
+        # ── single-flight claim BEFORE the ACK (validation already passed) ──
+        request_id = (getattr(req, 'request_id', None) or uuid.uuid4().hex)
+        action = 'cancel-all'
+        if not _claim_manual_inflight(current_user.user_id, action, req.pair_code):
+            raise HTTPException(status_code=409, detail='重复指令执行中，请勿重复点击')
 
-                # Resolve per-account bridge URL
-                api_key = os.getenv("MT5_API_KEY", "")
-                bridge_url = os.getenv("MT5_SERVICE_URL", "http://172.31.14.113:8001")
-                _mc = (await db.execute(
-                    _sa_sel(MT5ClientModel)
-                    .where(MT5ClientModel.account_id == hedge_account.account_id)
-                    .where(MT5ClientModel.is_active == True)
-                    .where(MT5ClientModel.is_system_service == False)
-                    .order_by(MT5ClientModel.priority)
-                    .limit(1)
-                )).scalar_one_or_none()
-                if _mc and _mc.bridge_url:
-                    bridge_url = _mc.bridge_url
-                elif _mc and _mc.bridge_service_port:
-                    bridge_url = f"http://172.31.14.113:{_mc.bridge_service_port}"
+        async def _legs():
+            # Runs AFTER the 202 ACK. SEQUENTIAL. Uses only detached account
+            # objects + plain captured values — never the request `db`.
+            from app.services.order_executor import order_executor
+            results = []
 
-                headers = {"X-Api-Key": api_key} if api_key else {}
+            if binance_account:
+                try:
+                    from app.services.binance_client import BinanceFuturesClient
+                    client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
+                                                   proxy_url=build_proxy_url(binance_account.proxy_config))
+                    try:
+                        open_orders = await client.get_open_orders(_sym_a_open)
 
-                async with httpx.AsyncClient(timeout=10.0) as _http:
-                    # Query open MT5 orders for this symbol
-                    r = await _http.get(
-                        f"{bridge_url}/mt5/orders",
-                        params={"symbol": _sym_b},
-                        headers=headers,
-                    )
-                    if r.status_code != 200:
-                        logger.warning(f"[manual/cancel-all] MT5 bridge orders query failed: {r.status_code}")
-                        mt5_orders = []
-                    else:
-                        mt5_orders = r.json().get("orders", []) or []
-
-                    # SAFETY (方案 A): only cancel manual/no-prefix orders.
-                    # MT5 orders' "comment" field carries the s-/m- prefix when our
-                    # executor places them (place_bybit_order forwards as comment).
-                    skipped_strategy = 0
-                    for od in mt5_orders:
-                        comment = str(od.get("comment", "") or "")
-                        if comment.startswith("s-"):
-                            skipped_strategy += 1
-                            continue
-                        ticket = od.get("ticket") or od.get("order_id")
-                        if not ticket:
-                            continue
-                        try:
-                            rc = await _http.post(
-                                f"{bridge_url}/mt5/order/cancel",
-                                json={"ticket": int(ticket)},
-                                headers=headers,
+                        # SAFETY (方案 A): only cancel manual ("m-" prefix) and
+                        # legacy/no-prefix orders. Strategy orders ("s-" prefix) are
+                        # owned by the running ContinuousStrategyExecutor and MUST
+                        # be preserved — user should stop the strategy from the
+                        # strategy panel if they want to cancel those.
+                        skipped_strategy = 0
+                        for order in open_orders:
+                            coid = str(order.get("clientOrderId", "") or "")
+                            if coid.startswith("s-"):
+                                skipped_strategy += 1
+                                continue
+                            order_id = order.get("orderId")
+                            result = await order_executor.cancel_binance_order(
+                                binance_account,
+                                _sym_a_open,
+                                order_id
                             )
-                            ok = rc.status_code == 200
+
+                            _ok = result.get("success") if isinstance(result, dict) else True
                             results.append({
-                                "exchange": PlatformId.BYBIT.key,
-                                "order_id": str(ticket),
-                                "comment": comment,
-                                "success": ok,
+                                "leg": PlatformId.BINANCE.key,
+                                "order_id": order_id,
+                                "client_order_id": coid,
+                                "success": bool(_ok),
+                                "error": None if _ok else (result.get("error") if isinstance(result, dict) else None),
                             })
-                        except Exception as _ce:
-                            logger.warning(f"[manual/cancel-all] cancel ticket {ticket} failed: {_ce}")
-                            results.append({
-                                "exchange": PlatformId.BYBIT.key,
-                                "order_id": str(ticket),
-                                "success": False,
-                                "error": str(_ce),
-                            })
-                    if skipped_strategy:
-                        logger.info(
-                            f"[manual/cancel-all] MT5: kept {skipped_strategy} strategy orders "
-                            f"(s- prefix in comment). Stop strategy from panel to cancel those."
+                        if skipped_strategy:
+                            logger.info(
+                                f"[manual/cancel-all] Binance: kept {skipped_strategy} strategy orders "
+                                f"(s- prefix). Stop strategy from panel to cancel those."
+                            )
+                    finally:
+                        await client.close()
+                except Exception as e:
+                    logger.error(f"Binance cancel orders error: {str(e)}", exc_info=True)
+                    results.append({"leg": PlatformId.BINANCE.key, "success": False, "error": str(e)})
+
+            # Cancel hedge-side (MT5) 挂单 via Bridge HTTP。
+            # 桥【真实】端点 = POST /mt5/cancel-all (按 symbol 撤该 symbol 全部挂单)。
+            # 旧代码用的 GET /mt5/orders + POST /mt5/order/cancel 在当前桥上均 404(端点不存在),
+            # 404 被静默吞掉 → MT5/对冲侧挂单从不被撤(手动挂单/外部交易软件挂单撤不掉的根因)。
+            # 安全性: 策略对冲腿均为【市价单】(立即成交、MT5 侧不留挂单), 故无策略挂单可误伤;
+            # 按 symbol 一锅端只会撤到【手动】挂单, 符合"不误伤自动单、手动单必撤"。
+            # bridge_url/headers were resolved pre-ACK on the request db.
+            if hedge_account:
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=10.0) as _http:
+                        rc = await _http.post(
+                            f"{hedge_bridge_url}/mt5/cancel-all",
+                            json={"symbol": _sym_b_open},
+                            headers=hedge_headers,
                         )
-            except Exception as e:
-                logger.error(f"MT5 cancel orders error: {str(e)}", exc_info=True)
-                results.append({"exchange": PlatformId.BYBIT.key, "error": str(e)})
+                        _ok = (rc.status_code == 200)
+                        _info = None
+                        if _ok:
+                            try:
+                                _info = rc.json()
+                            except Exception:
+                                _info = None
+                        results.append({
+                            "leg": PlatformId.BYBIT.key,
+                            "action": "mt5_cancel_all",
+                            "symbol": _sym_b_open,
+                            "success": _ok,
+                            "detail": _info,
+                            "error": None if _ok else f"HTTP {rc.status_code}",
+                        })
+                        logger.info(
+                            f"[manual/cancel-all] MT5 POST /mt5/cancel-all symbol={_sym_b_open} "
+                            f"-> {rc.status_code} {(_info if _ok else '')}"
+                        )
+                except Exception as e:
+                    logger.error(f"MT5 cancel orders error: {str(e)}", exc_info=True)
+                    results.append({"leg": PlatformId.BYBIT.key, "success": False, "error": str(e)})
 
-        asyncio.create_task(_push_position_after_trade(current_user.user_id))
+            all_ok = all(r.get("success") for r in results) if results else True
+            return all_ok, results
 
-        return {
-            "success": True,
-            "results": results,
-            "message": f"Cancelled {len(results)} orders"
-        }
+        _spawn_manual(_run_manual_execution(str(current_user.user_id), request_id, action, req.pair_code, _legs))
+        return Response(
+            status_code=status.HTTP_202_ACCEPTED,
+            media_type='application/json',
+            content=json.dumps({'success': True, 'accepted': True, 'request_id': request_id, 'action': action}),
+        )
 
     except HTTPException:
         raise

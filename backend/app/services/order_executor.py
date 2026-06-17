@@ -52,6 +52,55 @@ def _get_pair_specs():
     }
 
 
+
+def _publish_pending_order_event(account, action: str, *, symbol=None, side=None,
+                                  price=None, quantity=None, order_id=None,
+                                  client_order_id=None, prefix=None):
+    """(20260617) 委托标志事件驱动: maker下单成功/撤单成功后, 主动推一条 ws:user_event
+    给前端即时画/抹委托标志(替代3s轮询采样盲区)。来源(source)由 clientOrderId 前缀判定:
+    s-=策略, m-=手动。包 try/except, 任何失败都不得影响下单/撤单主流程。
+    action: 'add' | 'remove'。"""
+    try:
+        import asyncio as _aio, json as _json
+        uid = str(getattr(account, "user_id", "") or "")
+        if not uid:
+            return
+        coid = str(client_order_id or "") or (str(prefix or ""))
+        if coid.startswith("m-"):
+            source = "manual"
+        elif coid.startswith("s-"):
+            source = "strategy"
+        else:
+            source = "unknown"
+        data = {
+            "kind": action,                       # add | remove
+            "order_id": str(order_id) if order_id is not None else None,
+            "account_id": str(getattr(account, "account_id", "") or ""),
+            "exchange": "主账号",
+            "platform": "binance",
+            "symbol": symbol,
+            "side": (str(side).lower() if side else None),
+            "price": (float(price) if price not in (None, "") else None),
+            "quantity": (float(quantity) if quantity not in (None, "") else None),
+            "source": source,
+        }
+        evt = {"user_id": uid, "type": "pending_order_event", "data": data}
+
+        async def _do():
+            try:
+                from app.core.redis_client import redis_client as _rc
+                await _rc.publish("ws:user_event", _json.dumps(evt, default=str))
+            except Exception:
+                pass
+        try:
+            _loop = _aio.get_running_loop()
+            _loop.create_task(_do())
+        except RuntimeError:
+            pass
+    except Exception:
+        pass
+
+
 class OrderExecutor:
     """Service for executing orders on exchanges"""
 
@@ -115,6 +164,14 @@ class OrderExecutor:
                 )
 
             logger.info(f"Binance下单成功 - order_id: {result.get('orderId')}, status: {result.get('status')}, priceMatch: {result.get('priceMatch', 'N/A')}")
+
+            # (20260617) maker挂单事件: 即时推委托标志(策略+手动统一; price=None表priceMatch=QUEUE)
+            if post_only and order_type.upper() == "LIMIT":
+                _publish_pending_order_event(
+                    account, "add", symbol=symbol, side=side, price=price,
+                    quantity=quantity, order_id=result.get("orderId"),
+                    client_order_id=result.get("clientOrderId"), prefix=client_order_id_prefix,
+                )
 
             return {
                 "success": True,
@@ -392,6 +449,11 @@ class OrderExecutor:
 
         try:
             result = await client.cancel_order(symbol, order_id)
+            # (20260617) 撤单事件: 即时抹掉委托标志
+            _publish_pending_order_event(
+                account, "remove", symbol=symbol, order_id=order_id,
+                client_order_id=(result.get("clientOrderId") if isinstance(result, dict) else None),
+            )
             return {
                 "success": True,
                 "data": result,

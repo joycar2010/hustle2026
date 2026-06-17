@@ -431,6 +431,7 @@ class ContinuousStrategyExecutor:
                         strategy_type,
                         current_spread=current_spread,
                         threshold=spread_threshold,
+                        express=getattr(self.trigger_mgr, "last_was_express", False),
                     )
 
                 await asyncio.sleep(self.trigger_check_interval)
@@ -1941,6 +1942,7 @@ class ContinuousStrategyExecutor:
         strategy_type: str,
         current_spread: float = None,
         threshold: float = None,
+        express: bool = False,
     ):
         """Push trigger progress update via WebSocket"""
         if self.user_id:
@@ -1958,6 +1960,7 @@ class ContinuousStrategyExecutor:
                     'strategy_type': strategy_type,
                     'current_spread': round(current_spread, 3) if current_spread is not None else None,
                     'threshold': threshold,
+                    'express': bool(express),
                 },
                 self.user_id
             )

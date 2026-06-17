@@ -58,6 +58,7 @@ class TriggerCountManager:
         self.action = action
         self.count = 0
         self.last_trigger_time: Optional[float] = None
+        self.last_was_express: bool = False  # (20260617) 上次触发是否走Express快车道(供进度条可视化)
         self.min_trigger_interval = 0.1  # 100ms minimum between triggers
 
     async def check_and_increment(
@@ -123,10 +124,12 @@ class TriggerCountManager:
             if express_absolute or express_relative:
                 self.count = required_count
                 self.last_trigger_time = current_time
+                self.last_was_express = True
                 return True
 
         self.count += 1
         self.last_trigger_time = current_time
+        self.last_was_express = False
         return True
 
     def reset(self):

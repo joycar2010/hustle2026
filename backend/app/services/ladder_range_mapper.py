@@ -41,31 +41,32 @@ class LadderRangeMapper:
     def get_active_ladder_for_opening(
         self, global_pos: float, current_spread: float
     ) -> Optional[ActiveLadder]:
-        """Find the active ladder for opening based on spread and position.
+        """Find the active ladder for opening — STRICT SEQUENTIAL by position.
 
-        Logic: Walk ladders in order. For each ladder where
-        current_spread >= opening_spread AND global_pos < upper_bound,
-        return it with remaining capacity.
-
-        The highest-matching ladder wins (spread=4.5 with ladder1.open=3, ladder2.open=4
-        -> ladder2 is active, provided position allows).
-        But position must reach each ladder's lower bound first (sequential filling).
+        修(20260617): 原为"最高匹配优先"(不 break, 最后一个匹配覆盖) ->
+        点差同时越过多个阶梯阈值时会跳过低阶梯(实测 cq002 持仓0
+        点差-1.17 同时满足阶梯1(-1.5)/阶梯2(-1.2) -> 错选阶梯2)。
+        改为按持仓所处区间严格定位: 找“持仓落在的第一个未填满段”,
+        只用该段自己的阈值判定; 达标则开, 不达则 None(绝不因更高段阈值更松而跳过)。
+        -> 持仓0 必走阶梯1(0→60), 填满后才进阶梯2(60→150)。平仓侧本就对称(反序首匹配),不动。
         """
-        result = None
         for i, ladder in enumerate(self._ladders):
             lower, upper = self._ranges[i]
 
-            if current_spread < ladder.opening_spread:
-                continue
-
+            # 该段已填满 -> 看下一段
             if global_pos >= upper:
                 continue
 
+            # 持仓落在本段 [lower, upper): 这就是当前唯一应操作的阶梯。
+            # 只看本段阈值: 达标则开, 不达则不开(等点差), 绝不跳到更高段。
+            if current_spread < ladder.opening_spread:
+                return None
+
             remaining = upper - max(global_pos, lower)
             if remaining <= 0:
-                continue
+                return None
 
-            result = ActiveLadder(
+            return ActiveLadder(
                 index=i,
                 config=ladder,
                 remaining_capacity=remaining,
@@ -73,7 +74,7 @@ class LadderRangeMapper:
                 range_upper=upper,
             )
 
-        return result
+        return None
 
     def get_active_ladder_for_closing(
         self, live_position: float, current_spread: float

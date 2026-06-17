@@ -2250,7 +2250,7 @@ class BinancePositionPusher:
         # PositionStreamer broadcast picks up the fresh cache, so end-to-end
         # latency = SYNC_INTERVAL + ~1s.
         from app.services.binance_client import BinanceFuturesClient
-        SYNC_INTERVAL = 15.0  # 3s->15s 降频防币安限频(WS为主, REST仅floor)
+        SYNC_INTERVAL = 8.0   # 15s->8s(20260617): fstream WS出口黑洞下WS恒不可用,持仓新鲜度全靠REST floor;预算4acct*w5/8s=2.5w/s,叠加现~494/min 仍远低于2400红线
         # Stagger across accounts to spread API load
         await asyncio.sleep(1.0)
         while self.running:
@@ -2308,9 +2308,18 @@ class BinancePositionPusher:
         from app.services.binance_client import BinanceFuturesClient
         ws_base = "wss://fstream.binance.com/ws"
 
+        # 重连退避(20260617): fstream WS出口黑洞下,握手成功但零帧->每5min被silent-death杀掉重连,
+        # 实测每分钟数百次刷屏。改为:本次连接期间若收到过帧->下次5s快速重连(真断线);
+        # 若整段零帧(=出口仍黑洞)->退避翻倍 5->10->...->RECONNECT_MAX,消除无谓重连风暴。
+        RECONNECT_MAX = 60.0
+        _reconnect_delay = float(self.RECONNECT_DELAY)
+
         while self.running:
             client  = BinanceFuturesClient(api_key, api_secret, proxy_url=proxy_url)
             session = None
+            # per-conn frame counters (reset each iteration to avoid stale carry-over)
+            _ws_msg_count = [0]
+            _ws_last_msg_ts = [__import__('time').time()]
             try:
                 listen_key = await client.create_futures_listen_key()
                 if not listen_key:
@@ -2351,13 +2360,12 @@ class BinancePositionPusher:
                         logger.warning(f"[BinancePositionPusher] bootstrap failed {api_key[:8]}…: {_be}")
 
                     # Shared state for health monitoring in _keepalive_loop
-                    _ws_msg_count = [0]
-                    _ws_last_msg_ts = [__import__('time').time()]
+                    _ws_last_msg_ts[0] = __import__('time').time()
 
                     keepalive_task = asyncio.create_task(
                         self._keepalive_loop(client, listen_key, api_key=api_key,
                                              msg_count=_ws_msg_count, last_msg_ts=_ws_last_msg_ts,
-                                             ws=ws)
+                                             ws=ws, user_id=user_id)
                     )
                     try:
                         async for msg in ws:
@@ -2390,12 +2398,18 @@ class BinancePositionPusher:
                 await client.close()
 
             if self.running:
-                logger.info(f"[BinancePositionPusher] {self.RECONNECT_DELAY}s 后重连…")
-                await asyncio.sleep(self.RECONNECT_DELAY)
+                # 自适应退避: 本次连接收到过帧=真断线->重置为快速重连; 整段零帧=出口仍黑洞->退避翻倍
+                _got_frames = bool(_ws_msg_count[0])
+                if _got_frames:
+                    _reconnect_delay = float(self.RECONNECT_DELAY)
+                else:
+                    _reconnect_delay = min(RECONNECT_MAX, _reconnect_delay * 2.0)
+                logger.info(f"[BinancePositionPusher] {int(_reconnect_delay)}s 后重连… (frames_this_conn={_got_frames})")
+                await asyncio.sleep(_reconnect_delay)
 
     async def _keepalive_loop(self, client, listen_key: str, api_key: str = "",
                             msg_count: list = None, last_msg_ts: list = None,
-                            ws=None):
+                            ws=None, user_id: str = None):
         # Renew listenKey every KEEPALIVE_SEC (25min) — Binance requirement.
         # Plus silent-death detection: if no events for IDLE_THRESHOLD seconds
         # AND REST shows position changed vs our cache, force-close WS so the
@@ -2427,10 +2441,19 @@ class BinancePositionPusher:
             # Periodic health log (every 5min)
             if msg_count is not None and now - last_health_log_ts >= HEALTH_LOG_INTERVAL:
                 idle_s = int(now - last_msg_ts[0]) if last_msg_ts else 0
-                logger.info(
-                    f"[BinancePositionPusher] health: {_tag}… "
-                    f"total_msgs={msg_count[0]} idle={idle_s}s"
-                )
+                # 出口自检(20260617): 连上整段零帧 = fstream期货流主机出口黑洞(握手OK但无帧),
+                # 非本客户端可修;明确告警便于监控区分'出口不可用'与'在重连修复中'。
+                # 持仓新鲜度此时全由 _periodic_rest_sync_loop(REST floor)保证。
+                if msg_count[0] == 0:
+                    logger.warning(
+                        f"[BinancePositionPusher] fstream WS 出口不可用(握手OK零帧) {_tag}… "
+                        f"idle={idle_s}s — 持仓走REST floor兜底, 无需重连修复(疑似机房对fstream期货流的网络限制)"
+                    )
+                else:
+                    logger.info(
+                        f"[BinancePositionPusher] health: {_tag}… "
+                        f"total_msgs={msg_count[0]} idle={idle_s}s"
+                    )
                 last_health_log_ts = now
 
             # Silent-death detection + force reconnect
@@ -2457,20 +2480,21 @@ class BinancePositionPusher:
                                     if amt > 0: l += amt
                                     elif amt < 0: s += abs(amt)
                                 rest_by_sym[sym] = (round(l, 3), round(s, 3))
-                            # Compare with cache for this account
-                            cache = position_streamer._binance_positions
-                            for uid, syms in cache.items():
-                                for sym, (cl, cs) in syms.items():
-                                    rl, rs = rest_by_sym.get(sym, (0.0, 0.0))
-                                    if abs(cl - rl) > 0.001 or abs(cs - rs) > 0.001:
-                                        silent_death = True
-                                        logger.warning(
-                                            f"[BinancePositionPusher] WS silent-death {_tag}…: "
-                                            f"sym={sym} cache=({cl},{cs}) rest=({rl},{rs}) "
-                                            f"idle={int(idle_s)}s"
-                                        )
-                                        break
-                                if silent_death:
+                            # Compare with cache for THIS account only (keyed by user_id).
+                            # 修(20260617): 原遍历 cache.items() 全用户 -> 本账号REST与他人缓存比对,
+                            # 必然 mismatch -> 每5min误判silent-death+强制重连风暴(实测张冠李戴:
+                            # NmCDaQvO cache=(31) rest=(60) 而31是别人的仓)。现只比本 user_id 的缓存。
+                            syms = (position_streamer._binance_positions.get(user_id, {})
+                                    if user_id else {})
+                            for sym, (cl, cs) in syms.items():
+                                rl, rs = rest_by_sym.get(sym, (0.0, 0.0))
+                                if abs(cl - rl) > 0.001 or abs(cs - rs) > 0.001:
+                                    silent_death = True
+                                    logger.warning(
+                                        f"[BinancePositionPusher] WS silent-death {_tag}…: "
+                                        f"sym={sym} cache=({cl},{cs}) rest=({rl},{rs}) "
+                                        f"idle={int(idle_s)}s"
+                                    )
                                     break
                     except Exception as e:
                         logger.debug(f"[BinancePositionPusher] idle REST verify error {_tag}…: {e}")
