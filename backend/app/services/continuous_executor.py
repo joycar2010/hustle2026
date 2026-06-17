@@ -1365,6 +1365,8 @@ class ContinuousStrategyExecutor:
         )
 
         scan_count = 0
+        # 活跃键刷新时钟: 挂钟30s一次(防scan因代理超时拖长后 scan_count%200 触发周期>TTL 键提前过期)
+        import time as _hb_t_ak; _active_key_last_set = float('-inf')
 
         # MT5 收盘自动停：记录启动时距收盘分钟数，用于区分"收盘前一直运行"与"手动重启"
         from app.utils.trading_time import minutes_to_mt5_close as _mins_to_close
@@ -1395,9 +1397,13 @@ class ContinuousStrategyExecutor:
                 except Exception as _hre:
                     logger.debug(f"[V2][热重载] reload skipped: {_hre}")
 
-            if self._active_key and scan_count % 200 == 1:
+            # 活跃键刷新: 挂钟30s一次,不依赖scan次数
+            # (scan因SOCKS5代理超时最坏24s,200次=4800s>TTL3600s会提前过期导致按钮误熄灭)
+            _now_ak = _hb_t_ak.monotonic()
+            if self._active_key and (_now_ak - _active_key_last_set >= 30.0):
                 try:
                     await self._redis.set(self._active_key, "1", ex=3600)
+                    _active_key_last_set = _now_ak
                 except Exception:
                     pass
 
