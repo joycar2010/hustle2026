@@ -35,10 +35,34 @@ def _no_inventory_symbols() -> set[str]:
         return set()
 
 
+def _universe_symbols() -> set[str] | None:
+    """币安在交易白名单 engine:universe(现货∩合约 status==TRADING 的 USDT 对,
+    由 market_data_pusher 随上/退市动态刷新)。退市/单腿下架的币会自动移出该集 →
+    据此在监控第一步剔除,无需人工拉黑名单。返回 None 表示集不可用(Redis 异常/空),
+    此时调用方应跳过白名单过滤,避免 exchangeInfo 抖动误清空整表。"""
+    try:
+        import json as _j
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        raw = rc.get("engine:universe")
+        rc.close()
+        if not raw:
+            return None
+        syms = {s.upper() for s in _j.loads(raw)}
+        return syms or None
+    except Exception:
+        return None
+
+
 @router.get("/spreads", response_model=list[SpreadData])
 async def get_all_spreads(request: Request, db: Session = Depends(get_db)):
     bl = _blacklist_symbols(db, request) | _no_inventory_symbols()
-    items = [d for d in spread_reader.get_all() if d.symbol.upper() not in bl]
+    uni = _universe_symbols()
+    items = [
+        d for d in spread_reader.get_all()
+        if d.symbol.upper() not in bl and (uni is None or d.symbol.upper() in uni)
+    ]
     # 有券币按点差(取多/空较大方向)从高到低排序
     items.sort(key=lambda x: max(abs(x.spread_long), abs(x.spread_short)), reverse=True)
     return items
@@ -48,7 +72,11 @@ async def get_all_spreads(request: Request, db: Session = Depends(get_db)):
 async def get_top_spreads(request: Request, limit: int = Query(default=20, ge=1, le=500),
                           db: Session = Depends(get_db)):
     bl = _blacklist_symbols(db, request) | _no_inventory_symbols()
-    items = [d for d in spread_reader.get_all() if d.symbol.upper() not in bl]
+    uni = _universe_symbols()
+    items = [
+        d for d in spread_reader.get_all()
+        if d.symbol.upper() not in bl and (uni is None or d.symbol.upper() in uni)
+    ]
     items.sort(key=lambda x: max(abs(x.spread_long), abs(x.spread_short)), reverse=True)
     return items[:limit]
 

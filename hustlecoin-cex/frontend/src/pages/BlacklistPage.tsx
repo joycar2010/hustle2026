@@ -16,6 +16,16 @@ export function BlacklistPage() {
   const [batchText, setBatchText] = useState('')
   const [batchReason, setBatchReason] = useState('')
   const [loading, setLoading] = useState(true)
+  // 右键菜单:对某行币种快捷操作(移除黑名单)。全局系统条目(user_id==null)不可删。
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: BlacklistItem } | null>(null)
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true) }
+  }, [ctxMenu])
 
   const refresh = useCallback(async () => {
     try {
@@ -146,7 +156,11 @@ export function BlacklistPage() {
             ) : items.map((item) => {
               const isGlobal = item.user_id == null
               return (
-              <tr key={item.symbol} className="border-b border-border/50 hover:bg-accent/30">
+              <tr
+                key={item.symbol}
+                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, item }) }}
+                className="border-b border-border/50 hover:bg-accent/30"
+              >
                 <td className="px-3 py-1.5 font-mono">
                   {item.symbol}
                   {isGlobal && (
@@ -173,6 +187,27 @@ export function BlacklistPage() {
           </tbody>
         </table>
       </div>
+
+      {/* 右键菜单 — 移除黑名单(全局系统条目不可删) */}
+      {ctxMenu && (
+        <div
+          className="fixed z-50 min-w-[140px] rounded-md border border-border bg-[#111118] py-1 shadow-xl text-xs"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1 text-muted-foreground/60 border-b border-border/50 font-mono">{ctxMenu.item.symbol}</div>
+          {ctxMenu.item.user_id == null ? (
+            <div className="px-3 py-1.5 text-muted-foreground/50" title="系统全局黑名单,由引擎自动管理,不可手动删除">系统条目不可删除</div>
+          ) : (
+            <button
+              onClick={() => { handleRemove(ctxMenu.item.symbol); setCtxMenu(null) }}
+              className="block w-full text-left px-3 py-1.5 text-negative hover:bg-accent/40"
+            >
+              移除黑名单
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

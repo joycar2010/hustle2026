@@ -37,27 +37,6 @@ FEE_BUFFER = Decimal("1.0015")
 BORROW_FRESH_MS = 3000   # 借币二次确认: 点差快照超此毫秒数视为陈旧,不在已死/过期点差上完成借币
 
 
-def _auto_blacklist(symbol: str, reason: str) -> None:
-    """持续无券/死币 → 自动加全局黑名单(user_id IS NULL,对所有用户生效)+ 标 reason。
-    已存在则跳过(幂等,防多 worker 重复)。库存/行情恢复后需人工解黑。"""
-    db = SessionLocal()
-    try:
-        from app.db.models import Blacklist
-        exists = db.query(Blacklist).filter(
-            Blacklist.symbol == symbol, Blacklist.user_id.is_(None)
-        ).first()
-        if exists:
-            return
-        db.add(Blacklist(symbol=symbol, user_id=None, reason=reason))
-        db.commit()
-        logger.warning(f"自动加黑名单: {symbol} ({reason})")
-    except Exception as e:
-        db.rollback()
-        logger.debug(f"auto_blacklist {symbol} failed: {e}")
-    finally:
-        db.close()
-
-
 async def _get_asset_debt(client: BinanceTradingClient, asset: str) -> tuple[Decimal, Decimal]:
     margin_info = await client.get_margin_account()
     for a in margin_info.get("userAssets", []):
@@ -430,22 +409,14 @@ async def execute_borrow(
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, status="FAILED", error=str(e))
         # -3045 = 币安杠杆池该币无可借库存。这是相当稳定的市场状态(一个币池子空,常持续数小时),
         # 故冷却设 30 分钟:半小时重试一次足够捕捉库存恢复,又避免每 5 分钟重试一波刷高错误率/SAPI。
-        # 持续无券(首次失败起 ≥30 分钟仍无券)→ 自动加黑名单(标 reason),不再推送/显示;库存恢复需人工解黑。
+        # 注:不再自动拉黑——「无券」是临时供给状态,不等于「币本身坏」;仅做冷却(自动失效自动恢复),
+        # 黑名单回归人工维护。库存恢复后冷却 key 到期即自然恢复推送/显示。
         if "-3045" in str(e):
             try:
-                import time as _t
                 import redis as _r
                 from app.config import settings as _s
                 rc = _r.from_url(_s.redis_url, decode_responses=True)
                 rc.set(f"engine:noinv:{symbol}", "1", ex=1800)
-                since_key = f"engine:noinv_since:{symbol}"
-                since = rc.get(since_key)
-                now = int(_t.time())
-                if since is None:
-                    rc.set(since_key, str(now), ex=7200)   # 首次无券起始戳(2h TTL,不刷新)
-                elif now - int(since) >= 1800:             # 持续无券 ≥30 分钟 → 加黑名单
-                    _auto_blacklist(symbol, f"自动:持续无券≥30分(-3045)")
-                    rc.delete(since_key)
                 rc.close()
             except Exception:
                 pass

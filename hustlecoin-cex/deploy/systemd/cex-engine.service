@@ -12,6 +12,7 @@ Environment=RUST_LOG=cex_engine=info
 Environment=REDIS_URL=redis://127.0.0.1:6379
 Restart=always
 RestartSec=3
+WatchdogSec=120
 LimitNOFILE=1000000
 
 [Install]

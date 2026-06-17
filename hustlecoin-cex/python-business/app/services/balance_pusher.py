@@ -7,7 +7,7 @@ import redis.asyncio as aioredis
 
 from app.config import settings
 from app.db.session import SessionLocal
-from app.db.models import SubAccount, BalanceSnapshot
+from app.db.models import SubAccount, BalanceSnapshot, GlobalRules
 from app.services.fund_aggregate import aggregate_balances
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,22 @@ class BalancePusher:
             pass
         return 0.0
 
+    async def _spot_bids(self) -> dict[str, float]:
+        """All symbols' spot_bid from the Redis spreads hash, for converting
+        coin quantities to USDT and computing per-symbol borrow caps.
+        借币封顶口径用 spot_bid(与 order_executor 借币侧 price 取数一致)。"""
+        out: dict[str, float] = {}
+        try:
+            allp = await self._redis.hgetall("spreads")
+            for sym, raw in (allp or {}).items():
+                try:
+                    out[sym] = float(json.loads(raw).get("spot_bid") or 0)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return out
+
     async def _pushed_assets(self, user_id: int) -> set[str]:
         """Base assets the user is actively monitoring (pushed list), so the
         dashboard shows 现币/借币/最大可借 for monitored coins, not only positioned ones."""
@@ -69,10 +85,124 @@ class BalancePusher:
             pass
         return set()
 
+    def _load_borrow_policy(self, db) -> dict:
+        """读引擎借币封顶口径所需的规则,口径与 order_executor.execute_borrow 完全一致:
+        - borrow_via_otoco / collateral_ratio 是系统级字段(user_id IS NULL 行,全用户统一,
+          见 config_loader._SYSTEM_FIELDS),故只取一次系统行。
+        - order_amount(OTOCO 关闭时的固定单笔)按 per-user GlobalRules,回退系统行/默认 500。
+        返回 {otoco, ratio(float), sys_order_amount, order_amount_by_user{uid:amt}}。"""
+        sysrow = (db.query(GlobalRules)
+                  .filter(GlobalRules.user_id.is_(None))
+                  .order_by(GlobalRules.id).first())
+        otoco = bool(getattr(sysrow, "borrow_via_otoco", False)) if sysrow else False
+        ratio_raw = getattr(sysrow, "collateral_ratio", None) if sysrow else None
+        try:
+            ratio = float(ratio_raw) if ratio_raw is not None else 1.0
+        except Exception:
+            ratio = 1.0
+        if ratio <= 0 or ratio > 1:
+            ratio = 1.0  # 与引擎一致:越界视为借满
+        sys_order_amount = None
+        if sysrow and getattr(sysrow, "order_amount", None) is not None:
+            try:
+                sys_order_amount = float(sysrow.order_amount)
+            except Exception:
+                sys_order_amount = None
+        order_amount_by_user: dict[int, float] = {}
+        for r in db.query(GlobalRules).filter(GlobalRules.user_id.isnot(None)).all():
+            if r.order_amount is not None:
+                try:
+                    order_amount_by_user[r.user_id] = float(r.order_amount)
+                except Exception:
+                    pass
+        return {
+            "otoco": otoco,
+            "ratio": ratio,
+            "sys_order_amount": sys_order_amount,
+            "order_amount_by_user": order_amount_by_user,
+        }
+
+    def _resolve_amount_cap(self, db, sub_account_id: int, user_id: int, symbol: str,
+                            base_asset: str) -> Optional[float]:
+        """「金额限制」(USDT 借币上限)解析,严格复用引擎优先级:
+        账户单币(AccountSymbolRule) → 单币通用(SymbolRule) → 子账户(SubAccount).max_borrow_amount。
+        null=不封顶(跟随 maxBorrowable)。"""
+        from app.db.models import SymbolRule, AccountSymbolRule
+        syms = [symbol, base_asset]
+        asr = (db.query(AccountSymbolRule)
+               .filter(AccountSymbolRule.sub_account_id == sub_account_id,
+                       AccountSymbolRule.symbol.in_(syms)).first())
+        if asr and asr.max_borrow_amount is not None:
+            return float(asr.max_borrow_amount)
+        if user_id is not None:
+            sr = (db.query(SymbolRule)
+                  .filter(SymbolRule.user_id == user_id,
+                          SymbolRule.symbol.in_(syms)).first())
+            if sr and sr.max_borrow_amount is not None:
+                return float(sr.max_borrow_amount)
+        sa = db.query(SubAccount).get(sub_account_id)
+        if sa and sa.max_borrow_amount is not None:
+            return float(sa.max_borrow_amount)
+        return None
+
+    def _resolve_order_amount(self, db, acc, user_id: int, symbol: str,
+                              base_asset: str, policy: dict) -> Optional[float]:
+        """非 OTOCO 模式单笔借币金额(USDT),复用引擎 else 分支优先级:
+        全局 order_amount → 子账户 single_order_amount → 单币 SymbolRule.order_amount(最高)。"""
+        from app.db.models import SymbolRule
+        eff = policy["order_amount_by_user"].get(user_id, policy["sys_order_amount"])
+        sa_single = getattr(acc, "single_order_amount", None)
+        if sa_single is not None:
+            try:
+                eff = float(sa_single)
+            except Exception:
+                pass
+        if user_id is not None:
+            sr = (db.query(SymbolRule)
+                  .filter(SymbolRule.user_id == user_id,
+                          SymbolRule.symbol.in_([symbol, base_asset])).first())
+            if sr and sr.order_amount is not None:
+                try:
+                    eff = float(sr.order_amount)
+                except Exception:
+                    pass
+        return eff
+
+    def _compute_effective_borrowable(self, db, acc, sym_key: str, mb: float,
+                                      policy: dict, spot_bids: dict) -> tuple[float, str]:
+        """有效可借(币数量)+ 受限原因,口径与 order_executor.execute_borrow 完全一致。
+        OTOCO 开 & 有金额限制: min(金额限制/价, maxBorrowable×抵押率)。
+        否则(OTOCO 关 或 无金额限制): 单笔 order_amount/价(引擎此模式不看 maxBorrowable)。"""
+        base_asset = sym_key.replace("USDT", "")
+        uid = acc.user_id
+        price = float(spot_bids.get(sym_key, 0) or 0)
+        if mb is None:
+            mb = 0.0
+        if mb <= 0:
+            return 0.0, "无券"
+        cap_usdt = self._resolve_amount_cap(db, acc.id, uid, sym_key, base_asset)
+        if policy["otoco"] and cap_usdt is not None and cap_usdt > 0:
+            cap_qty = (cap_usdt / price) if price > 0 else 0.0
+            eff_max = mb * policy["ratio"]
+            if eff_max <= 0:
+                return cap_qty, "金额限制"
+            if cap_qty <= eff_max:
+                return cap_qty, "金额限制"
+            # maxBorrowable×抵押率 更紧
+            return eff_max, ("抵押率" if policy["ratio"] < 1 else "可借上限")
+        # 非 OTOCO(或未设金额限制)→ 单笔金额封顶
+        amt = self._resolve_order_amount(db, acc, uid, sym_key, base_asset, policy)
+        if amt is None or price <= 0:
+            # 拿不到单笔金额/价格 → 退回理论上限,不误导为 0
+            return mb, "可借上限"
+        eff = amt / price
+        return (min(eff, mb), "单笔金额") if eff <= mb else (mb, "可借上限")
+
     async def _fetch_and_push(self):
         self._max_borrow_tick += 1
         fetch_max_borrow = self._max_borrow_tick % 6 == 0
         btc_price = await self._btc_price()
+        spot_bids = await self._spot_bids()
         # Cap maxBorrowable calls per account per cycle to protect the SAPI weight budget.
         MAX_BORROW_PER_CYCLE = 40
 
@@ -81,6 +211,9 @@ class BalancePusher:
             accounts = db.query(SubAccount).filter(SubAccount.is_enabled == True).all()
             if not accounts:
                 return
+
+            # 借币封顶口径(与 order_executor.execute_borrow 同源),整周期取一次。
+            borrow_policy = self._load_borrow_policy(db)
 
             from engine.trading.binance_trading import BinanceTradingClient
             from engine.models import Position
@@ -172,6 +305,19 @@ class BalancePusher:
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),
                             }
+
+                    # 有效可借: 在理论上限(max_borrowable)基础上,套引擎同一封顶口径
+                    # (金额限制/抵押率/单笔金额),给前端展示「实际会借到的量」。
+                    for sym_key, sm in symbol_margin.items():
+                        try:
+                            eff, reason = self._compute_effective_borrowable(
+                                db, acc, sym_key, sm.get("max_borrowable", 0),
+                                borrow_policy, spot_bids,
+                            )
+                        except Exception:
+                            eff, reason = sm.get("max_borrowable", 0), "可借上限"
+                        sm["effective_borrowable"] = eff
+                        sm["borrow_cap_reason"] = reason
 
                     spot_free = "0"
                     for a in margin.get("userAssets", []):

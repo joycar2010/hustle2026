@@ -52,6 +52,7 @@ interface OwlTreeTableProps {
 interface SymbolGroup {
   symbol: string
   spread: SpreadData | undefined
+  spreadStale: boolean
   positions: Position[]
   totalQty: number
   totalUsdt: number
@@ -71,23 +72,6 @@ interface SymbolGroup {
   liquidationPct: number | null
   totalMarginFree: number | null
   totalFutAvail: number | null
-}
-
-function useFlash(_key: string, value: string | number | undefined) {
-  const prev = useRef(value)
-  const [flashing, setFlashing] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-
-  useEffect(() => {
-    if (prev.current !== value && prev.current !== undefined && value !== undefined) {
-      setFlashing(true)
-      if (timer.current) clearTimeout(timer.current)
-      timer.current = setTimeout(() => setFlashing(false), 1000)
-    }
-    prev.current = value
-  }, [value])
-
-  return flashing ? 'animate-flash' : ''
 }
 
 function durationText(opened: string): string {
@@ -205,7 +189,9 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   // 开仓点差 = spread_short = (spot_bid-fut_ask)/fut_ask×100 (%)，与交易引擎/规则口径一致
   const openPct = group.spread ? group.spread.spread_short : null
   const closePct = group.spread ? group.spread.spread_long : null
-  const spreadFlash = useFlash(`${group.symbol}-ss`, openPct?.toFixed(4))
+  // 点差陈旧(WS 断流/ts 过期但保留就近值)→ 整块淡化,提示"非实时,仅供参考"
+  const spreadStaleCls = group.spreadStale ? 'opacity-50' : ''
+  const spreadStaleTitle = group.spreadStale ? '点差非实时(行情断流,显示最近一次有效值)' : undefined
 
   const coinName = group.symbol
   const dh = group.durationHours
@@ -225,7 +211,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
 
   // 行情参数块:开(实时可开)/平(实时可平)/资/时/限/息
   const paramBlock = (
-    <td className={cn('px-1.5 py-1 text-left', spreadFlash)}>
+    <td className={cn('px-1.5 py-1 text-left', spreadStaleCls)} title={spreadStaleTitle}>
       <Chip label="开" value={openPct != null ? formatNumber(openPct, 2) : '-'} cls="text-positive" />
       {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 2) : '-'} cls="text-negative" />}
       <Chip label="资" value={marketInfo ? (marketInfo.funding_rate * 100).toFixed(2) : '-'}
@@ -267,7 +253,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {/* 财务列:汇总行兼"列标签"(coinmini 同款,与标题行合并);数字在子账户行 */}
       {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap" title="合约腿名义价值(USDT)">现-期</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">爆率</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">最大可借</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap" title="有效可借: 在币安理论最大可借(maxBorrowable)基础上,套引擎借币封顶口径(金额限制/抵押率/单笔金额)后实际会借到的量。悬停数字看理论上限与受限原因。">有效可借</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">现币</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">借币</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">借币金额</td>}
@@ -447,7 +433,7 @@ const SubAccountRow = memo(function SubAccountRow({
           })() : '-'}
         </td>
       )}
-      {/* 最大借 */}
+      {/* 有效可借 */}
       {!isMobile && (
         <td className={numCell}>
           {(() => {
@@ -457,9 +443,18 @@ const SubAccountRow = memo(function SubAccountRow({
             if (sm.no_inventory && !(sm.max_borrowable > 0)) {
               return <span className="text-amber-500/80" title="币安杠杆池当前无该币可借库存">无券</span>
             }
-            return borrowDisplayUsdt
-              ? formatNumber(sm.max_borrowable * (spread?.spot_bid ?? 0), 0)
-              : formatNumber(sm.max_borrowable, 2)
+            const px = spread?.spot_bid ?? 0
+            // 有效可借: 后端已套引擎封顶口径;旧负载缺该字段时回退理论上限
+            const eff = sm.effective_borrowable ?? sm.max_borrowable
+            const reason = sm.borrow_cap_reason
+            const shown = borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)
+            // tooltip: 标注理论上限 + 受限原因,让"为什么比 maxBorrowable 小"一目了然
+            const capTxt = borrowDisplayUsdt
+              ? `${formatNumber(sm.max_borrowable * px, 0)} U`
+              : `${formatNumber(sm.max_borrowable, 2)} ${pos.symbol.replace('USDT', '')}`
+            const title = `理论上限 ${capTxt}${reason ? ` · 受限于: ${reason}` : ''}`
+            const capped = reason && reason !== '可借上限' && eff < sm.max_borrowable
+            return <span className={capped ? 'text-sky-400/90' : ''} title={title}>{shown}</span>
           })()}
         </td>
       )}
@@ -563,9 +558,15 @@ const SubAccountRow = memo(function SubAccountRow({
 const FILTER_KEY = 'hc_filter_positions_only'
 const BORROW_DISPLAY_KEY = 'hc_borrow_display_mode'
 const COMPACT_KEY = 'hc_compact_view'
+// 币种行点差陈旧阈值(ms):某币 ts 落后全表最新 ts 超过此值视为陈旧(就近值变灰),与 /spreads 默认 300s 一致
+const DASH_SPREAD_STALE_MS = 300_000
 
 export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingSymbols, riskySymbols, throttleRate, onAction }: OwlTreeTableProps) {
   const spreads = useSpreadStore((s) => s.spreads)
+  const spreadsLastTs = useSpreadStore((s) => s.lastUpdateTs)
+  // 就近点差缓存: WS 断流/某币 ts 过期时,保留最后一次有效点差(不闪不清零,标记陈旧),
+  // 避免币种行点差因瞬时缺数据而变 '-' 或跳动。仅"从未有过数据"才落到 undefined。
+  const lastGoodSpreadRef = useRef<Map<string, SpreadData>>(new Map())
   const balances = useBalanceStore((s) => s.balances)
   const bans = useBanStore((s) => s.bans)
   const symbolStatuses = useSymbolStatusStore((s) => s.statuses)
@@ -632,7 +633,18 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
 
     for (const symbol of allSymbols) {
       if (q && !symbol.includes(q)) continue
-      const sp = spreads.get(symbol)
+      // 就近点差: store 有值就用并刷新缓存(ts 过期则标陈旧);store 已剔除该币(死币/断流)
+      // 则回退最后一次有效值并标陈旧。两者皆无才 undefined → 显示 '-'。
+      const liveSp = spreads.get(symbol)
+      let sp = liveSp
+      let spreadStale = false
+      if (liveSp) {
+        lastGoodSpreadRef.current.set(symbol, liveSp)
+        spreadStale = spreadsLastTs > 0 && spreadsLastTs - liveSp.ts > DASH_SPREAD_STALE_MS
+      } else {
+        const cached = lastGoodSpreadRef.current.get(symbol)
+        if (cached) { sp = cached; spreadStale = true }
+      }
       const pos = bySymbol.get(symbol) || []
 
       if (showPositionsOnly && pos.length === 0) continue
@@ -696,7 +708,9 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
         for (const id of ids) {
           const sm = balanceMap.get(id)?.symbol_margin?.[symbol]
           if (sm) {
-            if (sm.max_borrowable > 0) { mb += sm.max_borrowable; hasMb = true }
+            // 聚合「有效可借」与子账户行口径一致(回退理论上限)
+            const eff = sm.effective_borrowable ?? sm.max_borrowable
+            if (eff > 0) { mb += eff; hasMb = true }
             if (sm.free > 0) { fr += sm.free; hasFr = true }
           }
         }
@@ -726,7 +740,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
         : null
 
       result.push({
-        symbol, spread: sp, positions: pos,
+        symbol, spread: sp, spreadStale, positions: pos,
         totalQty, totalUsdt, totalFunding, totalInterest, groupProfit,
         isPushed: pushedSet.has(symbol),
         openCount: pos.length,
@@ -751,7 +765,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
     })
 
     return result
-  }, [spreads, positions, search, pushedSet, showPositionsOnly, balanceMap, symbolRules])
+  }, [spreads, spreadsLastTs, positions, search, pushedSet, showPositionsOnly, balanceMap, symbolRules])
 
   const toggle = useCallback((symbol: string) => {
     setExpanded(prev => {

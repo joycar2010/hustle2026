@@ -45,6 +45,12 @@ class APIMetrics:
             self.last_error_time = time.time()
             self.last_error_msg = msg[:200]
 
+    def record_skip(self):
+        """业务状态码(如 -3045 无可借库存)——市场状态,非 API 故障。既不计调用也不计错误,
+        把"正常无券探测"从健康指标里摘出去,避免 total_errors 被无券复查越刷越高。"""
+        with self._lock:
+            self.last_success_time = time.time()
+
     def record_rate_limit(self):
         with self._lock:
             self.rate_limited += 1

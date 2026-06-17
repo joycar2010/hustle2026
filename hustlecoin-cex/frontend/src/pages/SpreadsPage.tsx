@@ -88,11 +88,11 @@ function SpreadsTab() {
     getPushedSymbols().then((d) => setPushedSymbols(new Set(d.pushed_symbols || []))).catch(() => {})
   }, [setBulk])
 
-  // 定时整表刷新:setBulk 现为整表替换,周期性拉取可剪掉引擎已停发的死币
+  // 定时整表刷新:setBulk 现为整表替换,周期性拉取可剪掉引擎已停发的死币(10s 让死币更快消失)
   useEffect(() => {
     const t = setInterval(() => {
       getSpreads().then((data: SpreadData[]) => setBulk(data)).catch(() => {})
-    }, 20_000)
+    }, 10_000)
     return () => clearInterval(t)
   }, [setBulk])
 
@@ -111,13 +111,17 @@ function SpreadsTab() {
     if (lastUpdateTs > 0) {
       result = result.filter((s) => lastUpdateTs - s.ts <= staleMs)
     }
+    // 硬底线:剔除负点差,且开仓点差须 > 0.01%(过滤噪声/几乎无利差的币)
+    result = result.filter((s) => s.spread_short > 0.01)
     if (minSpread > 0) {
-      result = result.filter((s) => Math.abs(s.spread_short) >= minSpread)
+      result = result.filter((s) => s.spread_short >= minSpread)
     }
     if (minVol > 0) {
       result = result.filter((s) => (volMap.get(s.symbol) ?? 0) >= minVol)
     }
     result.sort((a, b) => b.spread_short - a.spread_short)   // 按开仓值(spread_short)降序,与参照系统一致
+    // 固定展示前 25;但有搜索词时展示全部匹配(否则搜排名 25 名外的币会"搜不到")
+    if (!q) result = result.slice(0, 25)
     return result
   }, [spreads, search, minSpread, minVol, volMap, lastUpdateTs, staleMs])
 
@@ -176,6 +180,8 @@ function SpreadsTab() {
           title="按 24h 成交量过滤低流动性薄盘(点差易虚高/glitch)"
         >
           <option value={0}>全部成交量</option>
+          <option value={250000}>&gt; 25万</option>
+          <option value={500000}>&gt; 50万</option>
           <option value={1000000}>&gt; 100万</option>
           <option value={5000000}>&gt; 500万</option>
           <option value={10000000}>&gt; 1000万</option>

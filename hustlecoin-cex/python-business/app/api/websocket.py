@@ -92,11 +92,33 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
         return syms
     blacklist_syms = await asyncio.to_thread(_load_blacklist)
 
+    # 在交易白名单 engine:universe(现货∩合约 status==TRADING 的 USDT 对,随上/退市动态刷新)。
+    # 退市/单腿下架的币不在此集 → 监控不推送。连接时点取一次,连接后由前端 10s 整表刷新纠正。
+    # None=集不可用(Redis 异常/空)→ 不启用白名单过滤,避免误清空。
+    def _load_universe():
+        try:
+            import redis as _r
+            from app.config import settings as _s
+            rc = _r.from_url(_s.redis_url, decode_responses=True)
+            raw = rc.get("engine:universe")
+            rc.close()
+            if not raw:
+                return None
+            syms = {s.upper() for s in json.loads(raw)}
+            return syms or None
+        except Exception:
+            return None
+    universe_syms = await asyncio.to_thread(_load_universe)
+
+    def _excluded(sym: str) -> bool:
+        u = sym.upper()
+        return u in blacklist_syms or (universe_syms is not None and u not in universe_syms)
+
     try:
         # Send initial spread snapshot(排除黑名单)
         try:
             from app.services.spread_reader import spread_reader
-            all_spreads = [s for s in spread_reader.get_all() if s.symbol.upper() not in blacklist_syms]
+            all_spreads = [s for s in spread_reader.get_all() if not _excluded(s.symbol)]
             await ws.send_json({
                 "type": "spread_snapshot",
                 "data": [json.loads(s.model_dump_json()) for s in all_spreads],
@@ -142,8 +164,8 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                 data_str = msg["data"]
 
                 if channel == "spread:updates":
-                    if str(data_str).upper() in blacklist_syms:
-                        continue  # 黑名单/死币不推送到利差监控
+                    if _excluded(str(data_str)):
+                        continue  # 黑名单/死币/退市(不在 universe)不推送到利差监控
                     raw = await redis_conn.hget("spreads", data_str)
                     if raw:
                         parsed = json.loads(raw)

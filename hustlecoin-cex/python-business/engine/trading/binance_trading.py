@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 SPOT_BASE = "https://api.binance.com"
 FUTURES_BASE = "https://fapi.binance.com"
 
+# 业务状态码:这些是市场状态/正常拒单,非 API 故障,不计入健康面板错误率。
+#   -3045 = 杠杆系统无可借库存(无券);后续如有同类"非故障"码可加进来。
+MARKET_STATE_CODES = {-3045}
+
 _global_semaphore = asyncio.Semaphore(20)
 
 # ── Per-account UID-weight pacer (per-sub-account configurable target rate) ──
@@ -171,8 +175,15 @@ class BinanceTradingClient:
             elif status >= 400:
                 data = resp.json()
                 msg = data.get("msg", resp.text)
-                metrics.record_error(f"[{status}] {msg}")
-                err = BinanceAPIError(status, data.get("code", 0), msg)
+                code = data.get("code", 0)
+                # -3045 = 杠杆池无可借库存,是市场状态(无券)非 API 故障 → 不计入错误率,
+                # 否则每 ~10min 一次的无券复查会把 total_errors 越刷越高(健康面板虚高)。
+                # 仍照常抛 BinanceAPIError,上层无券判定/置 0 逻辑不变。
+                if code in MARKET_STATE_CODES:
+                    metrics.record_skip()
+                else:
+                    metrics.record_error(f"[{status}] {msg}")
+                err = BinanceAPIError(status, code, msg)
             else:
                 metrics.record_success()
                 result = resp.json()
