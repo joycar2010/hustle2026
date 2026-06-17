@@ -293,7 +293,7 @@
               <!-- Trigger Progress -->
               <div v-if="continuousExecutionStatus.opening.status === 'running' && continuousExecutionTriggerProgress.opening.required > 0" class="mb-0.5">
                 <div class="flex justify-between text-gray-400 mb-0.5">
-                  <span>触发进度:</span>
+                  <span>触发进度:<span v-if="continuousExecutionTriggerProgress.opening.express" class="ml-1 text-[#fcd535] font-bold">⚡极速</span></span>
                   <span class="text-white">
                     {{ continuousExecutionTriggerProgress.opening.current }} / {{ continuousExecutionTriggerProgress.opening.required }}
                     <span v-if="continuousExecutionTriggerProgress.opening.triggerSpread !== null" class="text-[#fcd535] ml-1">({{ continuousExecutionTriggerProgress.opening.triggerSpread.toFixed(2) }})</span>
@@ -301,7 +301,8 @@
                 </div>
                 <div class="w-full bg-[#0d1117] rounded-full h-1.5">
                   <div
-                    class="bg-[#0ecb81] h-1.5 rounded-full transition-all duration-300"
+                    class="h-1.5 rounded-full transition-all duration-300"
+                    :class="continuousExecutionTriggerProgress.opening.express ? 'bg-[#fcd535] animate-pulse' : 'bg-[#0ecb81]'"
                     :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.opening.current / continuousExecutionTriggerProgress.opening.required) * 100)}%` }"
                   ></div>
                 </div>
@@ -339,7 +340,7 @@
               <!-- Trigger Progress -->
               <div v-if="continuousExecutionStatus.closing.status === 'running' && continuousExecutionTriggerProgress.closing.required > 0" class="mb-0.5">
                 <div class="flex justify-between text-gray-400 mb-0.5">
-                  <span>触发进度:</span>
+                  <span>触发进度:<span v-if="continuousExecutionTriggerProgress.closing.express" class="ml-1 text-[#fcd535] font-bold">⚡极速</span></span>
                   <span class="text-white">
                     {{ continuousExecutionTriggerProgress.closing.current }} / {{ continuousExecutionTriggerProgress.closing.required }}
                     <span v-if="continuousExecutionTriggerProgress.closing.triggerSpread !== null" class="text-[#fcd535] ml-1">({{ continuousExecutionTriggerProgress.closing.triggerSpread.toFixed(2) }})</span>
@@ -347,7 +348,8 @@
                 </div>
                 <div class="w-full bg-[#0d1117] rounded-full h-1.5">
                   <div
-                    class="bg-[#f6465d] h-1.5 rounded-full transition-all duration-300"
+                    class="h-1.5 rounded-full transition-all duration-300"
+                    :class="continuousExecutionTriggerProgress.closing.express ? 'bg-[#fcd535] animate-pulse' : 'bg-[#f6465d]'"
                     :style="{ width: `${Math.min(100, (continuousExecutionTriggerProgress.closing.current / continuousExecutionTriggerProgress.closing.required) * 100)}%` }"
                   ></div>
                 </div>
@@ -973,7 +975,7 @@ const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
 const isStopping = ref({ opening: false, closing: false })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
-const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null } })
+const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null, express: false }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null, express: false } })
 const statusPollingInterval = ref({ opening: null, closing: null })
 
 const ladderExecutionDetails = ref({ opening: {}, closing: {} })
@@ -1344,8 +1346,8 @@ function handleTriggerProgress(data) {
   const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
 
   if (isContinuousExecution) {
-    // For continuous execution, accept the message (it's already filtered by user_id on backend)
-    // continuous execution message accepted
+    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
+    if (!data.strategy_id?.includes(`_${props.type}_`)) return
   } else {
     // For regular execution, check strategy_id match
     if (data.strategy_id !== configId.value) {
@@ -1366,6 +1368,7 @@ function handleTriggerProgress(data) {
       required: data.required_count,
       triggerSpread: data.current_spread ?? null,
       threshold: data.threshold ?? null,
+      express: data.express === true,
     }
     return
   }
@@ -1380,6 +1383,7 @@ function handleTriggerProgress(data) {
       required: data.required_count,
       triggerSpread: data.current_spread ?? null,
       threshold: data.threshold ?? null,
+      express: data.express === true,
     }
   } else {
     // Update regular trigger count
@@ -1467,6 +1471,8 @@ function handleExecutionStarted(data) {
 
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
+    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
+    if (!data.strategy_id?.includes(`_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution started: ${action}`)
 
@@ -1504,6 +1510,8 @@ function handleExecutionCompleted(data) {
 
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
+    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
+    if (!data.strategy_id?.includes(`_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
     // 完成后刷新后端权威账本(平仓到 flat 时清零开仓均价)
@@ -1546,6 +1554,8 @@ function handleExecutionError(data) {
 
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
+    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
+    if (!data.strategy_id?.includes(`_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution error: ${action}, ${data.error_message}`)
 
@@ -2300,7 +2310,8 @@ async function startContinuousExecution(action) {
         current: 0,
         required: triggerCount || 1,
         triggerSpread: null,
-        threshold: null
+        threshold: null,
+        express: false
       }
 
       // task ID received
