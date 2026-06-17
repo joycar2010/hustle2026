@@ -10,6 +10,8 @@ import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
 import { getCoins } from '@/api/coins'
+import { confirmDialog } from '@/components/ui/confirm'
+import { useToastStore } from '@/components/ui/toast'
 import type { SpreadData } from '@/stores/spreadStore'
 
 interface SubAccount {
@@ -19,6 +21,7 @@ interface SubAccount {
 
 export function DashboardPage() {
   const fetchDashboard = useEngineStore((s) => s.fetchDashboard)
+  const addToast = useToastStore((s) => s.addToast)
   const setBulk = useSpreadStore((s) => s.setBulk)
   const [positions, setPositions] = useState<Position[]>([])
   const [accounts, setAccounts] = useState<SubAccount[]>([])
@@ -126,14 +129,14 @@ export function DashboardPage() {
     return () => window.removeEventListener('ws:position', handler)
   }, [])
 
-  const handleAction = useCallback((action: string, symbol: string, position?: Position, extra?: Record<string, unknown>) => {
+  const handleAction = useCallback(async (action: string, symbol: string, position?: Position, extra?: Record<string, unknown>) => {
     switch (action) {
       case 'transfer':
         setTransferAccountId(position?.sub_account_id)
         setShowTransfer(true)
         break
       case 'blacklist':
-        if (confirm(`确认将 "${symbol}" 加入黑名单？加入后从借币列表移除，不再推送。`)) {
+        if (await confirmDialog({ title: '加入黑名单', message: `确认将 "${symbol}" 加入黑名单？\n加入后从借币列表移除，不再推送。`, danger: true })) {
           addToBlacklist(symbol).then(() => refreshPushed()).catch(() => {})
         }
         break
@@ -147,10 +150,10 @@ export function DashboardPage() {
       case 'remove_slot': {
         const hasOpenPos = positions.some(p => p.symbol === symbol && p.status === 'OPEN')
         if (hasOpenPos) {
-          alert(`无法移除 ${symbol}：仍有子账户持仓中。请先平仓所有持仓后再移除。`)
+          addToast(`无法移除 ${symbol}：仍有子账户持仓中。请先平仓所有持仓后再移除。`, 'error')
           break
         }
-        if (confirm(`确认移除 ${symbol}？`)) {
+        if (await confirmDialog({ title: '移除推送', message: `确认移除 ${symbol}？` })) {
           removePushedSymbol(symbol).then(() => refreshPushed()).catch(() => {})
         }
         break
@@ -163,56 +166,56 @@ export function DashboardPage() {
           s => !positions.some(p => p.symbol === s && p.status === 'OPEN')
         )
         if (noPos.length === 0) {
-          alert('没有无持仓的推送币种')
+          addToast('没有无持仓的推送币种', 'info')
           return
         }
-        if (confirm(`批量移除 ${noPos.length} 个无持仓币种？\n${noPos.join(', ')}`)) {
+        if (await confirmDialog({ title: '批量移除', message: `批量移除 ${noPos.length} 个无持仓币种？\n${noPos.join(', ')}` })) {
           Promise.all(noPos.map(s => removePushedSymbol(s))).then(() => refreshPushed()).catch(() => {})
         }
         break
       }
       case 'manual_open': {
-        if (accounts.length === 0) { alert('无可用子账户'); break }
+        if (accounts.length === 0) { addToast('无可用子账户', 'error'); break }
         let accId = accounts[0].id
         if (accounts.length > 1) {
           const list = accounts.map((a, i) => `${i + 1}. ${a.note} (#${a.id})`).join('\n')
           const pick = prompt(`手动开仓 ${symbol}\n选择账户:\n${list}\n\n输入序号:`)
           if (!pick) break
           const idx = parseInt(pick, 10) - 1
-          if (isNaN(idx) || idx < 0 || idx >= accounts.length) { alert('无效序号'); break }
+          if (isNaN(idx) || idx < 0 || idx >= accounts.length) { addToast('无效序号', 'error'); break }
           accId = accounts[idx].id
         }
         const amtStr = prompt(`手动开仓 ${symbol} @ 账户#${accId}\n下单金额(USDT, 留空用全局规则):`)
         if (amtStr === null) break
         const amt = amtStr.trim() ? parseFloat(amtStr) : undefined
-        if (amtStr.trim() && (isNaN(amt as number) || (amt as number) <= 0)) { alert('请输入有效金额'); break }
+        if (amtStr.trim() && (isNaN(amt as number) || (amt as number) <= 0)) { addToast('请输入有效金额', 'error'); break }
         manualOpen(accId, symbol, amt)
-          .then((r) => { alert(r.message || '开仓已提交'); refreshPositions() })
-          .catch((e) => alert(`开仓失败: ${e.response?.data?.detail || e.message}`))
+          .then((r) => { addToast(r.message || '开仓已提交', 'success'); refreshPositions() })
+          .catch((e) => addToast(`开仓失败: ${e.response?.data?.detail || e.message}`, 'error'))
         break
       }
       case 'force_close':
         if (position) {
-          if (!confirm(`确认强制平仓 ${symbol} #${position.id}？\n账户: ${position.account_note || '#' + position.sub_account_id}\n将立即市价平仓+买回+还币。`)) break
+          if (!(await confirmDialog({ title: '强制平仓', message: `确认强制平仓 ${symbol} #${position.id}？\n账户: ${position.account_note || '#' + position.sub_account_id}\n将立即市价平仓+买回+还币。`, danger: true }))) break
           manualClose(position.id)
-            .then((r) => { alert(`${r.message}　盈亏: ${r.realized_pnl}`); refreshPositions() })
-            .catch((e) => alert(`平仓失败: ${e.response?.data?.detail || e.message}`))
+            .then((r) => { addToast(`${r.message}　盈亏: ${r.realized_pnl}`, 'success'); refreshPositions() })
+            .catch((e) => addToast(`平仓失败: ${e.response?.data?.detail || e.message}`, 'error'))
         }
         break
       case 'manual_hedge':
         if (position) {
-          if (!confirm(`确认手动对冲 ${symbol} #${position.id}？\n将卖出借来的现货(做空)+合约市价跟多。`)) break
+          if (!(await confirmDialog({ title: '手动对冲', message: `确认手动对冲 ${symbol} #${position.id}？\n将卖出借来的现货(做空)+合约市价跟多。` }))) break
           manualHedge(position.id)
-            .then((r) => { alert(r.message || '对冲完成'); refreshPositions() })
-            .catch((e) => alert(`对冲失败: ${e.response?.data?.detail || e.message}`))
+            .then((r) => { addToast(r.message || '对冲完成', 'success'); refreshPositions() })
+            .catch((e) => addToast(`对冲失败: ${e.response?.data?.detail || e.message}`, 'error'))
         }
         break
       case 'manual_repay':
         if (position) {
-          if (!confirm(`确认手动还币 ${symbol} #${position.id}？\n将买回的现币还清杠杆负债，持仓结算平仓。`)) break
+          if (!(await confirmDialog({ title: '手动还币', message: `确认手动还币 ${symbol} #${position.id}？\n将买回的现币还清杠杆负债，持仓结算平仓。`, danger: true }))) break
           manualRepay(position.id)
-            .then((r) => { alert(`${r.message}　盈亏: ${r.realized_pnl ?? '-'}`); refreshPositions() })
-            .catch((e) => alert(`还币失败: ${e.response?.data?.detail || e.message}`))
+            .then((r) => { addToast(`${r.message}　盈亏: ${r.realized_pnl ?? '-'}`, 'success'); refreshPositions() })
+            .catch((e) => addToast(`还币失败: ${e.response?.data?.detail || e.message}`, 'error'))
         }
         break
       case 'partial_repay': {
@@ -222,60 +225,63 @@ export function DashboardPage() {
         if (!amountStr) break
         const amount = parseFloat(amountStr)
         if (isNaN(amount) || amount <= 0) {
-          alert('请输入有效的正数')
+          addToast('请输入有效的正数', 'error')
           break
         }
         partialRepay(subId, symbol, amount)
-          .then(() => { alert('还币成功'); refreshPositions() })
-          .catch((e) => alert(`还币失败: ${e.response?.data?.detail || e.message}`))
+          .then(() => { addToast('还币成功', 'success'); refreshPositions() })
+          .catch((e) => addToast(`还币失败: ${e.response?.data?.detail || e.message}`, 'error'))
         break
       }
       case 'clear_account': {
         const clearSubId = extra?.subAccountId as number | undefined
         if (!clearSubId) break
-        const mode = confirm(
-          `清除账户 #${clearSubId}\n\n确定 = 禁用并平仓\n取消 = 仅禁用`
-        ) ? 'disable_and_close' as const : 'disable_only' as const
-        if (!confirm(`确认${mode === 'disable_and_close' ? '禁用并平仓' : '仅禁用'}账户 #${clearSubId}？`)) break
+        // 确认=禁用并平仓(高危),取消则不操作;仅禁用走账户页。简化为单一高危确认。
+        if (!(await confirmDialog({
+          title: '清除账户',
+          message: `确认禁用并平仓账户 #${clearSubId}？\n将禁用该子账户并市价平掉其全部持仓。`,
+          confirmText: '禁用并平仓', danger: true,
+        }))) break
+        const mode = 'disable_and_close' as const
         clearSubAccount(clearSubId, mode)
-          .then(() => { alert('操作成功'); refreshPositions() })
+          .then(() => { addToast('操作成功', 'success'); refreshPositions() })
           .catch((e: unknown) => {
             const resp = (e as { response?: { data?: { detail?: string } } })?.response
-            alert(`操作失败: ${resp?.data?.detail || (e as Error)?.message || '未知错误'}`)
+            addToast(`操作失败: ${resp?.data?.detail || (e as Error)?.message || '未知错误'}`, 'error')
           })
         break
       }
       case 'view_detail':
         if (position) {
-          alert(`持仓详情 ${symbol} #${position.id}\n状态: ${position.status}\n账户: ${position.account_note || '#' + position.sub_account_id}\n借币: ${position.borrow_qty}\n开仓利差: ${position.open_spread}%\n资金费: ${position.cumulative_funding_fee || '-'}\n利息: ${position.cumulative_interest || '-'}`)
+          addToast(`${symbol} #${position.id} · ${position.status} · ${position.account_note || '#' + position.sub_account_id} · 借${position.borrow_qty} · 开${position.open_spread}% · 资${position.cumulative_funding_fee || '-'} · 息${position.cumulative_interest || '-'}`, 'info')
         }
         break
       case 'cleanup_tail': {
         const maxStr = prompt('清理尾仓:平掉名义价值 ≤ N USDT 的碎仓\n输入阈值 (默认 10):', '10')
         if (maxStr === null) break
         const maxU = maxStr.trim() ? parseFloat(maxStr) : 10
-        if (isNaN(maxU) || maxU <= 0) { alert('请输入有效阈值'); break }
+        if (isNaN(maxU) || maxU <= 0) { addToast('请输入有效阈值', 'error'); break }
         listTailPositions(maxU)
-          .then((tails) => {
-            if (!tails.length) { alert(`无 ≤ ${maxU}U 的尾仓`); return }
+          .then(async (tails) => {
+            if (!tails.length) { addToast(`无 ≤ ${maxU}U 的尾仓`, 'info'); return }
             const list = tails.map((t) => `${t.symbol} #${t.id}  ${parseFloat(t.open_usdt_amount).toFixed(1)}U`).join('\n')
-            if (!confirm(`发现 ${tails.length} 个尾仓 (≤${maxU}U),将逐个市价平仓+买回+还币:\n\n${list}\n\n确认清理?`)) return
+            if (!(await confirmDialog({ title: '清理尾仓', message: `发现 ${tails.length} 个尾仓 (≤${maxU}U),将逐个市价平仓+买回+还币:\n\n${list}\n\n确认清理?`, danger: true }))) return
             cleanupTailPositions(maxU)
               .then((r: { message?: string; closed?: number; errors?: string[] }) => {
-                alert(`${r.message || '清理完成'}${r.errors && r.errors.length ? '\n\n错误:\n' + r.errors.join('\n') : ''}`)
+                addToast(`${r.message || '清理完成'}${r.errors && r.errors.length ? ' (含错误)' : ''}`, r.errors && r.errors.length ? 'error' : 'success')
                 refreshPositions()
               })
-              .catch((e) => alert(`清理失败: ${e.response?.data?.detail || e.message}`))
+              .catch((e) => addToast(`清理失败: ${e.response?.data?.detail || e.message}`, 'error'))
           })
-          .catch((e) => alert(`查询尾仓失败: ${e.response?.data?.detail || e.message}`))
+          .catch((e) => addToast(`查询尾仓失败: ${e.response?.data?.detail || e.message}`, 'error'))
         break
       }
       case 'refresh_borrowable': {
         const subId = (extra?.subAccountId as number | undefined) ?? position?.sub_account_id
         if (!subId) break
         getMaxBorrowable(subId, symbol)
-          .then((d: { max_borrowable?: string; asset?: string }) => alert(`${d.asset || symbol} @ 账户#${subId}\n最大可借: ${d.max_borrowable ?? '-'}`))
-          .catch((e) => alert(`查询失败: ${e.response?.data?.detail || e.message}`))
+          .then((d: { max_borrowable?: string; asset?: string }) => addToast(`${d.asset || symbol} @ 账户#${subId} 最大可借: ${d.max_borrowable ?? '-'}`, 'info'))
+          .catch((e) => addToast(`查询失败: ${e.response?.data?.detail || e.message}`, 'error'))
         break
       }
       default:

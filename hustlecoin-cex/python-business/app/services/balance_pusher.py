@@ -7,11 +7,17 @@ import redis.asyncio as aioredis
 
 from app.config import settings
 from app.db.session import SessionLocal
-from app.db.models import SubAccount
+from app.db.models import SubAccount, BalanceSnapshot
+from app.services.fund_aggregate import aggregate_balances
 
 logger = logging.getLogger(__name__)
 
 BALANCE_INTERVAL = 10  # seconds
+# 资金净值快照落库间隔(以 10s 周期计):60 → 每 ~10 分钟一行/用户。低频,不压 DB。
+SNAPSHOT_EVERY = 60
+# 无券币(-3045)重查节流:fetch_max_borrow 每 6 周期(~60s)触发一次,此值=10 → 无券币约每 10 分钟
+# 才重查一次 maxBorrowable(看库存是否恢复),避免每分钟对一批无券币重查刷高 400 错误率/SAPI 消耗。
+RECHECK_NOINV_EVERY = 10
 
 
 class BalancePusher:
@@ -106,18 +112,24 @@ class BalancePusher:
 
                         if fetch_max_borrow and targets:
                             mb_results = dict(self._max_borrow_cache.get(acc.id, {}))
+                            # 已知无券的币(-3045)不必每轮重查 maxBorrowable(每次都 400 刷错误率/耗 SAPI);
+                            # 仅每 RECHECK_NOINV_EVERY 次 fetch(fetch 自身每 6 周期一次)重试一次看库存是否恢复。
+                            recheck_noinv = self._max_borrow_tick % (6 * RECHECK_NOINV_EVERY) == 0
                             for asset in list(targets)[:MAX_BORROW_PER_CYCLE]:
-                                try:
-                                    amt = await client.get_max_borrowable(asset)
-                                    mb_results[asset] = float(amt)
-                                    self._no_inventory[asset] = False
-                                except Exception as e:
-                                    # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
-                                    if "-3045" in str(e):
-                                        mb_results[asset] = 0.0
-                                        self._no_inventory[asset] = True
-                                    else:
-                                        mb_results[asset] = mb_results.get(asset, 0)
+                                if self._no_inventory.get(asset) and not recheck_noinv:
+                                    mb_results[asset] = 0.0   # 沿用无券缓存,跳过查询
+                                else:
+                                    try:
+                                        amt = await client.get_max_borrowable(asset)
+                                        mb_results[asset] = float(amt)
+                                        self._no_inventory[asset] = False
+                                    except Exception as e:
+                                        # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
+                                        if "-3045" in str(e):
+                                            mb_results[asset] = 0.0
+                                            self._no_inventory[asset] = True
+                                        else:
+                                            mb_results[asset] = mb_results.get(asset, 0)
                                 if asset not in interest_fetched:
                                     try:
                                         rate = await client.get_margin_interest_rate(asset)
@@ -207,6 +219,36 @@ class BalancePusher:
 
                 await self._redis.publish("balance:updates", json.dumps(payload))
                 await self._redis.set(f"balance:latest:{uid}", json.dumps(payload), ex=30)
+
+            # 资金净值快照落库(每 ~10min 一次,每用户一行)→ 资金曲线/日终对账/回撤监控。
+            # 复用 aggregate_balances 同一净值口径(与 admin 实时总览一致)。落库失败不影响推送。
+            if self._max_borrow_tick % SNAPSHOT_EVERY == 0:
+                agg_by_user: dict[int, dict] = {}
+                try:
+                    for uid, balances in user_balances.items():
+                        agg = aggregate_balances(balances)
+                        agg_by_user[uid] = agg
+                        db.add(BalanceSnapshot(
+                            user_id=uid,
+                            equity=agg["equity"],
+                            available=agg["available"],
+                            borrowed=agg["borrowed"],
+                            unrealized_pnl=agg["unrealized_pnl"],
+                            margin_level_min=agg["margin_level_min"],
+                            bnb=agg["bnb"],
+                            account_count=agg["account_count"],
+                        ))
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    logger.warning(f"balance_snapshot persist failed: {e}")
+                # 资金风险告警(回撤/保证金/日亏)→ 跑马灯,节流自管,失败不影响主流程
+                try:
+                    from app.services.fund_alerts import run_fund_alert_checks
+                    run_fund_alert_checks(db, agg_by_user)
+                except Exception as e:
+                    db.rollback()
+                    logger.warning(f"fund alert checks failed: {e}")
 
             # P0: publish IP-wide used weight (this process makes frequent SAPI calls)
             try:

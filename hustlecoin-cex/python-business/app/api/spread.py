@@ -21,16 +21,33 @@ def _blacklist_symbols(db: Session, request: Request) -> set[str]:
     return {s[0].upper() for s in q.all() if s[0]}
 
 
+def _no_inventory_symbols() -> set[str]:
+    """无券币(借币 -3045 写入 engine:noinv:*,全局=币安杠杆池级别)。/spreads 利差监控排除:
+    无券币常因被抢空而点差虚高,显示出来也借不到,徒占榜首。"""
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        keys = rc.keys("engine:noinv:*")
+        rc.close()
+        return {k.split("engine:noinv:", 1)[1].upper() for k in keys}
+    except Exception:
+        return set()
+
+
 @router.get("/spreads", response_model=list[SpreadData])
 async def get_all_spreads(request: Request, db: Session = Depends(get_db)):
-    bl = _blacklist_symbols(db, request)
-    return [d for d in spread_reader.get_all() if d.symbol.upper() not in bl]
+    bl = _blacklist_symbols(db, request) | _no_inventory_symbols()
+    items = [d for d in spread_reader.get_all() if d.symbol.upper() not in bl]
+    # 有券币按点差(取多/空较大方向)从高到低排序
+    items.sort(key=lambda x: max(abs(x.spread_long), abs(x.spread_short)), reverse=True)
+    return items
 
 
 @router.get("/spreads/top", response_model=list[SpreadData])
 async def get_top_spreads(request: Request, limit: int = Query(default=20, ge=1, le=500),
                           db: Session = Depends(get_db)):
-    bl = _blacklist_symbols(db, request)
+    bl = _blacklist_symbols(db, request) | _no_inventory_symbols()
     items = [d for d in spread_reader.get_all() if d.symbol.upper() not in bl]
     items.sort(key=lambda x: max(abs(x.spread_long), abs(x.spread_short)), reverse=True)
     return items[:limit]

@@ -31,6 +31,8 @@ from app.api.admin_notify import router as admin_notify_router
 from app.api.admin_system import router as admin_system_router
 from app.api.admin_market import router as admin_market_router
 from app.api.admin_rbac import router as admin_rbac_router
+from app.api.admin_history import router as admin_history_router
+from app.api.admin_funds import router as admin_funds_router
 from app.api.admin_audit import router as admin_audit_router
 from app.api.admin_ai import router as admin_ai_router
 from app.api.admin_ws import router as admin_ws_router
@@ -117,6 +119,8 @@ app.include_router(admin_notify_router)
 app.include_router(admin_system_router)
 app.include_router(admin_market_router)
 app.include_router(admin_rbac_router)
+app.include_router(admin_history_router)
+app.include_router(admin_funds_router)
 app.include_router(admin_audit_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_ws_router)

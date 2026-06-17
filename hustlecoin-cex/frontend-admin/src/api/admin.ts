@@ -224,6 +224,144 @@ export async function getDashboardOverview() {
   return data as DashboardOverview
 }
 
+// ─── 跨用户历史查询(平仓历史 + 执行流水) ───
+
+export interface AdminHistoryPosition {
+  id: number
+  user_id: number | null
+  username: string | null
+  symbol: string
+  sub_account_id: number
+  account_note: string | null
+  borrow_qty: string | null
+  open_spread: string | null
+  close_spread: string | null
+  realized_pnl: string | null
+  cumulative_funding_fee: string | null
+  cumulative_interest: string | null
+  open_usdt_amount: string | null
+  opened_at: string | null
+  closed_at: string | null
+}
+
+export interface AdminClosedHistoryResp {
+  positions: AdminHistoryPosition[]
+  total_pnl: string
+  total_funding_fee: string
+  total_interest: string
+  net_pnl: string
+  count: number
+}
+
+export async function getAdminClosedHistory(params: Record<string, string | number | undefined>) {
+  const { data } = await client.get('/api/admin/history/closed', { params })
+  return data as AdminClosedHistoryResp
+}
+
+export interface AdminTradeLog {
+  id: number
+  position_id: number | null
+  user_id: number | null
+  username: string | null
+  sub_account_id: number
+  account_note: string | null
+  action: string
+  symbol: string | null
+  side: string | null
+  quantity: string | null
+  price: string | null
+  order_id: string | null
+  status: string
+  error_message: string | null
+  latency_ms: number | null
+  created_at: string | null
+}
+
+export async function getAdminTradeLogs(params: Record<string, string | number | undefined>) {
+  const { data } = await client.get('/api/admin/history/trade-logs', { params })
+  return data as { logs: AdminTradeLog[]; count: number }
+}
+
+// ─── 实时资金总览(跨用户账户净值) ───
+
+export interface AdminFundsAccount {
+  account_id: number
+  note: string | null
+  equity: number
+  spot_usdt_free: number
+  margin_net_usdt: number
+  margin_usdt_free: number
+  margin_usdt_borrowed: number
+  futures_total: number
+  futures_available: number
+  futures_unrealized_pnl: number
+  margin_level: number
+  bnb_free: number
+}
+
+export interface AdminFundsUser {
+  user_id: number
+  username: string
+  data_stale: boolean
+  equity: number | null
+  available: number | null
+  borrowed: number | null
+  unrealized_pnl: number | null
+  bnb: number | null
+  min_margin_level: number | null
+  account_count: number
+  deployed_notional: number
+  open_positions: number
+  accounts: AdminFundsAccount[]
+}
+
+export interface AdminFundsOverview {
+  users: AdminFundsUser[]
+  totals: {
+    equity: number
+    available: number
+    borrowed: number
+    unrealized_pnl: number
+    deployed_notional: number
+    users_with_data: number
+    users_total: number
+  }
+}
+
+export async function getAdminFundsOverview() {
+  const { data } = await client.get('/api/admin/funds/overview')
+  return data as AdminFundsOverview
+}
+
+export interface AdminFundsCurvePoint {
+  ts: string
+  equity: number
+  available?: number
+  borrowed: number
+  unrealized_pnl: number
+  margin_level_min?: number | null
+}
+
+export async function getAdminFundsCurve(params: Record<string, string | number | undefined>) {
+  const { data } = await client.get('/api/admin/funds/curve', { params })
+  return data as { user_id: number | null; days: number; points: AdminFundsCurvePoint[] }
+}
+
+export interface AdminPnlAttrRow {
+  key: string
+  label: string
+  realized: number
+  funding: number
+  interest: number
+  net: number
+  count: number
+}
+
+export async function getAdminPnlAttribution(params: Record<string, string | number | undefined>) {
+  const { data } = await client.get('/api/admin/funds/pnl-attribution', { params })
+  return data as { group_by: string; days: number; rows: AdminPnlAttrRow[]; totals: Omit<AdminPnlAttrRow, 'key' | 'label'> }
+}
+
 // ─── Audit Logs ───
 
 export interface AuditLogItem {

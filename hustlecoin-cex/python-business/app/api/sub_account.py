@@ -277,15 +277,28 @@ async def get_ip_whitelist(account_id: int, request: Request, db: Session = Depe
     account = _owned_sub(db, account_id, request)
     if not account.is_enabled:
         return {"ipRestrict": None, "ipList": []}
+    # 子账户 key 自身无权查 /account/apiRestrictions(币安拒"accountApiKey should not null"),
+    # 须母账户走 /sub-account/subAccountApi/ipRestriction(传子账户邮箱+key)查。
     try:
-        restrictions = await binance_client.get_api_restrictions(account.api_key, account.api_secret)
-        ip_data = await binance_client.get_ip_restriction(account.api_key, account.api_secret)
-        return {
-            "ipRestrict": restrictions.get("ipRestrict", False),
-            "ipList": ip_data.get("ipList", []),
-        }
+        from app.db.models import MasterAccount
+        uid = get_current_user_id(request)
+        master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
+        if master and master.api_key and account.email:
+            ip_data = await binance_client.get_sub_ip_restriction(
+                master.api_key, master.api_secret, account.email, account.api_key,
+            )
+            # 币安返回 ipList 为字符串数组 ['1.2.3.4'];前端契约是 [{ip}] → 适配
+            raw_ips = ip_data.get("ipList", []) or []
+            return {
+                "ipRestrict": ip_data.get("ipRestrict", False),
+                "ipList": [{"ip": s} for s in raw_ips],
+            }
+        return {"ipRestrict": None, "ipList": [], "error": "未配置主账户,无法查子账户 IP 限制"}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)[:200])
+        # IP 自检是只读展示功能(非交易关键)→ 失败优雅降级返回空,前端显示"未获取",
+        # 不抛 502 刷 Console。account 页对多个子账户并发调用,任一失败不应刷屏。
+        logger.debug(f"ip-whitelist {account_id} fetch failed: {e}")
+        return {"ipRestrict": None, "ipList": [], "error": str(e)[:120]}
 
 
 @router.put("/{account_id}/ip-whitelist")

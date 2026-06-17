@@ -10,6 +10,8 @@ import { NotifyPage } from '@/pages/NotifyPage'
 import { SystemPage } from '@/pages/SystemPage'
 import { AiSupportPage } from '@/pages/AiSupportPage'
 import { CoinManagementPage } from '@/pages/CoinManagementPage'
+import { HistoryPage } from '@/pages/HistoryPage'
+import { FundsPage } from '@/pages/FundsPage'
 
 export const router = createBrowserRouter([
   {
@@ -27,6 +29,8 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/admin/dashboard" replace /> },
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'users', element: <UsersPage /> },
+      { path: 'funds', element: <FundsPage /> },
+      { path: 'history', element: <HistoryPage /> },
       { path: 'global-rules', element: <GlobalRulesPage /> },
       { path: 'coins', element: <CoinManagementPage /> },
       { path: 'market-monitor', element: <MarketMonitorPage /> },

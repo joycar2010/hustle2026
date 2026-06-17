@@ -60,11 +60,12 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
     listener_task = None
     flush_task = None
 
-    # 黑名单(本用户 ∪ 全局系统死币如 HOMEUSDT)— WS 利差推送据此排除
+    # 黑名单(本用户 ∪ 全局系统死币如 HOMEUSDT)∪ 无券币(engine:noinv:*)— WS 利差推送据此排除
     def _load_blacklist():
         from app.db.session import SessionLocal
         from app.db.models import Blacklist
         from sqlalchemy import or_
+        syms = set()
         db = SessionLocal()
         try:
             q = db.query(Blacklist.symbol)
@@ -72,11 +73,23 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                 q = q.filter(or_(Blacklist.user_id == ws_user_id, Blacklist.user_id.is_(None)))
             else:
                 q = q.filter(Blacklist.user_id.is_(None))
-            return {s[0].upper() for s in q.all() if s[0]}
+            syms = {s[0].upper() for s in q.all() if s[0]}
         except Exception:
-            return set()
+            pass
         finally:
             db.close()
+        # 并入无券币(借币 -3045 池空,常点差虚高占榜首);snapshot 时点排除,
+        # 连接后新变无券的币由前端每 20s 的 /api/spreads 整表刷新纠正。
+        try:
+            import redis as _r
+            from app.config import settings as _s
+            rc = _r.from_url(_s.redis_url, decode_responses=True)
+            keys = rc.keys("engine:noinv:*")
+            rc.close()
+            syms |= {k.split("engine:noinv:", 1)[1].upper() for k in keys}
+        except Exception:
+            pass
+        return syms
     blacklist_syms = await asyncio.to_thread(_load_blacklist)
 
     try:

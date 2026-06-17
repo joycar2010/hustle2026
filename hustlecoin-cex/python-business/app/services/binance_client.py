@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import time
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 import httpx
 
@@ -22,7 +23,9 @@ class ValidationResult:
 
 def _sign(params: dict, secret: str) -> dict:
     params["timestamp"] = int(time.time() * 1000)
-    query = "&".join(f"{k}={v}" for k, v in params.items())
+    # 用 urlencode 算签名,与 httpx 实际发送的 query 编码一致;否则含特殊字符的参数
+    # (如子账户 email 的 @ → %40)签名串与发送串不符 → 币安拒"Signature not valid"。
+    query = urlencode(params)
     signature = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
     params["signature"] = signature
     return params
@@ -68,12 +71,31 @@ async def get_api_restrictions(api_key: str, api_secret: str) -> dict:
 
 
 async def get_ip_restriction(api_key: str, api_secret: str) -> dict:
+    # /account/apiRestrictions/ipRestriction 查"自己 key"的 IP 限制,只需签名参数(无需 apiKey)。
+    # 注:子账户 key 调此接口币安会拒("accountApiKey should not null"——该接口要求母账户/普通用户
+    # key;子账户 IP 限制须母账户走 /sub-account/subAccountApi/ipRestriction 查)。失败由上层优雅降级。
     params = _sign({}, api_secret)
     async with httpx.AsyncClient(timeout=settings.binance_api_timeout) as client:
         resp = await client.get(
             f"{SPOT_BASE}/sapi/v1/account/apiRestrictions/ipRestriction",
             params=params,
             headers={"X-MBX-APIKEY": api_key},
+        )
+    if resp.status_code != 200:
+        data = resp.json()
+        raise Exception(data.get("msg", f"HTTP {resp.status_code}"))
+    return resp.json()
+
+
+async def get_sub_ip_restriction(master_key: str, master_secret: str, sub_email: str, sub_api_key: str) -> dict:
+    """母账户查子账户 API key 的 IP 限制(子账户 key 自身无权查 /account/apiRestrictions)。
+    返回 {ipRestrict, ipList, ...};参数缺失或母账户未开权限会失败,由上层降级。"""
+    params = _sign({"email": sub_email, "subAccountApiKey": sub_api_key}, master_secret)
+    async with httpx.AsyncClient(timeout=settings.binance_api_timeout) as client:
+        resp = await client.get(
+            f"{SPOT_BASE}/sapi/v1/sub-account/subAccountApi/ipRestriction",
+            params=params,
+            headers={"X-MBX-APIKEY": master_key},
         )
     if resp.status_code != 200:
         data = resp.json()

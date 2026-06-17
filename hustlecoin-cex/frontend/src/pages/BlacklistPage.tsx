@@ -5,6 +5,7 @@ interface BlacklistItem {
   symbol: string
   reason?: string | null
   created_at?: string
+  user_id?: number | null   // null=全局系统黑名单(不可删除);有值=本人个人黑名单
 }
 
 export function BlacklistPage() {
@@ -142,21 +143,33 @@ export function BlacklistPage() {
               <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">加载中...</td></tr>
             ) : items.length === 0 ? (
               <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">暂无黑名单</td></tr>
-            ) : items.map((item) => (
+            ) : items.map((item) => {
+              const isGlobal = item.user_id == null
+              return (
               <tr key={item.symbol} className="border-b border-border/50 hover:bg-accent/30">
-                <td className="px-3 py-1.5 font-mono">{item.symbol}</td>
+                <td className="px-3 py-1.5 font-mono">
+                  {item.symbol}
+                  {isGlobal && (
+                    <span className="ml-1.5 px-1 py-0.5 rounded bg-muted text-[10px] text-muted-foreground align-middle">系统</span>
+                  )}
+                </td>
                 <td className="px-3 py-1.5 text-muted-foreground">{item.reason || '-'}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '-'}</td>
                 <td className="px-3 py-1.5 text-right">
-                  <button
-                    onClick={() => handleRemove(item.symbol)}
-                    className="text-negative hover:text-negative/80 text-xs"
-                  >
-                    移除
-                  </button>
+                  {isGlobal ? (
+                    <span className="text-muted-foreground/50 text-xs" title="系统全局黑名单(死币/持续无券),由引擎自动管理,不可手动删除">自动</span>
+                  ) : (
+                    <button
+                      onClick={() => handleRemove(item.symbol)}
+                      className="text-negative hover:text-negative/80 text-xs"
+                    >
+                      移除
+                    </button>
+                  )}
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>

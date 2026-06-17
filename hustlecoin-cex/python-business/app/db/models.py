@@ -270,5 +270,22 @@ class AiCoinConfig(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class BalanceSnapshot(Base):
+    """账户资金净值时间序列(balance_pusher 每 ~10min 落一行/用户),支撑资金曲线/日终对账/回撤监控。
+    口径见 app/services/fund_aggregate.aggregate_balances(与实时资金总览同源)。"""
+    __tablename__ = "balance_snapshot"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    ts = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    equity = Column(Numeric(18, 4))
+    available = Column(Numeric(18, 4))
+    borrowed = Column(Numeric(18, 4))
+    unrealized_pnl = Column(Numeric(18, 4))
+    margin_level_min = Column(Numeric(12, 4), nullable=True)
+    bnb = Column(Numeric(18, 8))
+    account_count = Column(Integer)
+
+
 # Import engine models into same Base so create_all() covers them
 from engine.models import Position, TradeLog, EngineState  # noqa: E402, F401

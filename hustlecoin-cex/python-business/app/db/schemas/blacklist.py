@@ -28,5 +28,6 @@ class BlacklistResponse(BaseModel):
     symbol: str
     reason: Optional[str] = None
     created_at: datetime
+    user_id: Optional[int] = None   # None=全局系统黑名单(不可由用户删除);有值=本人个人黑名单
 
     model_config = {"from_attributes": True}

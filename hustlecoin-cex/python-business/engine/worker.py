@@ -234,7 +234,8 @@ class Worker:
         for sym, label in active.items():
             if label:
                 statuses[sym] = label
-        self._symbol_statuses = statuses
+        # 注:挂单中(未持仓)币种的逐账户状态在下方借币循环里补入 statuses,
+        # 之后统一赋给 self._symbol_statuses 并发布(见借币循环末尾)。
 
         # ── UNHEDGE: OPEN → PENDING_REPAY at close_spread (or funding ratio) ──
         for pos in open_positions:
@@ -317,44 +318,52 @@ class Worker:
                 open_positions = await asyncio.to_thread(self._load_open_positions)
 
         # ── BORROW: pushed ∩ tradable, spread > borrow_spread → execute_borrow (idle) ──
+        # 同时为挂单中(未持仓)的每个推送币算逐账户状态写入 statuses(点差不符/无券/量不足/冷却…),
+        # 让前端子账户行能显示状态(与参照系统一致)。本 worker = 一个子账户,天然 per-account。
         active_count = len(open_positions) + len(idle_positions)
         can_borrow = (self._margin_safe and active_count < max_positions and
                       not (self._account_max_borrow is not None and self._account_max_borrow == 0))
-        if can_borrow:
-            pushed = await asyncio.to_thread(self._load_pushed_symbols)
-            borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)
-            # 开仓阈值缓冲: 实际要求点差 ≥ 借币点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留,行为不变)
-            eff_borrow = float(borrow_spread) + float(getattr(rules, "open_spread_buffer", 0) or 0)
-            no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
-            for symbol in pushed:
-                if not self._running or active_count >= max_positions:
-                    break
-                if symbol in blacklist or symbol not in tradable_symbols:
-                    continue
-                if symbol in active_symbols:          # already borrowed / open / pending
-                    continue
-                if symbol in no_inventory:            # 杠杆池无可借库存冷却(避免每周期重试打爆 SAPI)
-                    continue
-                if not self._volume_ok(symbol):       # 成交量护栏:薄盘币不借
-                    continue
-                if self._is_banned(symbol):
-                    continue
-                if self._is_removed_banned(symbol):   # 移除/平仓冷却:退出后短期不再借
-                    continue
-                sym_rule = self._symbol_rules.get(symbol, {})
-                if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
-                    continue
-                spread = self.spread_feed.get_symbol(symbol)
-                if not self._spread_sane(spread):        # glitch → 不在坏点差上借币开仓
-                    continue
-                if not self._spread_fresh(spread):       # feed 停更/快照陈旧 → 不在已死数据上借
-                    continue
-                # filter_duration_ms 防抖 + 开仓阈值缓冲:点差需持续超(借币点差+buffer)才借
-                if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
-                    continue
-                await self._initiate_borrow(symbol, spread, eff_borrow, account_note)
-                active_symbols.add(symbol)
-                active_count += 1
+        pushed = await asyncio.to_thread(self._load_pushed_symbols)
+        borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)
+        # 开仓阈值缓冲: 实际要求点差 ≥ 借币点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留,行为不变)
+        eff_borrow = float(borrow_spread) + float(getattr(rules, "open_spread_buffer", 0) or 0)
+        no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
+        for symbol in pushed:
+            # 已在途(借/持/待还)的币状态由上方 open/active 逻辑给定,这里不覆盖
+            if symbol in active_symbols or symbol in statuses:
+                continue
+            # 逐道护栏:被拒则记状态(供前端挂单中子账户行显示),不借
+            if symbol in blacklist:
+                statuses[symbol] = "黑名单"; continue
+            if symbol not in tradable_symbols:
+                statuses[symbol] = "不可交易"; continue
+            if symbol in no_inventory:
+                statuses[symbol] = "无券"; continue
+            if not self._volume_ok(symbol):
+                statuses[symbol] = "量不足"; continue
+            if self._is_banned(symbol):
+                statuses[symbol] = "借币冷却"; continue
+            if self._is_removed_banned(symbol):
+                statuses[symbol] = "移除冷却"; continue
+            sym_rule = self._symbol_rules.get(symbol, {})
+            if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
+                statuses[symbol] = "禁借"; continue
+            spread = self.spread_feed.get_symbol(symbol)
+            if not self._spread_sane(spread):
+                statuses[symbol] = "行情异常"; continue
+            if not self._spread_fresh(spread):
+                statuses[symbol] = "行情陈旧"; continue
+            if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
+                statuses[symbol] = "点差不符"; continue
+            # 有券 + 无异常 + 点差达标 → 正常运行(挂单借币中);本轮真借或受满仓/账户护栏暂缓,均标"运行中"
+            statuses[symbol] = "运行中"
+            if not can_borrow or active_count >= max_positions or not self._running:
+                continue
+            await self._initiate_borrow(symbol, spread, eff_borrow, account_note)
+            active_symbols.add(symbol)
+            active_count += 1
+
+        self._symbol_statuses = statuses
 
         # ── Auto-push: symbols whose spread ≥ auto_push_spread join the user's pushed list ──
         if self._cycle_count % 10 == 0 and getattr(rules, "auto_push_spread", 0) and rules.auto_push_spread > 0:
@@ -512,12 +521,15 @@ class Worker:
     async def _auto_push(self, threshold: float, tradable_symbols: set[str]):
         """Add symbols whose spread_short ≥ auto_push_spread to the user's pushed set."""
         try:
+            no_inventory = self._load_no_inventory()   # 无券币不自动推(否则高点差无券币反复回灌列表/-3045)
             candidates = {
                 sym for sym, sp in self.spread_feed.get_all().items()
                 if sym in tradable_symbols and sym not in self.config.blacklist  # 黑名单不进推送
                 and float(sp.spread_short) >= threshold
                 and self._volume_ok(sym)   # 成交量护栏:低量薄盘不自动推送
                 and not self._is_removed_banned(sym)   # 移除/平仓冷却内不重新推送
+                and sym not in no_inventory             # 无券币不自动推(高点差常因无券,推了也借不到)
+                and self._spread_fresh(sp)              # 死币(feed 停更/假基差)不自动推
             }
             if not candidates:
                 return

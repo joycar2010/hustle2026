@@ -536,8 +536,9 @@ function TransferModal({
   )
 }
 
-export function RulesPage() {
+export function RulesPage({ onClose }: { onClose?: () => void } = {}) {
   const navigate = useNavigate()
+  const closeRules = () => { if (onClose) onClose(); else navigate('/dashboard') }
   const [feishu, setFeishu] = useState<Record<string, unknown>>({})
   const [globalRules, setGlobalRules] = useState<Record<string, unknown>>({})
   const [fundRules, setFundRules] = useState<Record<string, unknown>>({})
@@ -695,7 +696,7 @@ export function RulesPage() {
       <div className="flex items-center justify-between px-4 py-2 bg-[#0d0d14] border-b border-border shrink-0">
         <span className="text-sm font-semibold">规则设置</span>
         <button
-          onClick={() => navigate('/dashboard')}
+          onClick={closeRules}
           className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
         >
           ✕

@@ -11,12 +11,16 @@ import {
   SlidersHorizontal,
   AlertTriangle,
   Coins,
+  History,
+  Wallet,
   X,
 } from 'lucide-react'
 
 const navItems = [
   { to: '/admin/dashboard', label: '总控面板', icon: LayoutDashboard },
   { to: '/admin/users', label: '用户管理', icon: Users },
+  { to: '/admin/funds', label: '资金统计', icon: Wallet },
+  { to: '/admin/history', label: '历史交易', icon: History },
   { to: '/admin/global-rules', label: '通用规则', icon: SlidersHorizontal },
   { to: '/admin/market-monitor', label: '行情检测', icon: AlertTriangle },
   { to: '/admin/coins', label: '币种管理', icon: Coins },

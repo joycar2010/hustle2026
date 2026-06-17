@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { getDashboardOverview, type DashboardOverview, type EngineUserStatus } from '@/api/admin'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -406,7 +407,9 @@ export function DashboardPage() {
                     <tbody>
                       {data.engine_health.stuck_positions.map((p) => (
                         <tr key={p.id} className="border-b border-border/30">
-                          <td className="py-1 pr-3">#{p.id}</td>
+                          <td className="py-1 pr-3">
+                            <Link to={`/admin/history?tab=logs&position_id=${p.id}`} className="text-primary hover:underline" title="查看该持仓执行流水">#{p.id}</Link>
+                          </td>
                           <td className="py-1 pr-3 font-medium">{p.symbol}</td>
                           <td className="py-1 pr-3"><Badge variant="destructive">{p.status}</Badge></td>
                           <td className="py-1 pr-3 text-right">{p.stuck_minutes} 分钟</td>
