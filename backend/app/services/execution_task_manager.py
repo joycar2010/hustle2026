@@ -260,6 +260,12 @@ class ExecutionTaskManager:
                         f"[HB_WATCHDOG] Task {task_id} ({sid}) 再次挂死但15min内重启已达上限"
                         f"({self._HUNG_MAX_RESTARTS}次) -> 仅cancel不重启(疑似持续性故障, 请排查)"
                     )
+                    # 善后(20260617修): 超限不重启时, 清残留防"挂死僵尸+孤儿active键+前端误显示运行中",
+                    # 并通知用户(此前只cancel->留下僵尸, cq002实战暴露)。包try防善后失败影响cancel。
+                    try:
+                        await self._cleanup_hung_strategy(sid, executor)
+                    except Exception as _ce:
+                        logger.warning(f"[HB_WATCHDOG] cleanup after rate-limit failed for {sid}: {_ce}")
                 t.cancel()
                 return
         except asyncio.CancelledError:
@@ -267,6 +273,52 @@ class ExecutionTaskManager:
         except Exception as _e:
             logger.warning(f"[HB_WATCHDOG] watchdog error for {task_id}: {_e}")
             return
+
+    async def _cleanup_hung_strategy(self, strategy_id, executor):
+        """超限不重启时的善后(20260617): 清snapshot/pending(防再被重放)+删active键
+        (前端不再误显示运行中)+推ws通知用户排查。区别于正常挂死自愈(那个要重放)。"""
+        # 1) 清 snapshot + pending (复用既有: 与手动停同效, 使其不被 StrategyResumeMonitor 重放)
+        try:
+            from app.services.strategy_resume_service import clear_on_manual_stop_by_strategy_id
+            await clear_on_manual_stop_by_strategy_id(strategy_id)
+        except Exception as _e:
+            logger.debug(f"[HB_WATCHDOG] clear snapshot/pending failed {strategy_id}: {_e}")
+        # 2) 删 active 键 (孤儿键会让前端 syncContinuousRunningState 误判仍在运行)
+        try:
+            ak = getattr(executor, "_active_key", None)
+            if ak:
+                from app.core.redis_client import redis_client as _rc
+                await _rc.client.delete(ak)
+                logger.info(f"[HB_WATCHDOG] cleared active key {ak} (超限不重启善后)")
+        except Exception as _e:
+            logger.debug(f"[HB_WATCHDOG] delete active key failed: {_e}")
+        # 3) 推 ws 通知用户: 策略因持续故障已停止, 请排查后手动重启
+        try:
+            uid = getattr(executor, "user_id", None)
+            pair = getattr(executor, "pair_code", None)
+            stype = None
+            try:
+                from app.services.strategy_resume_service import _parse_strategy_id
+                _u, _p, _action = _parse_strategy_id(strategy_id or "")
+                stype = _action
+            except Exception:
+                pass
+            if uid:
+                from app.services.strategy_status_pusher import status_pusher
+                # 复用前端已处理的 strategy_stop_confirmed -> 复位按钮(enabled=false/清进度)+弹通知,
+                # 零前端改动。带 reason 区分"故障停"vs正常停。strategy_id 末尾须 _continuous(前端据此识别)。
+                # event_type 传 "stop_confirmed"(push_custom_event 自动加 strategy_ 前缀 -> strategy_stop_confirmed,
+                # 前端 case 命中); action 须 opening/closing(前端 handleStopConfirmed 据此复位对应按钮)。
+                _act = "opening" if (stype and "opening" in stype) else "closing"
+                await status_pusher.push_custom_event(
+                    strategy_id, "stop_confirmed",
+                    {"reason": "持续挂死已停止(请排查后手动重启)", "action": _act,
+                     "strategy_type": stype, "pair_code": pair, "halted": True},
+                    uid,
+                )
+                logger.info(f"[HB_WATCHDOG] pushed stop_confirmed(halted) to user={uid} ({strategy_id})")
+        except Exception as _e:
+            logger.debug(f"[HB_WATCHDOG] push halted notify failed: {_e}")
 
     async def stop_task(self, task_id: str) -> bool:
         """

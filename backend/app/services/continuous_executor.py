@@ -1323,6 +1323,9 @@ class ContinuousStrategyExecutor:
         5. Re-evaluates after each ladder completion
         """
         from app.services.ladder_range_mapper import LadderRangeMapper
+        # 初始心跳(20260617修): task一进入即设基准, 让看门狗从启动就能精准计时,
+        # 覆盖"卡在进while第一轮前/初始化段"的挂死(否则_last_heartbeat恒None只能靠120s宽限)。
+        import time as _hb_t0; self._last_heartbeat = _hb_t0.monotonic()
         mapper = LadderRangeMapper(ladders)
         is_opening = 'opening' in strategy_type
         # ── 配置热重载状态: 每 N 秒回读 DB, 变更即重建 mapper/更新 order_qty_limit(保存即生效) ──
