@@ -205,51 +205,104 @@ def git_history(request: Request):
         return []
 
 
+_REPO_SUBDIRS = ["frontend", "frontend-admin", "python-business", "rust-engine", "deploy"]
+
+
+def _repo_root() -> str:
+    """git 仓库根(已对齐到家目录 /home/ec2-user;代码在 hustlecoin-cex/ 下,与 GitHub 结构一致)。"""
+    return subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=os.path.dirname(_VERSION_FILE), stderr=subprocess.DEVNULL, timeout=10,
+    ).decode().strip()
+
+
+def _pull_rust_source(root: str) -> bool:
+    """从 Rust 交易服务器(57.182.57.4)拉当前 rust-engine 源进本仓库 —— 备份的 Rust 腿。
+    best-effort:失败不阻断(前后端仍照常备份)。"""
+    proj = os.path.join(root, "hustlecoin-cex")
+    cmd = (
+        f'ssh -i {_SSH_KEY} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 '
+        f'{_SSH_USER}@{_RUST_HOST} '
+        f'"cd /home/ec2-user/hustlecoin-cex && tar -cf - --exclude=target --exclude=.git '
+        f'rust-engine/src rust-engine/Cargo.toml rust-engine/Cargo.lock" '
+        f'| tar -C {proj} -xf -'
+    )
+    try:
+        subprocess.run(cmd, shell=True, timeout=60, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
 @router.post("/git-push")
 def git_push(req: GitPushRequest, request: Request):
     require_super_admin(request)
 
     try:
+        root = _repo_root()
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+        # 0. 备份标签(best-effort)
         try:
-            subprocess.check_output(
-                ["git", "tag", f"backup-{timestamp}"],
-                stderr=subprocess.DEVNULL, timeout=5,
-            )
+            subprocess.check_output(["git", "tag", f"backup-{timestamp}"],
+                                    cwd=root, stderr=subprocess.DEVNULL, timeout=5)
         except Exception:
             pass
 
-        subprocess.check_output(["git", "add", "-A"], stderr=subprocess.STDOUT, timeout=30)
+        # 1. 拉 Rust 服务器当前源(两服务器全量备份的 Rust 腿)
+        rust_ok = _pull_rust_source(root)
 
+        # 2. 暂存:仅 5 个项目子目录(自动排除家目录敏感文件 + hustlecoin-cex/hustlecoin-cex 旧副本);
+        #    dist 被 .gitignore 忽略故 -f 强制纳入;最后剔除 *.bak 杂物。
+        subprocess.check_output(
+            ["git", "add"] + [f"hustlecoin-cex/{d}" for d in _REPO_SUBDIRS],
+            cwd=root, stderr=subprocess.STDOUT, timeout=90,
+        )
+        try:
+            subprocess.check_output(
+                ["git", "add", "-f",
+                 "hustlecoin-cex/python-business/static/spa",
+                 "hustlecoin-cex/python-business/static/admin-spa"],
+                cwd=root, stderr=subprocess.DEVNULL, timeout=30,
+            )
+        except Exception:
+            pass
+        staged = subprocess.check_output(["git", "diff", "--cached", "--name-only"],
+                                         cwd=root, timeout=20).decode().splitlines()
+        baks = [p for p in staged if ".bak" in p]
+        if baks:
+            subprocess.run(["git", "reset", "-q", "--"] + baks, cwd=root, timeout=30, check=False)
+
+        # 3. 有变更才升版本号
         has_changes = False
         try:
-            subprocess.check_output(
-                ["git", "diff", "--cached", "--quiet"],
-                stderr=subprocess.DEVNULL, timeout=10,
-            )
+            subprocess.check_output(["git", "diff", "--cached", "--quiet"],
+                                    cwd=root, stderr=subprocess.DEVNULL, timeout=10)
         except subprocess.CalledProcessError:
             has_changes = True
-
         if has_changes:
-            ver = _read_version()
-            new_ver = _bump_version(ver)
+            new_ver = _bump_version(_read_version())
             _write_version(new_ver)
-            subprocess.check_output(["git", "add", _VERSION_FILE], stderr=subprocess.DEVNULL, timeout=5)
+            subprocess.check_output(["git", "add", _VERSION_FILE],
+                                    cwd=root, stderr=subprocess.DEVNULL, timeout=5)
 
+        # 4. 提交
         try:
-            subprocess.check_output(
-                ["git", "commit", "-m", req.message],
-                stderr=subprocess.STDOUT, timeout=30,
-            )
+            subprocess.check_output(["git", "commit", "-m", req.message],
+                                    cwd=root, stderr=subprocess.STDOUT, timeout=30)
         except subprocess.CalledProcessError:
             pass
-        result = subprocess.check_output(
-            ["git", "push", "origin", _BRANCH],
-            stderr=subprocess.STDOUT, timeout=60,
-        ).decode()
-        return {"status": "success", "output": result[:500], "version": _read_version()}
+
+        # 5. 推送(仓库已对齐 origin/coin,fast-forward)
+        result = subprocess.check_output(["git", "push", "origin", _BRANCH],
+                                         cwd=root, stderr=subprocess.STDOUT, timeout=180).decode()
+        return {"status": "success", "output": result[:800],
+                "version": _read_version(), "rust_synced": rust_ok}
     except subprocess.CalledProcessError as e:
-        return {"status": "error", "output": e.output.decode()[:500] if e.output else str(e)}
+        return {"status": "error", "output": e.output.decode()[:800] if e.output else str(e)}
+    except Exception as e:
+        return {"status": "error", "output": str(e)[:800]}
 
 
 @router.post("/git-rollback")

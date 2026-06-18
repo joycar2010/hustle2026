@@ -1,1 +1,0 @@
-import{st as e}from"./index-Bz7JZ4im.js";async function t(){let{data:t}=await e.get(`/api/spreads`);return t}export{t};
