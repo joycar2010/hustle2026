@@ -720,6 +720,17 @@ export async function gitPush(body: { message: string }) {
   return data
 }
 
+// 左侧菜单顺序(按用户持久化)
+export async function getNavOrder() {
+  const { data } = await client.get('/api/admin/me/nav-order')
+  return data as { order: string[] }
+}
+
+export async function saveNavOrder(order: string[]) {
+  const { data } = await client.put('/api/admin/me/nav-order', { order })
+  return data
+}
+
 export interface GitCommit {
   hash: string
   short_hash: string

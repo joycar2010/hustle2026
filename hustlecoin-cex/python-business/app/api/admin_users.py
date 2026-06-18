@@ -22,6 +22,41 @@ from engine.models import Position, EngineState, TradeLog
 router = APIRouter(prefix="/api/admin", tags=["admin-users"])
 
 
+class NavOrderRequest(BaseModel):
+    order: list[str]
+
+
+@router.get("/me/nav-order")
+def get_nav_order(request: Request, db: Session = Depends(get_db)):
+    """当前管理员的左侧菜单顺序(按用户持久化,拖拽后保存,跨设备/下次登录恢复)。"""
+    uid = get_current_user_id(request)
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    order: list = []
+    raw = getattr(user, "admin_nav_order", None)
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                order = parsed
+        except Exception:
+            order = []
+    return {"order": [str(x) for x in order][:50]}
+
+
+@router.put("/me/nav-order")
+def set_nav_order(req: NavOrderRequest, request: Request, db: Session = Depends(get_db)):
+    """保存当前管理员的左侧菜单顺序。"""
+    uid = get_current_user_id(request)
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    user.admin_nav_order = json.dumps([str(x) for x in req.order][:50])
+    db.commit()
+    return {"status": "ok"}
+
+
 class CreateUserRequest(BaseModel):
     username: str
     password: str

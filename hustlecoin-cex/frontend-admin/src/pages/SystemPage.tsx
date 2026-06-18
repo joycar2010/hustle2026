@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getSystemInfo, getGitHistory, gitPush, gitRollback, gitDelete, getServiceVersions,
   getDatabaseStats, getDatabaseTables, getTableData, backupDatabase, cleanupDatabase,
@@ -86,6 +86,8 @@ function VersionTab() {
   const [loading, setLoading] = useState(true)
   const [pushMsg, setPushMsg] = useState('')
   const [pushing, setPushing] = useState(false)
+  const [pushProgress, setPushProgress] = useState(0)   // 0=空闲, 1-100=进度条
+  const pushTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const addToast = useToastStore((s) => s.addToast)
 
   useEffect(() => {
@@ -97,13 +99,31 @@ function VersionTab() {
   const handlePush = async () => {
     if (!pushMsg.trim()) return
     setPushing(true)
+    setPushProgress(3)
+    if (pushTimer.current) clearInterval(pushTimer.current)
+    // 后端 git push 为单次阻塞(无字节级进度),前端乐观分段推进至 92%,收到响应再填满
+    pushTimer.current = setInterval(() => {
+      setPushProgress((p) => (p >= 92 ? 92 : p + 2))
+    }, 350)
     try {
       const res = await gitPush({ message: pushMsg })
-      addToast(res.status === 'success' ? '推送成功' : `推送失败: ${res.output?.slice(0, 100)}`, res.status === 'success' ? 'success' : 'error')
-      setPushMsg('')
+      addToast(
+        res.status === 'success'
+          ? `推送成功${res.rust_synced === false ? '(Rust源未同步)' : ''}`
+          : `推送失败: ${res.output?.slice(0, 120)}`,
+        res.status === 'success' ? 'success' : 'error',
+      )
+      if (res.status === 'success') setPushMsg('')
       getGitHistory().then(setCommits)
       getServiceVersions().then(v => setServices(v.services))
-    } finally { setPushing(false) }
+    } catch {
+      addToast('推送失败', 'error')
+    } finally {
+      if (pushTimer.current) { clearInterval(pushTimer.current); pushTimer.current = null }
+      setPushProgress(100)
+      setPushing(false)
+      setTimeout(() => setPushProgress(0), 1500)
+    }
   }
 
   const handleRollback = async (hash: string, shortHash: string) => {
@@ -182,6 +202,24 @@ function VersionTab() {
               <Upload className="h-4 w-4" /> {pushing ? '推送中...' : '推送'}
             </Button>
           </div>
+          {pushProgress > 0 && (
+            <div className="mt-3 space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {pushProgress >= 100 ? '完成 ✓'
+                    : pushProgress >= 92 ? '推送到 GitHub coin…'
+                    : pushProgress >= 70 ? '提交…'
+                    : pushProgress >= 50 ? '暂存两端源码 + dist…'
+                    : pushProgress >= 25 ? '拉取 Rust 服务器源码…'
+                    : '准备备份…'}
+                </span>
+                <span className="tabular-nums">{pushProgress}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${pushProgress}%` }} />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

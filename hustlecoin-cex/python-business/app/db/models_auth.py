@@ -28,6 +28,7 @@ class User(Base):
     feishu_open_id = Column(String(100), nullable=True)
     feishu_phone = Column(String(20), nullable=True)
     feishu_union_id = Column(String(100), nullable=True)
+    admin_nav_order = Column(Text, nullable=True)   # 管理端左侧菜单自定义顺序(JSON 字符串数组,按用户持久化)
 
 
 # Keep AdminUser as alias for backward compatibility during migration
