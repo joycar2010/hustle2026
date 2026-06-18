@@ -738,6 +738,9 @@ class ContinuousStrategyExecutor:
                 ))
 
             # ── P1 FIX: Immediate B-side retry when single-leg detected ──
+            # 风险2修复: 原先手写 for 3x sleep(1s)+place_bybit_order(裸调) 绕开了
+            # _execute_bybit_market_buy/sell 内部的重试/10014-收缩/retcode校验等护栏。
+            # 改为直接调用统一执行通道: 一次调用即含内部 max_retries(=3) 退避重试。
             # Only when hedge_multiplier==1.0 (standard mode, not amplified hedge)
             if (exec_result.get('is_single_leg') and self.hedge_multiplier == 1.0
                     and exec_result.get('binance_filled_qty', 0) > 0
@@ -754,30 +757,31 @@ class ContinuousStrategyExecutor:
                     _retry_close = strategy_type == 'reverse_closing'
                 logger.warning(
                     f"[SINGLE_LEG_RETRY] B-side=0 with A-side={_retry_binance_filled}, "
-                    f"attempting 3 immediate retries ({_retry_side} {_retry_b_qty} lot {sym_b_r})"
+                    f"统一走 _execute_bybit_market 内部重试通道 ({_retry_side} {_retry_b_qty} lot {sym_b_r})"
                 )
-                for _retry_i in range(3):
-                    await asyncio.sleep(1.0)  # 1s between retries
-                    try:
-                        _retry_result = await self.order_executor.base_executor.place_bybit_order(
-                            account=bybit_account,
-                            symbol=sym_b_r,
-                            side=_retry_side,
-                            order_type="Market",
-                            quantity=str(round(_retry_b_qty, 2)),
-                            close_position=_retry_close,
-                        )
-                        if _retry_result.get('success'):
-                            logger.warning(f"[SINGLE_LEG_RETRY] B-side SUCCESS on retry #{_retry_i+1}: ticket={_retry_result.get('order_id')}")
-                            exec_result['bybit_filled_qty'] = _retry_b_qty
-                            exec_result['is_single_leg'] = False
-                            exec_result['success'] = True
-                            exec_result['single_leg_retried'] = True
-                            break
-                        else:
-                            logger.error(f"[SINGLE_LEG_RETRY] B-side retry #{_retry_i+1} failed: {_retry_result.get('error')}")
-                    except Exception as _retry_e:
-                        logger.error(f"[SINGLE_LEG_RETRY] B-side retry #{_retry_i+1} exception: {_retry_e}")
+                try:
+                    _retry_fn = (self.order_executor.base_executor._execute_bybit_market_buy
+                                 if _retry_side == "Buy"
+                                 else self.order_executor.base_executor._execute_bybit_market_sell)
+                    _retry_ret = await _retry_fn(
+                        bybit_account, sym_b_r, _retry_b_qty, close_position=_retry_close,
+                    )
+                    _retry_filled = (_retry_ret.get('filled_qty', 0) if isinstance(_retry_ret, dict)
+                                     else (_retry_ret or 0))
+                    if _retry_filled and _retry_filled > 0:
+                        logger.warning(f"[SINGLE_LEG_RETRY] B-side SUCCESS via 统一重试通道: filled={_retry_filled}")
+                        exec_result['bybit_filled_qty'] = _retry_filled
+                        exec_result['is_single_leg'] = False
+                        exec_result['success'] = True
+                        exec_result['single_leg_retried'] = True
+                        if isinstance(_retry_ret, dict) and _retry_ret.get('avg_price'):
+                            exec_result['bybit_avg_price'] = _retry_ret['avg_price']
+                        if isinstance(_retry_ret, dict) and _retry_ret.get('ticket'):
+                            exec_result['bybit_ticket'] = _retry_ret['ticket']
+                    else:
+                        logger.error(f"[SINGLE_LEG_RETRY] B-side 统一重试通道仍未成交")
+                except Exception as _retry_e:
+                    logger.error(f"[SINGLE_LEG_RETRY] B-side 统一重试通道异常: {_retry_e}")
 
             # On successful round-trip, keep preflight cache warm.
             if exec_result.get('success'):
@@ -1138,26 +1142,82 @@ class ContinuousStrategyExecutor:
                 logger.debug(f"[POS_LEDGER] update skipped: {_e_led}")
 
             # Step 11.6: 滑点保护检查 (双边成交后)
+            # 风险1修复: B侧均价桥接不返回(恒0) → 有ticket时异步回填deals均价后再检查
             try:
                 _b_filled = exec_result.get('binance_filled_qty', 0)
                 _bb_filled = exec_result.get('bybit_filled_qty', 0)
                 _bap = exec_result.get('binance_avg_price', 0) or 0
                 _bbp = exec_result.get('bybit_avg_price', 0) or 0
-                if _b_filled > 0 and _bb_filled > 0 and _bap > 0 and _bbp > 0 and self.user_id:
-                    actual_spread = round(float((_bap - _bbp) if 'reverse' in strategy_type else (_bbp - _bap)), 4)  # 方向化(与1031行同口径), 修正abs()致正向假大滑点
-                    slippage_val = actual_spread - (spread_threshold or 0)
-                    from app.services.slippage_guard import record_and_check as _slip_check
-                    await _slip_check(
-                        user_id=self.user_id,
-                        pair_code=self.pair_code,
-                        strategy_type=strategy_type,
-                        spread_threshold=spread_threshold,
-                        actual_spread=actual_spread,
-                        slippage=slippage_val,
-                        binance_order_id=binance_order_id,
-                        binance_avg_price=_bap,
-                        bybit_avg_price=_bbp,
-                    )
+                if _b_filled > 0 and _bb_filled > 0 and _bap > 0 and self.user_id:
+                    if _bbp > 0:
+                        # B侧均价已知 → 同步即时检查(原有路径)
+                        actual_spread = round(float((_bap - _bbp) if 'reverse' in strategy_type else (_bbp - _bap)), 4)
+                        slippage_val = actual_spread - (spread_threshold or 0)
+                        from app.services.slippage_guard import record_and_check as _slip_check
+                        await _slip_check(
+                            user_id=self.user_id,
+                            pair_code=self.pair_code,
+                            strategy_type=strategy_type,
+                            spread_threshold=spread_threshold,
+                            actual_spread=actual_spread,
+                            slippage=slippage_val,
+                            binance_order_id=binance_order_id,
+                            binance_avg_price=_bap,
+                            bybit_avg_price=_bbp,
+                        )
+                    else:
+                        # B侧均价缺失(桥接只返回ticket, avg_price=0) →
+                        # 非阻塞异步回填: 用 deals 历史查均价后补调滑点检查。
+                        # create_task 立即返回, 不占用当前执行周期时间(Step 12立即继续)。
+                        _bybit_ticket_for_slip = exec_result.get('bybit_ticket')
+                        if _bybit_ticket_for_slip and bybit_account:
+                            _slip_ctx = {
+                                'user_id': str(self.user_id), 'pair_code': self.pair_code,
+                                'strategy_type': strategy_type,
+                                'spread_threshold': spread_threshold or 0,
+                                'bap': _bap, 'binance_order_id': binance_order_id,
+                                'ticket': int(_bybit_ticket_for_slip),
+                                'account': bybit_account, 'symbol': sym_b,
+                                'is_reverse': 'reverse' in strategy_type,
+                            }
+                            async def _backfill_and_slip(_ctx=_slip_ctx):
+                                try:
+                                    from app.services.order_executor_v2 import _get_mt5_client_for_account as _gmc
+                                    from app.services.slippage_guard import record_and_check as _sc
+                                    _mt5 = _gmc(_ctx['account'])
+                                    _deals = None
+                                    for _da in range(3):
+                                        if hasattr(_mt5, 'get_deals_by_ticket_async'):
+                                            _deals = await _mt5.get_deals_by_ticket_async(_ctx['ticket'])
+                                        else:
+                                            _deals = _mt5.get_deals_by_ticket(_ctx['ticket'])
+                                        if _deals:
+                                            break
+                                        await asyncio.sleep(1.0)
+                                    if not _deals:
+                                        logger.warning(f"[SLIPPAGE_ASYNC] ticket={_ctx['ticket']} deals空, 跳过滑点检查")
+                                        return
+                                    _tv = sum(float(d.get('volume', 0)) for d in _deals)
+                                    _tc = sum(float(d.get('price', 0)) * float(d.get('volume', 0)) for d in _deals)
+                                    _bbp_f = (_tc / _tv) if _tv > 0 else 0.0
+                                    if _bbp_f <= 0:
+                                        logger.warning(f"[SLIPPAGE_ASYNC] ticket={_ctx['ticket']} 均价=0, 跳过")
+                                        return
+                                    _asp = round(float((_ctx['bap'] - _bbp_f) if _ctx['is_reverse'] else (_bbp_f - _ctx['bap'])), 4)
+                                    _slip = _asp - _ctx['spread_threshold']
+                                    await _sc(
+                                        user_id=_ctx['user_id'], pair_code=_ctx['pair_code'],
+                                        strategy_type=_ctx['strategy_type'],
+                                        spread_threshold=_ctx['spread_threshold'],
+                                        actual_spread=_asp, slippage=_slip,
+                                        binance_order_id=_ctx['binance_order_id'],
+                                        binance_avg_price=_ctx['bap'], bybit_avg_price=_bbp_f,
+                                    )
+                                    logger.info(f"[SLIPPAGE_ASYNC] ticket={_ctx['ticket']} 回填均价={_bbp_f:.4f} 点差={_asp:.4f} 滑点={_slip:.4f}")
+                                except Exception as _bfe:
+                                    logger.warning(f"[SLIPPAGE_ASYNC] 回填异常: {_bfe}")
+                            asyncio.create_task(_backfill_and_slip())
+                            logger.debug(f"[SLIPPAGE_ASYNC] ticket={_bybit_ticket_for_slip} 异步均价回填已提交")
             except Exception as _e_slip:
                 logger.warning(f"[SLIPPAGE] check failed: {_e_slip}")
 

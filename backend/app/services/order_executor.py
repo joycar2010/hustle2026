@@ -288,6 +288,18 @@ class OrderExecutor:
 
                 data = resp.json()
                 if resp.status_code == 200:
+                    # 风险3修复: HTTP 200 只代表请求送达桥接服务，不保证 MT5 内部真成交。
+                    # 桥接JSON本身已带 success 字段(实测357条历史成功记录均 retcode=10009/success=True)，
+                    # 用桥接自己的判定信号而非猜 retcode 数字枚举，HTTP 200 包裹 success=False 时仍判失败。
+                    if data.get("success") is False:
+                        error_msg = data.get("comment") or data.get("error") or f"retcode={data.get('retcode')}"
+                        logger.error(f"[BYBIT_ORDER] HTTP 200 但桥接内部失败: {error_msg}, data={data}")
+                        return {
+                            "success": False,
+                            "platform": "bybit",
+                            "error": error_msg,
+                            "data": data,
+                        }
                     # Bridge returns order result directly
                     order_id = data.get("order", data.get("ticket", data.get("orderId", 0)))
                     logger.info(f"[BYBIT_ORDER] Success: ticket={order_id}, data={data}")

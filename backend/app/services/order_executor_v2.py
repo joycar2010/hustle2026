@@ -259,6 +259,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "margin_precheck_failed": True,
                 "precheck_detail": precheck["detail"],
             }
@@ -322,6 +323,7 @@ class OrderExecutorV2:
                     "bybit_filled_qty": 0,
                     "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                     "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -335,6 +337,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -368,6 +371,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "b_side_skipped_below_min": True,
@@ -383,6 +387,7 @@ class OrderExecutorV2:
         )
         bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
         _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _bybit_ticket = _bb_res.get("ticket") if isinstance(_bb_res, dict) else None
         _t_b_done = time.perf_counter()
 
         logger.info(f"[REVERSE_OPENING] Bybit filled: {bybit_filled_qty} Lot")
@@ -397,6 +402,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -448,6 +454,7 @@ class OrderExecutorV2:
             "bybit_filled_qty": bybit_filled_qty,
             "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
             "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -498,6 +505,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "is_single_leg": False,
                 "position_exhausted": True,
                 "message": "Bybit没有LONG持仓，无法执行反向平仓"
@@ -572,6 +580,7 @@ class OrderExecutorV2:
                     "bybit_filled_qty": 0,
                     "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                     "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -585,6 +594,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -619,6 +629,7 @@ class OrderExecutorV2:
                     "bybit_filled_qty": 0,
                     "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                     "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": True,
                     "message": "Bybit 多仓为 0，无法平仓 — Binance 已成交需要人工补救",
@@ -647,6 +658,7 @@ class OrderExecutorV2:
         )
         bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
         _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _bybit_ticket = _bb_res.get("ticket") if isinstance(_bb_res, dict) else None
         _t_b_done = time.perf_counter()
         logger.info(f"[SLIPPAGE_TIMING] REVERSE_CLOSING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
@@ -659,6 +671,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -698,6 +711,7 @@ class OrderExecutorV2:
             "bybit_filled_qty": bybit_filled_qty,
             "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
             "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -745,6 +759,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "margin_precheck_failed": True,
                 "precheck_detail": precheck["detail"],
             }
@@ -810,6 +825,7 @@ class OrderExecutorV2:
                     "bybit_filled_qty": 0,
                     "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                     "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -823,6 +839,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -859,6 +876,7 @@ class OrderExecutorV2:
         )
         bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
         _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _bybit_ticket = _bb_res.get("ticket") if isinstance(_bb_res, dict) else None
         _t_b_done = time.perf_counter()
         logger.info(f"[SLIPPAGE_TIMING] FORWARD_OPENING A-detect→B-sent={(_t_b_sent - _t_a_detected)*1000:.0f}ms B-exec={(_t_b_done - _t_b_sent)*1000:.0f}ms total={(_t_b_done - _t_a_detected)*1000:.0f}ms")
 
@@ -871,6 +889,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -910,6 +929,7 @@ class OrderExecutorV2:
             "bybit_filled_qty": bybit_filled_qty,
             "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
             "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -965,6 +985,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "is_single_leg": False,
                 "position_exhausted": True,
                 "message": "Bybit没有SHORT持仓，无法执行正向平仓"
@@ -1046,6 +1067,7 @@ class OrderExecutorV2:
                     "bybit_filled_qty": 0,
                     "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                     "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": False,
                     "binance_api_error": True,
@@ -1060,6 +1082,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": False,
                 "message": message
@@ -1091,6 +1114,7 @@ class OrderExecutorV2:
                     "bybit_filled_qty": 0,
                     "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                     "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                     "binance_order_id": binance_order_id,
                     "is_single_leg": True,
                     "message": "Bybit 空仓为 0，无法平仓 — Binance 已成交需要人工补救",
@@ -1121,6 +1145,7 @@ class OrderExecutorV2:
         )
         bybit_filled_qty = _bb_res.get("filled_qty", 0) if isinstance(_bb_res, dict) else (_bb_res or 0)
         _bybit_avg_price = _bb_res.get("avg_price", 0) if isinstance(_bb_res, dict) else 0
+        _bybit_ticket = _bb_res.get("ticket") if isinstance(_bb_res, dict) else None
         _t_b_done = time.perf_counter()
 
         logger.info(f"[FORWARD_CLOSING] Bybit filled: {bybit_filled_qty} Lot")
@@ -1136,6 +1161,7 @@ class OrderExecutorV2:
                 "bybit_filled_qty": 0,
                 "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
                 "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
                 "binance_order_id": binance_order_id,
                 "is_single_leg": True,
                 "message": "Bybit订单已取消，等待下次重试",
@@ -1180,6 +1206,7 @@ class OrderExecutorV2:
             "bybit_filled_qty": bybit_filled_qty,
             "binance_avg_price": binance_avg_price if "binance_avg_price" in locals() else 0,
             "bybit_avg_price": _bybit_avg_price if "_bybit_avg_price" in locals() else 0,
+            "bybit_ticket": _bybit_ticket if "_bybit_ticket" in locals() else None,
             "binance_order_id": binance_order_id,
             "is_single_leg": is_single_leg,
             "single_leg_details": {
@@ -2109,6 +2136,7 @@ class OrderExecutorV2:
         total_quote = 0.0  # for avg_price calc
         total_avg_price = 0.0
         remaining = round(quantity, 2)
+        _fill_ticket = None  # 风险1: 开仓成功时记录ticket供上层异步回填B侧均价
 
         # ── CLOSE path: delegate to shared ticket-aggregation helper. ──
         if close_position:
@@ -2160,6 +2188,16 @@ class OrderExecutorV2:
                             continue
                     except Exception as _e:
                         logger.warning(f"[BYBIT_BUY] 10014 收缩查询失败: {_e}")
+                # 风险2修复: 通用失败退避重试 — 之前非10014一律直接break退出循环
+                # (max_retries虽存在但实际不生效),导致 SINGLE_LEG_RETRY 需要绕开本函数
+                # 在外层重写一套重试。改为: 若还有剩余尝试次数则退避continue统一走此通道。
+                if attempt < self.max_retries:
+                    logger.warning(
+                        f"[BYBIT_BUY] 下单失败({err}), {self.bybit_timeout}s后重试"
+                        f" ({attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(self.bybit_timeout)
+                    continue
                 break
 
             order_id = result["order_id"]
@@ -2196,6 +2234,7 @@ class OrderExecutorV2:
             # 多单累积场景 pos_total>=remaining 导致首次轮询假阳性，已弃用。
             actual_filled = remaining
             total_filled += actual_filled
+            _fill_ticket = ticket  # 风险1: 供上层异步回填B侧均价
             logger.info(
                 f"[BYBIT_BUY] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
                 f"(直接采信，无持仓轮询)"
@@ -2203,7 +2242,7 @@ class OrderExecutorV2:
             break
 
         logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
-        return {"filled_qty": total_filled, "avg_price": total_avg_price}
+        return {"filled_qty": total_filled, "avg_price": total_avg_price, "ticket": _fill_ticket}
 
     async def _execute_bybit_market_sell(
         self,
@@ -2226,6 +2265,7 @@ class OrderExecutorV2:
         total_quote = 0.0  # for avg_price calc
         total_avg_price = 0.0
         remaining = round(quantity, 2)
+        _fill_ticket = None  # 风险1: 开仓成功时记录ticket供上层异步回填B侧均价
 
         # ── CLOSE path: delegate to shared ticket-aggregation helper. ──
         # The MT5 Bridge /mt5/position/close picks ONE ticket and uses the
@@ -2282,6 +2322,14 @@ class OrderExecutorV2:
                             continue
                     except Exception as _e:
                         logger.warning(f"[BYBIT_SELL] 10014 收缩查询失败: {_e}")
+                # 风险2修复: 通用失败退避重试(与BUY对称)
+                if attempt < self.max_retries:
+                    logger.warning(
+                        f"[BYBIT_SELL] 下单失败({err}), {self.bybit_timeout}s后重试"
+                        f" ({attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(self.bybit_timeout)
+                    continue
                 break
 
             order_id = result["order_id"]
@@ -2321,6 +2369,7 @@ class OrderExecutorV2:
             # 多单累积场景 pos_total>=remaining 导致首次轮询假阳性，已弃用。
             actual_filled = remaining
             total_filled += actual_filled
+            _fill_ticket = ticket  # 风险1: 供上层异步回填B侧均价
             logger.info(
                 f"[BYBIT_SELL] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
                 f"(直接采信，无持仓轮询)"
@@ -2328,7 +2377,7 @@ class OrderExecutorV2:
             break
 
         logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
-        return {"filled_qty": total_filled, "avg_price": total_avg_price}
+        return {"filled_qty": total_filled, "avg_price": total_avg_price, "ticket": _fill_ticket}
 
     async def _check_mt5_filled_volume(
         self,
