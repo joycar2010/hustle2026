@@ -209,6 +209,13 @@ class ExecutionTaskManager:
     _HUNG_WINDOW_SEC = 900.0
     _HUNG_MAX_RESTARTS = 3
 
+    # 僵尸任务对外可见阈值(20260619): 协程卡死在 socks5/httpx C层 await 时, task.cancel()
+    # 穿不透 C层 -> task 永不 done -> _on_task_complete 永不触发 -> task_info.status 冻结在
+    # 'running'。get_status 对"心跳停滞超此阈值且仍 running"的任务对外降级为 'stalled',
+    # 使 /execution/tasks 不再当它运行中 -> 前端不再误点亮按钮。看门狗 90s 就该 cancel,
+    # 故 >120s 仍 running 必是 cancel 没穿透的僵尸; 健康循环每轮 <90s 刷心跳, 不会误判。
+    _STALE_THRESHOLD_S = 120.0
+
     def _hung_restart_allowed(self, strategy_id: str) -> bool:
         import time as _t
         self._hung_restart_hist = getattr(self, "_hung_restart_hist", {})
@@ -393,6 +400,26 @@ class ExecutionTaskManager:
             executor = self.executors[task_id]
             info['is_running'] = executor.is_running
             info['current_ladder_index'] = executor.current_ladder_index
+
+            # 僵尸任务检测(20260619, #2端点过滤治本): status 仍为 'running' 但循环心跳
+            # 长期停滞(协程卡死在 C层 await, task 永不 done -> 状态冻结在 running)时,
+            # 对外降级为 'stalled' + is_running=False, 让前端(仅在 status==='running'
+            # 时点亮按钮)不再被冻结的 running 欺骗。read-only: 只改返回副本, 不动 task_info。
+            if info.get('status') == 'running':
+                import time as _t
+                _hb = getattr(executor, '_last_heartbeat', None)
+                if _hb is not None:
+                    _stale = _t.monotonic() - _hb
+                else:
+                    # 循环还没进到设心跳那步(初始化段): 用 started_at 兜底计停滞
+                    try:
+                        _stale = (datetime.utcnow() - datetime.fromisoformat(info['started_at'])).total_seconds()
+                    except Exception:
+                        _stale = 0.0
+                if _stale > self._STALE_THRESHOLD_S:
+                    info['status'] = 'stalled'
+                    info['is_running'] = False
+                    info['stale_seconds'] = int(_stale)
 
         return info
 
