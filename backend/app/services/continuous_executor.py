@@ -527,12 +527,17 @@ class ContinuousStrategyExecutor:
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
 
-            # Step 7.5: Snapshot positions before execution (for single-leg detection)
+            # Step 7.5: Snapshot positions before execution.
+            # 20260619(方案B): 改为后台 create_task 非阻塞 —— 此快照的结果当前不被任何逻辑消费
+            # (_delayed_single_leg_check 的 Phase2 自行实查绝对持仓, 不读 pre_snapshot), 唯一有用
+            # 产物是 [SNAPSHOT] Pre-execution 诊断日志。原先 await 白占 A 侧挂单前 ~100ms(中位102ms,
+            # p99 643ms)。改为 create_task 后, A 侧挂单零快照延迟(含 express 极速触发), 日志照常打,
+            # 单腿防线不动(仍由成交后异步 Phase2 实盘总量对账兜底)。pre_snapshot 传空, 该参数已无消费方。
+            pre_snapshot = {}
             try:
-                pre_snapshot = await self._snapshot_positions(binance_account, bybit_account)
-            except Exception as e:
-                logger.error(f"[ladder={ladder_idx}] Failed to snapshot positions: {e}")
-                pre_snapshot = {}
+                asyncio.create_task(self._snapshot_positions(binance_account, bybit_account))
+            except RuntimeError:
+                pass  # 无运行中事件循环(极少见), 跳过快照日志, 不影响交易
 
             # ── Inject accumulated unhedged qty for B-side sizing ──────────────
             # If previous iterations had Binance fills too small for B-side (< 0.01 Lot),
