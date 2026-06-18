@@ -19,6 +19,16 @@ FUTURES_BASE = "https://fapi.binance.com"
 #   -3045 = 杠杆系统无可借库存(无券);后续如有同类"非故障"码可加进来。
 MARKET_STATE_CODES = {-3045}
 
+# 被币安 API 限制的"硬"错误码 → 逐账户中文提示(立即置位;任一成功调用即自愈)。
+# 418 IP封禁 / 429·-1003 超频 走瞬时滑窗去抖(见 _request)。
+_RESTRICTION_HARD = {
+    -2015: "API Key/IP 异常",   # invalid API-key, IP, or permissions
+    -2008: "API Key 失效",      # invalid Api-Key ID
+    -2014: "API Key 格式错",    # bad API-key format
+    -1022: "签名错误",          # signature invalid
+    -1002: "未授权",            # unauthorized
+}
+
 _global_semaphore = asyncio.Semaphore(20)
 
 # ── Per-account UID-weight pacer (per-sub-account configurable target rate) ──
@@ -192,6 +202,7 @@ class BinanceTradingClient:
             if status == 429:
                 metrics.record_rate_limit()
                 retry_after = int(resp.headers.get("Retry-After", 5))
+                metrics.note_restriction("请求超频", time.time() + max(retry_after, 5), transient=True)
             elif status >= 400:
                 data = resp.json()
                 msg = data.get("msg", resp.text)
@@ -203,6 +214,17 @@ class BinanceTradingClient:
                     metrics.record_skip()
                 else:
                     metrics.record_error(f"[{status}] {msg}")
+                    # 被币安 API 限制 → 置逐账户限制态(前端规则列红字提示)
+                    try:
+                        ra = int(resp.headers.get("Retry-After", 0) or 0)
+                    except ValueError:
+                        ra = 0
+                    if status == 418:
+                        metrics.note_restriction("IP 被封禁", time.time() + (ra or 300))
+                    elif code == -1003:
+                        metrics.note_restriction("请求超频", time.time() + (ra or 60), transient=True)
+                    elif code in _RESTRICTION_HARD:
+                        metrics.note_restriction(_RESTRICTION_HARD[code], time.time() + 120)
                 err = BinanceAPIError(status, code, msg)
             else:
                 metrics.record_success()

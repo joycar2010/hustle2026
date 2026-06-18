@@ -914,3 +914,19 @@ class Worker:
                     pass
             except Exception as e:
                 logger.debug(f"Ban/status publish failed: {e}")
+
+        # 逐账户"被币安API限制"状态(供前端规则列红字提示)。不限 RUNNING —— 账户降级时也要能提示;
+        # 仅在"有限制"或"刚解除"时发布,常态无限制不刷 Redis。
+        if self._redis:
+            try:
+                from engine.metrics import get_metrics
+                rsnap = get_metrics(self.sub_account_id).restriction_snapshot()
+                if rsnap is not None or getattr(self, "_restriction_pub_active", False):
+                    await self._redis.publish("account_restriction:updates", json.dumps({
+                        "sub_account_id": self.sub_account_id,
+                        "user_id": self._user_id,
+                        "restriction": rsnap,   # None=未限制(前端据此清除)
+                    }))
+                    self._restriction_pub_active = rsnap is not None
+            except Exception as e:
+                logger.debug(f"restriction publish failed: {e}")

@@ -1,1 +1,0 @@
-import{st as e}from"./index-WbS7u_cS.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};

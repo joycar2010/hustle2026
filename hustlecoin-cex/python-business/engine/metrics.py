@@ -22,6 +22,9 @@ class APIMetrics:
     used_order_count_10s: int = 0    # per-UID unfilled-order count in the 10s window (limit 100)
     order_limit_10s: int = 100       # per-UID 10s order-count limit (spot+margin)
     order_count_time: float = 0      # when order-count was observed
+    restricted_label: str = ""       # 被币安API限制的中文提示(空=未限制),供前端规则列逐账户红字
+    restricted_until: float = 0.0    # epoch 秒;到点自愈(任一成功调用也立即解除)
+    _transient_hits: list = field(default_factory=list, repr=False)  # 瞬时限制(429/-1003)命中时刻,滑窗去抖
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_weight(self, w: int, limit: int = 6000):
@@ -46,6 +49,7 @@ class APIMetrics:
         with self._lock:
             self.total_calls += 1
             self.last_success_time = time.time()
+            self._clear_restriction_locked()   # 自愈:任一成功调用即解除"被币安API限制"
 
     def record_error(self, msg: str = ""):
         with self._lock:
@@ -59,10 +63,47 @@ class APIMetrics:
         把"正常无券探测"从健康指标里摘出去,避免 total_errors 被无券复查越刷越高。"""
         with self._lock:
             self.last_success_time = time.time()
+            self._clear_restriction_locked()   # -3045 等业务码=鉴权/网络正常 → 解除限制
 
     def record_rate_limit(self):
         with self._lock:
             self.rate_limited += 1
+
+    # ── 被币安 API 限制(逐账户) ──
+    def _clear_restriction_locked(self):
+        if self.restricted_label or self._transient_hits:
+            self.restricted_label = ""
+            self.restricted_until = 0.0
+            self._transient_hits = []
+
+    def note_restriction(self, label: str, until: float, transient: bool = False):
+        """记录一次"被币安API限制"。transient(429/-1003 超频)需 30s 内≥3 次才置位
+        (常态偶发不误报);硬限制(API Key/IP/权限/封禁)立即置位。成功调用会自动清除。"""
+        with self._lock:
+            now = time.time()
+            if transient:
+                self._transient_hits = [t for t in self._transient_hits if now - t < 30]
+                self._transient_hits.append(now)
+                if len(self._transient_hits) < 3:
+                    return
+            self.restricted_label = label
+            self.restricted_until = until
+
+    def clear_restriction(self):
+        with self._lock:
+            self._clear_restriction_locked()
+
+    def restriction_snapshot(self):
+        """None=未限制;否则 {label, remaining(秒)}。到点(until)自愈。"""
+        with self._lock:
+            if not self.restricted_label:
+                return None
+            now = time.time()
+            if self.restricted_until and now >= self.restricted_until:
+                self._clear_restriction_locked()
+                return None
+            remaining = int(self.restricted_until - now) if self.restricted_until else 0
+            return {"label": self.restricted_label, "remaining": max(0, remaining)}
 
     def snapshot(self) -> dict:
         with self._lock:

@@ -5,6 +5,7 @@ import { useSpreadStore, type SpreadData } from '@/stores/spreadStore'
 import { useBalanceStore, type AccountBalance } from '@/stores/balanceStore'
 import { useBanStore } from '@/stores/banStore'
 import { useSymbolStatusStore } from '@/stores/symbolStatusStore'
+import { useRestrictionStore } from '@/stores/restrictionStore'
 import { useMarketDataStore, type MarketInfo } from '@/stores/marketDataStore'
 import { useUiStore } from '@/stores/uiStore'
 import { cn, formatNumber, pnlColor } from '@/lib/utils'
@@ -74,6 +75,21 @@ interface SymbolGroup {
   liquidationPct: number | null
   totalMarginFree: number | null
   totalFutAvail: number | null
+}
+
+// 逐账户"被币安API限制":按 updatedAt 推算实时剩余秒(remaining=0=无倒计时,只显文案)
+function restrictionFor(
+  restrictions: Map<number, { label: string; remaining: number; updatedAt: number }>,
+  subAccountId: number,
+): { label: string; remaining: number } | undefined {
+  const r = restrictions.get(subAccountId)
+  if (!r) return undefined
+  const remaining = r.remaining > 0 ? Math.max(0, r.remaining - Math.floor((Date.now() - r.updatedAt) / 1000)) : 0
+  return { label: r.label, remaining }
+}
+
+function fmtSec(s: number): string {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 function durationText(opened: string): string {
@@ -385,6 +401,7 @@ const SubAccountRow = memo(function SubAccountRow({
   borrowDisplayUsdt,
   symbolStatus,
   marketInfo,
+  restriction,
   onContextMenu,
   onDoubleClick,
   onMobileMenu,
@@ -397,6 +414,7 @@ const SubAccountRow = memo(function SubAccountRow({
   borrowDisplayUsdt?: boolean
   symbolStatus?: string | null
   marketInfo?: MarketInfo
+  restriction?: { label: string; remaining: number }
   onContextMenu: (e: React.MouseEvent, symbol: string, position: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
@@ -442,6 +460,10 @@ const SubAccountRow = memo(function SubAccountRow({
             <span className="ml-1.5 text-[10px] text-muted-foreground">{durationText(pos.opened_at)}</span>
           )}
         </div>
+        {/* 被币安 API 限制(账户级)红字提示 */}
+        {isMobile && restriction && (
+          <div className="mt-0.5 text-[10px] text-red-500 font-medium">⚠ 被限制:{restriction.label}{restriction.remaining > 0 ? ` ${fmtSec(restriction.remaining)}` : ''}</div>
+        )}
         {/* 移动端紧凑数据行 — 对齐 PC 逐账户列(现期/爆率/有效可借/现币/借币/借币金额/风险) */}
         {isMobile && (() => {
           const sm = balance?.symbol_margin?.[pos.symbol]
@@ -593,8 +615,16 @@ const SubAccountRow = memo(function SubAccountRow({
           )}
         </td>
       )}
-      {/* 规则 — 子账户行留空 */}
-      {!isMobile && <td className="px-1.5 py-0.5"></td>}
+      {/* 规则列 — 子账户行复用此列显示"被币安API限制"红字提示(账户级) */}
+      {!isMobile && (
+        <td className="px-1.5 py-0.5 text-center whitespace-nowrap text-[10px]">
+          {restriction ? (
+            <span className="text-red-500 font-medium" title={`被币安 API 限制:${restriction.label}`}>
+              {restriction.label}{restriction.remaining > 0 ? ` ${fmtSec(restriction.remaining)}` : ''}
+            </span>
+          ) : null}
+        </td>
+      )}
       {/* mobile action button */}
       {isMobile && (
         <td className="px-0.5 py-0.5 text-center">
@@ -627,6 +657,7 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
   const balances = useBalanceStore((s) => s.balances)
   const bans = useBanStore((s) => s.bans)
   const symbolStatuses = useSymbolStatusStore((s) => s.statuses)
+  const restrictions = useRestrictionStore((s) => s.restrictions)
   const marketData = useMarketDataStore((s) => s.marketData)
   const wsConnected = useUiStore((s) => s.wsConnected)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -961,6 +992,7 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
                   spreads={spreads}
                   bans={bans}
                   symbolStatuses={symbolStatuses}
+                  restrictions={restrictions}
                   marketData={marketData}
                   throttleRate={throttleRate}
                   onToggle={toggle}
@@ -1025,6 +1057,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   spreads,
   bans,
   symbolStatuses,
+  restrictions,
   marketData,
   throttleRate,
   onToggle,
@@ -1044,6 +1077,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   spreads: Map<string, SpreadData>
   bans: Map<string, { remaining: number; updatedAt: number }>
   symbolStatuses: Map<string, string>
+  restrictions: Map<number, { label: string; remaining: number; updatedAt: number }>
   marketData: Map<string, MarketInfo>
   throttleRate?: number
   onToggle: (symbol: string) => void
@@ -1090,6 +1124,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
           ? Math.max(0, banEntry.remaining - Math.floor((Date.now() - banEntry.updatedAt) / 1000))
           : undefined
         const posStatus = symbolStatuses.get(banKey) ?? null
+        const posRestriction = restrictionFor(restrictions, pos.sub_account_id)
         return (
           <SubAccountRow
             key={pos.id}
@@ -1100,6 +1135,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
             banRemaining={banRemaining}
             borrowDisplayUsdt={borrowDisplayUsdt}
             symbolStatus={posStatus}
+            restriction={posRestriction}
             marketInfo={marketData.get(pos.symbol)}
             onContextMenu={onContextMenu}
             onDoubleClick={onDoubleClick}
@@ -1112,6 +1148,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
       {isExpanded && group.positions.length === 0 && group.isPushed &&
         [...balanceMap.values()].map((bal) => {
           const acctStatus = symbolStatuses.get(`${bal.account_id}:${group.symbol}`) ?? null
+          const acctRestriction = restrictionFor(restrictions, bal.account_id)
           const pseudo: Position = {
             id: -bal.account_id,                  // 负 id 保证 key 不与真实 position 冲突
             sub_account_id: bal.account_id,
@@ -1131,6 +1168,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
               isMobile={isMobile}
               borrowDisplayUsdt={borrowDisplayUsdt}
               symbolStatus={acctStatus}
+              restriction={acctRestriction}
               marketInfo={marketData.get(group.symbol)}
               onContextMenu={onContextMenu}
               onDoubleClick={onDoubleClick}

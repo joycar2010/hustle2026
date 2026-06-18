@@ -6,6 +6,7 @@ import { useBalanceStore } from '@/stores/balanceStore'
 import { useBanStore } from '@/stores/banStore'
 import { useSymbolStatusStore } from '@/stores/symbolStatusStore'
 import { useMarketDataStore } from '@/stores/marketDataStore'
+import { useRestrictionStore } from '@/stores/restrictionStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const RECONNECT_BASE = 1000
@@ -106,6 +107,12 @@ export function useWebSocket() {
           case 'symbol_status':
             if (msg.data?.sub_account_id && msg.data?.statuses) {
               setSymbolStatuses(msg.data.sub_account_id, msg.data.statuses)
+            }
+            break
+          case 'account_restriction':
+            // 逐子账户"被币安API限制"(restriction=null 表示解除)
+            if (msg.data?.sub_account_id != null) {
+              useRestrictionStore.getState().setRestriction(msg.data.sub_account_id, msg.data.restriction)
             }
             break
           case 'market_data':

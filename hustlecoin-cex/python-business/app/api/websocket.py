@@ -138,7 +138,7 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
             logger.warning(f"Failed to send initial balance snapshot: {e}")
 
         pubsub = redis_conn.pubsub()
-        await pubsub.subscribe("spread:updates", "position:updates", "worker:status", "balance:updates", "notification:broadcast", "ban:updates", "symbol_status:updates", "market:updates", "pushed:updates")
+        await pubsub.subscribe("spread:updates", "position:updates", "worker:status", "balance:updates", "notification:broadcast", "ban:updates", "symbol_status:updates", "account_restriction:updates", "market:updates", "pushed:updates")
 
         batch: dict[str, dict] = {}
         batch_lock = asyncio.Lock()
@@ -214,6 +214,15 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                         if ws_user_id and parsed.get("user_id") != ws_user_id:
                             continue
                         await ws.send_json({"type": "symbol_status", "data": parsed})
+                    except Exception:
+                        pass
+
+                elif channel == "account_restriction:updates":
+                    try:
+                        parsed = json.loads(data_str)
+                        if ws_user_id and parsed.get("user_id") != ws_user_id:
+                            continue
+                        await ws.send_json({"type": "account_restriction", "data": parsed})
                     except Exception:
                         pass
 
