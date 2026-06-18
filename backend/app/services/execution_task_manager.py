@@ -216,6 +216,11 @@ class ExecutionTaskManager:
     # 故 >120s 仍 running 必是 cancel 没穿透的僵尸; 健康循环每轮 <90s 刷心跳, 不会误判。
     _STALE_THRESHOLD_S = 120.0
 
+    # 看门狗 cancel 后的二次确认宽限(20260619, #4): cancel 对卡死在 C层(socks5/httpx)
+    # 的 await 无效, task 永不 done -> _on_task_complete 永不触发 -> 留下僵尸。宽限后仍未
+    # done 即认定 cancel 未穿透, 主动强制善后(翻转状态+解绑+清残留+通知), 不再死等回调。
+    _CANCEL_CONFIRM_GRACE_S = 10.0
+
     def _hung_restart_allowed(self, strategy_id: str) -> bool:
         import time as _t
         self._hung_restart_hist = getattr(self, "_hung_restart_hist", {})
@@ -256,6 +261,7 @@ class ExecutionTaskManager:
                 stale = (now - hb) if hb is not None else (now - _start)
                 allow = self._hung_restart_allowed(sid or task_id)
                 self._hung_task_ids = getattr(self, "_hung_task_ids", set())
+                _already_cleaned = False
                 if allow:
                     self._hung_task_ids.add(task_id)  # 标记: _on_task_complete 据此走自恢复
                     logger.error(
@@ -271,15 +277,68 @@ class ExecutionTaskManager:
                     # 并通知用户(此前只cancel->留下僵尸, cq002实战暴露)。包try防善后失败影响cancel。
                     try:
                         await self._cleanup_hung_strategy(sid, executor)
+                        _already_cleaned = True
                     except Exception as _ce:
                         logger.warning(f"[HB_WATCHDOG] cleanup after rate-limit failed for {sid}: {_ce}")
                 t.cancel()
+                # #4(20260619): cancel 可能穿不透卡死在 C层(socks5/httpx)的 await -> task 永不
+                # done -> _on_task_complete 永不触发 -> 留下 status 冻结 'running' 的僵尸(今日
+                # cq001/cq002 forward_opening 实证)。spawn 二次确认: 宽限后仍未 done 即强制善后。
+                try:
+                    asyncio.create_task(
+                        self._confirm_cancel_or_force_halt(task_id, sid, executor, _already_cleaned)
+                    )
+                except RuntimeError:
+                    pass
                 return
         except asyncio.CancelledError:
             return
         except Exception as _e:
             logger.warning(f"[HB_WATCHDOG] watchdog error for {task_id}: {_e}")
             return
+
+    async def _confirm_cancel_or_force_halt(self, task_id, strategy_id, executor, already_cleaned=False):
+        """#4(20260619): 看门狗 cancel 后的二次确认。cancel 对卡死在 C层的 await 无效时,
+        task 永不 done、_on_task_complete 永不触发, 会留下 status 冻结 'running' 的僵尸。
+        宽限后若仍未 done, 主动强制善后(不再死等回调): 取消自恢复意图(防双协程)、置
+        executor.stop()(僵尸日后苏醒则下一轮循环顶即退出, 绝不下单)、翻转 task_info 状态
+        (供 cleanup 清理 + 与 #2 端点过滤口径一致)、解绑 strategy->task、清残留+通知用户。"""
+        try:
+            await asyncio.sleep(self._CANCEL_CONFIRM_GRACE_S)
+        except asyncio.CancelledError:
+            return
+        t = self.tasks.get(task_id)
+        if t is None or t.done():
+            return  # cancel 生效, _on_task_complete 已正常处理(含自恢复分支)
+        # ── cancel 未穿透 = C层僵尸 ──
+        logger.error(
+            f"[HB_WATCHDOG] Task {task_id} ({strategy_id}) cancel 未穿透"
+            f"({self._CANCEL_CONFIRM_GRACE_S:.0f}s 后仍未结束, 卡死在C层) -> 强制善后(降级不自动重启)"
+        )
+        # 1) 取消"自恢复"意图: 即便 _on_task_complete 日后侥幸触发也不重放(非可取消的卡死=持续故障)
+        try:
+            self._hung_task_ids = getattr(self, "_hung_task_ids", set())
+            self._hung_task_ids.discard(task_id)
+        except Exception:
+            pass
+        # 2) 兜底: 置 stop_requested, 僵尸若苏醒下一轮循环顶即退出, 绝不下单(防双协程下单)
+        try:
+            executor.stop()
+        except Exception:
+            pass
+        # 3) 翻转 task_info 状态(供 cleanup_completed_tasks 清理; 与 #2 stalled 口径一致)
+        if task_id in self.task_info:
+            self.task_info[task_id]['status'] = 'stalled'
+            self.task_info[task_id]['completed_at'] = datetime.utcnow().isoformat()
+        # 4) 解绑 strategy->task, 允许用户手动重启 / 开市恢复重新占位
+        if strategy_id and self._strategy_to_task.get(strategy_id) == task_id:
+            self._strategy_to_task.pop(strategy_id, None)
+        # 5) 清 active键/snapshot/pending + 推 stop_confirmed(halted) 通知用户(rate-limit 分支已清则跳过)
+        if not already_cleaned:
+            try:
+                await self._cleanup_hung_strategy(strategy_id, executor)
+            except Exception as _ce:
+                logger.warning(f"[HB_WATCHDOG] force-halt cleanup failed for {strategy_id}: {_ce}")
 
     async def _cleanup_hung_strategy(self, strategy_id, executor):
         """超限不重启时的善后(20260617): 清snapshot/pending(防再被重放)+删active键
@@ -441,7 +500,9 @@ class ExecutionTaskManager:
         to_remove = []
 
         for task_id, info in self.task_info.items():
-            if info['status'] in ['completed', 'failed', 'cancelled']:
+            # 'stalled'(20260619,#4): 强制善后后的 C层僵尸, 同样按 completed_at 老化清理,
+            # 否则会因 status 非终态而永久滞留 task_info(老 zombie 累积致内存与端点噪声)。
+            if info['status'] in ['completed', 'failed', 'cancelled', 'stalled']:
                 if 'completed_at' in info:
                     completed_at = datetime.fromisoformat(info['completed_at'])
                     age_hours = (now - completed_at).total_seconds() / 3600
