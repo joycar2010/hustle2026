@@ -72,7 +72,7 @@ export function ContextMenu({ x, y, symbol, position, isPushed, isAccountRow, su
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-[160px] rounded border border-border bg-[#141420] py-1 shadow-xl"
+      className="fixed z-50 min-w-[160px] max-w-[90vw] rounded border border-border bg-[#141420] py-1 shadow-xl"
       style={{ left: x, top: y }}
       onClick={(e) => e.stopPropagation()}
     >

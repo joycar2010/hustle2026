@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { getDashboardOverview, type DashboardOverview, type EngineUserStatus } from '@/api/admin'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
+import { loadCache, saveCache } from '@/lib/cache'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatNumber } from '@/lib/utils'
@@ -12,17 +13,21 @@ import {
   Radio, MessageSquare, Cpu, Heart, AlertTriangle,
 } from 'lucide-react'
 
+const DASH_CACHE_KEY = 'admin_dashboard_overview'
+
 export function DashboardPage() {
-  const [data, setData] = useState<DashboardOverview | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  // 首屏先吃 sessionStorage 缓存:弱网/刷新时立即显示就近数据,不白屏(过时由下方 Badge 提示)
+  const cached = loadCache<DashboardOverview>(DASH_CACHE_KEY)
+  const [data, setData] = useState<DashboardOverview | null>(cached?.data ?? null)
+  const [loading, setLoading] = useState(!cached)
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(cached ? new Date(cached.ts) : null)
   const [refreshing, setRefreshing] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
       const d = await getDashboardOverview()
       setData(d)
-      setLastUpdate(new Date())
+      setLastUpdate(new Date(saveCache(DASH_CACHE_KEY, d)))
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -239,7 +244,7 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {Object.entries(data.ai_chat).map(([site, info]) => (
                 <div key={site} className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">

@@ -26,6 +26,7 @@ export function DashboardPage() {
   const [positions, setPositions] = useState<Position[]>([])
   const [accounts, setAccounts] = useState<SubAccount[]>([])
   const [pushedSymbols, setPushedSymbols] = useState<string[]>([])
+  const [pushedAt, setPushedAt] = useState<Record<string, number>>({})
   const [showTransfer, setShowTransfer] = useState(false)
   const [transferAccountId, setTransferAccountId] = useState<number | undefined>()
   const [ruleSymbol, setRuleSymbol] = useState<string | null>(null)
@@ -36,18 +37,24 @@ export function DashboardPage() {
   const [throttleRate, setThrottleRate] = useState(0)
 
   useEffect(() => {
-    const fetchThrottle = () => getEngineHealth().then((h) => setThrottleRate(h.throttle_rate ?? 0)).catch(() => {})
+    // [第三梯队] 轮询用 AbortController:慢网下撤销上一次未完成的 health 请求,避免堆叠
+    let ctrl: AbortController | null = null
+    const fetchThrottle = () => {
+      ctrl?.abort()
+      ctrl = new AbortController()
+      getEngineHealth(ctrl.signal).then((h) => setThrottleRate(h.throttle_rate ?? 0)).catch(() => {})
+    }
     fetchThrottle()
     const t = setInterval(fetchThrottle, 15000)
-    return () => clearInterval(t)
+    return () => { clearInterval(t); ctrl?.abort() }
   }, [])
 
-  const refreshPositions = useCallback(() => {
-    getPositions('ACTIVE').then(setPositions).catch(() => {})
+  const refreshPositions = useCallback((signal?: AbortSignal) => {
+    getPositions('ACTIVE', signal).then(setPositions).catch(() => {})
   }, [])
 
   const refreshPushed = useCallback(() => {
-    getPushedSymbols().then((d) => setPushedSymbols(d.pushed_symbols || [])).catch(() => {})
+    getPushedSymbols().then((d) => { setPushedSymbols(d.pushed_symbols || []); setPushedAt(d.pushed_at || {}) }).catch(() => {})
   }, [])
 
   const refreshSymbolRules = useCallback(() => {
@@ -81,7 +88,7 @@ export function DashboardPage() {
     }).catch(() => {})
   }, [])
 
-  // Initial data load — no polling, WebSocket handles live updates
+  // Initial data load — WebSocket handles live updates (实时主通道)
   useEffect(() => {
     fetchDashboard()
     getSpreads().then((data: SpreadData[]) => setBulk(data)).catch(() => {})
@@ -92,6 +99,22 @@ export function DashboardPage() {
     refreshDelistingCoins()
     refreshRiskySymbols()
   }, [fetchDashboard, setBulk, refreshPositions, refreshPushed, refreshSymbolRules, refreshDelistingCoins, refreshRiskySymbols])
+
+  // [修3] 低频 REST 兜底轮询:WS 假死/断连时业务数据仍每 30s 刷新,不再整页冻结。
+  // WS 正常时这只是用同源快照覆盖(无副作用);同时每 30s 的 API 调用顺带保活 token 续期。
+  useEffect(() => {
+    // [第三梯队] 30s 兜底轮询同样接入 AbortController:慢网下新一轮开始前先撤销上一轮在途的 positions/spreads,释放带宽
+    let ctrl: AbortController | null = null
+    const t = setInterval(() => {
+      ctrl?.abort()
+      ctrl = new AbortController()
+      const sig = ctrl.signal
+      fetchDashboard()
+      refreshPositions(sig)
+      getSpreads(sig).then((data: SpreadData[]) => setBulk(data)).catch(() => {})
+    }, 30000)
+    return () => { clearInterval(t); ctrl?.abort() }
+  }, [fetchDashboard, refreshPositions, setBulk])
 
   // Refresh pushed symbols on push events
   useEffect(() => {
@@ -302,6 +325,7 @@ export function DashboardPage() {
       <OwlTreeTable
         positions={positions}
         pushedSymbols={pushedSymbols}
+        pushedAt={pushedAt}
         symbolRules={symbolRulesMap}
         delistingSymbols={delistingSymbols}
         riskySymbols={riskySymbols}

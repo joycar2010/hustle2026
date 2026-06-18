@@ -19,6 +19,9 @@ class APIMetrics:
     used_uid_weight_1m: int = 0      # per-UID used weight (borrow/repay = 1500 each)
     uid_limit_1m: int = 180000       # per-UID per-minute limit
     uid_weight_time: float = 0       # when UID weight was observed
+    used_order_count_10s: int = 0    # per-UID unfilled-order count in the 10s window (limit 100)
+    order_limit_10s: int = 100       # per-UID 10s order-count limit (spot+margin)
+    order_count_time: float = 0      # when order-count was observed
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_weight(self, w: int, limit: int = 6000):
@@ -32,6 +35,12 @@ class APIMetrics:
             self.used_uid_weight_1m = w
             self.uid_limit_1m = limit
             self.uid_weight_time = time.time()
+
+    def record_order_count(self, c: int, limit: int = 100):
+        with self._lock:
+            self.used_order_count_10s = c
+            self.order_limit_10s = limit
+            self.order_count_time = time.time()
 
     def record_success(self):
         with self._lock:
@@ -98,3 +107,13 @@ def max_uid_weight_snapshot() -> dict:
         if m.used_uid_weight_1m > best_w:
             best_w, best_lim, best_t = m.used_uid_weight_1m, m.uid_limit_1m, m.uid_weight_time
     return {"used_uid_weight_1m": best_w, "uid_limit": best_lim, "uid_weight_time": best_t}
+
+
+def max_order_count_snapshot() -> dict:
+    """Busiest UID's 10s order-count (借币提速维度)。order-count 100/10s 是 per-UID,
+    多账户并联=N倍预算;最接近上限的账户界定单账户借币上限。"""
+    best_c, best_lim, best_t = 0, 100, 0.0
+    for m in _metrics.values():
+        if m.used_order_count_10s > best_c:
+            best_c, best_lim, best_t = m.used_order_count_10s, m.order_limit_10s, m.order_count_time
+    return {"used_order_count_10s": best_c, "order_limit": best_lim, "order_count_time": best_t}

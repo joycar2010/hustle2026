@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   listUsers, createUser, updateUser, deleteUser, resetPassword,
-  getUserSubAccounts, createSubAccount, updateSubAccount, deleteSubAccount, syncSubAccountPermissions,
+  getUserSubAccounts, createSubAccount, updateSubAccount, deleteSubAccount, syncSubAccountPermissions, transferAccounts,
   getMasterAccount, createMasterAccount, updateMasterAccount, validateMasterAccount, deleteMasterAccount,
   listEngineUsers, startUserEngine, stopUserEngine,
   listProxies, bindProxy,
@@ -143,16 +143,16 @@ function AccountsTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
+          <table className="w-full text-sm md:min-w-[800px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">ID</th>
                 <th className="px-4 py-3">用户名</th>
-                <th className="px-4 py-3">邮箱</th>
+                <th className="px-4 py-3 hidden md:table-cell">邮箱</th>
                 <th className="px-4 py-3">角色</th>
                 <th className="px-4 py-3">状态</th>
-                <th className="px-4 py-3">飞书</th>
-                <th className="px-4 py-3">最后登录</th>
+                <th className="px-4 py-3 hidden md:table-cell">飞书</th>
+                <th className="px-4 py-3 hidden lg:table-cell">最后登录</th>
                 <th className="px-4 py-3">操作</th>
               </tr>
             </thead>
@@ -166,7 +166,7 @@ function AccountsTab() {
                   <tr key={u.id} className="border-b last:border-0 hover:bg-accent/50">
                     <td className="px-4 py-3">{u.id}</td>
                     <td className="px-4 py-3 font-medium">{u.username}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{u.email || '-'}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{u.email || '-'}</td>
                     <td className="px-4 py-3">
                       <Badge variant={u.role === 'SUPER_ADMIN' ? 'default' : u.role === 'ADMIN' ? 'warning' : 'secondary'}>
                         {u.role}
@@ -177,14 +177,14 @@ function AccountsTab() {
                         {u.is_active ? '活跃' : '禁用'}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 hidden md:table-cell">
                       {u.feishu_open_id ? (
                         <Badge variant="outline" className="text-[10px]">已绑定</Badge>
                       ) : (
                         <span className="text-xs text-muted-foreground">-</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                    <td className="px-4 py-3 text-xs text-muted-foreground hidden lg:table-cell">
                       {u.last_login_at ? new Date(u.last_login_at).toLocaleString('zh-CN') : '-'}
                     </td>
                     <td className="px-4 py-3">
@@ -230,6 +230,10 @@ function BindingsTab() {
   const [bindingTarget, setBindingTarget] = useState<SubAccountItem | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [validatingMaster, setValidatingMaster] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [transferTargetId, setTransferTargetId] = useState<number | ''>('')
+  const [transferIncludeMaster, setTransferIncludeMaster] = useState(true)
+  const [transferring, setTransferring] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
 
   useEffect(() => {
@@ -304,9 +308,30 @@ function BindingsTab() {
     finally { setValidatingMaster(false) }
   }
 
+  const openTransfer = () => {
+    setTransferTargetId('')
+    setTransferIncludeMaster(true)
+    setShowTransfer(true)
+  }
+
+  const handleTransfer = async () => {
+    if (!selectedUserId || !transferTargetId) return
+    const srcName = users.find(u => u.id === selectedUserId)?.username
+    const dstName = users.find(u => u.id === transferTargetId)?.username
+    if (!confirm(`确认把【${srcName}】的 ${subAccounts.length} 个子账户${transferIncludeMaster && masterAccount ? '+主账户' : ''}转移给【${dstName}】？\n转移后这些账户及其持仓/流水归属将变更，源用户引擎须已停止、无在途持仓。`)) return
+    setTransferring(true)
+    try {
+      const r = await transferAccounts(selectedUserId, { target_user_id: Number(transferTargetId), include_master: transferIncludeMaster })
+      addToast(r.message + `（持仓 ${r.positions}、流水 ${r.trade_logs} 已迁移）`, 'success')
+      setShowTransfer(false)
+      loadData(selectedUserId)
+    } catch (err: unknown) { addToast(extractError(err, '转移失败'), 'error') }
+    finally { setTransferring(false) }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <select
           className="flex h-9 rounded-md border border-input px-3 py-1 text-sm"
           value={selectedUserId ?? ''}
@@ -334,6 +359,11 @@ function BindingsTab() {
               <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? '同步中...' : '同步权限'}
             </Button>
+            <Button size="sm" variant="outline" onClick={openTransfer}
+              disabled={subAccounts.length === 0 && !masterAccount}
+              title="把该用户的主账户+全部子账户整体转移给另一个用户(需源引擎已停、无在途持仓)">
+              转移账户
+            </Button>
           </>
         )}
       </div>
@@ -353,6 +383,46 @@ function BindingsTab() {
           onClose={() => setShowMasterForm(false)}
           onSaved={() => { setShowMasterForm(false); loadData(selectedUserId); addToast('主账户保存成功', 'success') }}
         />
+      )}
+
+      {showTransfer && selectedUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !transferring && setShowTransfer(false)}>
+          <div className="w-[calc(100vw-2rem)] max-w-md rounded-lg border border-border bg-background p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold mb-1">转移账户</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              把【{users.find(u => u.id === selectedUserId)?.username}】的
+              <b className="text-foreground"> {subAccounts.length} 个子账户</b>
+              {masterAccount && transferIncludeMaster ? <b className="text-foreground"> + 主账户</b> : ''}
+              整体转移给目标用户。持仓/流水/账户币种规则随账户迁移；全局规则/黑名单/资金规则不迁移。
+            </p>
+            <label className="block text-xs text-muted-foreground mb-1">目标用户</label>
+            <select
+              className="w-full h-9 rounded-md border border-input px-3 py-1 text-sm mb-3"
+              value={transferTargetId}
+              onChange={(e) => setTransferTargetId(e.target.value ? Number(e.target.value) : '')}
+            >
+              <option value="">选择目标用户</option>
+              {users.filter(u => u.id !== selectedUserId).map(u => (
+                <option key={u.id} value={u.id}>{u.username} ({u.role})</option>
+              ))}
+            </select>
+            {masterAccount && (
+              <label className="flex items-center gap-2 text-xs mb-4 cursor-pointer">
+                <input type="checkbox" checked={transferIncludeMaster} onChange={(e) => setTransferIncludeMaster(e.target.checked)} />
+                同时转移主账户(目标用户已有主账户时会报错)
+              </label>
+            )}
+            <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500 mb-4">
+              前置要求:源用户引擎须已停止、且无在途持仓,否则转移会被拒绝。
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowTransfer(false)} disabled={transferring}>取消</Button>
+              <Button size="sm" onClick={handleTransfer} disabled={!transferTargetId || transferring}>
+                {transferring ? '转移中...' : '确认转移'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {editingSub && selectedUserId && (
@@ -442,7 +512,7 @@ function BindingsTab() {
                       </div>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">API Key</span>
                         <span className="font-mono">{sa.api_key_masked}</span>
@@ -544,7 +614,7 @@ function EngineTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[750px]">
+          <table className="w-full text-sm md:min-w-[750px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">用户</th>
@@ -1042,7 +1112,7 @@ function UserRoleDialog({ user, onClose, onDone }: { user: UserItem; onClose: ()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <Card className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+      <Card className="w-[calc(100vw-2rem)] max-w-sm" onClick={(e) => e.stopPropagation()}>
         <CardHeader>
           <CardTitle className="text-sm">分配角色 — {user.username}</CardTitle>
         </CardHeader>

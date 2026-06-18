@@ -4,7 +4,7 @@ import { useToastStore } from '@/components/ui/toast'
 import { extractError } from '@/api/client'
 import { cn } from '@/lib/utils'
 
-export function SettingsPage() {
+export function SettingsPage({ embedded }: { onClose?: () => void; embedded?: boolean } = {}) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [form, setForm] = useState({
     email: '',
@@ -91,11 +91,11 @@ export function SettingsPage() {
   const readonlyCls = 'w-full bg-[#111118] border border-border/50 rounded px-2.5 py-1.5 text-[12px] text-muted-foreground cursor-not-allowed'
 
   return (
-    <div className="flex items-start justify-center py-8 px-4">
+    <div className={embedded ? 'flex items-start justify-center p-3' : 'flex items-start justify-center py-8 px-4'}>
       <div className="w-full max-w-lg bg-[#111118] border border-border rounded-lg overflow-hidden">
-        {/* Header */}
+        {/* Header — 嵌入模态时隐藏左侧"用户设置"标题(模态栏已展示),仅保留右侧角色/上次登录信息 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-[#0d0d14]">
-          <h2 className="text-sm font-medium text-foreground">用户设置</h2>
+          {embedded ? <span /> : <h2 className="text-sm font-medium text-foreground">用户设置</h2>}
           <span className="text-[10px] text-muted-foreground">
             {profile.role} · 上次登录 {profile.last_login_at ? new Date(profile.last_login_at).toLocaleString('zh-CN') : '-'}
           </span>
@@ -106,7 +106,7 @@ export function SettingsPage() {
           <input type="text" name="fake-user" autoComplete="username" style={{ display: 'none' }} tabIndex={-1} />
           <input type="password" name="fake-pass" autoComplete="current-password" style={{ display: 'none' }} tabIndex={-1} />
           {/* Basic info */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>用户名</label>
               <input value={profile.username} disabled className={readonlyCls} />
@@ -122,7 +122,7 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>邮箱</label>
               <input
@@ -177,7 +177,7 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>飞书 Open ID</label>
               <input
@@ -199,7 +199,7 @@ export function SettingsPage() {
           </div>
 
           {/* Read-only info */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>角色</label>
               <input value={profile.role} disabled className={readonlyCls} />

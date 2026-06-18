@@ -69,6 +69,8 @@ class BinanceTradingClient:
         self._semaphore = asyncio.Semaphore(3)
         self._lot_cache: dict[str, dict] = {}
         self._lot_cache_ts: dict[str, float] = {}
+        self._tick_cache: dict[str, dict] = {}      # symbol -> {tick, step} (spot PRICE_FILTER/LOT_SIZE, 1h TTL)
+        self._tick_cache_ts: dict[str, float] = {}
         self._futures_exchange_info: dict | None = None
         self._futures_exchange_info_ts: float = 0
 
@@ -133,6 +135,9 @@ class BinanceTradingClient:
             uid_w = h.get("X-SAPI-USED-UID-WEIGHT-1M") or h.get("x-sapi-used-uid-weight-1m")
             sapi_ip = h.get("X-SAPI-USED-IP-WEIGHT-1M") or h.get("x-sapi-used-ip-weight-1m")
             mbx_w = h.get("X-MBX-USED-WEIGHT-1M") or h.get("X-MBX-USED-WEIGHT-1m")
+            # Order-count (unfilled-order rate): per-UID, 100/10s spot+margin. OTOCO=3单/OTO=2/单腿=1,
+            # 且 IOC 过期不返还额度 → 提速建仓时第一个撞的墙(-1015)。仅下单端点(/margin/order*)返回此头。
+            order_c = h.get("X-MBX-ORDER-COUNT-10S") or h.get("x-mbx-order-count-10s")
 
             # ── Per-UID governor (borrow rate path) — record now, back off after unlock ──
             if uid_w:
@@ -159,6 +164,21 @@ class BinanceTradingClient:
                     w = int(ip_used)
                     metrics.record_weight(w, ip_limit)
                     r = w / ip_limit
+                    if r >= 0.90:
+                        backoff = max(backoff, 2.0)
+                    elif r >= 0.80:
+                        backoff = max(backoff, 1.0)
+                    elif r >= 0.65:
+                        backoff = max(backoff, 0.4)
+                except ValueError:
+                    pass
+
+            # ── Order-count governor (借币提速安全护栏: 接近 100/10s 时退避防 -1015) ──
+            if order_c:
+                try:
+                    c = int(order_c)
+                    metrics.record_order_count(c, 100)
+                    r = c / 100
                     if r >= 0.90:
                         backoff = max(backoff, 2.0)
                     elif r >= 0.80:
@@ -257,6 +277,49 @@ class BinanceTradingClient:
             "pendingAboveType": "STOP_LOSS_LIMIT", "pendingAbovePrice": str(pa),
             "pendingAboveStopPrice": str(pa), "pendingAboveTimeInForce": "GTC",
             "pendingBelowType": "LIMIT_MAKER", "pendingBelowPrice": str(pb),
+            "sideEffectType": "MARGIN_BUY", "isIsolated": "FALSE",
+        })
+
+    async def _get_spot_filters(self, symbol: str) -> dict:
+        """缓存现货 PRICE_FILTER.tickSize / LOT_SIZE.stepSize(1h TTL),
+        给挂单借币算价/取整用,避免每次借币都打 exchangeInfo(省 IP weight)。"""
+        now = time.time()
+        if symbol in self._tick_cache and now - self._tick_cache_ts.get(symbol, 0) < 3600:
+            return self._tick_cache[symbol]
+        info = await self._request("GET", f"{SPOT_BASE}/api/v3/exchangeInfo",
+                                   {"symbol": symbol}, signed=False)
+        flt = {f["filterType"]: f for f in info["symbols"][0]["filters"]}
+        res = {
+            "tick": Decimal(str(flt["PRICE_FILTER"]["tickSize"])),
+            "step": Decimal(str(flt["LOT_SIZE"]["stepSize"])),
+        }
+        self._tick_cache[symbol] = res
+        self._tick_cache_ts[symbol] = now
+        return res
+
+    async def margin_borrow_single(self, symbol: str, qty: Decimal, bid: Decimal | None = None) -> dict:
+        """路线A: 单腿裸 MARGIN_BUY 挂单借币 —— order-count 仅 1 笔/次(vs OTO 2/OTOCO 3)。
+        单条 IOC SELL LIMIT @ spot_bid×1.5(挂高绝不成交,秒撤/EXPIRED),MARGIN_BUY 触发自动借币到账,
+        借来的币留手上(可用=已借),后续按单笔分批对冲。无保护腿(裸单)→ 最省下单额度,建仓速率上限 ~10/s。
+        bid 优先由调用方从实时点差传入(省一个 bookTicker REST);缺省再打 bookTicker 兜底。"""
+        await _pace_borrow(self._sub_account_id)
+
+        def _floor(v: Decimal, s: Decimal) -> Decimal:
+            return (v / s).to_integral_value(rounding=ROUND_DOWN) * s if s > 0 else v
+
+        if bid is None or bid <= 0:
+            book = await self._request("GET", f"{SPOT_BASE}/api/v3/ticker/bookTicker",
+                                       {"symbol": symbol}, signed=False)
+            bid = Decimal(str(book.get("bidPrice") or book.get("b") or "0"))
+        if bid <= 0:
+            raise BinanceAPIError(0, 0, f"single borrow: no bid for {symbol}")
+        flt = await self._get_spot_filters(symbol)
+        tick, step = flt["tick"], flt["step"]
+        limit_price = _floor(bid * Decimal("1.5"), tick)        # 卖价 = spot_bid × 1.5(挂高不成交)
+        q = _floor(qty, step)
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/order", {
+            "symbol": symbol, "side": "SELL", "type": "LIMIT",
+            "timeInForce": "IOC", "quantity": str(q), "price": str(limit_price),
             "sideEffectType": "MARGIN_BUY", "isIsolated": "FALSE",
         })
 

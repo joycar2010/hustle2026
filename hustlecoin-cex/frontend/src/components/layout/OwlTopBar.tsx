@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { startAllWorkers, stopAllWorkers, pushSymbol } from '@/api/engine'
 import { getMasterBalance } from '@/api/accounts'
 import { useToastStore } from '@/components/ui/toast'
+import { usePageModalStore } from '@/stores/pageModalStore'
 import { cn, formatNumber } from '@/lib/utils'
 
 // 推送币种归一化:用户常只填币名(如 HOT),自动补全成 USDT 交易对(HOTUSDT)。
@@ -45,6 +46,42 @@ const navTabs = [
   { to: '/blacklist', label: '黑名单' },
   { to: '/coins', label: '币管理' },
 ]
+
+// 顶部导航项(主控台以外):单击立即弹模态;300ms 内第二击=双击 → 关模态 + 新标签页打开。
+function NavTab({ to, label }: { to: string; label: string }) {
+  const openModal = usePageModalStore((s) => s.open)
+  const closeModal = usePageModalStore((s) => s.close)
+  const modalRoute = usePageModalStore((s) => s.route)
+  const clickRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isActive = modalRoute === to
+
+  const handleClick = () => {
+    if (clickRef.current) {
+      clearTimeout(clickRef.current); clickRef.current = null
+      closeModal()
+      window.open(to, '_blank', 'noopener')   // 双击 → 新标签
+    } else {
+      openModal(to, label)                      // 单击 → 秒开模态
+      clickRef.current = setTimeout(() => { clickRef.current = null }, 300)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title="单击弹窗 · 双击新标签页打开"
+      className={cn(
+        'px-2.5 py-1 rounded text-[11px] transition-colors whitespace-nowrap',
+        isActive
+          ? 'bg-primary/15 text-primary font-medium'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+      )}
+    >
+      {label}
+    </button>
+  )
+}
 
 function Clock() {
   const [now, setNow] = useState(new Date())
@@ -320,7 +357,7 @@ export function OwlTopBar() {
   const [toggling, setToggling] = useState(false)
   const [pushing, setPushing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const navigate = useNavigate()
+  const openUserModal = usePageModalStore((s) => s.open)
 
   const isRunning = engineStatus === 'RUNNING'
 
@@ -461,32 +498,36 @@ export function OwlTopBar() {
           </button>
         </div>
 
-        {/* Nav tabs — desktop only */}
+        {/* Nav tabs — desktop only。主控台=路由跳转主页;其余=单击弹模态/双击开新标签 */}
         <nav className="hidden md:flex items-center gap-0.5 ml-3 shrink-0">
           {navTabs.map((tab) => (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              className={({ isActive }) =>
-                cn(
-                  'px-2.5 py-1 rounded text-[11px] transition-colors whitespace-nowrap',
-                  isActive
-                    ? 'bg-primary/15 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                )
-              }
-            >
-              {tab.label}
-            </NavLink>
+            tab.to === '/dashboard' ? (
+              <NavLink
+                key={tab.to}
+                to={tab.to}
+                className={({ isActive }) =>
+                  cn(
+                    'px-2.5 py-1 rounded text-[11px] transition-colors whitespace-nowrap',
+                    isActive
+                      ? 'bg-primary/15 text-primary font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                  )
+                }
+              >
+                {tab.label}
+              </NavLink>
+            ) : (
+              <NavTab key={tab.to} to={tab.to} label={tab.label} />
+            )
           ))}
         </nav>
 
         {/* User status — desktop only */}
         <div className="hidden md:flex items-center gap-1 ml-2 shrink-0">
           <button
-            onClick={() => navigate('/settings')}
+            onClick={() => openUserModal('/settings', '用户设置')}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="用户设置"
+            title="用户设置(单击弹窗)"
           >
             <User size={12} />
             <span>{username || 'admin'}</span>

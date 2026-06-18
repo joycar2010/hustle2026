@@ -17,5 +17,15 @@ export default defineConfig({
   build: {
     outDir: '../python-business/static/spa',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('lightweight-charts')) return 'charts'
+            if (id.includes('react') || id.includes('scheduler')) return 'vendor'
+          }
+        },
+      },
+    },
   },
 })

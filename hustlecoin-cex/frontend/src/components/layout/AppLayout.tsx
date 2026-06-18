@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import { OwlTopBar } from './OwlTopBar'
+import { PageModalHost } from './PageModalHost'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useUiStore } from '@/stores/uiStore'
 import { FloatingChatWidget } from '../FloatingChatWidget'
@@ -11,11 +12,12 @@ function WsStatusBar() {
 
   if (wsConnected) return null
 
-  if (reconnectCount >= 50) {
+  // 多次重连仍未连上:仍在自动退避重连(已去掉硬上限,绝不放弃),同时提供手动立即重连
+  if (reconnectCount >= 10) {
     return (
       <div className="flex items-center justify-center gap-2 bg-negative/10 border-b border-negative/20 px-3 py-1.5 text-[11px] text-negative shrink-0">
-        <span className="inline-block h-2 w-2 rounded-full bg-negative" />
-        <span>连接断开 — 自动重连已停止</span>
+        <span className="inline-block h-2 w-2 rounded-full bg-negative animate-pulse" />
+        <span>连接断开 — 持续重连中 ({reconnectCount})</span>
         <button
           onClick={() => {
             resetWsReconnectCount()
@@ -23,7 +25,7 @@ function WsStatusBar() {
           }}
           className="px-2 py-0.5 bg-primary/20 text-primary rounded text-[10px] hover:bg-primary/30"
         >
-          手动重连
+          立即重连
         </button>
       </div>
     )
@@ -48,6 +50,7 @@ export function AppLayout() {
         <Outlet />
       </main>
       <FloatingChatWidget />
+      <PageModalHost />
     </div>
   )
 }

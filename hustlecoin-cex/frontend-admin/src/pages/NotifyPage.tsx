@@ -273,7 +273,7 @@ function UserFeishuConfigSection({ configs, users, onRefresh }: {
           <div className="text-center text-muted-foreground text-sm py-8">暂无用户级配置，所有用户使用全局配置</div>
         ) : (
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[800px]">
+          <table className="w-full text-sm md:min-w-[800px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-3 py-3">用户</th>
@@ -290,7 +290,7 @@ function UserFeishuConfigSection({ configs, users, onRefresh }: {
               {userConfigs.map(c => (
                 <tr key={c.id} className="border-b last:border-0 hover:bg-accent/50">
                   <td className="px-3 py-2.5 font-medium">{c.username || `用户 #${c.user_id}`}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground font-mono truncate max-w-[120px]">{c.app_id || c.webhook_url || '-'}</td>
+                  <td className="px-3 py-2.5 text-xs text-muted-foreground font-mono truncate max-w-[80px] sm:max-w-[120px]">{c.app_id || c.webhook_url || '-'}</td>
                   <td className="px-3 py-2.5">{c.alert_interval_sec}s / {c.alert_count}次</td>
                   <td className="px-3 py-2.5">{c.margin_rate_alert}%</td>
                   <td className="px-3 py-2.5">{c.leverage_risk_alert}</td>
@@ -364,7 +364,7 @@ function UserFeishuConfigDialog({ mode, config, users, existingUserIds, onClose,
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <Card className="w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <Card className="w-[calc(100vw-2rem)] max-w-lg" onClick={(e) => e.stopPropagation()}>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm">{mode === 'create' ? '新增用户飞书配置' : `编辑: ${config?.username || `用户 #${config?.user_id}`}`}</CardTitle>
           <Button size="sm" variant="ghost" onClick={onClose}><X className="h-4 w-4" /></Button>
@@ -675,7 +675,7 @@ function TemplatesTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[850px]">
+          <table className="w-full text-sm md:min-w-[850px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-3 py-3">模板名</th>
@@ -818,7 +818,7 @@ function TemplateEditDialog({ template, sounds, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <Card className="w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <Card className="w-[calc(100vw-2rem)] max-w-lg" onClick={(e) => e.stopPropagation()}>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm">编辑模板: {template.template_name}</CardTitle>
           <Button size="sm" variant="ghost" onClick={onClose}><X className="h-4 w-4" /></Button>
@@ -952,7 +952,7 @@ function LogsTab() {
             <div className="p-8 text-center text-muted-foreground">暂无发送记录</div>
           ) : (
             <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[650px]">
+            <table className="w-full text-sm md:min-w-[650px]">
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="px-4 py-3">时间</th>

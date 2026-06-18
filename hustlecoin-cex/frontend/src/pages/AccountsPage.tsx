@@ -103,7 +103,7 @@ interface MasterAccountData {
   created_at: string
 }
 
-export function AccountsPage() {
+export function AccountsPage({ embedded }: { onClose?: () => void; embedded?: boolean } = {}) {
   const [accounts, setAccounts] = useState<SubAccount[]>([])
   const [balances, setBalances] = useState<Record<number, BalanceInfo>>({})
   const [ipInfos, setIpInfos] = useState<Record<number, IpInfo>>({})
@@ -280,9 +280,9 @@ export function AccountsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className={cn('space-y-4', embedded && 'p-3')}>
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">账户管理</h1>
+        {embedded ? <span /> : <h1 className="text-lg font-semibold">账户管理</h1>}
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={handleRefreshAll} disabled={refreshingAll || accounts.length === 0}>
             <RefreshCw size={14} className={cn(refreshingAll && 'animate-spin')} />

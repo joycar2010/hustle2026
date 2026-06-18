@@ -116,7 +116,7 @@ export function TransferDialog({ accounts, defaultAccountId, onClose }: Transfer
           </div>
 
           {balance.margin_level && (
-            <div className="grid grid-cols-3 gap-2 rounded-md border border-border/50 p-2 text-[10px]">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-md border border-border/50 p-2 text-[10px]">
               <div><span className="text-muted-foreground">杠杆可用</span><p className="font-mono">{formatNumber(balance.margin_usdt_free)}</p></div>
               <div><span className="text-muted-foreground">合约余额</span><p className="font-mono">{formatNumber(balance.futures_total_balance)}</p></div>
               <div><span className="text-muted-foreground">现货可用</span><p className="font-mono">{formatNumber(balance.spot_usdt_free)}</p></div>
@@ -124,7 +124,7 @@ export function TransferDialog({ accounts, defaultAccountId, onClose }: Transfer
           )}
 
           {mode === 'internal' ? (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <label className="text-[10px] text-muted-foreground mb-1 block">源钱包</label>
                 <select value={fromWallet} onChange={(e) => setFromWallet(e.target.value)} className={selCls}>
@@ -140,7 +140,7 @@ export function TransferDialog({ accounts, defaultAccountId, onClose }: Transfer
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] text-muted-foreground mb-1 block">方向</label>
                   <select value={crossDir} onChange={(e) => setCrossDir(e.target.value as 'out' | 'in')} className={selCls}>
@@ -167,7 +167,7 @@ export function TransferDialog({ accounts, defaultAccountId, onClose }: Transfer
                 <span className="text-primary">→</span>
                 <span className="px-2 py-1 rounded border border-positive/30 bg-positive/10 text-positive">{dstL}</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] text-muted-foreground mb-1 block">源钱包</label>
                   <select value={crossFrom} onChange={(e) => setCrossFrom(e.target.value)} className={selCls}>

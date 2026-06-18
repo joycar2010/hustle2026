@@ -63,7 +63,7 @@ export function FundPanel({ onTransfer }: FundPanelProps) {
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px] text-[11px]">
+          <table className="w-full md:min-w-[700px] text-[11px]">
             <thead>
               <tr className="border-b text-[10px] text-muted-foreground">
                 <th className="px-3 py-1.5 text-left font-medium">账户</th>

@@ -241,7 +241,7 @@ function ConversationsTab() {
             <div className="p-8 text-center text-muted-foreground">暂无对话记录</div>
           ) : (
             <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-sm">
+            <table className="w-full md:min-w-[800px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="px-4 py-3">ID</th>

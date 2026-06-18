@@ -94,7 +94,11 @@ class BalancePusher:
         sysrow = (db.query(GlobalRules)
                   .filter(GlobalRules.user_id.is_(None))
                   .order_by(GlobalRules.id).first())
-        otoco = bool(getattr(sysrow, "borrow_via_otoco", False)) if sysrow else False
+        # 借币方式: 新枚举 borrow_mode 优先,回退旧 bool(与引擎 config_loader/order_executor 同口径)。
+        # otoco/single/multi 三种均走「金额限制∩maxBorrowable×抵押率」封顶 → "有效可借"按此算。
+        _mode = (getattr(sysrow, "borrow_mode", None) if sysrow else None) or \
+                ("otoco" if (sysrow and getattr(sysrow, "borrow_via_otoco", False)) else "repay")
+        otoco = _mode in ("otoco", "single", "multi")
         ratio_raw = getattr(sysrow, "collateral_ratio", None) if sysrow else None
         try:
             ratio = float(ratio_raw) if ratio_raw is not None else 1.0

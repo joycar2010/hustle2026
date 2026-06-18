@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.db.models_auth import User, UserRole
-from app.db.models import SubAccount, GlobalRules, MasterAccount
+from app.db.models import SubAccount, GlobalRules, MasterAccount, AccountSymbolRule
 from app.db.models_proxy import AccountProxyBinding, ProxyPool, IpipgoOrder
 from app.db.session import get_db
 from app.config import settings
@@ -638,3 +638,113 @@ def stop_user_engine(user_id: int, request: Request, db: Session = Depends(get_d
         pass
 
     return {"message": f"Engine stop signal sent for user {user.username}"}
+
+
+# ─── 账户转移: 把源用户的主账户 + 全部子账户整体改归属到目标用户 ───
+# 跟账户走的数据(Position/TradeLog/AccountSymbolRule 的 user_id)随之迁移;
+# 跟用户走的(全局规则/黑名单/飞书/资金规则/快照/审计)不动。高危操作,super_admin。
+
+# 非终态(在途)持仓状态集 —— 与 orchestrator._IN_FLIGHT_STATUSES 一致
+_TRANSFER_BLOCKING_STATUSES = (
+    "OPEN", "BORROWED_IDLE", "PENDING_REPAY", "PENDING_BORROW", "BORROWED",
+    "HEDGING", "SPOT_SOLD", "CLOSING_FUTURES", "FUTURES_CLOSED",
+    "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
+)
+
+
+class TransferAccountsRequest(BaseModel):
+    target_user_id: int
+    include_master: bool = True
+
+
+@router.post("/users/{user_id}/transfer-accounts")
+def transfer_accounts(user_id: int, req: TransferAccountsRequest, request: Request,
+                      db: Session = Depends(get_db)):
+    require_super_admin(request)
+    source_id, target_id = user_id, req.target_user_id
+
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="源用户与目标用户相同")
+
+    source = db.query(User).filter(User.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="源用户不存在")
+    target = db.query(User).filter(User.id == target_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="目标用户不存在")
+
+    # 校验1: 源用户引擎不得在运行(避免转移瞬间旧引擎仍在操作这些账户)
+    running = db.query(EngineState).filter(
+        EngineState.user_id == source_id, EngineState.scope == "global",
+        EngineState.status == "RUNNING",
+    ).first()
+    if running:
+        raise HTTPException(status_code=400, detail="源用户引擎运行中,请先停止引擎再转移")
+
+    # 校验2: 源用户无在途持仓(非终态)
+    open_pos = db.query(sqlfunc.count(Position.id)).filter(
+        Position.user_id == source_id,
+        Position.status.in_(_TRANSFER_BLOCKING_STATUSES),
+    ).scalar() or 0
+    if open_pos > 0:
+        raise HTTPException(status_code=400, detail=f"源用户有 {open_pos} 个在途持仓,请先平仓/还币再转移")
+
+    subs = db.query(SubAccount).filter(SubAccount.user_id == source_id).all()
+    master = db.query(MasterAccount).filter(MasterAccount.user_id == source_id).first()
+    if not subs and not (req.include_master and master):
+        raise HTTPException(status_code=400, detail="源用户无可转移的账户")
+
+    # 校验3: 含主账户时,目标用户不得已有主账户(避免冲突)
+    if req.include_master and master:
+        target_master = db.query(MasterAccount).filter(MasterAccount.user_id == target_id).first()
+        if target_master:
+            raise HTTPException(status_code=409, detail="目标用户已有主账户,请先删除目标用户主账户或取消「含主账户」")
+
+    # 校验4: 目标用户子账户配额不得超
+    target_sub_count = db.query(sqlfunc.count(SubAccount.id)).filter(
+        SubAccount.user_id == target_id,
+    ).scalar() or 0
+    max_subs = target.max_sub_accounts if target.max_sub_accounts is not None else 5
+    if target_sub_count + len(subs) > max_subs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"目标用户子账户超上限(现有 {target_sub_count} + 转入 {len(subs)} > 上限 {max_subs})",
+        )
+
+    # 事务内迁移归属:子账户 + 各账户关联数据 user_id;可选主账户
+    sub_ids = [s.id for s in subs]
+    moved_positions = moved_trades = moved_acct_rules = 0
+    for s in subs:
+        s.user_id = target_id
+    if sub_ids:
+        moved_positions = db.query(Position).filter(
+            Position.sub_account_id.in_(sub_ids),
+        ).update({Position.user_id: target_id}, synchronize_session=False)
+        moved_trades = db.query(TradeLog).filter(
+            TradeLog.sub_account_id.in_(sub_ids),
+        ).update({TradeLog.user_id: target_id}, synchronize_session=False)
+        moved_acct_rules = db.query(AccountSymbolRule).filter(
+            AccountSymbolRule.sub_account_id.in_(sub_ids),
+        ).update({AccountSymbolRule.user_id: target_id}, synchronize_session=False)
+    moved_master = False
+    if req.include_master and master:
+        master.user_id = target_id
+        moved_master = True
+
+    db.commit()
+
+    # 审计明细(中间件自动落 AuditLog)
+    request.state.audit_details = {
+        "source_user_id": source_id, "source_username": source.username,
+        "target_user_id": target_id, "target_username": target.username,
+        "sub_accounts": len(subs), "master": moved_master,
+        "positions": moved_positions, "trade_logs": moved_trades,
+        "account_symbol_rules": moved_acct_rules,
+    }
+    # 转移后:源引擎下轮对账丢掉这些账户;目标用户引擎(若 RUNNING)由 reconcile 60s 内接管。
+    return {
+        "message": f"已转移 {len(subs)} 个子账户" + ("(含主账户)" if moved_master else ""),
+        "sub_accounts": len(subs), "master": moved_master,
+        "positions": moved_positions, "trade_logs": moved_trades,
+        "account_symbol_rules": moved_acct_rules,
+    }

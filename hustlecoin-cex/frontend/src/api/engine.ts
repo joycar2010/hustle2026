@@ -5,9 +5,9 @@ export async function getDashboard() {
   return data
 }
 
-export async function getPositions(status?: string) {
+export async function getPositions(status?: string, signal?: AbortSignal) {
   const params = status ? { status } : {}
-  const { data } = await client.get('/api/engine/positions', { params })
+  const { data } = await client.get('/api/engine/positions', { params, signal })
   return data
 }
 
@@ -114,7 +114,7 @@ export async function crossAccountTransfer(id: number, body: Record<string, unkn
   return data
 }
 
-export async function getPushedSymbols(): Promise<{ pushed_symbols: string[] }> {
+export async function getPushedSymbols(): Promise<{ pushed_symbols: string[]; pushed_at?: Record<string, number> }> {
   const { data } = await client.get('/api/engine/pushed-symbols')
   return data
 }
@@ -209,9 +209,10 @@ export interface EngineHealth {
   uid_limit?: number
   throttle_rate?: number
   agg_borrow_rate?: number
+  single_borrow_rate?: number
 }
 
-export async function getEngineHealth(): Promise<EngineHealth> {
-  const { data } = await client.get('/api/engine/health')
+export async function getEngineHealth(signal?: AbortSignal): Promise<EngineHealth> {
+  const { data } = await client.get('/api/engine/health', { signal })
   return data
 }

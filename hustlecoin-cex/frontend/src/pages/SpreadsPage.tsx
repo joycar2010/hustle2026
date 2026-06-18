@@ -29,7 +29,7 @@ function fmtVol(v: number | undefined): string {
   return v.toFixed(0)
 }
 
-export function SpreadsPage() {
+export function SpreadsPage(_props: { onClose?: () => void; embedded?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>('spreads')
 
   const tabCls = (t: Tab) =>
@@ -153,12 +153,12 @@ function SpreadsTab() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索..."
-          className="w-32 bg-[#1a1a22] border border-border rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+          className="w-full sm:w-32 bg-[#1a1a22] border border-border rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
         />
         <select
           value={minSpread}
@@ -192,7 +192,7 @@ function SpreadsTab() {
       </div>
 
       <div className="overflow-x-auto rounded border border-border">
-        <table className="w-full min-w-[600px] text-[11px]">
+        <table className="w-full md:min-w-[600px] text-[11px]">
           <thead>
             <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
               <th className="px-2 py-1.5 text-left font-medium">做空</th>
@@ -288,7 +288,7 @@ function SpreadsTab() {
 
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-[160px] rounded border border-border bg-[#141420] py-1 shadow-xl"
+          className="fixed z-50 min-w-[160px] max-w-[90vw] rounded border border-border bg-[#141420] py-1 shadow-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >

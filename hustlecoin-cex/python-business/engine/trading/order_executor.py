@@ -322,8 +322,11 @@ async def execute_borrow(
             if sa and sa.max_borrow_amount is not None:
                 cap_usdt = sa.max_borrow_amount
 
-        if getattr(rules, "borrow_via_otoco", False) and cap_usdt is not None and Decimal(str(cap_usdt)) > 0:
-            # OTOCO 借币: 借满「金额限制」∩ maxBorrowable(币捏手上,后续按单笔分批对冲)
+        # 借币方式: 新枚举 borrow_mode 优先(config_loader 已归一化);兜底由旧 bool 推导。
+        borrow_mode = getattr(rules, "borrow_mode", None) or ("otoco" if getattr(rules, "borrow_via_otoco", False) else "repay")
+        # otoco/single/multi 三种都按「金额限制∩maxBorrowable×抵押率」借满;repay 维持单笔 order_amount。
+        if borrow_mode in ("otoco", "single", "multi") and cap_usdt is not None and Decimal(str(cap_usdt)) > 0:
+            # 挂单借币: 借满「金额限制」∩ maxBorrowable(币捏手上,后续按单笔分批对冲)
             try:
                 max_borrowable = await client.get_max_borrowable(base_asset)
             except Exception:
@@ -382,11 +385,19 @@ async def execute_borrow(
                 return None
 
         # borrow → idle
-        # borrow_via_otoco=True 时走 coinmini 同款 IOC OTOCO 借币(MARGIN_BUY/IOC/卖价1.5x,
-        # 三单 EXPIRED、币留手上);默认 False 走 borrow-repay,不改变现网行为。
+        # 借币方式分支(borrow_mode,见上方归一化):
+        #   single        → 单腿裸 MARGIN_BUY(order-count 仅1笔,最省额度,~10/s)
+        #   multi         → 多账户并联,单账户借币动作用单腿(协调在 worker 层)
+        #   otoco+legs=1  → 等同单腿
+        #   otoco+legs2/3 → IOC OTO/OTOCO(2/3单撤,币留手上)
+        #   repay         → borrow-repay 直接借(默认,不改变现网行为)
+        legs = int(getattr(rules, "otoco_legs", 2) or 2)
+        bid = Decimal(str(getattr(spread, "spot_bid", 0) or 0))
         t0 = time.monotonic()
-        if getattr(rules, "borrow_via_otoco", False):
-            await client.margin_borrow_otoco(symbol, qty, legs=int(getattr(rules, "otoco_legs", 2) or 2))
+        if borrow_mode in ("single", "multi") or (borrow_mode == "otoco" and legs == 1):
+            await client.margin_borrow_single(symbol, qty, bid=bid if bid > 0 else None)
+        elif borrow_mode == "otoco":
+            await client.margin_borrow_otoco(symbol, qty, legs=max(2, legs))
         else:
             await client.margin_borrow(base_asset, qty)
         latency = int((time.monotonic() - t0) * 1000)

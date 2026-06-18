@@ -141,7 +141,7 @@ function RulesTab({ fields, title, showBroadcast = false }: { fields: RuleField[
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-4">
             {fields.map(field => (
               <div key={field.key} className="space-y-1">
                 <label className="text-xs text-muted-foreground">{field.label}</label>
@@ -189,9 +189,9 @@ function BackendRulesTab() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const addToast = useToastStore((s) => s.addToast)
 
-  const STR = ['follow_type', 'tier_ratios']
+  const STR = ['follow_type', 'tier_ratios', 'borrow_mode']
   const BOOL = ['hedge_via_master', 'borrow_via_otoco', 'block_risky_open']
-  const INT = ['otoco_legs', 'filter_duration_ms', 'removed_cooldown_minutes', 'spread_stale_sec']
+  const INT = ['otoco_legs', 'multi_max_accounts_per_symbol', 'filter_duration_ms', 'removed_cooldown_minutes', 'spread_stale_sec']
   const NUM = ['slippage_pct', 'stabilize_sec', 'borrow_rate_per_sec', 'max_spread_pct', 'min_volume_24h',
     'min_volume_24h_futures', 'min_borrow_usdt', 'collateral_ratio', 'open_spread_buffer', 'taker_fee_spot', 'taker_fee_futures']
 
@@ -262,12 +262,36 @@ function BackendRulesTab() {
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-muted-foreground/70">借币方式</span>
-          <button type="button" onClick={() => setV('borrow_via_otoco', !(form.borrow_via_otoco === true))} className={pill(form.borrow_via_otoco === true)}>{form.borrow_via_otoco === true ? 'IOC OTOCO 挂单借币' : 'borrow-repay 直接借'}</button>
+          <select
+            value={String(form.borrow_mode || (form.borrow_via_otoco === true ? 'otoco' : 'repay'))}
+            onChange={(e) => {
+              const m = e.target.value
+              setV('borrow_mode', m)
+              setV('borrow_via_otoco', m === 'otoco')   // 双写旧 bool,灰度回退安全
+            }}
+            className={sel}
+          >
+            <option value="repay">borrow-repay 直接借</option>
+            <option value="otoco">IOC OTOCO 挂单借币</option>
+            <option value="single">单腿 MARGIN_BUY(最快,省额度)</option>
+            <option value="multi">多账户并联(突破单UID)</option>
+          </select>
           <span className={lbl}>撤单腿数
             <select value={String(form.otoco_legs ?? '2')} onChange={(e) => setV('otoco_legs', e.target.value)} className={sel}>
-              <option value="2">2 单 (OTO)</option><option value="3">3 单 (OTOCO)</option>
+              <option value="1">1 单 (单腿MARGIN_BUY)</option>
+              <option value="2">2 单 (OTO)</option>
+              <option value="3">3 单 (OTOCO)</option>
             </select></span>
-          <span className={desc}>开启=IOC 挂单借币;2 单撤单更省、反滥用压力更低</span>
+          <span className={lbl}>并联上限
+            <input
+              type="number" min={1} max={50}
+              value={String(form.multi_max_accounts_per_symbol ?? '')}
+              onChange={(e) => setV('multi_max_accounts_per_symbol', e.target.value)}
+              disabled={String(form.borrow_mode) !== 'multi'}
+              className={inp + (String(form.borrow_mode) !== 'multi' ? ' opacity-40' : '')}
+              title="多账户并联: 同一币最多几个子账户同时并联借(突破单UID order-count瓶颈)"
+            /></span>
+          <span className={desc}>单腿=order-count仅1笔(~10/s);并联=N倍UID预算</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-muted-foreground/70">对冲腿</span>

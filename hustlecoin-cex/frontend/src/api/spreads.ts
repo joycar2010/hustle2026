@@ -1,7 +1,7 @@
 import client from './client'
 
-export async function getSpreads() {
-  const { data } = await client.get('/api/spreads')
+export async function getSpreads(signal?: AbortSignal) {
+  const { data } = await client.get('/api/spreads', { signal })
   return data
 }
 

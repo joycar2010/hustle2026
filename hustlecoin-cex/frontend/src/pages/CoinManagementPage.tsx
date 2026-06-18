@@ -6,7 +6,7 @@ import { cn, formatNumber } from '@/lib/utils'
 
 type Filter = 'all' | 'new' | 'delisting' | 'risky'
 
-export function CoinManagementPage() {
+export function CoinManagementPage({ embedded }: { onClose?: () => void; embedded?: boolean } = {}) {
   const [coins, setCoins] = useState<Coin[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -96,9 +96,9 @@ export function CoinManagementPage() {
   if (loading) return <p className="py-8 text-center text-muted-foreground text-xs">加载中...</p>
 
   return (
-    <div className="flex flex-col h-[calc(100vh-5.5rem)]">
+    <div className={cn('flex flex-col', embedded ? 'h-full max-h-[78vh]' : 'h-[calc(100vh-5.5rem)]')}>
       <div className="flex items-center gap-3 px-3 py-2 border-b border-border shrink-0">
-        <h2 className="text-sm font-semibold">币种管理</h2>
+        {!embedded && <h2 className="text-sm font-semibold">币种管理</h2>}
         <button
           onClick={handleSyncVolume}
           disabled={syncing}

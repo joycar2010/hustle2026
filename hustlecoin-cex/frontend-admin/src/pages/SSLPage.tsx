@@ -179,7 +179,7 @@ function UploadCertDialog({ onClose, onUploaded }: { onClose: () => void; onUplo
       <CardHeader><CardTitle className="text-sm">上传 SSL 证书</CardTitle></CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">证书名称</label>
               <Input value={form.cert_name} onChange={(e) => setForm({ ...form, cert_name: e.target.value })} required />

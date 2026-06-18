@@ -130,7 +130,7 @@ export function FundsPage() {
       </div>
 
       {/* Platform totals */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         <StatCard label="全平台净值" value={t ? `${formatNumber(t.equity)} U` : '-'} accent="text-primary" hint={t ? `${t.users_with_data}/${t.users_total} 用户有数据` : undefined} />
         <StatCard label="总可用" value={t ? `${formatNumber(t.available)} U` : '-'} />
         <StatCard label="总已借(USDT)" value={t ? `${formatNumber(t.borrowed)} U` : '-'} />
@@ -167,7 +167,7 @@ export function FundsPage() {
       {/* Per-user table */}
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-[11px] border-collapse">
+          <table className="w-full md:min-w-[860px] text-[11px] border-collapse">
             <thead>
               <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
                 <th className="px-3 py-2 text-left font-medium">用户</th>
@@ -275,7 +275,7 @@ export function FundsPage() {
           <span className="text-[10px] text-muted-foreground ml-auto">净 = 平仓利润 + 资金费 − 利息</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-[11px] border-collapse">
+          <table className="w-full md:min-w-[560px] text-[11px] border-collapse">
             <thead>
               <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
                 <th className="px-3 py-1.5 text-left font-medium">{attrBy === 'user' ? '用户' : attrBy === 'symbol' ? '币种' : '日期'}</th>

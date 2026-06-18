@@ -8,7 +8,7 @@ interface BlacklistItem {
   user_id?: number | null   // null=全局系统黑名单(不可删除);有值=本人个人黑名单
 }
 
-export function BlacklistPage() {
+export function BlacklistPage({ embedded }: { onClose?: () => void; embedded?: boolean } = {}) {
   const [items, setItems] = useState<BlacklistItem[]>([])
   const [input, setInput] = useState('')
   const [reason, setReason] = useState('')
@@ -77,9 +77,9 @@ export function BlacklistPage() {
   }, [refresh])
 
   return (
-    <div className="space-y-3">
+    <div className={embedded ? 'space-y-3 p-3' : 'space-y-3'}>
       <div className="flex items-center gap-2">
-        <h1 className="text-sm font-semibold">黑名单管理</h1>
+        {!embedded && <h1 className="text-sm font-semibold">黑名单管理</h1>}
         <div className="ml-auto flex items-center gap-1">
           <input
             value={input}
@@ -191,7 +191,7 @@ export function BlacklistPage() {
       {/* 右键菜单 — 移除黑名单(全局系统条目不可删) */}
       {ctxMenu && (
         <div
-          className="fixed z-50 min-w-[140px] rounded-md border border-border bg-[#111118] py-1 shadow-xl text-xs"
+          className="fixed z-50 min-w-[140px] max-w-[90vw] rounded-md border border-border bg-[#111118] py-1 shadow-xl text-xs"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >

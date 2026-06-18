@@ -157,7 +157,7 @@ function VersionTab() {
 
       {/* System Info */}
       {info && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:grid-cols-3">
           <InfoCard label="后端版本" value={info.backend_version} />
           <InfoCard label="Python" value={info.python_version} />
           <InfoCard label="运行时长" value={info.uptime} />
@@ -190,7 +190,7 @@ function VersionTab() {
         <CardHeader><CardTitle className="text-sm">提交历史</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[600px]">
+          <table className="w-full text-sm md:min-w-[600px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">Hash</th>
@@ -309,7 +309,7 @@ function DatabaseTab() {
         <CardHeader><CardTitle className="text-sm">数据表列表</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[500px]">
+          <table className="w-full text-sm md:min-w-[500px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">表名</th>
@@ -363,7 +363,7 @@ function DatabaseTab() {
                     {tableData.rows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0">
                         {tableData.columns.map(c => (
-                          <td key={c} className="px-2 py-1 max-w-[200px] truncate">{String(row[c] ?? '')}</td>
+                          <td key={c} className="px-2 py-1 max-w-[90px] sm:max-w-[200px] truncate">{String(row[c] ?? '')}</td>
                         ))}
                       </tr>
                     ))}
@@ -472,7 +472,7 @@ function RolesTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
+          <table className="w-full text-sm md:min-w-[700px]">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">角色名称</th>
@@ -493,7 +493,7 @@ function RolesTab() {
                     </span>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{r.role_code}</td>
-                  <td className="px-4 py-2 text-muted-foreground truncate max-w-[200px]">{r.description}</td>
+                  <td className="px-4 py-2 text-muted-foreground truncate max-w-[90px] sm:max-w-[200px]">{r.description}</td>
                   <td className="px-4 py-2 text-center">
                     <Badge variant="outline">{r.permission_count}</Badge>
                   </td>
@@ -584,7 +584,7 @@ function RoleEditDialog({ role, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <Card className="w-[calc(100vw-2rem)] max-w-md" onClick={(e) => e.stopPropagation()}>
         <CardHeader>
           <CardTitle className="flex items-center justify-between text-sm">
             <span>{isEdit ? '编辑角色' : '新增角色'}</span>
@@ -902,7 +902,7 @@ function SSLTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[850px]">
+          <table className="w-full text-sm md:min-w-[850px]">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-4 py-3">名称</th>
@@ -1147,7 +1147,7 @@ function ProxyPoolTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[850px]">
+          <table className="w-full text-sm md:min-w-[850px]">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-4 py-3">名称</th>
@@ -1242,7 +1242,7 @@ function IpipgoTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[850px]">
+          <table className="w-full text-sm md:min-w-[850px]">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-4 py-3">订单号</th>
@@ -1390,7 +1390,7 @@ function BindDialog({ proxies, bindings, onClose, onChanged }: {
         {error && <p className="text-sm text-negative">{error}</p>}
         {bindings.length > 0 && (
           <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[400px]">
+          <table className="w-full text-sm md:min-w-[400px]">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-3 py-2">账户</th>

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from decimal import Decimal
 
 import redis
@@ -554,7 +555,25 @@ def get_pushed_symbols(request: Request):
     user_id = get_current_user_id(request)
     r = _redis()
     raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
-    return {"pushed_symbols": json.loads(raw) if raw else []}
+    pushed = json.loads(raw) if raw else []
+    # 推送时间戳(engine:{uid}:pushed_at,symbol→unix秒)统一在此回填/清理:
+    # 覆盖手动 push(API 已记)与引擎自动推送(此处首次见到即补 now);移除的清掉。
+    at_key = _user_redis_key(user_id, "pushed_at")
+    try:
+        at = r.hgetall(at_key) or {}
+        now = int(time.time())
+        miss = [s for s in pushed if s not in at]
+        if miss:
+            r.hset(at_key, mapping={s: now for s in miss})
+            for s in miss:
+                at[s] = str(now)
+        stale = [s for s in at.keys() if s not in pushed]
+        if stale:
+            r.hdel(at_key, *stale)
+        pushed_at = {s: int(at[s]) for s in pushed if s in at}
+    except Exception:
+        pushed_at = {}
+    return {"pushed_symbols": pushed, "pushed_at": pushed_at}
 
 
 @router.post("/push-symbol/{symbol}")
@@ -578,6 +597,7 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     current = set(json.loads(raw)) if raw else set()
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
+    r.hsetnx(_user_redis_key(user_id, "pushed_at"), sym, int(time.time()))  # 记首次推送时刻(已存在不覆盖)
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
     return {"message": f"Pushed {sym}"}
@@ -607,6 +627,7 @@ def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(ge
     current = set(json.loads(raw)) if raw else set()
     current.discard(sym)
     r.set(ps_key, json.dumps(sorted(current)))
+    r.hdel(_user_redis_key(user_id, "pushed_at"), sym)  # 清推送时间戳
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
     return {"message": f"Removed {sym}"}
 
@@ -1142,6 +1163,7 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     # the per-cycle X-SAPI-USED-IP-WEIGHT-1M delta if it needs tightening.
     IP_WEIGHT_PER_BORROW_CYCLE = 10
     agg_borrow_rate = 0.0
+    single_borrow_rate = 0.0
     try:
         from app.db.models import GlobalRules
         gr = (db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
@@ -1157,6 +1179,18 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         # host-shared IP ceiling (steady-state from the published IP weight limit)
         ip_host_ceiling = (weight_limit / IP_WEIGHT_PER_BORROW_CYCLE / 60) if weight_limit else float("inf")
         agg_borrow_rate = round(min(uid_capped_sum, ip_host_ceiling), 2)
+        # 单UID建仓速率: 实时实际速率 = 最近60s内最忙子账户成功借币(TradeLog action=BORROW)次数 / 60。
+        # 反映引擎此刻真正的单账户建仓节奏(非理论上限);无近期借币则为 0。
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        rows = (db.query(TradeLog.sub_account_id, func.count(TradeLog.id))
+                .filter(TradeLog.user_id == user_id,
+                        TradeLog.action == "BORROW",
+                        TradeLog.status == "SUCCESS",
+                        TradeLog.created_at >= cutoff)
+                .group_by(TradeLog.sub_account_id).all())
+        max_cnt = max((c for _, c in rows), default=0)
+        single_borrow_rate = round(max_cnt / 60.0, 2)
     except Exception:
         pass
 
@@ -1176,4 +1210,5 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         uid_limit=uid_limit,
         throttle_rate=throttle_rate,
         agg_borrow_rate=agg_borrow_rate,
+        single_borrow_rate=single_borrow_rate,
     )

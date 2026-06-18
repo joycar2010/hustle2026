@@ -123,7 +123,9 @@ class GlobalRules(Base):
     tier_ratios = Column(String(120), default="")             # "0.5:30,0.8:30,1.2:40" (persisted)
     borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
     borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTO/OTOCO;False=borrow-repay
-    otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 2=OTO(2单撤)/3=OTOCO(3单撤)
+    borrow_mode = Column(String(20), nullable=True)           # 借币方式枚举: repay/otoco/single/multi;null=回退 borrow_via_otoco(灰度兼容)
+    otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 1=单腿裸MARGIN_BUY(最省order-count)/2=OTO(2单撤)/3=OTOCO(3单撤)
+    multi_max_accounts_per_symbol = Column(Integer, default=3)  # 多账户并联(borrow_mode=multi): 同一币最多几个子账户同时并联借(突破单UID order-count瓶颈)
     hedge_via_master = Column(Boolean, default=False)         # True=合约对冲腿用主账户 key;False=三腿同子账户(原行为)
     max_spread_pct = Column(Numeric(10, 4), default=3.0)      # 点差合理性上限(%): 超过视为行情glitch,跳过该币种下单/平仓(0=不启用)
     min_volume_24h = Column(Numeric(20, 2), default=0)        # 现货24h成交量(USDT)门槛: 低于此的币不自动推送/借币(交易护栏;0=不启用)

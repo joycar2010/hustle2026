@@ -38,7 +38,9 @@ class GlobalRulesSnapshot:
     tier_ratios: str = ""
     borrow_rate_per_sec: Decimal = Decimal("2")
     borrow_via_otoco: bool = False
+    borrow_mode: str = "repay"
     otoco_legs: int = 2
+    multi_max_accounts_per_symbol: int = 3
     hedge_via_master: bool = False
     max_spread_pct: Decimal = Decimal("3.0")
     min_volume_24h: Decimal = Decimal("0")
@@ -80,14 +82,15 @@ DEFAULT_FUND = FundRulesSnapshot()
 # admin /admin/global-rules「系统后端规则」TAB 编辑。per-user worker 的这些字段从 NULL 行覆盖。
 _SYSTEM_FIELDS = (
     "follow_type", "slippage_pct", "stabilize_sec", "tier_ratios", "borrow_rate_per_sec",
-    "borrow_via_otoco", "otoco_legs", "hedge_via_master", "max_spread_pct", "min_volume_24h",
+    "borrow_via_otoco", "borrow_mode", "otoco_legs", "multi_max_accounts_per_symbol",
+    "hedge_via_master", "max_spread_pct", "min_volume_24h",
     "min_volume_24h_futures", "block_risky_open", "filter_duration_ms", "min_borrow_usdt",
     "collateral_ratio", "removed_cooldown_minutes", "open_spread_buffer",
     "taker_fee_spot", "taker_fee_futures",
 )
 _SYS_BOOL = {"borrow_via_otoco", "hedge_via_master", "block_risky_open"}
-_SYS_INT = {"otoco_legs", "filter_duration_ms", "removed_cooldown_minutes"}
-_SYS_STR = {"follow_type", "tier_ratios"}
+_SYS_INT = {"otoco_legs", "multi_max_accounts_per_symbol", "filter_duration_ms", "removed_cooldown_minutes"}
+_SYS_STR = {"follow_type", "tier_ratios", "borrow_mode"}
 
 
 class ConfigLoader:
@@ -150,7 +153,9 @@ class ConfigLoader:
                     tier_ratios=rules.tier_ratios or "",
                     borrow_rate_per_sec=rules.borrow_rate_per_sec if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
                     borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
+                    borrow_mode=(getattr(rules, "borrow_mode", None) or ""),
                     otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
+                    multi_max_accounts_per_symbol=int(getattr(rules, "multi_max_accounts_per_symbol", 3) or 3),
                     hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),
                     max_spread_pct=rules.max_spread_pct if getattr(rules, "max_spread_pct", None) is not None else Decimal("3.0"),
                     min_volume_24h=rules.min_volume_24h if getattr(rules, "min_volume_24h", None) is not None else Decimal("0"),
@@ -180,6 +185,12 @@ class ConfigLoader:
                         ov[f] = bool(v) if f in _SYS_BOOL else int(v) if f in _SYS_INT else str(v) if f in _SYS_STR else v
                     if ov:
                         self.global_rules = replace(self.global_rules, **ov)
+
+            # borrow_mode 归一化:新枚举字段为空时由旧 borrow_via_otoco 推导(灰度兼容,零行为变动)。
+            # 在系统行覆盖之后做,保证用的是权威值(borrow_mode/borrow_via_otoco 均系统级)。
+            if not getattr(self.global_rules, "borrow_mode", ""):
+                derived = "otoco" if self.global_rules.borrow_via_otoco else "repay"
+                self.global_rules = replace(self.global_rules, borrow_mode=derived)
 
             # 资金规则按 user 隔离;legacy(user_id=None)引擎确定性取 NULL 行
             fq = db.query(FundRules)

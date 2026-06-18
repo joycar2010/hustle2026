@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { getEngineHealth, restartWorker, startWorker, stopWorker, type EngineHealth } from '@/api/engine'
 import { useBalanceStore } from '@/stores/balanceStore'
@@ -30,11 +30,19 @@ export function EngineHealthBar() {
   const [error, setError] = useState(false)
   const balanceSummary = useBalanceStore((s) => s.summary)  // 顶栏「合约 未平/累计」移到此
   const addToast = useToastStore((s) => s.addToast)
+  const abortRef = useRef<AbortController | null>(null)
 
+  // [第三梯队] AbortController:慢网下若上一次 health 仍在途,先撤销再发新请求,避免请求堆叠抢带宽
   const fetchHealth = useCallback(() => {
-    getEngineHealth()
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    getEngineHealth(ctrl.signal)
       .then((d) => { setHealth(d); setError(false) })
-      .catch(() => setError(true))
+      .catch((e: { code?: string; name?: string }) => {
+        if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError') return  // 主动取消不算错误
+        setError(true)
+      })
   }, [])
 
   // 单 worker 操作: scope=sub:N → id=N;操作后延迟回读(reconcile ~10s 生效)
@@ -55,7 +63,7 @@ export function EngineHealthBar() {
   useEffect(() => {
     fetchHealth()
     const timer = setInterval(fetchHealth, 15000)
-    return () => clearInterval(timer)
+    return () => { clearInterval(timer); abortRef.current?.abort() }
   }, [fetchHealth])
 
   if (error && !health) return null
@@ -85,14 +93,14 @@ export function EngineHealthBar() {
     <div className="border-b border-border bg-card/50">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 px-4 py-2 text-xs hover:bg-accent/50 transition-colors"
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-xs hover:bg-accent/50 transition-colors"
       >
         <div className="flex items-center gap-1.5">
           <Icon className={`h-3.5 w-3.5 ${health.status === 'HEALTHY' ? 'text-positive' : health.status === 'DEGRADED' ? 'text-yellow-500' : 'text-negative'}`} />
           <Badge variant={cfg.variant}>{cfg.label}</Badge>
         </div>
 
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
 
         {/* engine mode (挂单中/已停止) + uptime */}
         <div className="flex items-center gap-1.5">
@@ -104,7 +112,7 @@ export function EngineHealthBar() {
           )}
         </div>
 
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
 
         {/* UID 借币权重 gauge(1500/次,限额 180000) */}
         <div className="flex items-center gap-1" title={`UID 借币权重 ${usedWeight}/${weightLimit} (1分钟单UID限额,借币 1500/次)${health.weight_age_sec != null ? ` · ${health.weight_age_sec}s前` : ''}`}>
@@ -115,7 +123,7 @@ export function EngineHealthBar() {
           </span>
         </div>
 
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
 
         <div className="flex items-center gap-1">
           <Server className="h-3 w-3 text-muted-foreground" />
@@ -125,15 +133,15 @@ export function EngineHealthBar() {
           )}
         </div>
 
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
 
-        {/* 聚合借速 = min( Σ 各账户配速[每账户≤2/s 单UID硬顶], 共享IP预算上限 ) */}
-        <div className="flex items-center gap-1" title="可持续聚合借速 = min( Σ 各启用子账户配速[每账户封顶 2/s 单UID硬顶], 共享IP预算上限 ) (req/s)">
+        {/* 单UID建仓速率 = 最近60s内最忙子账户实际成功借币次数/60(实时实际速率,非理论上限) */}
+        <div className="flex items-center gap-1" title="单UID建仓速率 = 最近60秒内最忙子账户实际成功借币次数 ÷ 60(req/s);反映引擎此刻真实建仓节奏,无近期借币则为0">
           <Gauge className="h-3 w-3 text-primary" />
-          <span>聚合借速 <span className="text-primary font-mono">{(health.agg_borrow_rate ?? 0).toFixed(1)}</span>/s</span>
+          <span>单UID建仓速率 <span className="text-primary font-mono">{(health.single_borrow_rate ?? 0).toFixed(1)}</span>/s</span>
         </div>
 
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
 
         <div className="flex items-center gap-1">
           <Zap className="h-3 w-3 text-muted-foreground" />
@@ -142,13 +150,13 @@ export function EngineHealthBar() {
 
         {totalMetrics.errors > 0 && (
           <>
-            <span className="text-muted-foreground">|</span>
+            <span className="hidden sm:inline text-muted-foreground">|</span>
             <span className="text-negative">API错误: {totalMetrics.errors}</span>
           </>
         )}
 
         {/* 持仓 + 合约 — 移到状态条最右侧 */}
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
         <div className="flex items-center gap-1">
           <Activity className="h-3 w-3 text-muted-foreground" />
           <span>{health.open_positions} 持仓</span>
@@ -157,7 +165,7 @@ export function EngineHealthBar() {
           )}
         </div>
 
-        <span className="text-muted-foreground">|</span>
+        <span className="hidden sm:inline text-muted-foreground">|</span>
         <div className="flex items-center gap-1" title="合约: 未平仓 / 累计持仓数">
           <span>合约 <span className="text-primary">{balanceSummary.positionCount}</span>/<span className="text-muted-foreground">{balanceSummary.totalContracts}</span></span>
         </div>
@@ -173,7 +181,7 @@ export function EngineHealthBar() {
           {health.workers.length > 0 && (
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground mb-1.5">Workers</p>
-              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 lg:grid-cols-4">
                 {health.workers.map(w => (
                   <div key={w.scope} className="flex items-center justify-between rounded-md border px-2.5 py-1.5 text-xs">
                     <span className="font-medium">{w.scope.replace('sub:', '#')}</span>

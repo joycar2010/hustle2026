@@ -26,7 +26,9 @@ class GlobalRulesUpdate(BaseModel):
     tier_ratios: Optional[str] = None
     borrow_rate_per_sec: Optional[Decimal] = None
     borrow_via_otoco: Optional[bool] = None
+    borrow_mode: Optional[str] = None
     otoco_legs: Optional[int] = None
+    multi_max_accounts_per_symbol: Optional[int] = None
     hedge_via_master: Optional[bool] = None
     max_spread_pct: Optional[Decimal] = None
     min_volume_24h: Optional[Decimal] = None
@@ -106,9 +108,23 @@ class GlobalRulesUpdate(BaseModel):
     def _v_legs(cls, v):
         if v is None:
             return v
-        if int(v) not in (2, 3):
-            raise ValueError("撤单腿数只能是 2 或 3")
+        if int(v) not in (1, 2, 3):
+            raise ValueError("撤单腿数只能是 1、2 或 3")
         return v
+
+    @field_validator("borrow_mode")
+    @classmethod
+    def _v_borrow_mode(cls, v):
+        if v is None:
+            return v
+        if str(v) not in ("repay", "otoco", "single", "multi"):
+            raise ValueError("借币方式只能是 repay/otoco/single/multi")
+        return v
+
+    @field_validator("multi_max_accounts_per_symbol")
+    @classmethod
+    def _v_multi_max(cls, v, info):
+        return V.rng(v, 1, 50, info.field_name)
 
     @field_validator("follow_type")
     @classmethod
@@ -142,7 +158,9 @@ class GlobalRulesResponse(BaseModel):
     tier_ratios: Optional[str] = ""
     borrow_rate_per_sec: Optional[Decimal] = 2
     borrow_via_otoco: Optional[bool] = False
+    borrow_mode: Optional[str] = None
     otoco_legs: Optional[int] = 2
+    multi_max_accounts_per_symbol: Optional[int] = 3
     hedge_via_master: Optional[bool] = False
     max_spread_pct: Optional[Decimal] = 3.0
     min_volume_24h: Optional[Decimal] = 0

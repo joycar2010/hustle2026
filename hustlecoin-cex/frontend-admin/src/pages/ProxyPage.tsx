@@ -269,7 +269,7 @@ function CreateProxyDialog({ onClose, onCreated }: { onClose: () => void; onCrea
     <Card>
       <CardHeader><CardTitle className="text-sm">添加代理</CardTitle></CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="grid grid-cols-3 gap-3">
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">名称</label>
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />

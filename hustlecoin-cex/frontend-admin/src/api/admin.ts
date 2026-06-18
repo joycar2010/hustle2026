@@ -107,6 +107,12 @@ export async function getUserSubAccounts(userId: number) {
   return data as SubAccountItem[]
 }
 
+// 转移: 把源用户的主账户(可选)+全部子账户整体改归属到目标用户
+export async function transferAccounts(userId: number, body: { target_user_id: number; include_master: boolean }) {
+  const { data } = await client.post(`/api/admin/users/${userId}/transfer-accounts`, body)
+  return data as { message: string; sub_accounts: number; master: boolean; positions: number; trade_logs: number; account_symbol_rules: number }
+}
+
 export async function createSubAccount(userId: number, body: { note: string; email: string; api_key: string; api_secret: string }) {
   const { data } = await client.post(`/api/admin/users/${userId}/sub-accounts`, body)
   return data
@@ -962,7 +968,9 @@ export interface GlobalRulesData {
   tier_ratios?: string
   borrow_rate_per_sec?: string | null
   borrow_via_otoco?: boolean
+  borrow_mode?: string | null
   otoco_legs?: number
+  multi_max_accounts_per_symbol?: number
   hedge_via_master?: boolean
   max_spread_pct?: string | null
   min_volume_24h?: string | null

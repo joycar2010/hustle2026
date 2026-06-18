@@ -42,6 +42,7 @@ export interface SymbolRuleInfo {
 interface OwlTreeTableProps {
   positions: Position[]
   pushedSymbols: string[]
+  pushedAt?: Record<string, number>   // symbol → 推送时刻(unix秒),用于挂单中显示"提币时间"
   symbolRules?: Map<string, SymbolRuleInfo>
   delistingSymbols?: Set<string>
   riskySymbols?: Set<string>
@@ -63,6 +64,7 @@ interface SymbolGroup {
   openCount: number
   durationHours: number | null
   pushTime: string | null
+  pushedAtText: string | null   // 推送时刻格式化("DD HH:MM:SS"),挂单中无持仓时显示
   minMarginLevel: number | null
   ruleInfo: SymbolRuleInfo | null
   futNotional: number | null
@@ -182,7 +184,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   onToggle: (symbol: string) => void
   onContextMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
-  onMobileMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
+  onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
   onOpenRules: () => void
 }) {
   const hasPos = group.positions.length > 0
@@ -209,6 +211,11 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   const hasCustomRule = rule && rule.source === 'custom' && (rule.open_spread != null || rule.close_spread != null)
   const isCustom = rule?.source === 'custom'
 
+  // 长按(手机)唤菜单计时/防误触
+  const lpTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const lpFired = useRef(false)
+  const lpStart = useRef<{ x: number; y: number } | null>(null)
+
   // 行情参数块:开(实时可开)/平(实时可平)/资/时/限/息
   const paramBlock = (
     <td className={cn('px-1.5 py-1 text-left', spreadStaleCls)} title={spreadStaleTitle}>
@@ -228,9 +235,31 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
         'border-b border-border/30 hover:bg-accent/20 cursor-pointer transition-colors text-[11px]',
         hasPos ? 'bg-[#111118]' : 'bg-[#0d0d14]/50',
       )}
-      onClick={() => { if (!compact) onToggle(group.symbol) }}
+      onClick={() => { if (lpFired.current) return; if (!compact) onToggle(group.symbol) }}
       onDoubleClick={() => onDoubleClick(group.symbol)}
       onContextMenu={(e) => onContextMenu(e, group.symbol)}
+      onTouchStart={(e) => {
+        // 手机长按(500ms)唤出菜单,替代手机不可用的右键 onContextMenu(桌面右键不变)
+        const t = e.touches[0]
+        const el = e.currentTarget as HTMLElement   // 捕获行元素(合成事件会被回收,不能在 timeout 里用 e)
+        lpStart.current = { x: t.clientX, y: t.clientY }
+        lpTimer.current = setTimeout(() => {
+          lpFired.current = true
+          onMobileMenu({ preventDefault() {}, stopPropagation() {}, currentTarget: el } as unknown as React.MouseEvent, group.symbol)
+        }, 500)
+      }}
+      onTouchMove={(e) => {
+        // 移动超阈值(滚动)→ 取消长按
+        const t = e.touches[0]
+        if (lpStart.current && (Math.abs(t.clientX - lpStart.current.x) > 10 || Math.abs(t.clientY - lpStart.current.y) > 10)) {
+          if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = undefined }
+        }
+      }}
+      onTouchEnd={() => {
+        if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = undefined }
+        // 长按已触发菜单 → 抑制随后的 click(避免误触展开)
+        if (lpFired.current) { setTimeout(() => { lpFired.current = false }, 50) }
+      }}
     >
       {/* expand toggle */}
       <td className="px-1.5 py-1 text-center text-muted-foreground w-5">
@@ -244,31 +273,35 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
         {isDeadCoin && <span className="mr-0.5" title={deadTitle}>&#128128;</span>}
         {coinName}
         {hasPos && (
-          <span className="ml-1 text-[9px] text-muted-foreground">×{group.openCount}</span>
+          <span className="ml-1 text-[10px] text-muted-foreground">×{group.openCount}</span>
         )}
         {isMobile && hasPos && (
-          <span className="ml-1 text-[9px] text-muted-foreground">{dhText}</span>
+          <span className="ml-1 text-[10px] text-muted-foreground">{dhText}</span>
         )}
       </td>
       {/* 财务列:汇总行兼"列标签"(coinmini 同款,与标题行合并);数字在子账户行 */}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap" title="合约腿名义价值(USDT)">现-期</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">爆率</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap" title="有效可借: 在币安理论最大可借(maxBorrowable)基础上,套引擎借币封顶口径(金额限制/抵押率/单笔金额)后实际会借到的量。悬停数字看理论上限与受限原因。">有效可借</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">现币</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">借币</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">借币金额</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">风险</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">保证金</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[9px] text-foreground whitespace-nowrap">可用</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="合约腿名义价值(USDT)">现-期</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">爆率</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="有效可借: 在币安理论最大可借(maxBorrowable)基础上,套引擎借币封顶口径(金额限制/抵押率/单笔金额)后实际会借到的量。悬停数字看理论上限与受限原因。">有效可借</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">现币</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">借币</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">借币金额</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">风险</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">保证金</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">可用</td>}
       {/* 参数块(行情) */}
       {paramBlock}
-      {/* 推/状态 — 推送时间 */}
+      {/* 推/状态 — 紧凑型: 显运行状态(无子账户行可承载);否则显提币(推送)时间 */}
       {!isMobile && (
         <td className="px-1.5 py-1 text-right whitespace-nowrap text-[10px]">
-          {group.pushTime ? (
+          {compact && symbolStatus ? (
+            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
+          ) : group.pushTime ? (
             <span className="text-muted-foreground">推 {group.pushTime}</span>
+          ) : group.pushedAtText ? (
+            <span className="text-muted-foreground">推 {group.pushedAtText}</span>
           ) : group.isPushed ? (
-            <span className="text-primary text-[9px]">已推</span>
+            <span className="text-primary text-[10px]">已推</span>
           ) : (
             <span className="text-muted-foreground">-</span>
           )}
@@ -287,7 +320,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {/* 单 — custom rule indicator */}
       {!isMobile && (
         <td
-          className="px-0.5 py-1 text-center text-[9px] whitespace-nowrap cursor-pointer hover:bg-accent/30"
+          className="px-0.5 py-1 text-center text-[10px] whitespace-nowrap cursor-pointer hover:bg-accent/30"
           title={rule ? ruleTooltip(rule) : undefined}
           onClick={(e) => { e.stopPropagation(); onDoubleClick(group.symbol) }}
         >
@@ -315,18 +348,15 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
           <span className={rule && rule.allow_repay === false ? 'text-negative' : 'text-positive'}>还</span>
         </td>
       )}
-      {/* 规则 — 通用规则→跳全局规则设置(/rules);单一规则→打开该币种单一规则弹窗 */}
+      {/* 规则类型 — 币种分组行固定显示规则来源(单一规则/通用规则),不显示运行状态;
+          运行状态(点差不符等)在各子账户行展示。通用规则→跳全局规则设置;单一规则→打开该币种单一规则弹窗 */}
       {!isMobile && (
         <td
           className="px-1.5 py-1 text-center whitespace-nowrap text-[10px] cursor-pointer hover:bg-accent/30"
           title={isCustom ? (rule ? ruleTooltip(rule) : '点击设置该币种单一规则') : '点击打开全局规则设置(/rules)'}
           onClick={(e) => { e.stopPropagation(); if (isCustom) onDoubleClick(group.symbol); else onOpenRules() }}
         >
-          {symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
-          ) : (
-            <span className={isCustom ? 'text-amber-400' : 'text-foreground'}>{isCustom ? '单一规则' : '通用规则'}</span>
-          )}
+          <span className={isCustom ? 'text-amber-400' : 'text-foreground'}>{isCustom ? '单一规则' : '通用规则'}</span>
         </td>
       )}
       {/* mobile action button */}
@@ -369,7 +399,7 @@ const SubAccountRow = memo(function SubAccountRow({
   marketInfo?: MarketInfo
   onContextMenu: (e: React.MouseEvent, symbol: string, position: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
-  onMobileMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
+  onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
 }) {
   // 持仓经济参数块:润(净盈亏)/资(累计资金费)/开(开仓点差)/息(当日利率)/累息(累计利息)/平(平仓点差)
   const profit = parseFloat(pos.realized_pnl || '0')
@@ -402,11 +432,38 @@ const SubAccountRow = memo(function SubAccountRow({
     >
       <td className="px-1.5 py-0.5"></td>
       {/* 币种 → account note(白色高亮) */}
-      <td className="px-1.5 py-0.5 pl-4 text-foreground whitespace-nowrap">
-        ↳ {pos.account_note || `#${pos.sub_account_id}`}
-        {isMobile && (
-          <span className="ml-1 text-[9px]">{durationText(pos.opened_at)}</span>
-        )}
+      <td className="px-1.5 py-0.5 pl-4 text-foreground">
+        <div className="whitespace-nowrap">
+          ↳ {pos.account_note || `#${pos.sub_account_id}`}
+          {isMobile && symbolStatus && (
+            <span className={cn('ml-1.5 text-[10px]', statusColorCls(symbolStatus))}>{symbolStatus}</span>
+          )}
+          {isMobile && !symbolStatus && (
+            <span className="ml-1.5 text-[10px] text-muted-foreground">{durationText(pos.opened_at)}</span>
+          )}
+        </div>
+        {/* 移动端紧凑数据行 — 对齐 PC 逐账户列(现期/爆率/有效可借/现币/借币/借币金额/风险) */}
+        {isMobile && (() => {
+          const sm = balance?.symbol_margin?.[pos.symbol]
+          const futVal = parseFloat(pos.futures_long_qty || '0') * (spread?.fut_bid ?? 0)
+          const blow = balance && balance.margin_level > 0 ? (1.1 / balance.margin_level) * 100 : null
+          const px = spread?.spot_bid ?? 0
+          const eff = sm ? (sm.effective_borrowable ?? sm.max_borrowable) : null
+          const noInv = sm?.no_inventory && !(sm.max_borrowable > 0)
+          return (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] tabular-nums font-mono leading-tight">
+              <span className="text-muted-foreground/60">爆<span className={cn('ml-0.5', blow != null ? (blow > 80 ? 'text-negative' : blow > 50 ? 'text-yellow-400' : 'text-positive') : 'text-foreground')}>{blow != null ? `${formatNumber(blow, 1)}%` : '-'}</span></span>
+              <span className="text-muted-foreground/60">可借{noInv
+                ? <span className="ml-0.5 text-amber-500/90">无券</span>
+                : <span className="ml-0.5 text-sky-300/90">{eff != null ? (borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)) : '-'}</span>}</span>
+              <span className="text-muted-foreground/60">现币<span className="ml-0.5 text-foreground">{sm?.free != null ? formatNumber(sm.free, 4) : '-'}</span></span>
+              <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{formatNumber(pos.borrow_qty, 4)}</span></span>
+              <span className="text-muted-foreground/60">额<span className="ml-0.5 text-foreground">{pos.open_usdt_amount ? formatNumber(pos.open_usdt_amount) : '-'}</span></span>
+              <span className="text-muted-foreground/60">险<span className={cn('ml-0.5', balance ? (balance.margin_level > 2 ? 'text-positive' : balance.margin_level > 1.3 ? 'text-yellow-400' : 'text-negative') : 'text-foreground')}>{balance ? formatNumber(balance.margin_level, 2) : '-'}</span></span>
+              {futVal > 0 && <span className="text-muted-foreground/60">现期<span className="ml-0.5 text-foreground">{formatNumber(futVal, 0)}</span></span>}
+            </div>
+          )
+        })()}
       </td>
       {/* 现-期 — this account's futures notional (tooltip: 张数) */}
       {!isMobile && (() => {
@@ -561,7 +618,7 @@ const COMPACT_KEY = 'hc_compact_view'
 // 币种行点差陈旧阈值(ms):某币 ts 落后全表最新 ts 超过此值视为陈旧(就近值变灰),与 /spreads 默认 300s 一致
 const DASH_SPREAD_STALE_MS = 300_000
 
-export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingSymbols, riskySymbols, throttleRate, onAction }: OwlTreeTableProps) {
+export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, delistingSymbols, riskySymbols, throttleRate, onAction }: OwlTreeTableProps) {
   const spreads = useSpreadStore((s) => s.spreads)
   const spreadsLastTs = useSpreadStore((s) => s.lastUpdateTs)
   // 就近点差缓存: WS 断流/某币 ts 过期时,保留最后一次有效点差(不闪不清零,标记陈旧),
@@ -676,13 +733,15 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
           }, Infinity)
         : null
       // 推送时间:日 + HH:MM:SS(coinmini 同款 "推06 16:08:56")
-      const pushTime = earliest && earliest < Infinity
-        ? (() => {
-            const d = new Date(earliest)
-            const p2 = (n: number) => String(n).padStart(2, '0')
-            return `${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
-          })()
-        : null
+      const fmtTime = (ms: number) => {
+        const d = new Date(ms)
+        const p2 = (n: number) => String(n).padStart(2, '0')
+        return `${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`
+      }
+      const pushTime = earliest && earliest < Infinity ? fmtTime(earliest) : null
+      // 提币(推送)时刻:无持仓的挂单中币用后端记录的 pushed_at(unix秒)格式化展示
+      const pushedAtTs = pushedAt?.[symbol]
+      const pushedAtText = pushedAtTs ? fmtTime(pushedAtTs * 1000) : null
 
       const ruleInfo = symbolRules?.get(symbol) ?? null
 
@@ -746,6 +805,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
         openCount: pos.length,
         durationHours: dh,
         pushTime,
+        pushedAtText,
         minMarginLevel,
         ruleInfo,
         futNotional,
@@ -765,7 +825,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
     })
 
     return result
-  }, [spreads, spreadsLastTs, positions, search, pushedSet, showPositionsOnly, balanceMap, symbolRules])
+  }, [spreads, spreadsLastTs, positions, search, pushedSet, pushedAt, showPositionsOnly, balanceMap, symbolRules])
 
   const toggle = useCallback((symbol: string) => {
     setExpanded(prev => {
@@ -781,7 +841,7 @@ export function OwlTreeTable({ positions, pushedSymbols, symbolRules, delistingS
     setContextMenu({ x: e.clientX, y: e.clientY, symbol, position })
   }, [])
 
-  const handleMobileMenu = useCallback((e: React.MouseEvent, symbol: string, position?: Position) => {
+  const handleMobileMenu = useCallback((e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => {
     e.preventDefault()
     e.stopPropagation()
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -989,7 +1049,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   onToggle: (symbol: string) => void
   onContextMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
-  onMobileMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
+  onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
   onOpenRules: () => void
 }) {
   const headerStatus = useMemo(() => {

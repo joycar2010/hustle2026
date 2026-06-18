@@ -87,13 +87,26 @@ function InlineField({
   // muted 项:文字/输入框统一压到 40% 透明度,鼠标悬停看 title 说明;不改任何保存/绑定逻辑
   const labelCls = muted ? 'text-muted-foreground/40' : 'text-muted-foreground'
   const inputCls = muted ? 'opacity-40' : ''
+  // 本地输入缓冲:保留用户原始按键(含中间态的尾零/前导零),避免外层 strip(去尾零)在输入途中
+  // 把 "0.10"→"0.1"、"0.00"→"0" 截断 —— 那会导致 0.00X 这类4位小数根本打不进去。
+  // 仅当外部值「数值上」真的变了(非尾零差异)才回灌(外部加载/重置/保存后刷新)。
+  const [local, setLocal] = useState<string>(String(value ?? ''))
+  useEffect(() => {
+    const ext = String(value ?? '')
+    setLocal((cur) => {
+      if (ext === cur) return cur
+      const a = parseFloat(ext), b = parseFloat(cur)
+      if (!Number.isNaN(a) && a === b) return cur   // 0.1≡0.10、0≡0.00 → 不打断输入
+      return ext
+    })
+  }, [value])
   return (
     <span className={`inline-flex items-center gap-1 text-[11px] ${muted ? 'cursor-help' : ''}`} title={title}>
       {prefix && <span className={labelCls}>{prefix}</span>}
       {label && <span className={labelCls}>{label}{muted ? '*' : ''}</span>}
       <input
-        value={String(value ?? '')}
-        onChange={(e) => onChange(e.target.value)}
+        value={local}
+        onChange={(e) => { setLocal(e.target.value); onChange(e.target.value) }}
         className={`${width} bg-transparent border-b border-border text-center text-foreground font-mono tabular-nums text-[11px] focus:outline-none focus:border-primary py-0.5 ${inputCls}`}
       />
       {suffix && <span className={labelCls}>{suffix}</span>}
@@ -395,7 +408,7 @@ function TransferModal({
           ) : (
             <>
               {/* 方向 + 对手账户 selectors */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="space-y-1.5">
                   <span className="text-[12px] text-muted-foreground font-medium">方向</span>
                   <div className="flex rounded-lg overflow-hidden border border-border">
@@ -476,7 +489,7 @@ function TransferModal({
               })()}
 
               {/* 源/目标 钱包 */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div className="space-y-1.5">
                   <span className="text-[12px] text-muted-foreground font-medium">源钱包</span>
                   <select
@@ -536,7 +549,7 @@ function TransferModal({
   )
 }
 
-export function RulesPage({ onClose }: { onClose?: () => void } = {}) {
+export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedded?: boolean } = {}) {
   const navigate = useNavigate()
   const closeRules = () => { if (onClose) onClose(); else navigate('/dashboard') }
   const [feishu, setFeishu] = useState<Record<string, unknown>>({})
@@ -692,16 +705,18 @@ export function RulesPage({ onClose }: { onClose?: () => void } = {}) {
 
   return (
     <div className="h-full bg-background flex flex-col overflow-hidden">
-      {/* Title bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#0d0d14] border-b border-border shrink-0">
-        <span className="text-sm font-semibold">规则设置</span>
-        <button
-          onClick={closeRules}
-          className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
-        >
-          ✕
-        </button>
-      </div>
+      {/* Title bar — 嵌入模态时隐藏(模态栏已展示标题/关闭),避免重复 */}
+      {!embedded && (
+        <div className="flex items-center justify-between px-4 py-2 bg-[#0d0d14] border-b border-border shrink-0">
+          <span className="text-sm font-semibold">规则设置</span>
+          <button
+            onClick={closeRules}
+            className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Two-column body */}
       <div className="flex flex-col md:flex-row gap-4 p-3 flex-1 overflow-auto min-h-0">

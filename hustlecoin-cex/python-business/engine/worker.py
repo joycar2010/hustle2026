@@ -337,10 +337,12 @@ class Worker:
                 statuses[symbol] = "黑名单"; continue
             if symbol not in tradable_symbols:
                 statuses[symbol] = "不可交易"; continue
+            # 无券/量不足/行情陈旧/点差不符 均为"正常等待态"(非故障)→ 统一显示"运行中",
+            # 但仍 continue 不借(仅展示口径统一,借币逻辑不变)。
             if symbol in no_inventory:
-                statuses[symbol] = "无券"; continue
+                statuses[symbol] = "运行中"; continue
             if not self._volume_ok(symbol):
-                statuses[symbol] = "量不足"; continue
+                statuses[symbol] = "运行中"; continue
             if self._is_banned(symbol):
                 statuses[symbol] = "借币冷却"; continue
             if self._is_removed_banned(symbol):
@@ -352,12 +354,17 @@ class Worker:
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
             if not self._spread_fresh(spread):
-                statuses[symbol] = "行情陈旧"; continue
+                statuses[symbol] = "运行中"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
-                statuses[symbol] = "点差不符"; continue
+                statuses[symbol] = "运行中"; continue
             # 有券 + 无异常 + 点差达标 → 正常运行(挂单借币中);本轮真借或受满仓/账户护栏暂缓,均标"运行中"
             statuses[symbol] = "运行中"
             if not can_borrow or active_count >= max_positions or not self._running:
+                continue
+            # 多账户并联(borrow_mode=multi): 同一币的并联账户数受 multi_max_accounts_per_symbol 限,
+            # 跨账户 Redis 配额,防 N 账户一拥而上把杠杆池库存(-3045)/资金一次打光。非 multi 模式直接放行。
+            if not await self._multi_parallel_reserve(symbol):
+                statuses[symbol] = "并联满"
                 continue
             await self._initiate_borrow(symbol, spread, eff_borrow, account_note)
             active_symbols.add(symbol)
@@ -371,6 +378,37 @@ class Worker:
 
         if self._cycle_count % 10 == 0:
             await self._update_state("RUNNING", active_positions=len(open_positions))
+
+    async def _multi_parallel_reserve(self, symbol: str) -> bool:
+        """多账户并联(borrow_mode=multi)跨账户配额: 同一币(同 user)最多
+        multi_max_accounts_per_symbol 个子账户同时并联借。非 multi 模式恒放行(零行为变动)。
+
+        实现: Redis set engine:borrowpar:{user}:{symbol} 存并联中的 account_id,带 TTL 兜底
+        (借币秒级完成,本账户已在场则幂等放行;set 满且本账户不在其中则拒)。已在场(持有该币
+        借/持仓)的账户视为已占位,直接放行。失败/异常一律放行(不因协调层故障阻断借币)。"""
+        mode = getattr(self.config.global_rules, "borrow_mode", None) or \
+            ("otoco" if getattr(self.config.global_rules, "borrow_via_otoco", False) else "repay")
+        if mode != "multi":
+            return True
+        try:
+            cap = int(getattr(self.config.global_rules, "multi_max_accounts_per_symbol", 3) or 3)
+            if cap <= 0:
+                return True
+            key = f"engine:borrowpar:{self._user_id}:{symbol}"
+            aid = str(self.sub_account_id)
+            if self._redis is None:
+                return True
+            # 本账户已在集合内 → 幂等放行(刷新 TTL);否则在未满时加入。
+            if await self._redis.sismember(key, aid):
+                await self._redis.expire(key, 30)
+                return True
+            if await self._redis.scard(key) >= cap:
+                return False
+            await self._redis.sadd(key, aid)
+            await self._redis.expire(key, 30)
+            return True
+        except Exception:
+            return True  # 协调层故障不阻断借币
 
     async def _initiate_borrow(self, symbol: str, spread: SpreadSnapshot, eff_borrow: float, account_note: str):
         """Phase 1: borrow at 挂单点差(含开仓缓冲), hold idle。eff_borrow=借币点差+open_spread_buffer。"""

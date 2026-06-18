@@ -6,7 +6,7 @@ import dayjs from 'dayjs'
 
 type HistTab = 'closed' | 'loan'
 
-export function HistoryPage() {
+export function HistoryPage(_props: { onClose?: () => void; embedded?: boolean } = {}) {
   const [tab, setTab] = useState<HistTab>('closed')
   const tabCls = (t: HistTab) =>
     `px-3 py-1.5 text-xs border-b-2 transition-colors ${tab === t ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground'}`
@@ -180,7 +180,7 @@ function ClosedHistoryTab() {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[700px] text-[11px] border-collapse">
+        <table className="w-full md:min-w-[700px] text-[11px] border-collapse">
           <thead>
             <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
               <th className="px-3 py-1.5 text-left font-medium w-[90px] border-r border-border/50">日期</th>
@@ -402,7 +402,7 @@ function LoanHistoryTab() {
       {err && <div className="px-3 py-1.5 text-[11px] text-negative bg-negative/10 border-b border-negative/20">{err}</div>}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-[11px]">
+        <table className="w-full md:min-w-[640px] text-[11px]">
           <thead>
             <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
               <th className="px-3 py-1.5 text-left font-medium">时间</th>

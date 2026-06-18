@@ -451,7 +451,7 @@ function AnnouncementsTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px] text-sm">
+          <table className="w-full md:min-w-[600px] text-sm">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">标题</th>
@@ -542,7 +542,7 @@ function BlacklistTab() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[650px] text-sm">
+          <table className="w-full md:min-w-[650px] text-sm">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-3">币种</th>

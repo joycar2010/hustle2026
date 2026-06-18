@@ -139,3 +139,4 @@ class HealthResponse(BaseModel):
     uid_limit: int = 180000        # 单 UID 权重上限
     throttle_rate: float = 0.0  # per-symbol borrow throughput (req/s) under current weight headroom
     agg_borrow_rate: float = 0.0  # Σ per-account effective borrow rate (req/s)
+    single_borrow_rate: float = 0.0  # 单UID建仓速率: 单账户配速 min(borrow_rate_per_sec, UID硬顶) (req/s)

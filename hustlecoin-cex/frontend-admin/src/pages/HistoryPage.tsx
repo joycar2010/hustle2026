@@ -180,7 +180,7 @@ function ClosedHistoryTab() {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-[11px] border-collapse">
+        <table className="w-full md:min-w-[820px] text-[11px] border-collapse">
           <thead>
             <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
               <th className="px-3 py-1.5 text-left font-medium w-[90px] border-r border-border/50">日期</th>
@@ -401,7 +401,7 @@ function TradeLogsTab({ initialPositionId }: { initialPositionId: string }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-[11px] border-collapse">
+        <table className="w-full md:min-w-[900px] text-[11px] border-collapse">
           <thead>
             <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
               <th className="px-3 py-1.5 text-left font-medium">时间</th>
