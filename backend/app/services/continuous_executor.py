@@ -2360,19 +2360,18 @@ class ContinuousStrategyExecutor:
                 f"ratio={ratio:.2%}"
             )
 
+            # 20260619修(Direction-1回归): 不再因 Phase1(基于 exec_result 采信数字)通过就跳过 Phase2。
+            # Direction-1 下 B 侧成交量恒=请求量(HTTP200直接采信), ratio 几乎永远≥60% → Phase2
+            # (真查两侧实盘持仓的总量对账)永不执行 → 单腿探测被弄瞎(cq002 reverse_opening
+            # 9.362 vs 3 无告警实证)。改为: Phase1 仅作信息日志, Phase2 恒执行。本检查本就是
+            # asyncio.create_task 异步、在成交之后跑, 不阻塞 B 侧即时下单/策略续跑 —— 即
+            # "成交后查持仓": 既保即时成交能力, 又恢复单腿防线(实盘总量对账)。
             if ratio >= 0.60:
-                logger.info(
-                    f"[SINGLE_LEG_CHECK] Phase1 PASS: ratio={ratio:.2%} >= 60%, "
-                    f"skipping delayed check"
-                )
-                return
+                logger.info(f"[SINGLE_LEG_CHECK] Phase1 ratio={ratio:.2%}(采信值仅供参考) → 仍执行Phase2实盘对账")
+            else:
+                logger.warning(f"[SINGLE_LEG_CHECK] Phase1 ratio={ratio:.2%} < 60% → Phase2实盘对账")
 
-            logger.warning(
-                f"[SINGLE_LEG_CHECK] Phase1 MISMATCH: ratio={ratio:.2%} < 60%, "
-                f"waiting {self.delayed_single_leg_check_delay}s for Phase2 verification"
-            )
-
-            # ── Phase 2: delayed live-position verification ──
+            # ── Phase 2: delayed live-position verification (恒执行, 非阻塞) ──
             await asyncio.sleep(self.delayed_single_leg_check_delay)
 
             try:
@@ -2428,10 +2427,14 @@ class ContinuousStrategyExecutor:
                     f"gap={position_gap:.4f} XAU"
                 )
 
-                if position_gap <= binance_filled * 0.5:
+                # 容差下限(20260619): 防 MT5 手数量化(1手=conv_factor XAU, 最小0.01手)的正常小偏差
+                # 误报; conv_factor*0.02 ≈ 2个最小手数步长。真单腿(如 6.36 XAU 裸敞口)远超此容差,
+                # 不会被掩盖; 总量对账用绝对缺口而非单笔比例, 才能抓住"累计偏离"。
+                _gap_tol = max(binance_filled * 0.5, conv_factor * 0.02)
+                if position_gap <= _gap_tol:
                     logger.info(
                         f"[SINGLE_LEG_CHECK] Phase2 RESOLVED: gap={position_gap:.4f} "
-                        f"<= threshold={binance_filled * 0.5:.4f}, no alert"
+                        f"<= threshold={_gap_tol:.4f}, no alert"
                     )
                     return
 
