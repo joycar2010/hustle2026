@@ -2166,8 +2166,9 @@ class OrderExecutorV2:
             ticket = int(order_id)
             logger.info(f"[BYBIT_BUY] Order placed: ticket={ticket}")
 
-            # Wait for Bybit timeout (initial delay for order to enter market)
-            await asyncio.sleep(self.bybit_timeout)
+            # 重试退避：仅在 attempt>0 时等待，首次下单无需睡眠
+            if attempt > 0:
+                await asyncio.sleep(self.bybit_timeout)
 
             # ── 平仓确认：before/after 持仓 diff（取代之前的"HTTP 200 直接采信"） ──
             if close_position:
@@ -2188,136 +2189,18 @@ class OrderExecutorV2:
                     break
                 continue
 
-            # ── 개창 확인: 포지션 목록 직접 조회（deals polling 완전 대체） ────────────
-            # 문제: _check_mt5_filled_volume(deals history) 는 MT5 deal 레코드가
-            # history에 반영되는 데 수초 걸려 polling 3s + recheck 1s 동안 항상 0 반환.
-            # 해결: 주문 직후 MT5 포지션 목록을 직접 조회해 Long 포지션이 생겼는지 확인.
-            # 포지션 목록은 즉시 반영되므로 0.3-0.5s 이내에 결과를 확인할 수 있음.
-            actual_filled = 0
-            is_partial = False
-            check_count = 0
-            max_wait = self.mt5_deal_sync_wait   # 최대 대기 (fallback 용, 기본 3s)
-            elapsed = 0
-
-            logger.info(f"[BYBIT_BUY] 开仓确认：通过持仓列表验证（取代 deals polling）")
-
-            while elapsed < max_wait:
-                await asyncio.sleep(self.mt5_poll_interval)
-                elapsed += self.mt5_poll_interval
-                check_count += 1
-
-                try:
-                    mt5_client = _get_mt5_client_for_account(account)
-                    _pos_result = mt5_client.get_positions(symbol)
-                    positions = (await _pos_result) if inspect.isawaitable(_pos_result) else _pos_result
-                    pos_total = sum(
-                        float(p.get('volume', 0))
-                        for p in positions
-                        if int(p.get('type', -1)) == 0  # 0=Long(Buy)
-                    )
-                    actual_filled = min(pos_total, remaining)  # 持仓量作为成交量
-                    is_partial = actual_filled < remaining * self.partial_fill_threshold
-                    logger.info(
-                        f"[BYBIT_BUY] 持仓确认 #{check_count} ({elapsed:.1f}s): "
-                        f"pos_long={pos_total:.4f}, filled={actual_filled}/{remaining} Lot"
-                    )
-                    if actual_filled >= remaining * self.partial_fill_threshold:
-                        logger.info(f"[BYBIT_BUY] 持仓确认成交，早退出 ({elapsed:.1f}s)")
-                        break
-                except Exception as _pe:
-                    logger.warning(f"[BYBIT_BUY] 持仓查询失败 #{check_count}: {_pe}")
-                    # 查询失败不中断，继续等待下次轮询
-
-            logger.info(f"[BYBIT_BUY] Ticket {ticket} final result: {actual_filled} Lot (partial={is_partial})")
-
-            # ── 防连开/连平安全机制 ──────────────────────────────────────────────────
-            # MT5 Bridge 市价单下单成功（HTTP 200）即代表实际成交，deals history 仅作二次校验。
-            # 若 deals history 确认为 0（字段不匹配/查询延迟），不得直接进入 retry 重新下单，
-            # 否则会对同一 Binance 成交量重复开/平 Bybit 仓位。
-            #
-            # 确认策略（按场景区分）：
-            #   开仓 (close_position=False): 查新建多仓总量 ≥ required×90% → 视为成交
-            #   平仓 (close_position=True):  买入平空仓 → 主文单成功即代表成交，直接采信
-            #     （平仓不产生新持仓，且空仓减少后查Long仍为0，无法通过持仓量正向验证）
-            if actual_filled == 0 and result.get("success"):
-                logger.warning(
-                    f"[BYBIT_BUY] deals确认为0但主文单成功(ticket={ticket}，"
-                    f"close_position={close_position})，查询当前持仓作为最终确认..."
-                )
-                try:
-                    if close_position:
-                        # 平仓场景（买入平空）：主文单成功 = MT5 Bridge 已执行 → 直接采信
-                        # 平仓成功后空仓减少，无法用持仓增加来正向验证，
-                        # 但主文单 HTTP 200 已代表执行成功。
-                        actual_filled = remaining
-                        logger.info(
-                            f"[BYBIT_BUY] 平仓场景：主文单成功，直接采信 "
-                            f"{actual_filled:.4f} Lot 成交 (ticket={ticket})"
-                        )
-                    else:
-                        # 开仓场景（买入开多）：查询多头持仓总量
-                        mt5_client = _get_mt5_client_for_account(account)
-                        _pos_result = mt5_client.get_positions(symbol)
-                        positions = (await _pos_result) if inspect.isawaitable(_pos_result) else _pos_result
-                        pos_total = sum(
-                            float(p.get('volume', 0))
-                            for p in positions
-                            if int(p.get('type', -1)) == 0  # 0=Long(Buy)
-                        )
-                        if pos_total >= remaining * 0.9:
-                            actual_filled = remaining
-                            logger.info(
-                                f"[BYBIT_BUY] 开仓持仓确认: pos_long={pos_total:.4f} ≥ "
-                                f"{remaining*0.9:.4f}, 采信 {actual_filled:.4f} Lot (ticket={ticket})"
-                            )
-                        else:
-                            logger.warning(
-                                f"[BYBIT_BUY] 开仓持仓不足: pos_long={pos_total:.4f} < "
-                                f"{remaining*0.9:.4f}, 判定真实未成交 (ticket={ticket})"
-                            )
-                except Exception as _pos_e:
-                    logger.warning(f"[BYBIT_BUY] 持仓确认查询失败: {_pos_e}")
-
-            if actual_filled > 0:
-                total_filled += actual_filled
-
-                # Send alert if partial fill detected
-                if is_partial and actual_filled < remaining * 0.5:
-                    await self._send_partial_fill_alert(
-                        account.user_id,
-                        symbol,
-                        remaining,
-                        actual_filled,
-                        ticket
-                    )
-                    print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
-
-                if actual_filled >= remaining * self.partial_fill_threshold:
-                    # Consider 90%+ as fully filled (降低从95%)
-                    logger.info(
-                        f"[BYBIT_BUY] Order considered fully filled: "
-                        f"{actual_filled}/{remaining} = {actual_filled/remaining*100:.1f}% "
-                        f"(threshold: {self.partial_fill_threshold*100:.0f}%)"
-                    )
-                    break
-
-                # Partially filled — update remaining and retry for the rest
-                remaining = round(remaining - actual_filled, 2)
-
-                if attempt == self.max_retries:
-                    # Last attempt, log warning
-                    logger.warning(f"[BYBIT_BUY] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
-            else:
-                # No fill detected on this attempt — continue to next retry.
-                # DO NOT break: MT5 bridge may lag or the order may fill on the next
-                # attempt. Breaking here wastes the remaining {max_retries - attempt} retries.
-                logger.warning(
-                    f"[BYBIT_BUY] No fill detected for ticket {ticket} "
-                    f"(attempt {attempt + 1}/{self.max_retries + 1}), "
-                    f"{'last attempt' if attempt == self.max_retries else 'retrying with new order...'}"
-                )
-                if attempt == self.max_retries:
-                    break  # Exhausted all retries, give up
+            # ── 开仓确认（方向一）: 直接信任 HTTP 200 ─────────────────────────────
+            # MT5 market order 同步撮合语义：order_send() 阻塞直到 broker 成交，
+            # HTTP 200 返回时单已成交，直接采信。
+            # 旧的持仓轮询 min(pos_total, remaining) 仅对首单(pos_before=0)正确；
+            # 多单累积场景 pos_total>=remaining 导致首次轮询假阳性，已弃用。
+            actual_filled = remaining
+            total_filled += actual_filled
+            logger.info(
+                f"[BYBIT_BUY] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
+                f"(直接采信，无持仓轮询)"
+            )
+            break
 
         logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
         return {"filled_qty": total_filled, "avg_price": total_avg_price}
@@ -2405,8 +2288,9 @@ class OrderExecutorV2:
             ticket = int(order_id)
             logger.info(f"[BYBIT_SELL] Order placed: ticket={ticket}")
 
-            # Wait for Bybit timeout
-            await asyncio.sleep(self.bybit_timeout)
+            # 重试退避：仅在 attempt>0 时等待，首次下单无需睡眠
+            if attempt > 0:
+                await asyncio.sleep(self.bybit_timeout)
 
             # ── 平仓确认：before/after 持仓 diff（取代之前的"HTTP 200 直接采信"） ──
             # HTTP 200 仅代表指令已提交到 MT5 终端，不代表 broker 实际成交。
@@ -2430,131 +2314,18 @@ class OrderExecutorV2:
                     break
                 continue
 
-            # ── 开仓确认: 포지션 목록 직접 조회（deals polling 완전 대체） ────────────
-            # deals history는 MT5 반영까지 수초 지연되어 항상 0 반환.
-            # Short 포지션 목록은 즉시 반영되어 0.3~0.5s 이내 확인 가능.
-            max_wait = self.mt5_deal_sync_wait
-            elapsed = 0
-            actual_filled = 0
-            is_partial = False
-            check_count = 0
-
-            logger.info(f"[BYBIT_SELL] 开仓确认：通过持仓列表验证（取代 deals polling）")
-
-            while elapsed < max_wait:
-                await asyncio.sleep(self.mt5_poll_interval)
-                elapsed += self.mt5_poll_interval
-                check_count += 1
-
-                try:
-                    mt5_client = _get_mt5_client_for_account(account)
-                    _pos_result = mt5_client.get_positions(symbol)
-                    positions = (await _pos_result) if inspect.isawaitable(_pos_result) else _pos_result
-                    pos_total = sum(
-                        float(p.get('volume', 0))
-                        for p in positions
-                        if int(p.get('type', -1)) == 1  # 1=Short(Sell)
-                    )
-                    actual_filled = min(pos_total, remaining)
-                    is_partial = actual_filled < remaining * self.partial_fill_threshold
-                    logger.info(
-                        f"[BYBIT_SELL] 持仓确认 #{check_count} ({elapsed:.1f}s): "
-                        f"pos_short={pos_total:.4f}, filled={actual_filled}/{remaining} Lot"
-                    )
-                    if actual_filled >= remaining * self.partial_fill_threshold:
-                        logger.info(f"[BYBIT_SELL] 持仓确认成交，早退出 ({elapsed:.1f}s)")
-                        break
-                except Exception as _pe:
-                    logger.warning(f"[BYBIT_SELL] 持仓查询失败 #{check_count}: {_pe}")
-
-            logger.info(f"[BYBIT_SELL] Ticket {ticket} filled: {actual_filled} Lot (partial={is_partial})")
-
-            # ── 防连开/连平安全机制 ──────────────────────────────────────────────────
-            # MT5 Bridge 市价单下单成功（HTTP 200）即代表实际成交，deals history 仅作二次校验。
-            # 若 deals history 确认为 0，不得直接 retry 重新下单。
-            #
-            # 确认策略（按场景区分）：
-            #   开仓 (close_position=False): 卖出开空 → 查空头持仓总量 ≥ required×90% → 采信
-            #   平仓 (close_position=True):  卖出平多 → 主文单成功即代表成交，直接采信
-            #     （平仓后多仓减少，无法通过持仓"增加"正向验证，主文单已足够）
-            if actual_filled == 0 and result.get("success"):
-                logger.warning(
-                    f"[BYBIT_SELL] deals确认为0但主文单成功(ticket={ticket}，"
-                    f"close_position={close_position})，查询当前持仓作为最终确认..."
-                )
-                try:
-                    if close_position:
-                        # 平仓场景（卖出平多）：主文单成功 = MT5 Bridge 已执行 → 直接采信
-                        # 平仓后多仓减少，无法用持仓增加正向验证。
-                        actual_filled = remaining
-                        logger.info(
-                            f"[BYBIT_SELL] 平仓场景：主文单成功，直接采信 "
-                            f"{actual_filled:.4f} Lot 成交 (ticket={ticket})"
-                        )
-                    else:
-                        # 开仓场景（卖出开空）：查询空头持仓总量
-                        mt5_client = _get_mt5_client_for_account(account)
-                        _pos_result = mt5_client.get_positions(symbol)
-                        positions = (await _pos_result) if inspect.isawaitable(_pos_result) else _pos_result
-                        pos_total = sum(
-                            float(p.get('volume', 0))
-                            for p in positions
-                            if int(p.get('type', -1)) == 1  # 1=Short(Sell)
-                        )
-                        if pos_total >= remaining * 0.9:
-                            actual_filled = remaining
-                            logger.info(
-                                f"[BYBIT_SELL] 开仓持仓确认: pos_short={pos_total:.4f} ≥ "
-                                f"{remaining*0.9:.4f}, 采信 {actual_filled:.4f} Lot (ticket={ticket})"
-                            )
-                        else:
-                            logger.warning(
-                                f"[BYBIT_SELL] 开仓持仓不足: pos_short={pos_total:.4f} < "
-                                f"{remaining*0.9:.4f}, 判定真实未成交 (ticket={ticket})"
-                            )
-                except Exception as _pos_e:
-                    logger.warning(f"[BYBIT_SELL] 持仓确认查询失败: {_pos_e}")
-
-            if actual_filled > 0:
-                total_filled += actual_filled
-
-                # Send alert if partial fill detected
-                if is_partial and actual_filled < remaining * 0.5:
-                    await self._send_partial_fill_alert(
-                        account.user_id,
-                        symbol,
-                        remaining,
-                        actual_filled,
-                        ticket
-                    )
-                    print(f"MT5 partial fill warning: {actual_filled}/{remaining} Lot (ticket: {ticket})")
-
-                if actual_filled >= remaining * self.partial_fill_threshold:
-                    # Consider 90%+ as fully filled (降低从95%)
-                    logger.info(
-                        f"[BYBIT_SELL] Order considered fully filled: "
-                        f"{actual_filled}/{remaining} = {actual_filled/remaining*100:.1f}% "
-                        f"(threshold: {self.partial_fill_threshold*100:.0f}%)"
-                    )
-                    break
-
-                # Partially filled — update remaining and retry for the rest
-                remaining = round(remaining - actual_filled, 2)
-
-                if attempt == self.max_retries:
-                    # Last attempt, log warning
-                    logger.warning(f"[BYBIT_SELL] Not fully filled after {self.max_retries + 1} attempts. Filled: {total_filled} Lot, Remaining: {remaining} Lot")
-            else:
-                # No fill detected on this attempt — continue to next retry.
-                # DO NOT break: MT5 bridge may lag or the order may fill on the next
-                # attempt. Breaking here wastes the remaining {max_retries - attempt} retries.
-                logger.warning(
-                    f"[BYBIT_SELL] No fill detected for ticket {ticket} "
-                    f"(attempt {attempt + 1}/{self.max_retries + 1}), "
-                    f"{'last attempt' if attempt == self.max_retries else 'retrying with new order...'}"
-                )
-                if attempt == self.max_retries:
-                    break  # Exhausted all retries, give up
+            # ── 开仓确认（方向一）: 直接信任 HTTP 200 ─────────────────────────────
+            # MT5 market order 同步撮合语义：order_send() 阻塞直到 broker 成交，
+            # HTTP 200 返回时单已成交，直接采信。
+            # 旧的持仓轮询 min(pos_total, remaining) 仅对首单(pos_before=0)正确；
+            # 多单累积场景 pos_total>=remaining 导致首次轮询假阳性，已弃用。
+            actual_filled = remaining
+            total_filled += actual_filled
+            logger.info(
+                f"[BYBIT_SELL] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
+                f"(直接采信，无持仓轮询)"
+            )
+            break
 
         logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
         return {"filled_qty": total_filled, "avg_price": total_avg_price}
