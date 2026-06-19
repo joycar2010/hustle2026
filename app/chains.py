@@ -24,6 +24,11 @@ CHAINS = {
     "ETH":  Chain("ETH",  1,     "ethereum", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6,  5_000_000, 2500),
     "BSC":  Chain("BSC",  56,    "bsc",      "0x55d398326f99059fF775485246999027B3197955", 18, 3_000_000, 2500),
     "ARB":  Chain("ARB",  42161, "arbitrum", "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", 6,  2_000_000, 2500),
+    # 第二批(实测 KyberSwap✅ + 币安永续✅ + 深池 + 低gas)
+    "OP":   Chain("OP",   10,    "optimism", "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", 6,  2_000_000, 2500),  # USDC原生
+    "AVAX": Chain("AVAX", 43114, "avalanche","0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", 6,  2_000_000, 2500),  # USDC原生
+    "POLY": Chain("POLY", 137,   "polygon",  "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", 6,  2_000_000, 2500),  # USDC原生
+    "SONIC":Chain("SONIC",146,   "sonic",    "0x29219dd400f2Bf60E5a23d13Be72B486D4038894", 6,  1_000_000, 2500),  # USDC.e(探索位)
 }
 
 

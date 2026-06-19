@@ -63,6 +63,26 @@ DEFAULT_MARKETS = [
     Market("ARB:BTC",  "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", 8,  0, "BTCUSDT",  source="agg", chain="ARB"),
     Market("ARB:GMX",  "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a", 18, 0, "GMXUSDT",  source="agg", chain="ARB"),
     Market("ARB:LINK", "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", 18, 0, "LINKUSDT", source="agg", chain="ARB"),
+
+    # —— Optimism(OP-Stack,同Base风险画像,gas极低)——
+    Market("OP:ETH",  "0x4200000000000000000000000000000000000006", 18, 0, "ETHUSDT", source="agg", chain="OP"),
+    Market("OP:OP",   "0x4200000000000000000000000000000000000042", 18, 0, "OPUSDT",  source="agg", chain="OP"),
+    Market("OP:BTC",  "0x68f180fcCe6836688e9084f035309E29Bf0A2095", 8,  0, "BTCUSDT", source="agg", chain="OP"),
+
+    # —— Avalanche(独立L1,gas近免费~1-2s终局,相关性低)——
+    Market("AVAX:AVAX", "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", 18, 0, "AVAXUSDT", source="agg", chain="AVAX"),
+    Market("AVAX:ETH",  "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", 18, 0, "ETHUSDT",  source="agg", chain="AVAX"),
+    Market("AVAX:BTC",  "0x152b9d0FdC40C096757F570A51E494bd4b943E50", 8,  0, "BTCUSDT",  source="agg", chain="AVAX"),
+    Market("AVAX:JOE",  "0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd", 18, 0, "JOEUSDT",  source="agg", chain="AVAX"),
+
+    # —— Polygon(老牌深流动性)——
+    Market("POLY:POL",  "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", 18, 0, "POLUSDT",  source="agg", chain="POLY"),
+    Market("POLY:ETH",  "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", 18, 0, "ETHUSDT",  source="agg", chain="POLY"),
+    Market("POLY:BTC",  "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6", 8,  0, "BTCUSDT",  source="agg", chain="POLY"),
+
+    # —— Sonic(新高性能链,探索位:新链错价红利)——
+    Market("SONIC:S",   "0x039e2fB66102314Ce7b64Ce5Ce3E5183bc94aD38", 18, 0, "SUSDT",   source="agg", chain="SONIC"),
+    Market("SONIC:ETH", "0x50c42dEAcD8Fc9773493ED674b675bE577f2634b", 18, 0, "ETHUSDT", source="agg", chain="SONIC"),
 ]
 
 
