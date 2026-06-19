@@ -33,6 +33,9 @@ class Collector(threading.Thread):
         self._stop = threading.Event()
         workers = min(cfg.rpc_concurrency, max(1, len(self.markets)))
         self._pool = ThreadPoolExecutor(max_workers=workers)
+        # 按链缓存最近一次有效 gas_usd(KyberSwap 偶发不返回 gasUsd 时按链兜底,绝不跨链)
+        self._gas_lock = threading.Lock()
+        self._last_gas: dict[str, float] = {}
 
     def stop(self):
         self._stop.set()
@@ -62,13 +65,26 @@ class Collector(threading.Thread):
             self.state.record_error(m.key, f"DEX报价失败 {type(e).__name__}: {e}")
             return
         t = tickers[sym]
-        # 按链 gas:agg 源必须用 KyberSwap 路由自带 gasUsd(各链真实,ETH主网随拥堵变);
-        # 缺失则丢该拍(绝不回退到 Base 的小 gas,否则非Base链净基差虚高);univ3(仅Base)用共享Base gas
+        # 按链 gas:agg 源优先用 KyberSwap 路由自带 gasUsd(各链真实,ETH主网随拥堵变)。
+        # 偶发缺失时按链兜底,绝不跨链用错 gas:
+        #   - Base 链:有同链共享 oracle gas(gas_usd 参数),直接用;
+        #   - 其他链:用该链最近一次有效 gasUsd 缓存;
+        #   - 都没有(该链首拍就缺):才丢该拍。
         if m.source == "agg":
-            if q.gas_usd is None:
-                self.state.record_error(m.key, "kyber无gasUsd,丢该拍(避免用错链gas)")
-                return
-            gas = q.gas_usd
+            if q.gas_usd is not None and q.gas_usd > 0:
+                gas = q.gas_usd
+                with self._gas_lock:
+                    self._last_gas[m.chain] = gas
+            else:
+                with self._gas_lock:
+                    cached = self._last_gas.get(m.chain)
+                if m.chain == "BASE":
+                    gas = gas_usd  # 同链共享 Base oracle,正确
+                elif cached is not None:
+                    gas = cached
+                else:
+                    self.state.record_error(m.key, f"kyber无gasUsd且{m.chain}无缓存gas,丢该拍")
+                    return
         else:
             gas = gas_usd
         r = compute_spread(
