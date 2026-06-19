@@ -1,0 +1,10 @@
+[Unit]
+Description=Trigger CrossArb daily Feishu report
+
+[Timer]
+# 每日 01:00 UTC = 09:00 北京时间(早间日报)。机器时区为 UTC。
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

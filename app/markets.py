@@ -35,7 +35,13 @@ DEFAULT_MARKETS = [
            pool="0xfBB6Eed8e7aa03B138556eeDaF5D271A5E1e43ef"),
     Market("BASE:VIRTUAL", "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", 18, 3000, "VIRTUALUSDT",
            pool="0x529d2863a1521d0b57db028168fdE2E97120017C"),
+    Market("BASE:AERO",    "0x940181a94A35A4569E4529A3CDfB74e38FD98631", 18, 500,  "AEROUSDT",
+           pool="0xE5B5f522E98B5a2baAe212d4dA66b865B781DB97"),
+    Market("BASE:AIXBT",   "0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825", 18, 3000, "AIXBTUSDT",
+           pool="0xf1Fdc83c3A336bdbDC9fB06e318B08EadDC82FF4"),
 ]
+# 注:BRETT/ZORA/KAITO/ZRO/TOSHI/MORPHO 经探测在 Uniswap V3 上无足够深 USDC 池
+#     (eff 价偏离币安极大,真实流动性在 Aerodrome)。覆盖它们需 P1 加 Aerodrome 适配器。
 
 
 def load_markets() -> list[Market]:

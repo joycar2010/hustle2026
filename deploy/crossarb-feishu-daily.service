@@ -1,0 +1,11 @@
+[Unit]
+Description=CrossArb daily Feishu report (oneshot)
+After=network.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=-@APP_DIR@/.env
+Environment=PYTHONUTF8=1
+ExecStart=@APP_DIR@/.venv/bin/python -m app.feishu_daily

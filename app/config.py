@@ -58,5 +58,10 @@ class Config:
     http_port: int = int(_get("CROSSARB_HTTP_PORT", "8100"))
     redis_url: str = _get("CROSSARB_REDIS_URL", "")
 
+    # 飞书每日播报(自建应用):app_id/secret + 收件人 open_id;留空则不发
+    feishu_app_id: str = _get("CROSSARB_FEISHU_APP_ID", "")
+    feishu_app_secret: str = _get("CROSSARB_FEISHU_APP_SECRET", "")
+    feishu_open_id: str = _get("CROSSARB_FEISHU_OPEN_ID", "")
+
 
 cfg = Config()
