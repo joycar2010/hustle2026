@@ -34,10 +34,8 @@ DEFAULT_MARKETS = [
            pool="0xd0b53D9277642d899DF5C87A3966A349A798F224"),
     Market("BASE:BTC",     "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",  8, 500,  "BTCUSDT",
            pool="0xfBB6Eed8e7aa03B138556eeDaF5D271A5E1e43ef"),
-    Market("BASE:VIRTUAL", "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", 18, 3000, "VIRTUALUSDT",
-           pool="0x529d2863a1521d0b57db028168fdE2E97120017C"),
-    Market("BASE:AERO",    "0x940181a94A35A4569E4529A3CDfB74e38FD98631", 18, 500,  "AEROUSDT",
-           pool="0xE5B5f522E98B5a2baAe212d4dA66b865B781DB97"),
+    Market("BASE:VIRTUAL", "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", 18, 0, "VIRTUALUSDT", source="agg"),
+    Market("BASE:AERO",    "0x940181a94A35A4569E4529A3CDfB74e38FD98631", 18, 0, "AEROUSDT",    source="agg"),
     # —— 以下走 KyberSwap 聚合器(深流动性在 Slipstream CL/经WETH,经发现脚本验证 $2500 深度 ratio≈1.01)——
     # notional 按池深度定:深的用 $2500,浅的缩小到滑点可控档(发现脚本实测)
     Market("BASE:BRETT",   "0x532f27101965dd16442E59d40670FaF5eBB142E4", 18, 0, "BRETTUSDT",   source="agg"),
