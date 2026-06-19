@@ -53,12 +53,12 @@ class Config:
     # 深度探测:沿名义额阶梯找滑点≤容忍线的最大可执行额(spec 3.3/5.1 可执行量)
     depth_ladder: str = _get("CROSSARB_DEPTH_LADDER", "1000,2500,5000,10000")
     depth_slip_tol_bps: float = float(_get("CROSSARB_DEPTH_SLIP_TOL_BPS", "30"))  # 可执行额的滑点容忍线
-    depth_every_n: int = int(_get("CROSSARB_DEPTH_EVERY_N", "2"))  # 每 N 拍才探测1个市场(降聚合器负载)
+    depth_every_n: int = int(_get("CROSSARB_DEPTH_EVERY_N", "4"))  # 每 N 拍才探测1个市场(降聚合器负载)
     # 并行报价并发度。公共 RPC(mainnet.base.org)严格限频,建议 1-2;
     # Alchemy/QuickNode 端点可放到 8+。默认 2 求稳。
     rpc_concurrency: int = int(_get("CROSSARB_RPC_CONCURRENCY", "2"))
     kyber_client_id: str = _get("CROSSARB_KYBER_CLIENT_ID", "crossarb")  # 聚合器 x-client-id
-    kyber_min_interval: float = float(_get("CROSSARB_KYBER_MIN_INTERVAL", "0.12"))  # 聚合器请求最小间隔(秒),防429
+    kyber_min_interval: float = float(_get("CROSSARB_KYBER_MIN_INTERVAL", "0.16"))  # 聚合器请求最小间隔(秒),防429
 
     csv_path: str = _get("CROSSARB_CSV", "./data/ticks.csv")
     http_host: str = _get("CROSSARB_HTTP_HOST", "127.0.0.1")  # nginx 在前,默认只听本机
