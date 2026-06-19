@@ -206,5 +206,13 @@ def build_report(csv_path, threshold, depth=None):
     if depth:
         for m in data.get("markets", []):
             m["depth"] = depth.get(m["market"])
+    # 合并 focus 标志(聚焦主流币市场,薄meme降权显示)
+    try:
+        from .markets import load_markets
+        fmap = {mm.key: mm.focus for mm in load_markets()}
+        for m in data.get("markets", []):
+            m["focus"] = fmap.get(m["market"], False)
+    except Exception:  # noqa: BLE001
+        pass
     return data
 

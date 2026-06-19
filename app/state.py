@@ -136,10 +136,15 @@ class State:
             return dict(self._depth)
 
     def snapshot(self) -> dict:
+        from .markets import load_markets
+        focus_map = {m.key: m.focus for m in load_markets()}
+        chain_map = {m.key: m.chain for m in load_markets()}
         with self._lock:
             markets = [self._stats[k].view(k) for k in sorted(self._stats)]
             for m in markets:
                 m["depth"] = self._depth.get(m["market"])
+                m["focus"] = focus_map.get(m["market"], False)
+                m["chain"] = chain_map.get(m["market"], m["market"].split(":")[0])
             total_samples = sum(m["samples"] for m in markets)
             total_opp = sum(m["opp_count"] for m in markets)
             total_err = sum(m["errors"] for m in markets)

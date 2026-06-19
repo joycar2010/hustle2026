@@ -39,6 +39,7 @@
     <span>机会阈值 net &gt;</span>
     <input type="number" id="thr" step="1" value="20" /> <span>bps</span>
     <button onclick="load()" style="background:#1e2433;color:#cdd6f4;border:1px solid #2a3142;border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit;">重算</button>
+    <label style="cursor:pointer;color:#89b4fa;"><input type="checkbox" id="focusonly" onchange="load()" style="vertical-align:middle"/> 仅看 ★ 聚焦市场(主流币+深池+P1候选)</label>
     <span id="meta" style="color:#6c7086;"></span>
   </div>
 
@@ -90,9 +91,9 @@ function marketCard(m, thr){
   } else {
     depthHtml = `<div class="stats" style="margin-top:2px;color:#6c7086">可执行额: 探测中…</div>`;
   }
-  return `<div class="card">
+  return `<div class="card" style="${m.focus?'border-color:#3b5278':'opacity:0.62'}">
     <div class="mh">
-      <span class="mkt">${m.market} <span style="color:#6c7086;font-size:12px;font-weight:400">/ ${m.binance_symbol}</span></span>
+      <span class="mkt">${m.focus?'<span title="聚焦:主流币+深池+P1候选" style="color:#89b4fa">★</span> ':''}${m.market} <span style="color:#6c7086;font-size:12px;font-weight:400">/ ${m.binance_symbol}</span></span>
       <span>样本 <b>${m.samples}</b> · 机会 <b class="${m.opp_count>0?'op':''}">${m.opp_count}</b> (<b class="${m.opp_rate_pct>0?'op':''}">${fmt(m.opp_rate_pct,3)}%</b>)</span>
     </div>
     <div class="stats">
@@ -156,8 +157,14 @@ async function load(){
       `<b>全市场合计</b>:样本 <b>${T.samples}</b> · 达标机会 <b class="${T.opp_count>0?'op':''}">${T.opp_count}</b> (<b class="${T.opp_count>0?'op':''}">${fmt(T.opp_rate_pct,3)}%</b>) @ 阈值 ${thr}bps`;
     document.getElementById('equitybox').innerHTML=equityBox(s,thr);
     document.getElementById('topbox').innerHTML=topBox(s);
-    const mkts=(s.markets||[]).slice().sort((a,b)=>
-      (b.opp_count-a.opp_count) || ((b.net&&b.net.max||-1e9)-(a.net&&a.net.max||-1e9)));
+    const focusOnly=document.getElementById('focusonly') && document.getElementById('focusonly').checked;
+    let mkts=(s.markets||[]).slice();
+    if(focusOnly) mkts=mkts.filter(m=>m.focus);
+    // 排序:聚焦优先 → 机会数降序 → 净基差峰值降序
+    mkts.sort((a,b)=>
+      ((b.focus?1:0)-(a.focus?1:0))
+      || (b.opp_count-a.opp_count)
+      || ((b.net&&b.net.max||-1e9)-(a.net&&a.net.max||-1e9)));
     document.getElementById('markets').innerHTML=mkts.map(m=>marketCard(m,thr)).join('') || '<div class="stats">暂无数据(等采集落盘)。</div>';
   }catch(e){ document.getElementById('markets').innerHTML='<div class="neg">拉取失败: '+e+'</div>'; }
 }

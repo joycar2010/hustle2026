@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .agg_quoter import AggQuoter
 from .binance_feed import BinanceFutFeed
+from .chains import chain_of
 from .config import cfg
 from .depth import probe_depth
 from .dex_quoter import Quoter
@@ -92,13 +93,15 @@ class Collector(threading.Thread):
                     return
         else:
             gas = gas_usd
+        # 按链回收成本(链上现货搬回币安的提现/桥费):ETH主网贵≈12bps,L2≈1.2bps
+        recycle = chain_of(m.chain).recycle_bps
         r = compute_spread(
             market=m.key, binance_symbol=sym, ts=ts,
             dex_eff_price=q.eff_price, dex_mid_price=q.mid_price,
             base_out=q.base_out, slippage_bps=q.slippage_bps,
             gas_usd=gas, fut_bid=t["bid"], fut_ask=t["ask"],
             notional_usd=m.notional_usd or cfg.notional_usd,
-            taker_fee_bps=cfg.taker_fee_bps, recycle_bps=cfg.recycle_bps,
+            taker_fee_bps=cfg.taker_fee_bps, recycle_bps=recycle,
             min_net_bps=cfg.min_net_bps, exit_floor_bps=cfg.exit_floor_bps,
         )
         self.state.record(r)
