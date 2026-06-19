@@ -46,6 +46,7 @@ class Config:
     gas_units: int = int(_get("CROSSARB_GAS_UNITS", "150000"))
     l1_fee_usd: float = float(_get("CROSSARB_L1_FEE_USD", "0.05"))
     recycle_bps: float = float(_get("CROSSARB_RECYCLE_BPS", "0"))
+    exit_floor_bps: float = float(_get("CROSSARB_EXIT_FLOOR_BPS", "5"))  # 退出滑点下限(深币聚合器报~0时兜底,保守)
 
     min_net_bps: float = float(_get("CROSSARB_MIN_NET_BPS", "20"))
     poll_sec: float = float(_get("CROSSARB_POLL_SEC", "5"))

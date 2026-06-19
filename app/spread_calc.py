@@ -68,12 +68,14 @@ def compute_spread(
     taker_fee_bps: float,
     recycle_bps: float,
     min_net_bps: float,
+    exit_floor_bps: float = 0.0,
 ) -> SpreadResult:
     base_price = dex_mid_price if dex_mid_price > 0 else dex_eff_price
 
     gross_bps = (fut_bid - dex_eff_price) / dex_eff_price * 1e4
     gas_bps = gas_usd / notional_usd * 1e4 if notional_usd > 0 else 0.0
-    exit_dex_bps = max(slippage_bps, 0.0)
+    # 退出侧成本:入场滑点对称近似;但深币聚合器可能报 ~0,设一档池费下限防 net 偏乐观
+    exit_dex_bps = max(slippage_bps, exit_floor_bps)
 
     net_entry_bps = gross_bps - taker_fee_bps - gas_bps - recycle_bps
     net_bps = gross_bps - 2 * taker_fee_bps - 2 * gas_bps - exit_dex_bps - recycle_bps
