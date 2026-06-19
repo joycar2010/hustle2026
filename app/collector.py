@@ -40,6 +40,7 @@ class Collector(threading.Thread):
         # 深度探测:解析名义额阶梯 + 轮转游标(每拍只探测 1 个市场,避免限频)
         self._ladder = [float(x) for x in cfg.depth_ladder.split(",") if x.strip()]
         self._depth_cursor = 0
+        self._tick_no = 0
 
     def stop(self):
         self._stop.set()
@@ -131,6 +132,9 @@ class Collector(threading.Thread):
     def _probe_one_depth(self, ts):
         if not self.markets or not self._ladder:
             return
+        self._tick_no += 1
+        if cfg.depth_every_n > 1 and (self._tick_no % cfg.depth_every_n) != 0:
+            return  # 降频:每 N 拍才探测一次,减轻聚合器负载
         m = self.markets[self._depth_cursor % len(self.markets)]
         self._depth_cursor += 1
         try:

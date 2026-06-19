@@ -51,8 +51,9 @@ class Config:
     min_net_bps: float = float(_get("CROSSARB_MIN_NET_BPS", "20"))
     poll_sec: float = float(_get("CROSSARB_POLL_SEC", "5"))
     # 深度探测:沿名义额阶梯找滑点≤容忍线的最大可执行额(spec 3.3/5.1 可执行量)
-    depth_ladder: str = _get("CROSSARB_DEPTH_LADDER", "1000,2500,5000,10000,20000")
+    depth_ladder: str = _get("CROSSARB_DEPTH_LADDER", "1000,2500,5000,10000")
     depth_slip_tol_bps: float = float(_get("CROSSARB_DEPTH_SLIP_TOL_BPS", "30"))  # 可执行额的滑点容忍线
+    depth_every_n: int = int(_get("CROSSARB_DEPTH_EVERY_N", "2"))  # 每 N 拍才探测1个市场(降聚合器负载)
     # 并行报价并发度。公共 RPC(mainnet.base.org)严格限频,建议 1-2;
     # Alchemy/QuickNode 端点可放到 8+。默认 2 求稳。
     rpc_concurrency: int = int(_get("CROSSARB_RPC_CONCURRENCY", "2"))
