@@ -6,6 +6,18 @@
 **只读。零交易、零私钥、零生产接触。** 与生产 `hustlecoin-cex` 完全独立:
 独立目录、独立 `CROSSARB_` 配置、独立端口 8100、可选独立 `crossarb:*` Redis 命名空间。
 
+## 获取代码(测试机)
+
+托管于 GitHub `joycar2010/hustle2026`,分支 **`dex`**(本分支仅含本项目)。在独立东京测试机上:
+
+```bash
+git clone -b dex https://github.com/joycar2010/hustle2026.git crossarb
+cd crossarb
+# 之后按下面"跑起来",或直接用"测试机一键部署"
+```
+
+后续更新拉取:`git pull origin dex`。
+
 ## 跑起来
 
 ```bash
