@@ -26,7 +26,12 @@ _load_dotenv()
 
 
 def _get(name: str, default: str) -> str:
-    return os.environ.get(name, default)
+    # 容忍行内 # 注释:systemd EnvironmentFile 与 .env 都不剥离注释,
+    # 若值里带 "...  # 说明" 会污染 float()/int() 解析,这里统一剥离。
+    v = os.environ.get(name, default)
+    if isinstance(v, str) and "#" in v:
+        v = v.split("#", 1)[0]
+    return v.strip() if isinstance(v, str) else v
 
 
 class Config:
