@@ -34,7 +34,7 @@
       <thead><tr>
         <th class="l">市场</th><th class="l">币安</th>
         <th>net(往返)</th><th>入场净</th><th>gross</th><th>base价</th>
-        <th>滑点bps</th><th>gas$</th><th>机会率</th><th>net峰值</th><th>样本/错</th>
+        <th>滑点bps</th><th>可执行额</th><th>gas$</th><th>机会率</th><th>net峰值</th><th>样本/错</th>
       </tr></thead>
       <tbody id="mkts"></tbody>
     </table>
@@ -75,6 +75,11 @@ async function tick(){
 
     document.getElementById('mkts').innerHTML=applyFilter(s.markets).map(m=>{
       const L=m.last||{};
+      const D=m.depth||null;
+      const dtxt = D ? ('$'+(D.max_exec_usd>=1000?(D.max_exec_usd/1000).toFixed(D.max_exec_usd>=10000?0:1)+'k':D.max_exec_usd))
+                     : '<span style="color:#6c7086">…</span>';
+      const dcls = D ? (D.max_exec_usd>=2500?'pos':(D.max_exec_usd>0?'warn':'neg')) : '';
+      const dttl = D ? ('滑点≤'+D.slip_tol_bps+'bps的最大可执行额 · 阶梯 '+D.ladder.map(x=>'$'+x[0]+':'+x[1]+'bp').join(' ')) : '深度探测中(每拍轮转1个市场)';
       return `<tr>
         <td class="l mkt">${m.market}</td><td class="l">${m.binance_symbol||'—'}</td>
         <td class="big ${cls(L.net_bps)}">${fmt(L.net_bps,2)}</td>
@@ -82,6 +87,7 @@ async function tick(){
         <td class="${cls(L.gross_bps)}">${fmt(L.gross_bps,2)}</td>
         <td>${fmt(L.base_price, L.base_price>100?2:4)}</td>
         <td>${fmt(L.slippage_bps,1)}</td>
+        <td class="${dcls}" title="${dttl}">${dtxt}</td>
         <td>${fmt(L.gas_usd,3)}</td>
         <td class="${m.opp_rate_pct>0?'op':''}">${fmt(m.opp_rate_pct,2)}% (${m.opp_count})</td>
         <td class="${cls(m.net_bps_max)}">${fmt(m.net_bps_max,1)}</td>

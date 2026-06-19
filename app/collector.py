@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .agg_quoter import AggQuoter
 from .binance_feed import BinanceFutFeed
 from .config import cfg
+from .depth import probe_depth
 from .dex_quoter import Quoter
 from .markets import load_markets
 from .spread_calc import compute_spread
@@ -36,6 +37,9 @@ class Collector(threading.Thread):
         # 按链缓存最近一次有效 gas_usd(KyberSwap 偶发不返回 gasUsd 时按链兜底,绝不跨链)
         self._gas_lock = threading.Lock()
         self._last_gas: dict[str, float] = {}
+        # 深度探测:解析名义额阶梯 + 轮转游标(每拍只探测 1 个市场,避免限频)
+        self._ladder = [float(x) for x in cfg.depth_ladder.split(",") if x.strip()]
+        self._depth_cursor = 0
 
     def stop(self):
         self._stop.set()
@@ -118,5 +122,20 @@ class Collector(threading.Thread):
                 except Exception:  # noqa: BLE001
                     pass  # _one_market 内部已记 error
 
+            # 每拍轮转探测 1 个市场的深度(可执行最大额),避免一次性打爆 RPC/聚合器
+            self._probe_one_depth(ts)
+
             elapsed = time.time() - t0
             self._stop.wait(max(0.0, cfg.poll_sec - elapsed))
+
+    def _probe_one_depth(self, ts):
+        if not self.markets or not self._ladder:
+            return
+        m = self.markets[self._depth_cursor % len(self.markets)]
+        self._depth_cursor += 1
+        try:
+            src = self.agg if m.source == "agg" else self.quoter
+            dr = probe_depth(src.quote_buy, m, self._ladder, cfg.depth_slip_tol_bps, ts)
+            self.state.record_depth(dr)
+        except Exception:  # noqa: BLE001
+            pass  # 深度探测失败不影响主采集

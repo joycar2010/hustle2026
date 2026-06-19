@@ -73,6 +73,7 @@ class State:
         self._io_lock = threading.Lock()    # 串行化落盘+发布,防多线程 CSV 交错/丢行
         self._stats: dict[str, MarketStat] = {}
         self._recent = deque(maxlen=window)   # 跨市场最近样本(看板表)
+        self._depth: dict[str, dict] = {}     # market -> 最近一次深度探测结果
         self._last_error = ""
         self._started = time.time()
 
@@ -121,9 +122,20 @@ class State:
             self._stats.setdefault(market, MarketStat()).errors += 1
             self._last_error = f"[{market}] {msg}"
 
+    def record_depth(self, dr):
+        with self._lock:
+            self._depth[dr.market] = {
+                "max_exec_usd": dr.max_exec_usd,
+                "slip_tol_bps": dr.slip_tol_bps,
+                "ladder": dr.ladder,
+                "ts": dr.ts,
+            }
+
     def snapshot(self) -> dict:
         with self._lock:
             markets = [self._stats[k].view(k) for k in sorted(self._stats)]
+            for m in markets:
+                m["depth"] = self._depth.get(m["market"])
             total_samples = sum(m["samples"] for m in markets)
             total_opp = sum(m["opp_count"] for m in markets)
             total_err = sum(m["errors"] for m in markets)
