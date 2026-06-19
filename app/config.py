@@ -64,6 +64,7 @@ class Config:
     feishu_app_secret: str = _get("CROSSARB_FEISHU_APP_SECRET", "")
     feishu_open_id: str = _get("CROSSARB_FEISHU_OPEN_ID", "")
     feishu_email: str = _get("CROSSARB_FEISHU_EMAIL", "")
+    feishu_mobile: str = _get("CROSSARB_FEISHU_MOBILE", "")
 
 
 cfg = Config()
