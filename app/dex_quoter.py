@@ -38,6 +38,7 @@ class DexQuote:
     base_out: float           # notional 美元买到的 base 数量
     slippage_bps: float       # (eff - mid)/mid,正数=买贵了(含池费)
     pool: str
+    gas_usd: float | None = None  # 一次 swap 的 gas(USD);agg 源给按链真实值,univ3 源留空用共享
 
 
 def _retry(fn, tries: int = 4, delay: float = 0.8):

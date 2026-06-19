@@ -62,11 +62,13 @@ class Collector(threading.Thread):
             self.state.record_error(m.key, f"DEX报价失败 {type(e).__name__}: {e}")
             return
         t = tickers[sym]
+        # 按链 gas:agg 源用 KyberSwap 路由自带 gasUsd(各链真实,ETH主网会随拥堵变);univ3 用共享Base gas
+        gas = q.gas_usd if (q.gas_usd is not None) else gas_usd
         r = compute_spread(
             market=m.key, binance_symbol=sym, ts=ts,
             dex_eff_price=q.eff_price, dex_mid_price=q.mid_price,
             base_out=q.base_out, slippage_bps=q.slippage_bps,
-            gas_usd=gas_usd, fut_bid=t["bid"], fut_ask=t["ask"],
+            gas_usd=gas, fut_bid=t["bid"], fut_ask=t["ask"],
             notional_usd=m.notional_usd or cfg.notional_usd,
             taker_fee_bps=cfg.taker_fee_bps, recycle_bps=cfg.recycle_bps,
             min_net_bps=cfg.min_net_bps,

@@ -26,6 +26,7 @@
   <h1>CrossArb P0 · 只读经济性验证 · 多市场并行 <span style="font-weight:400;color:#6c7086;font-size:12px">· <a href="/report" style="color:#89b4fa;text-decoration:none">统计报告 →</a></span></h1>
   <div class="sub">Base/Uniswap V3【买入腿,含费+滑点】 vs 币安 USDT 永续【做空腿】 · 仅监控,零交易 · L1费实时(GasPriceOracle)</div>
   <div class="verdict" id="verdict">采集启动中…</div>
+  <div id="chainfilter" style="margin:4px 0 10px;font-size:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></div>
 
   <h2>各市场(主指标=往返净基差 net,已扣双边taker+双向gas+现货卖回)</h2>
   <div class="tablewrap">
@@ -56,14 +57,23 @@ const fmt=(x,d=2)=>(x===null||x===undefined)?'—':Number(x).toFixed(d);
 const cls=x=>x>0?'pos':(x<0?'neg':'');
 function tstr(ms){const d=new Date(ms);return d.toLocaleTimeString('zh-CN',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0').slice(0,2);}
 
+window.chainFilter = window.chainFilter || 'ALL';
+function renderChips(markets){
+  const chains=['ALL',...Array.from(new Set((markets||[]).map(m=>m.market.split(':')[0])))];
+  document.getElementById('chainfilter').innerHTML='<span style="color:#6c7086">链:</span>'+chains.map(c=>
+    `<span onclick="window.chainFilter='${c}';renderChips(window._mk||[]);tick()" style="cursor:pointer;padding:2px 9px;border-radius:10px;border:1px solid #2a3142;${window.chainFilter===c?'background:#1e2a44;color:#89b4fa;border-color:#3b5278':'color:#9399b2'}">${c}</span>`).join('');
+}
+function applyFilter(arr){ return (window.chainFilter==='ALL')?arr:(arr||[]).filter(x=>x.market.startsWith(window.chainFilter+':')); }
+
 async function tick(){
   try{
     const s=await (await fetch('/api/stats')).json();
     const thr=s.min_net_bps, T=s.totals||{};
+    window._mk=s.markets; renderChips(s.markets);
     document.getElementById('verdict').innerHTML=
       `闸门=往返净 net&gt;${thr}bps(=${fmt(thr/100,2)}%) · 全市场累计 ${T.samples||0} 样本中 <b class="${T.opp_count>0?'op':''}">${T.opp_count||0}</b> 次达标(${fmt(T.opp_rate_pct,3)}%) · 运行 ${fmt(s.uptime_sec/60,1)}m · Redis:${s.redis_enabled?'开':'关'} · go/no-go 证据`;
 
-    document.getElementById('mkts').innerHTML=(s.markets||[]).map(m=>{
+    document.getElementById('mkts').innerHTML=applyFilter(s.markets).map(m=>{
       const L=m.last||{};
       return `<tr>
         <td class="l mkt">${m.market}</td><td class="l">${m.binance_symbol||'—'}</td>
@@ -79,7 +89,7 @@ async function tick(){
       </tr>`;
     }).join('');
 
-    document.getElementById('rows').innerHTML=(s.recent||[]).map(r=>`<tr>
+    document.getElementById('rows').innerHTML=applyFilter(s.recent).map(r=>`<tr>
       <td class="l">${tstr(r.ts)}</td><td class="l mkt">${r.market}</td>
       <td class="${cls(r.net_bps)}">${fmt(r.net_bps,2)}</td>
       <td class="${cls(r.gross_bps)}">${fmt(r.gross_bps,2)}</td>
