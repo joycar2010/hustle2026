@@ -28,12 +28,12 @@ def _tenant_token(app_id: str, app_secret: str) -> str:
     return d["tenant_access_token"]
 
 
-def send_text(app_id: str, app_secret: str, open_id: str, text: str) -> tuple[bool, str]:
+def send_text(app_id: str, app_secret: str, receive_id_type: str, receive_id: str, text: str) -> tuple[bool, str]:
     tok = _tenant_token(app_id, app_secret)
     r = requests.post(
-        MSG_URL, params={"receive_id_type": "open_id"},
+        MSG_URL, params={"receive_id_type": receive_id_type},
         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-        json={"receive_id": open_id, "msg_type": "text", "content": json.dumps({"text": text})},
+        json={"receive_id": receive_id, "msg_type": "text", "content": json.dumps({"text": text})},
         timeout=10,
     )
     d = r.json()
@@ -84,13 +84,20 @@ def build_message() -> str:
 
 
 def main():
-    if not (cfg.feishu_app_id and cfg.feishu_app_secret and cfg.feishu_open_id):
-        print("飞书未配置(CROSSARB_FEISHU_APP_ID/APP_SECRET/OPEN_ID),跳过")
+    # 收件人:优先 email(与应用无关),否则 open_id(须与本应用同源)
+    if cfg.feishu_email:
+        rtype, rid = "email", cfg.feishu_email
+    elif cfg.feishu_open_id:
+        rtype, rid = "open_id", cfg.feishu_open_id
+    else:
+        rtype, rid = "", ""
+    if not (cfg.feishu_app_id and cfg.feishu_app_secret and rid):
+        print("飞书未配置(APP_ID/APP_SECRET/EMAIL或OPEN_ID),跳过")
         return
     try:
         text = build_message()
-        ok, detail = send_text(cfg.feishu_app_id, cfg.feishu_app_secret, cfg.feishu_open_id, text)
-        print("飞书发送:", "OK " + str(detail) if ok else "失败 " + str(detail))
+        ok, detail = send_text(cfg.feishu_app_id, cfg.feishu_app_secret, rtype, rid, text)
+        print(f"飞书发送({rtype}):", "OK " + str(detail) if ok else "失败 " + str(detail))
     except Exception as e:  # noqa: BLE001
         print("飞书播报异常:", type(e).__name__, e)
 
