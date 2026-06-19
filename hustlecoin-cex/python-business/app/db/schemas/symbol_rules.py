@@ -17,6 +17,7 @@ class SymbolRuleUpdate(BaseModel):
     allow_repay: Optional[bool] = None
     max_daily_interest_rate: Optional[Decimal] = None
     repay_spread: Optional[Decimal] = None
+    max_borrow_amount: Optional[Decimal] = None
     slippage_pct: Optional[Decimal] = None
     follow_type: Optional[str] = None
     note: Optional[str] = None
@@ -31,7 +32,7 @@ class SymbolRuleUpdate(BaseModel):
     def _v_ratio(cls, v, info):
         return V.rng(v, 0, 1000, info.field_name)
 
-    @field_validator("order_amount")
+    @field_validator("order_amount", "max_borrow_amount")
     @classmethod
     def _v_amount(cls, v, info):
         return V.rng(v, 0, 1_000_000_000_000, info.field_name)
@@ -62,6 +63,7 @@ class SymbolRuleResponse(BaseModel):
     allow_repay: bool
     max_daily_interest_rate: Optional[Decimal] = None
     repay_spread: Optional[Decimal] = None
+    max_borrow_amount: Optional[Decimal] = None
     slippage_pct: Optional[Decimal] = None
     follow_type: Optional[str] = None
     note: Optional[str] = None

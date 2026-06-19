@@ -225,7 +225,7 @@ class Worker:
                 statuses[sym] = "借币红"
             else:
                 sp = self.spread_feed.get_symbol(sym)
-                if sp and sp.spread_short < rules.close_spread:
+                if sp and sp.spread_short < self._sym_threshold(sym, "close_spread", rules.close_spread):
                     statuses[sym] = "还币中"
                 else:
                     statuses[sym] = "点差不符"
@@ -261,23 +261,28 @@ class Worker:
                 continue
             if self._is_borrow_banned(pos.symbol):        # C4
                 continue
-            if spread.spread_short < rules.close_spread:
+            close_sp = self._sym_threshold(pos.symbol, "close_spread", rules.close_spread)
+            if spread.spread_short < close_sp:
                 await self._unhedge_position(pos, spread, account_note)
                 continue
+            close_fr = self._sym_threshold(pos.symbol, "close_funding_ratio", rules.close_funding_ratio)
             if getattr(pos, 'funding_rate_ratio', None) is not None and \
-               rules.close_funding_ratio > 0 and pos.funding_rate_ratio >= rules.close_funding_ratio:
-                logger.info(f"Unhedge {pos.symbol}: funding ratio {pos.funding_rate_ratio} >= {rules.close_funding_ratio}")
+               close_fr > 0 and pos.funding_rate_ratio >= close_fr:
+                logger.info(f"Unhedge {pos.symbol}: funding ratio {pos.funding_rate_ratio} >= {close_fr}")
                 await self._unhedge_position(pos, spread, account_note)
 
         # ── REPAY: PENDING_REPAY → CLOSED only if an auto-repay threshold is configured & met ──
-        repay_spread = getattr(rules, "repay_spread", None)
-        repay_fr = getattr(rules, "repay_funding_ratio", None)
+        g_repay_spread = getattr(rules, "repay_spread", None)
+        g_repay_fr = getattr(rules, "repay_funding_ratio", None)
         for pos in pending_repay:
             if not self._is_repay_allowed(pos.symbol):
                 continue
             spread = self.spread_feed.get_symbol(pos.symbol)
             if spread is not None and not self._spread_sane(spread):  # glitch → 本轮不还
                 continue
+            # 逐币/逐账户覆盖(空=回退全局)
+            repay_spread = self._sym_threshold(pos.symbol, "repay_spread", g_repay_spread)
+            repay_fr = self._sym_threshold(pos.symbol, "repay_funding_ratio", g_repay_fr)
             do_repay = False
             if repay_spread is not None and repay_spread > 0 and spread and spread.spread_short < repay_spread:
                 do_repay = True
@@ -298,7 +303,7 @@ class Worker:
             spread = self.spread_feed.get_symbol(sym)
             if not self._spread_sane(spread):
                 continue
-            if spread.spread_short < rules.close_spread:
+            if spread.spread_short < self._sym_threshold(sym, "close_spread", rules.close_spread):
                 await self._borrow_only_repay(sym, account_note)
 
         global_max = rules.max_positions or MAX_POSITIONS_PER_ACCOUNT
@@ -313,7 +318,7 @@ class Worker:
             spread = self.spread_feed.get_symbol(pos.symbol)
             if not self._spread_sane(spread):            # glitch → 不在坏点差上对冲开仓
                 continue
-            if spread.spread_short > rules.open_spread:
+            if spread.spread_short > self._sym_threshold(pos.symbol, "open_spread", rules.open_spread):
                 await self._hedge_position(pos, spread, account_note)
                 open_positions = await asyncio.to_thread(self._load_open_positions)
 
@@ -666,12 +671,19 @@ class Worker:
             if self._user_id:
                 q = q.filter(SymbolRule.user_id == self._user_id)
             for sr in q.all():
-                rules_map[sr.symbol] = {
+                entry = {
                     "allow_repay": sr.allow_repay,
                     "allow_remove": sr.allow_remove,
                     "remove_spread": sr.remove_spread,
                     "source": sr.source,
                 }
+                # 逐币阈值基线(仅非 NULL 才写 → 空=跟随全局);引擎开/平/还循环按币覆盖全局
+                for k in ("open_spread", "close_spread", "close_funding_ratio",
+                          "repay_spread", "repay_funding_ratio"):
+                    val = getattr(sr, k, None)
+                    if val is not None:
+                        entry[k] = val
+                rules_map[sr.symbol] = entry
             # account-level overrides
             for ar in db.query(AccountSymbolRule).filter(
                 AccountSymbolRule.sub_account_id == self.sub_account_id,
@@ -684,6 +696,12 @@ class Worker:
                         rules_map[key]["account_enabled"] = ar.is_enabled
                     if ar.max_borrow_amount is not None:
                         rules_map[key]["max_borrow_amount"] = ar.max_borrow_amount
+                    # 逐账户阈值覆盖(优先于逐币基线;NULL 不覆盖)
+                    for k in ("open_spread", "close_spread", "close_funding_ratio",
+                              "repay_spread", "repay_funding_ratio"):
+                        val = getattr(ar, k, None)
+                        if val is not None:
+                            rules_map[key][k] = val
             self._symbol_rules = rules_map
         finally:
             db.close()
@@ -725,6 +743,13 @@ class Worker:
         if not last or (now - last).total_seconds() > 60:
             self._glitch_logged[symbol] = now
             logger.warning(f"行情护栏: 跳过 {symbol} (坏数据: {reason})")
+
+    def _sym_threshold(self, symbol: str, key: str, global_val):
+        """逐币/逐账户阈值覆盖解析: _symbol_rules[symbol][key] 已是 account>symbol 合并值
+        (见 _load_symbol_rules);缺失/None → 回退 global_val。返回 Decimal,与全局快照同型,
+        保持纯 Decimal 比较。空=跟随全局,0 视为有效覆盖值。"""
+        v = self._symbol_rules.get(symbol, {}).get(key)
+        return v if v is not None else global_val
 
     def _is_repay_allowed(self, symbol: str) -> bool:
         rule = self._symbol_rules.get(symbol)

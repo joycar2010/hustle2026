@@ -34,6 +34,7 @@ def _to_response(rule: SymbolRule, global_rules: GlobalRules) -> dict:
         "allow_repay": rule.allow_repay,
         "max_daily_interest_rate": rule.max_daily_interest_rate,
         "repay_spread": rule.repay_spread,
+        "max_borrow_amount": rule.max_borrow_amount,
         "source": rule.source,
         "effective_open_spread": rule.open_spread if rule.open_spread is not None else global_rules.open_spread,
         "effective_close_spread": rule.close_spread if rule.close_spread is not None else global_rules.close_spread,
@@ -134,6 +135,7 @@ def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_d
     rule.repay_funding_ratio = None
     rule.max_daily_interest_rate = None
     rule.repay_spread = None
+    rule.max_borrow_amount = None
     rule.source = "global"
     db.commit()
     db.refresh(rule)
