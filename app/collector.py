@@ -28,7 +28,7 @@ class Collector(threading.Thread):
         self.state = state
         self.markets = load_markets()
         self.quoter = Quoter(cfg.base_rpc)
-        self.agg = AggQuoter(cfg.kyber_client_id)
+        self.agg = AggQuoter(cfg.kyber_client_id, cfg.kyber_min_interval)
         self.feed = BinanceFutFeed(cfg.binance_fapi)
         self._stop = threading.Event()
         workers = min(cfg.rpc_concurrency, max(1, len(self.markets)))

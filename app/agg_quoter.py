@@ -9,6 +9,7 @@ amountInUsd/amountOutUsd(算买入总成本=费+冲击)、gasUsd(该链该路由
 """
 from __future__ import annotations
 
+import threading
 import time
 
 import requests
@@ -21,7 +22,7 @@ KYBER_BASE = "https://aggregator-api.kyberswap.com"
 
 
 class AggQuoter:
-    def __init__(self, client_id: str = "crossarb"):
+    def __init__(self, client_id: str = "crossarb", min_interval: float = 0.12):
         self._s = requests.Session()
         self._s.headers.update({
             "accept": "application/json",
@@ -30,14 +31,31 @@ class AggQuoter:
         })
         ad = requests.adapters.HTTPAdapter(pool_maxsize=16)
         self._s.mount("https://", ad)
+        # 全局节流:并发线程池会把多市场一齐打向 KyberSwap 公共端点触发 429。
+        # 用一把锁 + 最小间隔把请求摊开(~8 req/s),消除突发尖峰。
+        self._gate = threading.Lock()
+        self._next_at = 0.0
+        self._min_interval = min_interval
+
+    def _pace(self):
+        with self._gate:
+            now = time.time()
+            wait = self._next_at - now
+            if wait > 0:
+                time.sleep(wait)
+                now = time.time()
+            self._next_at = now + self._min_interval
 
     def _route(self, slug: str, token_in: str, token_out: str, amount_in: int) -> dict:
         url = f"{KYBER_BASE}/{slug}/api/v1/routes"
         last = None
-        for i in range(2):
+        for i in range(3):
             try:
+                self._pace()
                 r = self._s.get(url, params={"tokenIn": token_in, "tokenOut": token_out,
                                              "amountIn": str(amount_in)}, timeout=6)
+                if r.status_code == 429:
+                    raise RuntimeError("kyber 429 rate-limited")
                 r.raise_for_status()
                 d = r.json()
                 if d.get("code") != 0:
@@ -45,8 +63,8 @@ class AggQuoter:
                 return d.get("data", {}).get("routeSummary", {})
             except Exception as e:  # noqa: BLE001
                 last = e
-                if i < 1:
-                    time.sleep(0.4)
+                if i < 2:
+                    time.sleep(0.5 * (i + 1))  # 429 退避稍长,避免连环撞墙
         raise last
 
     def quote_buy(self, m: Market, notional_usd: float) -> DexQuote:
