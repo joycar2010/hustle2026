@@ -27,13 +27,17 @@ class AggQuoter:
             "User-Agent": "crossarb/1.0",
             "x-client-id": client_id or "crossarb",
         })
+        # 连接池 >= 最大并发,避免跨线程争用
+        ad = requests.adapters.HTTPAdapter(pool_maxsize=16)
+        self._s.mount("https://", ad)
 
     def _route(self, token_in: str, token_out: str, amount_in: int) -> dict:
+        # 收紧 timeout/重试,使单市场最坏耗时 < 轮询节拍,避免拖出采样空洞
         last = None
-        for i in range(3):
+        for i in range(2):
             try:
                 r = self._s.get(KYBER_URL, params={"tokenIn": token_in, "tokenOut": token_out,
-                                                    "amountIn": str(amount_in)}, timeout=12)
+                                                    "amountIn": str(amount_in)}, timeout=6)
                 r.raise_for_status()
                 d = r.json()
                 if d.get("code") != 0:
@@ -41,8 +45,8 @@ class AggQuoter:
                 return d.get("data", {}).get("routeSummary", {})
             except Exception as e:  # noqa: BLE001
                 last = e
-                if i < 2:
-                    time.sleep(0.5 * (i + 1))
+                if i < 1:
+                    time.sleep(0.4)
         raise last
 
     def quote_buy(self, m: Market, notional_usd: float) -> DexQuote:
@@ -57,9 +61,19 @@ class AggQuoter:
         # 买入总成本(费+价格冲击)= (投入USD - 到手USD)/投入USD;作 mid 与 exit 对称成本
         in_usd = float(rs.get("amountInUsd") or 0)
         out_usd = float(rs.get("amountOutUsd") or 0)
-        slip = (in_usd - out_usd) / in_usd if (in_usd > 0 and out_usd > 0) else 0.0
-        slip = max(slip, 0.0)
-        mid = eff / (1 + slip) if slip > 0 else eff
+        if in_usd > 0 and out_usd > 0:
+            slip = max((in_usd - out_usd) / in_usd, 0.0)
+            mid = eff / (1 + slip) if slip > 0 else eff
+        else:
+            # KyberSwap 缺 USD 定价(薄长尾币常见):绝不把退出成本当 0(会虚高 net、误报机会),
+            # 改用一笔小额($25)报价反推 mid → 真实滑点;再失败则丢弃该拍(记 error,不出假数)。
+            small = int(round(25 * (10 ** m.quote_decimals)))
+            rs2 = self._route(m.quote_token, m.base_token, small)
+            o2 = int(rs2.get("amountOut", 0))
+            if o2 <= 0:
+                raise RuntimeError(f"{m.key}: kyber 无USD定价且小额报价失败,丢弃该拍")
+            mid = 25 / (o2 / (10 ** m.base_decimals))
+            slip = max((eff - mid) / mid, 0.0) if mid > 0 else 0.0
         slippage_bps = slip * 1e4
         return DexQuote(eff_price=eff, mid_price=mid, base_out=base_out,
                         slippage_bps=slippage_bps, pool="kyberswap")
