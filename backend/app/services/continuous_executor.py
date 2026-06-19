@@ -183,6 +183,18 @@ class ContinuousStrategyExecutor:
                 # 复开市检测: 上次非FULL → 本次FULL = 复开市
                 if ContinuousStrategyExecutor._mt5_last_full.get(key) is False:
                     ContinuousStrategyExecutor._mt5_reopen_at[key] = now
+                    # MT5 临时停市熔断解冻(20260620): 仅在 trade_mode 真正经历"非FULL→FULL"跃迁
+                    # (=真正的正常开市)时解冻。【关键】绝不能在"trade_mode==FULL"就解冻——因为
+                    # 盘中临时停市期间 trade_mode 全程撒谎报 FULL(实测106次全FULL), 那样会10s内
+                    # 立即误解冻使熔断形同虚设。停市期 trade_mode 恒FULL不跃迁→冻结正确保持到下一次
+                    # 正常日级开市(届时经历真实的非FULL→FULL)才解冻, 与复开市预热同一锚点。
+                    try:
+                        from app.services.mt5_market_freeze import is_frozen as _frz_q, clear as _frz_clear
+                        _aid = str(getattr(bybit_account, "account_id", "") or "")
+                        if _aid and _frz_q(_aid):
+                            _frz_clear(_aid, reason="复开市(trade_mode 非FULL→FULL跃迁)")
+                    except Exception:
+                        pass
                 ContinuousStrategyExecutor._mt5_last_full[key] = True
                 # 复开市预热: 节假日/分时段复开市同样走预热(与日级/周末一致: XAU/BXAU 1min, ICXAU 2min)
                 _ro = ContinuousStrategyExecutor._mt5_reopen_at.get(key)
@@ -618,7 +630,31 @@ class ContinuousStrategyExecutor:
             # Step 7.5: MT5 first-trade preflight (probes only after >2h idle).
             # Active trading short-circuits this via cached verified-at (<1us).
             _sym_a_pf, _sym_b_pf, _ = _get_pair_config(self.pair_code)
-            if not await self._ensure_mt5_trade_mode(bybit_account, _sym_b_pf, self.pair_code):
+            # preflight 先跑(即使冻结中也跑): 它每~10s 探 trade_mode, 在"非FULL→FULL"复开市
+            # 瞬间会调 mt5_market_freeze.clear() 解冻 —— 这是冻结的主解冻通道, 故必须放在冻结闸
+            # 之前, 否则冻结期 preflight 被跳过, 复开市检测永不触发, 只能死等 6h 兜底。
+            _preflight_ok = await self._ensure_mt5_trade_mode(bybit_account, _sym_b_pf, self.pair_code)
+
+            # ── MT5 临时停市熔断闸(20260620): B侧曾回 retcode=10018(市场关闭) → 冻结下单。 ──
+            # 10018 是 order_send 真实回执, 不撒谎(trade_mode/trade_allowed/tick 在停市期均会误导)。
+            # 冻结期只等待不下A单, 杜绝停市期持续制造单腿; 解冻锚定下一次正常开市(preflight 复开市
+            # 检测调 clear)+6h时间兜底+重启清空。只停下单, 绝不自动补存量单腿(交解冻后实时对账+
+            # 告警, 由用户决定)。放在 preflight 之后, 确保复开市 clear 通道始终可达。
+            try:
+                from app.services.mt5_market_freeze import is_frozen as _mt5_frozen, frozen_age as _frz_age
+                if _mt5_frozen(str(bybit_account.account_id)):
+                    if scan_count % 20 == 1:
+                        _age = _frz_age(str(bybit_account.account_id)) or 0
+                        logger.warning(
+                            f"[ladder={ladder_idx}] MT5临时停市冻结中({_age/60:.0f}min) - 暂停下单, "
+                            f"等正常开市自动解冻 ({strategy_type})"
+                        )
+                    await self._sleep_or_stop(self.api_spam_prevention_delay)
+                    continue
+            except Exception:
+                pass
+
+            if not _preflight_ok:
                 logger.warning(
                     f"[ladder={ladder_idx}] MT5 preflight refused - deferring iter "
                     f"(no A-side order placed; will retry next trigger cycle)"

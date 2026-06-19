@@ -294,6 +294,13 @@ class OrderExecutor:
                     if data.get("success") is False:
                         error_msg = data.get("comment") or data.get("error") or f"retcode={data.get('retcode')}"
                         logger.error(f"[BYBIT_ORDER] HTTP 200 但桥接内部失败: {error_msg}, data={data}")
+                        # MT5 临时停市熔断(20260620): 开仓侧若回 10018 同样冻结(对称防护)。
+                        if "10018" in str(error_msg) or str(data.get("retcode")) == "10018":
+                            try:
+                                from app.services.mt5_market_freeze import mark_frozen as _mk_frozen
+                                _mk_frozen(str(account.account_id), reason=f"order retcode=10018 ({symbol})")
+                            except Exception:
+                                pass
                         return {
                             "success": False,
                             "platform": "bybit",
@@ -312,6 +319,12 @@ class OrderExecutor:
                 else:
                     error_msg = data.get("detail", str(data))
                     logger.error(f"[BYBIT_ORDER] Bridge error: {resp.status_code} {error_msg}")
+                    if "10018" in str(error_msg):
+                        try:
+                            from app.services.mt5_market_freeze import mark_frozen as _mk_frozen
+                            _mk_frozen(str(account.account_id), reason=f"order retcode=10018 ({symbol})")
+                        except Exception:
+                            pass
                     return {
                         "success": False,
                         "platform": "bybit",
@@ -946,6 +959,15 @@ async def close_bybit_position_aggregated(
                         _last_err = r.json().get("detail", r.text)
                     except Exception:
                         _last_err = r.text[:120]
+                    # MT5 临时停市熔断(20260620): 10018=TRADE_RETCODE_MARKET_CLOSED, 是唯一不撒谎的
+                    # 停市信号(trade_mode/trade_allowed/tick 在停市期均会误导)。立即冻结该账号下单,
+                    # 杜绝停市期 A 侧继续成交、B 侧补不上持续制造单腿。只冻结, 绝不自动补仓。
+                    if "10018" in str(_last_err):
+                        try:
+                            from app.services.mt5_market_freeze import mark_frozen as _mk_frozen
+                            _mk_frozen(str(account.account_id), reason=f"close retcode=10018 ({symbol})")
+                        except Exception:
+                            pass
                     logger.warning(f"[close_aggregated] ticket {ticket} vol={close_vol} attempt {_ta+1}/3 failed: {r.status_code} {_last_err}")
                 if not _ticket_ok:
                     details.append({"ticket": ticket, "volume": close_vol, "ok": False, "error": str(_last_err)[:120]})
