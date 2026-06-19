@@ -13,10 +13,11 @@ import math
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 HIST_LO, HIST_HI, HIST_STEP = -100, 50, 5
 TOP_N = 8
+CST = timezone(timedelta(hours=8))  # 北京时间 UTC+8(固定偏移,不依赖系统tzdata)
 
 _cache: dict = {}
 _lock = threading.Lock()
@@ -115,7 +116,7 @@ def _compute(csv_path, threshold):
                 if net > a["net_max"]:
                     a["net_max"] = net; a["net_max_ts"] = ts
                 a["hist"][_bin_index(net, edges)] += 1
-                hour = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).hour
+                hour = datetime.fromtimestamp(ts / 1000, tz=CST).hour  # 北京时间小时分桶
                 a["hs"][hour] += 1
                 if net > threshold:
                     a["ho"][hour] += 1
@@ -130,7 +131,7 @@ def _compute(csv_path, threshold):
         for e in eps:
             e["market"] = mk; e["sym"] = a["sym"]
             all_eps.append(e)
-            g_hp[datetime.fromtimestamp(e["start_ts"] / 1000, tz=timezone.utc).hour] += e["pnl"]
+            g_hp[datetime.fromtimestamp(e["start_ts"] / 1000, tz=CST).hour] += e["pnl"]
         m = _empty_market(mk)
         m["binance_symbol"] = a["sym"]; m["samples"] = n
         m["opp_count"] = a["opp"]; m["opp_rate_pct"] = round(a["opp"] / n * 100, 3) if n else 0.0

@@ -71,10 +71,10 @@ function histHtml(h, thr){
 function hoursHtml(hourly){
   let cells='', lbls='';
   for(const h of hourly){
-    cells+=`<div class="hcell" style="background:${heat(h.opp_rate_pct)}" title="UTC${h.hour}:00  样本${h.samples} 机会${h.opp} (${fmt(h.opp_rate_pct,1)}%)">${h.opp_rate_pct>0?fmt(h.opp_rate_pct,0):''}</div>`;
+    cells+=`<div class="hcell" style="background:${heat(h.opp_rate_pct)}" title="北京${h.hour}:00  样本${h.samples} 机会${h.opp} (${fmt(h.opp_rate_pct,1)}%)">${h.opp_rate_pct>0?fmt(h.opp_rate_pct,0):''}</div>`;
     lbls+=`<span>${h.hour}</span>`;
   }
-  return `<div class="hourwrap"><div class="hours">${cells}</div><div class="hlbl">${lbls}</div><div class="legend">每格=UTC小时,色深=该时段机会率(net&gt;阈值占比);看错位是否在特定时段聚集</div></div>`;
+  return `<div class="hourwrap"><div class="hours">${cells}</div><div class="hlbl">${lbls}</div><div class="legend">每格=北京时间小时,色深=该时段机会率(net&gt;阈值占比);看错位是否在特定时段聚集</div></div>`;
 }
 
 function marketCard(m, thr){
@@ -113,7 +113,7 @@ function equitySvg(eq){
 
 function equityBox(s,thr){
   const eq=s.equity||[]; const pnl=s.est_total_pnl||0;
-  const span = eq.length>1 ? `${new Date(eq[0].ts).toLocaleString('zh-CN')} → ${new Date(eq[eq.length-1].ts).toLocaleString('zh-CN')}` : '—';
+  const span = eq.length>1 ? `${new Date(eq[0].ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})} → ${new Date(eq[eq.length-1].ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}` : '—';
   return `<div class="mh"><span class="mkt">假设累计净值曲线</span>
       <span>累计 <b class="${pnl>=0?'op':'neg'}" style="font-size:15px">$${fmt(pnl,2)}</b> · ${s.episode_count||0} 次机会 · 阈值 ${thr}bps</span></div>
     ${eq.length?equitySvg(eq):'<div class="stats">该阈值下暂无机会,净值持平 $0。降低阈值或继续累计样本。</div>'}
@@ -121,12 +121,12 @@ function equityBox(s,thr){
 }
 
 function topBox(s){
-  const hours=(s.best_hours||[]).map(h=>`<tr><td class="l">UTC ${String(h.hour).padStart(2,'0')}:00</td><td class="${h.opp>0?'op':''}">${h.opp}</td><td>${fmt(h.opp_rate_pct,2)}%</td><td class="${h.pnl>0?'op':''}">$${fmt(h.pnl,2)}</td><td>${h.samples}</td></tr>`).join('')||'<tr><td colspan=5 class="l" style="color:#6c7086">无</td></tr>';
-  const eps=(s.best_episodes||[]).map(e=>`<tr><td class="l">${e.market.replace('BASE:','')}</td><td class="l">${new Date(e.start_ts).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td><td class="op">${fmt(e.entry_net,1)}</td><td>${fmt(e.peak_net,1)}</td><td>${fmt(e.dur_sec,0)}s</td><td class="op">$${fmt(e.pnl,2)}</td></tr>`).join('')||'<tr><td colspan=6 class="l" style="color:#6c7086">无</td></tr>';
+  const hours=(s.best_hours||[]).map(h=>`<tr><td class="l">北京 ${String(h.hour).padStart(2,'0')}:00</td><td class="${h.opp>0?'op':''}">${h.opp}</td><td>${fmt(h.opp_rate_pct,2)}%</td><td class="${h.pnl>0?'op':''}">$${fmt(h.pnl,2)}</td><td>${h.samples}</td></tr>`).join('')||'<tr><td colspan=5 class="l" style="color:#6c7086">无</td></tr>';
+  const eps=(s.best_episodes||[]).map(e=>`<tr><td class="l">${e.market.replace('BASE:','')}</td><td class="l">${new Date(e.start_ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td><td class="op">${fmt(e.entry_net,1)}</td><td>${fmt(e.peak_net,1)}</td><td>${fmt(e.dur_sec,0)}s</td><td class="op">$${fmt(e.pnl,2)}</td></tr>`).join('')||'<tr><td colspan=6 class="l" style="color:#6c7086">无</td></tr>';
   return `
     <div class="card" style="flex:1;min-width:300px">
       <div class="mh"><span class="mkt">最佳时段 Top-${(s.best_hours||[]).length||0}</span><span style="color:#6c7086">按机会数→捕获额</span></div>
-      <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">UTC小时</td><td>机会</td><td>机会率</td><td>捕获$</td><td>样本</td></tr></thead><tbody>${hours}</tbody></table>
+      <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">北京小时</td><td>机会</td><td>机会率</td><td>捕获$</td><td>样本</td></tr></thead><tbody>${hours}</tbody></table>
     </div>
     <div class="card" style="flex:1;min-width:340px">
       <div class="mh"><span class="mkt">最佳机会 Top-${(s.best_episodes||[]).length||0}</span><span style="color:#6c7086">单段错位</span></div>
@@ -139,7 +139,7 @@ async function load(){
   try{
     const s=await (await fetch('/api/report?threshold='+thr)).json();
     const T=s.totals||{};
-    document.getElementById('meta').textContent=`· 总行数 ${s.total_rows} · 生成于 ${new Date(s.generated_ts).toLocaleString('zh-CN')}`;
+    document.getElementById('meta').textContent=`· 总行数 ${s.total_rows} · 生成于 ${new Date(s.generated_ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}`;
     document.getElementById('totals').innerHTML=
       `<b>全市场合计</b>:样本 <b>${T.samples}</b> · 达标机会 <b class="${T.opp_count>0?'op':''}">${T.opp_count}</b> (<b class="${T.opp_count>0?'op':''}">${fmt(T.opp_rate_pct,3)}%</b>) @ 阈值 ${thr}bps`;
     document.getElementById('equitybox').innerHTML=equityBox(s,thr);
