@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -57,7 +58,7 @@ def api_health():
 
 
 @app.get("/api/report")
-def api_report(threshold: float | None = None):
+def api_report(threshold: Optional[float] = None):  # Optional 而非 float|None,兼容 Python 3.9(AL2023)
     thr = cfg.min_net_bps if threshold is None else threshold
     return JSONResponse(build_report(cfg.csv_path, thr))
 
