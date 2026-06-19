@@ -1,0 +1,5 @@
+[
+  {"key": "BASE:ETH", "base_token": "0x4200000000000000000000000000000000000006", "base_decimals": 18, "fee_tier": 500, "binance_symbol": "ETHUSDT", "pool": "0xd0b53D9277642d899DF5C87A3966A349A798F224"},
+  {"key": "BASE:BTC", "base_token": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", "base_decimals": 8, "fee_tier": 500, "binance_symbol": "BTCUSDT", "pool": "0xfBB6Eed8e7aa03B138556eeDaF5D271A5E1e43ef"},
+  {"key": "BASE:VIRTUAL", "base_token": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", "base_decimals": 18, "fee_tier": 3000, "binance_symbol": "VIRTUALUSDT", "pool": "0x529d2863a1521d0b57db028168fdE2E97120017C", "notional_usd": 1500}
+]

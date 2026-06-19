@@ -1,0 +1,7 @@
+# CrossArb P0 (只读经济性验证) — 依赖
+# 与生产 hustlecoin-cex 完全独立,绝不共用 venv / 目录
+web3>=6.15,<8
+fastapi>=0.110
+uvicorn[standard]>=0.27
+requests>=2.31
+redis>=5.0

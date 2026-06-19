@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CrossArb P0 · Base 多市场 × 币安永续</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, Menlo, Consolas, monospace; background:#0b0e14; color:#cdd6f4; margin:0; padding:16px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 4px; }
+  .sub { color:#6c7086; font-size:12px; margin-bottom:10px; }
+  .verdict { font-size:12px; color:#89b4fa; margin:6px 0 14px; }
+  .pos { color:#a6e3a1; } .neg { color:#f38ba8; } .op { color:#a6e3a1; font-weight:700; }
+  h2 { font-size:12px; color:#9399b2; font-weight:600; margin:14px 0 6px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { text-align:right; padding:4px 8px; border-bottom:1px solid #1a1f2e; white-space:nowrap; }
+  th { color:#6c7086; font-weight:500; position:sticky; top:0; background:#0b0e14; }
+  td.l, th.l { text-align:left; }
+  .tablewrap { max-height:34vh; overflow:auto; border:1px solid #1e2433; border-radius:8px; }
+  .mkt { font-weight:600; color:#cdd6f4; }
+  .err { color:#f38ba8; font-size:11px; margin-top:8px; min-height:14px; }
+  .big { font-size:14px; }
+</style>
+</head>
+<body>
+  <h1>CrossArb P0 · 只读经济性验证 · 多市场并行 <span style="font-weight:400;color:#6c7086;font-size:12px">· <a href="/report" style="color:#89b4fa;text-decoration:none">统计报告 →</a></span></h1>
+  <div class="sub">Base/Uniswap V3【买入腿,含费+滑点】 vs 币安 USDT 永续【做空腿】 · 仅监控,零交易 · L1费实时(GasPriceOracle)</div>
+  <div class="verdict" id="verdict">采集启动中…</div>
+
+  <h2>各市场(主指标=往返净基差 net,已扣双边taker+双向gas+现货卖回)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th class="l">市场</th><th class="l">币安</th>
+        <th>net(往返)</th><th>入场净</th><th>gross</th><th>base价</th>
+        <th>滑点bps</th><th>gas$</th><th>机会率</th><th>net峰值</th><th>样本/错</th>
+      </tr></thead>
+      <tbody id="mkts"></tbody>
+    </table>
+  </div>
+
+  <h2>最近采样(跨市场)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th class="l">时间</th><th class="l">市场</th><th>net(bps)</th><th>gross</th>
+        <th>DEX买价</th><th>合约bid</th><th>滑点bps</th><th>gas$</th><th>机会</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="err" id="err"></div>
+
+<script>
+const fmt=(x,d=2)=>(x===null||x===undefined)?'—':Number(x).toFixed(d);
+const cls=x=>x>0?'pos':(x<0?'neg':'');
+function tstr(ms){const d=new Date(ms);return d.toLocaleTimeString('zh-CN',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0').slice(0,2);}
+
+async function tick(){
+  try{
+    const s=await (await fetch('/api/stats')).json();
+    const thr=s.min_net_bps, T=s.totals||{};
+    document.getElementById('verdict').innerHTML=
+      `闸门=往返净 net&gt;${thr}bps(=${fmt(thr/100,2)}%) · 全市场累计 ${T.samples||0} 样本中 <b class="${T.opp_count>0?'op':''}">${T.opp_count||0}</b> 次达标(${fmt(T.opp_rate_pct,3)}%) · 运行 ${fmt(s.uptime_sec/60,1)}m · Redis:${s.redis_enabled?'开':'关'} · go/no-go 证据`;
+
+    document.getElementById('mkts').innerHTML=(s.markets||[]).map(m=>{
+      const L=m.last||{};
+      return `<tr>
+        <td class="l mkt">${m.market}</td><td class="l">${m.binance_symbol||'—'}</td>
+        <td class="big ${cls(L.net_bps)}">${fmt(L.net_bps,2)}</td>
+        <td class="${cls(L.net_entry_bps)}">${fmt(L.net_entry_bps,2)}</td>
+        <td class="${cls(L.gross_bps)}">${fmt(L.gross_bps,2)}</td>
+        <td>${fmt(L.base_price, L.base_price>100?2:4)}</td>
+        <td>${fmt(L.slippage_bps,1)}</td>
+        <td>${fmt(L.gas_usd,3)}</td>
+        <td class="${m.opp_rate_pct>0?'op':''}">${fmt(m.opp_rate_pct,2)}% (${m.opp_count})</td>
+        <td class="${cls(m.net_bps_max)}">${fmt(m.net_bps_max,1)}</td>
+        <td>${m.samples}/${m.errors}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('rows').innerHTML=(s.recent||[]).map(r=>`<tr>
+      <td class="l">${tstr(r.ts)}</td><td class="l mkt">${r.market}</td>
+      <td class="${cls(r.net_bps)}">${fmt(r.net_bps,2)}</td>
+      <td class="${cls(r.gross_bps)}">${fmt(r.gross_bps,2)}</td>
+      <td>${fmt(r.dex_eff_price, r.dex_eff_price>100?2:4)}</td>
+      <td>${fmt(r.fut_bid, r.fut_bid>100?2:4)}</td>
+      <td>${fmt(r.slippage_bps,1)}</td><td>${fmt(r.gas_usd,3)}</td>
+      <td class="${r.is_opportunity?'op':''}">${r.is_opportunity?'✓':''}</td>
+    </tr>`).join('');
+    document.getElementById('err').textContent=s.last_error||'';
+  }catch(e){document.getElementById('err').textContent='看板拉取失败: '+e;}
+}
+tick(); setInterval(tick,2000);
+</script>
+</body>
+</html>

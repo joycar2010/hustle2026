@@ -1,0 +1,21 @@
+[Unit]
+Description=CrossArb P0 read-only validation (multi-market collector + dashboard)
+After=network.target
+# 与生产 cex-business / cex-engine / cex-arb-engine 无任何依赖或资源共享
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=-@APP_DIR@/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+ExecStart=@APP_DIR@/.venv/bin/python -m app.main
+Restart=always
+RestartSec=5
+# 测试机内存友好护栏(生产机有过 OOM 史,这里硬限)
+MemoryMax=1G
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

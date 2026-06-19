@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CrossArb P0 · 影子统计报告</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, Menlo, Consolas, monospace; background:#0b0e14; color:#cdd6f4; margin:0; padding:16px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 4px; }
+  a { color:#89b4fa; text-decoration:none; } a:hover{text-decoration:underline;}
+  .sub { color:#6c7086; font-size:12px; margin-bottom:10px; }
+  .bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:8px 0 16px; font-size:12px; }
+  input[type=number]{ background:#11151f; border:1px solid #2a3142; color:#cdd6f4; border-radius:6px; padding:3px 6px; width:70px; font-family:inherit; }
+  .pos{color:#a6e3a1;} .neg{color:#f38ba8;} .op{color:#a6e3a1;font-weight:700;}
+  .card { background:#0e121b; border:1px solid #1e2433; border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+  .mh { display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }
+  .mh .mkt { font-size:14px; font-weight:700; }
+  .stats { color:#9399b2; font-size:12px; margin:6px 0; line-height:1.7; }
+  .stats b { color:#cdd6f4; }
+  .hist { display:flex; align-items:flex-end; gap:1px; height:90px; margin:8px 0 2px; }
+  .hcol { flex:1; background:#11151f; min-width:2px; position:relative; }
+  .hticks { display:flex; justify-content:space-between; color:#6c7086; font-size:10px; }
+  .hourwrap { margin-top:10px; }
+  .hours { display:flex; gap:2px; }
+  .hcell { flex:1; height:22px; border-radius:3px; display:flex; align-items:center; justify-content:center; font-size:9px; color:#0b0e14; }
+  .hlbl { display:flex; gap:2px; color:#6c7086; font-size:9px; margin-top:2px; }
+  .hlbl span { flex:1; text-align:center; }
+  .legend { color:#6c7086; font-size:11px; margin-top:4px; }
+  table.tot { font-size:12px; border-collapse:collapse; }
+  table.tot td { padding:2px 10px 2px 0; }
+</style>
+</head>
+<body>
+  <h1>CrossArb P0 · 影子统计报告 <span style="font-weight:400;color:#6c7086;font-size:12px">· <a href="/">← 实时看板</a></span></h1>
+  <div class="sub">读全量 ticks.csv,逐市场:机会频率 · 净基差分布 · 分时段聚集。阈值可调,即时重切——这是 go/no-go 的核心证据。</div>
+
+  <div class="bar">
+    <span>机会阈值 net &gt;</span>
+    <input type="number" id="thr" step="1" value="20" /> <span>bps</span>
+    <button onclick="load()" style="background:#1e2433;color:#cdd6f4;border:1px solid #2a3142;border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit;">重算</button>
+    <span id="meta" style="color:#6c7086;"></span>
+  </div>
+
+  <div id="totals" class="stats"></div>
+  <div id="equitybox" class="card"></div>
+  <div id="topbox" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;"></div>
+  <div id="markets"></div>
+
+<script>
+const fmt=(x,d=2)=>(x===null||x===undefined)?'—':Number(x).toFixed(d);
+const cls=x=>x>0?'pos':(x<0?'neg':'');
+// 机会率→颜色(0=灰,越高越绿)
+function heat(rate){ if(rate<=0) return '#1a1f2e'; const t=Math.min(1,rate/5); const r=Math.round(58+(166-58)*t),g=Math.round(63+(227-63)*t),b=Math.round(74+(161-74)*t); return `rgb(${r},${g},${b})`; }
+
+function histHtml(h, thr){
+  const edges=h.edges, counts=h.counts; const max=Math.max(1,...counts);
+  // counts[0]=下溢(<lo); counts[i] for 1..len-1 区间[edges[i-1],edges[i]); 末桶=上溢(>=hi)
+  let bars='';
+  for(let i=0;i<counts.length;i++){
+    const lo = i===0 ? -Infinity : edges[i-1];
+    const isOpp = lo>=thr;                 // 该桶下沿≥阈值即"机会区"
+    const hpct = Math.round(counts[i]/max*100);
+    const color = counts[i]===0 ? '#11151f' : (isOpp ? '#a6e3a1' : (lo<0?'#45324a':'#3b4a6b'));
+    const lab = i===0?('<'+edges[0]):(i===counts.length-1?('≥'+edges[edges.length-1]):(edges[i-1]+'~'+edges[i]));
+    bars+=`<div class="hcol" style="height:${hpct}%;background:${color}" title="${lab}bps: ${counts[i]}"></div>`;
+  }
+  return `<div class="hist">${bars}</div><div class="hticks"><span>${edges[0]}</span><span>0</span><span>阈值${thr}</span><span>≥${edges[edges.length-1]}</span></div>`;
+}
+
+function hoursHtml(hourly){
+  let cells='', lbls='';
+  for(const h of hourly){
+    cells+=`<div class="hcell" style="background:${heat(h.opp_rate_pct)}" title="UTC${h.hour}:00  样本${h.samples} 机会${h.opp} (${fmt(h.opp_rate_pct,1)}%)">${h.opp_rate_pct>0?fmt(h.opp_rate_pct,0):''}</div>`;
+    lbls+=`<span>${h.hour}</span>`;
+  }
+  return `<div class="hourwrap"><div class="hours">${cells}</div><div class="hlbl">${lbls}</div><div class="legend">每格=UTC小时,色深=该时段机会率(net&gt;阈值占比);看错位是否在特定时段聚集</div></div>`;
+}
+
+function marketCard(m, thr){
+  const N=m.net||{};
+  return `<div class="card">
+    <div class="mh">
+      <span class="mkt">${m.market} <span style="color:#6c7086;font-size:12px;font-weight:400">/ ${m.binance_symbol}</span></span>
+      <span>样本 <b>${m.samples}</b> · 机会 <b class="${m.opp_count>0?'op':''}">${m.opp_count}</b> (<b class="${m.opp_rate_pct>0?'op':''}">${fmt(m.opp_rate_pct,3)}%</b>)</span>
+    </div>
+    <div class="stats">
+      净基差 net(bps): 均<b class="${cls(N.avg)}">${fmt(N.avg)}</b> · p50 <b>${fmt(N.p50)}</b> · p90 <b>${fmt(N.p90)}</b> · p95 <b>${fmt(N.p95)}</b> · p99 <b class="${cls(N.p99)}">${fmt(N.p99)}</b> · 峰值 <b class="${cls(N.max)}">${fmt(N.max)}</b><br/>
+      成本拆解(均): gross <b class="${cls(m.gross_avg)}">${fmt(m.gross_avg)}</b> · 现货卖回 <b>${fmt(m.exit_dex_avg)}</b> · gas <b>${fmt(m.gas_bps_avg,3)}</b> · 入场滑点 <b>${fmt(m.slippage_avg)}</b> bps
+    </div>
+    ${histHtml(m.histogram, thr)}
+    ${hoursHtml(m.hourly)}
+  </div>`;
+}
+
+function equitySvg(eq){
+  if(!eq||eq.length===0) return '';
+  const W=1000,H=170,P=26;
+  const xs=eq.map(p=>p.ts), ys=eq.map(p=>p.cum_pnl);
+  const xmin=Math.min(...xs),xmax=Math.max(...xs);
+  let ymin=Math.min(0,...ys),ymax=Math.max(0,...ys); if(ymin===ymax)ymax=ymin+1;
+  const sx=t=> P + (xmax===xmin?0:(t-xmin)/(xmax-xmin))*(W-2*P);
+  const sy=v=> H-P - (v-ymin)/(ymax-ymin)*(H-2*P);
+  const pts=eq.map(p=>`${sx(p.ts).toFixed(1)},${sy(p.cum_pnl).toFixed(1)}`).join(' ');
+  const zeroY=sy(0).toFixed(1); const last=ys[ys.length-1]; const col=last>=0?'#a6e3a1':'#f38ba8';
+  const fillpts=`${sx(xmin).toFixed(1)},${zeroY} ${pts} ${sx(xmax).toFixed(1)},${zeroY}`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="height:175px;display:block">
+    <polygon points="${fillpts}" fill="${col}" opacity="0.08"/>
+    <line x1="${P}" y1="${zeroY}" x2="${W-P}" y2="${zeroY}" stroke="#2a3142" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"/>
+  </svg>`;
+}
+
+function equityBox(s,thr){
+  const eq=s.equity||[]; const pnl=s.est_total_pnl||0;
+  const span = eq.length>1 ? `${new Date(eq[0].ts).toLocaleString('zh-CN')} → ${new Date(eq[eq.length-1].ts).toLocaleString('zh-CN')}` : '—';
+  return `<div class="mh"><span class="mkt">假设累计净值曲线</span>
+      <span>累计 <b class="${pnl>=0?'op':'neg'}" style="font-size:15px">$${fmt(pnl,2)}</b> · ${s.episode_count||0} 次机会 · 阈值 ${thr}bps</span></div>
+    ${eq.length?equitySvg(eq):'<div class="stats">该阈值下暂无机会,净值持平 $0。降低阈值或继续累计样本。</div>'}
+    <div class="legend">⚠ 假设上限:每段"机会"(net 连续&gt;阈值)按一次入场、入场net、当时名义额估收益;未计执行折损/未必成交/下单冲击;同一错位持续多拍只算一次。区间 ${span}</div>`;
+}
+
+function topBox(s){
+  const hours=(s.best_hours||[]).map(h=>`<tr><td class="l">UTC ${String(h.hour).padStart(2,'0')}:00</td><td class="${h.opp>0?'op':''}">${h.opp}</td><td>${fmt(h.opp_rate_pct,2)}%</td><td class="${h.pnl>0?'op':''}">$${fmt(h.pnl,2)}</td><td>${h.samples}</td></tr>`).join('')||'<tr><td colspan=5 class="l" style="color:#6c7086">无</td></tr>';
+  const eps=(s.best_episodes||[]).map(e=>`<tr><td class="l">${e.market.replace('BASE:','')}</td><td class="l">${new Date(e.start_ts).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td><td class="op">${fmt(e.entry_net,1)}</td><td>${fmt(e.peak_net,1)}</td><td>${fmt(e.dur_sec,0)}s</td><td class="op">$${fmt(e.pnl,2)}</td></tr>`).join('')||'<tr><td colspan=6 class="l" style="color:#6c7086">无</td></tr>';
+  return `
+    <div class="card" style="flex:1;min-width:300px">
+      <div class="mh"><span class="mkt">最佳时段 Top-${(s.best_hours||[]).length||0}</span><span style="color:#6c7086">按机会数→捕获额</span></div>
+      <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">UTC小时</td><td>机会</td><td>机会率</td><td>捕获$</td><td>样本</td></tr></thead><tbody>${hours}</tbody></table>
+    </div>
+    <div class="card" style="flex:1;min-width:340px">
+      <div class="mh"><span class="mkt">最佳机会 Top-${(s.best_episodes||[]).length||0}</span><span style="color:#6c7086">单段错位</span></div>
+      <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">市场</td><td class="l">起始</td><td>入场net</td><td>峰值</td><td>时长</td><td>估收益</td></tr></thead><tbody>${eps}</tbody></table>
+    </div>`;
+}
+
+async function load(){
+  const thr=parseFloat(document.getElementById('thr').value)||20;
+  try{
+    const s=await (await fetch('/api/report?threshold='+thr)).json();
+    const T=s.totals||{};
+    document.getElementById('meta').textContent=`· 总行数 ${s.total_rows} · 生成于 ${new Date(s.generated_ts).toLocaleString('zh-CN')}`;
+    document.getElementById('totals').innerHTML=
+      `<b>全市场合计</b>:样本 <b>${T.samples}</b> · 达标机会 <b class="${T.opp_count>0?'op':''}">${T.opp_count}</b> (<b class="${T.opp_count>0?'op':''}">${fmt(T.opp_rate_pct,3)}%</b>) @ 阈值 ${thr}bps`;
+    document.getElementById('equitybox').innerHTML=equityBox(s,thr);
+    document.getElementById('topbox').innerHTML=topBox(s);
+    document.getElementById('markets').innerHTML=(s.markets||[]).map(m=>marketCard(m,thr)).join('') || '<div class="stats">暂无数据(等采集落盘)。</div>';
+  }catch(e){ document.getElementById('markets').innerHTML='<div class="neg">拉取失败: '+e+'</div>'; }
+}
+// 初始阈值跟随后端默认
+fetch('/api/health').then(r=>r.json()).then(h=>{document.getElementById('thr').value=h.min_net_bps;load();}).catch(load);
+</script>
+</body>
+</html>
