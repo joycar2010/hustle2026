@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 _BJT = timezone(timedelta(hours=8))
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'market_closure.json')
+_HOLIDAY_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'mt5_holiday_schedule.json')
 
 # 收盘前安全停缓冲(夏令时强制特殊时间点，数值不可随意改动):
 # 距收盘<=SOFT 软停(仅停"一直运行"的，允许手动重启运行至HARD)；<=HARD 硬停(全部停，禁止启动)。
@@ -39,6 +40,48 @@ def _load_config() -> dict:
             return {**_DEFAULTS, **cfg}
     except Exception:
         return dict(_DEFAULTS)
+
+
+# 节假日表缓存(60s): 文件几乎不变, 但每60s回读以支持运行中热更新(人工填表后无需重启)。
+_holiday_cache = {"ts": 0.0, "data": None}
+_HOLIDAY_CACHE_TTL = 60.0
+
+
+def _load_holiday_windows() -> list:
+    """读取黄金节假日提前停市表 config/mt5_holiday_schedule.json, 返回 windows 列表。
+    文件缺失/损坏/禁用 → 返回 []（=不挡任何交易, 安全降级到原行为）。带60s缓存支持热更新。"""
+    import time as _t
+    now = _t.time()
+    if _holiday_cache["data"] is not None and (now - _holiday_cache["ts"]) < _HOLIDAY_CACHE_TTL:
+        return _holiday_cache["data"]
+    windows = []
+    try:
+        with open(_HOLIDAY_PATH, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        if isinstance(cfg, dict) and cfg.get("enabled", True):
+            windows = cfg.get("windows", []) or []
+    except Exception:
+        windows = []  # 缺失/损坏 → 不挡交易(安全降级)
+    _holiday_cache["data"] = windows
+    _holiday_cache["ts"] = now
+    return windows
+
+
+def check_holiday_closure(now_bjt=None) -> tuple[bool, str]:
+    """节假日提前停市检查(北京时间)。返回 (in_closure, name)。
+    落在任一 [start, end) 北京时间窗口内 → (True, 窗口名)。无匹配 → (False, "")。
+    解析失败的单条窗口跳过(不影响其他窗口/不误挡)。"""
+    if now_bjt is None:
+        now_bjt = datetime.now(_BJT)
+    for w in _load_holiday_windows():
+        try:
+            s = datetime.strptime(w["start"], "%Y-%m-%d %H:%M").replace(tzinfo=_BJT)
+            e = datetime.strptime(w["end"], "%Y-%m-%d %H:%M").replace(tzinfo=_BJT)
+            if s <= now_bjt < e:
+                return True, str(w.get("name", "节假日停市"))
+        except Exception:
+            continue
+    return False, ""
 
 
 def _parse_weekday_hour(s: str) -> tuple[int, int]:
@@ -91,6 +134,14 @@ def is_bybit_trading_hours() -> tuple[bool, str]:
         return True, "停市检测已关闭"
 
     now_bjt = datetime.now(_BJT)
+
+    # 节假日提前停市闸(20260620): 黄金 COMEX 节假日提前收盘期间, 币安仍可成交而 MT5 拒单(10018)
+    # →单腿。事前按已知 CME 假期日历(config/mt5_holiday_schedule.json)直接判休市, 从源头规避。
+    # 此判定先于周/日级常规判定; 所有调用方(策略主循环/恢复服务/广播)经此自动停 A 侧下单。
+    _hol, _hol_name = check_holiday_closure(now_bjt)
+    if _hol:
+        return False, f"MT5休市中（节假日提前停市：{_hol_name}）"
+
     weekday = now_bjt.weekday()  # 0=Mon, 6=Sun
     hour = now_bjt.hour
     month = now_bjt.month
