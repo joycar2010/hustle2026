@@ -156,7 +156,9 @@ async function load(){
       `<b>全市场合计</b>:样本 <b>${T.samples}</b> · 达标机会 <b class="${T.opp_count>0?'op':''}">${T.opp_count}</b> (<b class="${T.opp_count>0?'op':''}">${fmt(T.opp_rate_pct,3)}%</b>) @ 阈值 ${thr}bps`;
     document.getElementById('equitybox').innerHTML=equityBox(s,thr);
     document.getElementById('topbox').innerHTML=topBox(s);
-    document.getElementById('markets').innerHTML=(s.markets||[]).map(m=>marketCard(m,thr)).join('') || '<div class="stats">暂无数据(等采集落盘)。</div>';
+    const mkts=(s.markets||[]).slice().sort((a,b)=>
+      (b.opp_count-a.opp_count) || ((b.net&&b.net.max||-1e9)-(a.net&&a.net.max||-1e9)));
+    document.getElementById('markets').innerHTML=mkts.map(m=>marketCard(m,thr)).join('') || '<div class="stats">暂无数据(等采集落盘)。</div>';
   }catch(e){ document.getElementById('markets').innerHTML='<div class="neg">拉取失败: '+e+'</div>'; }
 }
 // 初始阈值跟随后端默认
