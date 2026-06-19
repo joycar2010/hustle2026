@@ -79,6 +79,17 @@ function hoursHtml(hourly){
 
 function marketCard(m, thr){
   const N=m.net||{};
+  const D=m.depth||null;
+  let depthHtml='';
+  if(D){
+    const v=D.max_exec_usd;
+    const txt = v>=1000 ? ('$'+(v/1000).toFixed(v>=10000?0:1)+'k') : ('$'+v);
+    const dc = v>=2500?'pos':(v>0?'warn':'neg');
+    const ladder = (D.ladder||[]).map(x=>'$'+(x[0]>=1000?(x[0]/1000)+'k':x[0])+':'+x[1]+'bp').join('  ');
+    depthHtml = `<div class="stats" style="margin-top:2px">可执行额(滑点≤${D.slip_tol_bps}bps): <b class="${dc}">${txt}</b> <span style="color:#6c7086">· 阶梯 ${ladder}</span></div>`;
+  } else {
+    depthHtml = `<div class="stats" style="margin-top:2px;color:#6c7086">可执行额: 探测中…</div>`;
+  }
   return `<div class="card">
     <div class="mh">
       <span class="mkt">${m.market} <span style="color:#6c7086;font-size:12px;font-weight:400">/ ${m.binance_symbol}</span></span>
@@ -88,6 +99,7 @@ function marketCard(m, thr){
       净基差 net(bps): 均<b class="${cls(N.avg)}">${fmt(N.avg)}</b> · p50 <b>${fmt(N.p50)}</b> · p90 <b>${fmt(N.p90)}</b> · p95 <b>${fmt(N.p95)}</b> · p99 <b class="${cls(N.p99)}">${fmt(N.p99)}</b> · 峰值 <b class="${cls(N.max)}">${fmt(N.max)}</b><br/>
       成本拆解(均): gross <b class="${cls(m.gross_avg)}">${fmt(m.gross_avg)}</b> · 现货卖回 <b>${fmt(m.exit_dex_avg)}</b> · gas <b>${fmt(m.gas_bps_avg,3)}</b> · 入场滑点 <b>${fmt(m.slippage_avg)}</b> bps
     </div>
+    ${depthHtml}
     ${histHtml(m.histogram, thr)}
     ${hoursHtml(m.hourly)}
   </div>`;

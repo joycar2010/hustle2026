@@ -191,14 +191,20 @@ def _compute(csv_path, threshold):
     }
 
 
-def build_report(csv_path, threshold):
+def build_report(csv_path, threshold, depth=None):
+    """depth: 可选的实时深度快照 {market: {max_exec_usd, slip_tol_bps, ...}};
+    历史报告来自CSV缓存,深度是实时量、每次合并(不进缓存键),供逐市场显示可执行额。"""
     mtime = os.path.getmtime(csv_path) if os.path.exists(csv_path) else 0
     ckey = (csv_path, round(threshold, 3))
     with _lock:
         c = _cache.get(ckey)
         if c and c["mtime"] == mtime and (time.time() - c["at"]) < 10:
-            return c["data"]
-    data = _compute(csv_path, threshold)
-    with _lock:
-        _cache[ckey] = {"mtime": mtime, "at": time.time(), "data": data}
+            data = c["data"]
+        else:
+            data = _compute(csv_path, threshold)
+            _cache[ckey] = {"mtime": mtime, "at": time.time(), "data": data}
+    if depth:
+        for m in data.get("markets", []):
+            m["depth"] = depth.get(m["market"])
     return data
+

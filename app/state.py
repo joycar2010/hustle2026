@@ -131,6 +131,10 @@ class State:
                 "ts": dr.ts,
             }
 
+    def depth_snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._depth)
+
     def snapshot(self) -> dict:
         with self._lock:
             markets = [self._stats[k].view(k) for k in sorted(self._stats)]
