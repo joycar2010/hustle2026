@@ -52,6 +52,7 @@ class Config:
     # 并行报价并发度。公共 RPC(mainnet.base.org)严格限频,建议 1-2;
     # Alchemy/QuickNode 端点可放到 8+。默认 2 求稳。
     rpc_concurrency: int = int(_get("CROSSARB_RPC_CONCURRENCY", "2"))
+    kyber_client_id: str = _get("CROSSARB_KYBER_CLIENT_ID", "crossarb")  # 聚合器 x-client-id
 
     csv_path: str = _get("CROSSARB_CSV", "./data/ticks.csv")
     http_host: str = _get("CROSSARB_HTTP_HOST", "127.0.0.1")  # nginx 在前,默认只听本机

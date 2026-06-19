@@ -13,6 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from .agg_quoter import AggQuoter
 from .binance_feed import BinanceFutFeed
 from .config import cfg
 from .dex_quoter import Quoter
@@ -27,6 +28,7 @@ class Collector(threading.Thread):
         self.state = state
         self.markets = load_markets()
         self.quoter = Quoter(cfg.base_rpc)
+        self.agg = AggQuoter(cfg.kyber_client_id)
         self.feed = BinanceFutFeed(cfg.binance_fapi)
         self._stop = threading.Event()
         workers = min(cfg.rpc_concurrency, max(1, len(self.markets)))
@@ -54,7 +56,8 @@ class Collector(threading.Thread):
             self.state.record_error(m.key, f"币安无 {sym} 行情")
             return
         try:
-            q = self.quoter.quote_buy(m, m.notional_usd or cfg.notional_usd)
+            src = self.agg if m.source == "agg" else self.quoter
+            q = src.quote_buy(m, m.notional_usd or cfg.notional_usd)
         except Exception as e:  # noqa: BLE001
             self.state.record_error(m.key, f"DEX报价失败 {type(e).__name__}: {e}")
             return

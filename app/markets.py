@@ -19,12 +19,13 @@ class Market:
     key: str               # 显示/索引键,如 "BASE:ETH"
     base_token: str        # 要买入的代币地址
     base_decimals: int
-    fee_tier: int          # Uniswap V3 费档:100/500/3000/10000
+    fee_tier: int          # Uniswap V3 费档:100/500/3000/10000(source=agg 时忽略,填0)
     binance_symbol: str    # 做空腿币安 USDT 永续
     pool: str = ""         # 已知池地址(省一次 getPool;留空则运行时 factory 解析)
     quote_token: str = USDC
     quote_decimals: int = USDC_DECIMALS
     notional_usd: float | None = None  # 该市场名义额;None=用全局默认
+    source: str = "univ3"  # 买入腿价源:"univ3"(直连深池)| "agg"(KyberSwap聚合,跨源多跳)
 
 
 # —— 链上实测核实(2026-06,Base mainnet)——
@@ -37,11 +38,16 @@ DEFAULT_MARKETS = [
            pool="0x529d2863a1521d0b57db028168fdE2E97120017C"),
     Market("BASE:AERO",    "0x940181a94A35A4569E4529A3CDfB74e38FD98631", 18, 500,  "AEROUSDT",
            pool="0xE5B5f522E98B5a2baAe212d4dA66b865B781DB97"),
-    Market("BASE:AIXBT",   "0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825", 18, 3000, "AIXBTUSDT",
-           pool="0xf1Fdc83c3A336bdbDC9fB06e318B08EadDC82FF4"),
+    # —— 以下走 KyberSwap 聚合器(深流动性在 Slipstream CL/经WETH,经发现脚本验证 $2500 深度 ratio≈1.01)——
+    # notional 按池深度定:深的用 $2500,浅的缩小到滑点可控档(发现脚本实测)
+    Market("BASE:BRETT",   "0x532f27101965dd16442E59d40670FaF5eBB142E4", 18, 0, "BRETTUSDT",   source="agg"),
+    Market("BASE:ZORA",    "0x1111111111166b7FE7bd91427724B487980aFc69", 18, 0, "ZORAUSDT",    source="agg"),
+    Market("BASE:TOSHI",   "0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4", 18, 0, "TOSHIUSDT",   source="agg"),
+    Market("BASE:MORPHO",  "0xBAa5CC21fd487B8Fcc2F632f3f4E8D37262a0842", 18, 0, "MORPHOUSDT",  source="agg"),
+    Market("BASE:AIXBT",   "0x4F9Fd6Be4a90f2620860d680c0d4d5Fb53d1A825", 18, 0, "AIXBTUSDT",   source="agg", notional_usd=1000),
+    Market("BASE:ZRO",     "0x6985884C4392D348587B19cb9eAAf157F13271cd", 18, 0, "ZROUSDT",     source="agg", notional_usd=1000),
+    Market("BASE:KAITO",   "0x98d0baa52b2D063E780DE12F615f963Fe8537553", 18, 0, "KAITOUSDT",   source="agg", notional_usd=500),
 ]
-# 注:BRETT/ZORA/KAITO/ZRO/TOSHI/MORPHO 经探测在 Uniswap V3 上无足够深 USDC 池
-#     (eff 价偏离币安极大,真实流动性在 Aerodrome)。覆盖它们需 P1 加 Aerodrome 适配器。
 
 
 def load_markets() -> list[Market]:
