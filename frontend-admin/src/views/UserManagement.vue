@@ -1705,6 +1705,9 @@ function toast(msg, type = 'success') {
   toasts.value.push({ id, msg, type })
   setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id) }, 3000)
 }
+// 别名(20260620): 多处(createSub/cashflow/fund-view/pnl-links 等)调用 showToast 但仅定义了
+// toast → ReferenceError 致函数静默崩溃("创建子账号无反应"根因)。补别名统一指向 toast。
+const showToast = toast
 function apiErr(label, e) {
   let detail = e?.response?.data?.detail || e?.message || ''
   // FastAPI validation error returns detail as array of objects

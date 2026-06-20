@@ -519,7 +519,10 @@ async def get_daily_pnl(
     if not accounts:
         return {"daily_pnl": [], "summary": _compute_summary([])}
 
-    active_account_ids = [str(a.account_id) for a in accounts if a.is_active]
+    # 口径(20260620修): 收益不按 account.is_active 过滤(account.is_active 仅控 testgo 左侧列表
+    # 显隐, 收益是历史交易事实应全计入)。accounts 已是 resolve_pnl_account_ids 解析的目标集。
+    # 对冲腿计入与否由 MT5客户端(MT5Client.is_active)独立开关决定(_fetch_mt5_deals 选桥处)。
+    active_account_ids = [str(a.account_id) for a in accounts]
 
     # 1) 日期范围 + 分平台 NAV / UPL
     from datetime import date as _date
@@ -527,9 +530,9 @@ async def get_daily_pnl(
     d_end = _date.fromisoformat(end_date)
     prev_date = (d_start - timedelta(days=1)).isoformat()
 
-    # NAV 计算包含所有活跃 MT5 账户（SUM 天然处理多账户迁移场景）
-    mt5_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.is_mt5_account]
-    binance_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.platform_id == 1]
+    # NAV 计算包含所有 MT5 账户（SUM 天然处理多账户迁移场景）
+    mt5_account_ids = [str(a.account_id) for a in accounts if a.is_mt5_account]
+    binance_account_ids = [str(a.account_id) for a in accounts if a.platform_id == 1]
 
     mt5_nav_by_date = await _fetch_daily_closing_nav(
         mt5_account_ids, prev_date, end_date
@@ -545,7 +548,7 @@ async def get_daily_pnl(
 
     if platform in ("all", "mt5"):
         for account in accounts:
-            if not account.is_mt5_account or not account.is_active:
+            if not account.is_mt5_account:
                 continue
             cf_deals = await _fetch_mt5_cashflows(account, start_ms, end_ms)
             for d in cf_deals:
@@ -559,7 +562,7 @@ async def get_daily_pnl(
     binance_wins = defaultdict(int)
     if platform in ("all", "binance"):
         for account in accounts:
-            if account.platform_id != 1 or not account.is_active:
+            if account.platform_id != 1:
                 continue
             all_income = await _fetch_binance_income(account, start_ms, end_ms)
             for r in all_income:
@@ -584,7 +587,7 @@ async def get_daily_pnl(
     mt5_wins = defaultdict(int)
     if platform in ("all", "mt5"):
         for account in accounts:
-            if not account.is_mt5_account or not account.is_active:
+            if not account.is_mt5_account:
                 continue
             deals = await _fetch_mt5_deals(account, start_ms, end_ms)
             for d in deals:

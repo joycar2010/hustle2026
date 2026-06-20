@@ -141,16 +141,19 @@ async def _resolve_view_context(db: AsyncSession, user_id: str) -> ViewContext:
 
 async def resolve_pnl_account_ids(db: AsyncSession, data_user_id: str, view: str = "merged", is_sub: bool = False) -> list:
     """收益关联(20260620): 解析收益视图应聚合的 account_id 集合。
-    - view='merged'(默认): data_user_id 自己 ∪ user_pnl_links 关联用户(B/C)的 is_active 账号, 去重。
-    - view=<某user_id>: 只取那一个用户的 is_active 账号; 该 user 必须是 self 或 data_user_id
+    - view='merged'(默认): data_user_id 自己 ∪ user_pnl_links 关联用户(B/C)的账号, 去重。
+    - view=<某user_id>: 只取那一个用户的账号; 该 user 必须是 self 或 data_user_id
       的关联用户之一, 否则抛 403(防越权看任意用户)。
     - 子账号(is_sub): 不参与合并(份额模型互斥), 直接返回 data_user_id 自己的账号, 忽略 view。
     只展开一层(不递归关联用户的关联), 防环路/重复。
+    口径(20260620修): 不按 account.is_active 过滤 —— 账户 is_active 只控制 testgo 左侧列表
+    显示/隐藏, 收益是历史交易事实应全计入。对冲腿是否计入由 MT5客户端(MT5Client.is_active)
+    的独立禁用开关决定(_fetch_mt5_deals 按 MT5Client.is_active 选桥), 与账户隐藏解耦。
     """
     # 子账号: 走原口径, 只看自己(其实是父账号 data_user_id)的账号
     if is_sub:
         rows = (await db.execute(text(
-            "SELECT account_id::text FROM accounts WHERE user_id = CAST(:u AS UUID) AND is_active = true"
+            "SELECT account_id::text FROM accounts WHERE user_id = CAST(:u AS UUID)"
         ), {"u": data_user_id})).fetchall()
         return [r[0] for r in rows]
 
@@ -170,7 +173,7 @@ async def resolve_pnl_account_ids(db: AsyncSession, data_user_id: str, view: str
     if not target_uids:
         return []
     rows = (await db.execute(text(
-        "SELECT account_id::text FROM accounts WHERE user_id = ANY(CAST(:uids AS uuid[])) AND is_active = true"
+        "SELECT account_id::text FROM accounts WHERE user_id = ANY(CAST(:uids AS uuid[]))"
     ), {"uids": target_uids})).fetchall()
     # 去重(同一 account_id 不重复)
     return list({r[0] for r in rows})
