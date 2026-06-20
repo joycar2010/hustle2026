@@ -28,24 +28,24 @@
 
       <!-- 核心四宫格: 今日 / 本周 / 本月 / 累计 -->
       <div class="grid grid-cols-2 gap-3">
-        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">今日收益</div>
-          <div class="text-2xl font-bold font-mono" :class="pnlColor(todayPnl)">{{ fmtPnl(todayPnl) }}</div>
+          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(todayPnl), fitFont(todayPnl)]">{{ fmtPnl(todayPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">USDT</div>
         </div>
-        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本周收益</div>
-          <div class="text-2xl font-bold font-mono" :class="pnlColor(thisWeekPnl)">{{ fmtPnl(thisWeekPnl) }}</div>
+          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(thisWeekPnl), fitFont(thisWeekPnl)]">{{ fmtPnl(thisWeekPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">本周一至今</div>
         </div>
-        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本月收益</div>
-          <div class="text-2xl font-bold font-mono" :class="pnlColor(thisMonthPnl)">{{ fmtPnl(thisMonthPnl) }}</div>
+          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(thisMonthPnl), fitFont(thisMonthPnl)]">{{ fmtPnl(thisMonthPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">本月1日至今</div>
         </div>
-        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4">
+        <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">累计收益</div>
-          <div class="text-2xl font-bold font-mono" :class="pnlColor(cumulativePnl)">{{ fmtPnl(cumulativePnl) }}</div>
+          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ fmtPnl(cumulativePnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">{{ rangeLabel }}内累计</div>
         </div>
       </div>
@@ -84,17 +84,17 @@
           <span class="text-[10px]" :class="wsConnected ? 'text-[#0ecb81]' : 'text-text-tertiary'">{{ wsConnected ? '⚡ 实时' : '📡 轮询' }}</span>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-sm">
-          <div class="flex items-center justify-between">
-            <span class="text-text-tertiary text-xs">总资产</span>
-            <span class="font-mono font-semibold">{{ fmtNum(fundTotals.total_assets) }} U</span>
+          <div class="flex items-center justify-between gap-1 min-w-0">
+            <span class="text-text-tertiary text-xs flex-shrink-0">总资产</span>
+            <span class="font-mono font-semibold truncate text-right">{{ fmtNum(fundTotals.total_assets) }} U</span>
           </div>
-          <div class="flex items-center justify-between">
-            <span class="text-text-tertiary text-xs">净资产</span>
-            <span class="font-mono font-semibold">{{ fmtNum(fundTotals.net_assets) }} U</span>
+          <div class="flex items-center justify-between gap-1 min-w-0">
+            <span class="text-text-tertiary text-xs flex-shrink-0">净资产</span>
+            <span class="font-mono font-semibold truncate text-right">{{ fmtNum(fundTotals.net_assets) }} U</span>
           </div>
-          <div class="flex items-center justify-between">
-            <span class="text-text-tertiary text-xs">浮动盈亏</span>
-            <span class="font-mono font-semibold" :class="pnlColor(fundTotals.unrealized_pnl)">{{ fmtPnl(fundTotals.unrealized_pnl) }} U</span>
+          <div class="flex items-center justify-between gap-1 min-w-0">
+            <span class="text-text-tertiary text-xs flex-shrink-0">浮动盈亏</span>
+            <span class="font-mono font-semibold truncate text-right" :class="pnlColor(fundTotals.unrealized_pnl)">{{ fmtPnl(fundTotals.unrealized_pnl) }} U</span>
           </div>
         </div>
       </div>
@@ -115,7 +115,7 @@ import { Bar } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js'
 import { useAuthStore } from '@/stores/auth.js'
 import { useWebSocket } from '@/composables/useWebSocket.js'
-import { fetchDailyPnl, aggregateWeekly, aggregateMonthly, fmtPnl, fmtNum, pnlColor, setWsInstance } from '@/utils/pnlUtils.js'
+import { fetchDailyPnl, aggregateWeekly, aggregateMonthly, fmtPnl, fmtNum, pnlColor, setWsInstance, clearPnlCache } from '@/utils/pnlUtils.js'
 import api from '@/services/api.js'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
@@ -133,7 +133,7 @@ const loading = ref(true)
 const lastUpdate = ref('--')
 const dailyList = ref([])
 const fundTotals = ref({ total_assets: 0, available: 0, net_assets: 0, unrealized_pnl: 0 })
-const activeRange = ref('90d')
+const activeRange = ref('30d')
 const activeGran = ref('day')   // day | week | month
 const chartKey = ref(0)
 let fallbackTimer = null
@@ -163,6 +163,16 @@ const thisMonthPnl = computed(() => {
   return dailyList.value.filter(x => x.date >= ms).reduce((s, x) => s + x.net_pnl, 0)
 })
 const cumulativePnl = computed(() => dailyList.value.reduce((s, x) => s + x.net_pnl, 0))
+
+// 数字自适应字号(防大数字在窄屏溢出/错位): 按格式化后字符串长度选 Tailwind 字号档。
+// 如 +9,209.10(9字符)用较小号, +137.16(7字符)用大号。
+function fitFont(v) {
+  const len = String(fmtPnl(v)).length
+  if (len <= 7) return 'text-2xl'      // +137.16
+  if (len <= 9) return 'text-xl'       // +1,622.36
+  if (len <= 11) return 'text-lg'      // +9,209.10 / +12,345.67
+  return 'text-base'                   // 更长(六位数+)
+}
 
 // ── 趋势图: 日/周/月 三种粒度, 纯前端切换, 不发请求 ──
 const chartData = computed(() => {
@@ -244,11 +254,23 @@ async function fetchFund() {
 
 function doLogout() { wsDisconnect(); clearInterval(fallbackTimer); auth.logout(); router.push('/login') }
 
+// 切户/重新登录后自动刷新: pnlUtils 的缓存键只按日期范围(不含user_id), 换用户后60s内会
+// 命中上个用户的缓存→显示旧数据。故进入页面先 clearPnlCache 清缓存, 并 watch 当前用户变化
+// (username 变即重新拉数), 保证切户后数据立即随当前账号刷新, 无需手动刷新。
+watch(() => auth.user?.username, (nu, ou) => {
+  if (nu && nu !== ou) {
+    clearPnlCache()
+    setRange(activeRange.value)
+    fetchFund()
+  }
+})
+
 onMounted(async () => {
-  auth.fetchUser()
+  clearPnlCache()           // 进入页即清, 杜绝跨用户缓存串号
+  await auth.fetchUser()    // 先确认当前用户, 再拉该用户数据
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })
-  await Promise.all([setRange('90d'), fetchFund()])
+  await Promise.all([setRange('30d'), fetchFund()])
 })
 onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer) })
 </script>

@@ -72,27 +72,46 @@ def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
 # ── 数据获取 ─────────────────────────────────────────
 
 async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str = None) -> list:
-    """获取 Binance income 记录（自动分页，limit=1000/次）"""
+    """获取 Binance income 记录。
+
+    20260620 修(收益随查询范围漂移的根因): 原实现单次大跨度 + limit=1000 游标分页,
+    当某热点日(如对冲密集日)单日 income 笔数多、且分页边界恰好切在该日时, 会漏取该日
+    后续记录(实测 hcz987 6/9: 30天范围只取63笔/581.03, 90天/单日均66笔/913.40)。
+    根因: 币安 /fapi/v1/income 大跨度+1000上限分页, 游标 records[-1].time+1 在同毫秒多笔
+    或跨度过大时丢数。改为【按7天分段】拉取, 每段内再分页(段内跨度小, 分页边界不会切在
+    热点日中间), 跨段用 ticket/tranId 去重。同一区间无论从30/90/全部范围进入, 结果一致。
+    """
     client = BinanceFuturesClient(
         account.api_key, account.api_secret,
         proxy_url=build_proxy_url(account.proxy_config)
     )
+    _SEG_MS = 7 * 24 * 60 * 60 * 1000  # 7天分段
     all_records = []
-    cursor_start = start_ms
+    seen = set()
     try:
-        for _ in range(20):
-            records = await client.get_income(
-                income_type=income_type,
-                start_time=cursor_start,
-                end_time=end_ms,
-                limit=1000,
-            )
-            if not records:
-                break
-            all_records.extend(records)
-            if len(records) < 1000:
-                break
-            cursor_start = int(records[-1].get("time", 0)) + 1
+        seg_start = start_ms
+        while seg_start <= end_ms:
+            seg_end = min(seg_start + _SEG_MS - 1, end_ms)
+            cursor = seg_start
+            for _ in range(50):  # 段内分页(7天单段一般远不到, 50页=50000条上限兜底)
+                records = await client.get_income(
+                    income_type=income_type,
+                    start_time=cursor,
+                    end_time=seg_end,
+                    limit=1000,
+                )
+                if not records:
+                    break
+                for r in records:
+                    # 去重键: tranId 优先(币安唯一), 退化用 (time,type,income,symbol)
+                    k = r.get("tranId") or (r.get("time"), r.get("incomeType"), r.get("income"), r.get("symbol"), r.get("tradeId"))
+                    if k not in seen:
+                        seen.add(k)
+                        all_records.append(r)
+                if len(records) < 1000:
+                    break
+                cursor = int(records[-1].get("time", 0)) + 1
+            seg_start = seg_end + 1
     except Exception as e:
         logger.error(f"Binance income ({income_type}) fetch failed [{account.account_name}]: {e}")
     finally:
