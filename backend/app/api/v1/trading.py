@@ -2449,9 +2449,18 @@ async def get_realtime_trading_history(
                                        _all_binance_pre_filter, pair_code)
 
         # 计算统计数据
+        # 取 BNBUSDT 现价折算币安BNB手续费(仅当确有BNB手续费且有币安账号时才取价, 省调用)
+        _bnb_price = 0.0
+        try:
+            if a_platform_id == 1 and primary_accs and any(
+                float(t.get("fee_bnb", 0) or 0) > 0 for t in formatted_binance
+            ):
+                _bnb_price = await _get_bnb_usdt_price(primary_accs[0])
+        except Exception as _bpe:
+            logger.warning(f"[realtime] BNB价格获取跳过: {_bpe}")
         stats = _calculate_stats(
             formatted_binance, formatted_mt5, binance_realized_pnl, pair_funding_fee,
-            binance_rebate=binance_rebate,
+            binance_rebate=binance_rebate, bnb_price=_bnb_price,
         )
 
         return {
@@ -2466,6 +2475,21 @@ async def get_realtime_trading_history(
     except Exception as e:
         logger.error(f"Realtime history error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _get_bnb_usdt_price(account) -> float:
+    """取 BNBUSDT 现价(用于把币安BNB手续费折算成USDT)。失败返回0(调用方安全降级:不折扣)。"""
+    from app.services.binance_client import BinanceFuturesClient
+    client = BinanceFuturesClient(account.api_key, account.api_secret,
+                                   proxy_url=build_proxy_url(account.proxy_config))
+    try:
+        r = await client.get_ticker_price("BNBUSDT")
+        return float(r.get("price", 0) or 0)
+    except Exception as e:
+        logger.warning(f"[stats] BNBUSDT 取价失败: {e} (BNB手续费本次不折算)")
+        return 0.0
+    finally:
+        await client.close()
 
 
 async def _get_binance_trades_realtime(account, start_time_ms, end_time_ms, symbol=None):
@@ -3439,11 +3463,16 @@ def _assign_funding_to_paired(paired_trades, funding_records, all_binance_trades
 
 
 def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binance_funding_fee=0.0,
-                     binance_rebate=0.0):
+                     binance_rebate=0.0, bnb_price=0.0):
     """计算交易统计数据（含资金费/返佣/返佣前利润/返佣后净利润）
 
-    返佣前利润 = binanceRealizedPnL + mt5RealizedPnL + fundingFee + mt5OvernightFee - mt5Fee
+    返佣前利润 = binanceRealizedPnL + mt5RealizedPnL + fundingFee + mt5OvernightFee
+                 - binanceFee(USDT) - binanceBnbFee*bnb_price - mt5Fee
     返佣后净利润 = 返佣前利润 + binanceRebate + mt5Rebate
+
+    20260620: 此前返佣前利润漏扣【币安手续费】(只扣了MT5手续费), 导致利润偏高。
+    现补扣: 币安USDT手续费直接扣; 币安BNB手续费按传入的 BNBUSDT 现价(bnb_price)折USDT后扣。
+    bnb_price=0 时(取价失败)BNB部分不扣, 安全降级(宁可少扣不扣错), 并在日志标注。
     """
     stats = {
         "totalVolume": 0,
@@ -3520,10 +3549,17 @@ def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binan
     stats["mt5OvernightFee"] = round(stats["mt5OvernightFee"], 2)
     stats["mt5RealizedPnL"] = round(stats["mt5RealizedPnL"], 2)
 
-    # 返佣前利润 = Binance已实现 + MT5已实现 + 资金费 + MT5过夜费 - MT5手续费
+    # 币安手续费折USDT: USDT部分直接用; BNB部分按 BNBUSDT 现价折算(取价失败则不折,安全降级)
+    _binance_fee_usdt = round(float(stats["totalFees"]), 4)
+    _binance_bnb_fee_usdt = round(float(stats["bnbFees"]) * float(bnb_price or 0.0), 4)
+    stats["binanceFeeUsdtTotal"] = round(_binance_fee_usdt + _binance_bnb_fee_usdt, 4)
+    stats["bnbPriceUsed"] = round(float(bnb_price or 0.0), 4)
+
+    # 返佣前利润 = Binance已实现 + MT5已实现 + 资金费 + MT5过夜费 - 币安手续费(USDT+BNB折算) - MT5手续费
     stats["profitBeforeRebate"] = round(
         stats["realizedPnL"] + stats["mt5RealizedPnL"]
-        + stats["fundingFee"] + stats["mt5OvernightFee"] - stats["mt5Fee"], 2
+        + stats["fundingFee"] + stats["mt5OvernightFee"]
+        - _binance_fee_usdt - _binance_bnb_fee_usdt - stats["mt5Fee"], 2
     )
     # 返佣后净利润 = 返佣前利润 + 各方返佣
     stats["netProfitAfterRebate"] = round(
@@ -3532,10 +3568,13 @@ def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binan
     stats["binanceRebate"] = round(stats["binanceRebate"], 4)
     stats["mt5Rebate"] = round(stats["mt5Rebate"], 2)
 
+    if stats["bnbFees"] > 0 and not bnb_price:
+        logger.warning(f"[stats] BNB手续费={stats['bnbFees']:.6f} 但 BNBUSDT 取价失败, 本次未折算扣除(利润略偏高)")
     logger.info(f"Stats calculated: Binance trades={len(binance_trades)}, MT5 trades={len(mt5_trades)}, "
                 f"Binance realizedPnL={stats['realizedPnL']:.2f}, fundingFee={stats['fundingFee']:.4f}, "
+                f"binanceFee(USDT+BNB折算)={stats['binanceFeeUsdtTotal']:.2f}(bnb@{stats['bnbPriceUsed']:.2f}), "
                 f"bnbFees={stats['bnbFees']:.6f} BNB, MT5 realizedPnL={stats['mt5RealizedPnL']:.2f}, "
-                f"MT5 overnightFee={stats['mt5OvernightFee']:.2f}, "
+                f"MT5 overnightFee={stats['mt5OvernightFee']:.2f}, MT5Fee={stats['mt5Fee']:.2f}, "
                 f"profitBeforeRebate={stats['profitBeforeRebate']:.2f}, "
                 f"netProfitAfterRebate={stats['netProfitAfterRebate']:.2f}")
     return stats
