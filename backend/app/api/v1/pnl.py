@@ -645,3 +645,69 @@ async def get_daily_pnl(
             scaled["note"] = "历史快照不足，采用父账号原始 PnL × 份额比例近似展示"
         return scaled
     return resp
+
+
+# 累计端点专用缓存(30min): 累计是慢变量, 全周期取数慢(实测365天~135s, 打交易所+多桥),
+# 不需实时。首次慢、之后30min内秒回。与 /daily 的300s缓存分开。
+_CUM_CACHE_TTL = 1800
+
+
+@router.get("/cumulative")
+async def get_cumulative_pnl(
+    platform: str = Query("all", description="平台过滤: all/binance/mt5"),
+    ctx: ViewContext = Depends(get_view_context),
+):
+    """真正的"开户至今累计收益"(固定起点=账号首笔快照日, 不随前端范围/日期滚动变化)。
+
+    背景: 前端累计卡片原先用"滚动N天窗口求和", 每天0点会因N天前那天滑出窗口而跳变
+    (hcz987: 昨天1378今天639, 因5/21的+739滑出30天窗), 且"本月>累计"反直觉。
+    本端点固定从 inception(account_snapshots 最早日)累加到今天, 给出稳定的总累计。
+    内部复用 get_daily_pnl(start=inception, end=today) 求和; 带30min缓存抵消全周期取数慢。
+    """
+    from app.models.user import User as _U
+    async with AsyncSessionLocal() as db:
+        _row = (await db.execute(select(_U).where(_U.user_id == ctx.data_user_id))).scalar_one_or_none()
+        if not _row:
+            return {"cumulative_pnl": 0, "inception_date": None, "end_date": None}
+        uid = _row.user_id
+
+    _ck = f"pnlcum:{uid}:{platform}:sub={ctx.is_sub}:v1"
+    _hit = _cache.get(_ck)
+    if _hit is not None and _time.time() - _cache_ts.get(_ck, 0) < _CUM_CACHE_TTL:
+        return _hit
+
+    # 1) inception = 该用户所有账号 account_snapshots 的最早北京日期(便宜查询)
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(text("""
+            SELECT MIN(CAST(s.timestamp + interval '8 hours' AS date))
+            FROM account_snapshots s
+            JOIN accounts a ON a.account_id = s.account_id
+            WHERE a.user_id = CAST(:uid AS uuid)
+        """), {"uid": str(uid)})).first()
+    inception = row[0].isoformat() if row and row[0] else None
+
+    import datetime as _dtm
+    today_bj = _dtm.datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+    if not inception:
+        out = {"cumulative_pnl": 0, "inception_date": None, "end_date": today_bj}
+        _cache[_ck] = out; _cache_ts[_ck] = _time.time()
+        return out
+
+    # 2) 复用 /daily 全周期取数(inception→today), 求和 net_pnl = 真实总累计
+    daily_resp = await get_daily_pnl(
+        start_date=inception, end_date=today_bj, platform=platform, ctx=ctx
+    )
+    dl = daily_resp.get("daily_pnl", []) if isinstance(daily_resp, dict) else []
+    cum = round(sum(float(x.get("net_pnl", 0)) for x in dl), 2)
+
+    out = {
+        "cumulative_pnl": cum,
+        "inception_date": inception,
+        "end_date": today_bj,
+        "days": len(dl),
+    }
+    _cache[_ck] = out
+    _cache_ts[_ck] = _time.time()
+    logger.info(f"[PnL-CUM] user={uid} inception={inception} cumulative={cum} days={len(dl)}")
+    return out
+

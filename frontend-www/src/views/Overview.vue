@@ -45,8 +45,8 @@
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">累计收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ fmtPnl(cumulativePnl) }}</div>
-          <div class="text-[10px] text-text-tertiary mt-1">{{ rangeLabel }}内累计<span v-if="cumRangeText" class="ml-1 text-text-tertiary/80">({{ cumRangeText }})</span></div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ cumLoading ? '...' : fmtPnl(cumulativePnl) }}</div>
+          <div class="text-[10px] text-text-tertiary mt-1">开户至今<span v-if="cumInception" class="ml-1 text-text-tertiary/80">({{ cumInception }} 起)</span></div>
         </div>
       </div>
 
@@ -146,16 +146,8 @@ const grans = [
   { label: '日', val: 'day' }, { label: '周', val: 'week' }, { label: '月', val: 'month' },
 ]
 const rangeLabel = computed(() => (ranges.find(r => r.val === activeRange.value) || {}).label || '')
-// 累计的实际日期段(取 dailyList 首尾日期), 形如 "05-21 ~ 06-20", 供累计卡片备注用
-const cumRangeText = computed(() => {
-  const list = dailyList.value
-  if (!list.length) return ''
-  const a = list[0].date.substring(5)        // MM-DD
-  const b = list[list.length - 1].date.substring(5)
-  return `${a} ~ ${b}`
-})
 
-// ── 四个核心数字: 全部由同一份 dailyList 现算 ──
+// ── 四个核心数字: 今日/本周/本月由 dailyList 现算; 累计独立从 /pnl/cumulative 取 ──
 const todayPnl = computed(() => {
   const today = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
   const d = dailyList.value.find(x => x.date === today)
@@ -170,7 +162,20 @@ const thisMonthPnl = computed(() => {
   const ms = dayjs().tz('Asia/Shanghai').format('YYYY-MM') + '-01'
   return dailyList.value.filter(x => x.date >= ms).reduce((s, x) => s + x.net_pnl, 0)
 })
-const cumulativePnl = computed(() => dailyList.value.reduce((s, x) => s + x.net_pnl, 0))
+// 累计收益: 改为固定"开户至今"(后端 /pnl/cumulative, inception起算), 独立于上方范围,
+// 不再随30天滚动窗/日期跳变。cumulativePnl 不再从 dailyList 求和。
+const cumulativePnl = ref(0)
+const cumInception = ref('')
+const cumLoading = ref(false)
+async function fetchCumulative() {
+  cumLoading.value = true
+  try {
+    const r = await api.get('/api/v1/pnl/cumulative', { params: { platform: 'all' } })
+    cumulativePnl.value = Number(r.data?.cumulative_pnl || 0)
+    cumInception.value = r.data?.inception_date || ''
+  } catch (e) { console.error('cumulative fetch error:', e) }
+  finally { cumLoading.value = false }
+}
 
 // 数字自适应字号(完整显示不截断): 按格式化后字符串长度选 Tailwind 字号档, 字号下探更小,
 // 保证半屏卡片宽度内最长金额也能整行放下(无 overflow-hidden, 永不出现 "..." 截断)。
@@ -272,6 +277,7 @@ watch(() => auth.user?.username, (nu, ou) => {
     clearPnlCache()
     setRange(activeRange.value)
     fetchFund()
+    fetchCumulative()
   }
 })
 
@@ -281,6 +287,7 @@ onMounted(async () => {
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })
   await Promise.all([setRange('30d'), fetchFund()])
+  fetchCumulative()         // 累计独立拉取(开户至今, 不阻塞首屏四宫格其余三个数)
 })
 onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer) })
 </script>
