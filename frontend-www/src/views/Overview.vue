@@ -46,7 +46,7 @@
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">累计收益</div>
           <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ fmtPnl(cumulativePnl) }}</div>
-          <div class="text-[10px] text-text-tertiary mt-1">{{ rangeLabel }}内累计</div>
+          <div class="text-[10px] text-text-tertiary mt-1">{{ rangeLabel }}内累计<span v-if="cumRangeText" class="ml-1 text-text-tertiary/80">({{ cumRangeText }})</span></div>
         </div>
       </div>
 
@@ -146,6 +146,14 @@ const grans = [
   { label: '日', val: 'day' }, { label: '周', val: 'week' }, { label: '月', val: 'month' },
 ]
 const rangeLabel = computed(() => (ranges.find(r => r.val === activeRange.value) || {}).label || '')
+// 累计的实际日期段(取 dailyList 首尾日期), 形如 "05-21 ~ 06-20", 供累计卡片备注用
+const cumRangeText = computed(() => {
+  const list = dailyList.value
+  if (!list.length) return ''
+  const a = list[0].date.substring(5)        // MM-DD
+  const b = list[list.length - 1].date.substring(5)
+  return `${a} ~ ${b}`
+})
 
 // ── 四个核心数字: 全部由同一份 dailyList 现算 ──
 const todayPnl = computed(() => {
