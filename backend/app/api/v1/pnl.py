@@ -439,7 +439,7 @@ async def get_daily_pnl(
                 if _join_date_str > start_date:
                     start_date = _join_date_str
 
-    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:view={view}:v4"
+    cache_key = f"pnl:{ctx.auth_user_id}:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:view={view}:v5"
     cached = _cache_get(cache_key)
     if cached:
         return cached
@@ -643,17 +643,20 @@ async def get_daily_pnl(
 
     summary = _compute_summary(daily_list)
     resp = {"daily_pnl": daily_list, "summary": summary, "data_source": "income_deals_based"}
-    _cache_set(cache_key, resp)
 
     logger.info(f"[PnL-NAV] user={current_user.username}, range={start_date}~{end_date}, "
                 f"days={len(daily_list)}, cumulative={summary['cumulative_pnl']}")
 
     if ctx.is_sub:
+        # 子账户: 按份额投影后再缓存(此前 bug: L646 缓存了未投影的父账号原始 resp,
+        # 子账户第二次请求命中缓存→拿到未缩放值, 柱形图=父账号原值。改为缓存 scaled)。
         scaled = project_response(resp, ctx.multiplier)
         if isinstance(scaled, dict):
             scaled["data_source"] = "parent_raw_x_multiplier"
             scaled["note"] = "历史快照不足，采用父账号原始 PnL × 份额比例近似展示"
+        _cache_set(cache_key, scaled)
         return scaled
+    _cache_set(cache_key, resp)
     return resp
 
 
