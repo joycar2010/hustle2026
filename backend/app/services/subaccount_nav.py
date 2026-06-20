@@ -251,6 +251,14 @@ async def get_parent_nav(db: AsyncSession, parent_user_id: str, *, force: bool =
             )
         except Exception:
             pass
+        # 20260620修(子账号创建500根因): _upsert_daily_snapshot 内部 await db.commit() +
+        # 后续 drop-check 可能在调用方事务中途留下 aborted 态, 污染后续写(create_sub_account
+        # 的 INSERT users 报 'transaction is aborted')。get_parent_nav 契约上只读, 这里强制
+        # rollback 确保返回时调用方事务干净(快照已自行commit, 不受影响)。
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     try:
         rc = redis_client.client
