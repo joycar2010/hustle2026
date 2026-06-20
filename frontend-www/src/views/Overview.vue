@@ -8,7 +8,7 @@
       </div>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">{{ auth.user?.username }}</span>
-        <select v-if="viewOptions.length > 1" v-model="activeView" @change="onViewChange"
+        <select v-if="viewOptions.length > 1" v-model="activeView"
           class="text-sm bg-dark-200 border border-border-primary rounded px-2 py-1">
           <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
         </select>
@@ -21,7 +21,7 @@
       <div class="flex items-center gap-2 min-w-0">
         <span class="font-semibold text-sm flex-shrink-0">我的收益</span>
         <span class="text-xs text-text-secondary truncate">{{ auth.user?.username || '--' }}</span>
-        <select v-if="viewOptions.length > 1" v-model="activeView" @change="onViewChange"
+        <select v-if="viewOptions.length > 1" v-model="activeView"
           class="text-xs bg-dark-200 border border-border-primary rounded px-1.5 py-0.5 flex-shrink-0 max-w-[40vw]">
           <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
         </select>
@@ -163,8 +163,13 @@ async function loadViewOptions() {
   } catch (e) { viewOptions.value = [] }
 }
 async function onViewChange() {
-  await Promise.all([setRange(activeRange.value), fetchCumulative()])
+  // 切换视图: 清缓存确保不命中旧 view 数据, 两个拉取独立(互不阻断)
+  clearPnlCache()
+  setRange(activeRange.value)
+  fetchCumulative()
 }
+// 兜底: watch activeView 变化也触发刷新(防 select @change 在个别端不触发)
+watch(activeView, () => { onViewChange() })
 
 const ranges = [
   { label: '30天', val: '30d' }, { label: '90天', val: '90d' },
