@@ -4,10 +4,11 @@ import { useAuthStore } from '@/stores/auth.js'
 const routes = [
   { path: '/login', name: 'Login', component: () => import('@/views/Login.vue'), meta: { requiresAuth: false } },
   { path: '/',       name: 'Overview', component: () => import('@/views/Overview.vue'), meta: { requiresAuth: true } },
-  { path: '/daily',  name: 'Daily',    component: () => import('@/views/Daily.vue'),    meta: { requiresAuth: true } },
-  { path: '/weekly', name: 'Weekly',   component: () => import('@/views/Weekly.vue'),   meta: { requiresAuth: true } },
-  { path: '/monthly',name: 'Monthly',  component: () => import('@/views/Monthly.vue'),  meta: { requiresAuth: true } },
   { path: '/fund-flow', name: 'FundFlow', component: () => import('@/views/FundFlow.vue'), meta: { requiresAuth: true } },
+  // 20260620: 日/周/月三页已合并进单页收益总览(/), 旧路径重定向到 / 避免书签404
+  { path: '/daily',   redirect: '/' },
+  { path: '/weekly',  redirect: '/' },
+  { path: '/monthly', redirect: '/' },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })

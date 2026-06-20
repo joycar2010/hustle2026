@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.proxy_utils import build_proxy_url
 from app.models.user import User
 from app.models.account import Account
@@ -118,22 +118,24 @@ async def _get_active_mt5_symbols(db: AsyncSession) -> set:
         return _FALLBACK_MT5_SYMBOLS
 
 
-async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
+async def _fetch_mt5_deals(account, start_ms: int, end_ms: int) -> list:
     """获取 MT5 平仓 deal（entry==1），从该 account 下所有活跃 bridge 聚合并按 ticket 去重"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
     api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
     headers = {"X-Api-Key": api_key} if api_key else {}
 
+    # 短会话仅做 bridge 端口快查，随即归还连接；下面的 httpx 打桥(可达15s超时)不再占 DB 连接。
     try:
-        result = await db.execute(
-            select(MT5Client.bridge_service_port).where(
-                MT5Client.account_id == account.account_id,
-                MT5Client.is_active == True,
-                MT5Client.is_system_service == False,
-                MT5Client.bridge_service_port.isnot(None),
-            ).order_by(MT5Client.priority)
-        )
-        bridge_ports = [row[0] for row in result.fetchall()]
+        async with AsyncSessionLocal() as _db:
+            result = await _db.execute(
+                select(MT5Client.bridge_service_port).where(
+                    MT5Client.account_id == account.account_id,
+                    MT5Client.is_active == True,
+                    MT5Client.is_system_service == False,
+                    MT5Client.bridge_service_port.isnot(None),
+                ).order_by(MT5Client.priority)
+            )
+            bridge_ports = [row[0] for row in result.fetchall()]
     except Exception:
         bridge_ports = []
 
@@ -142,7 +144,11 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession
 
     start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
     now_utc = datetime.now(tz=timezone.utc)
-    days = max(1, int((now_utc - start_dt).total_seconds() / 86400) + 2)
+    # MT5桥 days 参数实测按"最近N条/交易日"截断而非N个日历日(8002 days=32 实际只回~12天),
+    # 直接用(now-start)天数会漏掉早段平仓→收益虚高(单腿假象)。故 ×3+7 大幅冗余覆盖;
+    # 下方已用真实时间戳 start_ts<=ts<=end_ts 二次精确过滤, 多取无害(只是多拉后丢弃)。
+    _span_days = int((now_utc - start_dt).total_seconds() / 86400)
+    days = max(1, _span_days * 3 + 7)
     days = min(days, 365)
 
     seen_tickets = set()
@@ -173,22 +179,24 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int, db: AsyncSession
     ]
 
 
-async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int, db: AsyncSession) -> list:
+async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int) -> list:
     """获取 MT5 入出金记录，从该 account 下所有活跃 bridge 聚合并按 ticket 去重"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
     api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
     headers = {"X-Api-Key": api_key} if api_key else {}
 
+    # 短会话仅做 bridge 端口快查，随即归还连接；下面的 httpx 打桥(可达15s超时)不再占 DB 连接。
     try:
-        result = await db.execute(
-            select(MT5Client.bridge_service_port).where(
-                MT5Client.account_id == account.account_id,
-                MT5Client.is_active == True,
-                MT5Client.is_system_service == False,
-                MT5Client.bridge_service_port.isnot(None),
-            ).order_by(MT5Client.priority)
-        )
-        bridge_ports = [row[0] for row in result.fetchall()]
+        async with AsyncSessionLocal() as _db:
+            result = await _db.execute(
+                select(MT5Client.bridge_service_port).where(
+                    MT5Client.account_id == account.account_id,
+                    MT5Client.is_active == True,
+                    MT5Client.is_system_service == False,
+                    MT5Client.bridge_service_port.isnot(None),
+                ).order_by(MT5Client.priority)
+            )
+            bridge_ports = [row[0] for row in result.fetchall()]
     except Exception:
         bridge_ports = []
 
@@ -197,7 +205,11 @@ async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int, db: AsyncSes
 
     start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
     now_utc = datetime.now(tz=timezone.utc)
-    days = max(1, int((now_utc - start_dt).total_seconds() / 86400) + 2)
+    # MT5桥 days 参数实测按"最近N条/交易日"截断而非N个日历日(8002 days=32 实际只回~12天),
+    # 直接用(now-start)天数会漏掉早段平仓→收益虚高(单腿假象)。故 ×3+7 大幅冗余覆盖;
+    # 下方已用真实时间戳 start_ts<=ts<=end_ts 二次精确过滤, 多取无害(只是多拉后丢弃)。
+    _span_days = int((now_utc - start_dt).total_seconds() / 86400)
+    days = max(1, _span_days * 3 + 7)
     days = min(days, 365)
 
     seen_tickets = set()
@@ -260,7 +272,7 @@ async def _fetch_gateio_income(account, start_ms: int, end_ms: int) -> list:
     return records
 
 
-async def _fetch_daily_closing_nav(account_ids: list, start_date: str, end_date: str, db: AsyncSession) -> dict:
+async def _fetch_daily_closing_nav(account_ids: list, start_date: str, end_date: str) -> dict:
     """从 account_snapshots 查询每天收盘净值（北京时间最后一条快照）
     Returns: {date_str: total_nav_float}
     """
@@ -269,25 +281,26 @@ async def _fetch_daily_closing_nav(account_ids: list, start_date: str, end_date:
     from datetime import date as _d
     sd = _d.fromisoformat(start_date)
     ed = _d.fromisoformat(end_date)
-    result = await db.execute(text("""
-        WITH ranked AS (
-            SELECT
-                CAST(timestamp + interval '8 hours' AS date) as bj_date,
-                account_id,
-                net_assets,
-                ROW_NUMBER() OVER (
-                    PARTITION BY account_id, CAST(timestamp + interval '8 hours' AS date)
-                    ORDER BY timestamp DESC
-                ) as rn
-            FROM account_snapshots
-            WHERE account_id = ANY(CAST(:aids AS uuid[]))
-            AND CAST(timestamp + interval '8 hours' AS date) BETWEEN :sd AND :ed
-        )
-        SELECT bj_date, SUM(net_assets) as total_nav
-        FROM ranked WHERE rn = 1
-        GROUP BY bj_date ORDER BY bj_date
-    """), {"aids": account_ids, "sd": sd, "ed": ed})
-    return {row[0].isoformat(): float(row[1]) for row in result.fetchall()}
+    async with AsyncSessionLocal() as _db:
+        result = await _db.execute(text("""
+            WITH ranked AS (
+                SELECT
+                    CAST(timestamp + interval '8 hours' AS date) as bj_date,
+                    account_id,
+                    net_assets,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY account_id, CAST(timestamp + interval '8 hours' AS date)
+                        ORDER BY timestamp DESC
+                    ) as rn
+                FROM account_snapshots
+                WHERE account_id = ANY(CAST(:aids AS uuid[]))
+                AND CAST(timestamp + interval '8 hours' AS date) BETWEEN :sd AND :ed
+            )
+            SELECT bj_date, SUM(net_assets) as total_nav
+            FROM ranked WHERE rn = 1
+            GROUP BY bj_date ORDER BY bj_date
+        """), {"aids": account_ids, "sd": sd, "ed": ed})
+        return {row[0].isoformat(): float(row[1]) for row in result.fetchall()}
 
 
 async def _fetch_daily_closing_upnl(account_ids: list, start_date: str, end_date: str, db) -> dict:
@@ -389,21 +402,21 @@ async def get_daily_pnl(
     end_date: str = Query(..., description="结束日期（北京时间 YYYY-MM-DD）"),
     platform: str = Query("all", description="平台过滤: all/binance/mt5"),
     ctx: ViewContext = Depends(get_view_context),
-    db: AsyncSession = Depends(get_db),
 ):
+    # 不再用 Depends(get_db) 全程持连接：所有 DB 读放进短会话块，慢的交易所/MT5 桥拉取在会话外执行。
     from app.models.user import User as _U
-    _row = (await db.execute(__import__('sqlalchemy').select(_U).where(_U.user_id == ctx.data_user_id))).scalar_one_or_none()
-    current_user = _row
+    async with AsyncSessionLocal() as db:
+        _row = (await db.execute(select(_U).where(_U.user_id == ctx.data_user_id))).scalar_one_or_none()
+        current_user = _row
 
-    if ctx.is_sub:
-        from sqlalchemy import text as _text
-        _row_sub = (await db.execute(_text(
-            "SELECT MIN(created_at) FROM sub_account_subscriptions WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
-        ), {"u": ctx.auth_user_id})).first()
-        if _row_sub and _row_sub[0]:
-            _join_date_str = _row_sub[0].astimezone().strftime('%Y-%m-%d')
-            if _join_date_str > start_date:
-                start_date = _join_date_str
+        if ctx.is_sub:
+            _row_sub = (await db.execute(text(
+                "SELECT MIN(created_at) FROM sub_account_subscriptions WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
+            ), {"u": ctx.auth_user_id})).first()
+            if _row_sub and _row_sub[0]:
+                _join_date_str = _row_sub[0].astimezone().strftime('%Y-%m-%d')
+                if _join_date_str > start_date:
+                    start_date = _join_date_str
 
     cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:v3"
     cached = _cache_get(cache_key)
@@ -415,20 +428,21 @@ async def get_daily_pnl(
         from app.services.subaccount_nav import (
             list_parent_daily_navs, list_active_subscriptions_by_sub,
         )
-        subs = await list_active_subscriptions_by_sub(db, ctx.auth_user_id)
-        if not subs:
-            return {"daily_pnl": [], "summary": _compute_summary([])}
+        async with AsyncSessionLocal() as db:
+            subs = await list_active_subscriptions_by_sub(db, ctx.auth_user_id)
+            if not subs:
+                return {"daily_pnl": [], "summary": _compute_summary([])}
 
-        date_pnl: Dict[str, Decimal] = defaultdict(lambda: Decimal(0))
-        total_snapshots = 0
-        for _sid, parent_uid, shares, _inv_u, _inv_c, nav_at_join, _created in subs:
-            navs = await list_parent_daily_navs(db, parent_uid, start_date, end_date)
-            total_snapshots += len(navs)
-            prev_nav = nav_at_join
-            for snap_date, nav, _ta, _ass in navs:
-                pnl = shares * (nav - prev_nav)
-                date_pnl[snap_date.isoformat()] += pnl
-                prev_nav = nav
+            date_pnl: Dict[str, Decimal] = defaultdict(lambda: Decimal(0))
+            total_snapshots = 0
+            for _sid, parent_uid, shares, _inv_u, _inv_c, nav_at_join, _created in subs:
+                navs = await list_parent_daily_navs(db, parent_uid, start_date, end_date)
+                total_snapshots += len(navs)
+                prev_nav = nav_at_join
+                for snap_date, nav, _ta, _ass in navs:
+                    pnl = shares * (nav - prev_nav)
+                    date_pnl[snap_date.isoformat()] += pnl
+                    prev_nav = nav
 
         if total_snapshots >= 3:
             daily_list = [
@@ -474,8 +488,9 @@ async def get_daily_pnl(
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式错误，需 YYYY-MM-DD")
 
-    result = await db.execute(select(Account).filter(Account.user_id == current_user.user_id))
-    accounts = result.scalars().all()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Account).filter(Account.user_id == current_user.user_id))
+        accounts = result.scalars().all()
     if not accounts:
         return {"daily_pnl": [], "summary": _compute_summary([])}
 
@@ -492,7 +507,7 @@ async def get_daily_pnl(
     binance_account_ids = [str(a.account_id) for a in accounts if a.is_active and a.platform_id == 1]
 
     mt5_nav_by_date = await _fetch_daily_closing_nav(
-        mt5_account_ids, prev_date, end_date, db
+        mt5_account_ids, prev_date, end_date
     ) if mt5_account_ids else {}
 
 
@@ -502,16 +517,12 @@ async def get_daily_pnl(
 
     # 3) MT5 入出金（entry=0, symbol 为空的 deals）
     mt5_cashflows = defaultdict(float)
-    _bound_b_result = await db.execute(text(
-        "SELECT DISTINCT account_b_id FROM user_pair_accounts WHERE user_id = :uid AND account_b_id IS NOT NULL"
-    ), {"uid": str(current_user.user_id)})
-    _bound_b_ids = {str(r[0]) for r in _bound_b_result.fetchall()}
 
     if platform in ("all", "mt5"):
         for account in accounts:
             if not account.is_mt5_account or not account.is_active:
                 continue
-            cf_deals = await _fetch_mt5_cashflows(account, start_ms, end_ms, db)
+            cf_deals = await _fetch_mt5_cashflows(account, start_ms, end_ms)
             for d in cf_deals:
                 dk = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
                 mt5_cashflows[dk] += float(d.get("profit", 0))
@@ -550,7 +561,7 @@ async def get_daily_pnl(
         for account in accounts:
             if not account.is_mt5_account or not account.is_active:
                 continue
-            deals = await _fetch_mt5_deals(account, start_ms, end_ms, db)
+            deals = await _fetch_mt5_deals(account, start_ms, end_ms)
             for d in deals:
                 dk = _mt5_ts_to_beijing_date(int(d.get("time", 0)))
                 profit = float(d.get("profit", 0))
