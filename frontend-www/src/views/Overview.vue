@@ -8,6 +8,10 @@
       </div>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">{{ auth.user?.username }}</span>
+        <select v-if="viewOptions.length > 1" v-model="activeView" @change="onViewChange"
+          class="text-sm bg-dark-200 border border-border-primary rounded px-2 py-1">
+          <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
+        </select>
         <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-red-500'"></div>
         <span class="text-xs text-text-tertiary">{{ lastUpdate }}</span>
         <button @click="doLogout" class="text-sm text-text-tertiary hover:text-danger transition-colors">退出</button>
@@ -17,6 +21,10 @@
       <div class="flex items-center gap-2 min-w-0">
         <span class="font-semibold text-sm flex-shrink-0">我的收益</span>
         <span class="text-xs text-text-secondary truncate">{{ auth.user?.username || '--' }}</span>
+        <select v-if="viewOptions.length > 1" v-model="activeView" @change="onViewChange"
+          class="text-xs bg-dark-200 border border-border-primary rounded px-1.5 py-0.5 flex-shrink-0 max-w-[40vw]">
+          <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
+        </select>
       </div>
       <div class="flex items-center gap-2 flex-shrink-0">
         <div class="w-2 h-2 rounded-full animate-pulse" :class="wsConnected ? 'bg-green-500' : 'bg-red-500'"></div>
@@ -138,6 +146,26 @@ const activeGran = ref('day')   // day | week | month
 const chartKey = ref(0)
 let fallbackTimer = null
 
+// 收益视图(20260620): merged=合并全部关联用户; <user_id>=只看某个用户
+const activeView = ref('merged')
+const viewOptions = ref([])  // [{label,val}], 仅当有关联用户时长度>1
+async function loadViewOptions() {
+  try {
+    const r = await api.get('/api/v1/pnl/link-options')
+    const linked = r.data?.linked || []
+    if (linked.length === 0) { viewOptions.value = []; return }  // 无关联→不显示下拉
+    const self = r.data?.self
+    viewOptions.value = [
+      { label: '合并全部数据', val: 'merged' },
+      ...(self ? [{ label: self.username + '(本人)', val: self.user_id }] : []),
+      ...linked.map(u => ({ label: u.username, val: u.user_id })),
+    ]
+  } catch (e) { viewOptions.value = [] }
+}
+async function onViewChange() {
+  await Promise.all([setRange(activeRange.value), fetchCumulative()])
+}
+
 const ranges = [
   { label: '30天', val: '30d' }, { label: '90天', val: '90d' },
   { label: '半年', val: '180d' }, { label: '全部', val: '365d' },
@@ -170,7 +198,7 @@ const cumLoading = ref(false)
 async function fetchCumulative() {
   cumLoading.value = true
   try {
-    const r = await api.get('/api/v1/pnl/cumulative', { params: { platform: 'all' } })
+    const r = await api.get('/api/v1/pnl/cumulative', { params: { platform: 'all', view: activeView.value } })
     cumulativePnl.value = Number(r.data?.cumulative_pnl || 0)
     cumInception.value = r.data?.inception_date || ''
   } catch (e) { console.error('cumulative fetch error:', e) }
@@ -251,7 +279,7 @@ async function setRange(val) {
   const end = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
   loading.value = true
   try {
-    const data = await fetchDailyPnl(start, end)
+    const data = await fetchDailyPnl(start, end, activeView.value)
     dailyList.value = data.daily_pnl || []
     chartKey.value++
   } catch (e) { console.error('PnL fetch error:', e) }
@@ -275,6 +303,8 @@ function doLogout() { wsDisconnect(); clearInterval(fallbackTimer); auth.logout(
 watch(() => auth.user?.username, (nu, ou) => {
   if (nu && nu !== ou) {
     clearPnlCache()
+    activeView.value = 'merged'
+    loadViewOptions()
     setRange(activeRange.value)
     fetchFund()
     fetchCumulative()
@@ -286,6 +316,7 @@ onMounted(async () => {
   await auth.fetchUser()    // 先确认当前用户, 再拉该用户数据
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })
+  loadViewOptions()        // 加载收益视图下拉(有关联用户才显示)
   await Promise.all([setRange('30d'), fetchFund()])
   fetchCumulative()         // 累计独立拉取(开户至今, 不阻塞首屏四宫格其余三个数)
 })

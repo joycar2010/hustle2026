@@ -29,8 +29,8 @@ function _cacheSet(key, data) {
 
 export function clearPnlCache() { _cache.clear() }
 
-export async function fetchDailyPnl(startDate, endDate) {
-  const key = _cacheKey('pnl', startDate, endDate)
+export async function fetchDailyPnl(startDate, endDate, view = 'merged') {
+  const key = _cacheKey('pnl', startDate, endDate, view)
   const cached = _cacheGet(key)
   if (cached) return cached
 
@@ -38,7 +38,7 @@ export async function fetchDailyPnl(startDate, endDate) {
   if (_inflight.has(key)) return _inflight.get(key)
 
   const promise = api.get('/api/v1/pnl/daily', {
-    params: { start_date: startDate, end_date: endDate, platform: 'all' }
+    params: { start_date: startDate, end_date: endDate, platform: 'all', view }
   }).then(r => {
     _cacheSet(key, r.data)
     _inflight.delete(key)

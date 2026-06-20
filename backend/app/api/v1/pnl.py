@@ -420,6 +420,7 @@ async def get_daily_pnl(
     start_date: str = Query(..., description="开始日期（北京时间 YYYY-MM-DD）"),
     end_date: str = Query(..., description="结束日期（北京时间 YYYY-MM-DD）"),
     platform: str = Query("all", description="平台过滤: all/binance/mt5"),
+    view: str = Query("merged", description="收益视图: merged(合并全部关联)/<user_id>(单用户)"),
     ctx: ViewContext = Depends(get_view_context),
 ):
     # 不再用 Depends(get_db) 全程持连接：所有 DB 读放进短会话块，慢的交易所/MT5 桥拉取在会话外执行。
@@ -437,7 +438,7 @@ async def get_daily_pnl(
                 if _join_date_str > start_date:
                     start_date = _join_date_str
 
-    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:v3"
+    cache_key = f"pnl:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:view={view}:v4"
     cached = _cache_get(cache_key)
     if cached:
         return cached
@@ -508,7 +509,12 @@ async def get_daily_pnl(
         raise HTTPException(status_code=400, detail="日期格式错误，需 YYYY-MM-DD")
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Account).filter(Account.user_id == current_user.user_id))
+        # 收益关联(20260620): 账号集 = data_user_id 自己 ∪ 关联用户(view=merged) 或单用户(view=<uid>)。
+        from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
+        _aids = await _resolve_aids(db, str(current_user.user_id), view=view, is_sub=ctx.is_sub)
+        if not _aids:
+            return {"daily_pnl": [], "summary": _compute_summary([])}
+        result = await db.execute(select(Account).filter(Account.account_id.in_(_aids)))
         accounts = result.scalars().all()
     if not accounts:
         return {"daily_pnl": [], "summary": _compute_summary([])}
@@ -655,6 +661,7 @@ _CUM_CACHE_TTL = 1800
 @router.get("/cumulative")
 async def get_cumulative_pnl(
     platform: str = Query("all", description="平台过滤: all/binance/mt5"),
+    view: str = Query("merged", description="收益视图: merged/<user_id>"),
     ctx: ViewContext = Depends(get_view_context),
 ):
     """真正的"开户至今累计收益"(固定起点=账号首笔快照日, 不随前端范围/日期滚动变化)。
@@ -663,6 +670,7 @@ async def get_cumulative_pnl(
     (hcz987: 昨天1378今天639, 因5/21的+739滑出30天窗), 且"本月>累计"反直觉。
     本端点固定从 inception(account_snapshots 最早日)累加到今天, 给出稳定的总累计。
     内部复用 get_daily_pnl(start=inception, end=today) 求和; 带30min缓存抵消全周期取数慢。
+    收益关联(20260620): inception 取账号集(view决定)最早快照日, 累计随 view 合并/单用户。
     """
     from app.models.user import User as _U
     async with AsyncSessionLocal() as db:
@@ -671,19 +679,23 @@ async def get_cumulative_pnl(
             return {"cumulative_pnl": 0, "inception_date": None, "end_date": None}
         uid = _row.user_id
 
-    _ck = f"pnlcum:{uid}:{platform}:sub={ctx.is_sub}:v1"
+    _ck = f"pnlcum:{uid}:{platform}:sub={ctx.is_sub}:view={view}:v2"
     _hit = _cache.get(_ck)
     if _hit is not None and _time.time() - _cache_ts.get(_ck, 0) < _CUM_CACHE_TTL:
         return _hit
 
-    # 1) inception = 该用户所有账号 account_snapshots 的最早北京日期(便宜查询)
+    # 1) inception = 账号集(view 决定) 的 account_snapshots 最早北京日期(便宜查询)
+    from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
     async with AsyncSessionLocal() as db:
-        row = (await db.execute(text("""
-            SELECT MIN(CAST(s.timestamp + interval '8 hours' AS date))
-            FROM account_snapshots s
-            JOIN accounts a ON a.account_id = s.account_id
-            WHERE a.user_id = CAST(:uid AS uuid)
-        """), {"uid": str(uid)})).first()
+        _aids = await _resolve_aids(db, str(uid), view=view, is_sub=ctx.is_sub)
+        if not _aids:
+            row = None
+        else:
+            row = (await db.execute(text("""
+                SELECT MIN(CAST(s.timestamp + interval '8 hours' AS date))
+                FROM account_snapshots s
+                WHERE s.account_id = ANY(CAST(:aids AS uuid[]))
+            """), {"aids": _aids})).first()
     inception = row[0].isoformat() if row and row[0] else None
 
     import datetime as _dtm
@@ -695,7 +707,7 @@ async def get_cumulative_pnl(
 
     # 2) 复用 /daily 全周期取数(inception→today), 求和 net_pnl = 真实总累计
     daily_resp = await get_daily_pnl(
-        start_date=inception, end_date=today_bj, platform=platform, ctx=ctx
+        start_date=inception, end_date=today_bj, platform=platform, view=view, ctx=ctx
     )
     dl = daily_resp.get("daily_pnl", []) if isinstance(daily_resp, dict) else []
     cum = round(sum(float(x.get("net_pnl", 0)) for x in dl), 2)
@@ -710,4 +722,15 @@ async def get_cumulative_pnl(
     _cache_ts[_ck] = _time.time()
     logger.info(f"[PnL-CUM] user={uid} inception={inception} cumulative={cum} days={len(dl)}")
     return out
+
+
+@router.get("/link-options")
+async def get_pnl_view_options(ctx: ViewContext = Depends(get_view_context)):
+    """收益视图下拉数据源(20260620): 返回当前登录用户(A)的 self + 关联用户(linked)。
+    前端据此渲染"合并全部数据 / 各用户"下拉; 无 linked 时前端可隐藏下拉。
+    用 data_user_id(子账号映射父账号; 普通用户=自己)。"""
+    from app.api.v1.subaccount import get_pnl_link_options as _opts
+    async with AsyncSessionLocal() as db:
+        return await _opts(db, str(ctx.data_user_id))
+
 

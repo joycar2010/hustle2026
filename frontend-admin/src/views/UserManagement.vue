@@ -927,7 +927,10 @@
           </div>
           <button @click="showProxyModal = false" class="text-text-tertiary hover:text-text-primary text-lg">✕</button>
         </div>
-        <form @submit.prevent="saveProxyConfig" class="p-6 space-y-4">
+        <form @submit.prevent="saveProxyConfig" autocomplete="off" class="p-6 space-y-4">
+          <!-- Hidden dummy fields to prevent browser/password-manager autofill of login creds -->
+          <input type="text" name="prevent_autofill" style="display:none" />
+          <input type="password" name="prevent_autofill_pw" style="display:none" />
           <p class="text-xs text-text-tertiary bg-dark-200 rounded-lg p-3">
             配置 IPIPGO 独享静态IP，用于 Binance/Bybit API 请求防封。留空所有字段可清除代理配置（使用服务器直连）。
           </p>
@@ -955,7 +958,8 @@
             </div>
             <div>
               <label class="block text-xs text-text-tertiary mb-1">用户名</label>
-              <input v-model="proxyForm.username"
+              <input v-model="proxyForm.username" name="ipipgo_proxy_user" autocomplete="off"
+                data-1p-ignore data-lpignore="true"
                 class="w-full px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
                 placeholder="IPIPGO 用户名" />
             </div>
@@ -963,6 +967,7 @@
               <label class="block text-xs text-text-tertiary mb-1">密码</label>
               <div class="relative">
                 <input v-model="proxyForm.password" :type="secretVisible.proxy_password ? 'text' : 'password'"
+                  name="ipipgo_proxy_pw" autocomplete="new-password" data-1p-ignore data-lpignore="true"
                   class="w-full px-3 py-2 pr-16 bg-dark-200 border border-border-primary rounded-lg text-sm font-mono focus:outline-none focus:border-primary"
                   :placeholder="secretHasData.proxy_password && !proxyForm.password ? '••••••••（已设置）' : 'IPIPGO 密码'" />
                 <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1598,7 +1603,7 @@
       <div v-if="showFundViewModal"
         class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
         @click.self="showFundViewModal = false">
-        <div class="bg-dark-100 rounded-xl p-6 w-full max-w-md border border-border-primary">
+        <div class="bg-dark-100 rounded-xl p-6 w-full max-w-md border border-border-primary max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between mb-4">
             <h3 class="font-bold">查看资金权限 — {{ fundViewUser?.username }}</h3>
             <button @click="showFundViewModal = false" class="text-text-tertiary hover:text-text-primary">✕</button>
@@ -1611,6 +1616,27 @@
           <div class="text-xs text-text-tertiary mb-5">
             启用后该用户可访问 www 站点底部导航的「资金流向」页；未开启时该入口与后端接口都会被屏蔽。
           </div>
+
+          <!-- 收益关联(20260620): 合并被关联用户的全部账号收益 -->
+          <div class="border-t border-border-primary pt-4 mb-4">
+            <div class="text-sm font-semibold mb-1">收益关联用户</div>
+            <div class="text-xs text-text-tertiary mb-3">
+              选择后，被关联用户名下<b>所有主账号 + 对冲MT5</b>的交易数据将<b>合并计入「{{ fundViewUser?.username }}」</b>的收益视图（test.hustle2026.xyz 收益页可下拉切换「合并全部 / 各用户」）。单向：被关联用户自己登录仍只看自己。
+            </div>
+            <input v-model="pnlLinkSearch" placeholder="搜索用户名…"
+              class="w-full mb-2 px-3 py-1.5 bg-dark-200 border border-border-primary rounded text-sm">
+            <div class="max-h-44 overflow-y-auto border border-border-primary rounded divide-y divide-border-primary">
+              <label v-for="c in pnlLinkCandidates" :key="c.user_id"
+                class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-dark-200 cursor-pointer">
+                <input type="checkbox" class="accent-primary"
+                  :checked="pnlLinkedIds.includes(c.user_id)" @change="togglePnlLink(c.user_id)">
+                <span>{{ c.username }}</span>
+              </label>
+              <div v-if="pnlLinkCandidates.length === 0" class="px-3 py-3 text-xs text-text-tertiary text-center">无可选用户</div>
+            </div>
+            <div class="text-xs text-text-tertiary mt-2">已选 {{ pnlLinkedIds.length }} 个</div>
+          </div>
+
           <div class="flex justify-end gap-2">
             <button @click="showFundViewModal = false" class="px-4 py-2 bg-dark-200 hover:bg-dark-50 rounded-lg text-sm">取消</button>
             <button @click="saveFundViewToggle" :disabled="fundViewSaving"
@@ -1914,10 +1940,12 @@ function maskSecret(s) {
   if (!s) return 'N/A'
   return '●'.repeat(16)
 }
+// 硬编码兜底：当 /hedging/platforms 偶发 500 导致 platforms 为空时，平台名不至于塌成 Platform N
+const PLATFORM_FALLBACK_NAMES = { 1: '币安', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX', 6: 'Bitget' }
 function getPlatformName(pid, mt5) {
-  const p = platforms.value.find(x => x.platform_id === pid)
-  if (!p) return `Platform ${pid}`
-  const base = p.display_name || p.platform_name
+  // 数值比较，规避 platform_id 类型不一致（字符串/数字）导致的查找落空
+  const p = platforms.value.find(x => Number(x.platform_id) === Number(pid))
+  const base = (p && (p.display_name || p.platform_name)) || PLATFORM_FALLBACK_NAMES[pid] || `Platform ${pid}`
   return mt5 ? `${base} MT5` : base
 }
 
@@ -3199,11 +3227,35 @@ const showFundViewModal = ref(false)
 const fundViewUser = ref(null)
 const fundViewEnabled = ref(false)
 const fundViewSaving = ref(false)
+// 收益关联(20260620): 该用户合并哪些被关联用户的收益
+const pnlLinkedIds = ref([])      // 已选 linked user_id 列表
+const pnlLinkSearch = ref('')
+
+// 可选的被关联用户(排除自己和子账号)
+const pnlLinkCandidates = computed(() => {
+  const selfId = fundViewUser.value?.user_id
+  const kw = (pnlLinkSearch.value || '').toLowerCase()
+  return users.value.filter(u =>
+    u.user_id !== selfId && !u.is_subaccount &&
+    (!kw || (u.username || '').toLowerCase().includes(kw))
+  )
+})
+function togglePnlLink(uid) {
+  const i = pnlLinkedIds.value.indexOf(uid)
+  if (i >= 0) pnlLinkedIds.value.splice(i, 1)
+  else pnlLinkedIds.value.push(uid)
+}
 
 async function openFundViewAccess(u) {
   fundViewUser.value = u
   fundViewEnabled.value = !!u.fund_view_enabled
+  pnlLinkedIds.value = []
+  pnlLinkSearch.value = ''
   showFundViewModal.value = true
+  try {
+    const r = await api.get('/api/v1/users/pnl-links', { params: { user_id: u.user_id } })
+    pnlLinkedIds.value = (r.data?.linked || []).map(x => x.user_id)
+  } catch (e) { /* 表不存在或无关联时忽略 */ }
 }
 
 async function saveFundViewToggle() {
@@ -3213,10 +3265,15 @@ async function saveFundViewToggle() {
       user_id: fundViewUser.value?.user_id,
       enabled: fundViewEnabled.value,
     })
+    // 收益关联: 全量覆盖
+    await api.put('/api/v1/users/pnl-links', {
+      user_id: fundViewUser.value?.user_id,
+      linked_user_ids: pnlLinkedIds.value,
+    })
     const idx = users.value.findIndex(u => u.user_id === fundViewUser.value?.user_id)
     if (idx >= 0) users.value[idx].fund_view_enabled = fundViewEnabled.value
     showFundViewModal.value = false
-    showToast(fundViewEnabled.value ? '已授予查看资金权限' : '已撤销查看资金权限', 'success')
+    showToast('已保存资金权限与收益关联设置', 'success')
   } catch (e) {
     showToast('保存失败: ' + (e.response?.data?.detail || e.message), 'error')
   } finally { fundViewSaving.value = false }

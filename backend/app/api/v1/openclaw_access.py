@@ -96,6 +96,67 @@ def make_router() -> APIRouter:
         return {'ok': True, 'user_id': req.user_id,
                 'username': target[1], 'fund_view_enabled': req.enabled}
 
+
+    class PnlLinksReq(BaseModel):
+        user_id: str
+        linked_user_ids: list[str] = []
+
+    @r.get('/pnl-links', status_code=status.HTTP_200_OK)
+    async def get_pnl_links(
+        user_id: str,
+        db: AsyncSession = Depends(get_db),
+        operator_id: str = Depends(get_current_user_id),
+    ):
+        """收益关联(20260620): 读 user_id(A) 当前关联的被合并用户列表。仅 admin。"""
+        await _require_admin(db, operator_id)
+        rows = (await db.execute(text("""
+            SELECT u.user_id::text, u.username
+            FROM user_pnl_links l JOIN users u ON u.user_id = l.linked_user_id
+            WHERE l.owner_user_id = CAST(:u AS UUID)
+            ORDER BY u.username
+        """), {'u': user_id})).fetchall()
+        return {'ok': True, 'user_id': user_id,
+                'linked': [{'user_id': r[0], 'username': r[1]} for r in rows]}
+
+    @r.put('/pnl-links', status_code=status.HTTP_200_OK)
+    async def set_pnl_links(
+        req: PnlLinksReq,
+        db: AsyncSession = Depends(get_db),
+        operator_id: str = Depends(get_current_user_id),
+    ):
+        """收益关联(20260620): 全量覆盖 user_id(A) 的关联(先删后插)。仅 admin。
+        校验: 去重、剔除自己、被关联用户须存在。"""
+        await _require_admin(db, operator_id)
+        target = (await db.execute(text(
+            "SELECT user_id, username FROM users WHERE user_id = CAST(:u AS UUID)"
+        ), {'u': req.user_id})).first()
+        if not target:
+            raise HTTPException(status_code=404, detail='目标用户不存在')
+
+        # 去重 + 剔除自己
+        linked = [x for x in dict.fromkeys(req.linked_user_ids) if x and x != req.user_id]
+        # 校验被关联用户存在
+        if linked:
+            valid = {r[0] for r in (await db.execute(text(
+                "SELECT user_id::text FROM users WHERE user_id = ANY(CAST(:ids AS uuid[]))"
+            ), {'ids': linked})).fetchall()}
+            linked = [x for x in linked if x in valid]
+
+        # 全量覆盖
+        await db.execute(text(
+            "DELETE FROM user_pnl_links WHERE owner_user_id = CAST(:u AS UUID)"
+        ), {'u': req.user_id})
+        for lid in linked:
+            await db.execute(text("""
+                INSERT INTO user_pnl_links (owner_user_id, linked_user_id, created_by)
+                VALUES (CAST(:o AS UUID), CAST(:l AS UUID), CAST(:b AS UUID))
+                ON CONFLICT (owner_user_id, linked_user_id) DO NOTHING
+            """), {'o': req.user_id, 'l': lid, 'b': operator_id})
+        await db.commit()
+        logger.info(f'[pnl-links] {target[1]} linked={linked} by operator={operator_id[:8]}')
+        return {'ok': True, 'user_id': req.user_id, 'linked_user_ids': linked}
+
+
     class FeishuLookupReq(BaseModel):
         mobile: str
 

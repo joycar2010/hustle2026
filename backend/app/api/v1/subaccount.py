@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.security import get_current_user_id
 from app.services.subaccount_nav import (
     get_parent_nav, invalidate_parent_nav, get_active_subscription,
@@ -84,8 +84,17 @@ class ViewContext:
 
 async def get_view_context(
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ) -> ViewContext:
+    # Short-lived session: get_view_context is a DEPENDENCY on slow aggregation
+    # endpoints (dashboard/summary/pnl). With db=Depends(get_db) the pooled
+    # connection was held for the ENTIRE multi-second request, so when an MT5/bysys
+    # bridge stalls dragged those requests to ~2min, dozens of connections piled up
+    # idle-in-transaction and exhausted the pool (manual buttons then queued on get_db).
+    async with AsyncSessionLocal() as db:
+        return await _resolve_view_context(db, user_id)
+
+
+async def _resolve_view_context(db: AsyncSession, user_id: str) -> ViewContext:
     row = (await db.execute(text(
         "SELECT is_subaccount FROM users WHERE user_id = CAST(:u AS UUID)"
     ), {"u": user_id})).first()
@@ -128,6 +137,60 @@ async def get_view_context(
         sub_invested_cny=agg_inv_cny,
         sub_current_value_usdt=agg_cur,
     )
+
+
+async def resolve_pnl_account_ids(db: AsyncSession, data_user_id: str, view: str = "merged", is_sub: bool = False) -> list:
+    """收益关联(20260620): 解析收益视图应聚合的 account_id 集合。
+    - view='merged'(默认): data_user_id 自己 ∪ user_pnl_links 关联用户(B/C)的 is_active 账号, 去重。
+    - view=<某user_id>: 只取那一个用户的 is_active 账号; 该 user 必须是 self 或 data_user_id
+      的关联用户之一, 否则抛 403(防越权看任意用户)。
+    - 子账号(is_sub): 不参与合并(份额模型互斥), 直接返回 data_user_id 自己的账号, 忽略 view。
+    只展开一层(不递归关联用户的关联), 防环路/重复。
+    """
+    # 子账号: 走原口径, 只看自己(其实是父账号 data_user_id)的账号
+    if is_sub:
+        rows = (await db.execute(text(
+            "SELECT account_id::text FROM accounts WHERE user_id = CAST(:u AS UUID) AND is_active = true"
+        ), {"u": data_user_id})).fetchall()
+        return [r[0] for r in rows]
+
+    # 关联用户集合(只展开一层)
+    linked = [r[0] for r in (await db.execute(text(
+        "SELECT linked_user_id::text FROM user_pnl_links WHERE owner_user_id = CAST(:u AS UUID)"
+    ), {"u": data_user_id})).fetchall()]
+    allowed_uids = {str(data_user_id)} | set(linked)  # 可见的用户范围
+
+    if view and view != "merged":
+        if view not in allowed_uids:
+            raise HTTPException(status_code=403, detail="无权查看该用户收益")
+        target_uids = [view]
+    else:
+        target_uids = list(allowed_uids)
+
+    if not target_uids:
+        return []
+    rows = (await db.execute(text(
+        "SELECT account_id::text FROM accounts WHERE user_id = ANY(CAST(:uids AS uuid[])) AND is_active = true"
+    ), {"uids": target_uids})).fetchall()
+    # 去重(同一 account_id 不重复)
+    return list({r[0] for r in rows})
+
+
+async def get_pnl_link_options(db: AsyncSession, owner_user_id: str) -> dict:
+    """前端视图下拉数据源: 返回 self + 关联用户(linked) 的 {user_id, username}。"""
+    self_row = (await db.execute(text(
+        "SELECT user_id::text, username FROM users WHERE user_id = CAST(:u AS UUID)"
+    ), {"u": owner_user_id})).first()
+    linked_rows = (await db.execute(text(
+        """SELECT u.user_id::text, u.username
+           FROM user_pnl_links l JOIN users u ON u.user_id = l.linked_user_id
+           WHERE l.owner_user_id = CAST(:u AS UUID)
+           ORDER BY u.username"""
+    ), {"u": owner_user_id})).fetchall()
+    return {
+        "self": {"user_id": self_row[0], "username": self_row[1]} if self_row else None,
+        "linked": [{"user_id": r[0], "username": r[1]} for r in linked_rows],
+    }
 
 
 async def require_not_subaccount(
