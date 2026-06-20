@@ -4,15 +4,15 @@
       <h1 class="text-3xl font-bold">交易历史数据</h1>
       <div v-if="hasData" class="flex items-center gap-3 flex-wrap">
         <div class="flex items-center gap-1">
-          <span class="text-xs text-gray-400">返佣前利润:</span>
-          <span class="text-lg font-bold" :class="profitBeforeRebate >= 0 ? 'text-green-500' : 'text-red-500'">
-            {{ profitBeforeRebate >= 0 ? '+' : '' }}{{ profitBeforeRebate.toFixed(2) }}
+          <span class="text-xs text-gray-400">平仓利润:</span>
+          <span class="text-lg font-bold" :class="closingProfit >= 0 ? 'text-green-500' : 'text-red-500'" title="平仓利润 = 币安已实现盈亏 + MT5已实现盈亏(仅两腿平仓盈亏,不含资金费/手续费/返佣)">
+            {{ closingProfit >= 0 ? '+' : '' }}{{ closingProfit.toFixed(2) }}
           </span>
         </div>
         <span class="text-gray-600">|</span>
         <div class="flex items-center gap-1">
-          <span class="text-xs text-gray-400">返佣后净利润:</span>
-          <span class="text-lg font-bold" :class="netProfitAfterRebate >= 0 ? 'text-green-500' : 'text-red-500'">
+          <span class="text-xs text-gray-400">平仓总净利润:</span>
+          <span class="text-lg font-bold" :class="netProfitAfterRebate >= 0 ? 'text-green-500' : 'text-red-500'" title="平仓总净利润 = 平仓利润 + 资金费 + 过夜费 − 全部手续费 + 返佣(到手净额)">
             {{ netProfitAfterRebate >= 0 ? '+' : '' }}{{ netProfitAfterRebate.toFixed(2) }}
           </span>
         </div>
@@ -592,7 +592,12 @@ const netProfit = computed(() => {
   return stats.value.totalReturnProfit - stats.value.totalFees - stats.value.overnightFees
 })
 
-// 返佣前利润 + 返佣后净利润（由后端计算）
+// 平仓利润(币安已实现+MT5已实现) + 平仓总净利润(全口径净额) + 返佣前利润(保留, 内部/导出仍可用)
+const closingProfit = computed(() => {
+  // 后端已给 closingProfit; 兜底用 realizedPnL + mt5RealizedPnL 现算(老后端无该字段时)
+  if (stats.value.closingProfit != null) return stats.value.closingProfit
+  return Number(stats.value.realizedPnL || 0) + Number(stats.value.mt5RealizedPnL || 0)
+})
 const profitBeforeRebate = computed(() => stats.value.profitBeforeRebate || 0)
 const netProfitAfterRebate = computed(() => stats.value.netProfitAfterRebate || 0)
 

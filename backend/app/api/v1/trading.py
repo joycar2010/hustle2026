@@ -3555,6 +3555,9 @@ def _calculate_stats(binance_trades, mt5_trades, binance_realized_pnl=0.0, binan
     stats["binanceFeeUsdtTotal"] = round(_binance_fee_usdt + _binance_bnb_fee_usdt, 4)
     stats["bnbPriceUsed"] = round(float(bnb_price or 0.0), 4)
 
+    # 平仓利润(20260620, 前端红框第一个数) = 币安已实现 + MT5已实现(纯两腿平仓盈亏, 不含资金费/手续费/返佣)
+    stats["closingProfit"] = round(stats["realizedPnL"] + stats["mt5RealizedPnL"], 2)
+
     # 返佣前利润 = Binance已实现 + MT5已实现 + 资金费 + MT5过夜费 - 币安手续费(USDT+BNB折算) - MT5手续费
     stats["profitBeforeRebate"] = round(
         stats["realizedPnL"] + stats["mt5RealizedPnL"]
