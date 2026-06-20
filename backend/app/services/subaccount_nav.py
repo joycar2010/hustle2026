@@ -152,13 +152,18 @@ async def list_parent_daily_navs(
     end_date: str,
 ) -> list:
     """Returns [(snapshot_date, nav_per_share, total_assets, active_sub_shares), ...] in ascending date order."""
+    # 20260620修: start/end 转 date 对象再传(asyncpg 对 snapshot_date 列推断参数为 date 类型,
+    # 传 str 会报 "'str' object has no attribute 'toordinal'")。
+    from datetime import date as _date
+    _sd = _date.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+    _ed = _date.fromisoformat(end_date) if isinstance(end_date, str) else end_date
     rows = (await db.execute(text("""
         SELECT snapshot_date, nav_per_share, total_assets_usdt, active_sub_shares
         FROM subscription_daily_nav
         WHERE parent_user_id = CAST(:u AS UUID)
           AND snapshot_date BETWEEN :sd AND :ed
         ORDER BY snapshot_date ASC
-    """), {"u": parent_user_id, "sd": start_date, "ed": end_date})).fetchall()
+    """), {"u": parent_user_id, "sd": _sd, "ed": _ed})).fetchall()
     return [(r[0], Decimal(str(r[1])), Decimal(str(r[2])), Decimal(str(r[3]))) for r in rows]
 
 

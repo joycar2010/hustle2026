@@ -687,22 +687,34 @@ async def get_cumulative_pnl(
     if _hit is not None and _time.time() - _cache_ts.get(_ck, 0) < _CUM_CACHE_TTL:
         return _hit
 
-    # 1) inception = 账号集(view 决定) 的 account_snapshots 最早北京日期(便宜查询)
-    from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
-    async with AsyncSessionLocal() as db:
-        _aids = await _resolve_aids(db, str(uid), view=view, is_sub=ctx.is_sub)
-        if not _aids:
-            row = None
-        else:
-            row = (await db.execute(text("""
-                SELECT MIN(CAST(s.timestamp + interval '8 hours' AS date))
-                FROM account_snapshots s
-                WHERE s.account_id = ANY(CAST(:aids AS uuid[]))
-            """), {"aids": _aids})).first()
-    inception = row[0].isoformat() if row and row[0] else None
-
     import datetime as _dtm
     today_bj = _dtm.datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+
+    # 1) inception 计算
+    if ctx.is_sub:
+        # 子账号(20260620): 起点=首次入金登记时刻(订阅 created_at 最早), 而非父账号快照日。
+        # daily 的 sub-path(per_share_replay)会自动按份额回放, 这里只需给对的起点。
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(text(
+                "SELECT MIN(created_at) FROM sub_account_subscriptions "
+                "WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
+            ), {"u": str(ctx.auth_user_id)})).first()
+        inception = row[0].astimezone(timezone(timedelta(hours=8))).date().isoformat() if row and row[0] else None
+    else:
+        # 普通用户: inception = 账号集(view 决定) 的 account_snapshots 最早北京日期
+        from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
+        async with AsyncSessionLocal() as db:
+            _aids = await _resolve_aids(db, str(uid), view=view, is_sub=ctx.is_sub)
+            if not _aids:
+                row = None
+            else:
+                row = (await db.execute(text("""
+                    SELECT MIN(CAST(s.timestamp + interval '8 hours' AS date))
+                    FROM account_snapshots s
+                    WHERE s.account_id = ANY(CAST(:aids AS uuid[]))
+                """), {"aids": _aids})).first()
+        inception = row[0].isoformat() if row and row[0] else None
+
     if not inception:
         out = {"cumulative_pnl": 0, "inception_date": None, "end_date": today_bj}
         _cache[_ck] = out; _cache_ts[_ck] = _time.time()
@@ -730,8 +742,11 @@ async def get_cumulative_pnl(
 @router.get("/link-options")
 async def get_pnl_view_options(ctx: ViewContext = Depends(get_view_context)):
     """收益视图下拉数据源(20260620): 返回当前登录用户(A)的 self + 关联用户(linked)。
-    前端据此渲染"合并全部数据 / 各用户"下拉; 无 linked 时前端可隐藏下拉。
-    用 data_user_id(子账号映射父账号; 普通用户=自己)。"""
+    前端据此渲染"合并全部数据 / 各用户"下拉; 无 linked 时前端隐藏下拉。
+    20260620修: 子账号(is_sub)按份额看父账号, 不应看到父账号的收益关联下拉, 故直接返回
+    空 linked(前端据此屏蔽下拉)。普通用户用 data_user_id=自己。"""
+    if ctx.is_sub:
+        return {"self": None, "linked": []}
     from app.api.v1.subaccount import get_pnl_link_options as _opts
     async with AsyncSessionLocal() as db:
         return await _opts(db, str(ctx.data_user_id))
