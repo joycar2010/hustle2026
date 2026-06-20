@@ -49,22 +49,32 @@ class AggQuoter:
     def _route(self, slug: str, token_in: str, token_out: str, amount_in: int) -> dict:
         url = f"{KYBER_BASE}/{slug}/api/v1/routes"
         last = None
-        for i in range(3):
+        tries = 4
+        for i in range(tries):
             try:
                 self._pace()
                 r = self._s.get(url, params={"tokenIn": token_in, "tokenOut": token_out,
                                              "amountIn": str(amount_in)}, timeout=6)
                 if r.status_code == 429:
+                    # 429 单独处理:撞限频窗口,退避更久(1.5/3/4.5s)再试,而非立刻再撞
+                    if i < tries - 1:
+                        time.sleep(1.5 * (i + 1))
                     raise RuntimeError("kyber 429 rate-limited")
                 r.raise_for_status()
                 d = r.json()
                 if d.get("code") != 0:
                     raise RuntimeError(f"kyber code={d.get('code')} {d.get('message')}")
                 return d.get("data", {}).get("routeSummary", {})
+            except RuntimeError as e:
+                last = e
+                if "429" in str(e):
+                    continue  # 已在上面退避过,直接进下一次重试
+                if i < tries - 1:
+                    time.sleep(0.5 * (i + 1))
             except Exception as e:  # noqa: BLE001
                 last = e
-                if i < 2:
-                    time.sleep(0.5 * (i + 1))  # 429 退避稍长,避免连环撞墙
+                if i < tries - 1:
+                    time.sleep(0.5 * (i + 1))
         raise last
 
     def quote_buy(self, m: Market, notional_usd: float) -> DexQuote:
