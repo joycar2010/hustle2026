@@ -30,22 +30,22 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">今日收益</div>
-          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(todayPnl), fitFont(todayPnl)]">{{ fmtPnl(todayPnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(todayPnl), fitFont(todayPnl)]">{{ fmtPnl(todayPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">USDT</div>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本周收益</div>
-          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(thisWeekPnl), fitFont(thisWeekPnl)]">{{ fmtPnl(thisWeekPnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(thisWeekPnl), fitFont(thisWeekPnl)]">{{ fmtPnl(thisWeekPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">本周一至今</div>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本月收益</div>
-          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(thisMonthPnl), fitFont(thisMonthPnl)]">{{ fmtPnl(thisMonthPnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(thisMonthPnl), fitFont(thisMonthPnl)]">{{ fmtPnl(thisMonthPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">本月1日至今</div>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">累计收益</div>
-          <div class="font-bold font-mono whitespace-nowrap overflow-hidden text-ellipsis" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ fmtPnl(cumulativePnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ fmtPnl(cumulativePnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">{{ rangeLabel }}内累计</div>
         </div>
       </div>
@@ -86,15 +86,15 @@
         <div class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-sm">
           <div class="flex items-center justify-between gap-1 min-w-0">
             <span class="text-text-tertiary text-xs flex-shrink-0">总资产</span>
-            <span class="font-mono font-semibold truncate text-right">{{ fmtNum(fundTotals.total_assets) }} U</span>
+            <span class="font-mono font-semibold whitespace-nowrap text-right text-xs">{{ fmtNum(fundTotals.total_assets) }} U</span>
           </div>
           <div class="flex items-center justify-between gap-1 min-w-0">
             <span class="text-text-tertiary text-xs flex-shrink-0">净资产</span>
-            <span class="font-mono font-semibold truncate text-right">{{ fmtNum(fundTotals.net_assets) }} U</span>
+            <span class="font-mono font-semibold whitespace-nowrap text-right text-xs">{{ fmtNum(fundTotals.net_assets) }} U</span>
           </div>
           <div class="flex items-center justify-between gap-1 min-w-0">
             <span class="text-text-tertiary text-xs flex-shrink-0">浮动盈亏</span>
-            <span class="font-mono font-semibold truncate text-right" :class="pnlColor(fundTotals.unrealized_pnl)">{{ fmtPnl(fundTotals.unrealized_pnl) }} U</span>
+            <span class="font-mono font-semibold whitespace-nowrap text-right text-xs" :class="pnlColor(fundTotals.unrealized_pnl)">{{ fmtPnl(fundTotals.unrealized_pnl) }} U</span>
           </div>
         </div>
       </div>
@@ -164,14 +164,16 @@ const thisMonthPnl = computed(() => {
 })
 const cumulativePnl = computed(() => dailyList.value.reduce((s, x) => s + x.net_pnl, 0))
 
-// 数字自适应字号(防大数字在窄屏溢出/错位): 按格式化后字符串长度选 Tailwind 字号档。
-// 如 +9,209.10(9字符)用较小号, +137.16(7字符)用大号。
+// 数字自适应字号(完整显示不截断): 按格式化后字符串长度选 Tailwind 字号档, 字号下探更小,
+// 保证半屏卡片宽度内最长金额也能整行放下(无 overflow-hidden, 永不出现 "..." 截断)。
+// 参考: 半屏卡片(grid-cols-2, p-4)内容宽约 130-150px。
 function fitFont(v) {
   const len = String(fmtPnl(v)).length
   if (len <= 7) return 'text-2xl'      // +137.16
   if (len <= 9) return 'text-xl'       // +1,622.36
-  if (len <= 11) return 'text-lg'      // +9,209.10 / +12,345.67
-  return 'text-base'                   // 更长(六位数+)
+  if (len <= 11) return 'text-base'    // +9,209.10 / +12,345.67
+  if (len <= 13) return 'text-sm'      // +123,456.78
+  return 'text-xs'                      // 更长极端值, 仍完整显示
 }
 
 // ── 趋势图: 日/周/月 三种粒度, 纯前端切换, 不发请求 ──
