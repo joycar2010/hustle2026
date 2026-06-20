@@ -22,6 +22,22 @@ CSV_COLS = [
 ]
 
 
+def _row_to_result(row: dict) -> SpreadResult:
+    """从 CSV 行重建 SpreadResult(warm-start 回放用)。字段与 CSV_COLS 一一对应。"""
+    return SpreadResult(
+        market=row["market"], binance_symbol=row["binance_symbol"], ts=int(row["ts"]),
+        base_price=float(row["base_price"]), dex_eff_price=float(row["dex_eff_price"]),
+        dex_mid_price=float(row["dex_mid_price"]), fut_bid=float(row["fut_bid"]),
+        fut_ask=float(row["fut_ask"]), notional_usd=float(row["notional_usd"]),
+        base_out=float(row["base_out"]), slippage_bps=float(row["slippage_bps"]),
+        gas_usd=float(row["gas_usd"]), gross_bps=float(row["gross_bps"]),
+        taker_bps=float(row["taker_bps"]), gas_bps=float(row["gas_bps"]),
+        exit_dex_bps=float(row["exit_dex_bps"]), recycle_bps=float(row["recycle_bps"]),
+        net_entry_bps=float(row["net_entry_bps"]), net_bps=float(row["net_bps"]),
+        is_opportunity=(row["is_opportunity"] in ("1", "True", "true")),
+    )
+
+
 class MarketStat:
     __slots__ = ("samples", "opp_count", "gross_pos_count", "net_max", "net_sum",
                  "gross_max", "last", "errors")
@@ -88,6 +104,7 @@ class State:
                 self._redis = None
 
         self._init_csv()
+        self._warm_start()  # 从 CSV 回放重建内存统计,重启后实时看板累计数不归零
 
     def _init_csv(self):
         d = os.path.dirname(self.csv_path)
@@ -96,6 +113,44 @@ class State:
         if not os.path.exists(self.csv_path):
             with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow(CSV_COLS)
+
+    def _warm_start(self):
+        """启动时从 ticks.csv 回放,重建各市场累计统计与最近样本。
+        CSV 是唯一持久真源;此处只是把它加载回内存,使 /api/stats 在重启后保留全部累计数。
+        逐行累加 counters,last 取每市场最后一行;_recent 取全局最后 window 行。"""
+        if not os.path.exists(self.csv_path):
+            return
+        n = 0
+        recent_tail = deque(maxlen=self._recent.maxlen)
+        try:
+            with open(self.csv_path, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        r = _row_to_result(row)
+                    except (KeyError, ValueError):
+                        continue
+                    st = self._stats.setdefault(r.market, MarketStat())
+                    st.update(r)
+                    recent_tail.append(r)
+                    n += 1
+        except Exception as e:  # noqa: BLE001
+            self._last_error = f"warm-start 回放部分失败: {e}"
+        self._recent.extend(recent_tail)
+        if n:
+            # 用 CSV 首行时间作为统计起点,uptime/累计口径覆盖历史而非仅本次进程
+            self._started = self._csv_first_ts() or self._started
+
+    def _csv_first_ts(self):
+        try:
+            with open(self.csv_path, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    return int(row["ts"]) / 1000.0
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
 
     def record(self, r: SpreadResult):
         with self._lock:
