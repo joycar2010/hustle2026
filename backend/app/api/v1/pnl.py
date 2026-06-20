@@ -430,11 +430,12 @@ async def get_daily_pnl(
         current_user = _row
 
         if ctx.is_sub:
+            # 子账户收益起点(20260620): 优先用投入时间 invested_at, 回退订阅 created_at。
             _row_sub = (await db.execute(text(
-                "SELECT MIN(created_at) FROM sub_account_subscriptions WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
+                "SELECT MIN(COALESCE(invested_at, created_at)) FROM sub_account_subscriptions WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
             ), {"u": ctx.auth_user_id})).first()
             if _row_sub and _row_sub[0]:
-                _join_date_str = _row_sub[0].astimezone().strftime('%Y-%m-%d')
+                _join_date_str = _row_sub[0].astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
                 if _join_date_str > start_date:
                     start_date = _join_date_str
 
@@ -696,7 +697,7 @@ async def get_cumulative_pnl(
         # daily 的 sub-path(per_share_replay)会自动按份额回放, 这里只需给对的起点。
         async with AsyncSessionLocal() as db:
             row = (await db.execute(text(
-                "SELECT MIN(created_at) FROM sub_account_subscriptions "
+                "SELECT MIN(COALESCE(invested_at, created_at)) FROM sub_account_subscriptions "
                 "WHERE sub_user_id = CAST(:u AS UUID) AND status='active'"
             ), {"u": str(ctx.auth_user_id)})).first()
         inception = row[0].astimezone(timezone(timedelta(hours=8))).date().isoformat() if row and row[0] else None

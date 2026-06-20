@@ -46,6 +46,7 @@ class SubAccountCreate(BaseModel):
     password: str = Field(..., min_length=6, max_length=128)
     invested_cny: float = Field(..., gt=0)
     fx_override: Optional[float] = Field(None, description="可选：管理员手动指定 CNY→USDT 汇率（CNY/USDT）")
+    invested_at: Optional[str] = Field(None, description="可选：投入时间(北京时间, 收益起算点)。格式 'YYYY-MM-DD HH:MM' 或 ISO; 留空用创建时刻。")
     note: Optional[str] = None
 
 
@@ -320,24 +321,49 @@ async def create_sub_account(
     """), {"n": body.username, "p": pw_hash, "pa": parent_user_id})).first()
     sub_user_id = str(sub_row[0])
 
+    # 投入时间(20260620): 可选, 作为子账户收益起算点; 解析失败或留空→用 NOW()。
+    # 输入按北京时间理解, 存为带时区 datetime 对象(asyncpg 需 datetime 实例, 不能传 str)。
+    _iat_param = None  # datetime(带+08时区) 或 None→用NOW()
+    if body.invested_at:
+        try:
+            from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+            _s = body.invested_at.strip().replace("T", " ")
+            _parsed = None
+            for _fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    _parsed = _dt2.strptime(_s, _fmt); break
+                except Exception:
+                    continue
+            if _parsed is None:
+                _parsed = _dt2.fromisoformat(body.invested_at)
+                if _parsed.tzinfo is None:
+                    _parsed = _parsed.replace(tzinfo=_tz2(_td2(hours=8)))
+                _iat_param = _parsed
+            else:
+                _iat_param = _parsed.replace(tzinfo=_tz2(_td2(hours=8)))
+        except Exception:
+            _iat_param = None
+
     # Insert subscription
     sub_id_row = (await db.execute(text("""
         INSERT INTO sub_account_subscriptions (
             sub_user_id, parent_user_id,
             invested_cny, fx_cny_to_usdt, invested_usdt,
             parent_total_assets_at_join, nav_per_share_at_join, shares,
-            status, created_by
+            status, created_by, invested_at
         ) VALUES (
             CAST(:s AS UUID), CAST(:pa AS UUID),
             :icny, :fx, :iusdt,
             :pta, :nav, :sh,
-            'active', CAST(:op AS UUID)
+            'active', CAST(:op AS UUID),
+            COALESCE(:iat, NOW())
         ) RETURNING id
     """), {
         "s": sub_user_id, "pa": parent_user_id,
         "icny": float(body.invested_cny), "fx": float(fx_rate), "iusdt": float(invested_usdt),
         "pta": float(nav.total_assets_usdt), "nav": float(nav_per_share), "sh": float(shares),
         "op": operator_id,
+        "iat": _iat_param,
     })).first()
     await db.commit()
     await invalidate_parent_nav(parent_user_id)

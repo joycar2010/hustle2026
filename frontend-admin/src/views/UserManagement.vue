@@ -1455,6 +1455,12 @@
                 class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
+              <label class="text-xs text-text-tertiary">投入时间（收益起算点，留空=创建时刻）</label>
+              <input v-model="subForm.invested_at" type="datetime-local"
+                class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
+              <div class="text-[10px] text-text-tertiary mt-0.5">该子账户在 test 收益页的数据从此刻起算（北京时间）。</div>
+            </div>
+            <div>
               <label class="text-xs text-text-tertiary">汇率覆盖（CNY/USDT，留空自动取实时）</label>
               <input v-model.number="subForm.fx_override" type="number" step="0.01" placeholder="自动"
                 class="w-full bg-dark-100 border border-border-primary rounded px-2 py-1.5 text-sm" />
@@ -1725,7 +1731,7 @@ const subParent = ref(null)
 const subList = ref([])
 const subListLoading = ref(false)
 const subCreating = ref(false)
-const subForm = ref({ username: '', password: '', invested_cny: null, fx_override: null })
+const subForm = ref({ username: '', password: '', invested_cny: null, fx_override: null, invested_at: '' })
 
 const cashEvents = ref([])
 const cashflowState = ref({ virtual_shares: null, bootstrap_total_assets: null })
@@ -1767,7 +1773,7 @@ async function submitCashflow() {
 
 async function openSubAccountModal(u) {
   subParent.value = u
-  subForm.value = { username: '', password: '', invested_cny: null, fx_override: null }
+  subForm.value = { username: '', password: '', invested_cny: null, fx_override: null, invested_at: '' }
   subModalOpen.value = true
   await reloadSubs()
   await reloadCashflow()
@@ -1842,9 +1848,10 @@ async function createSub() {
       invested_cny: Number(f.invested_cny),
     }
     if (f.fx_override && f.fx_override > 0) body.fx_override = Number(f.fx_override)
+    if (f.invested_at) body.invested_at = String(f.invested_at).replace('T', ' ')  // datetime-local→'YYYY-MM-DD HH:MM'
     const r = await api.post(`/api/v1/users/${subParent.value.user_id}/sub-accounts`, body)
     showToast(`子账号已创建：投入 ¥${r.data.invested_cny} = ${Number(r.data.invested_usdt).toFixed(2)} USDT，份额 ${Number(r.data.shares).toFixed(4)}`)
-    subForm.value = { username: '', password: '', invested_cny: null, fx_override: null }
+    subForm.value = { username: '', password: '', invested_cny: null, fx_override: null, invested_at: '' }
     await reloadSubs()
     await loadUsers()  // refresh user list to show is_subaccount badges
   } catch (e) {
