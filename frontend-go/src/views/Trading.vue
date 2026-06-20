@@ -139,10 +139,10 @@
               <th class="pb-2 px-1">数量(对冲)</th>
               <th class="pb-2 px-1">方向(对冲)</th>
               <th class="pb-2 px-1">时间(对冲)</th>
-              <th class="pb-2 px-1 bg-dark-100">利润</th>
+              <th class="pb-2 px-1 bg-dark-100" title="净利 = 毛利 − 手续费 + 过夜费 + 资金费">净利润</th>
               <th class="pb-2 px-1 bg-dark-100">手续费</th>
               <th class="pb-2 px-1 bg-dark-100">过夜费</th>
-              <th class="pb-2 px-1 bg-dark-100">资金费</th>
+              <th class="pb-2 px-1 bg-dark-100" title="正=收到资金费(入金), 负=支付">资金费</th>
             </tr>
           </thead>
           <tbody>
@@ -199,8 +199,8 @@
               </td>
               <td class="py-2 px-1 text-gray-400">{{ formatPairedTime(p.timestamp_hedge) }}</td>
               <td class="py-2 px-1 font-mono bg-dark-100">
-                <span v-if="p.pair_profit != null" :class="p.pair_profit >= 0 ? 'text-green-500' : 'text-red-500'">
-                  {{ p.pair_profit >= 0 ? '+' : '' }}{{ Number(p.pair_profit).toFixed(2) }}
+                <span v-if="p.pair_profit != null" :class="pairNetProfit(p) >= 0 ? 'text-green-500' : 'text-red-500'" :title="`毛利${Number(p.pair_profit).toFixed(2)} − 手续费${Number(p.pair_total_fee||0).toFixed(2)} + 过夜费${Number(p.hedge_overnight||0).toFixed(2)} + 资金费${Number(p.funding_fee||0).toFixed(2)}`">
+                  {{ pairNetProfit(p) >= 0 ? '+' : '' }}{{ pairNetProfit(p).toFixed(2) }}
                 </span>
                 <span v-else class="text-gray-600">-</span>
               </td>
@@ -532,6 +532,48 @@ const filteredPairedTrades = computed(() => {
   return pairedTrades.value.filter(p => p.source === pairFilter.value)
 })
 
+// 配对净利 = 毛利(两腿已实现) − 手续费(主+对冲,正成本) + 过夜费(已带符号,支出为负) + 资金费(已带符号,入金为正)
+// 符号约定: pair_total_fee 是正数成本故减; hedge_overnight/funding_fee 来自交易所原值已带正负故加。
+function pairNetProfit(p) {
+  const gross = Number(p?.pair_profit || 0)
+  const fee = Number(p?.pair_total_fee || 0)
+  const overnight = Number(p?.hedge_overnight || 0)
+  const funding = Number(p?.funding_fee || 0)
+  return gross - fee + overnight + funding
+}
+
+// 导出用: 把"套利配对成交历史"表(当前筛选后)转成表头+数据行, 列与页面橙框一致。
+// 导出页面所见即所得(含 all/strategy/manual 筛选)。
+const PAIRED_EXPORT_HEADERS = [
+  '来源', '时间(主)', '方向', '主账号均价', '数量', '价差', '阈值', '滑点',
+  '滑点(触发)', '对冲均价', '数量(对冲)', '方向(对冲)', '时间(对冲)',
+  '净利润', '毛利润', '手续费', '过夜费', '资金费'
+]
+function buildPairedRows() {
+  const fmtSide = (s) => s === 'buy' ? '买入' : (s === 'sell' ? '卖出' : '-')
+  const n = (v, d = 2) => (v != null && v !== '' && !isNaN(v)) ? Number(v).toFixed(d) : '-'
+  return filteredPairedTrades.value.map(p => [
+    p.source === 'strategy' ? '自动' : (p.source === 'manual' ? '手动' : (p.source || '-')),
+    formatPairedTime(p.timestamp_primary),
+    fmtSide(p.side_primary),
+    n(p.avg_price_primary, 4),
+    n(p.qty_primary, 2),
+    p.spread != null ? n(p.spread, 4) : '-',
+    p.threshold != null ? n(p.threshold, 4) : '-',
+    p.slippage != null ? n(p.slippage, 4) : '-',
+    p.slippage_vs_trigger != null ? n(p.slippage_vs_trigger, 4) : '-',
+    p.avg_price_hedge != null ? n(p.avg_price_hedge, 4) : '-',
+    p.qty_hedge != null ? n(p.qty_hedge, 2) : '-',
+    fmtSide(p.side_hedge),
+    p.timestamp_hedge ? formatPairedTime(p.timestamp_hedge) : '-',
+    pairNetProfit(p).toFixed(2),
+    n(p.pair_profit, 2),
+    n(p.pair_total_fee, 4),
+    p.hedge_overnight != null ? n(p.hedge_overnight, 2) : '0.00',
+    p.funding_fee != null ? n(p.funding_fee, 4) : '0.0000'
+  ])
+}
+
 function formatPairedTime(ts) {
   if (!ts) return '-'
   // 后端返回北京时间字符串，截取 HH:MM:SS
@@ -757,6 +799,9 @@ function exportToCSV(filename) {
     trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
   ])
 
+  // 套利配对成交历史(页面橙框, 所见即所得含筛选) — 用户要求导出这张表
+  const pairedRows = buildPairedRows()
+
   const csvContent = [
     ['交易历史数据报告'],
     [`查询时间: ${startTime.value} 至 ${endTime.value}`],
@@ -776,6 +821,11 @@ function exportToCSV(filename) {
     ['MT5过夜费', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5手续费', (stats.value.mt5Fee?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5已实现盈亏', (stats.value.mt5RealizedPnL?.toFixed(2) || '0.00') + ' USDT'],
+    [],
+    [`=== 套利配对成交历史 (${pairFilter.value === 'all' ? '全部' : (pairFilter.value === 'strategy' ? '自动交易' : '手动交易')}, ${pairedRows.length}条) ===`],
+    ['说明: 净利润 = 毛利润 − 手续费 + 过夜费 + 资金费; 资金费正=入金/负=支付'],
+    PAIRED_EXPORT_HEADERS,
+    ...pairedRows,
     [],
     ['=== 主账号成交历史 ==='],
     binanceHeaders,
@@ -819,6 +869,15 @@ function exportToExcel(filename) {
   ]
   const statsSheet = XLSX.utils.aoa_to_sheet(statsData)
   XLSX.utils.book_append_sheet(wb, statsSheet, '统计数据')
+
+  // 套利配对成交历史 sheet (用户要求, 列与页面橙框一致; 含净利润)
+  const pairedData = [
+    ['说明: 净利润 = 毛利润 − 手续费 + 过夜费 + 资金费; 资金费正=入金/负=支付'],
+    PAIRED_EXPORT_HEADERS,
+    ...buildPairedRows()
+  ]
+  const pairedSheet = XLSX.utils.aoa_to_sheet(pairedData)
+  XLSX.utils.book_append_sheet(wb, pairedSheet, '套利配对成交历史')
 
   // Binance sheet
   const binanceData = [
@@ -906,6 +965,34 @@ function exportToPDF(filename) {
       ],
       styles: { fontSize: 9 },
       headStyles: { fillColor: [231, 76, 60] }
+    })
+
+    // Arbitrage paired trade history (用户要求, 净利润口径; PDF用ASCII表头避免中文不渲染)
+    currentY = doc.previousAutoTable.finalY + 10
+    if (currentY > 240) { doc.addPage(); currentY = 15 }
+    const _pairLabel = pairFilter.value === 'all' ? 'All' : (pairFilter.value === 'strategy' ? 'Auto' : 'Manual')
+    doc.text(`Arbitrage Paired Trades (${_pairLabel}) - Net = Gross - Fee + Swap + Funding`, 14, currentY)
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [['Time', 'Side', 'A-Price', 'Qty', 'Spread', 'Thr', 'Slip', 'H-Price', 'H-Qty', 'Net', 'Gross', 'Fee', 'Swap', 'Funding']],
+      body: filteredPairedTrades.value.map(p => [
+        formatPairedTime(p.timestamp_primary),
+        p.side_primary === 'buy' ? 'Buy' : (p.side_primary === 'sell' ? 'Sell' : '-'),
+        p.avg_price_primary != null ? Number(p.avg_price_primary).toFixed(2) : '-',
+        p.qty_primary != null ? Number(p.qty_primary).toFixed(2) : '-',
+        p.spread != null ? Number(p.spread).toFixed(2) : '-',
+        p.threshold != null ? Number(p.threshold).toFixed(2) : '-',
+        p.slippage != null ? Number(p.slippage).toFixed(2) : '-',
+        p.avg_price_hedge != null ? Number(p.avg_price_hedge).toFixed(2) : '-',
+        p.qty_hedge != null ? Number(p.qty_hedge).toFixed(2) : '-',
+        pairNetProfit(p).toFixed(2),
+        p.pair_profit != null ? Number(p.pair_profit).toFixed(2) : '-',
+        p.pair_total_fee != null ? Number(p.pair_total_fee).toFixed(2) : '-',
+        p.hedge_overnight != null ? Number(p.hedge_overnight).toFixed(2) : '0.00',
+        p.funding_fee != null ? Number(p.funding_fee).toFixed(2) : '0.00'
+      ]),
+      styles: { fontSize: 6 },
+      headStyles: { fillColor: [243, 156, 18] }
     })
 
     // Binance trades table
