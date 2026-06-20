@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 HIST_LO, HIST_HI, HIST_STEP = -100, 50, 5
-TOP_N = 8
+TOP_N = 15
 CST = timezone(timedelta(hours=8))  # 北京时间 UTC+8(固定偏移,不依赖系统tzdata)
 
 _cache: dict = {}
@@ -49,18 +49,20 @@ def _bin_index(v, edges):
 
 
 def _episodes(seq, threshold):
-    """seq: 已按 ts 升序的 [(ts, net, notional)]。返回机会 episode 列表。
-    一段 net 连续 > 阈值 = 一次机会;pnl 按入场样本(保守)= notional*entry_net/1e4。"""
+    """seq: 已按 ts 升序的 [(ts, net, gross, notional)]。返回机会 episode 列表。
+    一段 net 连续 > 阈值 = 一次机会;pnl 按入场样本(保守)= notional*entry_net/1e4。
+    同时跟踪点差(gross_bps):入场点差 entry_gross / 峰值点差 peak_gross。"""
     eps = []
     cur = None
-    for ts, net, notional in seq:
+    for ts, net, gross, notional in seq:
         if net > threshold:
             if cur is None:
                 cur = {"start_ts": ts, "end_ts": ts, "entry_net": net, "peak_net": net,
-                       "notional": notional, "n": 1}
+                       "entry_gross": gross, "peak_gross": gross, "notional": notional, "n": 1}
             else:
                 cur["end_ts"] = ts
                 cur["peak_net"] = max(cur["peak_net"], net)
+                cur["peak_gross"] = max(cur["peak_gross"], gross)
                 cur["n"] += 1
         else:
             if cur is not None:
@@ -86,7 +88,7 @@ def _empty_market(key):
     }
 
 
-def _compute(csv_path, threshold):
+def _compute(csv_path, threshold, start_ms=None, end_ms=None):
     edges = _hist_edges()
     acc: dict = {}
     total_rows = 0
@@ -109,7 +111,7 @@ def _compute(csv_path, threshold):
                                    "gross_sum": 0.0, "exit_sum": 0.0, "gas_sum": 0.0, "slip_sum": 0.0,
                                    "opp": 0, "net_max": -1e18, "net_max_ts": None,
                                    "hist": [0] * (len(edges) + 1), "hs": [0] * 24, "ho": [0] * 24}
-                a["nets"].append(net); a["seq"].append((ts, net, notional))
+                a["nets"].append(net); a["seq"].append((ts, net, gross, notional))
                 a["gross_sum"] += gross; a["exit_sum"] += exitd; a["gas_sum"] += gasb; a["slip_sum"] += slip
                 if net > threshold:
                     a["opp"] += 1
@@ -151,11 +153,14 @@ def _compute(csv_path, threshold):
         for h in range(24):
             g_hs[h] += a["hs"][h]; g_ho[h] += a["ho"][h]
 
-    # 假设性累计净值曲线(按 episode 起始时间排序累加)
+    # 假设性累计净值曲线(按 episode 起始时间排序累加;可按时间窗筛选)
     all_eps.sort(key=lambda e: e["start_ts"])
+    win_eps = [e for e in all_eps
+               if (start_ms is None or e["start_ts"] >= start_ms)
+               and (end_ms is None or e["start_ts"] <= end_ms)]
     equity = []
     cum = 0.0
-    for e in all_eps:
+    for e in win_eps:
         cum += e["pnl"]
         equity.append({"ts": e["start_ts"], "cum_pnl": round(cum, 2),
                        "market": e["market"], "pnl": round(e["pnl"], 2)})
@@ -170,12 +175,13 @@ def _compute(csv_path, threshold):
           "pnl": round(g_hp[h], 2)} for h in range(24) if g_hs[h] > 0],
         key=lambda x: (x["opp"], x["pnl"]), reverse=True)[:TOP_N]
 
-    # 最佳机会 Top-N(按单段 pnl)
+    # 最佳机会 Top-N(按单段 pnl;含点差机会值 entry_gross/peak_gross)
     best_eps = sorted(all_eps, key=lambda e: e["pnl"], reverse=True)[:TOP_N]
     best_episodes = [{"market": e["market"], "binance_symbol": e["sym"], "start_ts": e["start_ts"],
                       "dur_sec": e["dur_sec"], "entry_net": round(e["entry_net"], 2),
-                      "peak_net": round(e["peak_net"], 2), "samples": e["n"],
-                      "pnl": round(e["pnl"], 2)} for e in best_eps]
+                      "peak_net": round(e["peak_net"], 2),
+                      "entry_gross": round(e["entry_gross"], 2), "peak_gross": round(e["peak_gross"], 2),
+                      "samples": e["n"], "pnl": round(e["pnl"], 2)} for e in best_eps]
 
     market_list = [markets[k] for k in sorted(markets)]
     tot_s = sum(m["samples"] for m in market_list)
@@ -183,7 +189,9 @@ def _compute(csv_path, threshold):
     return {
         "threshold_bps": threshold, "total_rows": total_rows, "generated_ts": int(time.time() * 1000),
         "hist_meta": {"lo": HIST_LO, "hi": HIST_HI, "step": HIST_STEP},
-        "est_total_pnl": round(cum, 2), "episode_count": len(all_eps),
+        "window": {"start_ms": start_ms, "end_ms": end_ms,
+                   "episodes_in_window": len(win_eps), "episodes_total": len(all_eps)},
+        "est_total_pnl": round(cum, 2), "episode_count": len(win_eps),
         "totals": {"samples": tot_s, "opp_count": tot_o,
                    "opp_rate_pct": round(tot_o / tot_s * 100, 3) if tot_s else 0.0},
         "equity": equity, "best_hours": best_hours, "best_episodes": best_episodes,
@@ -191,17 +199,17 @@ def _compute(csv_path, threshold):
     }
 
 
-def build_report(csv_path, threshold, depth=None):
-    """depth: 可选的实时深度快照 {market: {max_exec_usd, slip_tol_bps, ...}};
+def build_report(csv_path, threshold, depth=None, start_ms=None, end_ms=None):
+    """depth: 可选的实时深度快照;start_ms/end_ms: 净值曲线的时间窗筛选(毫秒)。
     历史报告来自CSV缓存,深度是实时量、每次合并(不进缓存键),供逐市场显示可执行额。"""
     mtime = os.path.getmtime(csv_path) if os.path.exists(csv_path) else 0
-    ckey = (csv_path, round(threshold, 3))
+    ckey = (csv_path, round(threshold, 3), start_ms, end_ms)
     with _lock:
         c = _cache.get(ckey)
         if c and c["mtime"] == mtime and (time.time() - c["at"]) < 10:
             data = c["data"]
         else:
-            data = _compute(csv_path, threshold)
+            data = _compute(csv_path, threshold, start_ms, end_ms)
             _cache[ckey] = {"mtime": mtime, "at": time.time(), "data": data}
     if depth:
         for m in data.get("markets", []):

@@ -58,9 +58,10 @@ def api_health():
 
 
 @app.get("/api/report")
-def api_report(threshold: Optional[float] = None):  # Optional 而非 float|None,兼容 Python 3.9(AL2023)
+def api_report(threshold: Optional[float] = None, start_ms: Optional[int] = None, end_ms: Optional[int] = None):  # Optional 而非 float|None,兼容 Python 3.9(AL2023)
     thr = cfg.min_net_bps if threshold is None else threshold
-    return JSONResponse(build_report(cfg.csv_path, thr, depth=state.depth_snapshot()))
+    return JSONResponse(build_report(cfg.csv_path, thr, depth=state.depth_snapshot(),
+                                     start_ms=start_ms, end_ms=end_ms))
 
 
 @app.get("/", response_class=HTMLResponse)

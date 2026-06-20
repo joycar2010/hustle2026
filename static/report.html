@@ -127,30 +127,37 @@ function equitySvg(eq){
 function equityBox(s,thr){
   const eq=s.equity||[]; const pnl=s.est_total_pnl||0;
   const span = eq.length>1 ? `${new Date(eq[0].ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})} → ${new Date(eq[eq.length-1].ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}` : '—';
+  const wins=[['ALL','全部'],['1','近24h'],['3','近3天'],['7','近7天'],['14','近14天']];
+  const chips=wins.map(w=>`<span onclick="window.eqWin='${w[0]}';load()" style="cursor:pointer;padding:2px 9px;border-radius:10px;border:1px solid #2a3142;${(window.eqWin||'ALL')===w[0]?'background:#1e2a44;color:#89b4fa;border-color:#3b5278':'color:#9399b2'}">${w[1]}</span>`).join(' ');
   return `<div class="mh"><span class="mkt">假设累计净值曲线</span>
       <span>累计 <b class="${pnl>=0?'op':'neg'}" style="font-size:15px">$${fmt(pnl,2)}</b> · ${s.episode_count||0} 次机会 · 阈值 ${thr}bps</span></div>
-    ${eq.length?equitySvg(eq):'<div class="stats">该阈值下暂无机会,净值持平 $0。降低阈值或继续累计样本。</div>'}
+    <div style="margin:6px 0;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="color:#6c7086">时间段:</span>${chips}${s.window&&s.window.episodes_total?`<span style="color:#6c7086">(窗内 ${s.window.episodes_in_window}/${s.window.episodes_total} 段)</span>`:''}</div>
+    ${eq.length?equitySvg(eq):'<div class="stats">该时间段/阈值下暂无机会,净值持平 $0。放宽时间段或降低阈值。</div>'}
     <div class="legend">⚠ 假设上限:每段"机会"(net 连续&gt;阈值)按一次入场、入场net、当时名义额估收益;未计执行折损/未必成交/下单冲击;同一错位持续多拍只算一次。区间 ${span}</div>`;
 }
 
 function topBox(s){
   const hours=(s.best_hours||[]).map(h=>`<tr><td class="l">北京 ${String(h.hour).padStart(2,'0')}:00</td><td class="${h.opp>0?'op':''}">${h.opp}</td><td>${fmt(h.opp_rate_pct,2)}%</td><td class="${h.pnl>0?'op':''}">$${fmt(h.pnl,2)}</td><td>${h.samples}</td></tr>`).join('')||'<tr><td colspan=5 class="l" style="color:#6c7086">无</td></tr>';
-  const eps=(s.best_episodes||[]).map(e=>`<tr><td class="l">${e.market.replace('BASE:','')}</td><td class="l">${new Date(e.start_ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td><td class="op">${fmt(e.entry_net,1)}</td><td>${fmt(e.peak_net,1)}</td><td>${fmt(e.dur_sec,0)}s</td><td class="op">$${fmt(e.pnl,2)}</td></tr>`).join('')||'<tr><td colspan=6 class="l" style="color:#6c7086">无</td></tr>';
+  const eps=(s.best_episodes||[]).map(e=>`<tr><td class="l">${e.market.replace('BASE:','')}</td><td class="l">${new Date(e.start_ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td><td class="op">${fmt(e.entry_gross,1)}</td><td>${fmt(e.peak_gross,1)}</td><td class="op">${fmt(e.entry_net,1)}</td><td>${fmt(e.peak_net,1)}</td><td>${fmt(e.dur_sec,0)}s</td><td class="op">$${fmt(e.pnl,2)}</td></tr>`).join('')||'<tr><td colspan=8 class="l" style="color:#6c7086">无</td></tr>';
   return `
     <div class="card" style="flex:1;min-width:300px">
       <div class="mh"><span class="mkt">最佳时段 Top-${(s.best_hours||[]).length||0}</span><span style="color:#6c7086">按机会数→捕获额</span></div>
       <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">北京小时</td><td>机会</td><td>机会率</td><td>捕获$</td><td>样本</td></tr></thead><tbody>${hours}</tbody></table>
     </div>
-    <div class="card" style="flex:1;min-width:340px">
-      <div class="mh"><span class="mkt">最佳机会 Top-${(s.best_episodes||[]).length||0}</span><span style="color:#6c7086">单段错位</span></div>
-      <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">市场</td><td class="l">起始</td><td>入场net</td><td>峰值</td><td>时长</td><td>估收益</td></tr></thead><tbody>${eps}</tbody></table>
+    <div class="card" style="flex:1;min-width:400px">
+      <div class="mh"><span class="mkt">最佳机会 Top-${(s.best_episodes||[]).length||0}</span><span style="color:#6c7086">单段错位 · 点差=gross,净=扣全成本</span></div>
+      <table class="tot" style="width:100%"><thead><tr style="color:#6c7086"><td class="l">市场</td><td class="l">起始</td><td>点差入场</td><td>点差峰值</td><td>净入场</td><td>净峰值</td><td>时长</td><td>估收益</td></tr></thead><tbody>${eps}</tbody></table>
     </div>`;
 }
 
 async function load(){
   const thr=parseFloat(document.getElementById('thr').value)||20;
+  // 净值曲线时间段:eqWin = ALL/1/3/7/14(天);非ALL时传 start_ms
+  const win=window.eqWin||'ALL';
+  let qs='/api/report?threshold='+thr;
+  if(win!=='ALL'){ const ms=Date.now()-parseInt(win)*86400*1000; qs+='&start_ms='+ms; }
   try{
-    const s=await (await fetch('/api/report?threshold='+thr)).json();
+    const s=await (await fetch(qs)).json();
     const T=s.totals||{};
     document.getElementById('meta').textContent=`· 总行数 ${s.total_rows} · 生成于 ${new Date(s.generated_ts).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})}`;
     document.getElementById('totals').innerHTML=
