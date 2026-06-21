@@ -1463,31 +1463,83 @@ INSTANCE_NAME={request.service_name}
         if result.returncode != 0:
             logger.warning(f"Failed to start service: {result.stderr}")
 
-        # ==================== 3.5 首次启动 MT5 写入登录凭证 ====================
-        # MT5 不在 common.ini 存密码，需要启动一次让它自动登录并保存 accounts.dat
+        # ==================== 3.5 首次启动 MT5 写入登录凭证（方案1·轮询加固 20260621）====================
+        # MT5 不在 common.ini 存密码，需启动一次让它自动登录并保存 accounts.dat。
+        # 旧实现用 /login:/password:/server: CLI 参数 + 固定 sleep(15) → IC Markets 实测授权约需 ~58s，
+        # 15s 内被 kill，accounts.dat 从未写成 → GUI 首登要人工填（本次根因）。
+        # 改：① 用 MT5 官方 /config:ini 自启登录（[Common] 段，比 CLI 参数可靠，受控测试 2s 写 dat、58s 授权成功）；
+        #     ② 轮询【终端日志出现 "authorized"】或 accounts.dat 稳定，最长 90s，到点才 kill；
+        #     ③ 结束后立即删除含明文密码的 ini（不在磁盘久留）；④ 失败不再静默谎报，写明确 WARNING 供排查。
+        # 仅作用于本次新部署的目录 mt5_client_dir，绝不触碰任何已部署实例/桥。
+        login_ok = False
         try:
             mt5_exe = mt5_client_dir / "terminal64.exe"
             if mt5_exe.exists():
-                # 用命令行参数传入完整凭证启动 MT5（/portable 模式）
-                mt5_cmd = [
-                    str(mt5_exe), '/portable',
-                    f'/login:{request.mt5_login}',
-                    f'/password:{request.mt5_password}',
-                    f'/server:{request.mt5_server}',
-                ]
-                logger.info(f"Starting MT5 for initial login: {request.mt5_login}@{request.mt5_server}")
-                mt5_proc = subprocess.Popen(mt5_cmd, cwd=str(mt5_client_dir))
+                cfg_ini = mt5_client_dir / "_autologin.ini"
+                # UTF-16-LE（MT5 config 原生编码）；KeepPrivate=1 避免把密码回写进 common.ini
+                _cfg = (f"[Common]\r\nLogin={request.mt5_login}\r\n"
+                        f"Password={request.mt5_password}\r\nServer={request.mt5_server}\r\n"
+                        f"KeepPrivate=1\r\nNewsEnable=0\r\n")
+                cfg_ini.write_text(_cfg, encoding="utf-16-le")
 
-                # 等待 MT5 启动并登录保存凭证（给足时间让它连接服务器并写入 accounts.dat）
-                time.sleep(15)
+                accounts_dat_path = mt5_client_dir / "Config" / "accounts.dat"
+                logger.info(f"Starting MT5 for initial login via /config: {request.mt5_login}@{request.mt5_server}")
+                mt5_proc = subprocess.Popen(
+                    [str(mt5_exe), '/portable', f'/config:{cfg_ini}'],
+                    cwd=str(mt5_client_dir),
+                )
 
-                # 关闭 MT5（凭证已保存到 accounts.dat）
-                mt5_proc.terminate()
+                # 轮询授权成功（最长 90s）：终端日志 logs/YYYYMMDD.log 出现 "'{login}': authorized"
+                # 即真正登录成功、accounts.dat 已写入；比单纯等 accounts.dat 出现更准（dat 会先出空壳）。
+                import glob as _glob, re as _re
+                deadline = time.time() + 90.0
+                while time.time() < deadline:
+                    time.sleep(3)
+                    try:
+                        log_dir = mt5_client_dir / "logs"
+                        latest = None
+                        if log_dir.exists():
+                            cands = sorted(log_dir.glob("20*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+                            latest = cands[0] if cands else None
+                        if latest:
+                            txt = latest.read_text(encoding="utf-16-le", errors="ignore")
+                            if (f"'{request.mt5_login}': authorized" in txt) or ("authorized on" in txt and str(request.mt5_login) in txt):
+                                login_ok = True
+                                break
+                    except Exception:
+                        pass
+                    # 兜底：accounts.dat 已存在且非空也算（极少数日志格式异常时）
+                    try:
+                        if accounts_dat_path.exists() and accounts_dat_path.stat().st_size > 256 and (time.time() > deadline - 60):
+                            login_ok = True
+                            break
+                    except Exception:
+                        pass
+
+                # 关闭 MT5
                 try:
-                    mt5_proc.wait(timeout=10)
+                    mt5_proc.terminate()
+                    mt5_proc.wait(timeout=12)
                 except subprocess.TimeoutExpired:
                     mt5_proc.kill()
-                logger.info(f"MT5 initial login completed, credentials saved to accounts.dat")
+                # 删除含明文密码的临时 ini（安全：不在磁盘久留）
+                try:
+                    cfg_ini.unlink()
+                except Exception:
+                    pass
+
+                dat_ok = accounts_dat_path.exists() and accounts_dat_path.stat().st_size > 0
+                if login_ok and dat_ok:
+                    logger.info(f"MT5 initial login OK: authorized & accounts.dat saved ({accounts_dat_path.stat().st_size} bytes)")
+                else:
+                    # 明确告警（不再谎报成功）：GUI 首登可能仍需人工，便于排查/重试
+                    logger.warning(
+                        f"MT5 initial login NOT confirmed within 90s "
+                        f"(login_ok={login_ok}, dat_exists={accounts_dat_path.exists()}). "
+                        f"GUI 终端首登可能仍需人工，Bridge 不受影响。account={request.mt5_login}@{request.mt5_server}"
+                    )
+            else:
+                logger.warning(f"terminal64.exe not found in {mt5_client_dir}, skip initial login")
         except Exception as e:
             logger.warning(f"Failed to perform MT5 initial login: {e}")
 
@@ -1506,12 +1558,13 @@ INSTANCE_NAME={request.service_name}
                 win_target_path = new_mt5_path.replace('/', '\\')
                 win_working_dir = str(mt5_client_dir).replace('/', '\\')
 
-                # 使用 PowerShell 创建快捷方式（更可靠）
+                # 快捷方式仅用 /portable：accounts.dat 已在第3.5步写入，终端据此自动登录，
+                # 无需把明文密码 baked 进快捷方式 Arguments（安全 + 与 GUI 自动登录一致）。
                 ps_script = f"""
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("{win_shortcut_path}")
 $Shortcut.TargetPath = "{win_target_path}"
-$Shortcut.Arguments = "/portable /login:{request.mt5_login} /password:{request.mt5_password} /server:{request.mt5_server}"
+$Shortcut.Arguments = "/portable"
 $Shortcut.WorkingDirectory = "{win_working_dir}"
 $Shortcut.IconLocation = "{win_target_path}"
 $Shortcut.Description = "MT5 Client - {request.mt5_login} on port {request.service_port}"
@@ -1812,11 +1865,18 @@ async def monitoring_task():
                 continue
 
             instances = load_instances()
+            # Run in thread pool — check_instance_health calls psutil.Process.cpu_percent(interval=1)
+            # which is a SYNC BLOCKING call that sleeps for 1s. With N instances this used to block
+            # the asyncio event loop for N seconds per cycle, freezing /health and other HTTP endpoints.
+            # run_in_executor offloads to the default ThreadPoolExecutor so the loop stays responsive.
+            _loop = asyncio.get_event_loop()
             for name, cfg in instances.items():
                 if not controller.is_instance_running(cfg["path"]):
                     continue
 
-                health_status = health_monitor.check_instance_health(name, cfg)
+                health_status = await _loop.run_in_executor(
+                    None, health_monitor.check_instance_health, name, cfg
+                )
 
                 # 检测卡顿
                 if health_status["is_frozen"]:

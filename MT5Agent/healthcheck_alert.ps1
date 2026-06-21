@@ -31,18 +31,28 @@ try {
 }
 
 $sig = (($alert.failures | ForEach-Object { $_.target }) | Sort-Object) -join '|'
-$prevSig = if (Test-Path $dispatchState) { Get-Content $dispatchState -Raw -ErrorAction SilentlyContinue } else { $null }
-if ($prevSig -eq $sig) {
+$prevSig = if (Test-Path $dispatchState) { (Get-Content $dispatchState -Raw -ErrorAction SilentlyContinue).Trim() } else { $null }
+# Hard cooldown: even if sig changes, don't fire desktop popup more than once per 30 min.
+# (Feishu/backend still gets every alert via the POST below for audit.)
+$POPUP_COOLDOWN_S = 1800
+$lastDispatchTs = if (Test-Path $dispatchState) { (Get-Item $dispatchState).LastWriteTime } else { [datetime]::MinValue }
+$secsSinceLast = ((Get-Date) - $lastDispatchTs).TotalSeconds
+if ($prevSig -eq $sig.Trim()) {
     Write-Log 'INFO' ("same failure set - suppressed: " + $sig)
     exit 0
 }
+$popupAllowed = ($secsSinceLast -ge $POPUP_COOLDOWN_S)
 
 $targets = ($alert.failures | ForEach-Object { $_.target }) -join ', '
 $title = 'MT5 Infra Alert'
 $body = "Host " + $alert.host + " failures: " + $targets
 
-# 1. Desktop toast
+# 1. Desktop toast (BurntToast if available, else msg.exe fallback)
+# Skip popup if within cooldown window (Feishu still gets it below)
 $toastSent = $false
+if (-not $popupAllowed) {
+    Write-Log 'INFO' ("popup suppressed by 30min cooldown ({0:N0}s since last)" -f $secsSinceLast)
+} else {
 try {
     if (Get-Module -ListAvailable -Name BurntToast -ErrorAction SilentlyContinue) {
         Import-Module BurntToast -ErrorAction Stop
@@ -62,6 +72,7 @@ if (-not $toastSent) {
     } catch {
         Write-Log 'WARN' ("msg.exe failed: " + $_.Exception.Message)
     }
+}
 }
 
 # 2. Backend POST (Feishu + admin WS)

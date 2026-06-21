@@ -89,21 +89,6 @@ foreach ($b in $BRIDGES) {
         $state.bridge_fails[$b.svc] = 0
     } else {
         $state.bridge_fails[$b.svc] += 1
-        # SELF-HEAL: as soon as we see 1 failure, fire the Scheduled Task that
-        # spawns the bridge. Idempotent — if the task is already starting/running
-        # the Task Scheduler returns immediately. This converts the monitor into
-        # a watchdog so a dead bridge auto-resurrects within ~60s without
-        # waiting for human intervention.
-        #
-        # Note: NetSetup Service can transiently reset network sockets every
-        # hour; we accept this re-run cost (each spawn is ~1-2s) to keep
-        # the trading bridges hot.
-        try {
-            Start-ScheduledTask -TaskName "Bridge-$($b.svc)" -ErrorAction Stop
-            Log 'HEAL' "auto-restart Bridge-$($b.svc) (fails=$($state.bridge_fails[$b.svc]))"
-        } catch {
-            Log 'ERROR' "auto-restart Bridge-$($b.svc) failed: $($_.Exception.Message)"
-        }
         if ($state.bridge_fails[$b.svc] -ge $FAIL_THRESHOLD) {
             $failures += @{ target=$b.svc; reason="bridge port $($b.port) unreachable"; fails=$state.bridge_fails[$b.svc] }
         }
