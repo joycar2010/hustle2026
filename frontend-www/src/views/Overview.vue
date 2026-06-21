@@ -312,30 +312,30 @@ const chartData = computed(() => {
 const chartOpts = computed(() => {
   const data = (chartData.value.datasets[0] && chartData.value.datasets[0].data) || []
   const n = data.length
-  const maxAbs = data.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1
-  // 标注策略(防重叠): 30根日柱标签宽度>柱距, 全标必横向重叠。故只标【显著】柱——
-  // |值| >= 峰值的12%(过滤零轴附近一堆小负柱的拥挤标签); 柱很少(≤14, 如周/月视图)时全标。
-  const thresh = n <= 14 ? -1 : maxAbs * 0.12
+  // 标注防重叠(根因=横向空间): 30根日柱每槽~23px, 水平标签"−1.5k"宽~30px>柱距→相邻必撞。
+  // 解法: 柱多时(>14, 日视图)把数字【竖排90°】, 宽度~10px塞得下全标且不重叠(TradingView同款);
+  // 柱少时(≤14, 周/月视图)空间足, 保持水平更易读。
+  const dense = n > 14
+  const rot = dense ? -90 : 0
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
-    layout: { padding: { top: 22, bottom: 22 } },   // 上下留足空间(正柱顶上方/负柱底下方标注)
+    layout: { padding: { top: dense ? 34 : 22, bottom: dense ? 34 : 22 } },  // 竖排需更多上下留白
     plugins: {
       legend: { display: false },
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
-        // 只显示显著柱的标签(小柱不标, 消除零轴附近横向重叠); 小柱数值仍可悬停看 tooltip。
-        display: (c) => Math.abs(c.dataset.data[c.dataIndex]) >= thresh,
-        // 正柱: 锚柱顶往上(end/top); 负柱: 锚柱底往下(end/bottom) → 数字在柱体外侧。
+        display: true,                 // 全部柱都标(含小柱)
         anchor: 'end',
         align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),
-        offset: 3,
+        rotation: rot,                 // 日视图竖排, 周/月水平
+        offset: dense ? 1 : 3,
         clamp: false,
         color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
-        font: { size: n <= 20 ? 10 : 9, weight: '600' },
+        font: { size: n > 40 ? 8 : (dense ? 9 : 10), weight: '600' },
         formatter: (v) => {
           const a = Math.abs(v)
+          if (a < 0.005) return ''                            // 0 不标
           if (a >= 1000) return (v / 1000).toFixed(1) + 'k'   // 紧凑: 9209→9.2k
-          if (a < 0.005) return ''                             // 0 不标
           return v.toFixed(0)
         },
       },
