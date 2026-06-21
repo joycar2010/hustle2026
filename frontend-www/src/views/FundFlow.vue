@@ -46,7 +46,7 @@
             </button>
           </div>
         </div>
-        <div v-if="fundFlowLoading && !fundFlows.length" class="py-8 flex flex-col items-center justify-center text-text-tertiary text-sm gap-2">
+        <div v-if="fundFlowLoading" class="py-8 flex flex-col items-center justify-center text-text-tertiary text-sm gap-2">
           <span>加载中 {{ ffPct }}%</span>
           <div class="w-40 h-1.5 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: ffPct + '%' }"></div></div>
         </div>
@@ -170,6 +170,7 @@ async function loadViewOptions() {
 
 async function loadFundFlow() {
   fundFlowLoading.value = true
+  fundFlows.value = []      // 清旧, 切账号/范围重拉时立即让位给进度条(不滞留上批记录)
   startFfProgress()
   try {
     const r = await fetchFundFlow(fundFlowDays.value, activeView.value)

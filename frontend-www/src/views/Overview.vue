@@ -310,9 +310,12 @@ const chartData = computed(() => {
 })
 
 const chartOpts = computed(() => {
-  const n = chartData.value.labels.length
-  // 柱顶数字标注: 柱子太多会重叠, 故按数量自适应 —— ≤31根全标, 32-62隔1根, >62不标(改看tooltip)。
-  const every = n <= 31 ? 1 : (n <= 62 ? 2 : 0)
+  const data = (chartData.value.datasets[0] && chartData.value.datasets[0].data) || []
+  const n = data.length
+  const maxAbs = data.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1
+  // 标注策略(防重叠): 30根日柱标签宽度>柱距, 全标必横向重叠。故只标【显著】柱——
+  // |值| >= 峰值的12%(过滤零轴附近一堆小负柱的拥挤标签); 柱很少(≤14, 如周/月视图)时全标。
+  const thresh = n <= 14 ? -1 : maxAbs * 0.12
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     layout: { padding: { top: 22, bottom: 22 } },   // 上下留足空间(正柱顶上方/负柱底下方标注)
@@ -320,12 +323,12 @@ const chartOpts = computed(() => {
       legend: { display: false },
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
-        display: (c) => every > 0 && (c.dataIndex % every === 0),
-        // 正柱: 锚柱顶往上(end/top); 负柱: 锚柱底往下(end/bottom) → 数字始终在柱体【外侧】。
-        // 不用 clamp(clamp会把越界标签拉回图内压到柱身上, 正是重叠根源); 靠 layout padding 留白。
+        // 只显示显著柱的标签(小柱不标, 消除零轴附近横向重叠); 小柱数值仍可悬停看 tooltip。
+        display: (c) => Math.abs(c.dataset.data[c.dataIndex]) >= thresh,
+        // 正柱: 锚柱顶往上(end/top); 负柱: 锚柱底往下(end/bottom) → 数字在柱体外侧。
         anchor: 'end',
         align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),
-        offset: 2,
+        offset: 3,
         clamp: false,
         color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
         font: { size: n <= 20 ? 10 : 9, weight: '600' },
