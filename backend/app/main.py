@@ -167,8 +167,9 @@ async def init_mt5_and_monitoring():
         await redis_status_streamer.start()
         await position_streamer.start()   # 实时持仓广播，1秒1次
         await market_state_monitor.start()  # MT5 休市/开市状态监控
-        from app.services.strategy_resume_service import strategy_resume_monitor
+        from app.services.strategy_resume_service import strategy_resume_monitor, recover_running_after_restart
         await strategy_resume_monitor.start()  # 开市后自动恢复(按对预热), 仅恢复收盘自动停的按钮
+        await recover_running_after_restart()  # 重启自恢复: 把曾运行(有快照)的连续策略标记待恢复, 由上面Monitor回放, 防后端重启静默停
         from app.services.hedge_stopout_service import hedge_stopout_monitor
         await hedge_stopout_monitor.start()  # 对冲腿强平检测+单腿告警(只读)
         await binance_position_pusher.start()  # Binance User Data Stream，<100ms 持仓更新
@@ -294,6 +295,15 @@ async def lifespan(app: FastAPI):
         logger.info('[dashboard_stream] started')
     except Exception as e:
         logger.error(f'[dashboard_stream] start err: {e}')
+
+    # PnL 缓存预热(20260621): 为有收益关联的 owner 预算 merged 视图缓存, 消除"首访35s"。
+    try:
+        from app.api.v1.pnl import prewarm_loop as _pnl_prewarm
+        pnl_prewarm_task = asyncio.create_task(_pnl_prewarm())
+        app_state['pnl_prewarm_task'] = pnl_prewarm_task
+        logger.info('[PnL-prewarm] task scheduled')
+    except Exception as e:
+        logger.error(f'[PnL-prewarm] failed to start: {e}')
 
     # Sub-account: daily NAV snapshot scheduler (00:05 Asia/Shanghai)
     try:

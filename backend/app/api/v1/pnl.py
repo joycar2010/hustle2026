@@ -798,3 +798,49 @@ async def get_pnl_view_options(ctx: ViewContext = Depends(get_view_context)):
         return await _opts(db, str(ctx.data_user_id))
 
 
+# ── 缓存预热(优化项4-加强, 20260621): 消除"首访35s" ────────────────────────
+# 合并视图(有 user_pnl_links 的 owner)daily 冷启动要 30-70s。后台定时(< SOFT_TTL)为这些
+# 用户预算 merged 视图的 daily(默认30天)+ cumulative, 让缓存常 fresh → 用户首次打开即秒回。
+# 只预热"有关联的 owner"(merged 慢的根源); 普通无关联用户 daily 快, 不必预热。
+_PREWARM_INTERVAL = 240   # 4min(< SOFT 300s, 保证缓存不掉出 fresh 窗)
+_PREWARM_RANGE_DAYS = 30  # 前端默认范围
+
+
+async def _prewarm_one(owner_uid: str):
+    """为一个 owner 预热 merged 视图的 daily(30天) + cumulative。复用 _bg=True 全量算并写缓存。"""
+    try:
+        from app.api.v1.subaccount import get_view_context as _gvc
+        ctx = await _gvc(owner_uid)
+        if ctx.is_sub:
+            return  # 子账户不预热(走份额路径, 另算)
+        import datetime as _d
+        end = _d.datetime.now(timezone(timedelta(hours=8))).date()
+        start = end - _d.timedelta(days=_PREWARM_RANGE_DAYS)
+        await get_daily_pnl(start_date=start.isoformat(), end_date=end.isoformat(),
+                            platform="all", view="merged", ctx=ctx, _bg=True)
+        await get_cumulative_pnl(platform="all", view="merged", ctx=ctx)
+    except Exception as e:
+        logger.warning(f"[PnL-prewarm] owner={owner_uid[:8]} failed: {e}")
+
+
+async def prewarm_loop():
+    """每 _PREWARM_INTERVAL 秒为所有有收益关联的 owner 预热缓存(串行+间隔, 不打爆桥)。"""
+    import asyncio as _aio
+    logger.info("[PnL-prewarm] loop started")
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                rows = (await db.execute(text(
+                    "SELECT DISTINCT owner_user_id::text FROM user_pnl_links"
+                ))).fetchall()
+            owners = [r[0] for r in rows]
+            if owners:
+                logger.info(f"[PnL-prewarm] warming {len(owners)} owner(s)")
+                for uid in owners:
+                    await _prewarm_one(uid)
+                    await _aio.sleep(2)  # 间隔, 避免连续打桥
+        except Exception as e:
+            logger.warning(f"[PnL-prewarm] cycle error: {e}")
+        await _aio.sleep(_PREWARM_INTERVAL)
+
+
