@@ -38,22 +38,22 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">今日收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(todayPnl), fitFont(todayPnl)]">{{ fmtPnl(todayPnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[loading ? 'text-text-tertiary' : pnlColor(todayPnl), loading ? 'text-base' : fitFont(todayPnl)]">{{ loading ? '计算中…' : fmtPnl(todayPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">USDT</div>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本周收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(thisWeekPnl), fitFont(thisWeekPnl)]">{{ fmtPnl(thisWeekPnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[loading ? 'text-text-tertiary' : pnlColor(thisWeekPnl), loading ? 'text-base' : fitFont(thisWeekPnl)]">{{ loading ? '计算中…' : fmtPnl(thisWeekPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">本周一至今</div>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本月收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(thisMonthPnl), fitFont(thisMonthPnl)]">{{ fmtPnl(thisMonthPnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[loading ? 'text-text-tertiary' : pnlColor(thisMonthPnl), loading ? 'text-base' : fitFont(thisMonthPnl)]">{{ loading ? '计算中…' : fmtPnl(thisMonthPnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">本月1日至今</div>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">累计收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ cumLoading ? '...' : fmtPnl(cumulativePnl) }}</div>
+          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[cumLoading ? 'text-text-tertiary' : pnlColor(cumulativePnl), cumLoading ? 'text-base' : fitFont(cumulativePnl)]">{{ cumLoading ? '计算中…' : fmtPnl(cumulativePnl) }}</div>
           <div class="text-[10px] text-text-tertiary mt-1">开户至今<span v-if="cumInception" class="ml-1 text-text-tertiary/80">({{ cumInception }} 起)</span></div>
         </div>
       </div>
@@ -163,10 +163,13 @@ async function loadViewOptions() {
   } catch (e) { viewOptions.value = [] }
 }
 async function onViewChange() {
-  // 切换视图: 清缓存确保不命中旧 view 数据, 两个拉取独立(互不阻断)
+  // 切换视图: 清缓存 + 立即清旧值并置 loading(让四宫格/累计显示"计算中"而非滞留上个view的旧数),
+  // 两个拉取独立(互不阻断)。
   clearPnlCache()
-  setRange(activeRange.value)
-  fetchCumulative()
+  loading.value = true; cumLoading.value = true
+  dailyList.value = []          // 清旧, 四宫格立即变"计算中"
+  setRange(activeRange.value)   // 内部置 loading
+  fetchCumulative()             // 内部置 cumLoading
 }
 // 兜底: watch activeView 变化也触发刷新(防 select @change 在个别端不触发)
 watch(activeView, () => { onViewChange() })
@@ -262,8 +265,12 @@ watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.type === 'account_balance' && msg.data) {
     const s = msg.data.summary || {}
+    // 修(20260620): WS 推空 summary(total_assets 缺失/0)时不覆盖已有资金值, 防把
+    // REST 取到的正确资金(如96504)刷成0。仅当推送含有效总资产时才更新。
+    const _ta = Number(s.total_assets || 0)
+    if (_ta <= 0) return
     fundTotals.value = {
-      total_assets: s.total_assets || 0,
+      total_assets: _ta,
       available: s.available_balance || 0,
       net_assets: s.net_assets || 0,
       unrealized_pnl: s.unrealized_pnl || 0,
@@ -322,8 +329,11 @@ onMounted(async () => {
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })
   loadViewOptions()        // 加载收益视图下拉(有关联用户才显示)
-  await Promise.all([setRange('30d'), fetchFund()])
-  fetchCumulative()         // 累计独立拉取(开户至今, 不阻塞首屏四宫格其余三个数)
+  // 三者独立并发, 互不阻塞(此前 Promise.all 等 daily 33s, 拖累资金/累计"出不来"):
+  // 资金 ~0.1s 先出; 累计独立(开户至今); daily(合并视图可达30s+)单独慢, 期间四宫格显"计算中"。
+  fetchFund()
+  fetchCumulative()
+  setRange('30d')
 })
 onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer) })
 </script>
