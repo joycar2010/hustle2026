@@ -32,6 +32,14 @@ _cache: Dict[str, Any] = {}
 _cache_ts: Dict[str, float] = {}
 CACHE_TTL = 300
 
+# SWR(stale-while-revalidate, 20260620 优化项4): 合并视图 daily 取数慢(实测cq002+cq001
+# merged 30天=33s, 打5-6桥+币安income分段)。SWR 让缓存过期后【先返回旧值秒回 + 后台异步刷新】,
+# 用户永不等33s(除真正冷启动首次)。SOFT 内=新鲜直接返回; SOFT~HARD 之间=返回旧值并触发后台刷新;
+# 超 HARD 或无缓存=冷启动需同步算(仅首访)。_inflight 防并发重复算(同 key 只跑一个后台任务)。
+_SWR_SOFT_TTL = 300.0     # 5min 内视为新鲜
+_SWR_HARD_TTL = 1800.0    # 30min 内可返回旧值(后台刷新), 超过则视为太旧需同步重算
+_inflight: set = set()    # 正在后台刷新的 cache_key
+
 
 def _cache_get(key: str):
     if key in _cache and _time.time() - _cache_ts.get(key, 0) < CACHE_TTL:
@@ -42,6 +50,18 @@ def _cache_get(key: str):
 def _cache_set(key: str, val):
     _cache[key] = val
     _cache_ts[key] = _time.time()
+
+
+def _swr_get(key: str):
+    """返回 (value, freshness): freshness ∈ {'fresh','stale','miss'}。"""
+    if key not in _cache:
+        return None, 'miss'
+    age = _time.time() - _cache_ts.get(key, 0)
+    if age < _SWR_SOFT_TTL:
+        return _cache[key], 'fresh'
+    if age < _SWR_HARD_TTL:
+        return _cache[key], 'stale'
+    return None, 'miss'
 
 
 # ── 时间工具 ──────────────────────────────────────────
@@ -422,6 +442,7 @@ async def get_daily_pnl(
     platform: str = Query("all", description="平台过滤: all/binance/mt5"),
     view: str = Query("merged", description="收益视图: merged(合并全部关联)/<user_id>(单用户)"),
     ctx: ViewContext = Depends(get_view_context),
+    _bg: bool = False,   # 内部: 后台刷新调用时 True, 跳过 SWR 短路直接全量计算
 ):
     # 不再用 Depends(get_db) 全程持连接：所有 DB 读放进短会话块，慢的交易所/MT5 桥拉取在会话外执行。
     from app.models.user import User as _U
@@ -440,9 +461,30 @@ async def get_daily_pnl(
                     start_date = _join_date_str
 
     cache_key = f"pnl:{ctx.auth_user_id}:{current_user.user_id}:{start_date}:{end_date}:{platform}:sub={ctx.is_sub}:view={view}:v5"
-    cached = _cache_get(cache_key)
-    if cached:
-        return cached
+    # SWR(优化项4): 后台刷新调用(_bg)跳过短路, 直接全量算并写缓存。
+    if not _bg:
+        _val, _fresh = _swr_get(cache_key)
+        if _fresh == 'fresh':
+            return _val
+        if _fresh == 'stale':
+            # 返回旧值秒回, 同时后台异步刷新(同 key 只跑一个)。
+            if cache_key not in _inflight:
+                _inflight.add(cache_key)
+                async def _refresh(_ck=cache_key):
+                    try:
+                        await get_daily_pnl(start_date=start_date, end_date=end_date,
+                                            platform=platform, view=view, ctx=ctx, _bg=True)
+                    except Exception as _e:
+                        logger.warning(f"[PnL-SWR] bg refresh failed {_ck}: {_e}")
+                    finally:
+                        _inflight.discard(_ck)
+                try:
+                    import asyncio as _aio
+                    _aio.create_task(_refresh())
+                except RuntimeError:
+                    _inflight.discard(cache_key)
+            return _val
+        # miss: 冷启动, 同步算(仅首次/超30min)
 
     # ── Sub path: per-share NAV replay ──
     if ctx.is_sub:
