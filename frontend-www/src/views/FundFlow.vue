@@ -46,7 +46,10 @@
             </button>
           </div>
         </div>
-        <div v-if="fundFlowLoading && !fundFlows.length" class="py-8 text-center text-text-tertiary text-sm">加载中…</div>
+        <div v-if="fundFlowLoading && !fundFlows.length" class="py-8 flex flex-col items-center justify-center text-text-tertiary text-sm gap-2">
+          <span>加载中 {{ ffPct }}%</span>
+          <div class="w-40 h-1.5 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: ffPct + '%' }"></div></div>
+        </div>
         <div v-else-if="!fundFlows.length" class="py-8 text-center text-text-tertiary text-sm">近 {{ fundFlowDays }} 天无划转 / 充值 / 提现记录</div>
         <div v-else>
           <div class="hidden md:block max-h-[70vh] overflow-y-auto">
@@ -131,6 +134,21 @@ const fundFlowDays = ref(30)
 const fundFlowErrors = ref('')
 const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
+// 进度条(20260621): 资金流向取数无真实进度回调, 用基于经验耗时(合并视图打多账号桥~20s,
+// 单账号~8s)的模拟进度: 平滑爬到90%, 数据返回跳100%淡出。
+const ffPct = ref(0)
+let _ffTimer = null
+function startFfProgress() {
+  clearInterval(_ffTimer); ffPct.value = 1
+  const expect = (viewOptions.value.length > 1 && activeView.value === 'merged') ? 20000 : 8000
+  const t0 = Date.now()
+  _ffTimer = setInterval(() => {
+    const p = 90 * (1 - Math.exp(-(Date.now() - t0) / (expect * 0.55)))
+    ffPct.value = Math.min(90, Math.round(p))
+  }, 200)
+}
+function doneFfProgress() { clearInterval(_ffTimer); ffPct.value = 100; setTimeout(() => { if (!fundFlowLoading.value) ffPct.value = 0 }, 400) }
+
 // 收益关联(20260621): 资金流向同收益页, 加视图下拉(合并全部/各用户)
 const activeView = ref('merged')
 const viewOptions = ref([])
@@ -150,6 +168,7 @@ async function loadViewOptions() {
 
 async function loadFundFlow() {
   fundFlowLoading.value = true
+  startFfProgress()
   try {
     const r = await fetchFundFlow(fundFlowDays.value, activeView.value)
     fundFlows.value = r?.flows || []
@@ -171,6 +190,7 @@ async function loadFundFlow() {
     }
   } finally {
     fundFlowLoading.value = false
+    doneFfProgress()
   }
 }
 
@@ -188,7 +208,7 @@ function fmtFlowTime(ts) {
   return dayjs(ts).format('MM-DD HH:mm')
 }
 
-onUnmounted(() => wsDisconnect())
+onUnmounted(() => { wsDisconnect(); clearInterval(_ffTimer) })
 onMounted(() => {
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })

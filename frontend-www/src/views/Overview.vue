@@ -38,23 +38,47 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">今日收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[loading ? 'text-text-tertiary' : pnlColor(todayPnl), loading ? 'text-base' : fitFont(todayPnl)]">{{ loading ? '计算中…' : fmtPnl(todayPnl) }}</div>
-          <div class="text-[10px] text-text-tertiary mt-1">USDT</div>
+          <template v-if="loading">
+            <div class="text-base font-mono text-text-tertiary leading-tight">计算中 {{ trendPct }}%</div>
+            <div class="h-1 mt-2 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: trendPct + '%' }"></div></div>
+          </template>
+          <template v-else>
+            <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(todayPnl), fitFont(todayPnl)]">{{ fmtPnl(todayPnl) }}</div>
+            <div class="text-[10px] text-text-tertiary mt-1">USDT</div>
+          </template>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本周收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[loading ? 'text-text-tertiary' : pnlColor(thisWeekPnl), loading ? 'text-base' : fitFont(thisWeekPnl)]">{{ loading ? '计算中…' : fmtPnl(thisWeekPnl) }}</div>
-          <div class="text-[10px] text-text-tertiary mt-1">本周一至今</div>
+          <template v-if="loading">
+            <div class="text-base font-mono text-text-tertiary leading-tight">计算中 {{ trendPct }}%</div>
+            <div class="h-1 mt-2 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: trendPct + '%' }"></div></div>
+          </template>
+          <template v-else>
+            <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(thisWeekPnl), fitFont(thisWeekPnl)]">{{ fmtPnl(thisWeekPnl) }}</div>
+            <div class="text-[10px] text-text-tertiary mt-1">本周一至今</div>
+          </template>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">本月收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[loading ? 'text-text-tertiary' : pnlColor(thisMonthPnl), loading ? 'text-base' : fitFont(thisMonthPnl)]">{{ loading ? '计算中…' : fmtPnl(thisMonthPnl) }}</div>
-          <div class="text-[10px] text-text-tertiary mt-1">本月1日至今</div>
+          <template v-if="loading">
+            <div class="text-base font-mono text-text-tertiary leading-tight">计算中 {{ trendPct }}%</div>
+            <div class="h-1 mt-2 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: trendPct + '%' }"></div></div>
+          </template>
+          <template v-else>
+            <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(thisMonthPnl), fitFont(thisMonthPnl)]">{{ fmtPnl(thisMonthPnl) }}</div>
+            <div class="text-[10px] text-text-tertiary mt-1">本月1日至今</div>
+          </template>
         </div>
         <div class="bg-dark-100 rounded-2xl border border-border-primary p-4 min-w-0">
           <div class="text-xs text-text-tertiary mb-1">累计收益</div>
-          <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[cumLoading ? 'text-text-tertiary' : pnlColor(cumulativePnl), cumLoading ? 'text-base' : fitFont(cumulativePnl)]">{{ cumLoading ? '计算中…' : fmtPnl(cumulativePnl) }}</div>
-          <div class="text-[10px] text-text-tertiary mt-1">开户至今<span v-if="cumInception" class="ml-1 text-text-tertiary/80">({{ cumInception }} 起)</span></div>
+          <template v-if="cumLoading">
+            <div class="text-base font-mono text-text-tertiary leading-tight">计算中 {{ cumPct }}%</div>
+            <div class="h-1 mt-2 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: cumPct + '%' }"></div></div>
+          </template>
+          <template v-else>
+            <div class="font-bold font-mono leading-tight whitespace-nowrap" :class="[pnlColor(cumulativePnl), fitFont(cumulativePnl)]">{{ fmtPnl(cumulativePnl) }}</div>
+            <div class="text-[10px] text-text-tertiary mt-1">开户至今<span v-if="cumInception" class="ml-1 text-text-tertiary/80">({{ cumInception }} 起)</span></div>
+          </template>
         </div>
       </div>
 
@@ -72,7 +96,13 @@
         </div>
         <div class="h-56 md:h-64">
           <Bar v-if="chartData.labels.length" :data="chartData" :options="chartOpts" :key="chartKey" />
-          <div v-else class="h-full flex items-center justify-center text-text-tertiary text-sm">{{ loading ? '加载中...' : '暂无数据' }}</div>
+          <div v-else class="h-full flex flex-col items-center justify-center text-text-tertiary text-sm gap-2">
+            <template v-if="loading">
+              <span>加载中 {{ trendPct }}%</span>
+              <div class="w-40 h-1.5 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: trendPct + '%' }"></div></div>
+            </template>
+            <span v-else>暂无数据</span>
+          </div>
         </div>
         <!-- 取数范围切换(只影响趋势图与累计的窗口) -->
         <div class="flex items-center justify-end gap-1 mt-3">
@@ -121,6 +151,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bar } from 'vue-chartjs'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js'
+import ChartDataLabels from 'chartjs-plugin-datalabels'
 import { useAuthStore } from '@/stores/auth.js'
 import { useWebSocket } from '@/composables/useWebSocket.js'
 import { fetchDailyPnl, aggregateWeekly, aggregateMonthly, fmtPnl, fmtNum, pnlColor, setWsInstance, clearPnlCache } from '@/utils/pnlUtils.js'
@@ -131,7 +162,7 @@ import timezone from 'dayjs/plugin/timezone'
 dayjs.extend(utc)
 dayjs.extend(timezone)
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, ChartDataLabels)
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -140,6 +171,31 @@ const { connected: wsConnected, lastMessage, connect: wsConnect, disconnect: wsD
 const loading = ref(true)
 const lastUpdate = ref('--')
 const dailyList = ref([])
+
+// 进度条(20260621): 后端取数(打桥+币安分段)无真实进度回调, 用【基于经验耗时的模拟进度】——
+// 平滑推进到90%封顶, 数据返回时跳100%再淡出。避免布尔loading的"不知还要多久"焦虑。
+// merged视图慢(~35s)给长曲线, 单视图/资金快给短曲线。startProgress 返回 stop 函数。
+const trendPct = ref(0)
+const cumPct = ref(0)
+let _trendTimer = null, _cumTimer = null
+function _animate(setter, expectMs) {
+  let p = 0; const t0 = Date.now()
+  const tick = () => {
+    const elapsed = Date.now() - t0
+    // 指数逼近90%: 经验耗时内走到~85%, 之后极缓慢爬向90%(永不到100, 完成时才跳)
+    p = 90 * (1 - Math.exp(-elapsed / (expectMs * 0.55)))
+    setter(Math.min(90, Math.round(p)))
+  }
+  tick()
+  return setInterval(tick, 200)
+}
+function startTrendProgress(ms) { clearInterval(_trendTimer); trendPct.value = 1; _trendTimer = _animate(v => trendPct.value = v, ms) }
+function doneTrendProgress() { clearInterval(_trendTimer); trendPct.value = 100; setTimeout(() => { if (!loading.value) trendPct.value = 0 }, 400) }
+function startCumProgress(ms) { clearInterval(_cumTimer); cumPct.value = 1; _cumTimer = _animate(v => cumPct.value = v, ms) }
+function doneCumProgress() { clearInterval(_cumTimer); cumPct.value = 100; setTimeout(() => { if (!cumLoading.value) cumPct.value = 0 }, 400) }
+// 预期耗时: 合并视图(有关联且非单用户)慢, 否则快
+function expectMs() { return (viewOptions.value.length > 1 && activeView.value === 'merged') ? 32000 : 14000 }
+
 const fundTotals = ref({ total_assets: 0, available: 0, net_assets: 0, unrealized_pnl: 0 })
 const activeRange = ref('30d')
 const activeGran = ref('day')   // day | week | month
@@ -207,12 +263,13 @@ const cumInception = ref('')
 const cumLoading = ref(false)
 async function fetchCumulative() {
   cumLoading.value = true
+  startCumProgress(expectMs())
   try {
     const r = await api.get('/api/v1/pnl/cumulative', { params: { platform: 'all', view: activeView.value } })
     cumulativePnl.value = Number(r.data?.cumulative_pnl || 0)
     cumInception.value = r.data?.inception_date || ''
   } catch (e) { console.error('cumulative fetch error:', e) }
-  finally { cumLoading.value = false }
+  finally { cumLoading.value = false; doneCumProgress() }
 }
 
 // 数字自适应字号(完整显示不截断): 按格式化后字符串长度选 Tailwind 字号档, 字号下探更小,
@@ -251,14 +308,37 @@ const chartData = computed(() => {
   }
 })
 
-const chartOpts = {
-  responsive: true, maintainAspectRatio: false, animation: false,
-  plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' } },
-  scales: {
-    x: { grid: { display: false }, ticks: { color: '#666', maxTicksLimit: 8, font: { size: 10 } } },
-    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 10 } } }
+const chartOpts = computed(() => {
+  const n = chartData.value.labels.length
+  // 柱顶数字标注: 柱子太多会重叠, 故按数量自适应 —— ≤45根全标, 46-90隔1根, >90不标(改看tooltip)。
+  const every = n <= 45 ? 1 : (n <= 90 ? 2 : 0)
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    layout: { padding: { top: 18 } },   // 给柱顶数字留空间
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
+      datalabels: {
+        display: (c) => every > 0 && (c.dataIndex % every === 0),
+        anchor: 'end',
+        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'end' : 'start'),
+        offset: 2,
+        color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
+        font: { size: n <= 20 ? 10 : 9, weight: '600' },
+        formatter: (v) => {
+          const a = Math.abs(v)
+          if (a >= 1000) return (v / 1000).toFixed(1) + 'k'   // 紧凑: 9209→9.2k
+          if (a < 0.005) return ''                             // 0 不标
+          return v.toFixed(0)
+        },
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#666', maxTicksLimit: 8, font: { size: 10 } } },
+      y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 10 } } }
+    }
   }
-}
+})
 
 watch(activeGran, () => { chartKey.value++ })
 
@@ -297,12 +377,13 @@ async function setRange(val) {
   const start = dayjs().tz('Asia/Shanghai').subtract(days, 'day').format('YYYY-MM-DD')
   const end = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
   loading.value = true
+  startTrendProgress(expectMs())
   try {
     const data = await fetchDailyPnl(start, end, activeView.value)
     dailyList.value = data.daily_pnl || []
     chartKey.value++
   } catch (e) { console.error('PnL fetch error:', e) }
-  finally { loading.value = false }
+  finally { loading.value = false; doneTrendProgress() }
 }
 
 async function fetchFund() {
@@ -346,5 +427,5 @@ onMounted(async () => {
   // 当前 view 拉一次 REST 资金保持新鲜(自己视图另有 WS 实时); fetchFund 很快(~0.1s)。
   fundPollTimer = setInterval(fetchFund, 30000)
 })
-onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer); clearInterval(fundPollTimer) })
+onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer); clearInterval(fundPollTimer); clearInterval(_trendTimer); clearInterval(_cumTimer) })
 </script>
