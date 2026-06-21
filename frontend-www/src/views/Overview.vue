@@ -324,8 +324,12 @@ const chartOpts = computed(() => {
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
         display: true,                  // 每根柱都标(含大跌负柱)
-        anchor: 'end',                  // 锚柱端(正柱=柱顶, 负柱=柱底)
-        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),  // 正柱标上、负柱标下
+        // 根因修(20260621): chartjs-datalabels 的 anchor 按"元素边界高低"定义, 非数据值!
+        // anchor:'end'=最高边界→负柱是【柱顶(零轴侧)】(之前红字一直贴零轴的真因);
+        // anchor:'start'=最低边界→负柱才是【柱底尖端】。故: 正柱 anchor=end(柱顶)+align=top;
+        // 负柱 anchor=start(柱底)+align=bottom → 数字落到大跌柱深底外侧。
+        anchor: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'end' : 'start'),
+        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),
         rotation: 0,                    // 横排
         offset: 3,
         clamp: false,
