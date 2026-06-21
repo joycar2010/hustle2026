@@ -43,6 +43,13 @@ _inflight: set = set()    # 正在后台刷新的 cache_key
 # per-key 锁上等待→拿到锁后复检命中已填缓存, 避免重复算+争抢桥 I/O(此前并发冷各算→实测76s)。
 _compute_locks: Dict[str, Any] = {}
 
+# 累计真实起算日缓存(20260621): inception 改为【动态查账号集最早成交记录】(币安income最早
+# + MT5 deals最早 取较早者), 而非 account_snapshots 快照日(测试库快照4/16晚于真实成交3月,
+# 用快照会截断早期对冲腿盈利→累计失真: cq002 从4/16算=-9527, 从真实最早算≈+3283)。
+# 查最早成交需打交易所/桥(慢), 故按账号集缓存24h(账号最早成交日是不变量)。
+_inception_cache: Dict[str, Any] = {}
+_INCEPTION_TTL = 86400.0  # 24h
+
 
 def _cache_get(key: str):
     if key in _cache and _time.time() - _cache_ts.get(key, 0) < CACHE_TTL:
@@ -65,6 +72,56 @@ def _swr_get(key: str):
     if age < _SWR_HARD_TTL:
         return _cache[key], 'stale'
     return None, 'miss'
+
+
+async def _earliest_binance_ms(account, scan_from_ms: int, now_ms: int):
+    """币安账户最早成交(非TRANSFER)的 ms 时间戳。从 scan_from_ms 按7天段向前扫, 命中第一个
+    有成交的段即返回该段最小时间(币安 income 按时间正序)。无成交返回 None。"""
+    client = BinanceFuturesClient(
+        account.api_key, account.api_secret, proxy_url=build_proxy_url(account.proxy_config)
+    )
+    _SEG = 7 * 24 * 60 * 60 * 1000
+    try:
+        seg = scan_from_ms
+        while seg <= now_ms:
+            seg_end = min(seg + _SEG - 1, now_ms)
+            recs = await client.get_income(start_time=seg, end_time=seg_end, limit=1000)
+            times = [int(r.get("time", 0)) for r in recs
+                     if r.get("incomeType") != "TRANSFER" and r.get("time")]
+            if times:
+                return min(times)
+            seg = seg_end + 1
+        return None
+    except Exception as e:
+        logger.warning(f"[inception] binance probe failed [{account.account_name}]: {e}")
+        return None
+    finally:
+        await client.close()
+
+
+async def _find_inception(accounts, scan_from_str: str = "2026-01-01"):
+    """动态查账号集最早成交日(北京日期): 币安取 income 最早、MT5 取 deals 最早, 取较早者。
+    替代 account_snapshots 快照日(测试库快照晚于真实成交→截断早期对冲腿盈亏致累计失真)。"""
+    import datetime as _dtm
+    scan_from_ms = int(_dtm.datetime.strptime(scan_from_str, "%Y-%m-%d")
+                       .replace(tzinfo=timezone.utc).timestamp() * 1000)
+    now_ms = int(_time.time() * 1000)
+    earliest_ms = None
+    for a in accounts:
+        try:
+            if a.platform_id == 1:  # 币安
+                m = await _earliest_binance_ms(a, scan_from_ms, now_ms)
+            elif getattr(a, "is_mt5_account", False):  # MT5(Bybit/IC)
+                deals = await _fetch_mt5_deals(a, scan_from_ms, now_ms)
+                ts = [mt5_server_ts_to_utc(int(d.get("time", 0))) * 1000 for d in deals if d.get("time")]
+                m = min(ts) if ts else None
+            else:
+                m = None
+            if m is not None:
+                earliest_ms = m if earliest_ms is None else min(earliest_ms, m)
+        except Exception as e:
+            logger.warning(f"[inception] probe failed [{getattr(a,'account_name','?')}]: {e}")
+    return _utc_ms_to_beijing_date(earliest_ms) if earliest_ms is not None else None
 
 
 # ── 时间工具 ──────────────────────────────────────────
@@ -721,6 +778,8 @@ async def get_daily_pnl(
 # 累计端点专用缓存(30min): 累计是慢变量, 全周期取数慢(实测365天~135s, 打交易所+多桥),
 # 不需实时。首次慢、之后30min内秒回。与 /daily 的300s缓存分开。
 _CUM_CACHE_TTL = 1800
+# SWR 硬上限(6h): SOFT(30min)~HARD 之间返回旧值秒回+后台刷新, 超 HARD 才冷算。
+_CUM_HARD_TTL = 21600
 
 
 @router.get("/cumulative")
@@ -728,6 +787,7 @@ async def get_cumulative_pnl(
     platform: str = Query("all", description="平台过滤: all/binance/mt5"),
     view: str = Query("merged", description="收益视图: merged/<user_id>"),
     ctx: ViewContext = Depends(get_view_context),
+    _bg: bool = False,   # 内部: 后台刷新调用时 True, 跳过 SWR 短路直接全量算
 ):
     """真正的"开户至今累计收益"(固定起点=账号首笔快照日, 不随前端范围/日期滚动变化)。
 
@@ -744,10 +804,33 @@ async def get_cumulative_pnl(
             return {"cumulative_pnl": 0, "inception_date": None, "end_date": None}
         uid = _row.user_id
 
-    _ck = f"pnlcum:{uid}:{platform}:sub={ctx.is_sub}:view={view}:v2"
-    _hit = _cache.get(_ck)
-    if _hit is not None and _time.time() - _cache_ts.get(_ck, 0) < _CUM_CACHE_TTL:
-        return _hit
+    _ck = f"pnlcum:{uid}:{platform}:sub={ctx.is_sub}:view={view}:v3"
+    # SWR(20260621): cumulative 冷启动慢(动态inception+全周期取数, cq002实测~6min)。过 SOFT
+    # 后返回旧值秒回 + 后台刷新, 用户首次之后永不等。_bg 跳过短路直接全量算。
+    if not _bg:
+        _hit = _cache.get(_ck)
+        if _hit is not None:
+            _age = _time.time() - _cache_ts.get(_ck, 0)
+            if _age < _CUM_CACHE_TTL:          # fresh(30min)
+                return _hit
+            if _age < _CUM_HARD_TTL:           # stale: 返回旧值 + 后台刷新(同key一个)
+                _sk = "cum:" + _ck
+                if _sk not in _inflight:
+                    _inflight.add(_sk)
+                    async def _refresh(_s=_sk):
+                        try:
+                            await get_cumulative_pnl(platform=platform, view=view, ctx=ctx, _bg=True)
+                        except Exception as _e:
+                            logger.warning(f"[PnL-CUM-SWR] bg refresh failed: {_e}")
+                        finally:
+                            _inflight.discard(_s)
+                    try:
+                        import asyncio as _aio
+                        _aio.create_task(_refresh())
+                    except RuntimeError:
+                        _inflight.discard(_sk)
+                return _hit
+        # miss 或太旧: 冷启动同步算(下方)
 
     import datetime as _dtm
     today_bj = _dtm.datetime.now(timezone(timedelta(hours=8))).date().isoformat()
@@ -763,19 +846,26 @@ async def get_cumulative_pnl(
             ), {"u": str(ctx.auth_user_id)})).first()
         inception = row[0].astimezone(timezone(timedelta(hours=8))).date().isoformat() if row and row[0] else None
     else:
-        # 普通用户: inception = 账号集(view 决定) 的 account_snapshots 最早北京日期
+        # 普通用户(20260621): inception = 账号集(view决定)的【最早真实成交日】(动态查交易所/桥),
+        # 不再用 account_snapshots 快照日(快照晚于成交→截断早期对冲腿盈亏致累计失真)。
+        # 账号集最早成交日是不变量, 缓存24h(查交易所慢)。
         from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
         async with AsyncSessionLocal() as db:
             _aids = await _resolve_aids(db, str(uid), view=view, is_sub=ctx.is_sub)
-            if not _aids:
-                row = None
+            accounts = []
+            if _aids:
+                _r = await db.execute(select(Account).filter(Account.account_id.in_(_aids)))
+                accounts = _r.scalars().all()
+        if not accounts:
+            inception = None
+        else:
+            _ick = f"incep:{uid}:view={view}"
+            _icv = _inception_cache.get(_ick)
+            if _icv is not None and _time.time() - _icv[1] < _INCEPTION_TTL:
+                inception = _icv[0]
             else:
-                row = (await db.execute(text("""
-                    SELECT MIN(CAST(s.timestamp + interval '8 hours' AS date))
-                    FROM account_snapshots s
-                    WHERE s.account_id = ANY(CAST(:aids AS uuid[]))
-                """), {"aids": _aids})).first()
-        inception = row[0].isoformat() if row and row[0] else None
+                inception = await _find_inception(accounts)
+                _inception_cache[_ick] = (inception, _time.time())
 
     if not inception:
         out = {"cumulative_pnl": 0, "inception_date": None, "end_date": today_bj}
@@ -788,10 +878,13 @@ async def get_cumulative_pnl(
     )
     dl = daily_resp.get("daily_pnl", []) if isinstance(daily_resp, dict) else []
     cum = round(sum(float(x.get("net_pnl", 0)) for x in dl), 2)
+    # 展示用起算日 = 首个有收益的真实成交日(inception 为探测下限, 之前可能有空白天)
+    _nz = [x.get("date") for x in dl if abs(float(x.get("net_pnl", 0))) > 0.001]
+    disp_inception = _nz[0] if _nz else inception
 
     out = {
         "cumulative_pnl": cum,
-        "inception_date": inception,
+        "inception_date": disp_inception,
         "end_date": today_bj,
         "days": len(dl),
     }
@@ -837,7 +930,13 @@ async def _prewarm_one(owner_uid: str):
         # 触发后台刷新, cold 时持锁计算一次。
         await get_daily_pnl(start_date=start.isoformat(), end_date=end.isoformat(),
                             platform="all", view="merged", ctx=ctx, _bg=False)
-        await get_cumulative_pnl(platform="all", view="merged", ctx=ctx)
+        # 累计用 _bg=True 强制重算写缓存(绕过SWR短路), 保持常热; 但仅在缓存接近过期时才真算,
+        # 否则 30min内反复算太重 → 先看缓存年龄, fresh 则跳过。
+        _cum_ck = f"pnlcum:{ctx.data_user_id}:all:sub=False:view=merged:v3"
+        # 缺失(default 0→age极大)或接近过期(24min+)才刷新, 保持常热不空转
+        _cum_age = _time.time() - _cache_ts.get(_cum_ck, 0)
+        if _cum_ck not in _cache or _cum_age > _CUM_CACHE_TTL * 0.8:
+            await get_cumulative_pnl(platform="all", view="merged", ctx=ctx, _bg=True)
     except Exception as e:
         logger.warning(f"[PnL-prewarm] owner={owner_uid[:8]} failed: {e}")
 
