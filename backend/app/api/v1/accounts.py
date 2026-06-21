@@ -5,7 +5,7 @@ from sqlalchemy import select, text
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.security import get_current_user_id
 from app.models.account import Account
 from app.models.mt5_client import MT5Client
@@ -141,12 +141,11 @@ async def create_account(
 async def get_accounts_summary(
     include_inactive: bool = False,
     ctx: ViewContext = Depends(get_view_context),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get account summary for www frontend.
     Alias for /dashboard/aggregated.
     """
-    return await get_aggregated_dashboard(include_inactive=include_inactive, ctx=ctx, db=db)
+    return await get_aggregated_dashboard(include_inactive=include_inactive, ctx=ctx)
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
@@ -608,8 +607,8 @@ async def get_account_pnl(
 @router.get("/dashboard/aggregated")
 async def get_aggregated_dashboard(
     include_inactive: bool = False,
+    view: str = Query("merged", description="资金视图: merged(合并全部关联)/<user_id>(单用户), 同收益页下拉"),
     ctx: ViewContext = Depends(get_view_context),
-    db: AsyncSession = Depends(get_db),
 ):
     user_id = ctx.data_user_id
     """Get aggregated dashboard data for all user accounts.
@@ -617,24 +616,35 @@ async def get_aggregated_dashboard(
     IMPORTANT: This route MUST be defined BEFORE /{account_id}/dashboard
     to prevent FastAPI from matching 'dashboard' as an account_id parameter.
     Admin users see ALL users' accounts; regular users see only their own.
+    收益关联(20260621): 普通用户的资金也按 view(merged/单用户)合并, 与收益页下拉一致。
     """
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"API: /dashboard/aggregated called for user {user_id}")
+    logger.info(f"API: /dashboard/aggregated called for user {user_id} view={view}")
 
-    # Admin check — admin sees all accounts
+    # 连接池护栏：用一个【短会话】只取账户列表，随即归还连接；其后的
+    # get_aggregated_account_data 是数秒级交易所/MT5 余额拉取，不再占用 DB 连接。
+    # 不走 Depends(get_db)——否则该连接会被持有到整个请求结束（覆盖慢 I/O 全程），
+    # 正是并发用户轮询打爆异步连接池、连接 idle-in-transaction 的根因。
+    # AsyncSessionLocal(expire_on_commit=False) 保证会话关闭后 ORM 对象已加载列仍可安全读取。
     ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
-    user_result = await db.execute(select(User).where(User.user_id == user_id))
-    caller = user_result.scalar_one_or_none()
-    is_admin = caller is not None and caller.role in ADMIN_ROLES
-
-    if is_admin:
-        result = await db.execute(select(Account))
-    else:
-        result = await db.execute(
-            select(Account).where(Account.user_id == UUID(user_id))
-        )
-    accounts = result.scalars().all()
+    async with AsyncSessionLocal() as db:
+        user_result = await db.execute(select(User).where(User.user_id == user_id))
+        caller = user_result.scalar_one_or_none()
+        is_admin = caller is not None and caller.role in ADMIN_ROLES
+        if is_admin:
+            result = await db.execute(select(Account))
+            accounts = result.scalars().all()
+        else:
+            # 资金账号集 = 同收益: data_user_id 自己 ∪ 关联用户(view=merged) 或单用户(view=<uid>)
+            from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
+            _aids = await _resolve_aids(db, str(user_id), view=view, is_sub=ctx.is_sub)
+            if _aids:
+                result = await db.execute(select(Account).where(Account.account_id.in_(_aids)))
+                accounts = result.scalars().all()
+            else:
+                accounts = []
+    # 连接已归还至此
 
     # Filter active accounts for data fetching
     active_accounts = [acc for acc in accounts if acc.is_active]
@@ -752,6 +762,7 @@ def _ff_cache_set(key: str, val):
 @router.get("/me/fund-flow")
 async def get_user_fund_flow(
     days: int = 30,
+    view: str = Query("merged", description="资金流向视图: merged(合并全部关联)/<user_id>(单用户), 同收益页下拉"),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -764,7 +775,7 @@ async def get_user_fund_flow(
 
     # ── Cache check ──
     _days_norm = max(1, min(int(days or 30), 90))
-    _ck = f"ff:{user_id}:{_days_norm}"
+    _ck = f"ff:{user_id}:{_days_norm}:view={view}"
     _hit = _ff_cache_get(_ck)
     if _hit is not None:
         return _hit
@@ -785,9 +796,16 @@ async def get_user_fund_flow(
     end_ms = int(_time.time() * 1000)
     start_ms = end_ms - days * 86400_000
 
-    rs = await db.execute(select(Account).where(Account.user_id == UUID(user_id),
-                                                Account.is_active == True))
-    accounts = rs.scalars().all()
+    # 资金流向账号集 = 同收益: data_user_id 自己 ∪ 关联用户(view=merged) 或单用户(view=<uid>)。
+    # is_sub 已在上方权限门挡掉(子账号不可查看资金流向), 此处 is_sub=False。
+    from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
+    _aids = await _resolve_aids(db, str(user_id), view=view, is_sub=False)
+    if _aids:
+        rs = await db.execute(select(Account).where(Account.account_id.in_(_aids),
+                                                    Account.is_active == True))
+        accounts = rs.scalars().all()
+    else:
+        accounts = []
 
     flows: list = []
     errors: dict = {}

@@ -145,6 +145,7 @@ const activeRange = ref('30d')
 const activeGran = ref('day')   // day | week | month
 const chartKey = ref(0)
 let fallbackTimer = null
+let fundPollTimer = null
 
 // 收益视图(20260620): merged=合并全部关联用户; <user_id>=只看某个用户
 const activeView = ref('merged')
@@ -164,12 +165,13 @@ async function loadViewOptions() {
 }
 async function onViewChange() {
   // 切换视图: 清缓存 + 立即清旧值并置 loading(让四宫格/累计显示"计算中"而非滞留上个view的旧数),
-  // 两个拉取独立(互不阻断)。
+  // 三者独立刷新(收益四宫格/累计/资金)。
   clearPnlCache()
   loading.value = true; cumLoading.value = true
   dailyList.value = []          // 清旧, 四宫格立即变"计算中"
   setRange(activeRange.value)   // 内部置 loading
   fetchCumulative()             // 内部置 cumLoading
+  fetchFund()                   // 资金也随 view 切换刷新(20260621)
 }
 // 兜底: watch activeView 变化也触发刷新(防 select @change 在个别端不触发)
 watch(activeView, () => { onViewChange() })
@@ -264,6 +266,11 @@ watch(activeGran, () => { chartKey.value++ })
 watch(lastMessage, (msg) => {
   if (!msg) return
   if (msg.type === 'account_balance' && msg.data) {
+    // WS 推的是【登录者自己】名下账户的实时余额。只有当前展示口径==登录者自己时才可用:
+    // 无关联用户(viewOptions 空, 恒为 merged=自己) 或 显式选了"本人"视图。其余(merged含
+    // 关联、或选了别的关联用户)WS 会盖掉按 view 取的 REST 合并资金 → 跳过, 以 fetchFund 为准。
+    const _selfOnly = viewOptions.value.length <= 1 || activeView.value === auth.user?.user_id
+    if (!_selfOnly) return
     const s = msg.data.summary || {}
     // 修(20260620): WS 推空 summary(total_assets 缺失/0)时不覆盖已有资金值, 防把
     // REST 取到的正确资金(如96504)刷成0。仅当推送含有效总资产时才更新。
@@ -300,7 +307,8 @@ async function setRange(val) {
 
 async function fetchFund() {
   try {
-    const r = await api.get('/api/v1/accounts/dashboard/aggregated')
+    // 资金随视图下拉变(20260621): 带 view, 与收益页下拉一致(merged/单用户)
+    const r = await api.get('/api/v1/accounts/dashboard/aggregated', { params: { view: activeView.value } })
     const s = r.data?.summary || {}
     fundTotals.value = { total_assets: s.total_assets || 0, available: s.available_balance || 0, net_assets: s.net_assets || 0, unrealized_pnl: s.unrealized_pnl || 0 }
     lastUpdate.value = dayjs().format('HH:mm:ss')
@@ -334,6 +342,9 @@ onMounted(async () => {
   fetchFund()
   fetchCumulative()
   setRange('30d')
+  // 资金常驻轮询(20260621): merged/关联用户视图下 WS 被门控(只推登录者自己), 故每30s按
+  // 当前 view 拉一次 REST 资金保持新鲜(自己视图另有 WS 实时); fetchFund 很快(~0.1s)。
+  fundPollTimer = setInterval(fetchFund, 30000)
 })
-onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer) })
+onUnmounted(() => { wsDisconnect(); clearInterval(fallbackTimer); clearInterval(fundPollTimer) })
 </script>

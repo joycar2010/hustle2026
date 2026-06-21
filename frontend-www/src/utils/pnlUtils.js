@@ -52,16 +52,16 @@ export async function fetchDailyPnl(startDate, endDate, view = 'merged') {
   return promise
 }
 
-export async function fetchFundFlow(days) {
+export async function fetchFundFlow(days, view = 'merged') {
   const d = days || 30
-  const key = _cacheKey('ff', d)
+  const key = _cacheKey('ff', d, view)
   const cached = _cacheGet(key)
   if (cached) return cached
 
   if (_inflight.has(key)) return _inflight.get(key)
 
   const promise = api.get('/api/v1/accounts/me/fund-flow', {
-    params: { days: d }
+    params: { days: d, view }
   }).then(r => {
     _cacheSet(key, r.data)
     _inflight.delete(key)

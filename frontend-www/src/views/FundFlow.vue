@@ -30,6 +30,10 @@
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <span class="text-sm font-bold">资金流向</span>
           <div class="flex items-center gap-1.5 flex-shrink-0">
+            <select v-if="viewOptions.length > 1" v-model="activeView" @change="loadFundFlow"
+              class="bg-dark-200 border border-border-primary rounded text-xs px-2 py-1 max-w-[40vw]">
+              <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
+            </select>
             <select v-model.number="fundFlowDays" @change="loadFundFlow"
               class="bg-dark-200 border border-border-primary rounded text-xs px-2 py-1">
               <option :value="7">7 天</option>
@@ -127,10 +131,27 @@ const fundFlowDays = ref(30)
 const fundFlowErrors = ref('')
 const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
+// 收益关联(20260621): 资金流向同收益页, 加视图下拉(合并全部/各用户)
+const activeView = ref('merged')
+const viewOptions = ref([])
+async function loadViewOptions() {
+  try {
+    const r = await api.get('/api/v1/pnl/link-options')
+    const linked = r.data?.linked || []
+    if (linked.length === 0) { viewOptions.value = []; return }
+    const self = r.data?.self
+    viewOptions.value = [
+      { label: '合并全部数据', val: 'merged' },
+      ...(self ? [{ label: self.username + '(本人)', val: self.user_id }] : []),
+      ...linked.map(u => ({ label: u.username, val: u.user_id })),
+    ]
+  } catch (e) { viewOptions.value = [] }
+}
+
 async function loadFundFlow() {
   fundFlowLoading.value = true
   try {
-    const r = await fetchFundFlow(fundFlowDays.value)
+    const r = await fetchFundFlow(fundFlowDays.value, activeView.value)
     fundFlows.value = r?.flows || []
     const errs = r?.errors || {}
     const errKeys = Object.keys(errs)
@@ -171,6 +192,7 @@ onUnmounted(() => wsDisconnect())
 onMounted(() => {
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })
+  loadViewOptions()   // 加载视图下拉(有关联用户才显示)
   loadFundFlow()
 })
 </script>
