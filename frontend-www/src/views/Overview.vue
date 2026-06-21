@@ -200,6 +200,7 @@ const fundTotals = ref({ total_assets: 0, available: 0, net_assets: 0, unrealize
 const activeRange = ref('30d')
 const activeGran = ref('day')   // day | week | month
 const chartKey = ref(0)
+let _trendSeq = 0   // setRange 请求序号: 并发(切view+切范围)时只采用最新一次结果, 防旧请求覆盖
 let fallbackTimer = null
 let fundPollTimer = null
 
@@ -310,22 +311,22 @@ const chartData = computed(() => {
 
 const chartOpts = computed(() => {
   const n = chartData.value.labels.length
-  // 柱顶数字标注: 柱子太多会重叠, 故按数量自适应 —— ≤45根全标, 46-90隔1根, >90不标(改看tooltip)。
-  const every = n <= 45 ? 1 : (n <= 90 ? 2 : 0)
+  // 柱顶数字标注: 柱子太多会重叠, 故按数量自适应 —— ≤31根全标, 32-62隔1根, >62不标(改看tooltip)。
+  const every = n <= 31 ? 1 : (n <= 62 ? 2 : 0)
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
-    layout: { padding: { top: 20, bottom: 20 } },   // 上下都留空间(正柱顶上方/负柱底下方标注)
+    layout: { padding: { top: 22, bottom: 22 } },   // 上下留足空间(正柱顶上方/负柱底下方标注)
     plugins: {
       legend: { display: false },
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
         display: (c) => every > 0 && (c.dataIndex % every === 0),
-        // 正柱: 锚柱顶、往上(end/top); 负柱: 锚柱底(end锚在远离0轴的那端=柱底)、往下(bottom)
-        // → 数字始终在柱体【外侧】, 不再压在红柱上重叠。
+        // 正柱: 锚柱顶往上(end/top); 负柱: 锚柱底往下(end/bottom) → 数字始终在柱体【外侧】。
+        // 不用 clamp(clamp会把越界标签拉回图内压到柱身上, 正是重叠根源); 靠 layout padding 留白。
         anchor: 'end',
         align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),
-        offset: 1,
-        clamp: true,
+        offset: 2,
+        clamp: false,
         color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
         font: { size: n <= 20 ? 10 : 9, weight: '600' },
         formatter: (v) => {
@@ -379,16 +380,20 @@ async function setRange(val) {
   const days = parseInt(val)
   const start = dayjs().tz('Asia/Shanghai').subtract(days, 'day').format('YYYY-MM-DD')
   const end = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
+  const seq = ++_trendSeq          // 本次请求序号
   loading.value = true
-  dailyList.value = []          // 清旧, 切范围立即显进度条(不滞留上个范围的柱图)
+  dailyList.value = []             // 清旧, 切范围立即显进度条(不滞留上个范围的柱图)
   chartKey.value++
   startTrendProgress(expectMs())
   try {
     const data = await fetchDailyPnl(start, end, activeView.value)
+    if (seq !== _trendSeq) return   // 已有更新的请求发起, 丢弃本次旧结果(防并发覆盖致空/错)
     dailyList.value = data.daily_pnl || []
-    chartKey.value++           // 数据回来再remount一次, 确保柱图刷新
+    chartKey.value++               // 数据回来再remount一次, 确保柱图刷新
   } catch (e) { console.error('PnL fetch error:', e) }
-  finally { loading.value = false; doneTrendProgress() }
+  finally {
+    if (seq === _trendSeq) { loading.value = false; doneTrendProgress() }
+  }
 }
 
 async function fetchFund() {
