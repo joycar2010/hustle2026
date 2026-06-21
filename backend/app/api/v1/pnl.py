@@ -39,6 +39,9 @@ CACHE_TTL = 300
 _SWR_SOFT_TTL = 300.0     # 5min 内视为新鲜
 _SWR_HARD_TTL = 1800.0    # 30min 内可返回旧值(后台刷新), 超过则视为太旧需同步重算
 _inflight: set = set()    # 正在后台刷新的 cache_key
+# cold-miss 去重(20260621): 同一 cache_key 的并发冷启动(含预热 vs 用户)只算一次, 其余在
+# per-key 锁上等待→拿到锁后复检命中已填缓存, 避免重复算+争抢桥 I/O(此前并发冷各算→实测76s)。
+_compute_locks: Dict[str, Any] = {}
 
 
 def _cache_get(key: str):
@@ -484,7 +487,20 @@ async def get_daily_pnl(
                 except RuntimeError:
                     _inflight.discard(cache_key)
             return _val
-        # miss: 冷启动, 同步算(仅首次/超30min)
+        # miss: 冷启动。单飞锁去重(20260621): 同 cache_key 的并发冷启动(含预热 vs 用户)
+        # 只算一次, 其余在锁上等待→拿到锁后复检命中已填的缓存, 不重复算+不争抢桥 I/O。
+        import asyncio as _aio
+        _lock = _compute_locks.get(cache_key)
+        if _lock is None:
+            _lock = _aio.Lock()
+            _compute_locks[cache_key] = _lock
+        async with _lock:
+            _val2, _fresh2 = _swr_get(cache_key)
+            if _val2 is not None and _fresh2 in ('fresh', 'stale'):
+                return _val2  # 别的请求已算完, 直接复用
+            # 仍冷 → 本请求触发一次 _bg 全量计算(写缓存), 其余同 key 请求在锁上等待复用
+            return await get_daily_pnl(start_date=start_date, end_date=end_date,
+                                       platform=platform, view=view, ctx=ctx, _bg=True)
 
     # ── Sub path: per-share NAV replay ──
     if ctx.is_sub:
@@ -816,8 +832,11 @@ async def _prewarm_one(owner_uid: str):
         import datetime as _d
         end = _d.datetime.now(timezone(timedelta(hours=8))).date()
         start = end - _d.timedelta(days=_PREWARM_RANGE_DAYS)
+        # _bg=False: 预热走与用户相同的 SWR+单飞锁路径 → 预热与并发用户冷启动共享同一次计算
+        # (此前 _bg=True 绕过锁, 预热与用户会各算一次, 实测撞上76s)。fresh 时 noop, stale 时
+        # 触发后台刷新, cold 时持锁计算一次。
         await get_daily_pnl(start_date=start.isoformat(), end_date=end.isoformat(),
-                            platform="all", view="merged", ctx=ctx, _bg=True)
+                            platform="all", view="merged", ctx=ctx, _bg=False)
         await get_cumulative_pnl(platform="all", view="merged", ctx=ctx)
     except Exception as e:
         logger.warning(f"[PnL-prewarm] owner={owner_uid[:8]} failed: {e}")
