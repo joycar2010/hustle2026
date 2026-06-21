@@ -312,26 +312,25 @@ const chartData = computed(() => {
 const chartOpts = computed(() => {
   const data = (chartData.value.datasets[0] && chartData.value.datasets[0].data) || []
   const n = data.length
-  // 标注防重叠(根因=横向空间): 30根日柱每槽~23px, 水平标签"−1.5k"宽~30px>柱距→相邻必撞。
-  // 解法: 柱多时(>14, 日视图)把数字【竖排90°】, 宽度~10px塞得下全标且不重叠(TradingView同款);
-  // 柱少时(≤14, 周/月视图)空间足, 保持水平更易读。
-  const dense = n > 14
-  const rot = dense ? -90 : 0
+  // 横排标注防重叠(根因=横向): "−1.5k"宽~30px, 700px图宽÷30柱=23px/槽 < 标签宽 → 相邻必撞。
+  // 横排无法压缩宽度, 故按密度【隔根标】: ≤16根全标; 17-34隔1根; >34隔2根 → 标签间距>标签宽。
+  // 正柱标柱顶上方、负柱标柱底下方(镜像), offset 拉开离柱体; 不用clamp(clamp会把标签拉回压柱身)。
+  const every = n <= 16 ? 1 : (n <= 34 ? 2 : 3)
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
-    layout: { padding: { top: dense ? 34 : 22, bottom: dense ? 34 : 22 } },  // 竖排需更多上下留白
+    layout: { padding: { top: 20, bottom: 20 } },
     plugins: {
       legend: { display: false },
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
-        display: true,                 // 全部柱都标(含小柱)
-        anchor: 'end',
-        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),
-        rotation: rot,                 // 日视图竖排, 周/月水平
-        offset: dense ? 1 : 3,
+        display: (c) => (c.dataIndex % every === 0),
+        anchor: 'end',                  // 锚柱端(正柱=柱顶, 负柱=柱底)
+        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),  // 正上负下
+        rotation: 0,                    // 横排
+        offset: 4,
         clamp: false,
         color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
-        font: { size: n > 40 ? 8 : (dense ? 9 : 10), weight: '600' },
+        font: { size: n > 24 ? 8 : 9, weight: '600' },
         formatter: (v) => {
           const a = Math.abs(v)
           if (a < 0.005) return ''                            // 0 不标
