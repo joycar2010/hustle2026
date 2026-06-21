@@ -30,7 +30,7 @@
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <span class="text-sm font-bold">资金流向</span>
           <div class="flex items-center gap-1.5 flex-shrink-0">
-            <select v-if="viewOptions.length > 1" v-model="activeView" @change="loadFundFlow"
+            <select v-if="viewOptions.length > 1" v-model="activeView"
               class="bg-dark-200 border border-border-primary rounded text-xs px-2 py-1 max-w-[40vw]">
               <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
             </select>
@@ -116,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useMaintenance } from '@/composables/useMaintenance.js'
 import { useAuthStore } from '@/stores/auth.js'
 import api from '@/services/api.js'
@@ -152,6 +152,8 @@ function doneFfProgress() { clearInterval(_ffTimer); ffPct.value = 100; setTimeo
 // 收益关联(20260621): 资金流向同收益页, 加视图下拉(合并全部/各用户)
 const activeView = ref('merged')
 const viewOptions = ref([])
+// 切账号下拉即重拉(用 watch 比 select @change 可靠, 个别端 @change 不触发)
+watch(activeView, () => { loadFundFlow() })
 async function loadViewOptions() {
   try {
     const r = await api.get('/api/v1/pnl/link-options')

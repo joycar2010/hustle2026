@@ -314,15 +314,18 @@ const chartOpts = computed(() => {
   const every = n <= 45 ? 1 : (n <= 90 ? 2 : 0)
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
-    layout: { padding: { top: 18 } },   // 给柱顶数字留空间
+    layout: { padding: { top: 20, bottom: 20 } },   // 上下都留空间(正柱顶上方/负柱底下方标注)
     plugins: {
       legend: { display: false },
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
         display: (c) => every > 0 && (c.dataIndex % every === 0),
+        // 正柱: 锚柱顶、往上(end/top); 负柱: 锚柱底(end锚在远离0轴的那端=柱底)、往下(bottom)
+        // → 数字始终在柱体【外侧】, 不再压在红柱上重叠。
         anchor: 'end',
-        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'end' : 'start'),
-        offset: 2,
+        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),
+        offset: 1,
+        clamp: true,
         color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
         font: { size: n <= 20 ? 10 : 9, weight: '600' },
         formatter: (v) => {
@@ -377,11 +380,13 @@ async function setRange(val) {
   const start = dayjs().tz('Asia/Shanghai').subtract(days, 'day').format('YYYY-MM-DD')
   const end = dayjs().tz('Asia/Shanghai').format('YYYY-MM-DD')
   loading.value = true
+  dailyList.value = []          // 清旧, 切范围立即显进度条(不滞留上个范围的柱图)
+  chartKey.value++
   startTrendProgress(expectMs())
   try {
     const data = await fetchDailyPnl(start, end, activeView.value)
     dailyList.value = data.daily_pnl || []
-    chartKey.value++
+    chartKey.value++           // 数据回来再remount一次, 确保柱图刷新
   } catch (e) { console.error('PnL fetch error:', e) }
   finally { loading.value = false; doneTrendProgress() }
 }
