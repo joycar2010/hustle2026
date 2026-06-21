@@ -312,10 +312,10 @@ const chartData = computed(() => {
 const chartOpts = computed(() => {
   const data = (chartData.value.datasets[0] && chartData.value.datasets[0].data) || []
   const n = data.length
-  // 横排标注防重叠(根因=横向): "−1.5k"宽~30px, 700px图宽÷30柱=23px/槽 < 标签宽 → 相邻必撞。
-  // 横排无法压缩宽度, 故按密度【隔根标】: ≤16根全标; 17-34隔1根; >34隔2根 → 标签间距>标签宽。
-  // 正柱标柱顶上方、负柱标柱底下方(镜像), offset 拉开离柱体; 不用clamp(clamp会把标签拉回压柱身)。
-  const every = n <= 16 ? 1 : (n <= 34 ? 2 : 3)
+  // 标注(20260621修): 去掉"隔根标"密度过滤——它按序号跳柱, 恰好把大跌负柱(在被跳序号上)
+  // 全跳过, 只剩零轴附近小柱有数字, 造成"红字没落到负柱底"的假象。改为【每柱都标】: 正柱标
+  // 柱顶上方、负柱标柱底下方(anchor=end+align正top/负bottom)。正负标签天然分居上下半区不互撞;
+  // 同符号相邻靠小字号(7-9px)+offset错开。大跌柱的数字即落在其深底处。
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     layout: { padding: { top: 20, bottom: 20 } },
@@ -323,14 +323,14 @@ const chartOpts = computed(() => {
       legend: { display: false },
       tooltip: { backgroundColor: 'rgba(0,0,0,0.85)' },
       datalabels: {
-        display: (c) => (c.dataIndex % every === 0),
+        display: true,                  // 每根柱都标(含大跌负柱)
         anchor: 'end',                  // 锚柱端(正柱=柱顶, 负柱=柱底)
-        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),  // 正上负下
+        align: (c) => (c.dataset.data[c.dataIndex] >= 0 ? 'top' : 'bottom'),  // 正柱标上、负柱标下
         rotation: 0,                    // 横排
-        offset: 4,
+        offset: 3,
         clamp: false,
         color: (c) => (c.dataset.data[c.dataIndex] >= 0 ? '#0ecb81' : '#f6465d'),
-        font: { size: n > 24 ? 8 : 9, weight: '600' },
+        font: { size: n > 30 ? 7 : (n > 16 ? 8 : 9), weight: '600' },
         formatter: (v) => {
           const a = Math.abs(v)
           if (a < 0.005) return ''                            // 0 不标
