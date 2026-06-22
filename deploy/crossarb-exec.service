@@ -1,0 +1,20 @@
+[Unit]
+Description=CrossArb P1 execution validation (OP single-chain, INDEPENDENT of crossarb-p0)
+After=network.target
+# 与 crossarb-p0(采集看板)分进程,互不影响
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=-@APP_DIR@/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+# 默认 dry-run(只看价不下单不签名);testnet/live 由 .env 的 CROSSARB_EXEC_MODE 切换
+ExecStart=@APP_DIR@/.venv/bin/python -m app.coordinator
+Restart=always
+RestartSec=5
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

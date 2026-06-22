@@ -65,6 +65,24 @@ class Config:
     http_port: int = int(_get("CROSSARB_HTTP_PORT", "8100"))
     redis_url: str = _get("CROSSARB_REDIS_URL", "")
 
+    # ===== P1 执行验证(最小,OP单链$500)=====
+    # 三档:dry-run(默认,只模拟不下单)| testnet(币安测试网真下单+链上模拟)| live(真金)
+    exec_mode: str = _get("CROSSARB_EXEC_MODE", "dry-run")
+    exec_market: str = _get("CROSSARB_EXEC_MARKET", "OP:BTC")     # 只做这一个市场
+    exec_notional_usd: float = float(_get("CROSSARB_EXEC_NOTIONAL_USD", "500"))
+    exec_min_net_bps: float = float(_get("CROSSARB_EXEC_MIN_NET_BPS", "25"))  # 触发执行的净基差(高于看板20,留安全垫)
+    exec_poll_sec: float = float(_get("CROSSARB_EXEC_POLL_SEC", "3"))
+    # 币安做空腿凭证(独立账户!绝不用生产coin账户)
+    bn_api_key: str = _get("CROSSARB_BN_API_KEY", "")
+    bn_api_secret: str = _get("CROSSARB_BN_API_SECRET", "")
+    # 熔断
+    exec_max_trades: int = int(_get("CROSSARB_EXEC_MAX_TRADES", "20"))        # 总单数上限
+    exec_max_daily_usd: float = float(_get("CROSSARB_EXEC_MAX_DAILY_USD", "3000"))  # 单日链上支出上限
+    exec_naked_timeout_sec: float = float(_get("CROSSARB_EXEC_NAKED_TIMEOUT_SEC", "20"))  # 裸腿超时强平
+    # 链上签名(live才用):KMS key id;dry-run/testnet留空
+    exec_kms_key_id: str = _get("CROSSARB_EXEC_KMS_KEY_ID", "")
+    exec_wallet_addr: str = _get("CROSSARB_EXEC_WALLET_ADDR", "")  # 钱包地址(KyberSwap build calldata 需 sender)
+
     # 飞书每日播报(自建应用):app_id/secret + 收件人;留空则不发
     # 收件人优先用 email(与应用无关,不踩 open_id 跨应用问题),否则用 open_id
     feishu_app_id: str = _get("CROSSARB_FEISHU_APP_ID", "")
