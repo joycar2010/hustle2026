@@ -82,6 +82,11 @@ class Config:
     # 链上签名(live才用):KMS key id;dry-run/testnet留空
     exec_kms_key_id: str = _get("CROSSARB_EXEC_KMS_KEY_ID", "")
     exec_wallet_addr: str = _get("CROSSARB_EXEC_WALLET_ADDR", "")  # 钱包地址(KyberSwap build calldata 需 sender)
+    exec_kms_region: str = _get("CROSSARB_EXEC_KMS_REGION", "ap-northeast-1")  # KMS 所在 region
+    exec_rpc: str = _get("CROSSARB_EXEC_RPC", "https://mainnet.optimism.io")  # live 广播用链 RPC(建议换 Alchemy)
+    exec_slippage_bps: int = int(_get("CROSSARB_EXEC_SLIPPAGE_BPS", "50"))  # swap 滑点容忍(编进calldata的minOut)
+    exec_approve_cap_usd: float = float(_get("CROSSARB_EXEC_APPROVE_CAP_USD", "3000"))  # 单次授权额度上限(非无限授权)
+    exec_recv_timeout_sec: float = float(_get("CROSSARB_EXEC_RECV_TIMEOUT_SEC", "120"))  # 等链上回执超时
 
     # 飞书每日播报(自建应用):app_id/secret + 收件人;留空则不发
     # 收件人优先用 email(与应用无关,不踩 open_id 跨应用问题),否则用 open_id

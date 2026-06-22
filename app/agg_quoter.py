@@ -9,14 +9,24 @@ amountInUsd/amountOutUsd(算买入总成本=费+冲击)、gasUsd(该链该路由
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import threading
 import time
 
 import requests
 
 from .chains import chain_of
-from .dex_quoter import DexQuote
 from .markets import Market
+
+
+@dataclass
+class DexQuote:
+    eff_price: float
+    mid_price: float
+    base_out: float
+    slippage_bps: float
+    pool: str
+    gas_usd: float | None = None
 
 KYBER_BASE = "https://aggregator-api.kyberswap.com"
 
@@ -76,6 +86,34 @@ class AggQuoter:
                 if i < tries - 1:
                     time.sleep(0.5 * (i + 1))
         raise last
+
+    def route_build(self, slug: str, route_summary: dict, sender: str, recipient: str,
+                    slippage_bps: int) -> dict:
+        """把 GET /routes 的 routeSummary 编成可上链 calldata(POST /route/build)。
+        仅 live 买入/卖回调用;返回含 routerAddress / data(calldata) / amountOut / transactionValue。
+        minAmountOut 已按 slippage_bps 编进 calldata —— 链上成交低于下限自动 revert(滑点保护)。"""
+        url = f"{KYBER_BASE}/{slug}/api/v1/route/build"
+        body = {"routeSummary": route_summary, "sender": sender, "recipient": recipient,
+                "slippageTolerance": int(slippage_bps), "source": self._s.headers.get("x-client-id", "crossarb")}
+        last = None
+        for i in range(3):  # build 失败仅丢一次机会(不亏钱),但瞬时超时值得重试
+            try:
+                self._pace()
+                r = self._s.post(url, json=body, timeout=12)
+                r.raise_for_status()
+                d = r.json()
+                if d.get("code") != 0:
+                    raise RuntimeError(f"kyber build code={d.get('code')} {d.get('message')}")
+                return d.get("data", {})
+            except Exception as e:  # noqa: BLE001
+                last = e
+                if i < 2:
+                    time.sleep(1.0 * (i + 1))
+        raise last
+
+    def route_raw(self, slug: str, token_in: str, token_out: str, amount_in: int) -> dict:
+        """取完整 routeSummary(给 route_build 用);quote_buy 只取摘要字段,这里要整包。"""
+        return self._route(slug, token_in, token_out, amount_in)
 
     def quote_buy(self, m: Market, notional_usd: float) -> DexQuote:
         """稳定币 -> base 经聚合器最优路由(按 market.chain)。eff/slippage/gas 全来自一次报价。"""

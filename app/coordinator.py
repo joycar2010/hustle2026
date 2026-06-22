@@ -38,7 +38,10 @@ class ExecCoordinator(threading.Thread):
         self.market = markets.get(cfg.exec_market)
         base = FUTURES_TESTNET if self.mode == "testnet" else FUTURES_LIVE
         self.bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, base_url=base)
-        self.onchain = OnchainExec(self.mode, cfg.exec_wallet_addr, cfg.exec_kms_key_id, cfg.kyber_client_id)
+        self.onchain = OnchainExec(
+            self.mode, cfg.exec_wallet_addr, cfg.exec_kms_key_id, cfg.kyber_client_id,
+            rpc_url=cfg.exec_rpc, kms_region=cfg.exec_kms_region, slippage_bps=cfg.exec_slippage_bps,
+            approve_cap_usd=cfg.exec_approve_cap_usd, recv_timeout=cfg.exec_recv_timeout_sec)
         self._stop = threading.Event()
         self._lock = threading.Lock()
         # 熔断计数
