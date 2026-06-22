@@ -109,16 +109,30 @@ class ExecCoordinator(threading.Thread):
                 short_price = float(ap) if ap and float(ap) > 0 else short_price
                 short_exec = 1
             except Exception as e:  # noqa: BLE001
-                # 链上已买、币安做空失败 → 裸多敞口!live 须立即卖回止损
-                out.update(short_executed=0, outcome="SHORT_FAIL_NAKED",
-                           note=f"做空失败(裸腿!): {type(e).__name__}: {e}")
-                if self.mode == "live":
-                    try:
-                        self.onchain.sell_back(m, base_out)
-                        out["note"] += " | 已卖回止损"
-                    except Exception as e2:  # noqa: BLE001
-                        out["note"] += f" | 卖回也失败: {e2}"
-                self._log(out); self.trades += 1; self.consec_loss += 1; return
+                # 响应丢失(超时/5xx)时订单可能已成交!先复核真实状态,防误判致裸空
+                verified_qty = 0.0
+                try:
+                    order = self.bn.get_order_by_client_id(m.binance_symbol, coid)
+                    if order.get("status") == "FILLED":
+                        verified_qty = float(order.get("executedQty", 0))
+                        ap = order.get("avgPrice")
+                        if verified_qty > 0:
+                            short_price = float(ap) if ap and float(ap) > 0 else short_price
+                            short_exec = 1
+                            out["note"] = f"做空响应丢失但复核已成交 qty={verified_qty}"
+                except Exception:  # noqa: BLE001
+                    pass  # 复核也失败,按未成交处理
+                if short_exec == 0:
+                    # 确认未成交 → 裸多敞口!live 须立即卖回止损
+                    out.update(short_executed=0, outcome="SHORT_FAIL_NAKED",
+                               note=f"做空失败(裸腿!): {type(e).__name__}: {e}")
+                    if self.mode == "live":
+                        try:
+                            self.onchain.sell_back(m, base_out)
+                            out["note"] += " | 已卖回止损"
+                        except Exception as e2:  # noqa: BLE001
+                            out["note"] += f" | 卖回也失败: {e2}"
+                    self._log(out); self.trades += 1; self.consec_loss += 1; return
         t_short = time.time()
         # ③ 兑现 net:做空价 vs 实际买价(扣双边taker+双向gas+退出+recycle 用同口径)
         ch = chain_of(m.chain)
