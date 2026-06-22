@@ -100,13 +100,14 @@ class ExecCoordinator(threading.Thread):
             self.daily_spend += notional
         # ② 币安做空腿(testnet/live 真下;dry-run 用 bid 作参考价)
         qty = self.bn.round_qty(m.binance_symbol, Decimal(str(base_out)))
-        short_price = float(bt["bid"]); short_exec = 0
+        short_price = float(bt["bid"]); short_exec = 0; actual_short_qty = 0.0
         if self.mode in ("testnet", "live") and qty > 0:
             try:
                 coid = f"cax{int(t0*1000)}"
                 resp = self.bn.futures_market_short(m.binance_symbol, qty, coid)
                 ap = resp.get("avgPrice") or resp.get("avgprice")
                 short_price = float(ap) if ap and float(ap) > 0 else short_price
+                actual_short_qty = float(resp.get("executedQty", 0) or qty)
                 short_exec = 1
             except Exception as e:  # noqa: BLE001
                 # 响应丢失(超时/5xx)时订单可能已成交!先复核真实状态,防误判致裸空
@@ -118,6 +119,7 @@ class ExecCoordinator(threading.Thread):
                         ap = order.get("avgPrice")
                         if verified_qty > 0:
                             short_price = float(ap) if ap and float(ap) > 0 else short_price
+                            actual_short_qty = verified_qty
                             short_exec = 1
                             out["note"] = f"做空响应丢失但复核已成交 qty={verified_qty}"
                 except Exception:  # noqa: BLE001
@@ -133,6 +135,14 @@ class ExecCoordinator(threading.Thread):
                         except Exception as e2:  # noqa: BLE001
                             out["note"] += f" | 卖回也失败: {e2}"
                     self._log(out); self.trades += 1; self.consec_loss += 1; return
+            # 做空成功,检查取整差异(ROUND_DOWN 可能致裸多累积)
+            naked_long = base_out - actual_short_qty
+            if self.mode == "live" and naked_long > 0.0001:  # 阈值 0.0001 BTC ≈ $6
+                try:
+                    self.onchain.sell_back(m, naked_long)
+                    out["note"] = (out.get("note", "") + f" | 取整差额{naked_long:.6f}已卖回").strip()
+                except Exception as e3:  # noqa: BLE001
+                    out["note"] = (out.get("note", "") + f" | 取整差额{naked_long:.6f}卖回失败: {e3}").strip()
         t_short = time.time()
         # ③ 兑现 net:做空价 vs 实际买价(扣双边taker+双向gas+退出+recycle 用同口径)
         ch = chain_of(m.chain)
