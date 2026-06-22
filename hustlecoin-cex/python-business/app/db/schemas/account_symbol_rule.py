@@ -8,6 +8,7 @@ from app.db.schemas import validators as V
 
 class AccountSymbolRuleUpsert(BaseModel):
     open_spread: Optional[Decimal] = None
+    borrow_spread: Optional[Decimal] = None
     close_spread: Optional[Decimal] = None
     order_amount: Optional[Decimal] = None
     remove_spread: Optional[Decimal] = None
@@ -25,6 +26,11 @@ class AccountSymbolRuleUpsert(BaseModel):
     @classmethod
     def _v_pct(cls, v, info):
         return V.rng(v, 0, 100, info.field_name)
+
+    @field_validator("borrow_spread")
+    @classmethod
+    def _v_borrow(cls, v, info):
+        return V.rng(v, -100, 100, info.field_name)
 
     @field_validator("close_funding_ratio", "repay_funding_ratio", "max_daily_interest_rate")
     @classmethod
@@ -54,6 +60,7 @@ class AccountSymbolRuleResponse(BaseModel):
     sub_account_id: int
     symbol: str
     open_spread: Optional[Decimal] = None
+    borrow_spread: Optional[Decimal] = None
     close_spread: Optional[Decimal] = None
     order_amount: Optional[Decimal] = None
     remove_spread: Optional[Decimal] = None

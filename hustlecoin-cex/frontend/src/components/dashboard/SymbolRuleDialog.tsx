@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getSymbolRule, updateSymbolRule, resetSymbolRule } from '@/api/rules'
+import { getSymbolRule, updateSymbolRule, resetSymbolRule, getGlobalRules } from '@/api/rules'
 import { getSubAccounts } from '@/api/accounts'
 import { getAccountSymbolRule, upsertAccountSymbolRule } from '@/api/accountSymbolRules'
+import { partialRepay } from '@/api/engine'
+import { useBalanceStore } from '@/stores/balanceStore'
+import { confirmDialog } from '@/components/ui/confirm'
 import { useToastStore } from '@/components/ui/toast'
 
 interface SymbolRuleDialogProps {
@@ -19,6 +22,7 @@ interface SubAccount {
 // 列定义:type=select(跟单 market/limit)默认数值;w=按数据实际大小给宽,避免横向滚动
 // 注:日利率(max_daily_interest_rate,引擎零消费=孤儿)与备注(per-symbol 标签)已摘除
 const COLS = [
+  { key: 'borrow_spread', label: '挂单差', w: 'w-12' },
   { key: 'open_spread', label: '开点差', w: 'w-12' },
   { key: 'close_spread', label: '平点差', w: 'w-12' },
   { key: 'remove_spread', label: '移除差', w: 'w-12' },
@@ -37,22 +41,55 @@ const CELL_BASE = 'bg-[#1a1a22] border border-border rounded px-1 py-0.5 text-[1
 
 export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   const [symbolRule, setSymbolRule] = useState<Row>({})        // 批量/基线(SymbolRule)
+  const [globalRules, setGlobalRules] = useState<Row>({})      // 全局规则(批量行 placeholder 默认值源)
   const [accountRules, setAccountRules] = useState<Record<number, Row>>({}) // 各账户(AccountSymbolRule)
   const [accounts, setAccounts] = useState<SubAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState<Set<string>>(new Set())   // 'common' | account id
+  const [repaying, setRepaying] = useState<number | null>(null)
   const addToast = useToastStore((s) => s.addToast)
+  const balances = useBalanceStore((s) => s.balances)
+
+  // 某账户对当前币的持币(已借本金+利息),数据来自 balance 实时快照 symbol_margin
+  const heldOf = useCallback((accountId: number) => {
+    const bal = balances.find((b) => b.account_id === accountId)
+    const sm = bal?.symbol_margin?.[symbol]
+    const borrowed = sm?.borrowed ?? 0
+    const interest = sm?.interest ?? 0
+    return { borrowed, interest, total: borrowed + interest }
+  }, [balances, symbol])
+
+  const handleRepayOne = useCallback(async (accountId: number, note: string) => {
+    const { borrowed, interest, total } = heldOf(accountId)
+    if (total <= 0) { addToast('该账户当前无持币', 'info'); return }
+    const base = symbol.replace('USDT', '')
+    if (!(await confirmDialog({
+      title: '还币',
+      message: `确认为 ${note} 还清 ${base}？\n本金 ${borrowed.toFixed(6)} + 利息 ${interest.toFixed(6)} ≈ ${total.toFixed(6)} ${base}`,
+      danger: true,
+    }))) return
+    setRepaying(accountId)
+    try {
+      await partialRepay(accountId, symbol, total)
+      addToast(`${note} 还币已提交`, 'success')
+    } catch (e) {
+      addToast(`还币失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
+    }
+    setRepaying(null)
+  }, [heldOf, symbol, addToast])
 
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true)
       try {
-        const [rule, accts] = await Promise.all([
+        const [rule, accts, grules] = await Promise.all([
           getSymbolRule(symbol).catch(() => ({})),
           getSubAccounts(true),
+          getGlobalRules().catch(() => ({})),
         ])
         setSymbolRule(rule as Row)
+        setGlobalRules(grules as Row)
         setAccounts(accts)
         const arMap: Record<number, Row> = {}
         await Promise.all(accts.map(async (a: SubAccount) => {
@@ -182,6 +219,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
             <thead>
               <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
                 <th className="px-1.5 py-1.5 text-left font-medium">备注</th>
+                <th className="px-1 py-1.5 text-center font-medium whitespace-nowrap">持币</th>
                 {COLS.map((c) => <th key={c.key} className="px-1 py-1.5 text-center font-medium whitespace-nowrap">{c.label}</th>)}
                 <th className="px-1 py-1.5 text-center font-medium whitespace-nowrap">移除/还币</th>
                 <th className="px-1 py-1.5 text-center font-medium">操作</th>
@@ -191,9 +229,11 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
               {/* 批量 行(基线 + 批量改列) */}
               <tr className="border-b border-border/40 bg-primary/5">
                 <td className="px-1.5 py-1 font-medium text-primary whitespace-nowrap">批量</td>
+                <td className="px-1 py-1 text-center text-muted-foreground/40">—</td>
                 {COLS.map((c) => (
                   <td key={c.key} className="px-1 py-1 text-center">
-                    {renderCell(c, symbolRule[c.key], '', false, (v) => setBatch(c.key, v))}
+                    {/* 批量行留空=跟随全局;placeholder 显示全局值,让用户点进来就看到全局默认,改了才落自定义 */}
+                    {renderCell(c, symbolRule[c.key], String(globalRules[c.key] ?? ''), false, (v) => setBatch(c.key, v))}
                   </td>
                 ))}
                 <td className="px-1 py-1 text-center whitespace-nowrap">
@@ -216,6 +256,22 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
                 return (
                   <tr key={a.id} className="border-b border-border/20 hover:bg-accent/10">
                     <td className="px-1.5 py-1 font-medium whitespace-nowrap">{a.note}</td>
+                    <td className="px-1 py-1 text-center whitespace-nowrap">
+                      {(() => {
+                        const held = heldOf(a.id)
+                        if (held.total <= 0) return <span className="text-muted-foreground/40">—</span>
+                        return (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-amber-400 font-mono" title={`本金${held.borrowed.toFixed(6)} 利息${held.interest.toFixed(6)}`}>{held.borrowed.toFixed(4)}</span>
+                            <button
+                              onClick={() => handleRepayOne(a.id, a.note)}
+                              disabled={repaying === a.id}
+                              className="px-1 py-0.5 rounded text-[9px] bg-negative/20 text-negative hover:bg-negative/30 disabled:opacity-40"
+                            >{repaying === a.id ? '还币中' : '还币'}</button>
+                          </span>
+                        )
+                      })()}
+                    </td>
                     {COLS.map((c) => {
                       const v = ar[c.key]
                       const baseline = String(symbolRule[c.key] ?? '')
@@ -233,7 +289,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
                   </tr>
                 )
               })}
-              {accounts.length === 0 && <tr><td colSpan={COLS.length + 3} className="py-4 text-center text-muted-foreground">无子账户</td></tr>}
+              {accounts.length === 0 && <tr><td colSpan={COLS.length + 4} className="py-4 text-center text-muted-foreground">无子账户</td></tr>}
             </tbody>
           </table>
         )}

@@ -8,6 +8,7 @@ from app.db.schemas import validators as V
 
 class SymbolRuleUpdate(BaseModel):
     open_spread: Optional[Decimal] = None
+    borrow_spread: Optional[Decimal] = None
     close_spread: Optional[Decimal] = None
     order_amount: Optional[Decimal] = None
     remove_spread: Optional[Decimal] = None
@@ -26,6 +27,12 @@ class SymbolRuleUpdate(BaseModel):
     @classmethod
     def _v_pct(cls, v, info):
         return V.rng(v, 0, 100, info.field_name)
+
+    # 挂单点差允许负值(如 -1 = 任何点差都先借,提前囤券);范围 [-100, 100]
+    @field_validator("borrow_spread")
+    @classmethod
+    def _v_borrow(cls, v, info):
+        return V.rng(v, -100, 100, info.field_name)
 
     @field_validator("close_funding_ratio", "repay_funding_ratio", "max_daily_interest_rate")
     @classmethod
@@ -54,6 +61,7 @@ class SymbolRuleResponse(BaseModel):
     id: int
     symbol: str
     open_spread: Optional[Decimal] = None
+    borrow_spread: Optional[Decimal] = None
     close_spread: Optional[Decimal] = None
     order_amount: Optional[Decimal] = None
     remove_spread: Optional[Decimal] = None
@@ -69,6 +77,7 @@ class SymbolRuleResponse(BaseModel):
     note: Optional[str] = None
     source: str
     effective_open_spread: Optional[Decimal] = None
+    effective_borrow_spread: Optional[Decimal] = None
     effective_close_spread: Optional[Decimal] = None
     effective_order_amount: Optional[Decimal] = None
     created_at: datetime

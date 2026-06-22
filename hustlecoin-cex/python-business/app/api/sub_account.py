@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import math
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -270,6 +272,137 @@ def toggle_sub_account(account_id: int, request: Request, db: Session = Depends(
     db.commit()
     db.refresh(account)
     return _to_response(account)
+
+
+# ─── 安全停用/删除:校验持仓+借币,可选把 U/BNB 划回主账户 ───
+
+# 进行中持仓状态(非终态)——这些状态下账户有未了结的仓位,不可停用/删除
+_ACTIVE_POS_STATUSES_EXCLUDE = ("CLOSED", "FAILED")
+_DUST = {"USDT": 0.5, "BNB": 0.0001}   # 低于此忽略不划(避免 dust 划转失败)
+
+
+class DeactivateBody(BaseModel):
+    mode: str = "disable"            # disable | delete
+    transfer_to_master: bool = False
+
+
+async def _account_blockers(account: SubAccount, db: Session) -> dict:
+    """返回该子账户是否有进行中持仓 / 未还借币(实时双源:DB 持仓 + 币安 margin 已借)。"""
+    from engine.models import Position
+    open_count = db.query(Position).filter(
+        Position.sub_account_id == account.id,
+        Position.status.notin_(_ACTIVE_POS_STATUSES_EXCLUDE),
+    ).count()
+    borrowed = []
+    margin = None
+    try:
+        from engine.trading.binance_trading import BinanceTradingClient
+        async with BinanceTradingClient(account.api_key, account.api_secret) as c:
+            margin = await c.get_margin_account()
+        for a in margin.get("userAssets", []):
+            b = float(a.get("borrowed", "0") or 0)
+            if b > 1e-8:
+                borrowed.append({"asset": a["asset"], "amount": b})
+    except Exception as e:
+        logger.warning(f"deactivate borrow-check failed for #{account.id}: {e}")
+        # 查不到借币 → 不武断放行,标记 unknown 让前端提示(保守)
+        return {"open_count": open_count, "borrowed": borrowed, "borrow_check_ok": False, "margin": None}
+    return {"open_count": open_count, "borrowed": borrowed, "borrow_check_ok": True, "margin": margin}
+
+
+@router.get("/{account_id}/deactivate-precheck")
+async def deactivate_precheck(account_id: int, request: Request, db: Session = Depends(get_db)):
+    account = _owned_sub(db, account_id, request)
+    uid = get_current_user_id(request)
+    blk = await _account_blockers(account, db)
+    master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
+    has_master = bool(master and master.api_key)
+    can = blk["open_count"] == 0 and len(blk["borrowed"]) == 0 and blk["borrow_check_ok"]
+    if blk["open_count"] > 0:
+        reason = f"该账户有 {blk['open_count']} 个进行中持仓,请先平仓"
+    elif blk["borrowed"]:
+        reason = f"该账户有未还借币({', '.join(x['asset'] for x in blk['borrowed'])}),请先还币"
+    elif not blk["borrow_check_ok"]:
+        reason = "借币状态查询失败,无法确认是否可安全停用,请稍后重试"
+    else:
+        reason = ""
+    return {
+        "can_deactivate": can, "reason": reason,
+        "open_count": blk["open_count"], "borrowed_assets": blk["borrowed"],
+        "has_master": has_master,
+    }
+
+
+@router.post("/{account_id}/deactivate")
+async def deactivate_sub_account(account_id: int, body: DeactivateBody, request: Request, db: Session = Depends(get_db)):
+    """安全停用/删除:再校验持仓+借币(任一存在则 409);可选把 U/BNB 划回主账户后再停用/删除。"""
+    account = _owned_sub(db, account_id, request)
+    uid = get_current_user_id(request)
+
+    blk = await _account_blockers(account, db)
+    if not blk["borrow_check_ok"]:
+        raise HTTPException(status_code=409, detail="借币状态查询失败,无法确认可否停用,请稍后重试")
+    if blk["open_count"] > 0:
+        raise HTTPException(status_code=409, detail=f"该账户有 {blk['open_count']} 个进行中持仓,请先平仓")
+    if blk["borrowed"]:
+        raise HTTPException(status_code=409, detail=f"该账户有未还借币({', '.join(x['asset'] for x in blk['borrowed'])}),请先还币")
+
+    transferred = []
+    if body.transfer_to_master:
+        master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
+        if not master or not master.api_key:
+            raise HTTPException(status_code=400, detail="主账户未配置,无法划转")
+        from engine.trading.binance_trading import BinanceTradingClient
+        margin = blk["margin"] or {}
+        def _free(assets, name):
+            return next((float(a.get("free", "0") or 0) for a in assets if a.get("asset") == name), 0.0)
+        m_usdt = _free(margin.get("userAssets", []), "USDT")
+        m_bnb = _free(margin.get("userAssets", []), "BNB")
+        s_usdt = s_bnb = f_usdt = 0.0
+        try:
+            async with BinanceTradingClient(account.api_key, account.api_secret) as c:
+                spot, fut = await asyncio.gather(c.get_spot_account(), c.get_futures_account())
+            s_usdt = _free(spot.get("balances", []), "USDT")
+            s_bnb = _free(spot.get("balances", []), "BNB")
+            f_usdt = float(fut.get("availableBalance", "0") or 0)
+        except Exception as e:
+            logger.warning(f"deactivate balance fetch failed #{account_id}: {e}")
+        # 用主账户 key 万向划转把各钱包 U/BNB 扫到主账户现货;逐笔 best-effort
+        sweeps = [
+            ("USDT", m_usdt, "MARGIN"), ("USDT", s_usdt, "SPOT"), ("USDT", f_usdt, "USDT_FUTURE"),
+            ("BNB", m_bnb, "MARGIN"), ("BNB", s_bnb, "SPOT"),
+        ]
+        async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+            for asset, amt, from_type in sweeps:
+                if amt is None or amt <= _DUST.get(asset, 0.0):
+                    continue
+                amt_floor = math.floor(amt * 1e6) / 1e6   # 向下取整防 free 漂移导致余额不足
+                try:
+                    await mc.universal_transfer(
+                        asset=asset, amount=Decimal(str(amt_floor)),
+                        from_account_type=from_type, to_account_type="SPOT",
+                        from_email=account.email, to_email=None,   # to=主账户
+                    )
+                    transferred.append({"asset": asset, "amount": amt_floor, "from": from_type})
+                except Exception as e:
+                    logger.warning(f"sweep {asset} {amt_floor} from {from_type} #{account_id} failed: {e}")
+
+    # 执行停用 / 删除
+    note = account.note
+    if body.mode == "delete":
+        from engine.models import EngineState
+        db.query(EngineState).filter(EngineState.scope == f"sub:{account_id}").delete(synchronize_session=False)
+        db.delete(account)
+        action = "deleted"
+    else:
+        account.is_enabled = False
+        action = "disabled"
+    db.commit()
+    return {
+        "message": f"账户 {note} 已{'删除' if action == 'deleted' else '停用'}"
+                   + (f",已划转 {len(transferred)} 笔到主账户" if transferred else ""),
+        "mode": body.mode, "transferred": transferred,
+    }
 
 
 @router.get("/{account_id}/ip-whitelist")

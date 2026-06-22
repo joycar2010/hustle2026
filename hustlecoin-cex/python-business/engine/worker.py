@@ -329,9 +329,9 @@ class Worker:
         can_borrow = (self._margin_safe and active_count < max_positions and
                       not (self._account_max_borrow is not None and self._account_max_borrow == 0))
         pushed = await asyncio.to_thread(self._load_pushed_symbols)
-        borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)
-        # 开仓阈值缓冲: 实际要求点差 ≥ 借币点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留,行为不变)
-        eff_borrow = float(borrow_spread) + float(getattr(rules, "open_spread_buffer", 0) or 0)
+        g_borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)   # 全局挂单点差回退值
+        # 开仓阈值缓冲: 实际要求点差 ≥ 挂单点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留)
+        borrow_buffer = float(getattr(rules, "open_spread_buffer", 0) or 0)
         no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
         for symbol in pushed:
             # 已在途(借/持/待还)的币状态由上方 open/active 逻辑给定,这里不覆盖
@@ -355,6 +355,8 @@ class Worker:
             sym_rule = self._symbol_rules.get(symbol, {})
             if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                 statuses[symbol] = "禁借"; continue
+            # 逐币挂单点差(可负=提前借):账户>单币>全局,_sym_threshold 已合并 account>symbol;+开仓缓冲
+            eff_borrow = float(self._sym_threshold(symbol, "borrow_spread", g_borrow_spread)) + borrow_buffer
             spread = self.spread_feed.get_symbol(symbol)
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
@@ -677,8 +679,8 @@ class Worker:
                     "remove_spread": sr.remove_spread,
                     "source": sr.source,
                 }
-                # 逐币阈值基线(仅非 NULL 才写 → 空=跟随全局);引擎开/平/还循环按币覆盖全局
-                for k in ("open_spread", "close_spread", "close_funding_ratio",
+                # 逐币阈值基线(仅非 NULL 才写 → 空=跟随全局);引擎开/平/还/借循环按币覆盖全局
+                for k in ("open_spread", "borrow_spread", "close_spread", "close_funding_ratio",
                           "repay_spread", "repay_funding_ratio"):
                     val = getattr(sr, k, None)
                     if val is not None:
@@ -697,7 +699,7 @@ class Worker:
                     if ar.max_borrow_amount is not None:
                         rules_map[key]["max_borrow_amount"] = ar.max_borrow_amount
                     # 逐账户阈值覆盖(优先于逐币基线;NULL 不覆盖)
-                    for k in ("open_spread", "close_spread", "close_funding_ratio",
+                    for k in ("open_spread", "borrow_spread", "close_spread", "close_funding_ratio",
                               "repay_spread", "repay_funding_ratio"):
                         val = getattr(ar, k, None)
                         if val is not None:

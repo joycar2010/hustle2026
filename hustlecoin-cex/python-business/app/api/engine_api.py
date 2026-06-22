@@ -629,6 +629,21 @@ def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(ge
     r.set(ps_key, json.dumps(sorted(current)))
     r.hdel(_user_redis_key(user_id, "pushed_at"), sym)  # 清推送时间戳
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+
+    # 移除即清该币的单一规则覆盖(SymbolRule + AccountSymbolRule)→ 再推进来回归全局参数。
+    # 与"移除保留规则"的旧行为相反,按用户诉求改:删除而非保留。无持仓时才会走到这(上方已校验)。
+    try:
+        from app.db.models import SymbolRule, AccountSymbolRule
+        db.query(SymbolRule).filter(
+            SymbolRule.user_id == user_id, SymbolRule.symbol == sym,
+        ).delete(synchronize_session=False)
+        if sub_ids:
+            db.query(AccountSymbolRule).filter(
+                AccountSymbolRule.sub_account_id.in_(sub_ids), AccountSymbolRule.symbol == sym,
+            ).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
     return {"message": f"Removed {sym}"}
 
 

@@ -46,6 +46,24 @@ export async function toggleSubAccount(id: number) {
   return data
 }
 
+export interface DeactivatePrecheck {
+  can_deactivate: boolean
+  reason: string
+  open_count: number
+  borrowed_assets: { asset: string; amount: number }[]
+  has_master: boolean
+}
+
+export async function deactivatePrecheck(id: number) {
+  const { data } = await client.get(`/api/sub-accounts/${id}/deactivate-precheck`)
+  return data as DeactivatePrecheck
+}
+
+export async function deactivateSubAccount(id: number, body: { mode: 'disable' | 'delete'; transfer_to_master: boolean }) {
+  const { data } = await client.post(`/api/sub-accounts/${id}/deactivate`, body)
+  return data as { message: string; mode: string; transferred: { asset: string; amount: number; from: string }[] }
+}
+
 export async function getMasterAccount() {
   const { data } = await client.get('/api/master-account/')
   return data

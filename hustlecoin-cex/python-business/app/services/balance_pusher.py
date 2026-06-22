@@ -293,6 +293,8 @@ class BalancePusher:
                             sym_key = f"{asset_name}USDT"
                             symbol_margin[sym_key] = {
                                 "free": float(a.get("free", "0")),
+                                "borrowed": float(a.get("borrowed", "0")),      # 该子账户已借该币本金(持币)
+                                "interest": float(a.get("interest", "0")),      # 已计利息(还币需本金+利息)
                                 "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),
@@ -305,6 +307,8 @@ class BalancePusher:
                         if sym_key not in symbol_margin:
                             symbol_margin[sym_key] = {
                                 "free": 0.0,
+                                "borrowed": 0.0,
+                                "interest": 0.0,
                                 "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),

@@ -3,10 +3,12 @@ import {
   getSubAccounts, toggleSubAccount, validateSubAccount,
   getMasterAccount, updateMasterAccount, validateMasterAccount,
   createSubAccount, getIpWhitelist, updateSubAccountKeys,
-  deleteSubAccount, updateSubAccount, getApiPermissions,
+  updateSubAccount, getApiPermissions,
   checkPermissions, getMasterPermissions, getMasterBalance,
+  deactivatePrecheck, deactivateSubAccount,
 } from '@/api/accounts'
 import { getAccountBalance } from '@/api/engine'
+import { confirmDialog } from '@/components/ui/confirm'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +18,40 @@ import { extractError } from '@/api/client'
 import { cn, formatNumber } from '@/lib/utils'
 import { Power, Shield, RefreshCw, Wallet, Plus, Eye, EyeOff, X, Key, ChevronDown, ChevronUp, Trash2, AlertTriangle } from 'lucide-react'
 import { IpWhitelistPanel } from '@/components/accounts/IpWhitelistPanel'
+
+/** 安全停用/删除子账户:先校验持仓+借币(后端实时双源),无则问是否把 U+BNB 划主账户,再执行。
+ * 返回 true=已执行(调用方刷新)。所有分支均给提示。 */
+async function runSafeDeactivate(
+  accountId: number, note: string, mode: 'disable' | 'delete',
+  addToast: (m: string, t?: 'success' | 'error' | 'info') => void,
+): Promise<boolean> {
+  let pc
+  try { pc = await deactivatePrecheck(accountId) }
+  catch { addToast('检查账户状态失败,请重试', 'error'); return false }
+  if (!pc.can_deactivate) { addToast(pc.reason || '该账户当前不可停用', 'error'); return false }
+  const label = mode === 'delete' ? '删除' : '停用'
+  if (!(await confirmDialog({
+    title: `${label}账户`,
+    message: `账户 ${note} 无持仓、无未还借币,可安全${label}。`,
+    confirmText: `继续${label}`, danger: true,
+  }))) return false
+  let transfer = false
+  if (pc.has_master) {
+    transfer = await confirmDialog({
+      title: '划转资金',
+      message: `是否把账户 ${note} 内的 USDT 和 BNB 划转到主账户?\n「划转到主账户」=自动转回;「保留资金」=留在子账户。`,
+      confirmText: '划转到主账户', cancelText: '保留资金',
+    })
+  }
+  try {
+    const r = await deactivateSubAccount(accountId, { mode, transfer_to_master: transfer })
+    addToast(r.message || `${label}成功`, 'success')
+    return true
+  } catch (e) {
+    addToast(extractError(e, `${label}失败`), 'error')
+    return false
+  }
+}
 
 const SUB_PERM_FIELDS = [
   { key: 'enableSpotAndMarginTrading', label: '现货及杠杆交易' },
@@ -196,6 +232,13 @@ export function AccountsPage({ embedded }: { onClose?: () => void; embedded?: bo
   }, [accounts])
 
   const handleToggle = async (id: number) => {
+    const acct = accounts.find((a) => a.id === id)
+    // 停用(启用→禁用)走安全流程:校验持仓/借币 + 可选划转主账户;启用无需校验直接切
+    if (acct?.is_enabled) {
+      const ok = await runSafeDeactivate(id, acct.note, 'disable', addToast)
+      if (ok) fetchAccounts()
+      return
+    }
     try {
       await toggleSubAccount(id)
       addToast('状态已切换', 'success')
@@ -878,15 +921,9 @@ function AccountDetailDrawer({ account, balance, ipInfo: parentIpInfo, onClose, 
   }
 
   const handleDelete = async () => {
-    if (!confirm(`确认删除账户 ${account.note}？此操作将禁用账户。`)) return
-    try {
-      await deleteSubAccount(account.id)
-      addToast('账户已删除', 'success')
-      onClose()
-      onRefresh()
-    } catch (err: unknown) {
-      addToast(extractError(err, '删除失败'), 'error')
-    }
+    // 安全删除:校验持仓/借币 + 可选把 U/BNB 划主账户(与停用同一流程)
+    const ok = await runSafeDeactivate(account.id, account.note, 'delete', addToast)
+    if (ok) { onClose(); onRefresh() }
   }
 
   return (

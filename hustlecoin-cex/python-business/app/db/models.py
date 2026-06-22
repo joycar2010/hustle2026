@@ -204,6 +204,7 @@ class SymbolRule(Base):
     user_id = Column(Integer, nullable=True)
     symbol = Column(String(30), nullable=False)
     open_spread = Column(Numeric(10, 4), nullable=True)
+    borrow_spread = Column(Numeric(10, 4), nullable=True)      # 挂单点差(可负=提前借);null=跟随全局
     close_spread = Column(Numeric(10, 4), nullable=True)
     order_amount = Column(Numeric(15, 2), nullable=True)
     remove_spread = Column(Numeric(10, 4), nullable=True)
@@ -231,6 +232,7 @@ class AccountSymbolRule(Base):
     sub_account_id = Column(Integer, nullable=False)
     symbol = Column(String(30), nullable=False)
     open_spread = Column(Numeric(10, 4), nullable=True)
+    borrow_spread = Column(Numeric(10, 4), nullable=True)      # 账户·挂单点差(可负=提前借);null=跟随单币/全局
     close_spread = Column(Numeric(10, 4), nullable=True)
     order_amount = Column(Numeric(15, 2), nullable=True)
     remove_spread = Column(Numeric(10, 4), nullable=True)
