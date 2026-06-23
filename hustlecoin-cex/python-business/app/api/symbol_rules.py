@@ -25,6 +25,7 @@ def _to_response(rule: SymbolRule, global_rules: GlobalRules) -> dict:
         "id": rule.id,
         "symbol": rule.symbol,
         "open_spread": rule.open_spread,
+        "borrow_spread": rule.borrow_spread,
         "close_spread": rule.close_spread,
         "order_amount": rule.order_amount,
         "remove_spread": rule.remove_spread,
@@ -37,6 +38,7 @@ def _to_response(rule: SymbolRule, global_rules: GlobalRules) -> dict:
         "max_borrow_amount": rule.max_borrow_amount,
         "source": rule.source,
         "effective_open_spread": rule.open_spread if rule.open_spread is not None else global_rules.open_spread,
+        "effective_borrow_spread": rule.borrow_spread if rule.borrow_spread is not None else getattr(global_rules, "borrow_spread", None),
         "effective_close_spread": rule.close_spread if rule.close_spread is not None else global_rules.close_spread,
         "effective_order_amount": rule.order_amount if rule.order_amount is not None else global_rules.order_amount,
         "created_at": rule.created_at,
@@ -128,6 +130,7 @@ def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_d
     if not rule:
         raise HTTPException(status_code=404, detail=f"No rule for {symbol}")
     rule.open_spread = None
+    rule.borrow_spread = None
     rule.close_spread = None
     rule.order_amount = None
     rule.remove_spread = None

@@ -257,8 +257,12 @@ class BalancePusher:
                                     mb_results[asset] = 0.0   # 沿用无券缓存,跳过查询
                                 else:
                                     try:
-                                        amt = await client.get_max_borrowable(asset)
-                                        mb_results[asset] = float(amt)
+                                        mb_data = await client.get_max_borrowable(asset)
+                                        mb_results[asset] = float(mb_data["amount"])
+                                        # 新增:缓存 borrowLimit(VIP档借贷上限,与持U无关)
+                                        if "borrowLimit" not in mb_results:
+                                            mb_results["_limits"] = {}
+                                        mb_results["_limits"][asset] = float(mb_data["borrowLimit"])
                                         self._no_inventory[asset] = False
                                     except Exception as e:
                                         # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
@@ -291,9 +295,13 @@ class BalancePusher:
                             bnb_interest = a.get("interest", "0")
                         if asset_name in targets:
                             sym_key = f"{asset_name}USDT"
+                            mb_cache = self._max_borrow_cache.get(acc.id, {})
                             symbol_margin[sym_key] = {
                                 "free": float(a.get("free", "0")),
-                                "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
+                                "borrowed": float(a.get("borrowed", "0")),      # 该子账户已借该币本金(持币)
+                                "interest": float(a.get("interest", "0")),      # 已计利息(还币需本金+利息)
+                                "max_borrowable": mb_cache.get(asset_name, 0),
+                                "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),  # VIP档借贷上限(与持U无关)
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),
                             }
@@ -303,9 +311,13 @@ class BalancePusher:
                     for asset_name in targets:
                         sym_key = f"{asset_name}USDT"
                         if sym_key not in symbol_margin:
+                            mb_cache = self._max_borrow_cache.get(acc.id, {})
                             symbol_margin[sym_key] = {
                                 "free": 0.0,
-                                "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
+                                "borrowed": 0.0,
+                                "interest": 0.0,
+                                "max_borrowable": mb_cache.get(asset_name, 0),
+                                "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),
                             }
@@ -352,6 +364,33 @@ class BalancePusher:
                 except Exception as e:
                     logger.debug(f"Balance fetch failed for account {acc.id}: {e}")
 
+            # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)
+            master_futures_positions = {}  # {uid: {symbol: positionAmt}}
+            for uid in user_balances.keys():
+                from app.db.models import MasterAccount
+                master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
+                if not master or not master.api_key:
+                    continue
+                try:
+                    from engine.trading.binance_trading import BinanceTradingClient
+                    async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+                        # 只采集 pushed_symbols 里的币(避免全市场遍历)
+                        pushed = self._redis.smembers(f"engine:{uid}:pushed_symbols")
+                        if not pushed:
+                            continue
+                        positions = {}
+                        for sym_bytes in pushed:
+                            try:
+                                sym = sym_bytes.decode() if isinstance(sym_bytes, bytes) else sym_bytes
+                                pos_data = await mc.futures_position_risk(sym)
+                                if pos_data and len(pos_data) > 0:
+                                    positions[sym] = float(pos_data[0].get("positionAmt", "0") or 0)
+                            except Exception:
+                                pass  # 某币查不到持仓不影响其他币
+                        master_futures_positions[uid] = positions
+                except Exception as e:
+                    logger.debug(f"Master futures position fetch failed for user {uid}: {e}")
+
             for uid, balances in user_balances.items():
                 position_count = db.query(Position).filter(
                     Position.status == "OPEN", Position.user_id == uid,
@@ -365,6 +404,7 @@ class BalancePusher:
                     "balances": balances,
                     "position_count": position_count,
                     "total_contracts": total_contracts,
+                    "master_futures_positions": master_futures_positions.get(uid, {}),  # {symbol: positionAmt}
                 }
 
                 await self._redis.publish("balance:updates", json.dumps(payload))

@@ -40,20 +40,22 @@ async fn main() {
 
     let (update_tx, update_rx) = mpsc::unbounded_channel::<String>();
 
-    // Spawn spot WS(订阅交易宇宙 <symbol>@bookTicker,200/连接分块)
+    // Spawn spot WS(订阅交易宇宙 <symbol>@bookTicker,200/连接分块;每次重连时重读 universe)
     let spot_tickers = tickers.clone();
     let spot_symbols = cfg.symbols.clone();
     let spot_tx = update_tx.clone();
+    let spot_redis = cfg.redis_url.clone();
     tokio::spawn(async move {
-        ws::binance_spot::run(spot_symbols, spot_tickers, spot_tx).await;
+        ws::binance_spot::run(spot_symbols, spot_redis, spot_tickers, spot_tx).await;
     });
 
     // Spawn futures WS
     let fut_tickers = tickers.clone();
     let fut_symbols = cfg.symbols.clone();
     let fut_tx = update_tx.clone();
+    let fut_redis = cfg.redis_url.clone();
     tokio::spawn(async move {
-        ws::binance_futures::run(fut_symbols, fut_tickers, fut_tx).await;
+        ws::binance_futures::run(fut_symbols, fut_redis, fut_tickers, fut_tx).await;
     });
 
     drop(update_tx);

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_POSITIONS_PER_ACCOUNT = 10
 MAX_PER_SYMBOL = 3
 SPREAD_FRESH_MS = 10_000   # 借币门:快照 ts 超此毫秒数视为 feed 停更/陈旧,不在死数据上开仓(与 rust 新鲜度护栏对齐)
+STALE_PENDING_BORROW_SEC = 120   # PENDING_BORROW 超此秒数视为僵尸(正常秒级转 IDLE/FAILED),每周期回收(与 orchestrator 启动回收阈值一致)
 
 
 class Worker:
@@ -199,6 +200,10 @@ class Worker:
         eff_rate = self._account_borrow_rate if self._account_borrow_rate else getattr(rules, "borrow_rate_per_sec", 2)
         set_borrow_rate(self.sub_account_id, eff_rate)
 
+        # 每周期兜底:回收重启窗口内遗留、超龄的僵尸 PENDING_BORROW,否则其「排队中」overlay
+        # 会让下方借币循环误判该币在途而永不重借(根因②脆弱点)。须在加载 positions/statuses 之前。
+        await asyncio.to_thread(self._reclaim_stale_pending_borrow)
+
         open_positions = await asyncio.to_thread(self._load_open_positions)
         idle_positions = await asyncio.to_thread(self._load_positions_by_status, "BORROWED_IDLE")
         pending_repay = await asyncio.to_thread(self._load_positions_by_status, "PENDING_REPAY")
@@ -329,9 +334,9 @@ class Worker:
         can_borrow = (self._margin_safe and active_count < max_positions and
                       not (self._account_max_borrow is not None and self._account_max_borrow == 0))
         pushed = await asyncio.to_thread(self._load_pushed_symbols)
-        borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)
-        # 开仓阈值缓冲: 实际要求点差 ≥ 借币点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留,行为不变)
-        eff_borrow = float(borrow_spread) + float(getattr(rules, "open_spread_buffer", 0) or 0)
+        g_borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)   # 全局挂单点差回退值
+        # 开仓阈值缓冲: 实际要求点差 ≥ 挂单点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留)
+        borrow_buffer = float(getattr(rules, "open_spread_buffer", 0) or 0)
         no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
         for symbol in pushed:
             # 已在途(借/持/待还)的币状态由上方 open/active 逻辑给定,这里不覆盖
@@ -355,6 +360,8 @@ class Worker:
             sym_rule = self._symbol_rules.get(symbol, {})
             if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                 statuses[symbol] = "禁借"; continue
+            # 逐币挂单点差(可负=提前借):账户>单币>全局,_sym_threshold 已合并 account>symbol;+开仓缓冲
+            eff_borrow = float(self._sym_threshold(symbol, "borrow_spread", g_borrow_spread)) + borrow_buffer
             spread = self.spread_feed.get_symbol(symbol)
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
@@ -483,8 +490,46 @@ class Worker:
                 fee_spot=getattr(self.config.global_rules, "taker_fee_spot", None),
                 fee_futures=getattr(self.config.global_rules, "taker_fee_futures", None),
             )
+            # 还币完成后检查:该币所有持仓是否已 CLOSED,若是则自动下架+清规则(回归全局默认)
+            await self._check_and_remove_symbol_after_close(position.symbol)
         except Exception as e:
             logger.error(f"Repay failed {position.symbol}: {e}")
+
+    async def _check_and_remove_symbol_after_close(self, symbol: str):
+        """平仓后自动下架+清规则:检查该币所有持仓是否已 CLOSED,若是则从 pushed_symbols discard + 清 SymbolRule/AccountSymbolRule。"""
+        db = next(get_db())
+        try:
+            from app.db.models import Position
+            # 检查该 user 该 symbol 是否还有非 CLOSED 持仓
+            open_count = db.query(Position).filter(
+                Position.user_id == self._user_id,
+                Position.symbol == symbol,
+                Position.status != "CLOSED",
+            ).count()
+            if open_count > 0:
+                return  # 还有未平仓位,不下架
+            # 所有持仓已 CLOSED → 从 pushed_symbols 下架 + 清规则
+            ps_key = f"engine:{self._user_id}:pushed_symbols"
+            raw = self._redis.get(ps_key)
+            if raw:
+                current = set(json.loads(raw))
+                if symbol in current:
+                    current.discard(symbol)
+                    self._redis.set(ps_key, json.dumps(sorted(current)))
+                    self._redis.publish("pushed:updates", json.dumps({
+                        "user_id": self._user_id, "pushed_symbols": sorted(current)
+                    }))
+                    logger.info(f"Auto-removed {symbol} from pushed_symbols (all positions CLOSED)")
+            # 清单一规则(复用 engine_api._purge_symbol_rules)
+            from app.api.engine_api import _purge_symbol_rules
+            from app.db.models import SubAccount
+            sub_ids = [a.id for a in db.query(SubAccount).filter(SubAccount.user_id == self._user_id).all()]
+            _purge_symbol_rules(db, self._user_id, symbol, sub_ids)
+            logger.info(f"Auto-purged symbol rules for {symbol} (回归全局默认)")
+        except Exception as e:
+            logger.error(f"Auto-remove symbol {symbol} failed: {e}")
+        finally:
+            db.close()
 
     async def _check_futures_margin(self, account_note: str):
         """合约账户距爆仓安全垫 < margin_rate_alert% 告警(纯告警,不动仓)。
@@ -677,8 +722,8 @@ class Worker:
                     "remove_spread": sr.remove_spread,
                     "source": sr.source,
                 }
-                # 逐币阈值基线(仅非 NULL 才写 → 空=跟随全局);引擎开/平/还循环按币覆盖全局
-                for k in ("open_spread", "close_spread", "close_funding_ratio",
+                # 逐币阈值基线(仅非 NULL 才写 → 空=跟随全局);引擎开/平/还/借循环按币覆盖全局
+                for k in ("open_spread", "borrow_spread", "close_spread", "close_funding_ratio",
                           "repay_spread", "repay_funding_ratio"):
                     val = getattr(sr, k, None)
                     if val is not None:
@@ -697,7 +742,7 @@ class Worker:
                     if ar.max_borrow_amount is not None:
                         rules_map[key]["max_borrow_amount"] = ar.max_borrow_amount
                     # 逐账户阈值覆盖(优先于逐币基线;NULL 不覆盖)
-                    for k in ("open_spread", "close_spread", "close_funding_ratio",
+                    for k in ("open_spread", "borrow_spread", "close_spread", "close_funding_ratio",
                               "repay_spread", "repay_funding_ratio"):
                         val = getattr(ar, k, None)
                         if val is not None:
@@ -845,6 +890,41 @@ class Worker:
                 Position.sub_account_id == self.sub_account_id,
                 Position.status == status,
             ).all()
+        finally:
+            db.close()
+
+    def _reclaim_stale_pending_borrow(self) -> int:
+        """每周期回收本子账户超龄的僵尸 PENDING_BORROW(置 FAILED 释放占位)。
+
+        PENDING_BORROW 是借币前的瞬态排队(尚未动用资金/下单/无敞口),正常秒级转
+        BORROWED_IDLE/FAILED。若进程在此窗口被 kill(重启/崩溃),会留下永久卡住的孤儿:
+        _load_active_statuses 把它 overlay 成「排队中」→ 借币循环 `symbol in statuses`
+        判定该币已在途而永不重借,把币种钉死。orchestrator 仅在启动瞬间回收一次且要求
+        >2min,重启窗口内(<2min龄)产生的孤儿会逃过清理且此后再无机制处理——故在此每周期兜底。
+        超龄阈值 STALE_PENDING_BORROW_SEC 远大于正常借币耗时(含 borrow_delay_sec),不会误伤在借记录。
+        """
+        db = SessionLocal()
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_PENDING_BORROW_SEC)
+            stale = db.query(Position).filter(
+                Position.sub_account_id == self.sub_account_id,
+                Position.status == "PENDING_BORROW",
+                Position.created_at < cutoff,
+            ).all()
+            for p in stale:
+                p.status = "FAILED"
+                p.error_message = "stale PENDING_BORROW reclaimed (engine restart in borrow window)"
+            if stale:
+                db.commit()
+                logger.warning(
+                    f"Sub-account {self.sub_account_id}: reclaimed {len(stale)} stale PENDING_BORROW → FAILED "
+                    f"({', '.join(sorted({p.symbol for p in stale}))})"
+                )
+            return len(stale)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"reclaim_stale_pending_borrow failed (acct {self.sub_account_id}): {e}")
+            return 0
         finally:
             db.close()
 

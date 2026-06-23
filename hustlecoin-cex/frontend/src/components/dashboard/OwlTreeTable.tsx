@@ -419,6 +419,8 @@ const SubAccountRow = memo(function SubAccountRow({
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
 }) {
+  const spreads = useSpreadStore((s) => s.spreads)
+  const summary = useBalanceStore((s) => s.summary)
   // 持仓经济参数块:润(净盈亏)/资(累计资金费)/开(开仓点差)/息(当日利率)/累息(累计利息)/平(平仓点差)
   const profit = parseFloat(pos.realized_pnl || '0')
     + parseFloat(pos.cumulative_funding_fee || '0')
@@ -487,15 +489,20 @@ const SubAccountRow = memo(function SubAccountRow({
           )
         })()}
       </td>
-      {/* 现-期 — this account's futures notional (tooltip: 张数) */}
+      {/* 现-期 — 主账户合约持仓币数(优先),降级子账户持仓 */}
       {!isMobile && (() => {
-        const qty = parseFloat(pos.futures_long_qty || '0')
+        // 优先用主账户合约持仓(hedge_via_master模式),无则降级子账户
+        const masterQty = summary?.masterFuturesPositions?.[pos.symbol] ?? 0
+        const qty = masterQty !== 0 ? Math.abs(masterQty) : parseFloat(pos.futures_long_qty || '0')
+        const isMaster = masterQty !== 0
         const price = spread?.fut_bid ?? 0
         const val = qty * price
+        const title = qty > 0
+          ? `${isMaster ? '主账户' : '子账户'}合约持仓 · 名义价值: ${formatNumber(val, 2)} USDT`
+          : undefined
         return (
-          <td className={numCell}
-            title={qty > 0 ? `合约张数: ${formatNumber(qty, 4)}　名义价值: ${formatNumber(val, 2)} USDT` : undefined}>
-            {val > 0 ? formatNumber(val, 0) : '-'}
+          <td className={numCell} title={title}>
+            {qty > 0 ? formatNumber(qty, 4) : '-'}
           </td>
         )
       })()}
@@ -512,28 +519,25 @@ const SubAccountRow = memo(function SubAccountRow({
           })() : '-'}
         </td>
       )}
-      {/* 有效可借 */}
+      {/* 有效可借 — 优先显示 VIP 档借贷上限(borrow_limit,与持U无关),无则降级 effective_borrowable */}
       {!isMobile && (
         <td className={numCell}>
           {(() => {
             const sm = balance?.symbol_margin?.[pos.symbol]
             if (!sm) return '-'
-            // 币安杠杆池无可借库存(-3045)→ 显式标「无券」,区别于"0"与"无数据"
+            // 币安杠杆池无可借库存(-3045)→ 显式标「无券」
             if (sm.no_inventory && !(sm.max_borrowable > 0)) {
               return <span className="text-amber-500/80" title="币安杠杆池当前无该币可借库存">无券</span>
             }
             const px = spread?.spot_bid ?? 0
-            // 有效可借: 后端已套引擎封顶口径;旧负载缺该字段时回退理论上限
-            const eff = sm.effective_borrowable ?? sm.max_borrowable
-            const reason = sm.borrow_cap_reason
-            const shown = borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)
-            // tooltip: 标注理论上限 + 受限原因,让"为什么比 maxBorrowable 小"一目了然
-            const capTxt = borrowDisplayUsdt
-              ? `${formatNumber(sm.max_borrowable * px, 0)} U`
-              : `${formatNumber(sm.max_borrowable, 2)} ${pos.symbol.replace('USDT', '')}`
-            const title = `理论上限 ${capTxt}${reason ? ` · 受限于: ${reason}` : ''}`
-            const capped = reason && reason !== '可借上限' && eff < sm.max_borrowable
-            return <span className={capped ? 'text-sky-400/90' : ''} title={title}>{shown}</span>
+            // 优先 borrow_limit(VIP档上限,与持U无关、同VIP各账户相同),无则降级 effective_borrowable
+            const val = sm.borrow_limit ?? sm.effective_borrowable ?? sm.max_borrowable
+            const isBorrowLimit = (sm.borrow_limit ?? 0) > 0
+            const shown = borrowDisplayUsdt ? formatNumber(val * px, 0) : formatNumber(val, 2)
+            const title = isBorrowLimit
+              ? 'VIP档借贷上限(与持U无关、同VIP各账户相同)'
+              : `有效可借(受引擎封顶)${sm.borrow_cap_reason ? ` · 受限于: ${sm.borrow_cap_reason}` : ''}`
+            return <span className={isBorrowLimit ? 'text-emerald-400/90' : ''} title={title}>{shown}</span>
           })()}
         </td>
       )}
@@ -551,12 +555,14 @@ const SubAccountRow = memo(function SubAccountRow({
           {formatNumber(pos.borrow_qty, 4)}
         </td>
       )}
-      {/* 借币金额 */}
-      {!isMobile && (
-        <td className={numCell}>
-          {pos.open_usdt_amount ? formatNumber(pos.open_usdt_amount) : '-'}
-        </td>
-      )}
+      {/* 借币金额 — 借来的现币(sm.free)× 此币当前U值(spot_bid) */}
+      {!isMobile && (() => {
+        const sm = balance?.symbol_margin?.[pos.symbol]
+        const free = sm?.free ?? 0
+        const spotPrice = spread?.spot_bid ?? 0
+        const val = free * spotPrice
+        return <td className={numCell}>{val > 0.01 ? formatNumber(val, 0) : '-'}</td>
+      })()}
       {/* 风险 — margin level */}
       {!isMobile && (
         <td className={numCell}>
@@ -567,16 +573,18 @@ const SubAccountRow = memo(function SubAccountRow({
           ) : '-'}
         </td>
       )}
-      {/* 保证金 — 杠杆账户净权益(USDT)，回退可用USDT */}
+      {/* 保证金 — BNB U值 + USDT */}
+      {!isMobile && (() => {
+        if (!balance) return <td className={numCell}>-</td>
+        const bnbPrice = spreads.get('BNBUSDT')?.spot_bid ?? 0
+        const bnbVal = balance.bnb_free * bnbPrice
+        const total = bnbVal + balance.margin_usdt_free
+        return <td className={numCell}>{formatNumber(total, 0)}</td>
+      })()}
+      {/* 可用 — 杠杆账户可用USDT(可用来借币) */}
       {!isMobile && (
         <td className={numCell}>
-          {balance ? formatNumber(balance.margin_net_usdt ?? balance.margin_usdt_free, 0) : '-'}
-        </td>
-      )}
-      {/* 可用 */}
-      {!isMobile && (
-        <td className={numCell}>
-          {balance ? formatNumber(balance.futures_available, 0) : '-'}
+          {balance ? formatNumber(balance.margin_usdt_free, 0) : '-'}
         </td>
       )}
       {/* 参数块(持仓经济) */}

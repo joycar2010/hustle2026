@@ -96,6 +96,7 @@ export function useWebSocket() {
               setSummary({
                 positionCount: msg.data.position_count,
                 totalContracts: msg.data.total_contracts ?? 0,
+                masterFuturesPositions: msg.data.master_futures_positions ?? {},
               })
             }
             break

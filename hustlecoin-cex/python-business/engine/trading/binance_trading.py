@@ -371,11 +371,13 @@ class BinanceTradingClient:
             return Decimal(str(data[0].get("dailyInterestRate", "0")))
         return Decimal("0")
 
-    async def get_max_borrowable(self, asset: str) -> Decimal:
+    async def get_max_borrowable(self, asset: str) -> dict:
+        """全仓杠杆最大可借:返回 {amount:当前实际可借(受抵押/VIP/库存取min), borrowLimit:VIP档借贷额度上限}。
+        amount 受账户持U影响、各账户不同;borrowLimit 按VIP档、与持U无关、同VIP各账户相同。"""
         data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/maxBorrowable", {
             "asset": asset,
         })
-        return Decimal(str(data.get("amount", "0")))
+        return {"amount": Decimal(str(data.get("amount", "0"))), "borrowLimit": Decimal(str(data.get("borrowLimit", "0")))}
 
     async def get_loan_records(self, txn_type: str = "BORROW", asset: str = None, size: int = 20) -> dict:
         """币安全仓借/还流水(原始 REST 对账用)。txn_type=BORROW/REPAY。返回 {rows,total}。"""

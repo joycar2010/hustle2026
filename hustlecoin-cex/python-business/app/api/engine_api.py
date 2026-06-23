@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from decimal import Decimal
 
@@ -20,6 +21,8 @@ from engine.schemas import (
     PositionHistoryResponse, HealthResponse, WorkerHealth,
     StuckPosition, APIMetricsResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/engine", tags=["engine"])
 
@@ -603,6 +606,23 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     return {"message": f"Pushed {sym}"}
 
 
+def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids: list[int] = None):
+    """清除某币的单一规则(SymbolRule + AccountSymbolRule),使再推进来时回归全局默认。
+    供 HTTP DELETE 手动移除 & 引擎平仓后自动下架 两条路径复用。"""
+    from app.db.models import SymbolRule, AccountSymbolRule
+    try:
+        db.query(SymbolRule).filter(
+            SymbolRule.user_id == user_id, SymbolRule.symbol == symbol,
+        ).delete(synchronize_session=False)
+        if sub_account_ids:
+            db.query(AccountSymbolRule).filter(
+                AccountSymbolRule.sub_account_id.in_(sub_account_ids), AccountSymbolRule.symbol == symbol,
+            ).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 @router.delete("/push-symbol/{symbol}")
 def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
@@ -629,6 +649,9 @@ def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(ge
     r.set(ps_key, json.dumps(sorted(current)))
     r.hdel(_user_redis_key(user_id, "pushed_at"), sym)  # 清推送时间戳
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+
+    # 移除即清该币的单一规则覆盖(SymbolRule + AccountSymbolRule)→ 再推进来回归全局参数。
+    _purge_symbol_rules(db, user_id, sym, sub_ids)
     return {"message": f"Removed {sym}"}
 
 
@@ -640,6 +663,7 @@ class PartialRepayRequest(BaseModel):
 
 @router.post("/partial-repay")
 async def partial_repay(data: PartialRepayRequest, request: Request, db: Session = Depends(get_db)):
+    """部分/全额还币(杠杆账户)。复用引擎 execute_repay 逻辑:先查实时债务+free,free 不足按 free 封顶(防 -3041),最终失败给可读 400。"""
     user_id = get_current_user_id(request)
     account = db.query(SubAccount).filter(
         SubAccount.id == data.sub_account_id, SubAccount.user_id == user_id,
@@ -648,11 +672,155 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
         raise HTTPException(status_code=404, detail="Sub-account not found")
 
     base_asset = data.symbol.upper().replace("USDT", "")
-    from engine.trading.binance_trading import BinanceTradingClient
-    async with BinanceTradingClient(account.api_key, account.api_secret) as client:
-        await client.margin_repay(base_asset, data.amount)
+    from engine.trading.binance_trading import BinanceTradingClient, BinanceAPIError
 
-    return {"message": f"Repaid {data.amount} {base_asset} for account {account.note}"}
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret) as client:
+            # 1) 读实时债务与现货余额
+            margin = await client.get_margin_account()
+            asset_info = next((a for a in margin.get("userAssets", []) if a.get("asset") == base_asset), None)
+            usdt_info = next((a for a in margin.get("userAssets", []) if a.get("asset") == "USDT"), None)
+            if not asset_info:
+                raise HTTPException(status_code=400, detail=f"账户无 {base_asset} 杠杆资产")
+            borrowed = float(asset_info.get("borrowed", "0") or 0)
+            interest = float(asset_info.get("interest", "0") or 0)
+            free = float(asset_info.get("free", "0") or 0)
+            usdt_free = float(usdt_info.get("free", "0") or 0) if usdt_info else 0.0
+            total_debt = borrowed + interest
+            if total_debt < 1e-8:
+                return {"message": f"{account.note} {base_asset} 无需还币(债务为0)"}
+
+            repay_amount = min(data.amount, total_debt)
+
+            # 2) free 不足时:用 USDT 市价买入差额(常见于已平仓残留利息零头)。
+            #    币安 MARKET BUY 受 NOTIONAL.minNotional(常 5 USDT)+ LOT_SIZE.stepSize 约束,
+            #    故买入量须向上对齐到 minNotional;若子账户 USDT 不够,且全局开了 hedge_via_master,
+            #    自动从主账户 universal_transfer 划 USDT 进子账户杠杆户,再买入还债。
+            shortfall = repay_amount - free
+            if shortfall > 1e-8:
+                # 取交易对过滤器(stepSize / minNotional)+ 现价
+                try:
+                    info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                                 {"symbol": data.symbol.upper()}, signed=False)
+                    sp = info.get("symbols", [{}])[0]
+                    flt = {f["filterType"]: f for f in sp.get("filters", [])}
+                    step = float(flt.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+                    min_notional = float(flt.get("NOTIONAL", {}).get("minNotional", "5") or "5")
+                    tk = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                               {"symbol": data.symbol.upper()}, signed=False)
+                    price = float(tk.get("price", 0) or 0)
+                except Exception:
+                    step, min_notional, price = 0.01, 5.0, 0.0
+
+                if price <= 0:
+                    raise HTTPException(status_code=400, detail=f"无法获取 {base_asset} 价格,稍后重试")
+
+                # 需买入量:满足 minNotional(币安用5分钟均价校验,现价可能偏低)→ 留 +20% 缓冲;
+                # 再向上对齐 stepSize 并多加一档,确保名义价值稳过 NOTIONAL 过滤。
+                import math
+                target_notional = max(min_notional * 1.2, shortfall * price)
+                need_qty = target_notional / price
+                buy_qty = (math.ceil(need_qty / step) + 1) * step  # 向上对齐 stepSize + 多一档
+                buy_cost = buy_qty * price * 1.01           # +1% 余量(滑点/手续费)
+
+                # 子账户 USDT 不够买入 → 主账户按 transfer_order 顺序多源(合约/现货/全仓)累计划转补足
+                if usdt_free < buy_cost:
+                    deficit = buy_cost - usdt_free
+                    from app.db.models import GlobalRules, FundRules
+                    grules = db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
+                    hedge_via_master = bool(getattr(grules, "hedge_via_master", False)) if grules else False
+                    master = _load_master_account(db, user_id)
+                    if not hedge_via_master:
+                        raise HTTPException(status_code=400, detail=f"子账户 USDT 不足(需 {buy_cost:.2f} 缺 {deficit:.2f}),且未开启「主账户自动划转(hedge_via_master)」,无法自动补足。请手动划入 USDT 或开启该功能。")
+                    if not master or not master.api_key or not account.email:
+                        raise HTTPException(status_code=400, detail=f"子账户 USDT 不足且主账户未配置(或子账户无 email),无法自动划转还币。")
+                    # 按 FundRules.transfer_order 顺序从主账户各钱包归集 USDT 到主现货,再万向划转到子账户。
+                    # 注:币安不允许从主账户合约/全仓【直接】跨账户划给子账户(-9000),须先内部归集到主现货。
+                    fr = db.query(FundRules).filter(FundRules.user_id == user_id).first()
+                    order_str = (fr.transfer_order if fr and fr.transfer_order else "futures,spot,margin")
+                    sources = [s.strip() for s in order_str.split(",") if s.strip() in ("spot", "futures", "margin")]
+                    xfer_amt = round(deficit + 1.0, 2)  # 多划 1 USDT 余量
+                    # 内部归集 type 映射(各钱包 → 主现货 MAIN)
+                    _INTERNAL = {"futures": "UMFUTURE_MAIN", "margin": "MARGIN_MAIN"}
+                    try:
+                        from engine.fund.margin_balancer import _master_source_usdt
+                        async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+                            bal = await _master_source_usdt(mc, sources)
+                            spot_have = float(bal.get("spot", 0))
+                            need_collect = max(0.0, xfer_amt - spot_have)
+                            # 按 transfer_order 从非现货源归集到主现货
+                            for src in sources:
+                                if need_collect <= 0:
+                                    break
+                                if src == "spot":
+                                    continue
+                                avail = float(bal.get(src, 0))
+                                take = round(min(need_collect, avail), 2)
+                                if take <= 0:
+                                    continue
+                                try:
+                                    await mc.transfer(_INTERNAL[src], "USDT", Decimal(str(take)))
+                                    need_collect -= take
+                                except Exception:
+                                    continue
+                            if need_collect > 0.01:
+                                raise HTTPException(status_code=400, detail=f"主账户各钱包({order_str})USDT 合计不足,无法归集 {xfer_amt} USDT 还币。")
+                            # 主现货 → 子账户 MARGIN(子账户万向划转,SPOT 起源)
+                            await mc.universal_transfer(
+                                asset="USDT", amount=Decimal(str(xfer_amt)),
+                                from_account_type="SPOT", to_account_type="MARGIN",
+                                from_email=None, to_email=account.email,
+                            )
+                        usdt_free += xfer_amt
+                        logger.info(f"partial_repay: 主账户按序({order_str})归集+划转 {xfer_amt} USDT → 子账户 {account.note} 还币零头")
+                    except HTTPException:
+                        raise
+                    except Exception as xe:
+                        raise HTTPException(status_code=400, detail=f"主账户自动划转 USDT 失败: {str(xe)[:120]}")
+
+                # 市价买入 base_asset(NO_SIDE_EFFECT=只用现有 USDT,不借币)
+                try:
+                    buy_result = await client._request(
+                        "POST", "https://api.binance.com/sapi/v1/margin/order",
+                        {
+                            "symbol": data.symbol.upper(),
+                            "side": "BUY",
+                            "type": "MARKET",
+                            "quantity": f"{buy_qty:.8f}",
+                            "sideEffectType": "NO_SIDE_EFFECT",
+                            "isIsolated": "FALSE",
+                        }
+                    )
+                    executed = float(buy_result.get("executedQty", buy_qty) or buy_qty)
+                    free += executed
+                    repay_amount = min(total_debt, free)  # 买入后按债务全额还
+                except Exception as buy_err:
+                    raise HTTPException(status_code=400, detail=f"买入 {base_asset} 还币失败: {str(buy_err)[:100]}")
+
+            if repay_amount < 1e-8:
+                raise HTTPException(status_code=400, detail=f"可还数量为 0(free={free:.6f}),无法还币")
+
+            # 3) 还币,带重试
+            for attempt in range(3):
+                try:
+                    await client.margin_repay(base_asset, repay_amount)
+                    break
+                except BinanceAPIError as e:
+                    if e.code == -3041 and attempt < 2:
+                        repay_amount *= 0.999
+                        continue
+                    raise
+
+            return {
+                "message": f"已还 {repay_amount:.6f} {base_asset} (账户 {account.note})",
+                "repaid": float(repay_amount), "debt_before": total_debt, "free_before": free,
+            }
+    except BinanceAPIError as e:
+        raise HTTPException(status_code=400, detail=f"还币失败(币安 {e.code}): {e.message}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"还币失败: {str(e)}")
 
 
 # ─── Manual Open / Close (executed API-side, works regardless of engine state) ───

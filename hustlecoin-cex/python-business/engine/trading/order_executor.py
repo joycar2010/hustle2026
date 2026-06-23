@@ -328,7 +328,9 @@ async def execute_borrow(
         if borrow_mode in ("otoco", "single", "multi") and cap_usdt is not None and Decimal(str(cap_usdt)) > 0:
             # 挂单借币: 借满「金额限制」∩ maxBorrowable(币捏手上,后续按单笔分批对冲)
             try:
-                max_borrowable = await client.get_max_borrowable(base_asset)
+                mb = await client.get_max_borrowable(base_asset)
+                # get_max_borrowable 返回 {"amount":Decimal,"borrowLimit":Decimal};取实际可借 amount
+                max_borrowable = mb["amount"] if isinstance(mb, dict) else mb
             except Exception:
                 max_borrowable = Decimal("0")
             cap_qty = Decimal(str(cap_usdt)) / price if price > 0 else Decimal("0")

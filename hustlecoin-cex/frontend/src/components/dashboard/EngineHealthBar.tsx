@@ -5,8 +5,9 @@ import { useBalanceStore } from '@/stores/balanceStore'
 import { useToastStore } from '@/components/ui/toast'
 import {
   Activity, AlertTriangle, ChevronDown, ChevronUp,
-  Heart, Server, Zap, Gauge, Clock,
+  Heart, Server, Zap, Gauge, Clock, Wallet,
 } from 'lucide-react'
+import { HoldingsSummary } from './HoldingsSummary'
 
 const STATUS_CONFIG = {
   HEALTHY: { label: '正常', variant: 'success' as const, icon: Heart },
@@ -27,6 +28,7 @@ function fmtUptime(sec: number): string {
 export function EngineHealthBar() {
   const [health, setHealth] = useState<EngineHealth | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [showHoldings, setShowHoldings] = useState(false)
   const [error, setError] = useState(false)
   const balanceSummary = useBalanceStore((s) => s.summary)  // 顶栏「合约 未平/累计」移到此
   const addToast = useToastStore((s) => s.addToast)
@@ -170,7 +172,14 @@ export function EngineHealthBar() {
           <span>合约 <span className="text-primary">{balanceSummary.positionCount}</span>/<span className="text-muted-foreground">{balanceSummary.totalContracts}</span></span>
         </div>
 
-        <div className="ml-auto">
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowHoldings(true) }}
+          title="持币汇总 — 各子账户已借币种,逐笔单独还币"
+          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/60"
+        >
+          <Wallet className="h-3 w-3" />持币汇总
+        </button>
+        <div>
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </div>
       </button>
@@ -254,6 +263,7 @@ export function EngineHealthBar() {
           )}
         </div>
       )}
+      {showHoldings && <HoldingsSummary onClose={() => setShowHoldings(false)} />}
     </div>
   )
 }
