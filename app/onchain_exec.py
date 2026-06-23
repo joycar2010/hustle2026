@@ -52,8 +52,9 @@ class OnchainExec:
         return self._rpc_cache[chain_id]
 
     def _send_tx(self, rpc, signer, wallet: str, to: str, value: int, data_hex: str,
-                 gas_hint=None) -> str:
-        """构造 EIP-1559 交易 → KMS 签名 → 广播,返回 tx hash(不等回执)。"""
+                 gas_hint=None, nonce: int | None = None) -> str:
+        """构造 EIP-1559 交易 → KMS 签名 → 广播,返回 tx hash(不等回执)。
+        nonce 显式传入时用传入值(approve→swap 连续两笔须显式递增,防 pending 视图滞后冲突)。"""
         max_fee, prio = rpc.fees()
         est_tx = {"from": wallet, "to": to, "value": hex(value), "data": data_hex}
         try:
@@ -62,7 +63,7 @@ class OnchainExec:
             gas = int((gas_hint or 800000) * 1.3)
             logger.warning("estimate_gas 失败(%s),用兜底 gas=%d", e, gas)
         tx = {
-            "nonce": rpc.nonce(wallet),
+            "nonce": rpc.nonce(wallet) if nonce is None else nonce,
             "maxPriorityFeePerGas": prio,
             "maxFeePerGas": max_fee,
             "gas": gas,
@@ -74,24 +75,31 @@ class OnchainExec:
         return rpc.send_raw(raw.hex())
 
     def _ensure_allowance(self, rpc, signer, wallet: str, token: str, spender: str,
-                          need: int, stable_decimals: int):
-        """授权不足则授权一笔(有上限,非无限授权),等回执确认。"""
+                          need: int, stable_decimals: int) -> int | None:
+        """授权不足则授权一笔(有上限,非无限授权),等回执确认。
+        返回 approve 后应使用的下一个 nonce(None=未发approve,调用方查pending)。"""
+        from .chain_rpc import receipt_ok
         cur = rpc.erc20_allowance(token, wallet, spender)
         if cur >= need:
-            return
+            return None
         cap = int(round(self.approve_cap_usd * (10 ** stable_decimals)))
-        approve_amt = max(cap, need)
+        if need > cap:  # cap 是硬上限:需求超限即拒,绝不放大授权(防风控失效)
+            raise RuntimeError(f"授权需求 {need} 超配置上限 {cap}(${self.approve_cap_usd}),拒绝执行")
+        approve_amt = cap  # 一次授到上限,避免每笔都 approve;但有限额非无限
         data = rpc.erc20_approve_data(spender, approve_amt)
-        txh = self._send_tx(rpc, signer, wallet, to=token, value=0, data_hex=data)
+        approve_nonce = rpc.nonce(wallet)
+        txh = self._send_tx(rpc, signer, wallet, to=token, value=0, data_hex=data, nonce=approve_nonce)
         rc = rpc.wait_receipt(txh, self.recv_timeout)
-        if int(rc.get("status", "0x0"), 16) != 1:
+        if not receipt_ok(rc):
             raise RuntimeError(f"approve 交易失败 status!=1 tx={txh}")
         logger.info("approve 完成 token=%s spender=%s amt=%d tx=%s", token, spender, approve_amt, txh)
+        # approve 已确认 → swap 用 confirmed_nonce(latest),避免 pending 滞后致两笔同 nonce
+        return rpc.confirmed_nonce(wallet)
 
     def execute_buy(self, m: Market, notional_usd: float, quote) -> dict:
         """执行买入腿。
         dry-run/testnet:不上链,返回"假装买到 quote.base_out"(供协调器/埋点继续走流程)。
-        live:稳定币→base 真 swap 上链,按余额差实测真实到账量。
+        live:稳定币→base 真 swap 上链,从【本笔回执 Transfer 事件】实测真实到账量(不用余额差,防同区块污染)。
         返回 {executed, mode, base_out, eff_price, gas_usd, tx_hash?}。
         """
         if self.mode != "live":
@@ -102,6 +110,7 @@ class OnchainExec:
         # ---- live:真金不可逆,守卫齐全才执行 ----
         if not (self.kms_key_id and self.wallet_addr and self.rpc_url):
             raise RuntimeError("live 模式缺 KMS_KEY_ID / WALLET_ADDR / RPC,拒绝执行(防误触真金)")
+        from .chain_rpc import receipt_ok
         ch = chain_of(m.chain)
         rpc = self._get_rpc(ch.chain_id)
         signer = self._get_signer()
@@ -116,22 +125,23 @@ class OnchainExec:
         calldata = build["data"]
         value = int(build.get("transactionValue", 0) or 0)
 
-        # ② 授权(USDC → router),不足才授权
-        self._ensure_allowance(rpc, signer, wallet, rpc.checksum(ch.stable), router,
-                               amount_in, ch.stable_decimals)
+        # ② 授权(USDC → router),不足才授权;返回 approve 后应用的 nonce
+        next_nonce = self._ensure_allowance(rpc, signer, wallet, rpc.checksum(ch.stable), router,
+                                            amount_in, ch.stable_decimals)
 
-        # ③ 记录买入前 base 余额 → swap → 等回执 → 按余额差实测到账(不信报价,信链上)
-        bal_before = rpc.erc20_balance(m.base_token, wallet)
+        # ③ swap → 等回执 → 从本笔 Transfer 事件实测到账(只信本 tx,不用全局余额差)
         txh = self._send_tx(rpc, signer, wallet, to=router, value=value, data_hex=calldata,
-                            gas_hint=build.get("gas"))
+                            gas_hint=build.get("gas"), nonce=next_nonce)
         rc = rpc.wait_receipt(txh, self.recv_timeout)
-        if int(rc.get("status", "0x0"), 16) != 1:
+        if not receipt_ok(rc):
             raise RuntimeError(f"swap 交易失败 status!=1 tx={txh}")
-        bal_after = rpc.erc20_balance(m.base_token, wallet)
-        got = bal_after - bal_before
-        if got <= 0:
-            raise RuntimeError(f"swap 成交但未收到 base(Δ={got})tx={txh}")
-        base_out = got / (10 ** m.base_decimals)
+        got_raw = rpc.transfer_in_from_logs(rc, m.base_token, wallet)
+        if got_raw <= 0:
+            raise RuntimeError(f"swap 成交但回执无转入 base 的 Transfer 事件 tx={txh}")
+        base_out = got_raw / (10 ** m.base_decimals)
+        # 与报价偏离过大(>3%)→ 可能小数位配错/路由异常,拒绝(防错量去做空致裸腿)
+        if quote.base_out > 0 and abs(base_out - quote.base_out) / quote.base_out > 0.03:
+            raise RuntimeError(f"实测到账 {base_out:.8f} 与报价 {quote.base_out:.8f} 偏离>3%,拒绝(疑小数位/路由异常)tx={txh}")
         eff_price = notional_usd / base_out
         logger.info("买入成交 %s base_out=%.8f eff=%.6f tx=%s", m.key, base_out, eff_price, txh)
         return {"executed": True, "mode": "live", "base_out": base_out, "eff_price": eff_price,
@@ -143,6 +153,7 @@ class OnchainExec:
             return {"executed": False, "mode": self.mode, "note": "dry-run: 不实际卖回"}
         if not (self.kms_key_id and self.wallet_addr and self.rpc_url):
             raise RuntimeError("live 卖回缺 KMS/钱包/RPC,拒绝执行")
+        from .chain_rpc import receipt_ok
         ch = chain_of(m.chain)
         rpc = self._get_rpc(ch.chain_id)
         signer = self._get_signer()
@@ -152,14 +163,13 @@ class OnchainExec:
         build = self._agg.route_build(ch.kyber_slug, rs, sender=wallet, recipient=wallet,
                                       slippage_bps=self.slippage_bps)
         router = rpc.checksum(build["routerAddress"])
-        self._ensure_allowance(rpc, signer, wallet, m.base_token, router, amount_in, m.base_decimals)
-        usdc_before = rpc.erc20_balance(rpc.checksum(ch.stable), wallet)
+        next_nonce = self._ensure_allowance(rpc, signer, wallet, m.base_token, router, amount_in, m.base_decimals)
         txh = self._send_tx(rpc, signer, wallet, to=router, value=int(build.get("transactionValue", 0) or 0),
-                            data_hex=build["data"], gas_hint=build.get("gas"))
+                            data_hex=build["data"], gas_hint=build.get("gas"), nonce=next_nonce)
         rc = rpc.wait_receipt(txh, self.recv_timeout)
-        if int(rc.get("status", "0x0"), 16) != 1:
+        if not receipt_ok(rc):
             raise RuntimeError(f"卖回交易失败 status!=1 tx={txh}")
-        usdc_after = rpc.erc20_balance(rpc.checksum(ch.stable), wallet)
-        usdc_out = (usdc_after - usdc_before) / (10 ** ch.stable_decimals)
+        usdc_raw = rpc.transfer_in_from_logs(rc, ch.stable, wallet)
+        usdc_out = usdc_raw / (10 ** ch.stable_decimals)
         logger.info("卖回成交 %s usdc_out=%.4f tx=%s", m.key, usdc_out, txh)
         return {"executed": True, "mode": "live", "usdc_out": usdc_out, "tx_hash": txh}

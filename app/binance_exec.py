@@ -45,10 +45,23 @@ class BinanceExec:
         self._sem = threading.Semaphore(3)
         self._info = None
         self._info_ts = 0.0
+        self._time_offset = 0  # 本地时钟 vs 币安服务器偏移(ms)
+        self._time_synced = False
+
+    def sync_time(self):
+        """与币安服务器同步时钟偏移,防本地时钟漂移致 -1021(timestamp 超窗)。"""
+        try:
+            d = self._request("GET", "/fapi/v1/time", signed=False)
+            self._time_offset = int(d.get("serverTime", 0)) - int(time.time() * 1000)
+            self._time_synced = True
+            logger.info("币安时钟同步: 偏移 %d ms", self._time_offset)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("币安时钟同步失败(用本地时间): %s", e)
 
     # ---- 签名/请求(保留 coin 的限频退避,去 metrics)----
     def _sign(self, params: dict) -> str:
-        params["timestamp"] = int(time.time() * 1000)
+        params["timestamp"] = int(time.time() * 1000) + self._time_offset
+        params.setdefault("recvWindow", 5000)  # 5s 容差窗,吸收网络延迟
         query = urlencode(params)
         sig = hmac.new(self._api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
         return f"{query}&signature={sig}"

@@ -53,7 +53,11 @@ class KmsSigner:
         nums = pub.public_numbers()
         raw = nums.x.to_bytes(32, "big") + nums.y.to_bytes(32, "big")
         addr = to_checksum_address(keccak(raw)[-20:])
-        if self.expected_address and addr.lower() != self.expected_address:
+        if not self.expected_address:
+            # live 必须显式指定钱包地址核对 —— 否则任意 KMS key 派生地址都被接受,可能动错钱包
+            raise RuntimeError(
+                f"KmsSigner 缺 expected_address(live 必填,防动错钱包)。当前 KMS 派生地址={addr}")
+        if addr.lower() != self.expected_address:
             raise RuntimeError(
                 f"KMS 派生地址 {addr} 与期望 {self.expected_address} 不符 —— 拒绝签名(防动错钱包)")
         self._addr = addr

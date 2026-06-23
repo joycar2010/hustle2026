@@ -14,6 +14,7 @@ import time
 from decimal import Decimal
 
 from .binance_exec import FUTURES_LIVE, FUTURES_TESTNET, BinanceExec
+from .chain_rpc import PendingTxError
 from .config import cfg
 from .markets import load_markets
 from .onchain_exec import OnchainExec
@@ -38,6 +39,8 @@ class ExecCoordinator(threading.Thread):
         self.market = markets.get(cfg.exec_market)
         base = FUTURES_TESTNET if self.mode == "testnet" else FUTURES_LIVE
         self.bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, base_url=base)
+        if self.mode in ("testnet", "live"):
+            self.bn.sync_time()  # 同步币安时钟,防 -1021
         self.onchain = OnchainExec(
             self.mode, cfg.exec_wallet_addr, cfg.exec_kms_key_id, cfg.kyber_client_id,
             rpc_url=cfg.exec_rpc, kms_region=cfg.exec_kms_region, slippage_bps=cfg.exec_slippage_bps,
@@ -88,6 +91,14 @@ class ExecCoordinator(threading.Thread):
         # ① 链上买入腿
         try:
             buy = self.onchain.execute_buy(m, notional, q)
+        except PendingTxError as pe:
+            # swap 已广播但超时未确认 —— 状态未知!绝不能继续做空(可能已买入也可能没),
+            # 也绝不能重发(防双花)。记 HALT 并熔断停机,等人工核对链上后再启。
+            out.update(outcome="BUY_PENDING_HALT",
+                       note=f"链上买入状态未知,已停机待人工核对: {pe}")
+            self._log(out)
+            self._stop.set()  # 触发停机,防止带着未知敞口继续
+            return
         except Exception as e:  # noqa: BLE001
             out.update(outcome="BUY_FAIL", note=f"{type(e).__name__}: {e}")
             self._log(out); return

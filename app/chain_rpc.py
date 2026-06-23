@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 
 import requests
-from eth_utils import to_checksum_address
 
 # 知名 ERC20 函数选择器(keccak[:4],写死避免运行时计算)
 SEL_APPROVE = "095ea7b3"      # approve(address,uint256)
@@ -18,11 +17,35 @@ SEL_BALANCEOF = "70a08231"    # balanceOf(address)
 
 
 def _enc_addr(addr: str) -> str:
-    return "0" * 24 + addr.lower().replace("0x", "")
+    clean = addr.lower().replace("0x", "")
+    if len(clean) != 40 or any(c not in "0123456789abcdef" for c in clean):
+        raise ValueError(f"非法地址(需40位hex): {addr}")
+    return "0" * 24 + clean
 
 
 def _enc_uint(v: int) -> str:
     return f"{v:064x}"
+
+
+# ERC20 Transfer 事件 topic0 = keccak("Transfer(address,address,uint256)")
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def receipt_ok(rc: dict) -> bool:
+    """健壮判定回执成功:容忍 status 为 hex 串("0x1")或整数(1);缺字段视为失败。"""
+    if not rc:
+        return False
+    st = rc.get("status")
+    if st is None:
+        return False
+    try:
+        return (int(st, 16) if isinstance(st, str) else int(st)) == 1
+    except (ValueError, TypeError):
+        return False
+
+
+class PendingTxError(Exception):
+    """交易已广播但超时仍在 mempool —— 状态未知。严禁当失败重发(会双花)。"""
 
 
 class ChainRpc:
@@ -45,7 +68,13 @@ class ChainRpc:
 
     # ---- 基础读 ----
     def nonce(self, addr: str) -> int:
+        """pending nonce(含 mempool 未确认)。approve→swap 连续两笔间用 confirmed_nonce+本地推进,
+        不重复查 pending(L2 pending 视图滞后会致两笔同 nonce 冲突)。"""
         return int(self._call("eth_getTransactionCount", [addr, "pending"]), 16)
+
+    def confirmed_nonce(self, addr: str) -> int:
+        """已确认 nonce(latest);approve 回执后用它派生 swap 的 nonce,避免 pending 滞后冲突。"""
+        return int(self._call("eth_getTransactionCount", [addr, "latest"]), 16)
 
     def eth_balance(self, addr: str) -> int:
         return int(self._call("eth_getBalance", [addr, "latest"]), 16)
@@ -67,10 +96,11 @@ class ChainRpc:
             return 1_000_000  # 0.001 gwei
 
     def fees(self) -> tuple[int, int]:
-        """返回 (maxFeePerGas, maxPriorityFeePerGas);maxFee 留 2x base 余量防区块抬费。"""
+        """返回 (maxFeePerGas, maxPriorityFeePerGas);maxFee 留 3x base 余量防区块抬费。
+        OP base fee 可能数秒内翻倍;2x 余量在突涨时会卡单致裸腿,故用 3x。"""
         prio = self.priority_fee()
         base = self.base_fee()
-        return base * 2 + prio, prio
+        return base * 3 + prio, prio
 
     # ---- 广播 + 回执 ----
     def send_raw(self, raw_hex: str) -> str:
@@ -78,14 +108,29 @@ class ChainRpc:
             raw_hex = "0x" + raw_hex
         return self._call("eth_sendRawTransaction", [raw_hex])
 
+    def tx_by_hash(self, tx_hash: str) -> dict | None:
+        """查交易本身(判断是否已被打包/仍在 mempool);None=节点不知道此交易。"""
+        return self._call("eth_getTransactionByHash", [tx_hash])
+
     def wait_receipt(self, tx_hash: str, timeout: float = 120.0, poll: float = 2.0) -> dict:
+        """等回执。超时不立即放弃 —— 先做一次终态确认(交易可能已上链只是回执慢):
+        - 若已有回执 → 返回(成败由上层 receipt_ok 判)
+        - 若交易仍在 mempool(pending,blockNumber=None)→ 抛 PendingError(状态未知,严禁当失败重发=防双花)
+        - 若节点完全不知道此交易 → 抛 TimeoutError(可安全判失败)"""
         deadline = time.time() + timeout
         while time.time() < deadline:
             rc = self._call("eth_getTransactionReceipt", [tx_hash])
             if rc:
                 return rc
             time.sleep(poll)
-        raise TimeoutError(f"等回执超时 {tx_hash}")
+        # 超时终态确认
+        rc = self._call("eth_getTransactionReceipt", [tx_hash])
+        if rc:
+            return rc
+        tx = self.tx_by_hash(tx_hash)
+        if tx is not None and tx.get("blockNumber") is None:
+            raise PendingTxError(f"交易仍在mempool未确认(状态未知,勿重发): {tx_hash}")
+        raise TimeoutError(f"等回执超时且节点无此交易(可判失败): {tx_hash}")
 
     # ---- ERC20 ----
     def erc20_balance(self, token: str, owner: str) -> int:
@@ -97,9 +142,30 @@ class ChainRpc:
         return int(res, 16) if res and res != "0x" else 0
 
     @staticmethod
+    def transfer_in_from_logs(rc: dict, token: str, to_wallet: str) -> int:
+        """从回执 logs 解析【本笔交易】转入 wallet 的指定 token 总量(只信本 tx 的 Transfer 事件,
+        不依赖全局余额差 —— 避免同区块其他转账污染)。token/to_wallet 不区分大小写。"""
+        token_l = token.lower()
+        to_l = to_wallet.lower().replace("0x", "")
+        total = 0
+        for lg in rc.get("logs", []):
+            if lg.get("address", "").lower() != token_l:
+                continue
+            topics = lg.get("topics", [])
+            if len(topics) < 3 or topics[0].lower() != TRANSFER_TOPIC:
+                continue
+            # topics[2] = to(左填充到32B);取后40位比对
+            if topics[2][-40:].lower() != to_l:
+                continue
+            data = lg.get("data", "0x")
+            total += int(data, 16) if data and data != "0x" else 0
+        return total
+
+    @staticmethod
     def erc20_approve_data(spender: str, amount: int) -> str:
         return "0x" + SEL_APPROVE + _enc_addr(spender) + _enc_uint(amount)
 
     @staticmethod
     def checksum(addr: str) -> str:
+        from eth_utils import to_checksum_address  # 惰性:dry-run 不依赖 eth_utils
         return to_checksum_address(addr)
