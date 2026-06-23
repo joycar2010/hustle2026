@@ -93,8 +93,17 @@ def build_message() -> str:
     rep = build_report(cfg.csv_path, thr)
     d24 = _last24h(cfg.csv_path, thr)
     L = ["📊 CrossArb 影子日报", f"阈值 net>{thr:g}bps · 看板 https://dex.hustle2026.xyz/report", "",
-         "【近24小时】"]
-    for m in rep["markets"]:
+         "【近24小时·按机会高到低】"]
+    # 按近24h机会数降序;机会数相同则按最佳net降序(最有价值的市场排最前)
+    markets_sorted = sorted(
+        rep["markets"],
+        key=lambda m: (
+            d24.get(m["market"], {}).get("opp", 0),
+            d24.get(m["market"], {}).get("best", -1e18),
+        ),
+        reverse=True,
+    )
+    for m in markets_sorted:
         a = d24.get(m["market"], {"n": 0, "opp": 0, "best": None})
         best = f"{a['best']:.1f}" if a["n"] else "—"
         flag = " ⚠有机会" if a["opp"] > 0 else ""
