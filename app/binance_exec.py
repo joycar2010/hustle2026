@@ -126,19 +126,29 @@ class BinanceExec:
         return (qty / step).to_integral_value(rounding=ROUND_DOWN) * step if step > 0 else qty
 
     # ---- 做空腿下单(方向与 coin 的 long 对冲腿相反)----
-    def futures_market_short(self, symbol: str, quantity: Decimal, client_order_id: str | None = None) -> dict:
-        """市价开空(SELL)。newOrderRespType=RESULT 拿真实 executedQty/avgPrice(fapi 市价单默认 ACK=0)。"""
+    def futures_market_short(self, symbol: str, quantity: Decimal, client_order_id: str | None = None,
+                             dual: bool = False) -> dict:
+        """市价开空(SELL)。newOrderRespType=RESULT 拿真实 executedQty/avgPrice(fapi 市价单默认 ACK=0)。
+        dual=True(双向持仓模式):带 positionSide=SHORT(此模式下不能带 reduceOnly)。
+        dual=False(单向模式):普通 SELL。"""
         params = {"symbol": symbol, "side": "SELL", "type": "MARKET",
                   "quantity": str(quantity), "newOrderRespType": "RESULT"}
+        if dual:
+            params["positionSide"] = "SHORT"
         if client_order_id:
             params["newClientOrderId"] = client_order_id
         return self._request("POST", "/fapi/v1/order", params)
 
-    def futures_close_short(self, symbol: str, quantity: Decimal) -> dict:
-        """市价平空(BUY reduceOnly)。"""
-        return self._request("POST", "/fapi/v1/order", {
-            "symbol": symbol, "side": "BUY", "type": "MARKET",
-            "quantity": str(quantity), "reduceOnly": "true", "newOrderRespType": "RESULT"})
+    def futures_close_short(self, symbol: str, quantity: Decimal, dual: bool = False) -> dict:
+        """市价平空(BUY)。dual=True:positionSide=SHORT(隐含平空,不带reduceOnly);
+        dual=False:BUY + reduceOnly。"""
+        params = {"symbol": symbol, "side": "BUY", "type": "MARKET",
+                  "quantity": str(quantity), "newOrderRespType": "RESULT"}
+        if dual:
+            params["positionSide"] = "SHORT"  # 双向模式:平 SHORT 仓
+        else:
+            params["reduceOnly"] = "true"
+        return self._request("POST", "/fapi/v1/order", params)
 
     def get_order_by_client_id(self, symbol: str, client_order_id: str) -> dict:
         """下单响应丢失(超时/5xx)时,按 clientOrderId 复核真实成交量,绝不按 0 计致裸腿。"""

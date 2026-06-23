@@ -51,6 +51,23 @@ class OnchainExec:
             self._rpc_cache[chain_id] = ChainRpc(self.rpc_url, chain_id, timeout=12)
         return self._rpc_cache[chain_id]
 
+    def _route_and_build(self, slug: str, token_in: str, token_out: str, amount_in: int,
+                         wallet: str) -> dict:
+        """拉新鲜 route → build calldata,整体重试。
+        route_summary 有时效,过期后 build 报 400;重试时【重新 route_raw】(用同一旧 summary 重试无意义)。"""
+        import time as _t
+        last = None
+        for i in range(3):
+            try:
+                rs = self._agg.route_raw(slug, token_in, token_out, amount_in)
+                return self._agg.route_build(slug, rs, sender=wallet, recipient=wallet,
+                                             slippage_bps=self.slippage_bps)
+            except Exception as e:  # noqa: BLE001 —— 400(route过期)/超时都重新拉route再试
+                last = e
+                if i < 2:
+                    _t.sleep(0.8 * (i + 1))
+        raise last
+
     def _send_tx(self, rpc, signer, wallet: str, to: str, value: int, data_hex: str,
                  gas_hint=None, nonce: int | None = None) -> str:
         """构造 EIP-1559 交易 → KMS 签名 → 广播,返回 tx hash(不等回执)。
@@ -117,10 +134,8 @@ class OnchainExec:
         wallet = signer.address()  # 同时强制校验 == expected,不符即抛错
         amount_in = int(round(notional_usd * (10 ** ch.stable_decimals)))
 
-        # ① 构造可上链 calldata(GET routes → POST build),minOut 滑点保护已编进 data
-        rs = self._agg.route_raw(ch.kyber_slug, ch.stable, m.base_token, amount_in)
-        build = self._agg.route_build(ch.kyber_slug, rs, sender=wallet, recipient=wallet,
-                                      slippage_bps=self.slippage_bps)
+        # ① 构造可上链 calldata(GET routes → POST build),minOut 滑点保护已编进 data;过期自动重拉
+        build = self._route_and_build(ch.kyber_slug, ch.stable, m.base_token, amount_in, wallet)
         router = rpc.checksum(build["routerAddress"])
         calldata = build["data"]
         value = int(build.get("transactionValue", 0) or 0)
@@ -159,9 +174,7 @@ class OnchainExec:
         signer = self._get_signer()
         wallet = signer.address()
         amount_in = int(round(base_qty * (10 ** m.base_decimals)))
-        rs = self._agg.route_raw(ch.kyber_slug, m.base_token, ch.stable, amount_in)
-        build = self._agg.route_build(ch.kyber_slug, rs, sender=wallet, recipient=wallet,
-                                      slippage_bps=self.slippage_bps)
+        build = self._route_and_build(ch.kyber_slug, m.base_token, ch.stable, amount_in, wallet)
         router = rpc.checksum(build["routerAddress"])
         next_nonce = self._ensure_allowance(rpc, signer, wallet, m.base_token, router, amount_in, m.base_decimals)
         txh = self._send_tx(rpc, signer, wallet, to=router, value=int(build.get("transactionValue", 0) or 0),

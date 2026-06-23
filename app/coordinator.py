@@ -39,8 +39,13 @@ class ExecCoordinator(threading.Thread):
         self.market = markets.get(cfg.exec_market)
         base = FUTURES_TESTNET if self.mode == "testnet" else FUTURES_LIVE
         self.bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, base_url=base)
+        self.dual_mode = False  # 持仓模式:True=双向(下单带positionSide)
         if self.mode in ("testnet", "live"):
             self.bn.sync_time()  # 同步币安时钟,防 -1021
+            try:
+                self.dual_mode = self.bn.position_mode_dual()  # 自动适配单向/双向
+            except Exception:  # noqa: BLE001
+                pass
         self.onchain = OnchainExec(
             self.mode, cfg.exec_wallet_addr, cfg.exec_kms_key_id, cfg.kyber_client_id,
             rpc_url=cfg.exec_rpc, kms_region=cfg.exec_kms_region, slippage_bps=cfg.exec_slippage_bps,
@@ -115,7 +120,7 @@ class ExecCoordinator(threading.Thread):
         if self.mode in ("testnet", "live") and qty > 0:
             try:
                 coid = f"cax{int(t0*1000)}"
-                resp = self.bn.futures_market_short(m.binance_symbol, qty, coid)
+                resp = self.bn.futures_market_short(m.binance_symbol, qty, coid, dual=self.dual_mode)
                 ap = resp.get("avgPrice") or resp.get("avgprice")
                 short_price = float(ap) if ap and float(ap) > 0 else short_price
                 actual_short_qty = float(resp.get("executedQty", 0) or qty)
