@@ -78,15 +78,17 @@ class ExecCoordinator(threading.Thread):
             aid, sec = cfg.feishu_app_id, cfg.feishu_app_secret
             if not (aid and sec):
                 return
-            if cfg.feishu_email:
-                rtype, rid = "email", cfg.feishu_email
-            elif cfg.feishu_open_id:
-                rtype, rid = "open_id", cfg.feishu_open_id
-            elif cfg.feishu_mobile:
+            # mobile 优先(解析本应用 open_id);其次 email;最后才用配置的 open_id
+            # (配置里的 open_id 可能是跨应用的,直接用会 'open_id cross app' 失败)
+            if cfg.feishu_mobile:
                 oid, _ = resolve_open_id_by_mobile(aid, sec, cfg.feishu_mobile)
                 if not oid:
                     return
                 rtype, rid = "open_id", oid
+            elif cfg.feishu_email:
+                rtype, rid = "email", cfg.feishu_email
+            elif cfg.feishu_open_id:
+                rtype, rid = "open_id", cfg.feishu_open_id
             else:
                 return
             send_text(aid, sec, rtype, rid, text)
