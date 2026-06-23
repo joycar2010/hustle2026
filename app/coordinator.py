@@ -69,6 +69,30 @@ class ExecCoordinator(threading.Thread):
             with open(self.log_path, "w", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow(EXEC_LOG_COLS)
 
+    def _feishu(self, text: str):
+        """推飞书(复用 feishu_daily 发送逻辑)。异常静默,绝不影响交易主流程。"""
+        if self.mode == "dry-run":
+            return  # dry-run 不打扰
+        try:
+            from .feishu_daily import send_text, resolve_open_id_by_mobile
+            aid, sec = cfg.feishu_app_id, cfg.feishu_app_secret
+            if not (aid and sec):
+                return
+            if cfg.feishu_email:
+                rtype, rid = "email", cfg.feishu_email
+            elif cfg.feishu_open_id:
+                rtype, rid = "open_id", cfg.feishu_open_id
+            elif cfg.feishu_mobile:
+                oid, _ = resolve_open_id_by_mobile(aid, sec, cfg.feishu_mobile)
+                if not oid:
+                    return
+                rtype, rid = "open_id", oid
+            else:
+                return
+            send_text(aid, sec, rtype, rid, text)
+        except Exception:  # noqa: BLE001 —— 告警失败绝不拖累交易
+            pass
+
     def _restore_circuit_state(self):
         """从 exec_log.csv 重建【当日】熔断计数(防进程重启清零绕过单数/单日上限)。
         只算今天(UTC)的成交记录;跨日自然重置。"""
@@ -152,6 +176,7 @@ class ExecCoordinator(threading.Thread):
                        note=f"链上买入状态未知,已停机待人工核对: {pe}")
             self._log(out)
             self.halted = True
+            self._feishu(f"🛑 CrossArb 链上买入状态未知,已停机!\n{pe}\n请人工核对链上 tx 后处理")
             self._stop.set()  # 触发停机,防止带着未知敞口继续
             return
         except Exception as e:  # noqa: BLE001
@@ -194,6 +219,7 @@ class ExecCoordinator(threading.Thread):
                     # 确认未成交 → 裸多敞口!live 须立即卖回止损
                     out.update(short_executed=0, outcome="SHORT_FAIL_NAKED",
                                note=f"做空失败(裸腿!): {type(e).__name__}: {e}")
+                    sellback_ok = True
                     if self.mode == "live":
                         try:
                             self.onchain.sell_back(m, base_out)
@@ -202,10 +228,18 @@ class ExecCoordinator(threading.Thread):
                             # 卖回也失败 → 真裸多残留!立即停机,人工处理
                             out["note"] += f" | 卖回也失败,停机待人工: {e2}"
                             self.halted = True
+                            sellback_ok = False
                     self._log(out)
                     self.trades += 1; self.consec_loss += 1; self.consec_naked += 1
+                    if not sellback_ok:
+                        self._feishu(f"🛑🛑 CrossArb 裸多残留!{m.key} 做空失败且卖回也失败,已停机!\n"
+                                     f"{out.get('note','')[:150]}\n立即人工处理链上多头!")
+                    else:
+                        self._feishu(f"⚠ CrossArb 裸腿 {m.key} 做空失败已卖回止损 "
+                                     f"(连续{self.consec_naked}/3)")
                     if self.consec_naked >= 3:
                         self.halted = True  # 连续裸腿=币安疑持续故障,停机
+                        self._feishu("🛑 CrossArb 连续3笔裸腿,已熔断停机!请查币安连通性后重启")
                     return
             # 做空成功,清零连续裸腿计数
             self.consec_naked = 0
@@ -236,6 +270,11 @@ class ExecCoordinator(threading.Thread):
         self._log(out)
         self.trades += 1
         self.consec_loss = self.consec_loss + 1 if realized.net_bps < 0 else 0
+        # 成交告警(仅 live/testnet)
+        self._feishu(f"✅ CrossArb 成交 {m.key} ${notional:.0f}\n"
+                     f"买入 {base_out:.6f} @ {buy_price:.1f} | 做空 @ {short_price:.1f}\n"
+                     f"纸面net {paper.net_bps:.1f}bps → 兑现 {realized.net_bps:.1f}bps "
+                     f"(捕获{cap*100:.0f}%)\n今日第 {self.trades} 笔")
 
     def run(self):
         if self.market is None:
