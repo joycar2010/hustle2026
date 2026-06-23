@@ -52,11 +52,14 @@ class ExecCoordinator(threading.Thread):
             approve_cap_usd=cfg.exec_approve_cap_usd, recv_timeout=cfg.exec_recv_timeout_sec)
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self.halted = False  # 致命停机标志(裸腿/状态未知),需人工核对后清
         # 熔断计数
         self.trades = 0
         self.daily_spend = 0.0
         self.consec_loss = 0
+        self.consec_naked = 0  # 连续裸腿(币安持续故障)计数,达阈即停机
         self._init_log()
+        self._restore_circuit_state()  # 重启续算熔断,防重启绕过上限
 
     def _init_log(self):
         d = os.path.dirname(self.log_path)
@@ -65,6 +68,48 @@ class ExecCoordinator(threading.Thread):
         if not os.path.exists(self.log_path):
             with open(self.log_path, "w", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow(EXEC_LOG_COLS)
+
+    def _restore_circuit_state(self):
+        """从 exec_log.csv 重建【当日】熔断计数(防进程重启清零绕过单数/单日上限)。
+        只算今天(UTC)的成交记录;跨日自然重置。"""
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            with open(self.log_path, newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except FileNotFoundError:
+            return
+        tail_loss = 0  # 末尾连续亏损(从最后一笔倒推)
+        counted = False
+        for r in reversed(rows):
+            ts = r.get("ts_seen", "")
+            try:
+                day = datetime.fromtimestamp(int(ts)/1000, timezone.utc).strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            if day != today:
+                continue
+            oc = r.get("outcome", "")
+            if oc in ("OK", "SHORT_FAIL_NAKED"):  # 真正消耗 notional 的尝试
+                self.trades += 1
+                if r.get("mode") == "live":
+                    try:
+                        self.daily_spend += float(r.get("notional_usd") or 0)
+                    except ValueError:
+                        pass
+                # 连亏:从尾部连续 net<0 累计(中间出现盈利即停止累计)
+                if not counted:
+                    try:
+                        if float(r.get("realized_net_bps") or 0) < 0 or oc == "SHORT_FAIL_NAKED":
+                            tail_loss += 1
+                        else:
+                            counted = True
+                    except ValueError:
+                        counted = True
+        self.consec_loss = tail_loss
+        if self.trades or self.daily_spend:
+            print(f"[exec] 重启续算熔断: 今日 trades={self.trades} daily_spend=${self.daily_spend:.0f} "
+                  f"consec_loss={self.consec_loss}")
 
     def _log(self, row: dict):
         with self._lock:
@@ -75,6 +120,8 @@ class ExecCoordinator(threading.Thread):
         self._stop.set()
 
     def _circuit_ok(self) -> tuple[bool, str]:
+        if self.halted:
+            return False, "已停机(裸腿/状态未知),待人工核对"
         if self.market is None:
             return False, f"市场 {cfg.exec_market} 不存在"
         if self.trades >= cfg.exec_max_trades:
@@ -83,6 +130,8 @@ class ExecCoordinator(threading.Thread):
             return False, f"达单日支出上限 ${cfg.exec_max_daily_usd}"
         if self.consec_loss >= 5:
             return False, "连亏5笔,熔断"
+        if self.consec_naked >= 3:
+            return False, "连续3笔裸腿(币安疑持续故障),熔断停机"
         return True, ""
 
     def _attempt(self, m, q, bt, paper):
@@ -102,6 +151,7 @@ class ExecCoordinator(threading.Thread):
             out.update(outcome="BUY_PENDING_HALT",
                        note=f"链上买入状态未知,已停机待人工核对: {pe}")
             self._log(out)
+            self.halted = True
             self._stop.set()  # 触发停机,防止带着未知敞口继续
             return
         except Exception as e:  # noqa: BLE001
@@ -149,9 +199,17 @@ class ExecCoordinator(threading.Thread):
                             self.onchain.sell_back(m, base_out)
                             out["note"] += " | 已卖回止损"
                         except Exception as e2:  # noqa: BLE001
-                            out["note"] += f" | 卖回也失败: {e2}"
-                    self._log(out); self.trades += 1; self.consec_loss += 1; return
-            # 做空成功,检查取整差异(ROUND_DOWN 可能致裸多累积)
+                            # 卖回也失败 → 真裸多残留!立即停机,人工处理
+                            out["note"] += f" | 卖回也失败,停机待人工: {e2}"
+                            self.halted = True
+                    self._log(out)
+                    self.trades += 1; self.consec_loss += 1; self.consec_naked += 1
+                    if self.consec_naked >= 3:
+                        self.halted = True  # 连续裸腿=币安疑持续故障,停机
+                    return
+            # 做空成功,清零连续裸腿计数
+            self.consec_naked = 0
+            # 检查取整差异(ROUND_DOWN 可能致裸多累积)
             naked_long = base_out - actual_short_qty
             if self.mode == "live" and naked_long > 0.0001:  # 阈值 0.0001 BTC ≈ $6
                 try:

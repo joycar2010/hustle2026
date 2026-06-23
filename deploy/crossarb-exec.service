@@ -1,19 +1,25 @@
 [Unit]
-Description=CrossArb P1 execution validation (OP single-chain, INDEPENDENT of crossarb-p0)
+Description=CrossArb P1 execution (OP single-chain real-money, INDEPENDENT of crossarb-p0)
 After=network.target
 # 与 crossarb-p0(采集看板)分进程,互不影响
+# 限流:60s 内重启超 5 次则停服(防 halted/崩溃循环烧钱/烧 gas)
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-User=@USER@
-WorkingDirectory=@APP_DIR@
-EnvironmentFile=-@APP_DIR@/.env
+User=ec2-user
+WorkingDirectory=/home/ec2-user/crossarb
+EnvironmentFile=-/home/ec2-user/crossarb/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONUTF8=1
-# 默认 dry-run(只看价不下单不签名);testnet/live 由 .env 的 CROSSARB_EXEC_MODE 切换
-ExecStart=@APP_DIR@/.venv/bin/python -m app.coordinator
+Environment=PYTHONIOENCODING=utf-8
+# mode 由 .env 的 CROSSARB_EXEC_MODE 决定(dry-run/testnet/live)
+# 系统 python3(依赖装在 --user);如改用 venv 把路径换成 .venv/bin/python
+ExecStart=/usr/bin/python3 -m app.coordinator
+# 崩溃自愈,但熔断状态从 exec_log.csv 重建(重启不绕过当日上限)
 Restart=always
-RestartSec=5
+RestartSec=10
 MemoryMax=512M
 
 [Install]
