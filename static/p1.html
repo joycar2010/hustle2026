@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CrossArb P1 真金监控</title>
+<style>
+  :root{
+    --bg:#0b0e14; --card:#141925; --card2:#1b2230; --line:#222b3a;
+    --txt:#e6edf3; --dim:#8b98a9; --pos:#22c55e; --neg:#ef4444; --warn:#f59e0b; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;padding:12px;max-width:1100px;margin:0 auto}
+  .hd{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .hd h1{font-size:17px;font-weight:600;letter-spacing:.5px}
+  .hd .meta{font-size:12px;color:var(--dim)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .dot.on{background:var(--pos);box-shadow:0 0 6px var(--pos)}
+  .dot.off{background:var(--neg)}
+  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px}
+  .card .k{font-size:11px;color:var(--dim);margin-bottom:6px;letter-spacing:.3px}
+  .card .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
+  .card .sub{font-size:11px;color:var(--dim);margin-top:3px}
+  .pos{color:var(--pos)} .neg{color:var(--neg)} .warn{color:var(--warn)} .acc{color:var(--accent)}
+  .sec{margin-top:16px}
+  .sec h2{font-size:13px;color:var(--dim);font-weight:600;margin-bottom:8px;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+  .bars{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .barrow{display:flex;align-items:center;gap:10px;margin:7px 0}
+  .barrow .lbl{width:70px;font-size:12px;color:var(--dim);flex-shrink:0}
+  .bartrack{flex:1;height:18px;background:var(--card2);border-radius:5px;position:relative;overflow:hidden}
+  .barfill{height:100%;border-radius:5px;transition:width .5s ease}
+  .barrow .num{width:64px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;flex-shrink:0}
+  .spread-wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .spread-bar{height:26px;background:var(--card2);border-radius:6px;position:relative;margin:10px 0}
+  .spread-fill{height:100%;border-radius:6px;transition:width .5s}
+  .spread-trig{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{padding:7px 6px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+  th{color:var(--dim);font-weight:500;font-size:11px;text-align:right;position:sticky;top:0;background:var(--card)}
+  th:first-child,td:first-child{text-align:left}
+  .tbl-wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px}
+  .tag.ok{background:rgba(34,197,94,.15);color:var(--pos)}
+  .tag.naked{background:rgba(239,68,68,.15);color:var(--neg)}
+  .tag.halt{background:rgba(245,158,11,.15);color:var(--warn)}
+  .err{background:rgba(239,68,68,.1);border:1px solid var(--neg);color:var(--neg);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:10px}
+  .foot{text-align:center;color:var(--dim);font-size:11px;margin:18px 0 8px}
+  .pulse{animation:p 2s infinite}@keyframes p{0%,100%{opacity:1}50%{opacity:.45}}
+  @media(max-width:520px){
+    .card .v{font-size:19px} body{padding:9px}
+    .barrow .lbl{width:56px} table{font-size:11px}
+  }
+</style>
+</head>
+<body>
+  <div class="hd">
+    <h1>⚡ CrossArb P1 真金监控</h1>
+    <div class="meta"><span id="svc"></span> · <span id="now">—</span></div>
+  </div>
+
+  <div id="cfg" class="meta" style="margin-bottom:10px;font-size:12px"></div>
+
+  <!-- 核心指标 -->
+  <div class="grid" id="kpis"></div>
+
+  <!-- 当前基差 -->
+  <div class="sec">
+    <h2>📊 当前基差 <span class="pulse" style="font-size:10px;color:var(--accent)">●实时</span></h2>
+    <div class="spread-wrap" id="spread"><div class="meta">加载中…</div></div>
+  </div>
+
+  <!-- 实时持仓对账 -->
+  <div class="sec">
+    <h2>🔗 实时持仓对账</h2>
+    <div class="grid" id="positions"></div>
+  </div>
+
+  <!-- 捕获率分布 -->
+  <div class="sec">
+    <h2>🎯 捕获率分布(纸面机会真实兑现度)</h2>
+    <div class="bars" id="capdist"><div class="meta">暂无成交</div></div>
+  </div>
+
+  <!-- 成交流水 -->
+  <div class="sec">
+    <h2>📜 最近成交</h2>
+    <div class="tbl-wrap">
+      <table id="trades">
+        <thead><tr><th>时间(北京)</th><th>结果</th><th>纸面net</th><th>兑现net</th><th>捕获率</th><th>买入价</th><th>做空价</th><th>链上耗时</th></tr></thead>
+        <tbody><tr><td colspan="8" class="meta">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="errs"></div>
+  <div class="foot">每 5 秒刷新 · 只读监控 · 不影响真金执行</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = (v,d=2) => (v===null||v===undefined||isNaN(v)) ? '—' : (+v).toFixed(d);
+const sign = v => v>0?'pos':(v<0?'neg':'');
+const cls = (v,inv=false) => { if(v===null||v===undefined) return ''; const p=inv?v<0:v>0; return p?'pos':(v===0?'':'neg'); };
+
+async function load(){
+  let d;
+  try{ d = await (await fetch('/api/p1',{cache:'no-store'})).json(); }
+  catch(e){ $('#errs').innerHTML='<div class="err">数据加载失败,重试中…</div>'; return; }
+  $('#errs').innerHTML='';
+
+  // 顶部
+  $('#now').textContent = d.now_bj || '—';
+  const c = d.config||{};
+  const live = (c.mode==='live');
+  $('#svc').innerHTML = `<span class="dot ${live?'on':'off'}"></span>${c.mode||'?'}`;
+  $('#cfg').textContent = `${c.market} · $${c.notional_usd}/笔 · 触发net>${c.trigger_bps}bps · 上限${c.max_trades}笔/$${c.max_daily_usd}`;
+
+  // KPI
+  const s = d.summary||{}, t = s.total||{}, td = s.today||{};
+  const kpis = [
+    {k:'累计成交', v:t.trades||0, sub:`OK ${t.ok||0} · 裸腿 ${t.naked||0} · 停机 ${t.halt||0}`},
+    {k:'平均捕获率', v:t.avg_capture!==null?fmt(t.avg_capture*100,0)+'%':'—', c:cls(t.avg_capture), sub:`正${t.pos_caps||0} / 负${t.neg_caps||0}`},
+    {k:'平均兑现net', v:t.avg_realized_net!==null?fmt(t.avg_realized_net,1):'—', c:cls(t.avg_realized_net), sub:`纸面均值 ${fmt(t.avg_paper_net,1)}bps`},
+    {k:'累计净盈亏', v:'$'+fmt(t.est_pnl_usd,3), c:cls(t.est_pnl_usd), sub:'兑现net×名义额估算'},
+    {k:'今日', v:td.trades||0, sub:`OK ${td.ok||0} · 裸腿 ${td.naked||0}`},
+  ];
+  $('#kpis').innerHTML = kpis.map(x=>`<div class="card"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="sub">${x.sub||''}</div></div>`).join('');
+
+  // 基差
+  const sp = (d.live||{}).spread;
+  if(sp){
+    const pct = Math.max(0, Math.min(100, (sp.net/sp.trigger)*100));
+    const reached = sp.net>=sp.trigger;
+    $('#spread').innerHTML = `
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--dim)">
+        <span>当前 net <b class="${sign(sp.net)}" style="font-size:15px">${fmt(sp.net,1)}</b> bps</span>
+        <span>触发线 ${sp.trigger} bps</span>
+      </div>
+      <div class="spread-bar">
+        <div class="spread-fill" style="width:${pct}%;background:${reached?'var(--pos)':'var(--accent)'}"></div>
+        <div class="spread-trig" style="left:100%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim)">
+        <span>DEX ${fmt(sp.dex_price,0)} · 币安 ${fmt(sp.bn_bid,0)}</span>
+        <span>${reached?'<b class="pos">⚡达标</b>':'距触发还差 '+fmt(sp.gap,1)+' bps'}</span>
+      </div>`;
+  } else { $('#spread').innerHTML='<div class="meta">基差数据暂不可用</div>'; }
+
+  // 持仓对账
+  const ch=(d.live||{}).chain, bn=(d.live||{}).binance, match=d.hedge_match;
+  const pos=[];
+  if(ch){ pos.push({k:'链上 WBTC(多)',v:fmt(ch.wbtc,6),sub:`USDC ${fmt(ch.usdc,2)} · ETH ${fmt(ch.eth,5)}`}); }
+  if(bn){ pos.push({k:'币安 BTC(空)',v:fmt(bn.short,4),sub:`入场 ${fmt(bn.entry,0)} · 浮盈亏 ${fmt(bn.upnl,3)}`,c:cls(bn.upnl)}); }
+  let mtag = match===null?'<span class="meta">无持仓</span>':(match?'<span class="tag ok">✓两腿匹配</span>':'<span class="tag naked">⚠不匹配</span>');
+  pos.push({k:'对冲状态',v:mtag,raw:true});
+  $('#positions').innerHTML = pos.map(x=>`<div class="card"><div class="k">${x.k}</div><div class="v ${x.c||''}" style="${x.raw?'font-size:14px':''}">${x.v}</div><div class="sub">${x.sub||''}</div></div>`).join('');
+
+  // 捕获率分布
+  const caps = (d.recent||[]).filter(r=>r.outcome==='OK');
+  if(caps.length){
+    const buckets=[{l:'>50%',min:.5,n:0,c:'var(--pos)'},{l:'0~50%',min:0,n:0,c:'#84cc16'},{l:'-50~0%',min:-.5,n:0,c:'var(--warn)'},{l:'<-50%',min:-Infinity,n:0,c:'var(--neg)'}];
+    caps.forEach(r=>{ const v=r.capture; if(v>.5)buckets[0].n++; else if(v>0)buckets[1].n++; else if(v>-.5)buckets[2].n++; else buckets[3].n++; });
+    const mx=Math.max(...buckets.map(b=>b.n),1);
+    $('#capdist').innerHTML = buckets.map(b=>`<div class="barrow"><div class="lbl">${b.l}</div><div class="bartrack"><div class="barfill" style="width:${b.n/mx*100}%;background:${b.c}"></div></div><div class="num">${b.n}笔</div></div>`).join('');
+  } else { $('#capdist').innerHTML='<div class="meta">暂无成交记录</div>'; }
+
+  // 成交流水
+  const rows=(d.recent||[]);
+  $('#trades tbody').innerHTML = rows.length ? rows.map(r=>{
+    const tag = r.outcome==='OK'?'<span class="tag ok">OK</span>':(r.outcome==='SHORT_FAIL_NAKED'?'<span class="tag naked">裸腿</span>':(r.outcome.includes('HALT')?'<span class="tag halt">停机</span>':r.outcome));
+    return `<tr><td>${r.time}</td><td>${tag}</td><td class="${sign(r.paper_net)}">${fmt(r.paper_net,1)}</td><td class="${sign(r.realized_net)}">${fmt(r.realized_net,1)}</td><td class="${cls(r.capture)}">${r.outcome==='OK'?fmt(r.capture*100,0)+'%':'—'}</td><td>${r.buy_price?fmt(r.buy_price,0):'—'}</td><td>${r.short_price?fmt(r.short_price,0):'—'}</td><td>${r.ms_to_buy?r.ms_to_buy+'ms':'—'}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="meta">暂无成交(等 net>触发线)</td></tr>';
+
+  // 错误
+  const errs=(d.live||{}).errors||[];
+  if(errs.length) $('#errs').innerHTML=`<div class="err">部分实时数据降级: ${errs.join(', ')}</div>`;
+}
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>

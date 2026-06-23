@@ -64,6 +64,13 @@ def api_report(threshold: Optional[float] = None, start_ms: Optional[int] = None
                                      start_ms=start_ms, end_ms=end_ms))
 
 
+@app.get("/api/p1")
+def api_p1():
+    """P1 真金执行监控数据(只读旁路:读 exec_log.csv + 实时对账,不碰 coordinator)。"""
+    from .p1_monitor import monitor_snapshot
+    return JSONResponse(monitor_snapshot())
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (_STATIC / "index.html").read_text(encoding="utf-8")
@@ -72,6 +79,11 @@ def index():
 @app.get("/report", response_class=HTMLResponse)
 def report_page():
     return (_STATIC / "report.html").read_text(encoding="utf-8")
+
+
+@app.get("/p1", response_class=HTMLResponse)
+def p1_page():
+    return (_STATIC / "p1.html").read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":
