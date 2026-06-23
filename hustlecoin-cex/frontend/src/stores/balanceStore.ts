@@ -33,6 +33,7 @@ interface BalanceSummary {
   positionCount: number
   totalContracts: number
   masterFuturesPositions?: Record<string, number>  // 主账户合约持仓 {symbol: positionAmt}
+  masterFuturesLiqPct?: number | null  // 主账户合约户维持保证金率%(爆率列,币安标准 totalMaintMargin/totalMarginBalance×100)
 }
 
 interface BalanceState {

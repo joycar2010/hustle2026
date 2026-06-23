@@ -5,7 +5,7 @@
  *   - /assets 带 hash 的不可变资源:cache-first —— 离线/弱网秒开,新 hash 自然回源缓存;
  *   - 其它:直连网络(默认)。
  */
-const CACHE = 'hc-shell-v1'
+const CACHE = 'hc-shell-v2'
 const SHELL = ['/', '/index.html']
 
 self.addEventListener('install', (e) => {

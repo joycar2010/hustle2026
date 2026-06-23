@@ -37,6 +37,7 @@ class FeishuConfigUpdate(BaseModel):
     app_secret: str | None = None
     alert_interval_sec: int | None = None
     alert_count: int | None = None
+    risk_alert_cooldown_sec: int | None = None
     margin_rate_alert: float | None = None
     leverage_risk_alert: float | None = None
     enable_transfer_fail_alert: bool | None = None
@@ -64,6 +65,7 @@ def get_feishu_config(request: Request, db: Session = Depends(get_db)):
             "app_secret": "****" if getattr(c, "app_secret", "") else "",
             "alert_interval_sec": c.alert_interval_sec,
             "alert_count": c.alert_count,
+            "risk_alert_cooldown_sec": getattr(c, "risk_alert_cooldown_sec", 1800) or 1800,
             "margin_rate_alert": float(c.margin_rate_alert) if c.margin_rate_alert else 30,
             "leverage_risk_alert": float(c.leverage_risk_alert) if c.leverage_risk_alert else 1.3,
             "enable_transfer_fail_alert": c.enable_transfer_fail_alert,
@@ -83,6 +85,7 @@ def update_feishu_config(req: FeishuConfigUpdate, request: Request, db: Session 
         db.add(config)
 
     for field in ("webhook_url", "secret_key", "alert_interval_sec", "alert_count",
+                  "risk_alert_cooldown_sec",
                   "margin_rate_alert", "leverage_risk_alert",
                   "enable_transfer_fail_alert", "enable_new_borrow_alert",
                   "enable_borrow_success_alert", "enable_repay_success_alert"):
@@ -113,6 +116,7 @@ def update_user_feishu_config(user_id: int, req: FeishuConfigUpdate, request: Re
         db.add(config)
 
     for field in ("webhook_url", "secret_key", "alert_interval_sec", "alert_count",
+                  "risk_alert_cooldown_sec",
                   "margin_rate_alert", "leverage_risk_alert",
                   "enable_transfer_fail_alert", "enable_new_borrow_alert",
                   "enable_borrow_success_alert", "enable_repay_success_alert"):

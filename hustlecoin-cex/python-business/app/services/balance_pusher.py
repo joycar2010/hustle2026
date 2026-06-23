@@ -366,6 +366,7 @@ class BalancePusher:
 
             # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)
             master_futures_positions = {}  # {uid: {symbol: positionAmt}}
+            master_futures_liq = {}        # {uid: 维持保证金率%} 主账户合约户爆仓率(币安标准:totalMaintMargin/totalMarginBalance×100,越接近100越接近强平)
             for uid in user_balances.keys():
                 from app.db.models import MasterAccount
                 master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
@@ -374,6 +375,15 @@ class BalancePusher:
                 try:
                     from engine.trading.binance_trading import BinanceTradingClient
                     async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+                        # 主账户合约户维持保证金率(爆仓率口径,前端「爆率」列)。与 pushed 无关,先采集。
+                        try:
+                            facc = await mc.get_futures_account()
+                            tmm = float(facc.get("totalMaintMargin", "0") or 0)
+                            tmb = float(facc.get("totalMarginBalance", "0") or 0)
+                            if tmb > 0:
+                                master_futures_liq[uid] = tmm / tmb * 100
+                        except Exception:
+                            pass
                         # 只采集 pushed_symbols 里的币(避免全市场遍历)
                         pushed = self._redis.smembers(f"engine:{uid}:pushed_symbols")
                         if not pushed:
@@ -405,6 +415,7 @@ class BalancePusher:
                     "position_count": position_count,
                     "total_contracts": total_contracts,
                     "master_futures_positions": master_futures_positions.get(uid, {}),  # {symbol: positionAmt}
+                    "master_futures_liq_pct": master_futures_liq.get(uid),  # 主账户合约户维持保证金率%(爆率列),无主账户/无合约权益则 None
                 }
 
                 await self._redis.publish("balance:updates", json.dumps(payload))

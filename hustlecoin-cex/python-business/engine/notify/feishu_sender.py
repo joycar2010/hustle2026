@@ -42,6 +42,7 @@ class FeishuSender:
         # 绿框配置(安全默认;_ensure_config 从 DB 覆盖)
         self._alert_interval_sec = 5
         self._alert_count = 1
+        self._risk_alert_cooldown_sec = 1800  # 保证金风险告警专属冷却(默认30min),独立于全局节流
         self.leverage_risk_alert = Decimal("1.3")
         self.margin_rate_alert = Decimal("30")
         self.enable_transfer_fail_alert = True
@@ -66,6 +67,7 @@ class FeishuSender:
                 try:
                     self._alert_interval_sec = int(getattr(cfg, "alert_interval_sec", 5) or 0)
                     self._alert_count = max(1, int(getattr(cfg, "alert_count", 1) or 1))
+                    self._risk_alert_cooldown_sec = max(0, int(getattr(cfg, "risk_alert_cooldown_sec", 1800) or 0))
                     if getattr(cfg, "leverage_risk_alert", None) is not None:
                         self.leverage_risk_alert = Decimal(str(cfg.leverage_risk_alert))
                     if getattr(cfg, "margin_rate_alert", None) is not None:
@@ -250,6 +252,13 @@ class FeishuSender:
         )
 
     async def notify_risk(self, account_note: str, margin_level: Decimal):
+        # 保证金风险告警专属冷却:低保证金会每个风控周期(30s)持续命中,故用独立的较长冷却
+        # (默认30min,绿框 risk_alert_cooldown_sec 可配)按账户去抖,避免刷屏。0=不专属冷却,退回全局节流。
+        self._ensure_config()
+        cd = self._risk_alert_cooldown_sec
+        if cd > 0:
+            if not await asyncio.to_thread(throttle_ok, f"riskcd:{account_note}", cd, 1):
+                return
         await self.send(
             "风险告警",
             f"账户: {account_note}\n"

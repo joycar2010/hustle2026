@@ -738,6 +738,7 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
             <div className="flex items-center gap-4 flex-wrap">
               <InlineField label="合约爆仓率提醒 <" value={fv('margin_rate_alert')} onChange={(v) => updateF('margin_rate_alert', v)} suffix="%" width="w-10" title="合约距爆仓安全垫(=(保证金余额−维持保证金)÷保证金余额×100)低于此 % 即告警;hedge_via_master 看主账户合约。0=禁用。已接入引擎生效" />
               <InlineField label="杠杆风险率提醒 <" value={fv('leverage_risk_alert')} onChange={(v) => updateF('leverage_risk_alert', v)} width="w-12" />
+              <InlineField label="保证金告警冷却" value={fv('risk_alert_cooldown_sec')} onChange={(v) => updateF('risk_alert_cooldown_sec', v)} suffix="秒" width="w-14" title="同一子账户「保证金水平」告警的专属冷却:低保证金会每30秒持续命中,此冷却内只发一次,防刷屏。默认1800(30分钟),0=退回全局节流" />
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <TogglePill label="划转失败提醒" active={!!feishu.enable_transfer_fail_alert} onChange={(v) => updateFBool('enable_transfer_fail_alert', v)} />

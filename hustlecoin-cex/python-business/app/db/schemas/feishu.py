@@ -9,6 +9,7 @@ class FeishuConfigUpdate(BaseModel):
     secret_key: Optional[str] = None
     alert_interval_sec: Optional[int] = None
     alert_count: Optional[int] = None
+    risk_alert_cooldown_sec: Optional[int] = None
     margin_rate_alert: Optional[Decimal] = None
     leverage_risk_alert: Optional[Decimal] = None
     enable_transfer_fail_alert: Optional[bool] = None
@@ -23,6 +24,7 @@ class FeishuConfigResponse(BaseModel):
     secret_key_masked: Optional[str] = None
     alert_interval_sec: int
     alert_count: int
+    risk_alert_cooldown_sec: Optional[int] = 1800
     margin_rate_alert: Decimal
     leverage_risk_alert: Decimal
     enable_transfer_fail_alert: bool

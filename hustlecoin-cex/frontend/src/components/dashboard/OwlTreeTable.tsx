@@ -470,7 +470,7 @@ const SubAccountRow = memo(function SubAccountRow({
         {isMobile && (() => {
           const sm = balance?.symbol_margin?.[pos.symbol]
           const futVal = parseFloat(pos.futures_long_qty || '0') * (spread?.fut_bid ?? 0)
-          const blow = balance && balance.margin_level > 0 ? (1.1 / balance.margin_level) * 100 : null
+          const blow = summary?.masterFuturesLiqPct ?? null  // 爆率=主账户合约户维持保证金率(与桌面同源)
           const px = spread?.spot_bid ?? 0
           const eff = sm ? (sm.effective_borrowable ?? sm.max_borrowable) : null
           const noInv = sm?.no_inventory && !(sm.max_borrowable > 0)
@@ -506,11 +506,11 @@ const SubAccountRow = memo(function SubAccountRow({
           </td>
         )
       })()}
-      {/* 爆率 */}
+      {/* 爆率 — 主账户合约户维持保证金率(币安标准,hedge_via_master 下真正的强平风险在主账户合约;全表同值) */}
       {!isMobile && (
         <td className={numCell}>
-          {balance && balance.margin_level > 0 ? (() => {
-            const pct = (1.1 / balance.margin_level) * 100
+          {summary?.masterFuturesLiqPct != null ? (() => {
+            const pct = summary.masterFuturesLiqPct as number
             return (
               <span className={pct > 80 ? 'text-negative' : pct > 50 ? 'text-yellow-400' : 'text-positive'}>
                 {formatNumber(pct, 1)}%

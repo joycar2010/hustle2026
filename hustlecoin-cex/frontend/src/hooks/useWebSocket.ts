@@ -97,6 +97,7 @@ export function useWebSocket() {
                 positionCount: msg.data.position_count,
                 totalContracts: msg.data.total_contracts ?? 0,
                 masterFuturesPositions: msg.data.master_futures_positions ?? {},
+                masterFuturesLiqPct: msg.data.master_futures_liq_pct ?? null,
               })
             }
             break

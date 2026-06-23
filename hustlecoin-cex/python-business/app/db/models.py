@@ -165,6 +165,7 @@ class FeishuConfig(Base):
     app_secret = Column(String(200), nullable=True)
     alert_interval_sec = Column(Integer, default=5)
     alert_count = Column(Integer, default=1)
+    risk_alert_cooldown_sec = Column(Integer, default=1800)  # 子账户保证金风险告警专属冷却(默认30min),独立于全局节流,防低保证金持续刷屏
     margin_rate_alert = Column(Numeric(10, 2), default=30)
     leverage_risk_alert = Column(Numeric(10, 4), default=1.3)
     enable_transfer_fail_alert = Column(Boolean, default=True)

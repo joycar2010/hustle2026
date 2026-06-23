@@ -45,6 +45,7 @@ def _to_response(cfg: FeishuConfig) -> dict:
         "secret_key_masked": _mask_secret(cfg.secret_key),
         "alert_interval_sec": cfg.alert_interval_sec,
         "alert_count": cfg.alert_count,
+        "risk_alert_cooldown_sec": getattr(cfg, "risk_alert_cooldown_sec", 1800) or 1800,
         "margin_rate_alert": cfg.margin_rate_alert,
         "leverage_risk_alert": cfg.leverage_risk_alert,
         "enable_transfer_fail_alert": cfg.enable_transfer_fail_alert,

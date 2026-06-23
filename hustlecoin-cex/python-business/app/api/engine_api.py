@@ -690,7 +690,10 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             if total_debt < 1e-8:
                 return {"message": f"{account.note} {base_asset} 无需还币(债务为0)"}
 
-            repay_amount = min(data.amount, total_debt)
+            # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
+            # 归一为 float,避免下游 `repay_amount - free`(shortfall)/`*= 0.999`(重试)触发 Decimal-float
+            # 类型崩溃;margin_repay 内部 str(amount) 故 float 入参亦正常序列化。
+            repay_amount = min(float(data.amount), total_debt)
 
             # 2) free 不足时:用 USDT 市价买入差额(常见于已平仓残留利息零头)。
             #    币安 MARKET BUY 受 NOTIONAL.minNotional(常 5 USDT)+ LOT_SIZE.stepSize 约束,

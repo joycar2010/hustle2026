@@ -1,1 +1,0 @@
-import{lt as e}from"./index-CQLXWzy1.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};
