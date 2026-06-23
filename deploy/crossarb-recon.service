@@ -1,0 +1,12 @@
+[Unit]
+Description=CrossArb P1 daily reconciliation (feishu)
+After=network.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/crossarb
+EnvironmentFile=-/home/ec2-user/crossarb/.env
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/usr/bin/python3 daily_recon.py
