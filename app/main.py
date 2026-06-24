@@ -71,6 +71,13 @@ def api_p1():
     return JSONResponse(monitor_snapshot())
 
 
+@app.get("/api/p1/live")
+def api_p1_live():
+    """轻量实时端点:仅当前基差 + worker心跳。前端高频刷(不查链上余额,~150ms)。"""
+    from .p1_monitor import live_light
+    return JSONResponse(live_light())
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (_STATIC / "index.html").read_text(encoding="utf-8")

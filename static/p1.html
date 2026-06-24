@@ -47,6 +47,15 @@
   .err{background:rgba(239,68,68,.1);border:1px solid var(--neg);color:var(--neg);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:10px}
   .foot{text-align:center;color:var(--dim);font-size:11px;margin:18px 0 8px}
   .pulse{animation:p 2s infinite}@keyframes p{0%,100%{opacity:1}50%{opacity:.45}}
+  .wdot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .wdot.run{background:var(--pos);box-shadow:0 0 8px var(--pos);animation:p 1.2s infinite}
+  .wdot.stop{background:var(--neg);box-shadow:0 0 8px var(--neg)}
+  .wdot.wait{background:#e0a800;box-shadow:0 0 8px #e0a800}
+  .scan-bar{height:5px;background:#1a2230;border-radius:4px;margin-top:8px;overflow:hidden;position:relative}
+  .scan-fill{position:absolute;height:100%;width:32%;border-radius:4px;background:linear-gradient(90deg,transparent,var(--pos),transparent);left:-32%}
+  .scan-fill.run{animation:scan 1.6s linear infinite}
+  @keyframes scan{0%{left:-32%}100%{left:100%}}
+  .scan-fill.stop{width:100%;left:0;background:var(--neg);animation:none;opacity:.5}
   @media(max-width:520px){
     .card .v{font-size:19px} body{padding:9px}
     .barrow .lbl{width:56px} table{font-size:11px}
@@ -61,12 +70,25 @@
 
   <div id="cfg" class="meta" style="margin-bottom:10px;font-size:12px"></div>
 
+  <!-- worker 策略运行状态 -->
+  <div class="sec" id="workerbox" style="padding:10px 14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="wdot" class="wdot"></span>
+        <b id="wstate" style="font-size:14px">检测中…</b>
+        <span id="wtick" class="meta" style="font-size:11px"></span>
+      </div>
+      <span id="wnet" class="meta" style="font-size:12px"></span>
+    </div>
+    <div class="scan-bar"><div class="scan-fill" id="wscan"></div></div>
+  </div>
+
   <!-- 核心指标 -->
   <div class="grid" id="kpis"></div>
 
   <!-- 当前基差 -->
   <div class="sec">
-    <h2>📊 当前基差 <span class="pulse" style="font-size:10px;color:var(--accent)">●实时</span></h2>
+    <h2>📊 当前基差 <span class="pulse" style="font-size:10px;color:var(--accent)">●实时</span> <span id="spfresh" class="meta" style="font-size:10px"></span></h2>
     <div class="spread-wrap" id="spread"><div class="meta">加载中…</div></div>
   </div>
 
@@ -94,7 +116,7 @@
   </div>
 
   <div id="errs"></div>
-  <div class="foot">每 5 秒刷新 · 只读监控 · 不影响真金执行</div>
+  <div class="foot">基差+策略心跳每 2 秒刷新 · 余额/统计每 10 秒 · 只读监控 · 不影响真金执行</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -126,25 +148,9 @@ async function load(){
   ];
   $('#kpis').innerHTML = kpis.map(x=>`<div class="card"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="sub">${x.sub||''}</div></div>`).join('');
 
-  // 基差
-  const sp = (d.live||{}).spread;
-  if(sp){
-    const pct = Math.max(0, Math.min(100, (sp.net/sp.trigger)*100));
-    const reached = sp.net>=sp.trigger;
-    $('#spread').innerHTML = `
-      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--dim)">
-        <span>当前 net <b class="${sign(sp.net)}" style="font-size:15px">${fmt(sp.net,1)}</b> bps</span>
-        <span>触发线 ${sp.trigger} bps</span>
-      </div>
-      <div class="spread-bar">
-        <div class="spread-fill" style="width:${pct}%;background:${reached?'var(--pos)':'var(--accent)'}"></div>
-        <div class="spread-trig" style="left:100%"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim)">
-        <span>DEX ${fmt(sp.dex_price,0)} · 币安 ${fmt(sp.bn_bid,0)}</span>
-        <span>${reached?'<b class="pos">⚡达标</b>':'距触发还差 '+fmt(sp.gap,1)+' bps'}</span>
-      </div>`;
-  } else { $('#spread').innerHTML='<div class="meta">基差数据暂不可用</div>'; }
+  // 基差(全量也渲染一次,之后由 loadLive 高频刷)
+  renderSpread((d.live||{}).spread);
+  renderWorker(d.worker);
 
   // 持仓对账
   const ch=(d.live||{}).chain, bn=(d.live||{}).binance, match=d.hedge_match;
@@ -164,18 +170,78 @@ async function load(){
     $('#capdist').innerHTML = buckets.map(b=>`<div class="barrow"><div class="lbl">${b.l}</div><div class="bartrack"><div class="barfill" style="width:${b.n/mx*100}%;background:${b.c}"></div></div><div class="num">${b.n}笔</div></div>`).join('');
   } else { $('#capdist').innerHTML='<div class="meta">暂无成交记录</div>'; }
 
-  // 成交流水
-  const rows=(d.recent||[]);
-  $('#trades tbody').innerHTML = rows.length ? rows.map(r=>{
-    const tag = r.outcome==='OK'?'<span class="tag ok">OK</span>':(r.outcome==='SHORT_FAIL_NAKED'?'<span class="tag naked">裸腿</span>':(r.outcome.includes('HALT')?'<span class="tag halt">停机</span>':r.outcome));
-    return `<tr><td>${r.time}</td><td>${tag}</td><td class="${sign(r.paper_net)}">${fmt(r.paper_net,1)}</td><td class="${sign(r.realized_net)}">${fmt(r.realized_net,1)}</td><td class="${cls(r.capture)}">${r.outcome==='OK'?fmt(r.capture*100,0)+'%':'—'}</td><td>${r.buy_price?fmt(r.buy_price,0):'—'}</td><td>${r.short_price?fmt(r.short_price,0):'—'}</td><td>${r.ms_to_buy?r.ms_to_buy+'ms':'—'}</td></tr>`;
-  }).join('') : '<tr><td colspan="8" class="meta">暂无成交(等 net>触发线)</td></tr>';
+  // 成交流水(全量渲染;loadLive 也会刷新)
+  renderTrades(d.recent||[]);
 
   // 错误
   const errs=(d.live||{}).errors||[];
   if(errs.length) $('#errs').innerHTML=`<div class="err">部分实时数据降级: ${errs.join(', ')}</div>`;
+  else $('#errs').innerHTML='';
 }
-load(); setInterval(load, 5000);
+
+// ---- 可复用渲染函数(全量 load 与高频 loadLive 共用)----
+function renderSpread(sp){
+  if(!sp){ $('#spread').innerHTML='<div class="meta">基差数据暂不可用</div>'; return; }
+  const pct = Math.max(0, Math.min(100, (sp.net/sp.trigger)*100));
+  const reached = sp.net>=sp.trigger;
+  $('#spread').innerHTML = `
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--dim)">
+      <span>当前 net <b class="${sign(sp.net)}" style="font-size:17px">${fmt(sp.net,1)}</b> bps</span>
+      <span>触发线 ${sp.trigger} bps</span>
+    </div>
+    <div class="spread-bar">
+      <div class="spread-fill" style="width:${pct}%;background:${reached?'var(--pos)':'var(--accent)'}"></div>
+      <div class="spread-trig" style="left:100%"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim)">
+      <span>DEX ${fmt(sp.dex_price,0)} · 币安 ${fmt(sp.bn_bid,0)}</span>
+      <span>${reached?'<b class="pos">⚡达标</b>':'距触发还差 '+fmt(sp.gap,1)+' bps'}</span>
+    </div>`;
+}
+
+function renderWorker(w){
+  if(!w){ return; }
+  const box=$('#workerbox'), dot=$('#wdot'), st=$('#wstate'), tk=$('#wtick'), nt=$('#wnet'), scan=$('#wscan');
+  if(w.alive){
+    // 跑着:扫描动画;若达标边缘可能在执行
+    dot.className='wdot run'; scan.className='scan-fill run';
+    st.textContent='策略运行中'; st.style.color='var(--pos)';
+    tk.textContent=`第 ${w.tick||'?'} 轮 · ${w.age_sec}s前 · 每${w.poll_sec||'?'}s扫描`;
+    nt.textContent = w.net!==null&&w.net!==undefined ? `最近扫描 net ${fmt(w.net,1)}bps` : '';
+    if(w.halted){ dot.className='wdot wait'; st.textContent='⚠ 已停机(待人工)'; st.style.color='#e0a800'; scan.className='scan-fill stop'; }
+  } else {
+    dot.className='wdot stop'; scan.className='scan-fill stop';
+    st.textContent = w.age_sec!==null ? `策略未响应(${w.age_sec}s无心跳)` : '策略未运行/无心跳';
+    st.style.color='var(--neg)';
+    tk.textContent=''; nt.textContent='';
+  }
+}
+
+function renderTrades(rows){
+  $('#trades tbody').innerHTML = rows.length ? rows.map(r=>{
+    const tag = r.outcome==='OK'?'<span class="tag ok">OK</span>':(r.outcome==='SHORT_FAIL_NAKED'?'<span class="tag naked">裸腿</span>':(r.outcome.includes('HALT')?'<span class="tag halt">停机</span>':r.outcome));
+    return `<tr><td>${r.time}</td><td>${tag}</td><td class="${sign(r.paper_net)}">${fmt(r.paper_net,1)}</td><td class="${sign(r.realized_net)}">${fmt(r.realized_net,1)}</td><td class="${cls(r.capture)}">${r.outcome==='OK'?fmt(r.capture*100,0)+'%':'—'}</td><td>${r.buy_price?fmt(r.buy_price,0):'—'}</td><td>${r.short_price?fmt(r.short_price,0):'—'}</td><td>${r.ms_to_buy?r.ms_to_buy+'ms':'—'}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="meta">暂无成交(等 net>触发线)</td></tr>';
+}
+
+// ---- 高频轻量刷新:仅基差 + worker心跳(2s,不查链上余额)----
+let lastTradeCount=0;
+async function loadLive(){
+  let d;
+  try{ d = await (await fetch('/api/p1/live',{cache:'no-store'})).json(); }
+  catch(e){ return; }
+  renderSpread(d.spread);
+  renderWorker(d.worker);
+  if(d.spread&&d.spread.ts){ $('#spfresh').textContent='· '+new Date(d.spread.ts).toLocaleTimeString('zh-CN'); }
+  // worker 跑出新成交时,立即拉全量(否则成交表等到下次10s才更新)
+  if(d.worker&&d.worker.trades!=null&&d.worker.trades!==lastTradeCount){
+    if(lastTradeCount!==0) load();
+    lastTradeCount=d.worker.trades;
+  }
+}
+
+load(); setInterval(load, 10000);     // 全量(余额/持仓/统计):10s
+loadLive(); setInterval(loadLive, 2000); // 基差+心跳:2s
 </script>
 </body>
 </html>

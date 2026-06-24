@@ -18,8 +18,11 @@ from .config import cfg
 from .chains import chain_of
 
 WBTC_OP = "0x68f180fcCe6836688e9084f035309E29Bf0A2095"
-_CACHE: dict = {"ts": 0.0, "data": None}
-_CACHE_TTL = 4.0  # 实时区块缓存4s,避免前端多端并发打爆链上/币安
+# 拆分缓存:基差轻(KyberSwap+币安~150ms)要实时→1.5s;余额持仓重、变化慢→8s
+_SPREAD_CACHE: dict = {"ts": 0.0, "data": None}
+_SPREAD_TTL = 1.5
+_BAL_CACHE: dict = {"ts": 0.0, "data": None}
+_BAL_TTL = 8.0
 
 
 def _read_exec_rows() -> list[dict]:
@@ -107,41 +110,38 @@ def _recent(rows: list[dict], n: int = 20) -> list[dict]:
     return out
 
 
-def _live_blocks() -> dict:
-    """实时持仓对账 + 当前基差(带缓存,失败局部降级)。"""
-    now = time.time()
-    if _CACHE["data"] and now - _CACHE["ts"] < _CACHE_TTL:
-        return _CACHE["data"]
-    out = {"chain": None, "binance": None, "spread": None, "errors": []}
-    ch = chain_of("OP")
-    W = cfg.exec_wallet_addr
-    # 链上余额/持仓
+def _heartbeat_read() -> dict:
+    """读 coordinator 心跳文件,判断 worker 是否在跑(最近心跳<15s=alive)。零网络成本。"""
+    out = {"alive": False, "age_sec": None, "tick": None, "net": None,
+           "mode": None, "trigger": None, "halted": None, "trades": None, "poll_sec": None}
     try:
-        from .chain_rpc import ChainRpc
-        rpc = ChainRpc(cfg.exec_rpc, ch.chain_id, timeout=8)
-        out["chain"] = {
-            "wbtc": round(rpc.erc20_balance(WBTC_OP, W) / 1e8, 8),
-            "usdc": round(rpc.erc20_balance(ch.stable, W) / 1e6, 2),
-            "eth": round(rpc.eth_balance(W) / 1e18, 6),
-        }
-    except Exception as e:  # noqa: BLE001
-        out["errors"].append(f"chain: {type(e).__name__}")
-    # 币安持仓 + 当前基差
+        import json
+        path = os.path.join(os.path.dirname("./data/exec_log.csv") or ".", "exec_heartbeat.json")
+        with open(path, encoding="utf-8") as f:
+            hb = json.load(f)
+        age = (time.time() * 1000 - hb.get("ts", 0)) / 1000
+        out.update(alive=(age < 15), age_sec=round(age, 1), tick=hb.get("tick"),
+                   net=hb.get("net"), mode=hb.get("mode"), trigger=hb.get("trigger"),
+                   halted=hb.get("halted"), trades=hb.get("trades"), poll_sec=hb.get("poll_sec"))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _spread_now() -> dict:
+    """当前基差(KyberSwap报价 vs 币安,~150ms)。轻量,1.5s缓存,给前端快刷。"""
+    now = time.time()
+    if _SPREAD_CACHE["data"] and now - _SPREAD_CACHE["ts"] < _SPREAD_TTL:
+        return _SPREAD_CACHE["data"]
+    out = {"spread": None, "errors": []}
     try:
         from .binance_exec import BinanceExec, FUTURES_LIVE
-        bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, FUTURES_LIVE)
-        pos = [p for p in bn._request("GET", "/fapi/v2/positionRisk", {"symbol": "BTCUSDT"})
-               if abs(_f(p.get("positionAmt"))) > 0]
-        out["binance"] = {
-            "short": _f(pos[0]["positionAmt"]) if pos else 0.0,
-            "entry": _f(pos[0]["entryPrice"]) if pos else 0.0,
-            "upnl": _f(pos[0]["unRealizedProfit"]) if pos else 0.0,
-        }
-        # 当前基差(DEX 报价 vs 币安),只读
         from .onchain_exec import OnchainExec
         from .spread_calc import compute_spread
         from .markets import load_markets
+        ch = chain_of("OP")
         m = {x.key: x for x in load_markets()}.get(cfg.exec_market)
+        bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, FUTURES_LIVE)
         oc = OnchainExec("dry-run", cfg.exec_wallet_addr, "", cfg.kyber_client_id)
         q = oc.quote_buy(m, cfg.exec_notional_usd)
         bt = bn.book_ticker(m.binance_symbol)
@@ -154,12 +154,62 @@ def _live_blocks() -> dict:
             min_net_bps=cfg.exec_min_net_bps, exit_floor_bps=cfg.exit_floor_bps)
         out["spread"] = {"gross": round(sp.gross_bps, 2), "net": round(sp.net_bps, 2),
                          "trigger": cfg.exec_min_net_bps, "gap": round(cfg.exec_min_net_bps - sp.net_bps, 2),
-                         "dex_price": round(q.eff_price, 1), "bn_bid": float(bt["bid"])}
+                         "dex_price": round(q.eff_price, 1), "bn_bid": float(bt["bid"]),
+                         "ts": int(now * 1000)}
     except Exception as e:  # noqa: BLE001
-        out["errors"].append(f"binance/spread: {type(e).__name__}")
-    _CACHE["ts"] = now
-    _CACHE["data"] = out
+        out["errors"].append(f"spread: {type(e).__name__}")
+    _SPREAD_CACHE["ts"] = now
+    _SPREAD_CACHE["data"] = out
     return out
+
+
+def _balances() -> dict:
+    """链上余额 + 币安持仓(重,变化慢)。8s缓存。"""
+    now = time.time()
+    if _BAL_CACHE["data"] and now - _BAL_CACHE["ts"] < _BAL_TTL:
+        return _BAL_CACHE["data"]
+    out = {"chain": None, "binance": None, "errors": []}
+    ch = chain_of("OP")
+    W = cfg.exec_wallet_addr
+    try:
+        from .chain_rpc import ChainRpc
+        rpc = ChainRpc(cfg.exec_rpc, ch.chain_id, timeout=8)
+        out["chain"] = {
+            "wbtc": round(rpc.erc20_balance(WBTC_OP, W) / 1e8, 8),
+            "usdc": round(rpc.erc20_balance(ch.stable, W) / 1e6, 2),
+            "eth": round(rpc.eth_balance(W) / 1e18, 6),
+        }
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"chain: {type(e).__name__}")
+    try:
+        from .binance_exec import BinanceExec, FUTURES_LIVE
+        bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, FUTURES_LIVE)
+        pos = [p for p in bn._request("GET", "/fapi/v2/positionRisk", {"symbol": "BTCUSDT"})
+               if abs(_f(p.get("positionAmt"))) > 0]
+        out["binance"] = {
+            "short": _f(pos[0]["positionAmt"]) if pos else 0.0,
+            "entry": _f(pos[0]["entryPrice"]) if pos else 0.0,
+            "upnl": _f(pos[0]["unRealizedProfit"]) if pos else 0.0,
+        }
+    except Exception as e:  # noqa: BLE001
+        out["errors"].append(f"binance: {type(e).__name__}")
+    _BAL_CACHE["ts"] = now
+    _BAL_CACHE["data"] = out
+    return out
+
+
+def _live_blocks() -> dict:
+    """实时持仓对账 + 当前基差(合并三个数据源,供全量端点)。"""
+    bal = _balances()
+    sp = _spread_now()
+    return {"chain": bal.get("chain"), "binance": bal.get("binance"),
+            "spread": sp.get("spread"), "errors": bal.get("errors", []) + sp.get("errors", [])}
+
+
+def live_light() -> dict:
+    """轻量实时端点:仅基差 + worker心跳。给前端高频刷(1.5s),不查链上余额。"""
+    return {"spread": _spread_now().get("spread"), "worker": _heartbeat_read()}
+
 
 
 def monitor_snapshot() -> dict:
@@ -181,5 +231,6 @@ def monitor_snapshot() -> dict:
         "summary": _summary(rows),
         "recent": _recent(rows),
         "live": live,
+        "worker": _heartbeat_read(),
         "hedge_match": match,
     }

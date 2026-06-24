@@ -145,6 +145,27 @@ class ExecCoordinator(threading.Thread):
     def stop(self):
         self._stop.set()
 
+    def _heartbeat(self, net, ok: bool, err: str = ""):
+        """每 tick 写心跳(时间戳+最近net+tick数+熔断状态),供 /p1 监控判 worker 是否在跑。
+        原子写(临时文件+rename),前端读不到半行。异常静默不拖累交易。"""
+        try:
+            import json
+            self._tick_count = getattr(self, "_tick_count", 0) + 1
+            hb = {
+                "ts": int(time.time() * 1000), "tick": self._tick_count,
+                "net": net, "ok": ok, "err": err, "mode": self.mode,
+                "trigger": cfg.exec_min_net_bps, "halted": self.halted,
+                "trades": self.trades, "consec_naked": self.consec_naked,
+                "poll_sec": cfg.exec_poll_sec,
+            }
+            path = os.path.join(os.path.dirname(self.log_path) or ".", "exec_heartbeat.json")
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(hb))
+            os.replace(tmp, path)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _circuit_ok(self) -> tuple[bool, str]:
         if self.halted:
             return False, "已停机(裸腿/状态未知),待人工核对"
@@ -306,9 +327,11 @@ class ExecCoordinator(threading.Thread):
                         self._log({"ts_seen": int(t0*1000), "market": m.key, "mode": self.mode,
                                    "paper_net_bps": round(paper.net_bps, 2), "decision": "SKIP_CIRCUIT",
                                    "outcome": "SKIP", "note": why})
+                self._heartbeat(net=round(paper.net_bps, 2), ok=True)
             except Exception as e:  # noqa: BLE001
                 self._log({"ts_seen": int(t0*1000), "market": cfg.exec_market, "mode": self.mode,
                            "outcome": "TICK_ERR", "note": f"{type(e).__name__}: {e}"})
+                self._heartbeat(net=None, ok=False, err=f"{type(e).__name__}")
             self._stop.wait(max(0.0, cfg.exec_poll_sec - (time.time() - t0)))
 
 
