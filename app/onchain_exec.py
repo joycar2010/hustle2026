@@ -71,16 +71,28 @@ class OnchainExec:
     def _send_tx(self, rpc, signer, wallet: str, to: str, value: int, data_hex: str,
                  gas_hint=None, nonce: int | None = None) -> str:
         """构造 EIP-1559 交易 → KMS 签名 → 广播,返回 tx hash(不等回执)。
-        nonce 显式传入时用传入值(approve→swap 连续两笔须显式递增,防 pending 视图滞后冲突)。"""
-        max_fee, prio = rpc.fees()
+        nonce 显式传入时用传入值(approve→swap 连续两笔须显式递增,防 pending 视图滞后冲突)。
+        优化:fees/estimate_gas/nonce 三个独立只读查询【并行】发(原串行~1.4s,并行降到最慢一项~0.5s)。"""
+        from concurrent.futures import ThreadPoolExecutor
         est_tx = {"from": wallet, "to": to, "value": hex(value), "data": data_hex}
-        try:
-            gas = int(rpc.estimate_gas(est_tx) * 1.25)
-        except Exception as e:  # noqa: BLE001 —— 估gas失败用 build 提示兜底
-            gas = int((gas_hint or 800000) * 1.3)
-            logger.warning("estimate_gas 失败(%s),用兜底 gas=%d", e, gas)
+
+        def _gas():
+            try:
+                return int(rpc.estimate_gas(est_tx) * 1.25)
+            except Exception as e:  # noqa: BLE001 —— 估gas失败用 build 提示兜底
+                logger.warning("estimate_gas 失败(%s),用兜底", e)
+                return int((gas_hint or 800000) * 1.3)
+
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_fees = ex.submit(rpc.fees)
+            f_gas = ex.submit(_gas)
+            f_nonce = ex.submit(rpc.nonce, wallet) if nonce is None else None
+            max_fee, prio = f_fees.result()
+            gas = f_gas.result()
+            use_nonce = nonce if nonce is not None else f_nonce.result()
+
         tx = {
-            "nonce": rpc.nonce(wallet) if nonce is None else nonce,
+            "nonce": use_nonce,
             "maxPriorityFeePerGas": prio,
             "maxFeePerGas": max_fee,
             "gas": gas,

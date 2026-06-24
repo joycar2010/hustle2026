@@ -97,9 +97,12 @@ class ChainRpc:
 
     def fees(self) -> tuple[int, int]:
         """返回 (maxFeePerGas, maxPriorityFeePerGas);maxFee 留 3x base 余量防区块抬费。
-        OP base fee 可能数秒内翻倍;2x 余量在突涨时会卡单致裸腿,故用 3x。"""
-        prio = self.priority_fee()
-        base = self.base_fee()
+        OP base fee 可能数秒内翻倍;2x 余量在突涨时会卡单致裸腿,故用 3x。
+        优化:一次 getBlock 同时拿 base+block(原 base_fee/priority_fee 两次RPC合并);
+        prio 用 OP 典型极小值(0.001gwei),省一次 eth_maxPriorityFeePerGas RPC。"""
+        blk = self._call("eth_getBlockByNumber", ["latest", False])
+        base = int(blk.get("baseFeePerGas", "0x0"), 16)
+        prio = 1_000_000  # 0.001 gwei,OP 典型;base*3 余量已足够覆盖波动
         return base * 3 + prio, prio
 
     # ---- 广播 + 回执 ----
