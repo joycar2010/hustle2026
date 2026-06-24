@@ -25,6 +25,7 @@ export function useWebSocket() {
   const seenNotif = useRef<Map<string, number>>(new Map())   // [第三梯队] 通知去重:sig → 收到时刻
   const token = useAuthStore((s) => s.token)
   const setBulk = useSpreadStore((s) => s.setBulk)
+  const mergeBulk = useSpreadStore((s) => s.mergeBulk)
   const updateWorkerFromWs = useEngineStore((s) => s.updateWorkerFromWs)
   const setBalances = useBalanceStore((s) => s.setBalances)
   const setSummary = useBalanceStore((s) => s.setSummary)
@@ -79,8 +80,10 @@ export function useWebSocket() {
         const msg = JSON.parse(event.data)
         switch (msg.type) {
           case 'spread_snapshot':
+            setBulk(msg.data)        // 全量快照 → 整表替换(死币不残留)
+            break
           case 'spread_batch':
-            setBulk(msg.data)
+            mergeBulk(msg.data)      // 增量 → 合并 upsert,不冲掉未变化的币(修开/平瞬时空白)
             break
           case 'position_update':
             window.dispatchEvent(new CustomEvent('ws:position', { detail: msg.data }))
@@ -169,7 +172,7 @@ export function useWebSocket() {
     ws.onerror = () => {
       try { ws.close() } catch { /* onclose 会触发重连 */ }
     }
-  }, [clearHeartbeat, sendPing, setBulk, updateWorkerFromWs, setBalances, setSummary, setWsLatency, setBans, setSymbolStatuses, setMarketData])
+  }, [clearHeartbeat, sendPing, setBulk, mergeBulk, updateWorkerFromWs, setBalances, setSummary, setWsLatency, setBans, setSymbolStatuses, setMarketData])
 
   useEffect(() => {
     stopped.current = false

@@ -82,10 +82,13 @@ export function EngineHealthBar() {
   const weightPct = Math.min(100, Math.round((usedWeight / weightLimit) * 100))
   const weightColor = weightPct >= 85 ? 'text-negative' : weightPct >= 60 ? 'text-yellow-500' : 'text-positive'
   const weightBar = weightPct >= 85 ? 'bg-negative' : weightPct >= 60 ? 'bg-yellow-500' : 'bg-positive'
+  // API错误改「近5分钟实时」口径:total_errors 是进程级单调累计(只增不减),陈旧错误会常驻误报。
+  // 仅当该账户最近一次错误发生在 300s 内才计入,既反映真实近期故障,又不被历史累计污染。
+  const ERR_FRESH_SEC = 300
   const totalMetrics = Object.values(health.api_metrics).reduce(
     (acc, m) => ({
       calls: acc.calls + m.total_calls,
-      errors: acc.errors + m.total_errors,
+      errors: acc.errors + (m.last_error_ago_sec != null && m.last_error_ago_sec < ERR_FRESH_SEC ? m.total_errors : 0),
       rate_limited: acc.rate_limited + m.rate_limited,
     }),
     { calls: 0, errors: 0, rate_limited: 0 },

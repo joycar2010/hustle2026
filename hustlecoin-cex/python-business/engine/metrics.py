@@ -150,6 +150,21 @@ def max_uid_weight_snapshot() -> dict:
     return {"used_uid_weight_1m": best_w, "uid_limit": best_lim, "uid_weight_time": best_t}
 
 
+def per_account_uid_weight_snapshot() -> dict:
+    """逐子账户 UID 借币权重(借币速率维度)。UID 权重按子账户独立计(180000/分钟),
+    各账户消耗不同 → 可借速率不同。返回 {sub_account_id: {used, limit, time}}。"""
+    out = {}
+    for aid, m in _metrics.items():
+        if aid == 0:
+            continue  # 0 = 默认/未绑定账户的占位实例,跳过
+        out[str(aid)] = {
+            "used_uid_weight_1m": m.used_uid_weight_1m,
+            "uid_limit": m.uid_limit_1m,
+            "uid_weight_time": m.uid_weight_time,
+        }
+    return out
+
+
 def max_order_count_snapshot() -> dict:
     """Busiest UID's 10s order-count (借币提速维度)。order-count 100/10s 是 per-UID,
     多账户并联=N倍预算;最接近上限的账户界定单账户借币上限。"""

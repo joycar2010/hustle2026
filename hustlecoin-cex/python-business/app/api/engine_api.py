@@ -77,7 +77,16 @@ def list_positions(
     if symbol:
         q = q.filter(Position.symbol == symbol.upper())
     q = q.order_by(Position.id.desc())
-    return q.offset((page - 1) * size).limit(size).all()
+    rows = q.offset((page - 1) * size).limit(size).all()
+    # 注入子账户备注名(account_note):借到币的真实 position 也带名,前端不再 fallback 显示 #N
+    note_map = {
+        s.id: s.note for s in db.query(SubAccount.id, SubAccount.note).filter(
+            SubAccount.user_id == user_id,
+        ).all()
+    }
+    for p in rows:
+        p.account_note = note_map.get(p.sub_account_id)
+    return rows
 
 
 @router.get("/positions/summary", response_model=PositionSummary)
@@ -559,6 +568,8 @@ def get_pushed_symbols(request: Request):
     r = _redis()
     raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
     pushed = json.loads(raw) if raw else []
+    # 注:不要在此按「无规则/无持仓」自动剔除推送 —— 推送的币默认跟随全局规则、本就无单一规则,
+    # 且刚推送未借到时也无持仓,这都是正常态。曾有过的 ghost 对账会误删所有新推送,已移除。
     # 推送时间戳(engine:{uid}:pushed_at,symbol→unix秒)统一在此回填/清理:
     # 覆盖手动 push(API 已记)与引擎自动推送(此处首次见到即补 now);移除的清掉。
     at_key = _user_redis_key(user_id, "pushed_at")
@@ -874,6 +885,37 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                         repay_amount *= 0.999
                         continue
                     raise
+
+            # 3.5) 治本:还债后若有 base_asset 现货残留(因 minNotional 被迫多买的零头),
+            #      市价卖回 USDT,避免"现币有值/借币空/无持仓"的迷惑残留长期留在杠杆户。
+            #      仅当残留名义价值 ≥ minNotional 才可卖(币安限制);不足则为不可避免的尘埃,留账。
+            #      best-effort:卖回失败不影响已成功的还币。
+            try:
+                leftover = free - repay_amount
+                if leftover > 0:
+                    sp_info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                                    {"symbol": data.symbol.upper()}, signed=False)
+                    sp0 = sp_info.get("symbols", [{}])[0]
+                    flt0 = {f["filterType"]: f for f in sp0.get("filters", [])}
+                    sell_step = float(flt0.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+                    sell_min_notional = float(flt0.get("NOTIONAL", {}).get("minNotional", "5") or "5")
+                    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                                {"symbol": data.symbol.upper()}, signed=False)
+                    sell_price = float(tkr.get("price", 0) or 0)
+                    import math as _math
+                    sell_qty = _math.floor(leftover / sell_step) * sell_step  # 向下对齐,不卖超持有
+                    if sell_price > 0 and sell_qty > 0 and sell_qty * sell_price >= sell_min_notional:
+                        await client._request(
+                            "POST", "https://api.binance.com/sapi/v1/margin/order",
+                            {
+                                "symbol": data.symbol.upper(), "side": "SELL", "type": "MARKET",
+                                "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT",
+                                "isIsolated": "FALSE",
+                            }
+                        )
+                        logger.info(f"partial_repay: sold leftover {sell_qty} {base_asset} back to USDT (acct {data.sub_account_id})")
+            except Exception as se:
+                logger.warning(f"partial_repay 卖回零头残留失败(还币已成功): {se}")
 
             # 4) 回写 position:手动还币绕过引擎对冲/还币流程,不回写则 BORROWED_IDLE 等未终态
             #    position 会永久卡在「待对冲」(状态孤儿)。债已清 → 收口该币 position(见 helper)。
@@ -1241,9 +1283,13 @@ def start_one_worker(account_id: int, request: Request, db: Session = Depends(ge
 
 
 def _live_worker_scopes(db: Session, user_id: int) -> list[str]:
-    """当前仍存在的子账户对应的 worker scope。用于过滤掉已删除子账户残留的
-    engine_state(sub:N)僵尸行 —— 它们 heartbeat 永久过期、显示「超时」却无法删除。"""
-    sub_ids = [r.id for r in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
+    """当前仍存在【且已启用】的子账户对应的 worker scope。用于过滤掉:
+    ① 已删除子账户残留的 engine_state(sub:N)僵尸行;
+    ② 已停用(is_enabled=false)子账户的 worker —— 它们 status=STOPPED、心跳永久过期,
+       不该被算作「超时」(超时仅指 RUNNING 却心跳卡死的 worker)。"""
+    sub_ids = [r.id for r in db.query(SubAccount.id).filter(
+        SubAccount.user_id == user_id, SubAccount.is_enabled == True,
+    ).all()]
     return [f"sub:{i}" for i in sub_ids]
 
 
@@ -1291,7 +1337,8 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     any_stale = False
     for w in worker_rows:
         stale = False
-        if w.last_heartbeat:
+        # 仅 RUNNING 的 worker 才判「超时」:STOPPED 是主动停用,本就不更新心跳,标超时是误报
+        if w.status == "RUNNING" and w.last_heartbeat:
             delta = (now - w.last_heartbeat).total_seconds()
             stale = delta > HEARTBEAT_STALE_SEC
         if stale:
@@ -1367,8 +1414,12 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         uraw = r.get("engine:uid_weight:latest")
         if uraw:
             ud = json.loads(uraw)
-            uid_used = int(ud.get("used_uid_weight_1m", 0))
             uid_limit = int(ud.get("uid_limit", 180000))
+            # UID 权重是币安 1 分钟滑动窗口,只在借/还币调用时由响应头更新。若距上次更新 >60s,
+            # 窗口已滑过 → 视为 0(否则不借币时会一直显示上次借币的残留值,如"UID 6"永不归零)。
+            uid_wt = float(ud.get("uid_weight_time", 0) or 0)
+            uid_age = datetime.now(timezone.utc).timestamp() - uid_wt if uid_wt > 0 else 1e9
+            uid_used = int(ud.get("used_uid_weight_1m", 0)) if uid_age <= 60 else 0
         pushed_raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
         pushed_count = len(json.loads(pushed_raw)) if pushed_raw else 0
         uid_headroom = max(0, uid_limit - uid_used)
@@ -1431,6 +1482,35 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     except Exception:
         pass
 
+    # 逐子账户可借速率(各账户 UID 消耗不同 → 速率不同):
+    #   rate = min(该账户 UID 余量 ÷ 1500 ÷ 60, 该账户配速 borrow_rate_per_sec)
+    # UID 权重是币安 1 分钟滑动窗口,>60s 无更新视为已归零(余量满)。无该账户数据则用配速兜底。
+    account_borrow_rates: dict[str, float] = {}
+    try:
+        from app.db.models import GlobalRules as _GR
+        gr2 = (db.query(_GR).filter(_GR.user_id == user_id).first() or db.query(_GR).first())
+        default_rate2 = float(gr2.borrow_rate_per_sec) if gr2 and gr2.borrow_rate_per_sec is not None else 2.0
+        now_ts = datetime.now(timezone.utc).timestamp()
+        pa_raw = r.get("engine:uid_weight:by_account")
+        pa = json.loads(pa_raw) if pa_raw else {}
+        subs2 = db.query(SubAccount).filter(
+            SubAccount.user_id == user_id, SubAccount.is_enabled == True,
+        ).all()
+        for s in subs2:
+            cfg = float(s.borrow_rate_per_sec) if s.borrow_rate_per_sec else default_rate2
+            d = pa.get(str(s.id))
+            used = 0
+            lim = 180000
+            if d:
+                wt = float(d.get("uid_weight_time", 0) or 0)
+                age = now_ts - wt if wt > 0 else 1e9
+                used = int(d.get("used_uid_weight_1m", 0)) if age <= 60 else 0
+                lim = int(d.get("uid_limit", 180000) or 180000)
+            ceiling = max(0.0, (lim - used)) / 1500 / 60   # 该账户 UID 余量换算的每秒借币上限
+            account_borrow_rates[str(s.id)] = round(min(ceiling, cfg), 2)
+    except Exception:
+        pass
+
     return HealthResponse(
         status=overall,
         engine_status=engine_status,
@@ -1448,4 +1528,5 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         throttle_rate=throttle_rate,
         agg_borrow_rate=agg_borrow_rate,
         single_borrow_rate=single_borrow_rate,
+        account_borrow_rates=account_borrow_rates,
     )

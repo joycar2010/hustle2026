@@ -113,6 +113,9 @@ function SpreadsTab() {
     }
     // 硬底线:剔除负点差,且开仓点差须 > 0.01%(过滤噪声/几乎无利差的币)
     result = result.filter((s) => s.spread_short > 0.01)
+    // 剔除无券币(币安杠杆池-3045池空):它们常点差虚高占榜首但借不到,不进点差榜
+    // (dashboard 仍正常显示其点差,二者口径不同 —— 见 spreadStore.no_inventory)
+    result = result.filter((s) => !s.no_inventory)
     if (minSpread > 0) {
       result = result.filter((s) => s.spread_short >= minSpread)
     }

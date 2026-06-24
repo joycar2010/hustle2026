@@ -1008,13 +1008,17 @@ class Worker:
                 # P0: publish IP weight (read budget) + UID weight (borrow budget) for
                 # the top-bar gauge and per-account throttle display.
                 try:
-                    from engine.metrics import global_weight_snapshot, max_uid_weight_snapshot
+                    from engine.metrics import global_weight_snapshot, max_uid_weight_snapshot, per_account_uid_weight_snapshot
                     ws = global_weight_snapshot()
                     if ws["weight_time"] > 0:
                         await self._redis.set("engine:weight:latest", json.dumps(ws), ex=90)
                     us = max_uid_weight_snapshot()
                     if us["uid_weight_time"] > 0:
                         await self._redis.set("engine:uid_weight:latest", json.dumps(us), ex=90)
+                    # 逐子账户 UID 权重(各账户速率不同)→ 前端子账户行显示 per-account 速率
+                    pa = per_account_uid_weight_snapshot()
+                    if pa:
+                        await self._redis.set("engine:uid_weight:by_account", json.dumps(pa), ex=90)
                 except Exception:
                     pass
             except Exception as e:

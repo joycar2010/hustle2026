@@ -16,8 +16,8 @@ INTEREST_RATE_URL = "https://www.binance.com/bapi/margin/v1/public/margin/vip/sp
 SPOT_EXINFO_URL = "https://api.binance.com/api/v3/exchangeInfo"
 FUT_EXINFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 
-REFRESH_INTERVAL = 30
-STATIC_REFRESH_MULTIPLIER = 10  # refresh static data every 10 cycles = 5 min
+REFRESH_INTERVAL = 8    # 资金费率/mark价 实时刷新(premiumIndex 是低IP权重公开端点,8s 安全且够实时)
+STATIC_REFRESH_MULTIPLIER = 38  # 静态数据(资费周期/上限/利率)每 ~5 分钟刷一次(8s×38≈304s)
 INTEREST_CACHE_KEY = "market:interest_rates"  # Redis backup for last-good interest rates
 UNIVERSE_KEY = "engine:universe"  # Rust 引擎订阅集:现货∩合约 USDT 可交易对(随上/退市动态刷新)
 

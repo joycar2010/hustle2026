@@ -210,6 +210,7 @@ export interface EngineHealth {
   throttle_rate?: number
   agg_borrow_rate?: number
   single_borrow_rate?: number
+  account_borrow_rates?: Record<string, number>   // 逐子账户可借速率 {sub_account_id: req/s}
 }
 
 export async function getEngineHealth(signal?: AbortSignal): Promise<EngineHealth> {

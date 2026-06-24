@@ -5,7 +5,9 @@ import { OwlTreeTable, type Position, type SymbolRuleInfo } from '@/components/d
 import { EngineHealthBar } from '@/components/dashboard/EngineHealthBar'
 import { TransferDialog } from '@/components/dashboard/TransferDialog'
 import { SymbolRuleDialog } from '@/components/dashboard/SymbolRuleDialog'
-import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, partialRepay, manualOpen, manualClose, manualHedge, manualRepay, getEngineHealth, listTailPositions, cleanupTailPositions, getMaxBorrowable } from '@/api/engine'
+import { RemoveSymbolDialog } from '@/components/dashboard/RemoveSymbolDialog'
+import { PartialRepayDialog } from '@/components/dashboard/PartialRepayDialog'
+import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, manualOpen, manualClose, manualHedge, manualRepay, getEngineHealth, listTailPositions, cleanupTailPositions, getMaxBorrowable } from '@/api/engine'
 import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
@@ -31,10 +33,12 @@ export function DashboardPage() {
   const [transferAccountId, setTransferAccountId] = useState<number | undefined>()
   const [ruleSymbol, setRuleSymbol] = useState<string | null>(null)
   const [ruleAccountId, setRuleAccountId] = useState<number | undefined>()
+  const [removeSymbol, setRemoveSymbol] = useState<string | null>(null)
+  const [repaySymbol, setRepaySymbol] = useState<string | null>(null)
   const [symbolRulesMap, setSymbolRulesMap] = useState<Map<string, SymbolRuleInfo>>(new Map())
   const [delistingSymbols, setDelistingSymbols] = useState<Set<string>>(new Set())
   const [riskySymbols, setRiskySymbols] = useState<Set<string>>(new Set())
-  const [throttleRate, setThrottleRate] = useState(0)
+  const [accountRates, setAccountRates] = useState<Record<string, number>>({})
 
   useEffect(() => {
     // [第三梯队] 轮询用 AbortController:慢网下撤销上一次未完成的 health 请求,避免堆叠
@@ -42,7 +46,9 @@ export function DashboardPage() {
     const fetchThrottle = () => {
       ctrl?.abort()
       ctrl = new AbortController()
-      getEngineHealth(ctrl.signal).then((h) => setThrottleRate(h.throttle_rate ?? 0)).catch(() => {})
+      getEngineHealth(ctrl.signal).then((h) => {
+        setAccountRates(h.account_borrow_rates ?? {})
+      }).catch(() => {})
     }
     fetchThrottle()
     const t = setInterval(fetchThrottle, 15000)
@@ -176,9 +182,8 @@ export function DashboardPage() {
           addToast(`无法移除 ${symbol}：仍有子账户持仓中。请先平仓所有持仓后再移除。`, 'error')
           break
         }
-        if (await confirmDialog({ title: '移除推送', message: `确认移除 ${symbol}？` })) {
-          removePushedSymbol(symbol).then(() => refreshPushed()).catch(() => {})
-        }
+        // 主界面风格弹窗:列出各子账户现币/借币 → 确认后逐账户自动还币 → 再移除
+        setRemoveSymbol(symbol)
         break
       }
       case 'resume_slot':
@@ -242,18 +247,8 @@ export function DashboardPage() {
         }
         break
       case 'partial_repay': {
-        const subId = extra?.subAccountId as number | undefined
-        if (!subId) break
-        const amountStr = prompt(`部分还币 ${symbol}\n账户 #${subId}\n输入还币数量:`)
-        if (!amountStr) break
-        const amount = parseFloat(amountStr)
-        if (isNaN(amount) || amount <= 0) {
-          addToast('请输入有效的正数', 'error')
-          break
-        }
-        partialRepay(subId, symbol, amount)
-          .then(() => { addToast('还币成功', 'success'); refreshPositions() })
-          .catch((e) => addToast(`还币失败: ${e.response?.data?.detail || e.message}`, 'error'))
+        // 弹出主界面风格弹窗:列该币所有子账户现币/借币,可逐账户自填还币或一键全还
+        setRepaySymbol(symbol)
         break
       }
       case 'clear_account': {
@@ -329,7 +324,7 @@ export function DashboardPage() {
         symbolRules={symbolRulesMap}
         delistingSymbols={delistingSymbols}
         riskySymbols={riskySymbols}
-        throttleRate={throttleRate}
+        accountRates={accountRates}
         onAction={handleAction}
       />
       {showTransfer && (
@@ -344,6 +339,20 @@ export function DashboardPage() {
           symbol={ruleSymbol}
           initialAccountId={ruleAccountId}
           onClose={() => { setRuleSymbol(null); setRuleAccountId(undefined); refreshSymbolRules() }}
+        />
+      )}
+      {removeSymbol && (
+        <RemoveSymbolDialog
+          symbol={removeSymbol}
+          onClose={() => setRemoveSymbol(null)}
+          onRemoved={() => { refreshPushed(); refreshPositions() }}
+        />
+      )}
+      {repaySymbol && (
+        <PartialRepayDialog
+          symbol={repaySymbol}
+          onClose={() => setRepaySymbol(null)}
+          onDone={() => refreshPositions()}
         />
       )}
     </div>
