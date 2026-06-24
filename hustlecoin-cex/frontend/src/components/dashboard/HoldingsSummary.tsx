@@ -9,7 +9,8 @@ interface HeldRow {
   note: string
   symbol: string
   base: string
-  borrowed: number
+  free: number        // 现币:当前手上可用现币(实时)
+  borrowed: number    // 借币:杠杆户实时借币本金
   interest: number
   total: number
 }
@@ -17,6 +18,7 @@ interface HeldRow {
 /** 全局持币汇总:列出所有子账户当前借了哪些币、多少,逐行单独还币。数据来自 balance 实时快照。 */
 export function HoldingsSummary({ onClose }: { onClose: () => void }) {
   const balances = useBalanceStore((s) => s.balances)
+  const markRepaid = useBalanceStore((s) => s.markRepaid)
   const addToast = useToastStore((s) => s.addToast)
   const [repaying, setRepaying] = useState<string | null>(null)
 
@@ -27,11 +29,12 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
       for (const [symbol, m] of Object.entries(sm)) {
         const borrowed = m.borrowed ?? 0
         const interest = m.interest ?? 0
+        const free = m.free ?? 0
         if (borrowed + interest > 1e-8) {
           out.push({
             accountId: b.account_id, note: b.note, symbol,
             base: symbol.replace('USDT', ''),
-            borrowed, interest, total: borrowed + interest,
+            free, borrowed, interest, total: borrowed + interest,
           })
         }
       }
@@ -49,12 +52,13 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
     setRepaying(key)
     try {
       await partialRepay(r.accountId, r.symbol, r.total)
+      markRepaid(r.accountId, r.symbol)   // 乐观清零 → 该行即时消失,下次WS推送对账
       addToast(`${r.note} ${r.base} 还币已提交`, 'success')
     } catch (e) {
       addToast(`还币失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
     }
     setRepaying(null)
-  }, [addToast])
+  }, [addToast, markRepaid])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2" onClick={onClose}>
@@ -71,7 +75,8 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
               <tr className="bg-[#0d0d14] text-muted-foreground border-b border-border">
                 <th className="px-3 py-1.5 text-left font-medium">子账户</th>
                 <th className="px-3 py-1.5 text-left font-medium">币种</th>
-                <th className="px-3 py-1.5 text-right font-medium">借入本金</th>
+                <th className="px-3 py-1.5 text-right font-medium" title="现币:当前手上可用现币(实时)">现币</th>
+                <th className="px-3 py-1.5 text-right font-medium" title="借币:杠杆户实时借币本金">借币</th>
                 <th className="px-3 py-1.5 text-right font-medium">利息</th>
                 <th className="px-3 py-1.5 text-right font-medium">合计</th>
                 <th className="px-3 py-1.5 text-center font-medium">操作</th>
@@ -79,13 +84,14 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">当前无持币(无借币未还)</td></tr>
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">当前无持币(无借币未还)</td></tr>
               ) : rows.map((r) => {
                 const key = `${r.accountId}-${r.symbol}`
                 return (
                   <tr key={key} className="border-b border-border/30 hover:bg-[#1a1a22]/60">
                     <td className="px-3 py-1.5 font-medium">{r.note}</td>
                     <td className="px-3 py-1.5">{r.base}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">{r.free.toFixed(6)}</td>
                     <td className="px-3 py-1.5 text-right font-mono tabular-nums text-amber-400">{r.borrowed.toFixed(6)}</td>
                     <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">{r.interest.toFixed(6)}</td>
                     <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.total.toFixed(6)}</td>

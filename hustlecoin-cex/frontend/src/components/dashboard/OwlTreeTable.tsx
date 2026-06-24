@@ -481,8 +481,8 @@ const SubAccountRow = memo(function SubAccountRow({
                 ? <span className="ml-0.5 text-amber-500/90">无券</span>
                 : <span className="ml-0.5 text-sky-300/90">{eff != null ? (borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)) : '-'}</span>}</span>
               <span className="text-muted-foreground/60">现币<span className="ml-0.5 text-foreground">{sm?.free != null ? formatNumber(sm.free, 4) : '-'}</span></span>
-              <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{formatNumber(pos.borrow_qty, 4)}</span></span>
-              <span className="text-muted-foreground/60">额<span className="ml-0.5 text-foreground">{pos.open_usdt_amount ? formatNumber(pos.open_usdt_amount) : '-'}</span></span>
+              <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{sm?.borrowed != null ? formatNumber(sm.borrowed, 4) : '-'}</span></span>
+              <span className="text-muted-foreground/60">额<span className="ml-0.5 text-foreground">{(() => { const v = (sm?.borrowed ?? 0) * px; return v > 0.01 ? formatNumber(v, 0) : '-' })()}</span></span>
               <span className="text-muted-foreground/60">险<span className={cn('ml-0.5', balance ? (balance.margin_level > 2 ? 'text-positive' : balance.margin_level > 1.3 ? 'text-yellow-400' : 'text-negative') : 'text-foreground')}>{balance ? formatNumber(balance.margin_level, 2) : '-'}</span></span>
               {futVal > 0 && <span className="text-muted-foreground/60">现期<span className="ml-0.5 text-foreground">{formatNumber(futVal, 0)}</span></span>}
             </div>
@@ -549,18 +549,17 @@ const SubAccountRow = memo(function SubAccountRow({
             : '-'}
         </td>
       )}
-      {/* 借币 */}
-      {!isMobile && (
-        <td className={numCell}>
-          {formatNumber(pos.borrow_qty, 4)}
-        </td>
-      )}
-      {/* 借币金额 — 借来的现币(sm.free)× 此币当前U值(spot_bid) */}
+      {/* 借币 — 币安杠杆户实时借币本金(sm.borrowed),非 position 静态快照,随利息/部分还币/还币即时变 */}
       {!isMobile && (() => {
         const sm = balance?.symbol_margin?.[pos.symbol]
-        const free = sm?.free ?? 0
+        return <td className={numCell}>{sm?.borrowed != null ? formatNumber(sm.borrowed, 4) : '-'}</td>
+      })()}
+      {/* 借币金额 — 借币(sm.borrowed)× 此币当前U值(spot_bid),实时变动 */}
+      {!isMobile && (() => {
+        const sm = balance?.symbol_margin?.[pos.symbol]
+        const borrowed = sm?.borrowed ?? 0
         const spotPrice = spread?.spot_bid ?? 0
-        const val = free * spotPrice
+        const val = borrowed * spotPrice
         return <td className={numCell}>{val > 0.01 ? formatNumber(val, 0) : '-'}</td>
       })()}
       {/* 风险 — margin level */}

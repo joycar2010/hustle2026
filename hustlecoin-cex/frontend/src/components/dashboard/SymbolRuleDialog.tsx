@@ -48,6 +48,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   const [repaying, setRepaying] = useState<number | null>(null)
   const addToast = useToastStore((s) => s.addToast)
   const balances = useBalanceStore((s) => s.balances)
+  const markRepaid = useBalanceStore((s) => s.markRepaid)
 
   // 某账户对当前币的持币(已借本金+利息),数据来自 balance 实时快照 symbol_margin
   const heldOf = useCallback((accountId: number) => {
@@ -70,12 +71,13 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
     setRepaying(accountId)
     try {
       await partialRepay(accountId, symbol, total)
+      markRepaid(accountId, symbol)   // 乐观清零 → 持币列即时归"—",下次WS推送对账
       addToast(`${note} 还币已提交`, 'success')
     } catch (e) {
       addToast(`还币失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
     }
     setRepaying(null)
-  }, [heldOf, symbol, addToast])
+  }, [heldOf, symbol, addToast, markRepaid])
 
   useEffect(() => {
     const loadAll = async () => {

@@ -623,6 +623,64 @@ def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids:
         db.rollback()
 
 
+def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: int, symbol: str, repay_qty: Decimal):
+    """手动还币(/partial-repay)后收口 position 状态:把该子账户该币的未终态 position 置 CLOSED
+    (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。若该 user 该币全部 CLOSED → 自动下架
+    pushed_symbols + 清单一规则,对齐引擎平仓后行为(worker._check_and_remove_symbol_after_close),
+    防止刚还清又被引擎按残留规则(如 borrow_spread=-1)立即重借。失败回滚不阻断还币主流程。"""
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        active = db.query(Position).filter(
+            Position.sub_account_id == sub_account_id,
+            Position.symbol == symbol,
+            Position.status.notin_(["CLOSED", "FAILED"]),
+        ).all()
+        if not active:
+            return
+        now = _dt.now(_tz.utc)
+        closed_ids = [p.id for p in active]
+        for p in active:
+            p.status = "CLOSED"
+            if repay_qty > 0:
+                p.repay_qty = repay_qty
+            p.closed_at = now
+        db.commit()
+        # 发 position:updates(CLOSED)→ 前端 ws:position 即时删该持仓行(整行所有列一起消失),
+        # 否则行要等 30s 兜底轮询才掉,期间 风险/保证金/经济参数 等整行级列残留旧值。
+        try:
+            rp = _redis()
+            for pid in closed_ids:
+                rp.publish("position:updates", json.dumps({
+                    "id": pid, "status": "CLOSED", "symbol": symbol,
+                    "sub_account_id": sub_account_id, "user_id": user_id,
+                }))
+        except Exception:
+            pass
+        # 该 user 该 symbol 是否还有未终态持仓;无 → 下架 + 清规则
+        sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
+        remaining = db.query(Position).filter(
+            Position.sub_account_id.in_(sub_ids), Position.symbol == symbol,
+            Position.status.notin_(["CLOSED", "FAILED"]),
+        ).count() if sub_ids else 0
+        if remaining == 0:
+            try:
+                r = _redis()
+                ps_key = _user_redis_key(user_id, "pushed_symbols")
+                raw = r.get(ps_key)
+                if raw:
+                    current = set(json.loads(raw))
+                    if symbol in current:
+                        current.discard(symbol)
+                        r.set(ps_key, json.dumps(sorted(current)))
+                        r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+            except Exception:
+                pass
+            _purge_symbol_rules(db, user_id, symbol, sub_ids)
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"reconcile positions after repay failed ({symbol}): {e}")
+
+
 @router.delete("/push-symbol/{symbol}")
 def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
@@ -688,7 +746,10 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             usdt_free = float(usdt_info.get("free", "0") or 0) if usdt_info else 0.0
             total_debt = borrowed + interest
             if total_debt < 1e-8:
-                return {"message": f"{account.note} {base_asset} 无需还币(债务为0)"}
+                # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED + 自动下架),
+                # 修复"已还币但状态仍待对冲"的孤儿。
+                _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(), Decimal("0"))
+                return {"message": f"{account.note} {base_asset} 无需还币(债务为0),已同步持仓状态"}
 
             # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
             # 归一为 float,避免下游 `repay_amount - free`(shortfall)/`*= 0.999`(重试)触发 Decimal-float
@@ -813,6 +874,11 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                         repay_amount *= 0.999
                         continue
                     raise
+
+            # 4) 回写 position:手动还币绕过引擎对冲/还币流程,不回写则 BORROWED_IDLE 等未终态
+            #    position 会永久卡在「待对冲」(状态孤儿)。债已清 → 收口该币 position(见 helper)。
+            _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(),
+                                             Decimal(str(repay_amount)))
 
             return {
                 "message": f"已还 {repay_amount:.6f} {base_asset} (账户 {account.note})",

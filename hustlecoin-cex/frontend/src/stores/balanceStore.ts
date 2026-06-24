@@ -44,6 +44,7 @@ interface BalanceState {
   setBalances: (balances: AccountBalance[]) => void
   setSummary: (partial: Partial<BalanceSummary>) => void
   setWsLatency: (ms: number) => void
+  markRepaid: (accountId: number, symbol: string) => void
 }
 
 const SS_KEY = 'hc_balances'
@@ -93,4 +94,26 @@ export const useBalanceStore = create<BalanceState>((set) => ({
   },
 
   setWsLatency: (ms) => set({ wsLatency: ms }),
+
+  // 还币成功后乐观清零该账户该币的持币(现币 free + 本金 borrowed + 利息 interest),
+  // 让持币汇总/单一规则模态框即时更新;下次 WS 余额推送以服务端真值对账覆盖(setBalances 整体替换)。
+  markRepaid: (accountId, symbol) => {
+    set((state) => {
+      const balances = state.balances.map((b) => {
+        if (b.account_id !== accountId) return b
+        const sm = b.symbol_margin?.[symbol]
+        if (!sm) return b
+        return {
+          ...b,
+          symbol_margin: {
+            ...b.symbol_margin,
+            [symbol]: { ...sm, free: 0, borrowed: 0, interest: 0 },
+          },
+        }
+      })
+      const next = { balances, summary: state.summary, lastUpdateTs: state.lastUpdateTs }
+      try { sessionStorage.setItem(SS_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+      return { balances }
+    })
+  },
 }))
