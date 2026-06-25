@@ -96,10 +96,16 @@ def get_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)
         SymbolRule.symbol == symbol,
     ).first()
     if not rule:
-        rule = SymbolRule(user_id=user_id, symbol=symbol, source="custom")
-        db.add(rule)
-        db.commit()
-        db.refresh(rule)
+        # 不再为"查看"落库空壳 custom 行(否则该币永久误显"单一规则"、被前端并集钉在面板上清不掉)。
+        # 返回一份临时的 global 默认(不 add/不 commit);真正保存走 PUT /{symbol} 才落库为 custom。
+        from datetime import datetime, timezone
+        _now = datetime.now(timezone.utc)
+        rule = SymbolRule(user_id=user_id, symbol=symbol, source="global")
+        rule.id = 0                # 哨兵:满足 SymbolRuleResponse.id 非空,前端据 source/值判定不依赖 id
+        rule.created_at = _now
+        rule.updated_at = _now
+        global_rules = _get_global_rules(db, user_id)
+        return _to_response(rule, global_rules)
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 

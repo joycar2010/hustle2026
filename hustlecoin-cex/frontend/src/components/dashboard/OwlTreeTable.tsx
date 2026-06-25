@@ -145,6 +145,16 @@ function ruleTooltip(rule: SymbolRuleInfo): string {
   return parts.join('\n')
 }
 
+// 真·单一规则:source=custom 且至少有一项真实覆盖值(开/平/单笔额/平仓资息)。
+// 空壳 custom 行(GET 查看时自动落库的全 null 行)按"通用规则"处理 —— 否则会误显"单一规则"、
+// 且被下方 allSymbols 并集强制拉到面板上(且不在 pushed 列表、批量移除够不着,清不掉)。
+function ruleIsCustom(r: SymbolRuleInfo | null | undefined): boolean {
+  return !!r && r.source === 'custom' && (
+    r.open_spread != null || r.close_spread != null ||
+    r.order_amount != null || r.close_funding_ratio != null
+  )
+}
+
 // 状态列着色(分级):正常=绿、在途=蓝、队列=黄、等待=紫、异常=橙红、停止=红
 const EXEC_STATUSES = new Set(['借币中', '开仓中', '平仓中', '买回中', '还币中', '待还币'])
 const ABNORMAL_STATUSES = new Set(['无券', '量不足', '行情异常', '行情陈旧', '借币冷却', '移除冷却', '禁借', '不可交易'])
@@ -222,8 +232,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
     : undefined
 
   const rule = group.ruleInfo
-  const hasCustomRule = rule && rule.source === 'custom' && (rule.open_spread != null || rule.close_spread != null)
-  const isCustom = rule?.source === 'custom'
+  const hasCustomRule = ruleIsCustom(rule)   // 有真实覆盖值才算"单一规则"(空壳 custom 行→通用规则)
 
   // 长按(手机)唤菜单计时/防误触
   const lpTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -367,10 +376,10 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {!isMobile && (
         <td
           className="px-1.5 py-1 text-center whitespace-nowrap text-[10px] cursor-pointer hover:bg-accent/30"
-          title={isCustom ? (rule ? ruleTooltip(rule) : '点击设置该币种单一规则') : '点击打开全局规则设置(/rules)'}
-          onClick={(e) => { e.stopPropagation(); if (isCustom) onDoubleClick(group.symbol); else onOpenRules() }}
+          title={hasCustomRule ? (rule ? ruleTooltip(rule) : '点击设置该币种单一规则') : '点击打开全局规则设置(/rules)'}
+          onClick={(e) => { e.stopPropagation(); if (hasCustomRule) onDoubleClick(group.symbol); else onOpenRules() }}
         >
-          <span className={isCustom ? 'text-amber-400' : 'text-foreground'}>{isCustom ? '单一规则' : '通用规则'}</span>
+          <span className={hasCustomRule ? 'text-amber-400' : 'text-foreground'}>{hasCustomRule ? '单一规则' : '通用规则'}</span>
         </td>
       )}
       {/* mobile action button */}
@@ -751,10 +760,11 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
       bySymbol.set(p.symbol, list)
     }
 
-    // 并入"有自定义单一规则(source=custom)"的币:即便无持仓、未推送,也显示其操作台行
-    // (修复"操作台被自动下架后,设单一规则也救不回";只认 custom,避免 scan/global 默认刷屏)
+    // 并入"有真实覆盖值的单一规则(source=custom 且有值)"的币:即便无持仓、未推送,也显示其操作台行
+    // (修复"操作台被自动下架后,设单一规则也救不回")。空壳 custom 行(查看时自动落库的全 null 行)不并入,
+    // 否则会把它们永久钉在面板上、又不在 pushed 列表里、批量移除够不着,清不掉。
     const ruleSymbols = symbolRules
-      ? [...symbolRules.entries()].filter(([, r]) => r.source === 'custom').map(([s]) => s)
+      ? [...symbolRules.entries()].filter(([, r]) => ruleIsCustom(r)).map(([s]) => s)
       : []
     const allSymbols = new Set([...bySymbol.keys(), ...pushedSet, ...ruleSymbols])
     const q = search.toUpperCase()
