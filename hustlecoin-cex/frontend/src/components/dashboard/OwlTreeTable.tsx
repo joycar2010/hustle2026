@@ -245,6 +245,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
 
   return (
     <tr
+      id={`symrow-${group.symbol}`}
       className={cn(
         'border-b border-border/30 hover:bg-accent/20 cursor-pointer transition-colors text-[11px]',
         hasPos ? 'bg-[#111118]' : 'bg-[#0d0d14]/50',
@@ -695,6 +696,25 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
   } | null>(null)
   const isMobile = useIsMobile()
 
+  // 推送后定位:OwlTopBar 推送成功派发 pushed:focus(detail=symbol),滚动到该币汇总行并短暂高亮,
+  // 修复"再推一个已在列表的币没反应"。元素 id=symrow-{symbol};best-effort(被搜索/仅持仓过滤掉则不滚)。
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const sym = (e as CustomEvent).detail as string
+      if (!sym) return
+      setTimeout(() => {
+        const el = document.getElementById(`symrow-${sym}`)
+        if (!el) return
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el.style.transition = 'background-color 0.4s'
+        el.style.backgroundColor = 'rgba(99,102,241,0.22)'
+        setTimeout(() => { el.style.backgroundColor = '' }, 1800)
+      }, 150)
+    }
+    window.addEventListener('pushed:focus', onFocus)
+    return () => window.removeEventListener('pushed:focus', onFocus)
+  }, [])
+
   const pushedSet = useMemo(() => new Set(pushedSymbols), [pushedSymbols])
 
   const balanceMap = useMemo(() => {
@@ -727,7 +747,12 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
       bySymbol.set(p.symbol, list)
     }
 
-    const allSymbols = new Set([...bySymbol.keys(), ...pushedSet])
+    // 并入"有自定义单一规则(source=custom)"的币:即便无持仓、未推送,也显示其操作台行
+    // (修复"操作台被自动下架后,设单一规则也救不回";只认 custom,避免 scan/global 默认刷屏)
+    const ruleSymbols = symbolRules
+      ? [...symbolRules.entries()].filter(([, r]) => r.source === 'custom').map(([s]) => s)
+      : []
+    const allSymbols = new Set([...bySymbol.keys(), ...pushedSet, ...ruleSymbols])
     const q = search.toUpperCase()
     const result: SymbolGroup[] = []
 
@@ -1100,15 +1125,18 @@ const CoinGroupRows = memo(function CoinGroupRows({
 }) {
   const headerStatus = useMemo(() => {
     const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '运行中', '无券', '点差不符', '量不足', '行情陈旧', '行情异常']
-    // 有持仓:看持仓账户状态;挂单中无持仓:看各 enabled 账户对该币的状态
-    const keys = group.positions.length > 0
-      ? group.positions.map(p => `${p.sub_account_id}:${p.symbol}`)
-      : (group.isPushed ? [...balanceMap.keys()].map(id => `${id}:${group.symbol}`) : [])
+    // 状态口径与下方"显示哪些子账户行"保持并集一致:持仓账户 ∪ (该币被推送/有生效规则时的所有 enabled 账户)
+    const ids = new Set<number>()
+    group.positions.forEach(p => ids.add(p.sub_account_id))
+    if (group.isPushed || group.ruleInfo != null) {
+      for (const id of balanceMap.keys()) ids.add(id)
+    }
+    const keys = [...ids].map(id => `${id}:${group.symbol}`)
     for (const s of priority) {
       if (keys.some(k => symbolStatuses.get(k) === s)) return s
     }
     return null
-  }, [group.positions, group.isPushed, group.symbol, symbolStatuses, balanceMap])
+  }, [group.positions, group.isPushed, group.ruleInfo, group.symbol, symbolStatuses, balanceMap])
 
   return (
     <>
@@ -1155,10 +1183,13 @@ const CoinGroupRows = memo(function CoinGroupRows({
           />
         )
       })}
-      {/* 挂单中(已推送但无持仓):遍历所有 enabled 子账户(balanceMap)造最小伪 position,
-          显示账户名 + 余额 + 逐账户状态(点差不符/无券/待挂单…),与参照系统一致。 */}
-      {isExpanded && group.positions.length === 0 && group.isPushed &&
-        [...balanceMap.values()].map((bal) => {
+      {/* 子账户行渲染并集:除上方"有持仓"账户外,只要该币被推送或有生效规则(全局/单一),
+          就把其余 enabled 子账户(去重)也造最小伪 position 显示(账户名+余额+逐账户状态)。
+          修复"只有全局规则、别的账户已持仓时,该子账户整行不显示"(问题2;原 positions.length===0 互斥闸)。 */}
+      {isExpanded && (group.isPushed || group.ruleInfo != null) &&
+        [...balanceMap.values()]
+          .filter((bal) => !group.positions.some((p) => p.sub_account_id === bal.account_id))
+          .map((bal) => {
           const acctStatus = symbolStatuses.get(`${bal.account_id}:${group.symbol}`) ?? null
           const acctRestriction = restrictionFor(restrictions, bal.account_id)
           const pseudo: Position = {

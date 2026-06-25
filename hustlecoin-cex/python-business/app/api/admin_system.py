@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import threading
 import time
 from datetime import datetime
 
@@ -207,6 +208,10 @@ def git_history(request: Request):
 
 _REPO_SUBDIRS = ["frontend", "frontend-admin", "python-business", "rust-engine", "deploy"]
 
+# 单飞锁:同一时刻只允许一个 git-push 在跑。防前端重试风暴/双击触发并发 git → 抢 .git/index.lock 撞锁。
+# FastAPI 同步端点在线程池执行,故用 threading.Lock + 非阻塞 acquire。
+_push_lock = threading.Lock()
+
 
 def _repo_root() -> str:
     """git 仓库根(已对齐到家目录 /home/ec2-user;代码在 hustlecoin-cex/ 下,与 GitHub 结构一致)。"""
@@ -239,6 +244,10 @@ def _pull_rust_source(root: str) -> bool:
 def git_push(req: GitPushRequest, request: Request):
     require_super_admin(request)
 
+    # 单飞:占用中直接返回(而非排队/并发),避免前端重试或双击叠加并发 git。
+    if not _push_lock.acquire(blocking=False):
+        return {"status": "error",
+                "output": "上一次推送仍在进行中,请等其完成后再试(已加单飞锁防并发 git 撞锁)。"}
     try:
         root = _repo_root()
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -287,14 +296,44 @@ def git_push(req: GitPushRequest, request: Request):
             subprocess.check_output(["git", "add", _VERSION_FILE],
                                     cwd=root, stderr=subprocess.DEVNULL, timeout=5)
 
-        # 4. 提交
-        try:
-            subprocess.check_output(["git", "commit", "-m", req.message],
-                                    cwd=root, stderr=subprocess.STDOUT, timeout=30)
-        except subprocess.CalledProcessError:
-            pass
+        # 4. 提交(失败显形:除"无变更可提交"外,其余错误回传而非静默吞掉)
+        if has_changes:
+            try:
+                subprocess.check_output(["git", "commit", "-m", req.message],
+                                        cwd=root, stderr=subprocess.STDOUT, timeout=30)
+            except subprocess.CalledProcessError as e:
+                out = (e.output.decode() if e.output else "") or ""
+                if "nothing to commit" not in out:
+                    return {"status": "error", "output": f"提交失败:\n{out[:600]}"}
 
-        # 5. 推送(仓库已对齐 origin/coin,fast-forward)
+        # 5. 与 origin 对齐:fetch 后若本地落后 origin,先 rebase 上去(FF 对齐);
+        #    rebase 冲突=真分叉 → --abort 回滚(不动工作区),并把冲突显形,绝不 force。
+        try:
+            subprocess.check_output(["git", "fetch", "origin", _BRANCH],
+                                    cwd=root, stderr=subprocess.STDOUT, timeout=60)
+        except subprocess.CalledProcessError as e:
+            out = e.output.decode() if e.output else str(e)
+            return {"status": "error", "output": f"拉取 origin 失败(检查网络/HTTPS 凭据/token):\n{out[:500]}"}
+        behind = "0"
+        try:
+            behind = subprocess.check_output(
+                ["git", "rev-list", "--count", f"HEAD..origin/{_BRANCH}"],
+                cwd=root, stderr=subprocess.DEVNULL, timeout=15).decode().strip()
+        except Exception:
+            behind = "0"
+        if behind.isdigit() and int(behind) > 0:
+            try:
+                # --autostash:把未暂存改动临时入栈,rebase 完自动弹回(兼容工作区不干净)
+                subprocess.check_output(["git", "rebase", "--autostash", f"origin/{_BRANCH}"],
+                                        cwd=root, stderr=subprocess.STDOUT, timeout=90)
+            except subprocess.CalledProcessError as e:
+                subprocess.run(["git", "rebase", "--abort"], cwd=root, timeout=30, check=False)
+                out = e.output.decode() if e.output else ""
+                return {"status": "error",
+                        "output": (f"本地 {_BRANCH} 落后 origin {behind} 个提交且自动 rebase 冲突(已回滚,未改动工作区)。\n"
+                                   f"请在服务器仓库执行 `git pull --rebase origin {_BRANCH}` 人工解决冲突后再推送。\n{out[:400]}")}
+
+        # 6. 推送(经上一步对齐后应为 fast-forward;若仍被拒,原样回传 git 输出)
         result = subprocess.check_output(["git", "push", "origin", _BRANCH],
                                          cwd=root, stderr=subprocess.STDOUT, timeout=180).decode()
         return {"status": "success", "output": result[:800],
@@ -303,6 +342,8 @@ def git_push(req: GitPushRequest, request: Request):
         return {"status": "error", "output": e.output.decode()[:800] if e.output else str(e)}
     except Exception as e:
         return {"status": "error", "output": str(e)[:800]}
+    finally:
+        _push_lock.release()
 
 
 @router.post("/git-rollback")

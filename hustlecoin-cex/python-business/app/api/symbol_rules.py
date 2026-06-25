@@ -110,21 +110,26 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
 
     update_data = data.model_dump(exclude_unset=True)
     explicitly_set_repay = "allow_repay" in update_data
+    remove_spread_changed = "remove_spread" in update_data  # 本次是否显式改了 remove_spread
 
     for field, value in update_data.items():
         setattr(rule, field, value)
     rule.source = "custom"
 
-    # C3: auto-disable repay when remove_spread < 0.5 (unless user explicitly set allow_repay)
-    effective_remove = rule.remove_spread
-    if effective_remove is None:
-        global_rules = _get_global_rules(db, user_id)
-        effective_remove = global_rules.remove_spread
-    if effective_remove is not None and not explicitly_set_repay:
-        if Decimal(str(effective_remove)) < Decimal("0.5"):
-            rule.allow_repay = False
-        elif not rule.allow_repay:
-            rule.allow_repay = True
+    # C3: remove_spread<0.5 时自动联动关闭 allow_repay —— 仅在【本次请求显式修改 remove_spread】时才重算。
+    # 解耦(问题3):此前无条件用 rule.remove_spread(已存在值)判定,导致"只改 close_spread(平点差)保存"
+    # 也会因旧 remove_spread<0.5 把 allow_repay 翻成 False → 引擎 _is_repay_allowed 拦截 → 设平点差却永不平仓。
+    # 现改为:不碰 remove_spread / 不显式给 allow_repay 的保存,一律不动 allow_repay。
+    if remove_spread_changed and not explicitly_set_repay:
+        effective_remove = rule.remove_spread
+        if effective_remove is None:
+            global_rules = _get_global_rules(db, user_id)
+            effective_remove = global_rules.remove_spread
+        if effective_remove is not None:
+            if Decimal(str(effective_remove)) < Decimal("0.5"):
+                rule.allow_repay = False
+            elif not rule.allow_repay:
+                rule.allow_repay = True
 
     db.commit()
     db.refresh(rule)

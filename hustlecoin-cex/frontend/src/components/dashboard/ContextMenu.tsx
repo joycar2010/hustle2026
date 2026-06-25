@@ -50,7 +50,7 @@ export function ContextMenu({ x, y, symbol, position, isPushed, isAccountRow, su
   const accountActions = isAccountRow && subAccountId
     ? [
         { key: 'divider', label: '' },
-        { key: 'refresh_borrowable', label: '刷新可借上限(理论)' },
+        { key: 'refresh_borrowable', label: '刷新可借' },
         { key: 'partial_repay', label: '部分还币' },
         { key: 'clear_account', label: '清除账户' },
       ]

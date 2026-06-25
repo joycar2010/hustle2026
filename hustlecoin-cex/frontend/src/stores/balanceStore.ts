@@ -44,7 +44,7 @@ interface BalanceState {
   setBalances: (balances: AccountBalance[]) => void
   setSummary: (partial: Partial<BalanceSummary>) => void
   setWsLatency: (ms: number) => void
-  markRepaid: (accountId: number, symbol: string) => void
+  markRepaid: (accountId: number, symbol: string, amount?: number) => void
 }
 
 const SS_KEY = 'hc_balances'
@@ -95,20 +95,34 @@ export const useBalanceStore = create<BalanceState>((set) => ({
 
   setWsLatency: (ms) => set({ wsLatency: ms }),
 
-  // 还币成功后乐观清零该账户该币的持币(现币 free + 本金 borrowed + 利息 interest),
-  // 让持币汇总/单一规则模态框即时更新;下次 WS 余额推送以服务端真值对账覆盖(setBalances 整体替换)。
-  markRepaid: (accountId, symbol) => {
+  // 还币成功后乐观更新该账户该币的持币(现币 free + 本金 borrowed + 利息 interest)。
+  // 服务端真值随后由「写后即时刷新」(后端 balance:refresh → BalancePusher 立刻重推,不再干等 10s 轮询)
+  // 经 setBalances 整体替换对账覆盖。
+  //   amount 省略  → 全额还(清零;「一键全还」/移除币/持币汇总全清等场景保持旧行为);
+  //   amount 提供  → 部分还,按量递减(币安先抵利息再抵本金,现币同步递减),全部 clamp ≥ 0。
+  //                  修复「部分还币却乐观清零成全额还清」(问题1根因:此函数原为全额还而写,加部分还币后未同步)。
+  markRepaid: (accountId, symbol, amount) => {
     set((state) => {
       const balances = state.balances.map((b) => {
         if (b.account_id !== accountId) return b
         const sm = b.symbol_margin?.[symbol]
         if (!sm) return b
+        let patch: { free: number; borrowed: number; interest: number }
+        if (amount == null) {
+          patch = { free: 0, borrowed: 0, interest: 0 }
+        } else {
+          const interest0 = sm.interest ?? 0
+          const interestPaid = Math.min(amount, interest0)         // 先抵利息
+          const principalPaid = Math.max(0, amount - interestPaid) // 余下抵本金
+          patch = {
+            interest: Math.max(0, interest0 - interestPaid),
+            borrowed: Math.max(0, (sm.borrowed ?? 0) - principalPaid),
+            free: Math.max(0, (sm.free ?? 0) - amount),
+          }
+        }
         return {
           ...b,
-          symbol_margin: {
-            ...b.symbol_margin,
-            [symbol]: { ...sm, free: 0, borrowed: 0, interest: 0 },
-          },
+          symbol_margin: { ...b.symbol_margin, [symbol]: { ...sm, ...patch } },
         }
       })
       const next = { balances, summary: state.summary, lastUpdateTs: state.lastUpdateTs }

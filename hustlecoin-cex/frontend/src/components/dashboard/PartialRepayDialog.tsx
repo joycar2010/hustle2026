@@ -47,7 +47,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
     setRepaying(r.accountId)
     try {
       await partialRepay(r.accountId, symbol, amount)
-      markRepaid(r.accountId, symbol)
+      markRepaid(r.accountId, symbol, amount)   // 按实际还币量乐观递减(部分还币不再清零成全额)
       addToast(`${r.note} ${base} 还币已提交`, 'success')
       setInputs((p) => ({ ...p, [r.accountId]: '' }))
       onDone?.()
@@ -73,7 +73,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
       setRepaying(r.accountId)
       try {
         await partialRepay(r.accountId, symbol, r.total)
-        markRepaid(r.accountId, symbol)
+        markRepaid(r.accountId, symbol, r.total)   // 全额还:按 total 递减→自然归零
       } catch (e) {
         const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message
         addToast(`${r.note} 还币失败: ${msg}`, 'error')

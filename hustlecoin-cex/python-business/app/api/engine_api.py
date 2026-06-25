@@ -322,9 +322,15 @@ async def get_max_borrowable(account_id: int, asset: str, request: Request, db: 
 
     from engine.trading.binance_trading import BinanceTradingClient
     async with BinanceTradingClient(account.api_key, account.api_secret) as client:
-        amount = await client.get_max_borrowable(asset.upper())
+        mb = await client.get_max_borrowable(asset.upper())
 
-    return {"asset": asset.upper(), "max_borrowable": str(amount)}
+    # get_max_borrowable 返回 {"amount":Decimal, "borrowLimit":Decimal};过去直接 str(dict) 致前端显示
+    # 原始 "{'amount': Decimal('0'), ...}"。这里拆出标量,前端展示纯数字。
+    if isinstance(mb, dict):
+        return {"asset": asset.upper(),
+                "max_borrowable": str(mb.get("amount", 0)),
+                "borrow_limit": str(mb.get("borrowLimit", 0))}
+    return {"asset": asset.upper(), "max_borrowable": str(mb), "borrow_limit": None}
 
 
 @router.get("/accounts/{account_id}/loan-history")
@@ -788,6 +794,16 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                     step, min_notional, price = 0.01, 5.0, 0.0
 
                 if price <= 0:
+                    # 取价兜底:REST(exchangeInfo/ticker)失败时用 Redis spreads 现价(与行情推送同源),
+                    # 避免"明明可还却因瞬时取价失败被 400 拒"。
+                    try:
+                        raw_sp = _redis().hget("spreads", data.symbol.upper())
+                        if raw_sp:
+                            sp2 = json.loads(raw_sp)
+                            price = float(sp2.get("spot_ask") or sp2.get("spot_bid") or 0)
+                    except Exception:
+                        pass
+                if price <= 0:
                     raise HTTPException(status_code=400, detail=f"无法获取 {base_asset} 价格,稍后重试")
 
                 # 需买入量:满足 minNotional(币安用5分钟均价校验,现价可能偏低)→ 留 +20% 缓冲;
@@ -923,6 +939,12 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             #    position 会永久卡在「待对冲」(状态孤儿)。债已清 → 收口该币 position(见 helper)。
             _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(),
                                              Decimal(str(repay_amount)))
+
+            # 写后即时刷新:手动部分/全额还币 → 请求 BalancePusher 立刻重推该用户余额(不等 10s 轮询,问题4)
+            try:
+                _redis().publish("balance:refresh", str(user_id))
+            except Exception:
+                pass
 
             return {
                 "message": f"已还 {repay_amount:.6f} {base_asset} (账户 {account.note})",
