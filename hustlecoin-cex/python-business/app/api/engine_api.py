@@ -617,6 +617,16 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     current = set(json.loads(raw)) if raw else set()
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
+    # ③ 手动推送 → 从 auto_pushed_symbols 移除(手动推送的币不参与"点差不足自动移除")
+    try:
+        ap_key = _user_redis_key(user_id, "auto_pushed_symbols")
+        ap_raw = r.get(ap_key)
+        ap = set(json.loads(ap_raw)) if ap_raw else set()
+        if sym in ap:
+            ap.discard(sym)
+            r.set(ap_key, json.dumps(sorted(ap)))
+    except Exception:
+        pass
     r.hsetnx(_user_redis_key(user_id, "pushed_at"), sym, int(time.time()))  # 记首次推送时刻(已存在不覆盖)
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))

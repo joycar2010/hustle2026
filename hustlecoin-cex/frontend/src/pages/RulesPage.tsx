@@ -913,7 +913,7 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
           {/* -- Trading Parameters -- */}
           <div className="bg-[#111118] rounded border border-border p-3 space-y-2.5">
             <div className="flex items-center gap-6 flex-wrap text-[11px]">
-              <InlineField label="自动推送点差" value={gv('auto_push_spread')} onChange={(v) => updateG('auto_push_spread', v)} width="w-10" />
+              <InlineField label="自动推送点差" value={gv('auto_push_spread')} onChange={(v) => updateG('auto_push_spread', v)} width="w-10" title="点差≥此值:自动发现进列表,并作为全局借币(挂单)阈值;单一规则的挂单点差可逐币覆盖。已合并原全局「挂单点差」。" />
               <InlineField label="日利息拦截" value={gv('interest_filter')} onChange={(v) => updateG('interest_filter', v)} suffix="%" width="w-10" />
             </div>
             <div className="flex items-center gap-3 flex-wrap text-[11px]" title="自动推送二次确认:点差达标的币先等此秒数复核点差仍≥推送阈值才推(防瞬时跳点误推);点差≥下方值则直推不等。已接入引擎生效">
@@ -927,10 +927,9 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
               <InlineField label="单仓最大亏损" value={gv('max_loss_per_position')} onChange={(v) => updateG('max_loss_per_position', v)} suffix="U" width="w-10" title="单仓盯市浮亏达此 USDT 即强制平仓(合约平+现货买回,余下按还币规则);留空或 0=禁用。已接入引擎生效" />
             </div>
             <div className="flex items-center gap-4 flex-wrap text-[11px]">
-              <InlineField label="挂单点差" value={gv('borrow_spread')} onChange={(v) => updateG('borrow_spread', v)} width="w-10" />
               <InlineField label="开仓点差" value={gv('open_spread')} onChange={(v) => updateG('open_spread', v)} width="w-10" />
               <InlineField label="单笔下单额" value={gv('order_amount')} onChange={(v) => updateG('order_amount', v)} width="w-10" />
-              <InlineField label="借币延迟开仓" value={gv('borrow_delay_sec')} onChange={(v) => updateG('borrow_delay_sec', v)} suffix="秒" width="w-8" />
+              <InlineField label="借币延迟开仓" value={gv('borrow_delay_sec')} onChange={(v) => updateG('borrow_delay_sec', v)} suffix="秒" width="w-8" title="借到币后等此秒数再开仓(延迟在借币↔开仓之间,非借币前)" />
             </div>
             <div className="flex items-center gap-6 flex-wrap text-[11px]">
               <InlineField label="平仓点差" value={gv('close_spread')} onChange={(v) => updateG('close_spread', v)} width="w-10" />

@@ -298,8 +298,8 @@ async def execute_borrow(
             return None
         position.borrow_interest_rate = interest_rate
 
-        # delay + re-confirm spread still above the borrow threshold(含 ts 新鲜度,防陈旧缓存)
-        await asyncio.sleep(rules.borrow_delay_sec)
+        # ④ borrow_delay_sec 已移到「借到币↔开仓之间」(worker HEDGE 段),此处不再 sleep;
+        #    仍即时再校验点差新鲜+达标,避免在已陈旧/跌破的点差上借币。
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
             now_ms = int(time.time() * 1000)

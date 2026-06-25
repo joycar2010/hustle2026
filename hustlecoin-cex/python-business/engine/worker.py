@@ -322,12 +322,13 @@ class Worker:
             if spread is not None and not self._spread_sane(spread):  # glitch → 本轮不还
                 continue
             repay_fr = self._sym_threshold(pos.symbol, "repay_funding_ratio", g_repay_fr)
-            do_repay = False
-            if spread and spread.spread_short < repay_spread:
-                do_repay = True
-            elif repay_fr is not None and repay_fr > 0 and getattr(pos, 'funding_rate_ratio', None) is not None \
-                    and pos.funding_rate_ratio >= repay_fr:
-                do_repay = True
+            # ② 折中AND:repay_spread 与 repay_funding_ratio 都配置 → 两者都满足才还;
+            #    只配 repay_spread → 只看点差(repay_fr 未配则不参与,避免 funding 永不达标卡死 PENDING_REPAY)。
+            spread_ok = bool(spread and spread.spread_short < repay_spread)
+            fr_configured = repay_fr is not None and repay_fr > 0
+            fr_ok = (fr_configured and getattr(pos, 'funding_rate_ratio', None) is not None
+                     and pos.funding_rate_ratio >= repay_fr)
+            do_repay = (spread_ok and fr_ok) if fr_configured else spread_ok
             if do_repay:
                 await self._repay_position(pos, account_note)
 
@@ -357,6 +358,11 @@ class Worker:
             spread = self.spread_feed.get_symbol(pos.symbol)
             if not self._spread_sane(spread):            # glitch → 不在坏点差上对冲开仓
                 continue
+            # ④ 借币延迟开仓:借到币(BORROWED_IDLE)后等 borrow_delay_sec 再开仓(延迟在"借↔开"之间,非借币前)
+            _hd = float(getattr(rules, "borrow_delay_sec", 0) or 0)
+            if _hd > 0 and getattr(pos, "updated_at", None) is not None:
+                if (datetime.now(timezone.utc) - pos.updated_at).total_seconds() < _hd:
+                    continue
             if spread.spread_short > self._sym_threshold(pos.symbol, "open_spread", rules.open_spread):
                 await self._hedge_position(pos, spread, account_note)
                 open_positions = await asyncio.to_thread(self._load_open_positions)
@@ -368,10 +374,14 @@ class Worker:
         can_borrow = (self._margin_safe and active_count < max_positions and
                       not (self._account_max_borrow is not None and self._account_max_borrow == 0))
         pushed = await asyncio.to_thread(self._load_pushed_symbols)
-        g_borrow_spread = getattr(rules, "borrow_spread", rules.open_spread)   # 全局挂单点差回退值
+        # ① 挂单点差已并入「自动推送点差」:全局借币阈值回退 auto_push_spread(>0 时),未设则退 open_spread。
+        #    单一规则逐币 borrow_spread 仍可覆盖(_sym_threshold 优先 account>symbol>这里的全局回退)。
+        _aps = float(getattr(rules, "auto_push_spread", 0) or 0)
+        g_borrow_spread = _aps if _aps > 0 else rules.open_spread   # 全局借币阈值(=自动推送点差)
         # 开仓阈值缓冲: 实际要求点差 ≥ 挂单点差 + buffer,吸收腿间滑点/~160ms借币延迟(0=不留)
         borrow_buffer = float(getattr(rules, "open_spread_buffer", 0) or 0)
         no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
+        self._auto_pushed_cache = self._load_auto_pushed_symbols()   # ③ 自动推送来源(点差不足移除区分手动/自动)
         for symbol in pushed:
             # 已在途(借/持/待还)的币状态由上方 open/active 逻辑给定,这里不覆盖
             if symbol in active_symbols or symbol in statuses:
@@ -400,6 +410,11 @@ class Worker:
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
             if not self._spread_fresh(spread):
+                statuses[symbol] = "运行中"; continue
+            # ③ 点差不足移除:点差 < 借币阈值时,自动推送的币按 allow_remove 自动下架(手动推送一律不自动移除)
+            if float(spread.spread_short) < eff_borrow:
+                if await self._maybe_auto_remove(symbol):
+                    continue
                 statuses[symbol] = "运行中"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
                 statuses[symbol] = "运行中"; continue
@@ -640,6 +655,57 @@ class Worker:
         except Exception:
             return set()
 
+    def _load_auto_pushed_symbols(self) -> set[str]:
+        """③ 自动推送进来的币集合(engine:{uid}:auto_pushed_symbols)。点差不足移除时区分来源:
+        仅自动推送的币自动下架,手动推送的币不自动移除。"""
+        try:
+            import redis as _redis_sync
+            r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
+            raw = r.get(f"engine:{self._user_id}:auto_pushed_symbols")
+            r.close()
+            return set(json.loads(raw)) if raw else set()
+        except Exception:
+            return set()
+
+    async def _track_auto_pushed(self, syms: set[str]):
+        """③ 把"自动推送"的币记入 auto_pushed_symbols,供点差不足自动移除区分来源。"""
+        try:
+            ap_key = f"engine:{self._user_id}:auto_pushed_symbols"
+            raw = await self._redis.get(ap_key)
+            cur = set(json.loads(raw)) if raw else set()
+            cur |= syms
+            await self._redis.set(ap_key, json.dumps(sorted(cur)))
+        except Exception:
+            pass
+
+    async def _maybe_auto_remove(self, symbol: str) -> bool:
+        """③ 点差不足移除:仅"自动推送"的币、且单一规则未显式禁移(allow_remove != False)时,从 pushed 下架。
+        手动推送的币一律不自动移除。下架后进 removed_cooldown 冷却,防点差抖动反复推/移。返回是否已移除。"""
+        if symbol not in getattr(self, "_auto_pushed_cache", set()):
+            return False   # 手动推送 → 不自动移除
+        if self._symbol_rules.get(symbol, {}).get("allow_remove", True) is False:
+            return False   # 单一规则显式禁移
+        try:
+            ps_key = f"engine:{self._user_id}:pushed_symbols"
+            ap_key = f"engine:{self._user_id}:auto_pushed_symbols"
+            raw = await self._redis.get(ps_key)
+            cur = set(json.loads(raw)) if raw else set()
+            if symbol in cur:
+                cur.discard(symbol)
+                await self._redis.set(ps_key, json.dumps(sorted(cur)))
+                await self._redis.publish("pushed:updates", json.dumps(
+                    {"user_id": self._user_id, "pushed_symbols": sorted(cur)}))
+            rawa = await self._redis.get(ap_key)
+            aps = set(json.loads(rawa)) if rawa else set()
+            aps.discard(symbol)
+            await self._redis.set(ap_key, json.dumps(sorted(aps)))
+            self._removed_ban[symbol] = datetime.now(timezone.utc)   # 进移除冷却,防抖动重推
+            logger.info(f"Auto-removed {symbol} (点差不足: spread < 借币阈值, 自动推送+允移)")
+            return True
+        except Exception as e:
+            logger.warning(f"auto-remove {symbol} failed: {e}")
+            return False
+
     async def _auto_push(self, threshold: float, tradable_symbols: set[str]):
         """Add symbols whose spread_short ≥ auto_push_spread to the user's pushed set."""
         try:
@@ -676,6 +742,7 @@ class Worker:
             if immediate:
                 current |= immediate
                 await self._redis.set(key, json.dumps(sorted(current)))
+                await self._track_auto_pushed(immediate)   # ③ 标记自动推送来源
                 logger.info(f"Auto-pushed {len(immediate)} (spread≥{threshold}, 直推): {sorted(immediate)[:10]}")
             if need_confirm and cd > 0:
                 asyncio.create_task(self._confirm_push(need_confirm, threshold, cd, key))
@@ -699,6 +766,7 @@ class Worker:
             if add:
                 current |= ok
                 await self._redis.set(key, json.dumps(sorted(current)))
+                await self._track_auto_pushed(add)   # ③ 标记自动推送来源
                 logger.info(f"Auto-pushed {len(add)} after 2nd-confirm({cd}s): {sorted(add)[:10]}")
         except Exception as e:
             logger.debug(f"confirm_push failed: {e}")
