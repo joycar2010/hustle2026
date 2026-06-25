@@ -13,6 +13,19 @@ from app.middleware.permissions import get_current_user_id
 router = APIRouter(prefix="/api/account-symbol-rules", tags=["account-symbol-rules"])
 
 
+def _publish_rules_reload(user_id: int):
+    """事件驱动 0 秒规则热重载:保存/删除逐账户单一规则后立即通知该 user 的 worker 重读规则
+    (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。"""
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.publish(f"rules:reload:{user_id}", "1")
+        rc.close()
+    except Exception:
+        pass
+
+
 @router.get("/{sub_account_id}", response_model=list[AccountSymbolRuleResponse])
 def list_rules(sub_account_id: int, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
@@ -65,6 +78,7 @@ def upsert_rule(
 
     db.commit()
     db.refresh(rule)
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     return rule
 
 
@@ -80,6 +94,7 @@ def delete_rule(sub_account_id: int, symbol: str, request: Request, db: Session 
         raise HTTPException(status_code=404, detail="Rule not found")
     db.delete(rule)
     db.commit()
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     return {"message": f"Deleted rule for {symbol.upper()} on account {sub_account_id}"}
 
 
@@ -94,6 +109,7 @@ def reset_rule(sub_account_id: int, symbol: str, request: Request, db: Session =
     if rule:
         db.delete(rule)
         db.commit()
+        _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     return {"message": f"Reset rule for {symbol.upper()} on account {sub_account_id}"}
 
 
@@ -125,4 +141,5 @@ def batch_upsert(data: BatchAccountSymbolRuleRequest, request: Request, db: Sess
             created += 1
 
     db.commit()
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     return {"message": f"Batch complete: {created} created, {updated} updated"}

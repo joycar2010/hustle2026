@@ -881,7 +881,9 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                     await client.margin_repay(base_asset, repay_amount)
                     break
                 except BinanceAPIError as e:
-                    if e.code == -3041 and attempt < 2:
+                    # BinanceAPIError 属性是 api_code(不是 code)→ 误用 e.code 会抛
+                    # 'BinanceAPIError' object has no attribute 'code',反而把还币失败成属性错
+                    if e.api_code == -3041 and attempt < 2:
                         repay_amount *= 0.999
                         continue
                     raise
@@ -927,7 +929,7 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                 "repaid": float(repay_amount), "debt_before": total_debt, "free_before": free,
             }
     except BinanceAPIError as e:
-        raise HTTPException(status_code=400, detail=f"还币失败(币安 {e.code}): {e.message}")
+        raise HTTPException(status_code=400, detail=f"还币失败(币安 {e.api_code}): {e.message}")
     except HTTPException:
         raise
     except Exception as e:

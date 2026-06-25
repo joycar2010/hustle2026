@@ -268,6 +268,32 @@ class FeishuSender:
             throttle_key=f"risk:{account_note}",
         )
 
+    async def notify_naked_short(self, account_note: str, symbol: str, debt: Decimal,
+                                 free: Decimal, futures_qty=None, *, remediated: bool = False):
+        """裸空/孤儿债务告警 + 收口结果。检测时红框闪烁置顶跑马灯+飞书;收口完成发绿框确认。
+        裸空=借币未对冲(现货已卖、合约未开),delta 失衡有爆仓风险,故按最高优先级(同风险告警)。"""
+        if remediated:
+            await self.send(
+                "裸空已自动收口",
+                f"账户: {account_note}\n"
+                f"币种: {symbol}\n"
+                f"收口后剩余欠债: {debt}(≈0 即已清)",
+                marquee=True, priority=2, color="#22c55e",
+                throttle_key=f"nakedfix:{account_note}:{symbol}",
+            )
+            return
+        fut = "未知" if futures_qty is None else f"{futures_qty}"
+        await self.send(
+            "⚠️裸空敞口",
+            f"账户: {account_note}\n"
+            f"币种: {symbol}\n"
+            f"欠债(借+息): {debt}  现货可用: {free}\n"
+            f"主账户合约对冲量: {fut}\n"
+            f"检测到借币未对冲(现货已卖/合约未开),正在自动买回还币收口!",
+            marquee=True, priority=1, color="#ef4444", blink=True,
+            throttle_key=f"naked:{account_note}:{symbol}",
+        )
+
     async def notify_futures_margin(self, account_note: str, buffer_pct: Decimal, threshold: Decimal):
         """合约爆仓预警(绿框 margin_rate_alert):距爆仓安全垫低于阈值。关键告警,镜像跑马灯。"""
         await self.send(

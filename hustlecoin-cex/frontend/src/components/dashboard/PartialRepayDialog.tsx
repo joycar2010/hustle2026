@@ -130,8 +130,15 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
                     <td className="px-2 py-1.5 text-center whitespace-nowrap">
                       <button
                         onClick={() => {
-                          const v = parseFloat(inputs[r.accountId] ?? '')
-                          doRepay(r, isNaN(v) ? r.total : v)   // 留空=全额
+                          const raw = (inputs[r.accountId] ?? '').trim()
+                          if (raw === '') { doRepay(r, r.total); return }   // 留空=全额还
+                          const v = parseFloat(raw)
+                          if (isNaN(v) || v <= 0) { addToast('还币数量需为正数', 'error'); return }
+                          if (v > r.total + 1e-8) {   // 超过待还(本金+利息)→ 提醒,不提交
+                            addToast(`${r.note} 还币数量 ${v} 超过待还 ${r.total.toFixed(4)} ${base},请重新输入`, 'error')
+                            return
+                          }
+                          doRepay(r, v)
                         }}
                         disabled={!hasDebt || repaying === r.accountId || bulkBusy}
                         className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40 mr-1"

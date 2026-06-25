@@ -19,6 +19,8 @@ MAX_POSITIONS_PER_ACCOUNT = 10
 MAX_PER_SYMBOL = 3
 SPREAD_FRESH_MS = 10_000   # 借币门:快照 ts 超此毫秒数视为 feed 停更/陈旧,不在死数据上开仓(与 rust 新鲜度护栏对齐)
 STALE_PENDING_BORROW_SEC = 120   # PENDING_BORROW 超此秒数视为僵尸(正常秒级转 IDLE/FAILED),每周期回收(与 orchestrator 启动回收阈值一致)
+NAKED_CHECK_INTERVAL = 0.5       # 裸空安全网检查周期(秒):0.5s 准实时发现「孤儿债务」(借币未对冲)
+AUTO_REMEDIATE = True            # 裸空全自动收口(用户已选):检测+告警+自动买回还币;False=仅检测告警
 
 
 class Worker:
@@ -74,6 +76,16 @@ class Worker:
 
         self._redis = aioredis.from_url(settings.redis_url, decode_responses=True)
 
+        # 事件驱动 0 秒规则热重载:订阅 Redis 频道 rules:reload:{user_id},
+        # /dashboard 保存逐币/逐账户挂单点差的 API publish 后,本协程立即 _load_symbol_rules,
+        # 不必等主循环 3s 轮询 → 保存即生效、立刻按新阈值借币。3s 轮询保留作兜底。
+        self._rules_reload_task = asyncio.create_task(self._rules_reload_listener())
+
+        # 裸空/单腿安全网:0.5s 周期对账币安真实债务,发现「孤儿债务」(借币未对冲、现货已卖/合约未开)
+        # 即告警(跑马灯+飞书)+ 自动买回还币收口。独立兜底协程,不碰主交易路径。
+        # 见 engine/fund/reconcile_checker.py;根因背景=hustle-011 裸空事故。
+        self._naked_guard_task = asyncio.create_task(self._naked_short_loop(account_note))
+
         await self._update_state("RUNNING")
 
         tradable_symbols = await asyncio.to_thread(self._load_tradable_symbols)
@@ -88,6 +100,7 @@ class Worker:
         last_futmargin_check = 0
         last_balance_check = 0
         last_debtconv_check = 0
+        last_rule_reload = 0
 
         try:
             async with self._trading_client:
@@ -101,6 +114,13 @@ class Worker:
                     # periodic fund tasks
                     now = asyncio.get_event_loop().time()
                     fund_rules = self.config.fund_rules
+
+                    # 单一规则热重载(每 3s):用户在 /dashboard 保存逐币/逐账户挂单点差(borrow_spread=-1 等)
+                    # 后,引擎须尽快读到才会按新阈值借币。轻量(两条按 user/account 过滤的 DB 查询),
+                    # 与 _load_tradable_symbols(全市场重查,仍每 300 周期)解耦,避免保存后等几分钟才借币。
+                    if now - last_rule_reload > 3:
+                        await asyncio.to_thread(self._load_symbol_rules)
+                        last_rule_reload = now
 
                     if now - last_risk_check > 30:
                         from engine.fund.risk_monitor import check_margin_risk
@@ -186,6 +206,12 @@ class Worker:
             await self._update_state("ERROR", str(e))
             raise
         finally:
+            t = getattr(self, "_rules_reload_task", None)
+            if t:
+                t.cancel()
+            ng = getattr(self, "_naked_guard_task", None)
+            if ng:
+                ng.cancel()
             await self._update_state("STOPPED")
             logger.info(f"Worker stopped for sub-account {self.sub_account_id}")
 
@@ -276,20 +302,28 @@ class Worker:
                 logger.info(f"Unhedge {pos.symbol}: funding ratio {pos.funding_rate_ratio} >= {close_fr}")
                 await self._unhedge_position(pos, spread, account_note)
 
-        # ── REPAY: PENDING_REPAY → CLOSED only if an auto-repay threshold is configured & met ──
+        # ── REPAY: PENDING_REPAY → CLOSED ──
+        # PENDING_REPAY 已彻底去对冲(现货已买回+合约已平,借来的币在手),还币只是把持有的币还回 margin。
+        # 未配 repay_spread → 立即还:持币不还只会累积借币利息+拖低 marginLevel,无任何延迟收益。
+        # 历史坑:用 repay_funding_ratio 闸还币 —— 去对冲后的仓位 funding 已无意义、几乎永不达标,会把
+        # 已平仓位永久钉在 PENDING_REPAY(实测 FIL 卡 2.5h 把 ml 拖到 1.36)。故无 repay_spread 即不看 funding 直接还;
+        # 仅当显式配了 repay_spread 时才保留「挑点差/ funding 再还」的优化语义。
         g_repay_spread = getattr(rules, "repay_spread", None)
         g_repay_fr = getattr(rules, "repay_funding_ratio", None)
         for pos in pending_repay:
             if not self._is_repay_allowed(pos.symbol):
                 continue
+            # 逐币/逐账户覆盖(空=回退全局)
+            repay_spread = self._sym_threshold(pos.symbol, "repay_spread", g_repay_spread)
+            if repay_spread is None or repay_spread <= 0:
+                await self._repay_position(pos, account_note)   # 无阈值 → 立即还(不看点差/funding)
+                continue
             spread = self.spread_feed.get_symbol(pos.symbol)
             if spread is not None and not self._spread_sane(spread):  # glitch → 本轮不还
                 continue
-            # 逐币/逐账户覆盖(空=回退全局)
-            repay_spread = self._sym_threshold(pos.symbol, "repay_spread", g_repay_spread)
             repay_fr = self._sym_threshold(pos.symbol, "repay_funding_ratio", g_repay_fr)
             do_repay = False
-            if repay_spread is not None and repay_spread > 0 and spread and spread.spread_short < repay_spread:
+            if spread and spread.spread_short < repay_spread:
                 do_repay = True
             elif repay_fr is not None and repay_fr > 0 and getattr(pos, 'funding_rate_ratio', None) is not None \
                     and pos.funding_rate_ratio >= repay_fr:
@@ -707,6 +741,51 @@ class Worker:
             }
         finally:
             db.close()
+
+    async def _rules_reload_listener(self):
+        """事件驱动 0 秒规则热重载:订阅 rules:reload:{user_id},收到即重载单一规则。
+        Redis 异常自动重连重订阅(while True 外层兜底),不影响主循环 3s 轮询兜底。"""
+        while self._running:
+            try:
+                pubsub = self._redis.pubsub()
+                ch = f"rules:reload:{self._user_id}"
+                await pubsub.subscribe(ch)
+                logger.info(f"Worker {self.sub_account_id} subscribed {ch} for instant rule reload")
+                async for msg in pubsub.listen():
+                    if not self._running:
+                        break
+                    if msg.get("type") != "message":
+                        continue
+                    try:
+                        await asyncio.to_thread(self._load_symbol_rules)
+                        logger.info(f"Worker {self.sub_account_id}: rules reloaded (event-driven, 0s)")
+                    except Exception as e:
+                        logger.warning(f"event rule reload failed: {e}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"rules_reload_listener error (resubscribe in 2s): {e}")
+                await asyncio.sleep(2)
+
+    async def _naked_short_loop(self, account_note: str):
+        """裸空安全网循环:每 NAKED_CHECK_INTERVAL 秒对账一次币安真实债务,孤儿债务(借币未对冲)
+        即告警(跑马灯+飞书)+ 自动买回还币收口。独立兜底,异常不影响主循环;trading_client 与主循环
+        共享(httpx 并发安全)。见 engine/fund/reconcile_checker.run_naked_short_guard。"""
+        from engine.fund.reconcile_checker import run_naked_short_guard
+        await asyncio.sleep(5)   # 启动稍延迟,避开冷启动 position 尚未载入窗口
+        while self._running:
+            try:
+                if self._trading_client is not None:
+                    await run_naked_short_guard(
+                        self._trading_client, self._redis, self.sub_account_id,
+                        self._user_id, self._notifier, account_note,
+                        auto_remediate=AUTO_REMEDIATE,
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"naked_short_guard error: {e}")
+            await asyncio.sleep(NAKED_CHECK_INTERVAL)
 
     def _load_symbol_rules(self):
         db = SessionLocal()

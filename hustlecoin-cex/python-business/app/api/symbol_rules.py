@@ -10,6 +10,19 @@ from app.middleware.permissions import get_current_user_id
 router = APIRouter(prefix="/api/symbol-rules", tags=["symbol-rules"])
 
 
+def _publish_rules_reload(user_id: int):
+    """事件驱动 0 秒规则热重载:保存/重置/删除单一规则后立即通知该 user 的 worker 重读规则
+    (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。"""
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.publish(f"rules:reload:{user_id}", "1")
+        rc.close()
+    except Exception:
+        pass
+
+
 def _get_global_rules(db: Session, user_id: int) -> GlobalRules:
     rules = db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
     if not rules:
@@ -115,6 +128,7 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
 
     db.commit()
     db.refresh(rule)
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 
@@ -142,6 +156,7 @@ def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_d
     rule.source = "global"
     db.commit()
     db.refresh(rule)
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 
@@ -158,4 +173,5 @@ def delete_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail=f"No rule for {symbol}")
     db.delete(rule)
     db.commit()
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     return {"message": f"Symbol rule for {symbol} deleted"}
