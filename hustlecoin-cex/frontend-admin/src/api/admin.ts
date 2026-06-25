@@ -716,7 +716,11 @@ export async function getSystemInfo() {
 }
 
 export async function gitPush(body: { message: string }) {
-  const { data } = await client.post('/api/admin/system/git-push', body)
+  // 服务器侧全栈推送耗时分钟级(rust 拉取 60s + 全栈 add 90s + monorepo push 180s),
+  // 单独放长超时(240s)并禁用重试(非幂等:超时重发会并发跑 git 撞 index.lock)。
+  const { data } = await client.post('/api/admin/system/git-push', body, {
+    timeout: 240000, __noRetry: true,
+  })
   return data
 }
 
@@ -745,12 +749,17 @@ export async function getGitHistory() {
 }
 
 export async function gitRollback(body: { commit_hash: string }) {
-  const { data } = await client.post('/api/admin/system/git-rollback', body)
+  // 同 gitPush:含 git push --force,长任务且非幂等 → 长超时 + 禁重试。
+  const { data } = await client.post('/api/admin/system/git-rollback', body, {
+    timeout: 120000, __noRetry: true,
+  })
   return data
 }
 
 export async function gitDelete(body: { commit_hash: string }) {
-  const { data } = await client.post('/api/admin/system/git-delete', body)
+  const { data } = await client.post('/api/admin/system/git-delete', body, {
+    timeout: 120000, __noRetry: true,
+  })
   return data
 }
 

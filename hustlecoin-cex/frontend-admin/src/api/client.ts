@@ -2,6 +2,17 @@ import axios from 'axios'
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useToastStore } from '@/components/ui/toast'
 
+// 自定义 axios 配置项参与类型检查:
+//   __silent  — 不弹错误 toast
+//   __noRetry — 跳过自动重试。git 推送等长任务/非幂等操作必须禁用:客户端超时后重发会在
+//               服务器并发再起 git → 抢 .git/index.lock 撞锁(本次"老是提交失败"的放大器之一)。
+declare module 'axios' {
+  export interface AxiosRequestConfig<D = any> {
+    __silent?: boolean
+    __noRetry?: boolean
+  }
+}
+
 const RETRY_MAX = 3
 const RETRY_BASE_DELAY = 1000
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
@@ -9,6 +20,7 @@ const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 interface RetryConfig extends InternalAxiosRequestConfig {
   __retryCount?: number
   __silent?: boolean
+  __noRetry?: boolean
 }
 
 const client = axios.create({
@@ -34,7 +46,7 @@ client.interceptors.response.use(
     const isRetryable = !status || RETRYABLE_STATUSES.has(status)
     const retryCount = config.__retryCount || 0
 
-    if (isRetryable && retryCount < RETRY_MAX) {
+    if (isRetryable && !config.__noRetry && retryCount < RETRY_MAX) {
       config.__retryCount = retryCount + 1
       const delay = RETRY_BASE_DELAY * Math.pow(2, retryCount)
       await new Promise((r) => setTimeout(r, delay))
