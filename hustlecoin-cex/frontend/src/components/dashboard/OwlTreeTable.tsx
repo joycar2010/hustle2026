@@ -47,7 +47,7 @@ interface OwlTreeTableProps {
   symbolRules?: Map<string, SymbolRuleInfo>
   delistingSymbols?: Set<string>
   riskySymbols?: Set<string>
-  throttleRate?: number
+  accountRates?: Record<string, number>   // 逐子账户可借速率 {sub_account_id: req/s}
   onAction: (action: string, symbol: string, position?: Position, extra?: Record<string, unknown>) => void
 }
 
@@ -180,7 +180,6 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   isRisky,
   symbolStatus,
   marketInfo,
-  throttleRate,
   onToggle,
   onContextMenu,
   onDoubleClick,
@@ -191,7 +190,6 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   isExpanded: boolean
   compact?: boolean
   isMobile: boolean
-  throttleRate?: number
   isDelisting?: boolean
   isRisky?: boolean
   borrowDisplayUsdt?: boolean
@@ -237,16 +235,17 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
     <td className={cn('px-1.5 py-1 text-left', spreadStaleCls)} title={spreadStaleTitle}>
       <Chip label="开" value={openPct != null ? formatNumber(openPct, 2) : '-'} cls="text-positive" />
       {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 2) : '-'} cls="text-negative" />}
-      <Chip label="资" value={marketInfo ? (marketInfo.funding_rate * 100).toFixed(2) : '-'}
+      <Chip label="资" value={marketInfo ? (marketInfo.funding_rate * 100).toFixed(4) : '-'}
         cls={marketInfo && marketInfo.funding_rate >= 0 ? 'text-positive' : 'text-negative'} />
       {!isMobile && <Chip label="时" value={marketInfo ? marketInfo.funding_interval : '-'} cls="text-muted-foreground" />}
       {!isMobile && <Chip label="限" value={marketInfo && marketInfo.funding_cap > 0 ? (marketInfo.funding_cap * 100).toFixed(0) : '-'} cls="text-amber-400" />}
-      {!isMobile && <Chip label="息" value={marketInfo && marketInfo.daily_interest > 0 ? `${(marketInfo.daily_interest * 100).toFixed(2)}%` : '-'} cls="text-amber-400" />}
+      {!isMobile && <Chip label="息" value={marketInfo && marketInfo.daily_interest > 0 ? `${(marketInfo.daily_interest * 100).toFixed(3)}%` : '-'} cls="text-amber-400" />}
     </td>
   )
 
   return (
     <tr
+      id={`symrow-${group.symbol}`}
       className={cn(
         'border-b border-border/30 hover:bg-accent/20 cursor-pointer transition-colors text-[11px]',
         hasPos ? 'bg-[#111118]' : 'bg-[#0d0d14]/50',
@@ -298,7 +297,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {/* 财务列:汇总行兼"列标签"(coinmini 同款,与标题行合并);数字在子账户行 */}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="合约腿名义价值(USDT)">现-期</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">爆率</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="有效可借: 在币安理论最大可借(maxBorrowable)基础上,套引擎借币封顶口径(金额限制/抵押率/单笔金额)后实际会借到的量。悬停数字看理论上限与受限原因。">有效可借</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="最大可借: 优先币安 VIP 档借贷上限(borrowLimit,与持U无关、同VIP各账户相同);该币杠杆池无可借库存时,币安 API 直接 -3045 拿不到任何数 → 显示「无券」(真实市场状态)。">最大可借</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">现币</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">借币</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">借币金额</td>}
@@ -349,13 +348,8 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
           ) : '-'}
         </td>
       )}
-      {/* 速率 — 当前限流余量下每币借币速率 (req/s)，全局值 */}
-      {!isMobile && (
-        <td className="px-1 py-1 text-right tabular-nums font-mono text-[10px] text-foreground"
-            title="当前限流余量下每币可借速率 (req/s)">
-          {throttleRate && throttleRate > 0 ? `${throttleRate.toFixed(2)}/s` : '-'}
-        </td>
-      )}
+      {/* 速率 — 已下沉到各子账户行(per-account 速率),币种行此列留空占位保持对齐 */}
+      {!isMobile && <td className="px-1 py-1"></td>}
       {/* 移/还 — allow_remove / allow_repay 文字指示 */}
       {!isMobile && (
         <td className="px-1 py-1 text-center whitespace-nowrap text-[10px]">
@@ -402,6 +396,7 @@ const SubAccountRow = memo(function SubAccountRow({
   symbolStatus,
   marketInfo,
   restriction,
+  accountRate,
   onContextMenu,
   onDoubleClick,
   onMobileMenu,
@@ -415,10 +410,13 @@ const SubAccountRow = memo(function SubAccountRow({
   symbolStatus?: string | null
   marketInfo?: MarketInfo
   restriction?: { label: string; remaining: number }
+  accountRate?: number
   onContextMenu: (e: React.MouseEvent, symbol: string, position: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
 }) {
+  const spreads = useSpreadStore((s) => s.spreads)
+  const summary = useBalanceStore((s) => s.summary)
   // 持仓经济参数块:润(净盈亏)/资(累计资金费)/开(开仓点差)/息(当日利率)/累息(累计利息)/平(平仓点差)
   const profit = parseFloat(pos.realized_pnl || '0')
     + parseFloat(pos.cumulative_funding_fee || '0')
@@ -468,7 +466,7 @@ const SubAccountRow = memo(function SubAccountRow({
         {isMobile && (() => {
           const sm = balance?.symbol_margin?.[pos.symbol]
           const futVal = parseFloat(pos.futures_long_qty || '0') * (spread?.fut_bid ?? 0)
-          const blow = balance && balance.margin_level > 0 ? (1.1 / balance.margin_level) * 100 : null
+          const blow = summary?.masterFuturesLiqPct ?? null  // 爆率=主账户合约户维持保证金率(与桌面同源)
           const px = spread?.spot_bid ?? 0
           const eff = sm ? (sm.effective_borrowable ?? sm.max_borrowable) : null
           const noInv = sm?.no_inventory && !(sm.max_borrowable > 0)
@@ -479,31 +477,36 @@ const SubAccountRow = memo(function SubAccountRow({
                 ? <span className="ml-0.5 text-amber-500/90">无券</span>
                 : <span className="ml-0.5 text-sky-300/90">{eff != null ? (borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)) : '-'}</span>}</span>
               <span className="text-muted-foreground/60">现币<span className="ml-0.5 text-foreground">{sm?.free != null ? formatNumber(sm.free, 4) : '-'}</span></span>
-              <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{formatNumber(pos.borrow_qty, 4)}</span></span>
-              <span className="text-muted-foreground/60">额<span className="ml-0.5 text-foreground">{pos.open_usdt_amount ? formatNumber(pos.open_usdt_amount) : '-'}</span></span>
+              <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{sm?.borrowed != null ? formatNumber(sm.borrowed, 4) : '-'}</span></span>
+              <span className="text-muted-foreground/60">额<span className="ml-0.5 text-foreground">{(() => { const v = (sm?.borrowed ?? 0) * px; return v > 0.01 ? formatNumber(v, 0) : '-' })()}</span></span>
               <span className="text-muted-foreground/60">险<span className={cn('ml-0.5', balance ? (balance.margin_level > 2 ? 'text-positive' : balance.margin_level > 1.3 ? 'text-yellow-400' : 'text-negative') : 'text-foreground')}>{balance ? formatNumber(balance.margin_level, 2) : '-'}</span></span>
               {futVal > 0 && <span className="text-muted-foreground/60">现期<span className="ml-0.5 text-foreground">{formatNumber(futVal, 0)}</span></span>}
             </div>
           )
         })()}
       </td>
-      {/* 现-期 — this account's futures notional (tooltip: 张数) */}
+      {/* 现-期 — 主账户合约持仓币数(优先),降级子账户持仓 */}
       {!isMobile && (() => {
-        const qty = parseFloat(pos.futures_long_qty || '0')
+        // 优先用主账户合约持仓(hedge_via_master模式),无则降级子账户
+        const masterQty = summary?.masterFuturesPositions?.[pos.symbol] ?? 0
+        const qty = masterQty !== 0 ? Math.abs(masterQty) : parseFloat(pos.futures_long_qty || '0')
+        const isMaster = masterQty !== 0
         const price = spread?.fut_bid ?? 0
         const val = qty * price
+        const title = qty > 0
+          ? `${isMaster ? '主账户' : '子账户'}合约持仓 · 名义价值: ${formatNumber(val, 2)} USDT`
+          : undefined
         return (
-          <td className={numCell}
-            title={qty > 0 ? `合约张数: ${formatNumber(qty, 4)}　名义价值: ${formatNumber(val, 2)} USDT` : undefined}>
-            {val > 0 ? formatNumber(val, 0) : '-'}
+          <td className={numCell} title={title}>
+            {qty > 0 ? formatNumber(qty, 4) : '-'}
           </td>
         )
       })()}
-      {/* 爆率 */}
+      {/* 爆率 — 主账户合约户维持保证金率(币安标准,hedge_via_master 下真正的强平风险在主账户合约;全表同值) */}
       {!isMobile && (
         <td className={numCell}>
-          {balance && balance.margin_level > 0 ? (() => {
-            const pct = (1.1 / balance.margin_level) * 100
+          {summary?.masterFuturesLiqPct != null ? (() => {
+            const pct = summary.masterFuturesLiqPct as number
             return (
               <span className={pct > 80 ? 'text-negative' : pct > 50 ? 'text-yellow-400' : 'text-positive'}>
                 {formatNumber(pct, 1)}%
@@ -512,28 +515,25 @@ const SubAccountRow = memo(function SubAccountRow({
           })() : '-'}
         </td>
       )}
-      {/* 有效可借 */}
+      {/* 有效可借 — 优先显示 VIP 档借贷上限(borrow_limit,与持U无关),无则降级 effective_borrowable */}
       {!isMobile && (
         <td className={numCell}>
           {(() => {
             const sm = balance?.symbol_margin?.[pos.symbol]
             if (!sm) return '-'
-            // 币安杠杆池无可借库存(-3045)→ 显式标「无券」,区别于"0"与"无数据"
-            if (sm.no_inventory && !(sm.max_borrowable > 0)) {
-              return <span className="text-amber-500/80" title="币安杠杆池当前无该币可借库存">无券</span>
+            // 该币杠杆池无可借库存 → 币安 maxBorrowable 直接 -3045 拿不到任何数 → 「无券」(真实市场状态)
+            if (sm.no_inventory && !((sm.borrow_limit ?? 0) > 0) && !(sm.max_borrowable > 0)) {
+              return <span className="text-amber-500/80" title="币安杠杆池当前无该币可借库存(API -3045)">无券</span>
             }
             const px = spread?.spot_bid ?? 0
-            // 有效可借: 后端已套引擎封顶口径;旧负载缺该字段时回退理论上限
-            const eff = sm.effective_borrowable ?? sm.max_borrowable
-            const reason = sm.borrow_cap_reason
-            const shown = borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)
-            // tooltip: 标注理论上限 + 受限原因,让"为什么比 maxBorrowable 小"一目了然
-            const capTxt = borrowDisplayUsdt
-              ? `${formatNumber(sm.max_borrowable * px, 0)} U`
-              : `${formatNumber(sm.max_borrowable, 2)} ${pos.symbol.replace('USDT', '')}`
-            const title = `理论上限 ${capTxt}${reason ? ` · 受限于: ${reason}` : ''}`
-            const capped = reason && reason !== '可借上限' && eff < sm.max_borrowable
-            return <span className={capped ? 'text-sky-400/90' : ''} title={title}>{shown}</span>
+            // 最大可借 = 优先 borrowLimit(VIP档借贷上限,与持U无关、恒定);无则降级 maxBorrowable(amount,实际可借)
+            const val = (sm.borrow_limit ?? 0) > 0 ? sm.borrow_limit! : (sm.max_borrowable ?? sm.effective_borrowable ?? 0)
+            const isBorrowLimit = (sm.borrow_limit ?? 0) > 0
+            const shown = borrowDisplayUsdt ? formatNumber(val * px, 0) : formatNumber(val, 2)
+            const title = isBorrowLimit
+              ? '币安 VIP 档借贷上限(borrowLimit,与持U无关、同VIP各账户相同)'
+              : `币安实际最大可借(maxBorrowable amount)${sm.borrow_cap_reason ? ` · 受限于: ${sm.borrow_cap_reason}` : ''}`
+            return <span className={isBorrowLimit ? 'text-emerald-400/90' : ''} title={title}>{shown}</span>
           })()}
         </td>
       )}
@@ -545,18 +545,19 @@ const SubAccountRow = memo(function SubAccountRow({
             : '-'}
         </td>
       )}
-      {/* 借币 */}
-      {!isMobile && (
-        <td className={numCell}>
-          {formatNumber(pos.borrow_qty, 4)}
-        </td>
-      )}
-      {/* 借币金额 */}
-      {!isMobile && (
-        <td className={numCell}>
-          {pos.open_usdt_amount ? formatNumber(pos.open_usdt_amount) : '-'}
-        </td>
-      )}
+      {/* 借币 — 币安杠杆户实时借币本金(sm.borrowed),非 position 静态快照,随利息/部分还币/还币即时变 */}
+      {!isMobile && (() => {
+        const sm = balance?.symbol_margin?.[pos.symbol]
+        return <td className={numCell}>{sm?.borrowed != null ? formatNumber(sm.borrowed, 4) : '-'}</td>
+      })()}
+      {/* 借币金额 — 借币(sm.borrowed)× 此币当前U值(spot_bid),实时变动 */}
+      {!isMobile && (() => {
+        const sm = balance?.symbol_margin?.[pos.symbol]
+        const borrowed = sm?.borrowed ?? 0
+        const spotPrice = spread?.spot_bid ?? 0
+        const val = borrowed * spotPrice
+        return <td className={numCell}>{val > 0.01 ? formatNumber(val, 0) : '-'}</td>
+      })()}
       {/* 风险 — margin level */}
       {!isMobile && (
         <td className={numCell}>
@@ -567,31 +568,38 @@ const SubAccountRow = memo(function SubAccountRow({
           ) : '-'}
         </td>
       )}
-      {/* 保证金 — 杠杆账户净权益(USDT)，回退可用USDT */}
+      {/* 保证金 — BNB U值 + USDT */}
+      {!isMobile && (() => {
+        if (!balance) return <td className={numCell}>-</td>
+        const bnbPrice = spreads.get('BNBUSDT')?.spot_bid ?? 0
+        const bnbVal = balance.bnb_free * bnbPrice
+        const total = bnbVal + balance.margin_usdt_free
+        return <td className={numCell}>{formatNumber(total, 0)}</td>
+      })()}
+      {/* 可用 — 杠杆账户可用USDT(可用来借币) */}
       {!isMobile && (
         <td className={numCell}>
-          {balance ? formatNumber(balance.margin_net_usdt ?? balance.margin_usdt_free, 0) : '-'}
-        </td>
-      )}
-      {/* 可用 */}
-      {!isMobile && (
-        <td className={numCell}>
-          {balance ? formatNumber(balance.futures_available, 0) : '-'}
+          {balance ? formatNumber(balance.margin_usdt_free, 0) : '-'}
         </td>
       )}
       {/* 参数块(持仓经济) */}
       {paramBlock}
-      {/* 推/状态 — 子账户行此列显示状态 / 持仓时长 */}
+      {/* 推/状态 — 子账户行状态(三态互斥):被限流=API错误(红);正在借/已借到=借币(青);
+          其余等待态(运行中/点差不符/无券…)保留原状态词;无状态显持仓时长 */}
       {!isMobile && (
         <td className="px-1.5 py-0.5 text-right whitespace-nowrap text-[10px]">
-          {symbolStatus ? (
+          {restriction ? (
+            <span className="text-red-500 font-medium">API错误</span>
+          ) : (symbolStatus && EXEC_STATUSES.has(symbolStatus)) ? (
+            <span className="text-sky-400">借币</span>
+          ) : symbolStatus ? (
             <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
           ) : (
             <span className="text-muted-foreground">{durationText(pos.opened_at)}</span>
           )}
         </td>
       )}
-      {/* 资息 — 该持仓资息倍率 */}
+      {/* 资息 — 该持仓资息倍率(保留) */}
       {!isMobile && (
         <td className={numCell}>
           {pos.funding_rate_ratio != null && parseFloat(pos.funding_rate_ratio) !== 0 ? (
@@ -603,8 +611,13 @@ const SubAccountRow = memo(function SubAccountRow({
       )}
       {/* 单 — 子账户行留空 */}
       {!isMobile && <td className="px-0.5 py-0.5"></td>}
-      {/* 速率 — 子账户行留空 */}
-      {!isMobile && <td className="px-1 py-0.5"></td>}
+      {/* 速率 — 该子账户 per-account 可借速率(各账户因 UID 消耗不同而不同) */}
+      {!isMobile && (
+        <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px] text-foreground"
+            title="该子账户当前 UID 权重余量下每秒可发起的借币次数(各账户独立)">
+          {accountRate != null && accountRate > 0 ? `${accountRate.toFixed(2)}次` : '-'}
+        </td>
+      )}
       {/* 移/还 — 封禁倒计时 */}
       {!isMobile && (
         <td className="px-1 py-0.5 text-center whitespace-nowrap text-[10px]">
@@ -648,7 +661,7 @@ const COMPACT_KEY = 'hc_compact_view'
 // 币种行点差陈旧阈值(ms):某币 ts 落后全表最新 ts 超过此值视为陈旧(就近值变灰),与 /spreads 默认 300s 一致
 const DASH_SPREAD_STALE_MS = 300_000
 
-export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, delistingSymbols, riskySymbols, throttleRate, onAction }: OwlTreeTableProps) {
+export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, delistingSymbols, riskySymbols, accountRates, onAction }: OwlTreeTableProps) {
   const spreads = useSpreadStore((s) => s.spreads)
   const spreadsLastTs = useSpreadStore((s) => s.lastUpdateTs)
   // 就近点差缓存: WS 断流/某币 ts 过期时,保留最后一次有效点差(不闪不清零,标记陈旧),
@@ -683,6 +696,25 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
   } | null>(null)
   const isMobile = useIsMobile()
 
+  // 推送后定位:OwlTopBar 推送成功派发 pushed:focus(detail=symbol),滚动到该币汇总行并短暂高亮,
+  // 修复"再推一个已在列表的币没反应"。元素 id=symrow-{symbol};best-effort(被搜索/仅持仓过滤掉则不滚)。
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const sym = (e as CustomEvent).detail as string
+      if (!sym) return
+      setTimeout(() => {
+        const el = document.getElementById(`symrow-${sym}`)
+        if (!el) return
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        el.style.transition = 'background-color 0.4s'
+        el.style.backgroundColor = 'rgba(99,102,241,0.22)'
+        setTimeout(() => { el.style.backgroundColor = '' }, 1800)
+      }, 150)
+    }
+    window.addEventListener('pushed:focus', onFocus)
+    return () => window.removeEventListener('pushed:focus', onFocus)
+  }, [])
+
   const pushedSet = useMemo(() => new Set(pushedSymbols), [pushedSymbols])
 
   const balanceMap = useMemo(() => {
@@ -715,7 +747,12 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
       bySymbol.set(p.symbol, list)
     }
 
-    const allSymbols = new Set([...bySymbol.keys(), ...pushedSet])
+    // 并入"有自定义单一规则(source=custom)"的币:即便无持仓、未推送,也显示其操作台行
+    // (修复"操作台被自动下架后,设单一规则也救不回";只认 custom,避免 scan/global 默认刷屏)
+    const ruleSymbols = symbolRules
+      ? [...symbolRules.entries()].filter(([, r]) => r.source === 'custom').map(([s]) => s)
+      : []
+    const allSymbols = new Set([...bySymbol.keys(), ...pushedSet, ...ruleSymbols])
     const q = search.toUpperCase()
     const result: SymbolGroup[] = []
 
@@ -994,7 +1031,7 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
                   symbolStatuses={symbolStatuses}
                   restrictions={restrictions}
                   marketData={marketData}
-                  throttleRate={throttleRate}
+                  accountRates={accountRates}
                   onToggle={toggle}
                   onContextMenu={handleContextMenu}
                   onDoubleClick={handleDoubleClick}
@@ -1059,7 +1096,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   symbolStatuses,
   restrictions,
   marketData,
-  throttleRate,
+  accountRates,
   onToggle,
   onContextMenu,
   onDoubleClick,
@@ -1079,7 +1116,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   symbolStatuses: Map<string, string>
   restrictions: Map<number, { label: string; remaining: number; updatedAt: number }>
   marketData: Map<string, MarketInfo>
-  throttleRate?: number
+  accountRates?: Record<string, number>
   onToggle: (symbol: string) => void
   onContextMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
@@ -1088,15 +1125,18 @@ const CoinGroupRows = memo(function CoinGroupRows({
 }) {
   const headerStatus = useMemo(() => {
     const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '运行中', '无券', '点差不符', '量不足', '行情陈旧', '行情异常']
-    // 有持仓:看持仓账户状态;挂单中无持仓:看各 enabled 账户对该币的状态
-    const keys = group.positions.length > 0
-      ? group.positions.map(p => `${p.sub_account_id}:${p.symbol}`)
-      : (group.isPushed ? [...balanceMap.keys()].map(id => `${id}:${group.symbol}`) : [])
+    // 状态口径与下方"显示哪些子账户行"保持并集一致:持仓账户 ∪ (该币被推送/有生效规则时的所有 enabled 账户)
+    const ids = new Set<number>()
+    group.positions.forEach(p => ids.add(p.sub_account_id))
+    if (group.isPushed || group.ruleInfo != null) {
+      for (const id of balanceMap.keys()) ids.add(id)
+    }
+    const keys = [...ids].map(id => `${id}:${group.symbol}`)
     for (const s of priority) {
       if (keys.some(k => symbolStatuses.get(k) === s)) return s
     }
     return null
-  }, [group.positions, group.isPushed, group.symbol, symbolStatuses, balanceMap])
+  }, [group.positions, group.isPushed, group.ruleInfo, group.symbol, symbolStatuses, balanceMap])
 
   return (
     <>
@@ -1110,7 +1150,6 @@ const CoinGroupRows = memo(function CoinGroupRows({
         borrowDisplayUsdt={borrowDisplayUsdt}
         symbolStatus={headerStatus}
         marketInfo={marketData.get(group.symbol)}
-        throttleRate={throttleRate}
         onToggle={onToggle}
         onContextMenu={onContextMenu}
         onDoubleClick={onDoubleClick}
@@ -1137,16 +1176,20 @@ const CoinGroupRows = memo(function CoinGroupRows({
             symbolStatus={posStatus}
             restriction={posRestriction}
             marketInfo={marketData.get(pos.symbol)}
+            accountRate={accountRates?.[String(pos.sub_account_id)]}
             onContextMenu={onContextMenu}
             onDoubleClick={onDoubleClick}
             onMobileMenu={onMobileMenu}
           />
         )
       })}
-      {/* 挂单中(已推送但无持仓):遍历所有 enabled 子账户(balanceMap)造最小伪 position,
-          显示账户名 + 余额 + 逐账户状态(点差不符/无券/待挂单…),与参照系统一致。 */}
-      {isExpanded && group.positions.length === 0 && group.isPushed &&
-        [...balanceMap.values()].map((bal) => {
+      {/* 子账户行渲染并集:除上方"有持仓"账户外,只要该币被推送或有生效规则(全局/单一),
+          就把其余 enabled 子账户(去重)也造最小伪 position 显示(账户名+余额+逐账户状态)。
+          修复"只有全局规则、别的账户已持仓时,该子账户整行不显示"(问题2;原 positions.length===0 互斥闸)。 */}
+      {isExpanded && (group.isPushed || group.ruleInfo != null) &&
+        [...balanceMap.values()]
+          .filter((bal) => !group.positions.some((p) => p.sub_account_id === bal.account_id))
+          .map((bal) => {
           const acctStatus = symbolStatuses.get(`${bal.account_id}:${group.symbol}`) ?? null
           const acctRestriction = restrictionFor(restrictions, bal.account_id)
           const pseudo: Position = {
@@ -1170,6 +1213,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
               symbolStatus={acctStatus}
               restriction={acctRestriction}
               marketInfo={marketData.get(group.symbol)}
+              accountRate={accountRates?.[String(bal.account_id)]}
               onContextMenu={onContextMenu}
               onDoubleClick={onDoubleClick}
               onMobileMenu={onMobileMenu}

@@ -32,6 +32,22 @@ def _resolve_user_id(db, sub_account_id: int):
     return uid
 
 
+def _publish_balance_refresh(user_id):
+    """借/还币成功后请求 BalancePusher 对该用户做一次「写后即时余额刷新」(事件驱动,绕开 10s 轮询),
+    让 dashboard 子账户行的现币/借币/利息秒级刷新(问题4)。同步轻量 publish(与本模块 -3045 冷却同款);
+    失败静默——余额最终仍由 10s 轮询兜底,绝不因刷新影响已成功的借/还币。"""
+    if user_id is None:
+        return
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.publish("balance:refresh", str(user_id))
+        rc.close()
+    except Exception:
+        pass
+
+
 TAKER_FEE_RATE = Decimal("0.00075")
 FEE_BUFFER = Decimal("1.0015")
 BORROW_FRESH_MS = 3000   # 借币二次确认: 点差快照超此毫秒数视为陈旧,不在已死/过期点差上完成借币
@@ -328,7 +344,9 @@ async def execute_borrow(
         if borrow_mode in ("otoco", "single", "multi") and cap_usdt is not None and Decimal(str(cap_usdt)) > 0:
             # 挂单借币: 借满「金额限制」∩ maxBorrowable(币捏手上,后续按单笔分批对冲)
             try:
-                max_borrowable = await client.get_max_borrowable(base_asset)
+                mb = await client.get_max_borrowable(base_asset)
+                # get_max_borrowable 返回 {"amount":Decimal,"borrowLimit":Decimal};取实际可借 amount
+                max_borrowable = mb["amount"] if isinstance(mb, dict) else mb
             except Exception:
                 max_borrowable = Decimal("0")
             cap_qty = Decimal(str(cap_usdt)) / price if price > 0 else Decimal("0")
@@ -406,6 +424,8 @@ async def execute_borrow(
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
         logger.info(f"Borrowed (idle): {symbol} qty={qty}")
+        # 写后即时刷新:借到币 → 让该用户 dashboard 现币/借币列秒级更新,不等 10s 轮询
+        _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
         try:
             await notifier.notify_new_borrow(account_note, symbol, qty, qty * price)
         except Exception as e:
@@ -658,8 +678,23 @@ async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, 
             _log_trade(db, pos.id, sub_account_id, "ROLLBACK_REPAY", symbol, quantity=repay_amount, status="SUCCESS")
         except Exception as re:
             _log_trade(db, pos.id, sub_account_id, "ROLLBACK_REPAY", symbol, status="FAILED", error=str(re))
+        # 复核回滚是否真清账:上面买回/还币任一静默失败 → 现货已卖+债务仍在 = 裸空。
+        # 不再无条件标 "Rolled back";残债显著则发红色裸空告警,并保持 FAILED(终态)让 0.5s guard 兜底收口。
         pos.status = "FAILED"
-        pos.error_message = f"Futures long failed: {error}. Rolled back."
+        try:
+            residual_debt, _ = await _get_asset_debt(client, pos.base_asset)
+            if residual_debt > (pos.borrow_qty or Decimal("0")) * Decimal("0.02"):
+                pos.error_message = (f"Futures long failed: {error}. 回滚未清账(残留债务 "
+                                     f"{residual_debt} {pos.base_asset})— 裸空,guard 收口中")
+                logger.error(f"NAKED SHORT after rollback {symbol}: residual debt {residual_debt} {pos.base_asset}")
+                try:
+                    await notifier.notify_naked_short(account_note, symbol, residual_debt, Decimal("0"), futures_filled)
+                except Exception:
+                    pass
+            else:
+                pos.error_message = f"Futures long failed: {error}. Rolled back."
+        except Exception as _ve:
+            pos.error_message = f"Futures long failed: {error}. 回滚结果未核实({_ve}),guard 将复核"
         db.commit()
     else:
         pos.status = "FAILED"
@@ -875,6 +910,10 @@ async def execute_repay(
         db.commit()
 
         logger.info(f"Position closed (repaid): {pos.symbol} pnl={pos.realized_pnl}")
+        # 写后即时刷新:还币平仓(引擎自动 / manual-repay 端点都走此函数)→ 该用户余额秒级刷新
+        _publish_balance_refresh(
+            pos.user_id if getattr(pos, "user_id", None) is not None
+            else _resolve_user_id(db, pos.sub_account_id))
         await notifier.notify_position_closed(account_note, pos.symbol, pos.realized_pnl, pos.close_spread or Decimal("0"))
 
     except BinanceAPIError as e:

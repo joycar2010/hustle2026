@@ -241,6 +241,8 @@ function MobileNavDrawer() {
       await pushSymbol(sym)
       setPushInput('')
       window.dispatchEvent(new CustomEvent('pushed:refresh'))
+      window.dispatchEvent(new CustomEvent('pushed:focus', { detail: sym }))  // 定位+高亮该币行(已在列表也能看到反应)
+      setMobileNavOpen(false)   // 移动端:推送后关抽屉露出表格新行(桌面端 mobileNavOpen 恒 false,为 no-op)
       addToast(`已推送 ${sym}`, 'success')
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -394,6 +396,8 @@ export function OwlTopBar() {
       await pushSymbol(sym)
       setPushInput('')
       window.dispatchEvent(new CustomEvent('pushed:refresh'))
+      window.dispatchEvent(new CustomEvent('pushed:focus', { detail: sym }))  // 定位+高亮该币行(已在列表也能看到反应)
+      setMobileNavOpen(false)   // 移动端:推送后关抽屉露出表格新行(桌面端 mobileNavOpen 恒 false,为 no-op)
       addToast(`已推送 ${sym}`, 'success')
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }

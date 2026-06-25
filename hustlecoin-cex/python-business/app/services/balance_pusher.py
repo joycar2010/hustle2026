@@ -19,6 +19,14 @@ SNAPSHOT_EVERY = 60
 # 才重查一次 maxBorrowable(看库存是否恢复),避免每分钟对一批无券币重查刷高 400 错误率/SAPI 消耗。
 RECHECK_NOINV_EVERY = 10
 
+# ── 写后即时余额刷新(事件驱动)──
+# 借/还币成功后,生产者(还币端点 / 引擎 execute_borrow·execute_repay)往此频道 publish user_id,
+# BalancePusher 立即对该用户做一次「按范围限定」的余额重推(只查该用户账户,用缓存的 maxBorrowable),
+# 让 dashboard 子账户行的现币/借币/利息秒级刷新,而非干等下一个 10s 轮询周期(问题4根因)。
+REFRESH_CHANNEL = "balance:refresh"
+# 突发去抖:一批信号(如引擎连续借多币)合并为一次该用户刷新,避免逐笔打爆 SAPI/REST 预算。
+REFRESH_DEBOUNCE = 0.8  # seconds
+
 
 class BalancePusher:
     def __init__(self):
@@ -28,11 +36,21 @@ class BalancePusher:
         self._max_borrow_cache: dict[int, dict[str, float]] = {}  # account_id -> {asset: amount}
         self._no_inventory: dict[str, bool] = {}  # asset -> True 表示币安杠杆池无可借库存(-3045)
         self._interest_rate_cache: dict[str, float] = {}  # asset -> daily_interest_rate (global)
+        # 即时刷新(immediate)时不重查主账户合约持仓(省 REST);沿用上一次整轮采集的缓存,
+        # 避免即时推送把「现-期/爆率」列清空闪烁。整轮 _fetch_and_push 会刷新这两个缓存。
+        self._last_master_pos: dict[int, dict] = {}   # uid -> {symbol: positionAmt}
+        self._last_master_liq: dict[int, float] = {}  # uid -> 维持保证金率%
+        # 写后即时刷新:待处理用户集合 + 唤醒事件(去抖合并突发信号)
+        self._refresh_pending: set[int] = set()
+        self._refresh_event: Optional[asyncio.Event] = None
 
     async def start(self):
         self._redis = aioredis.from_url(settings.redis_url, decode_responses=True)
         self._running = True
+        self._refresh_event = asyncio.Event()
         asyncio.create_task(self._loop())
+        asyncio.create_task(self._refresh_listener())  # 订阅 balance:refresh
+        asyncio.create_task(self._refresh_worker())     # 去抖后按用户即时重推
         logger.info("BalancePusher started")
 
     async def stop(self):
@@ -45,6 +63,47 @@ class BalancePusher:
             except Exception as e:
                 logger.warning(f"BalancePusher error: {e}")
             await asyncio.sleep(BALANCE_INTERVAL)
+
+    async def _refresh_listener(self):
+        """订阅 balance:refresh:借/还币成功后生产者 publish user_id,这里收集到待处理集合并唤醒 worker。
+        独立连接(pubsub 自带),收集后立即返回,真正的拉取/推送交给 _refresh_worker(去抖一次)。"""
+        try:
+            pubsub = self._redis.pubsub()
+            await pubsub.subscribe(REFRESH_CHANNEL)
+            async for msg in pubsub.listen():
+                if not self._running:
+                    break
+                if msg.get("type") != "message":
+                    continue
+                try:
+                    uid = int(msg["data"])
+                except (ValueError, TypeError):
+                    continue
+                self._refresh_pending.add(uid)
+                if self._refresh_event:
+                    self._refresh_event.set()
+        except Exception as e:
+            logger.warning(f"balance refresh listener stopped: {e}")
+
+    async def _refresh_worker(self):
+        """去抖处理即时刷新:被唤醒后等 REFRESH_DEBOUNCE 合并突发信号,再对每个待处理用户各做一次
+        范围限定的即时重推(immediate=True:只查该用户账户,maxBorrowable/主账户合约走缓存,最省 REST)。"""
+        while self._running:
+            try:
+                if self._refresh_event:
+                    await self._refresh_event.wait()
+                    self._refresh_event.clear()
+                await asyncio.sleep(REFRESH_DEBOUNCE)  # 合并 0.8s 内的突发信号
+                pending = list(self._refresh_pending)
+                self._refresh_pending.clear()
+                for uid in pending:
+                    try:
+                        await self._fetch_and_push(only_user_id=uid, immediate=True)
+                    except Exception as e:
+                        logger.warning(f"immediate balance refresh failed (user {uid}): {e}")
+            except Exception as e:
+                logger.warning(f"balance refresh worker error: {e}")
+                await asyncio.sleep(1)
 
     async def _btc_price(self) -> float:
         """Read BTCUSDT futures bid from the Redis spreads hash to convert
@@ -202,9 +261,13 @@ class BalancePusher:
         eff = amt / price
         return (min(eff, mb), "单笔金额") if eff <= mb else (mb, "可借上限")
 
-    async def _fetch_and_push(self):
-        self._max_borrow_tick += 1
-        fetch_max_borrow = self._max_borrow_tick % 6 == 0
+    async def _fetch_and_push(self, only_user_id: Optional[int] = None, immediate: bool = False):
+        """only_user_id 非空 → 只采集该用户的账户(写后即时刷新用)。
+        immediate=True → 不推进周期计数器、不重查 maxBorrowable/主账户合约(走缓存)、不落快照/告警,
+        仅以最新 get_margin_account/get_futures_account 真值重推该用户余额,最省 REST 又秒级刷新。"""
+        if not immediate:
+            self._max_borrow_tick += 1
+        fetch_max_borrow = (not immediate) and (self._max_borrow_tick % 6 == 0)
         btc_price = await self._btc_price()
         spot_bids = await self._spot_bids()
         # Cap maxBorrowable calls per account per cycle to protect the SAPI weight budget.
@@ -212,7 +275,10 @@ class BalancePusher:
 
         db = SessionLocal()
         try:
-            accounts = db.query(SubAccount).filter(SubAccount.is_enabled == True).all()
+            acct_q = db.query(SubAccount).filter(SubAccount.is_enabled == True)
+            if only_user_id is not None:
+                acct_q = acct_q.filter(SubAccount.user_id == only_user_id)
+            accounts = acct_q.all()
             if not accounts:
                 return
 
@@ -257,8 +323,12 @@ class BalancePusher:
                                     mb_results[asset] = 0.0   # 沿用无券缓存,跳过查询
                                 else:
                                     try:
-                                        amt = await client.get_max_borrowable(asset)
-                                        mb_results[asset] = float(amt)
+                                        mb_data = await client.get_max_borrowable(asset)
+                                        mb_results[asset] = float(mb_data["amount"])
+                                        # 新增:缓存 borrowLimit(VIP档借贷上限,与持U无关)
+                                        if "borrowLimit" not in mb_results:
+                                            mb_results["_limits"] = {}
+                                        mb_results["_limits"][asset] = float(mb_data["borrowLimit"])
                                         self._no_inventory[asset] = False
                                     except Exception as e:
                                         # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
@@ -291,11 +361,13 @@ class BalancePusher:
                             bnb_interest = a.get("interest", "0")
                         if asset_name in targets:
                             sym_key = f"{asset_name}USDT"
+                            mb_cache = self._max_borrow_cache.get(acc.id, {})
                             symbol_margin[sym_key] = {
                                 "free": float(a.get("free", "0")),
                                 "borrowed": float(a.get("borrowed", "0")),      # 该子账户已借该币本金(持币)
                                 "interest": float(a.get("interest", "0")),      # 已计利息(还币需本金+利息)
-                                "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
+                                "max_borrowable": mb_cache.get(asset_name, 0),
+                                "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),  # VIP档借贷上限(与持U无关)
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),
                             }
@@ -305,11 +377,13 @@ class BalancePusher:
                     for asset_name in targets:
                         sym_key = f"{asset_name}USDT"
                         if sym_key not in symbol_margin:
+                            mb_cache = self._max_borrow_cache.get(acc.id, {})
                             symbol_margin[sym_key] = {
                                 "free": 0.0,
                                 "borrowed": 0.0,
                                 "interest": 0.0,
-                                "max_borrowable": self._max_borrow_cache.get(acc.id, {}).get(asset_name, 0),
+                                "max_borrowable": mb_cache.get(asset_name, 0),
+                                "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._no_inventory.get(asset_name, False),
                             }
@@ -356,6 +430,50 @@ class BalancePusher:
                 except Exception as e:
                     logger.debug(f"Balance fetch failed for account {acc.id}: {e}")
 
+            # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)。
+            # immediate 即时刷新跳过此段(省主账户 futures_position_risk 的逐币 REST),payload 用上一轮缓存兜底,
+            # 避免把「现-期/爆率」列清空闪烁;整轮采集后刷新缓存。
+            master_futures_positions = {}  # {uid: {symbol: positionAmt}}
+            master_futures_liq = {}        # {uid: 维持保证金率%} 主账户合约户爆仓率(币安标准:totalMaintMargin/totalMarginBalance×100,越接近100越接近强平)
+            for uid in ([] if immediate else user_balances.keys()):
+                from app.db.models import MasterAccount
+                master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
+                if not master or not master.api_key:
+                    continue
+                try:
+                    from engine.trading.binance_trading import BinanceTradingClient
+                    async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+                        # 主账户合约户维持保证金率(爆仓率口径,前端「爆率」列)。与 pushed 无关,先采集。
+                        try:
+                            facc = await mc.get_futures_account()
+                            tmm = float(facc.get("totalMaintMargin", "0") or 0)
+                            tmb = float(facc.get("totalMarginBalance", "0") or 0)
+                            if tmb > 0:
+                                master_futures_liq[uid] = tmm / tmb * 100
+                        except Exception:
+                            pass
+                        # 只采集 pushed_symbols 里的币(避免全市场遍历)
+                        pushed = self._redis.smembers(f"engine:{uid}:pushed_symbols")
+                        if not pushed:
+                            continue
+                        positions = {}
+                        for sym_bytes in pushed:
+                            try:
+                                sym = sym_bytes.decode() if isinstance(sym_bytes, bytes) else sym_bytes
+                                pos_data = await mc.futures_position_risk(sym)
+                                if pos_data and len(pos_data) > 0:
+                                    positions[sym] = float(pos_data[0].get("positionAmt", "0") or 0)
+                            except Exception:
+                                pass  # 某币查不到持仓不影响其他币
+                        master_futures_positions[uid] = positions
+                except Exception as e:
+                    logger.debug(f"Master futures position fetch failed for user {uid}: {e}")
+
+            if not immediate:
+                # 整轮采集成功 → 刷新主账户合约缓存,供后续 immediate 即时刷新兜底(避免清空闪烁)
+                self._last_master_pos.update(master_futures_positions)
+                self._last_master_liq.update(master_futures_liq)
+
             for uid, balances in user_balances.items():
                 position_count = db.query(Position).filter(
                     Position.status == "OPEN", Position.user_id == uid,
@@ -369,6 +487,11 @@ class BalancePusher:
                     "balances": balances,
                     "position_count": position_count,
                     "total_contracts": total_contracts,
+                    # immediate 时本轮未采集主账户合约 → 回退上一轮缓存,避免「现-期/爆率」列闪空
+                    "master_futures_positions": master_futures_positions.get(
+                        uid, self._last_master_pos.get(uid, {})),  # {symbol: positionAmt}
+                    "master_futures_liq_pct": master_futures_liq.get(
+                        uid, self._last_master_liq.get(uid)),  # 主账户合约户维持保证金率%(爆率列),无主账户/无合约权益则 None
                 }
 
                 await self._redis.publish("balance:updates", json.dumps(payload))
@@ -376,7 +499,8 @@ class BalancePusher:
 
             # 资金净值快照落库(每 ~10min 一次,每用户一行)→ 资金曲线/日终对账/回撤监控。
             # 复用 aggregate_balances 同一净值口径(与 admin 实时总览一致)。落库失败不影响推送。
-            if self._max_borrow_tick % SNAPSHOT_EVERY == 0:
+            # immediate 即时刷新不落快照/不跑资金告警(这两者绑定周期节拍,避免离散触发刷错告警/脏行)。
+            if not immediate and self._max_borrow_tick % SNAPSHOT_EVERY == 0:
                 agg_by_user: dict[int, dict] = {}
                 try:
                     for uid, balances in user_balances.items():

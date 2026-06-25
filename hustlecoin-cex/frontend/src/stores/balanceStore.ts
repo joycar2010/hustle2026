@@ -13,7 +13,17 @@ export interface AccountBalance {
   futures_unrealized_pnl: number
   bnb_free: number
   bnb_interest: number
-  symbol_margin?: Record<string, { free: number; borrowed?: number; interest?: number; max_borrowable: number; daily_interest_rate: number; no_inventory?: boolean; effective_borrowable?: number; borrow_cap_reason?: string }>
+  symbol_margin?: Record<string, {
+    free: number
+    borrowed?: number
+    interest?: number
+    max_borrowable: number
+    borrow_limit?: number  // VIP档借贷上限(与持U无关、同VIP各账户相同)
+    daily_interest_rate: number
+    no_inventory?: boolean
+    effective_borrowable?: number
+    borrow_cap_reason?: string
+  }>
 }
 
 interface BalanceSummary {
@@ -22,6 +32,8 @@ interface BalanceSummary {
   futuresAvailable: number
   positionCount: number
   totalContracts: number
+  masterFuturesPositions?: Record<string, number>  // 主账户合约持仓 {symbol: positionAmt}
+  masterFuturesLiqPct?: number | null  // 主账户合约户维持保证金率%(爆率列,币安标准 totalMaintMargin/totalMarginBalance×100)
 }
 
 interface BalanceState {
@@ -32,6 +44,7 @@ interface BalanceState {
   setBalances: (balances: AccountBalance[]) => void
   setSummary: (partial: Partial<BalanceSummary>) => void
   setWsLatency: (ms: number) => void
+  markRepaid: (accountId: number, symbol: string, amount?: number) => void
 }
 
 const SS_KEY = 'hc_balances'
@@ -81,4 +94,40 @@ export const useBalanceStore = create<BalanceState>((set) => ({
   },
 
   setWsLatency: (ms) => set({ wsLatency: ms }),
+
+  // 还币成功后乐观更新该账户该币的持币(现币 free + 本金 borrowed + 利息 interest)。
+  // 服务端真值随后由「写后即时刷新」(后端 balance:refresh → BalancePusher 立刻重推,不再干等 10s 轮询)
+  // 经 setBalances 整体替换对账覆盖。
+  //   amount 省略  → 全额还(清零;「一键全还」/移除币/持币汇总全清等场景保持旧行为);
+  //   amount 提供  → 部分还,按量递减(币安先抵利息再抵本金,现币同步递减),全部 clamp ≥ 0。
+  //                  修复「部分还币却乐观清零成全额还清」(问题1根因:此函数原为全额还而写,加部分还币后未同步)。
+  markRepaid: (accountId, symbol, amount) => {
+    set((state) => {
+      const balances = state.balances.map((b) => {
+        if (b.account_id !== accountId) return b
+        const sm = b.symbol_margin?.[symbol]
+        if (!sm) return b
+        let patch: { free: number; borrowed: number; interest: number }
+        if (amount == null) {
+          patch = { free: 0, borrowed: 0, interest: 0 }
+        } else {
+          const interest0 = sm.interest ?? 0
+          const interestPaid = Math.min(amount, interest0)         // 先抵利息
+          const principalPaid = Math.max(0, amount - interestPaid) // 余下抵本金
+          patch = {
+            interest: Math.max(0, interest0 - interestPaid),
+            borrowed: Math.max(0, (sm.borrowed ?? 0) - principalPaid),
+            free: Math.max(0, (sm.free ?? 0) - amount),
+          }
+        }
+        return {
+          ...b,
+          symbol_margin: { ...b.symbol_margin, [symbol]: { ...sm, ...patch } },
+        }
+      })
+      const next = { balances, summary: state.summary, lastUpdateTs: state.lastUpdateTs }
+      try { sessionStorage.setItem(SS_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+      return { balances }
+    })
+  },
 }))

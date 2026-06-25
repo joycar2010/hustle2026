@@ -10,6 +10,19 @@ from app.middleware.permissions import get_current_user_id
 router = APIRouter(prefix="/api/symbol-rules", tags=["symbol-rules"])
 
 
+def _publish_rules_reload(user_id: int):
+    """事件驱动 0 秒规则热重载:保存/重置/删除单一规则后立即通知该 user 的 worker 重读规则
+    (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。"""
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.publish(f"rules:reload:{user_id}", "1")
+        rc.close()
+    except Exception:
+        pass
+
+
 def _get_global_rules(db: Session, user_id: int) -> GlobalRules:
     rules = db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
     if not rules:
@@ -97,24 +110,30 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
 
     update_data = data.model_dump(exclude_unset=True)
     explicitly_set_repay = "allow_repay" in update_data
+    remove_spread_changed = "remove_spread" in update_data  # 本次是否显式改了 remove_spread
 
     for field, value in update_data.items():
         setattr(rule, field, value)
     rule.source = "custom"
 
-    # C3: auto-disable repay when remove_spread < 0.5 (unless user explicitly set allow_repay)
-    effective_remove = rule.remove_spread
-    if effective_remove is None:
-        global_rules = _get_global_rules(db, user_id)
-        effective_remove = global_rules.remove_spread
-    if effective_remove is not None and not explicitly_set_repay:
-        if Decimal(str(effective_remove)) < Decimal("0.5"):
-            rule.allow_repay = False
-        elif not rule.allow_repay:
-            rule.allow_repay = True
+    # C3: remove_spread<0.5 时自动联动关闭 allow_repay —— 仅在【本次请求显式修改 remove_spread】时才重算。
+    # 解耦(问题3):此前无条件用 rule.remove_spread(已存在值)判定,导致"只改 close_spread(平点差)保存"
+    # 也会因旧 remove_spread<0.5 把 allow_repay 翻成 False → 引擎 _is_repay_allowed 拦截 → 设平点差却永不平仓。
+    # 现改为:不碰 remove_spread / 不显式给 allow_repay 的保存,一律不动 allow_repay。
+    if remove_spread_changed and not explicitly_set_repay:
+        effective_remove = rule.remove_spread
+        if effective_remove is None:
+            global_rules = _get_global_rules(db, user_id)
+            effective_remove = global_rules.remove_spread
+        if effective_remove is not None:
+            if Decimal(str(effective_remove)) < Decimal("0.5"):
+                rule.allow_repay = False
+            elif not rule.allow_repay:
+                rule.allow_repay = True
 
     db.commit()
     db.refresh(rule)
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 
@@ -142,6 +161,7 @@ def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_d
     rule.source = "global"
     db.commit()
     db.refresh(rule)
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 
@@ -158,4 +178,5 @@ def delete_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail=f"No rule for {symbol}")
     db.delete(rule)
     db.commit()
+    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
     return {"message": f"Symbol rule for {symbol} deleted"}

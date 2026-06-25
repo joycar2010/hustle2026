@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from decimal import Decimal
 
@@ -20,6 +21,8 @@ from engine.schemas import (
     PositionHistoryResponse, HealthResponse, WorkerHealth,
     StuckPosition, APIMetricsResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/engine", tags=["engine"])
 
@@ -74,7 +77,16 @@ def list_positions(
     if symbol:
         q = q.filter(Position.symbol == symbol.upper())
     q = q.order_by(Position.id.desc())
-    return q.offset((page - 1) * size).limit(size).all()
+    rows = q.offset((page - 1) * size).limit(size).all()
+    # 注入子账户备注名(account_note):借到币的真实 position 也带名,前端不再 fallback 显示 #N
+    note_map = {
+        s.id: s.note for s in db.query(SubAccount.id, SubAccount.note).filter(
+            SubAccount.user_id == user_id,
+        ).all()
+    }
+    for p in rows:
+        p.account_note = note_map.get(p.sub_account_id)
+    return rows
 
 
 @router.get("/positions/summary", response_model=PositionSummary)
@@ -310,9 +322,15 @@ async def get_max_borrowable(account_id: int, asset: str, request: Request, db: 
 
     from engine.trading.binance_trading import BinanceTradingClient
     async with BinanceTradingClient(account.api_key, account.api_secret) as client:
-        amount = await client.get_max_borrowable(asset.upper())
+        mb = await client.get_max_borrowable(asset.upper())
 
-    return {"asset": asset.upper(), "max_borrowable": str(amount)}
+    # get_max_borrowable 返回 {"amount":Decimal, "borrowLimit":Decimal};过去直接 str(dict) 致前端显示
+    # 原始 "{'amount': Decimal('0'), ...}"。这里拆出标量,前端展示纯数字。
+    if isinstance(mb, dict):
+        return {"asset": asset.upper(),
+                "max_borrowable": str(mb.get("amount", 0)),
+                "borrow_limit": str(mb.get("borrowLimit", 0))}
+    return {"asset": asset.upper(), "max_borrowable": str(mb), "borrow_limit": None}
 
 
 @router.get("/accounts/{account_id}/loan-history")
@@ -556,6 +574,8 @@ def get_pushed_symbols(request: Request):
     r = _redis()
     raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
     pushed = json.loads(raw) if raw else []
+    # 注:不要在此按「无规则/无持仓」自动剔除推送 —— 推送的币默认跟随全局规则、本就无单一规则,
+    # 且刚推送未借到时也无持仓,这都是正常态。曾有过的 ghost 对账会误删所有新推送,已移除。
     # 推送时间戳(engine:{uid}:pushed_at,symbol→unix秒)统一在此回填/清理:
     # 覆盖手动 push(API 已记)与引擎自动推送(此处首次见到即补 now);移除的清掉。
     at_key = _user_redis_key(user_id, "pushed_at")
@@ -603,6 +623,81 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     return {"message": f"Pushed {sym}"}
 
 
+def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids: list[int] = None):
+    """清除某币的单一规则(SymbolRule + AccountSymbolRule),使再推进来时回归全局默认。
+    供 HTTP DELETE 手动移除 & 引擎平仓后自动下架 两条路径复用。"""
+    from app.db.models import SymbolRule, AccountSymbolRule
+    try:
+        db.query(SymbolRule).filter(
+            SymbolRule.user_id == user_id, SymbolRule.symbol == symbol,
+        ).delete(synchronize_session=False)
+        if sub_account_ids:
+            db.query(AccountSymbolRule).filter(
+                AccountSymbolRule.sub_account_id.in_(sub_account_ids), AccountSymbolRule.symbol == symbol,
+            ).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: int, symbol: str, repay_qty: Decimal):
+    """手动还币(/partial-repay)后收口 position 状态:把该子账户该币的未终态 position 置 CLOSED
+    (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。若该 user 该币全部 CLOSED → 自动下架
+    pushed_symbols + 清单一规则,对齐引擎平仓后行为(worker._check_and_remove_symbol_after_close),
+    防止刚还清又被引擎按残留规则(如 borrow_spread=-1)立即重借。失败回滚不阻断还币主流程。"""
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        active = db.query(Position).filter(
+            Position.sub_account_id == sub_account_id,
+            Position.symbol == symbol,
+            Position.status.notin_(["CLOSED", "FAILED"]),
+        ).all()
+        if not active:
+            return
+        now = _dt.now(_tz.utc)
+        closed_ids = [p.id for p in active]
+        for p in active:
+            p.status = "CLOSED"
+            if repay_qty > 0:
+                p.repay_qty = repay_qty
+            p.closed_at = now
+        db.commit()
+        # 发 position:updates(CLOSED)→ 前端 ws:position 即时删该持仓行(整行所有列一起消失),
+        # 否则行要等 30s 兜底轮询才掉,期间 风险/保证金/经济参数 等整行级列残留旧值。
+        try:
+            rp = _redis()
+            for pid in closed_ids:
+                rp.publish("position:updates", json.dumps({
+                    "id": pid, "status": "CLOSED", "symbol": symbol,
+                    "sub_account_id": sub_account_id, "user_id": user_id,
+                }))
+        except Exception:
+            pass
+        # 该 user 该 symbol 是否还有未终态持仓;无 → 下架 + 清规则
+        sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
+        remaining = db.query(Position).filter(
+            Position.sub_account_id.in_(sub_ids), Position.symbol == symbol,
+            Position.status.notin_(["CLOSED", "FAILED"]),
+        ).count() if sub_ids else 0
+        if remaining == 0:
+            try:
+                r = _redis()
+                ps_key = _user_redis_key(user_id, "pushed_symbols")
+                raw = r.get(ps_key)
+                if raw:
+                    current = set(json.loads(raw))
+                    if symbol in current:
+                        current.discard(symbol)
+                        r.set(ps_key, json.dumps(sorted(current)))
+                        r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+            except Exception:
+                pass
+            _purge_symbol_rules(db, user_id, symbol, sub_ids)
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"reconcile positions after repay failed ({symbol}): {e}")
+
+
 @router.delete("/push-symbol/{symbol}")
 def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
@@ -631,19 +726,7 @@ def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(ge
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
 
     # 移除即清该币的单一规则覆盖(SymbolRule + AccountSymbolRule)→ 再推进来回归全局参数。
-    # 与"移除保留规则"的旧行为相反,按用户诉求改:删除而非保留。无持仓时才会走到这(上方已校验)。
-    try:
-        from app.db.models import SymbolRule, AccountSymbolRule
-        db.query(SymbolRule).filter(
-            SymbolRule.user_id == user_id, SymbolRule.symbol == sym,
-        ).delete(synchronize_session=False)
-        if sub_ids:
-            db.query(AccountSymbolRule).filter(
-                AccountSymbolRule.sub_account_id.in_(sub_ids), AccountSymbolRule.symbol == sym,
-            ).delete(synchronize_session=False)
-        db.commit()
-    except Exception:
-        db.rollback()
+    _purge_symbol_rules(db, user_id, sym, sub_ids)
     return {"message": f"Removed {sym}"}
 
 
@@ -655,6 +738,7 @@ class PartialRepayRequest(BaseModel):
 
 @router.post("/partial-repay")
 async def partial_repay(data: PartialRepayRequest, request: Request, db: Session = Depends(get_db)):
+    """部分/全额还币(杠杆账户)。复用引擎 execute_repay 逻辑:先查实时债务+free,free 不足按 free 封顶(防 -3041),最终失败给可读 400。"""
     user_id = get_current_user_id(request)
     account = db.query(SubAccount).filter(
         SubAccount.id == data.sub_account_id, SubAccount.user_id == user_id,
@@ -663,11 +747,215 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
         raise HTTPException(status_code=404, detail="Sub-account not found")
 
     base_asset = data.symbol.upper().replace("USDT", "")
-    from engine.trading.binance_trading import BinanceTradingClient
-    async with BinanceTradingClient(account.api_key, account.api_secret) as client:
-        await client.margin_repay(base_asset, data.amount)
+    from engine.trading.binance_trading import BinanceTradingClient, BinanceAPIError
 
-    return {"message": f"Repaid {data.amount} {base_asset} for account {account.note}"}
+    try:
+        async with BinanceTradingClient(account.api_key, account.api_secret) as client:
+            # 1) 读实时债务与现货余额
+            margin = await client.get_margin_account()
+            asset_info = next((a for a in margin.get("userAssets", []) if a.get("asset") == base_asset), None)
+            usdt_info = next((a for a in margin.get("userAssets", []) if a.get("asset") == "USDT"), None)
+            if not asset_info:
+                raise HTTPException(status_code=400, detail=f"账户无 {base_asset} 杠杆资产")
+            borrowed = float(asset_info.get("borrowed", "0") or 0)
+            interest = float(asset_info.get("interest", "0") or 0)
+            free = float(asset_info.get("free", "0") or 0)
+            usdt_free = float(usdt_info.get("free", "0") or 0) if usdt_info else 0.0
+            total_debt = borrowed + interest
+            if total_debt < 1e-8:
+                # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED + 自动下架),
+                # 修复"已还币但状态仍待对冲"的孤儿。
+                _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(), Decimal("0"))
+                return {"message": f"{account.note} {base_asset} 无需还币(债务为0),已同步持仓状态"}
+
+            # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
+            # 归一为 float,避免下游 `repay_amount - free`(shortfall)/`*= 0.999`(重试)触发 Decimal-float
+            # 类型崩溃;margin_repay 内部 str(amount) 故 float 入参亦正常序列化。
+            repay_amount = min(float(data.amount), total_debt)
+
+            # 2) free 不足时:用 USDT 市价买入差额(常见于已平仓残留利息零头)。
+            #    币安 MARKET BUY 受 NOTIONAL.minNotional(常 5 USDT)+ LOT_SIZE.stepSize 约束,
+            #    故买入量须向上对齐到 minNotional;若子账户 USDT 不够,且全局开了 hedge_via_master,
+            #    自动从主账户 universal_transfer 划 USDT 进子账户杠杆户,再买入还债。
+            shortfall = repay_amount - free
+            if shortfall > 1e-8:
+                # 取交易对过滤器(stepSize / minNotional)+ 现价
+                try:
+                    info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                                 {"symbol": data.symbol.upper()}, signed=False)
+                    sp = info.get("symbols", [{}])[0]
+                    flt = {f["filterType"]: f for f in sp.get("filters", [])}
+                    step = float(flt.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+                    min_notional = float(flt.get("NOTIONAL", {}).get("minNotional", "5") or "5")
+                    tk = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                               {"symbol": data.symbol.upper()}, signed=False)
+                    price = float(tk.get("price", 0) or 0)
+                except Exception:
+                    step, min_notional, price = 0.01, 5.0, 0.0
+
+                if price <= 0:
+                    # 取价兜底:REST(exchangeInfo/ticker)失败时用 Redis spreads 现价(与行情推送同源),
+                    # 避免"明明可还却因瞬时取价失败被 400 拒"。
+                    try:
+                        raw_sp = _redis().hget("spreads", data.symbol.upper())
+                        if raw_sp:
+                            sp2 = json.loads(raw_sp)
+                            price = float(sp2.get("spot_ask") or sp2.get("spot_bid") or 0)
+                    except Exception:
+                        pass
+                if price <= 0:
+                    raise HTTPException(status_code=400, detail=f"无法获取 {base_asset} 价格,稍后重试")
+
+                # 需买入量:满足 minNotional(币安用5分钟均价校验,现价可能偏低)→ 留 +20% 缓冲;
+                # 再向上对齐 stepSize 并多加一档,确保名义价值稳过 NOTIONAL 过滤。
+                import math
+                target_notional = max(min_notional * 1.2, shortfall * price)
+                need_qty = target_notional / price
+                buy_qty = (math.ceil(need_qty / step) + 1) * step  # 向上对齐 stepSize + 多一档
+                buy_cost = buy_qty * price * 1.01           # +1% 余量(滑点/手续费)
+
+                # 子账户 USDT 不够买入 → 主账户按 transfer_order 顺序多源(合约/现货/全仓)累计划转补足
+                if usdt_free < buy_cost:
+                    deficit = buy_cost - usdt_free
+                    from app.db.models import GlobalRules, FundRules
+                    grules = db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
+                    hedge_via_master = bool(getattr(grules, "hedge_via_master", False)) if grules else False
+                    master = _load_master_account(db, user_id)
+                    if not hedge_via_master:
+                        raise HTTPException(status_code=400, detail=f"子账户 USDT 不足(需 {buy_cost:.2f} 缺 {deficit:.2f}),且未开启「主账户自动划转(hedge_via_master)」,无法自动补足。请手动划入 USDT 或开启该功能。")
+                    if not master or not master.api_key or not account.email:
+                        raise HTTPException(status_code=400, detail=f"子账户 USDT 不足且主账户未配置(或子账户无 email),无法自动划转还币。")
+                    # 按 FundRules.transfer_order 顺序从主账户各钱包归集 USDT 到主现货,再万向划转到子账户。
+                    # 注:币安不允许从主账户合约/全仓【直接】跨账户划给子账户(-9000),须先内部归集到主现货。
+                    fr = db.query(FundRules).filter(FundRules.user_id == user_id).first()
+                    order_str = (fr.transfer_order if fr and fr.transfer_order else "futures,spot,margin")
+                    sources = [s.strip() for s in order_str.split(",") if s.strip() in ("spot", "futures", "margin")]
+                    xfer_amt = round(deficit + 1.0, 2)  # 多划 1 USDT 余量
+                    # 内部归集 type 映射(各钱包 → 主现货 MAIN)
+                    _INTERNAL = {"futures": "UMFUTURE_MAIN", "margin": "MARGIN_MAIN"}
+                    try:
+                        from engine.fund.margin_balancer import _master_source_usdt
+                        async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+                            bal = await _master_source_usdt(mc, sources)
+                            spot_have = float(bal.get("spot", 0))
+                            need_collect = max(0.0, xfer_amt - spot_have)
+                            # 按 transfer_order 从非现货源归集到主现货
+                            for src in sources:
+                                if need_collect <= 0:
+                                    break
+                                if src == "spot":
+                                    continue
+                                avail = float(bal.get(src, 0))
+                                take = round(min(need_collect, avail), 2)
+                                if take <= 0:
+                                    continue
+                                try:
+                                    await mc.transfer(_INTERNAL[src], "USDT", Decimal(str(take)))
+                                    need_collect -= take
+                                except Exception:
+                                    continue
+                            if need_collect > 0.01:
+                                raise HTTPException(status_code=400, detail=f"主账户各钱包({order_str})USDT 合计不足,无法归集 {xfer_amt} USDT 还币。")
+                            # 主现货 → 子账户 MARGIN(子账户万向划转,SPOT 起源)
+                            await mc.universal_transfer(
+                                asset="USDT", amount=Decimal(str(xfer_amt)),
+                                from_account_type="SPOT", to_account_type="MARGIN",
+                                from_email=None, to_email=account.email,
+                            )
+                        usdt_free += xfer_amt
+                        logger.info(f"partial_repay: 主账户按序({order_str})归集+划转 {xfer_amt} USDT → 子账户 {account.note} 还币零头")
+                    except HTTPException:
+                        raise
+                    except Exception as xe:
+                        raise HTTPException(status_code=400, detail=f"主账户自动划转 USDT 失败: {str(xe)[:120]}")
+
+                # 市价买入 base_asset(NO_SIDE_EFFECT=只用现有 USDT,不借币)
+                try:
+                    buy_result = await client._request(
+                        "POST", "https://api.binance.com/sapi/v1/margin/order",
+                        {
+                            "symbol": data.symbol.upper(),
+                            "side": "BUY",
+                            "type": "MARKET",
+                            "quantity": f"{buy_qty:.8f}",
+                            "sideEffectType": "NO_SIDE_EFFECT",
+                            "isIsolated": "FALSE",
+                        }
+                    )
+                    executed = float(buy_result.get("executedQty", buy_qty) or buy_qty)
+                    free += executed
+                    repay_amount = min(total_debt, free)  # 买入后按债务全额还
+                except Exception as buy_err:
+                    raise HTTPException(status_code=400, detail=f"买入 {base_asset} 还币失败: {str(buy_err)[:100]}")
+
+            if repay_amount < 1e-8:
+                raise HTTPException(status_code=400, detail=f"可还数量为 0(free={free:.6f}),无法还币")
+
+            # 3) 还币,带重试
+            for attempt in range(3):
+                try:
+                    await client.margin_repay(base_asset, repay_amount)
+                    break
+                except BinanceAPIError as e:
+                    # BinanceAPIError 属性是 api_code(不是 code)→ 误用 e.code 会抛
+                    # 'BinanceAPIError' object has no attribute 'code',反而把还币失败成属性错
+                    if e.api_code == -3041 and attempt < 2:
+                        repay_amount *= 0.999
+                        continue
+                    raise
+
+            # 3.5) 治本:还债后若有 base_asset 现货残留(因 minNotional 被迫多买的零头),
+            #      市价卖回 USDT,避免"现币有值/借币空/无持仓"的迷惑残留长期留在杠杆户。
+            #      仅当残留名义价值 ≥ minNotional 才可卖(币安限制);不足则为不可避免的尘埃,留账。
+            #      best-effort:卖回失败不影响已成功的还币。
+            try:
+                leftover = free - repay_amount
+                if leftover > 0:
+                    sp_info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                                    {"symbol": data.symbol.upper()}, signed=False)
+                    sp0 = sp_info.get("symbols", [{}])[0]
+                    flt0 = {f["filterType"]: f for f in sp0.get("filters", [])}
+                    sell_step = float(flt0.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+                    sell_min_notional = float(flt0.get("NOTIONAL", {}).get("minNotional", "5") or "5")
+                    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                                {"symbol": data.symbol.upper()}, signed=False)
+                    sell_price = float(tkr.get("price", 0) or 0)
+                    import math as _math
+                    sell_qty = _math.floor(leftover / sell_step) * sell_step  # 向下对齐,不卖超持有
+                    if sell_price > 0 and sell_qty > 0 and sell_qty * sell_price >= sell_min_notional:
+                        await client._request(
+                            "POST", "https://api.binance.com/sapi/v1/margin/order",
+                            {
+                                "symbol": data.symbol.upper(), "side": "SELL", "type": "MARKET",
+                                "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT",
+                                "isIsolated": "FALSE",
+                            }
+                        )
+                        logger.info(f"partial_repay: sold leftover {sell_qty} {base_asset} back to USDT (acct {data.sub_account_id})")
+            except Exception as se:
+                logger.warning(f"partial_repay 卖回零头残留失败(还币已成功): {se}")
+
+            # 4) 回写 position:手动还币绕过引擎对冲/还币流程,不回写则 BORROWED_IDLE 等未终态
+            #    position 会永久卡在「待对冲」(状态孤儿)。债已清 → 收口该币 position(见 helper)。
+            _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(),
+                                             Decimal(str(repay_amount)))
+
+            # 写后即时刷新:手动部分/全额还币 → 请求 BalancePusher 立刻重推该用户余额(不等 10s 轮询,问题4)
+            try:
+                _redis().publish("balance:refresh", str(user_id))
+            except Exception:
+                pass
+
+            return {
+                "message": f"已还 {repay_amount:.6f} {base_asset} (账户 {account.note})",
+                "repaid": float(repay_amount), "debt_before": total_debt, "free_before": free,
+            }
+    except BinanceAPIError as e:
+        raise HTTPException(status_code=400, detail=f"还币失败(币安 {e.api_code}): {e.message}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"还币失败: {str(e)}")
 
 
 # ─── Manual Open / Close (executed API-side, works regardless of engine state) ───
@@ -1019,9 +1307,13 @@ def start_one_worker(account_id: int, request: Request, db: Session = Depends(ge
 
 
 def _live_worker_scopes(db: Session, user_id: int) -> list[str]:
-    """当前仍存在的子账户对应的 worker scope。用于过滤掉已删除子账户残留的
-    engine_state(sub:N)僵尸行 —— 它们 heartbeat 永久过期、显示「超时」却无法删除。"""
-    sub_ids = [r.id for r in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
+    """当前仍存在【且已启用】的子账户对应的 worker scope。用于过滤掉:
+    ① 已删除子账户残留的 engine_state(sub:N)僵尸行;
+    ② 已停用(is_enabled=false)子账户的 worker —— 它们 status=STOPPED、心跳永久过期,
+       不该被算作「超时」(超时仅指 RUNNING 却心跳卡死的 worker)。"""
+    sub_ids = [r.id for r in db.query(SubAccount.id).filter(
+        SubAccount.user_id == user_id, SubAccount.is_enabled == True,
+    ).all()]
     return [f"sub:{i}" for i in sub_ids]
 
 
@@ -1069,7 +1361,8 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     any_stale = False
     for w in worker_rows:
         stale = False
-        if w.last_heartbeat:
+        # 仅 RUNNING 的 worker 才判「超时」:STOPPED 是主动停用,本就不更新心跳,标超时是误报
+        if w.status == "RUNNING" and w.last_heartbeat:
             delta = (now - w.last_heartbeat).total_seconds()
             stale = delta > HEARTBEAT_STALE_SEC
         if stale:
@@ -1145,8 +1438,12 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         uraw = r.get("engine:uid_weight:latest")
         if uraw:
             ud = json.loads(uraw)
-            uid_used = int(ud.get("used_uid_weight_1m", 0))
             uid_limit = int(ud.get("uid_limit", 180000))
+            # UID 权重是币安 1 分钟滑动窗口,只在借/还币调用时由响应头更新。若距上次更新 >60s,
+            # 窗口已滑过 → 视为 0(否则不借币时会一直显示上次借币的残留值,如"UID 6"永不归零)。
+            uid_wt = float(ud.get("uid_weight_time", 0) or 0)
+            uid_age = datetime.now(timezone.utc).timestamp() - uid_wt if uid_wt > 0 else 1e9
+            uid_used = int(ud.get("used_uid_weight_1m", 0)) if uid_age <= 60 else 0
         pushed_raw = r.get(_user_redis_key(user_id, "pushed_symbols"))
         pushed_count = len(json.loads(pushed_raw)) if pushed_raw else 0
         uid_headroom = max(0, uid_limit - uid_used)
@@ -1209,6 +1506,35 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     except Exception:
         pass
 
+    # 逐子账户可借速率(各账户 UID 消耗不同 → 速率不同):
+    #   rate = min(该账户 UID 余量 ÷ 1500 ÷ 60, 该账户配速 borrow_rate_per_sec)
+    # UID 权重是币安 1 分钟滑动窗口,>60s 无更新视为已归零(余量满)。无该账户数据则用配速兜底。
+    account_borrow_rates: dict[str, float] = {}
+    try:
+        from app.db.models import GlobalRules as _GR
+        gr2 = (db.query(_GR).filter(_GR.user_id == user_id).first() or db.query(_GR).first())
+        default_rate2 = float(gr2.borrow_rate_per_sec) if gr2 and gr2.borrow_rate_per_sec is not None else 2.0
+        now_ts = datetime.now(timezone.utc).timestamp()
+        pa_raw = r.get("engine:uid_weight:by_account")
+        pa = json.loads(pa_raw) if pa_raw else {}
+        subs2 = db.query(SubAccount).filter(
+            SubAccount.user_id == user_id, SubAccount.is_enabled == True,
+        ).all()
+        for s in subs2:
+            cfg = float(s.borrow_rate_per_sec) if s.borrow_rate_per_sec else default_rate2
+            d = pa.get(str(s.id))
+            used = 0
+            lim = 180000
+            if d:
+                wt = float(d.get("uid_weight_time", 0) or 0)
+                age = now_ts - wt if wt > 0 else 1e9
+                used = int(d.get("used_uid_weight_1m", 0)) if age <= 60 else 0
+                lim = int(d.get("uid_limit", 180000) or 180000)
+            ceiling = max(0.0, (lim - used)) / 1500 / 60   # 该账户 UID 余量换算的每秒借币上限
+            account_borrow_rates[str(s.id)] = round(min(ceiling, cfg), 2)
+    except Exception:
+        pass
+
     return HealthResponse(
         status=overall,
         engine_status=engine_status,
@@ -1226,4 +1552,5 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         throttle_rate=throttle_rate,
         agg_borrow_rate=agg_borrow_rate,
         single_borrow_rate=single_borrow_rate,
+        account_borrow_rates=account_borrow_rates,
     )

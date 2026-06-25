@@ -5,7 +5,11 @@ import { OwlTreeTable, type Position, type SymbolRuleInfo } from '@/components/d
 import { EngineHealthBar } from '@/components/dashboard/EngineHealthBar'
 import { TransferDialog } from '@/components/dashboard/TransferDialog'
 import { SymbolRuleDialog } from '@/components/dashboard/SymbolRuleDialog'
-import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, partialRepay, manualOpen, manualClose, manualHedge, manualRepay, getEngineHealth, listTailPositions, cleanupTailPositions, getMaxBorrowable } from '@/api/engine'
+import { RemoveSymbolDialog } from '@/components/dashboard/RemoveSymbolDialog'
+import { PartialRepayDialog } from '@/components/dashboard/PartialRepayDialog'
+import { ManualOpenDialog } from '@/components/dashboard/ManualOpenDialog'
+import { ViewDetailDialog } from '@/components/dashboard/ViewDetailDialog'
+import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, manualClose, manualHedge, manualRepay, getEngineHealth, listTailPositions, cleanupTailPositions, getMaxBorrowable, startAllWorkers } from '@/api/engine'
 import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
@@ -31,10 +35,14 @@ export function DashboardPage() {
   const [transferAccountId, setTransferAccountId] = useState<number | undefined>()
   const [ruleSymbol, setRuleSymbol] = useState<string | null>(null)
   const [ruleAccountId, setRuleAccountId] = useState<number | undefined>()
+  const [removeSymbol, setRemoveSymbol] = useState<string | null>(null)
+  const [repaySymbol, setRepaySymbol] = useState<string | null>(null)
+  const [openSymbol, setOpenSymbol] = useState<string | null>(null)            // 手动开仓弹窗
+  const [detailPosition, setDetailPosition] = useState<Position | null>(null)  // 查看详情弹窗
   const [symbolRulesMap, setSymbolRulesMap] = useState<Map<string, SymbolRuleInfo>>(new Map())
   const [delistingSymbols, setDelistingSymbols] = useState<Set<string>>(new Set())
   const [riskySymbols, setRiskySymbols] = useState<Set<string>>(new Set())
-  const [throttleRate, setThrottleRate] = useState(0)
+  const [accountRates, setAccountRates] = useState<Record<string, number>>({})
 
   useEffect(() => {
     // [第三梯队] 轮询用 AbortController:慢网下撤销上一次未完成的 health 请求,避免堆叠
@@ -42,7 +50,9 @@ export function DashboardPage() {
     const fetchThrottle = () => {
       ctrl?.abort()
       ctrl = new AbortController()
-      getEngineHealth(ctrl.signal).then((h) => setThrottleRate(h.throttle_rate ?? 0)).catch(() => {})
+      getEngineHealth(ctrl.signal).then((h) => {
+        setAccountRates(h.account_borrow_rates ?? {})
+      }).catch(() => {})
     }
     fetchThrottle()
     const t = setInterval(fetchThrottle, 15000)
@@ -176,13 +186,15 @@ export function DashboardPage() {
           addToast(`无法移除 ${symbol}：仍有子账户持仓中。请先平仓所有持仓后再移除。`, 'error')
           break
         }
-        if (await confirmDialog({ title: '移除推送', message: `确认移除 ${symbol}？` })) {
-          removePushedSymbol(symbol).then(() => refreshPushed()).catch(() => {})
-        }
+        // 主界面风格弹窗:列出各子账户现币/借币 → 确认后逐账户自动还币 → 再移除
+        setRemoveSymbol(symbol)
         break
       }
       case 'resume_slot':
-        pushSymbol(symbol).then(() => refreshPushed()).catch(() => {})
+        // "停止挂单"是顶栏的全局引擎停;"恢复下单"应对称地重启引擎,而非重推一个已在列表的币(否则无反应)
+        startAllWorkers()
+          .then(() => addToast('已恢复下单（引擎已启动）', 'success'))
+          .catch((e) => addToast(`恢复下单失败: ${e.response?.data?.detail || e.message}`, 'error'))
         break
       case 'batch_remove': {
         const noPos = pushedSymbols.filter(
@@ -197,26 +209,10 @@ export function DashboardPage() {
         }
         break
       }
-      case 'manual_open': {
-        if (accounts.length === 0) { addToast('无可用子账户', 'error'); break }
-        let accId = accounts[0].id
-        if (accounts.length > 1) {
-          const list = accounts.map((a, i) => `${i + 1}. ${a.note} (#${a.id})`).join('\n')
-          const pick = prompt(`手动开仓 ${symbol}\n选择账户:\n${list}\n\n输入序号:`)
-          if (!pick) break
-          const idx = parseInt(pick, 10) - 1
-          if (isNaN(idx) || idx < 0 || idx >= accounts.length) { addToast('无效序号', 'error'); break }
-          accId = accounts[idx].id
-        }
-        const amtStr = prompt(`手动开仓 ${symbol} @ 账户#${accId}\n下单金额(USDT, 留空用全局规则):`)
-        if (amtStr === null) break
-        const amt = amtStr.trim() ? parseFloat(amtStr) : undefined
-        if (amtStr.trim() && (isNaN(amt as number) || (amt as number) <= 0)) { addToast('请输入有效金额', 'error'); break }
-        manualOpen(accId, symbol, amt)
-          .then((r) => { addToast(r.message || '开仓已提交', 'success'); refreshPositions() })
-          .catch((e) => addToast(`开仓失败: ${e.response?.data?.detail || e.message}`, 'error'))
+      case 'manual_open':
+        // 主界面风格弹窗:点子账户按规则开仓 / 一键全开(替代原 prompt 输序号+金额)
+        setOpenSymbol(symbol)
         break
-      }
       case 'force_close':
         if (position) {
           if (!(await confirmDialog({ title: '强制平仓', message: `确认强制平仓 ${symbol} #${position.id}？\n账户: ${position.account_note || '#' + position.sub_account_id}\n将立即市价平仓+买回+还币。`, danger: true }))) break
@@ -242,18 +238,8 @@ export function DashboardPage() {
         }
         break
       case 'partial_repay': {
-        const subId = extra?.subAccountId as number | undefined
-        if (!subId) break
-        const amountStr = prompt(`部分还币 ${symbol}\n账户 #${subId}\n输入还币数量:`)
-        if (!amountStr) break
-        const amount = parseFloat(amountStr)
-        if (isNaN(amount) || amount <= 0) {
-          addToast('请输入有效的正数', 'error')
-          break
-        }
-        partialRepay(subId, symbol, amount)
-          .then(() => { addToast('还币成功', 'success'); refreshPositions() })
-          .catch((e) => addToast(`还币失败: ${e.response?.data?.detail || e.message}`, 'error'))
+        // 弹出主界面风格弹窗:列该币所有子账户现币/借币,可逐账户自填还币或一键全还
+        setRepaySymbol(symbol)
         break
       }
       case 'clear_account': {
@@ -275,9 +261,8 @@ export function DashboardPage() {
         break
       }
       case 'view_detail':
-        if (position) {
-          addToast(`${symbol} #${position.id} · ${position.status} · ${position.account_note || '#' + position.sub_account_id} · 借${position.borrow_qty} · 开${position.open_spread}% · 资${position.cumulative_funding_fee || '-'} · 息${position.cumulative_interest || '-'}`, 'info')
-        }
+        // 主界面风格弹窗(替代纯 toast);伪行展示该账户余额/借币/可借而非空 position 字段
+        if (position) setDetailPosition(position)
         break
       case 'cleanup_tail': {
         const maxStr = prompt('清理尾仓:平掉名义价值 ≤ N USDT 的碎仓\n输入阈值 (默认 10):', '10')
@@ -303,7 +288,9 @@ export function DashboardPage() {
         const subId = (extra?.subAccountId as number | undefined) ?? position?.sub_account_id
         if (!subId) break
         getMaxBorrowable(subId, symbol)
-          .then((d: { max_borrowable?: string; asset?: string }) => addToast(`${d.asset || symbol} @ 账户#${subId} 最大可借: ${d.max_borrowable ?? '-'}`, 'info'))
+          .then((d: { max_borrowable?: string; borrow_limit?: string; asset?: string }) => addToast(
+            `${d.asset || symbol} @ 账户#${subId} 可借: ${d.max_borrowable ?? '-'}${d.borrow_limit ? `（VIP上限 ${d.borrow_limit}）` : ''}`,
+            'info'))
           .catch((e) => addToast(`查询失败: ${e.response?.data?.detail || e.message}`, 'error'))
         break
       }
@@ -329,7 +316,7 @@ export function DashboardPage() {
         symbolRules={symbolRulesMap}
         delistingSymbols={delistingSymbols}
         riskySymbols={riskySymbols}
-        throttleRate={throttleRate}
+        accountRates={accountRates}
         onAction={handleAction}
       />
       {showTransfer && (
@@ -344,6 +331,33 @@ export function DashboardPage() {
           symbol={ruleSymbol}
           initialAccountId={ruleAccountId}
           onClose={() => { setRuleSymbol(null); setRuleAccountId(undefined); refreshSymbolRules() }}
+        />
+      )}
+      {removeSymbol && (
+        <RemoveSymbolDialog
+          symbol={removeSymbol}
+          onClose={() => setRemoveSymbol(null)}
+          onRemoved={() => { refreshPushed(); refreshPositions() }}
+        />
+      )}
+      {repaySymbol && (
+        <PartialRepayDialog
+          symbol={repaySymbol}
+          onClose={() => setRepaySymbol(null)}
+          onDone={() => refreshPositions()}
+        />
+      )}
+      {openSymbol && (
+        <ManualOpenDialog
+          symbol={openSymbol}
+          onClose={() => setOpenSymbol(null)}
+          onDone={() => refreshPositions()}
+        />
+      )}
+      {detailPosition && (
+        <ViewDetailDialog
+          position={detailPosition}
+          onClose={() => setDetailPosition(null)}
         />
       )}
     </div>
