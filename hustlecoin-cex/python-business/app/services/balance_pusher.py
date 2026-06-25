@@ -452,8 +452,12 @@ class BalancePusher:
                                 master_futures_liq[uid] = tmm / tmb * 100
                         except Exception:
                             pass
-                        # 只采集 pushed_symbols 里的币(避免全市场遍历)
-                        pushed = self._redis.smembers(f"engine:{uid}:pushed_symbols")
+                        # 只采集 pushed_symbols 里的币(避免全市场遍历)。
+                        # pushed_symbols 在 Redis 里是 JSON 字符串(非 set),self._redis 为 aioredis →
+                        # 必须 await get + json.loads。原 `self._redis.smembers(...)` 既漏 await、又对字符串键
+                        # 误用集合操作,coroutine 从未 await(现-期列采集静默失败)。对齐 _pushed_assets 读法。
+                        raw_ps = await self._redis.get(f"engine:{uid}:pushed_symbols")
+                        pushed = json.loads(raw_ps) if raw_ps else []
                         if not pushed:
                             continue
                         positions = {}
