@@ -10,6 +10,16 @@ from app.middleware.permissions import get_current_user_id
 router = APIRouter(prefix="/api/symbol-rules", tags=["symbol-rules"])
 
 
+def _norm_symbol(symbol: str) -> str:
+    """规范化交易对:大写去空格 + 补全 USDT 后缀(本系统全为 USDT 永续对)。
+    根除「裸币种名」规则(如 'FIL')—— 前端/引擎都按全名 'FILUSDT' 查点差/行情/规则,裸键会建出
+    对不上的空白行(实测 AXL/FIDA/FIL 六列全空根因)。已带 USDT 的不动。"""
+    s = (symbol or "").upper().strip()
+    if s and not s.endswith("USDT"):
+        s += "USDT"
+    return s
+
+
 def _publish_rules_reload(user_id: int):
     """事件驱动 0 秒规则热重载:保存/重置/删除单一规则后立即通知该 user 的 worker 重读规则
     (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。"""
@@ -80,7 +90,7 @@ def list_symbol_rules(
 @router.get("/{symbol}", response_model=SymbolRuleResponse)
 def get_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,
@@ -98,7 +108,7 @@ def get_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)
 def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db: Session = Depends(get_db)):
     from decimal import Decimal
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,
@@ -141,7 +151,7 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
 @router.post("/{symbol}/reset", response_model=SymbolRuleResponse)
 def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,
@@ -169,7 +179,7 @@ def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_d
 @router.delete("/{symbol}", response_model=MessageResponse)
 def delete_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,

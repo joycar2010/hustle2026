@@ -52,7 +52,7 @@ export function ContextMenu({ x, y, symbol, position, isPushed, isAccountRow, su
         { key: 'divider', label: '' },
         { key: 'refresh_borrowable', label: '刷新可借' },
         { key: 'partial_repay', label: '部分还币' },
-        { key: 'clear_account', label: '清除账户' },
+        // 「清除账户」已移至 账户页 → 子账户卡片 → 白名单按钮右侧(Eraser 图标)
       ]
     : []
 

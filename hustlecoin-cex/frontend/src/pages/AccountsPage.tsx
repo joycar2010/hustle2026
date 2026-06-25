@@ -5,7 +5,7 @@ import {
   createSubAccount, getIpWhitelist, updateSubAccountKeys,
   updateSubAccount, getApiPermissions,
   checkPermissions, getMasterPermissions, getMasterBalance,
-  deactivatePrecheck, deactivateSubAccount,
+  deactivatePrecheck, deactivateSubAccount, clearSubAccount,
 } from '@/api/accounts'
 import { getAccountBalance } from '@/api/engine'
 import { confirmDialog } from '@/components/ui/confirm'
@@ -16,7 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { useToastStore } from '@/components/ui/toast'
 import { extractError } from '@/api/client'
 import { cn, formatNumber } from '@/lib/utils'
-import { Power, Shield, RefreshCw, Wallet, Plus, Eye, EyeOff, X, Key, ChevronDown, ChevronUp, Trash2, AlertTriangle } from 'lucide-react'
+import { Power, Shield, RefreshCw, Wallet, Plus, Eye, EyeOff, X, Key, ChevronDown, ChevronUp, Trash2, AlertTriangle, Eraser } from 'lucide-react'
 import { IpWhitelistPanel } from '@/components/accounts/IpWhitelistPanel'
 
 /** 安全停用/删除子账户:先校验持仓+借币(后端实时双源),无则问是否把 U+BNB 划主账户,再执行。
@@ -268,6 +268,23 @@ export function AccountsPage({ embedded }: { onClose?: () => void; embedded?: bo
       setBalances((prev) => ({ ...prev, [id]: data }))
     } catch {
       addToast('获取余额失败', 'error')
+    }
+  }
+
+  // 清除账户(高危):禁用该子账户 + 市价平掉其全部持仓。原在 dashboard 右键菜单,现移到本卡片。
+  const handleClearAccount = async (id: number) => {
+    const acct = accounts.find((a) => a.id === id)
+    if (!(await confirmDialog({
+      title: '清除账户',
+      message: `确认禁用并平仓账户 ${acct?.note || '#' + id}？\n将禁用该子账户并市价平掉其全部持仓。`,
+      confirmText: '禁用并平仓', danger: true,
+    }))) return
+    try {
+      await clearSubAccount(id, 'disable_and_close')
+      addToast('清除账户成功(已禁用并平仓)', 'success')
+      fetchAccounts()
+    } catch (e) {
+      addToast(extractError(e, '清除账户失败'), 'error')
     }
   }
 
@@ -629,6 +646,9 @@ export function AccountsPage({ embedded }: { onClose?: () => void; embedded?: bo
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => { setIpPanelAccountId(a.id); setIpPanelAccountNote(a.note || a.email) }} title="IP 白名单">
                         <Shield size={14} />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => handleClearAccount(a.id)} title="清除账户:禁用并市价平掉全部持仓(高危)">
+                        <Eraser size={14} className="text-negative" />
                       </Button>
                     </div>
                   </div>
