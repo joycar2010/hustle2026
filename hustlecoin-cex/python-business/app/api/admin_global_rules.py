@@ -37,7 +37,26 @@ def update_system_rules(data: GlobalRulesUpdate, request: Request, db: Session =
     db.commit()
     db.refresh(rules)
 
+    # 系统规则变更后立即通知所有活跃用户的 worker 热重载,不等 30s 轮询周期
+    _publish_system_rules_reload(db)
+
     return _rules_to_dict(rules)
+
+
+def _publish_system_rules_reload(db: Session):
+    """系统后端规则(NULL 行)保存后,向所有活跃用户的引擎发布 rules:reload 信号。
+    symbol_rules.py 保存后发单用户信号,系统规则影响全员所以需广播。失败静默不阻断保存。"""
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        from app.db.models_auth import User
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        users = db.query(User.id).filter(User.is_active == True).all()
+        for (uid,) in users:
+            rc.publish(f"rules:reload:{uid}", "system")
+        rc.close()
+    except Exception:
+        pass
 
 
 @router.post("/broadcast")
