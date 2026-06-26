@@ -596,6 +596,23 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
 
   const updateF = (key: string, val: string) => setFeishu((p) => ({ ...p, [key]: val }))
   const updateFBool = (key: string, val: boolean) => setFeishu((p) => ({ ...p, [key]: val }))
+  // 每类型提醒覆盖:写入 feishu.alert_overrides[type].{count|interval};留空=回退全局
+  const ovGet = (type: string, field: 'count' | 'interval'): string => {
+    const ov = (feishu.alert_overrides as Record<string, { count?: unknown; interval?: unknown }> | undefined)?.[type]
+    const v = ov?.[field]
+    return v === undefined || v === null ? '' : String(v)
+  }
+  const ovSet = (type: string, field: 'count' | 'interval', val: string) => {
+    setFeishu((p) => {
+      const all = { ...((p.alert_overrides as Record<string, Record<string, unknown>>) || {}) }
+      const cur = { ...(all[type] || {}) }
+      if (val === '') delete cur[field]
+      else cur[field] = parseInt(val, 10)
+      if (Object.keys(cur).length === 0) delete all[type]
+      else all[type] = cur
+      return { ...p, alert_overrides: all }
+    })
+  }
   const updateG = (key: string, val: string) => setGlobalRules((p) => ({ ...p, [key]: val }))
   const updateFR = (key: string, val: string) => setFundRules((p) => ({ ...p, [key]: val }))
 
@@ -725,8 +742,8 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
           {/* -- Feishu Alert Config -- */}
           <div className="space-y-2 bg-[#111118] rounded border border-border p-3">
             <div className="flex items-center gap-4 flex-wrap">
-              <InlineField label="提醒间隔" value={fv('alert_interval_sec')} onChange={(v) => updateF('alert_interval_sec', v)} suffix="秒" />
-              <InlineField label="提醒次数" value={fv('alert_count')} onChange={(v) => updateF('alert_count', v)} />
+              <InlineField label="提醒间隔" value={fv('alert_interval_sec')} onChange={(v) => updateF('alert_interval_sec', v)} suffix="秒" title="全局默认提醒间隔(秒);下方每种提醒可单独覆盖,留空则用此默认" />
+              <InlineField label="提醒次数" value={fv('alert_count')} onChange={(v) => updateF('alert_count', v)} title="全局默认提醒次数;下方每种提醒可单独覆盖,留空则用此默认" />
               <button
                 onClick={handleTest}
                 disabled={testing}
@@ -740,11 +757,39 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
               <InlineField label="杠杆风险率提醒 <" value={fv('leverage_risk_alert')} onChange={(v) => updateF('leverage_risk_alert', v)} width="w-12" />
               <InlineField label="保证金告警冷却" value={fv('risk_alert_cooldown_sec')} onChange={(v) => updateF('risk_alert_cooldown_sec', v)} suffix="秒" width="w-14" title="同一子账户「保证金水平」告警的专属冷却:低保证金会每30秒持续命中,此冷却内只发一次,防刷屏。默认1800(30分钟),0=退回全局节流" />
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <TogglePill label="划转失败提醒" active={!!feishu.enable_transfer_fail_alert} onChange={(v) => updateFBool('enable_transfer_fail_alert', v)} />
-              <TogglePill label="新增借币提醒" active={!!feishu.enable_new_borrow_alert} onChange={(v) => updateFBool('enable_new_borrow_alert', v)} />
-              <TogglePill label="借币成功提醒" active={feishu.enable_borrow_success_alert !== false} onChange={(v) => updateFBool('enable_borrow_success_alert', v)} />
-              <TogglePill label="还币成功提醒" active={feishu.enable_repay_success_alert !== false} onChange={(v) => updateFBool('enable_repay_success_alert', v)} />
+            {/* 每种提醒:开关 + 单独「次数 / 间隔」覆盖(留空=用上方全局默认)。已接入引擎生效。3列展示。 */}
+            <div className="pt-1.5 border-t border-border/40 space-y-1.5">
+              <span className="text-muted-foreground/60 text-[10px]">每种提醒可单独设「次数 / 间隔(秒)」,留空跟随全局默认</span>
+              <div className="grid grid-cols-3 gap-x-3 gap-y-1.5">
+                {([
+                  { type: 'new_borrow', label: '新增借币提醒', toggle: 'enable_new_borrow_alert', defOn: false },
+                  { type: 'borrow_success', label: '借币成功提醒', toggle: 'enable_borrow_success_alert', defOn: true },
+                  { type: 'repay_success', label: '还币成功提醒', toggle: 'enable_repay_success_alert', defOn: true },
+                  { type: 'transfer_fail', label: '划转失败提醒', toggle: 'enable_transfer_fail_alert', defOn: false },
+                  { type: 'risk', label: '保证金风险告警', toggle: null, defOn: true },
+                  { type: 'margin_rate', label: '合约爆仓预警', toggle: null, defOn: true },
+                  { type: 'naked_short', label: '裸空敞口告警', toggle: null, defOn: true },
+                  { type: 'error', label: '错误告警', toggle: null, defOn: true },
+                ] as const).map((row) => {
+                  const on = row.toggle
+                    ? (row.defOn ? feishu[row.toggle] !== false : !!feishu[row.toggle])
+                    : true
+                  return (
+                    <div key={row.type} className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                      {row.toggle ? (
+                        <TogglePill label={row.label} active={on}
+                          onChange={(v) => updateFBool(row.toggle as string, v)} />
+                      ) : (
+                        <span className="text-muted-foreground px-1 whitespace-nowrap">{row.label}<span className="text-muted-foreground/40 text-[9px]">(常开)</span></span>
+                      )}
+                      <InlineField label="次数" value={ovGet(row.type, 'count')}
+                        onChange={(v) => ovSet(row.type, 'count', v)} width="w-9" muted />
+                      <InlineField label="间隔" value={ovGet(row.type, 'interval')}
+                        onChange={(v) => ovSet(row.type, 'interval', v)} suffix="秒" width="w-9" muted />
+                    </div>
+                  )
+                })}
+              </div>
             </div>
             {/* 显示偏好(仅切换表格展示口径,不改变任何交易行为)—— 与上方功能开关分区 */}
             <div className="flex items-center gap-2 flex-wrap pt-1.5 border-t border-border/40">
@@ -913,7 +958,7 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
           {/* -- Trading Parameters -- */}
           <div className="bg-[#111118] rounded border border-border p-3 space-y-2.5">
             <div className="flex items-center gap-6 flex-wrap text-[11px]">
-              <InlineField label="自动推送点差" value={gv('auto_push_spread')} onChange={(v) => updateG('auto_push_spread', v)} width="w-10" title="点差≥此值:自动发现进列表,并作为全局借币(挂单)阈值;单一规则的挂单点差可逐币覆盖。已合并原全局「挂单点差」。" />
+              <InlineField label="自动推送点差" value={gv('auto_push_spread')} onChange={(v) => updateG('auto_push_spread', v)} width="w-10" />
               <InlineField label="日利息拦截" value={gv('interest_filter')} onChange={(v) => updateG('interest_filter', v)} suffix="%" width="w-10" />
             </div>
             <div className="flex items-center gap-3 flex-wrap text-[11px]" title="自动推送二次确认:点差达标的币先等此秒数复核点差仍≥推送阈值才推(防瞬时跳点误推);点差≥下方值则直推不等。已接入引擎生效">
@@ -927,9 +972,10 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
               <InlineField label="单仓最大亏损" value={gv('max_loss_per_position')} onChange={(v) => updateG('max_loss_per_position', v)} suffix="U" width="w-10" title="单仓盯市浮亏达此 USDT 即强制平仓(合约平+现货买回,余下按还币规则);留空或 0=禁用。已接入引擎生效" />
             </div>
             <div className="flex items-center gap-4 flex-wrap text-[11px]">
+              <InlineField label="挂单点差" value={gv('borrow_spread')} onChange={(v) => updateG('borrow_spread', v)} width="w-10" />
               <InlineField label="开仓点差" value={gv('open_spread')} onChange={(v) => updateG('open_spread', v)} width="w-10" />
               <InlineField label="单笔下单额" value={gv('order_amount')} onChange={(v) => updateG('order_amount', v)} width="w-10" />
-              <InlineField label="借币延迟开仓" value={gv('borrow_delay_sec')} onChange={(v) => updateG('borrow_delay_sec', v)} suffix="秒" width="w-8" title="借到币后等此秒数再开仓(延迟在借币↔开仓之间,非借币前)" />
+              <InlineField label="借币延迟开仓" value={gv('borrow_delay_sec')} onChange={(v) => updateG('borrow_delay_sec', v)} suffix="秒" width="w-8" />
             </div>
             <div className="flex items-center gap-6 flex-wrap text-[11px]">
               <InlineField label="平仓点差" value={gv('close_spread')} onChange={(v) => updateG('close_spread', v)} width="w-10" />

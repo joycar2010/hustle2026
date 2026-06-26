@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 class FeishuConfigUpdate(BaseModel):
@@ -16,6 +16,7 @@ class FeishuConfigUpdate(BaseModel):
     enable_new_borrow_alert: Optional[bool] = None
     enable_borrow_success_alert: Optional[bool] = None
     enable_repay_success_alert: Optional[bool] = None
+    alert_overrides: Optional[Dict[str, Any]] = None   # {alert_type:{count,interval}} 每类型覆盖
 
 
 class FeishuConfigResponse(BaseModel):
@@ -31,6 +32,7 @@ class FeishuConfigResponse(BaseModel):
     enable_new_borrow_alert: bool
     enable_borrow_success_alert: Optional[bool] = True
     enable_repay_success_alert: Optional[bool] = True
+    alert_overrides: Optional[Dict[str, Any]] = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}

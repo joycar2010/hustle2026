@@ -97,7 +97,7 @@ class BinanceTradingClient:
         故用 urlencode(与发送同款编码),否则含 @ 等特殊字符的参数(如 email)
         会因 httpx 把 @→%40 与朴素 join 不一致而 -1022 签名错误。"""
         params["timestamp"] = int(time.time() * 1000)
-        query = urlencode(params)
+        query = urlencode(params, doseq=True)  # doseq: list 值展开为 asset=A&asset=B(dust 等数组参数);标量不受影响
         sig = hmac.new(self._api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
         return f"{query}&signature={sig}"
 
@@ -109,7 +109,7 @@ class BinanceTradingClient:
         if params is None:
             params = {}
         # 预先编码成 querystring 并直接拼到 URL,绕过 httpx 的二次编码 —— 保证「签名串==发送串」
-        qs = self._sign(params) if signed else urlencode(params)
+        qs = self._sign(params) if signed else urlencode(params, doseq=True)
         full_url = f"{url}?{qs}" if qs else url
 
         # Backoff is COMPUTED while holding the semaphore but SLEPT after releasing it,
@@ -362,6 +362,18 @@ class BinanceTradingClient:
 
     async def get_margin_account(self) -> dict:
         return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/account")
+
+    async def get_dust_assets(self) -> dict:
+        """现货钱包可转 BNB 的小额资产清单(币安「小额资产兑换 BNB」)。该端点为 POST(非 GET)。
+        返回 {details:[{asset, amountFree, toBNB, ...}], totalTransferBtc:..., totalTransferBNB:...}。"""
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/asset/dust-btc")
+
+    async def dust_to_bnb(self, assets: list[str]) -> dict:
+        """把指定小额资产(现货钱包)一次性兑换成 BNB。assets 为资产名列表(如 ['ADA','XRP'])。
+        币安对同一资产有 ~6h 兑换频控,失败由调用方吞掉(本就是清扫,不影响交易)。"""
+        # 多值 asset 参数: 需 asset=A&asset=B,_sign 用 urlencode(doseq 默认不展开 list)→ 手动拼
+        params = {"asset": assets}  # urlencode(doseq=True) 会展开为多份 asset=
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/asset/dust", params)
 
     async def get_margin_interest_rate(self, asset: str) -> Decimal:
         data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/interestRateHistory", {

@@ -338,8 +338,8 @@ async def execute_borrow(
             return None
         position.borrow_interest_rate = interest_rate
 
-        # ④ borrow_delay_sec 已移到「借到币↔开仓之间」(worker HEDGE 段),此处不再 sleep;
-        #    仍即时再校验点差新鲜+达标,避免在已陈旧/跌破的点差上借币。
+        # delay + re-confirm spread still above the borrow threshold(含 ts 新鲜度,防陈旧缓存)
+        await asyncio.sleep(rules.borrow_delay_sec)
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
             now_ms = int(time.time() * 1000)
@@ -396,24 +396,8 @@ async def execute_borrow(
                 ratio = Decimal("1")
             eff_max = max_borrowable * ratio
             target = min(cap_qty, eff_max) if eff_max > 0 else cap_qty
-            # 单笔挂单(order_amount)= 每口挂单借币的 USDT 量(chunk);累加建仓到 target
-            #   (=金额限制 ∩ maxBorrowable×抵押率)为止。优先级 单币SymbolRule > 子账户single_order_amount > 全局。
-            #   未配 → chunk_qty=None → 一口借满 target(旧行为)。设1000+金额限制5000 → 每口≈1000U、累加到5000U。
-            #   (含义=挂单借币"每口"量,非"开仓一口";累加在下方借币循环按 chunk 分多笔到 target。)
-            eff_amount = rules.order_amount
-            _sa = db.query(SubAccount).get(sub_account_id)
-            if _sa and getattr(_sa, "single_order_amount", None):
-                eff_amount = _sa.single_order_amount
-            if user_id is not None:
-                _sr = db.query(SymbolRule).filter(
-                    SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
-                ).first()
-                if _sr and _sr.order_amount is not None:
-                    eff_amount = _sr.order_amount
-            chunk_qty = (Decimal(str(eff_amount)) / price) if (eff_amount is not None and Decimal(str(eff_amount)) > 0 and price > 0) else None
-            qty = round_to_step(target, lot_info["stepSize"])   # 累加上限(总目标量)
+            qty = round_to_step(target, lot_info["stepSize"])
         else:
-            chunk_qty = None   # 单笔/repay 模式不分块,一次借满 qty
             # 单笔金额(order_amount)优先级: 单币规则(SymbolRule) > 子账户(single_order_amount) > 全局
             eff_amount = rules.order_amount
             sa_ord = db.query(SubAccount).get(sub_account_id)
@@ -467,54 +451,19 @@ async def execute_borrow(
         #   repay         → borrow-repay 直接借(默认,不改变现网行为)
         legs = int(getattr(rules, "otoco_legs", 2) or 2)
         bid = Decimal(str(getattr(spread, "spot_bid", 0) or 0))
-
-        async def _borrow_chunk(q: Decimal):
-            if borrow_mode in ("single", "multi") or (borrow_mode == "otoco" and legs == 1):
-                await client.margin_borrow_single(symbol, q, bid=bid if bid > 0 else None)
-            elif borrow_mode == "otoco":
-                await client.margin_borrow_otoco(symbol, q, legs=max(2, legs))
-            else:
-                await client.margin_borrow(base_asset, q)
-
-        # 累加建仓:每口 chunk_qty(=单笔挂单 order_amount),累加到 qty(=金额限制∩maxBorrowable×抵押率)为止。
-        # chunk_qty=None(未配单笔挂单/repay 模式) → 一口借满 qty(旧行为)。
-        # ⚠️ money 安全铁律:已借到的量【绝不】因后续口失败而回滚/标 FAILED(否则=孤儿债务,裸债)。
-        #   中途 -3045(库存耗尽)/任何错误 → 停在已借量,照常转 BORROWED_IDLE;仅"一口都没借到"才向上抛走 FAILED。
-        _chunk = chunk_qty if (chunk_qty is not None and chunk_qty > 0) else qty
-        borrowed_total = Decimal("0")
         t0 = time.monotonic()
-        while borrowed_total < qty:
-            this_q = round_to_step(min(_chunk, qty - borrowed_total), lot_info["stepSize"])
-            if this_q <= 0:
-                break   # 剩余不足一个 step → 收尾
-            try:
-                await _borrow_chunk(this_q)
-                borrowed_total += this_q
-            except Exception as e:   # 任何错(含非BinanceAPIError网络错)都保留已借量,杜绝孤儿债务
-                if borrowed_total > 0:
-                    logger.warning(f"借币累加中断(已借 {borrowed_total}/{qty},剩余放弃,转 IDLE 不回滚): {e}")
-                    if "-3045" in str(e):
-                        try:
-                            import redis as _r2
-                            from app.config import settings as _s2
-                            _rc2 = _r2.from_url(_s2.redis_url, decode_responses=True)
-                            _rc2.set(f"engine:noinv:{symbol}", "1", ex=1800); _rc2.close()
-                        except Exception:
-                            pass
-                    break
-                raise   # 一口都没借到 → 抛给下方 except(FAILED + -3045 冷却),无孤儿债务
+        if borrow_mode in ("single", "multi") or (borrow_mode == "otoco" and legs == 1):
+            await client.margin_borrow_single(symbol, qty, bid=bid if bid > 0 else None)
+        elif borrow_mode == "otoco":
+            await client.margin_borrow_otoco(symbol, qty, legs=max(2, legs))
+        else:
+            await client.margin_borrow(base_asset, qty)
         latency = int((time.monotonic() - t0) * 1000)
-        if borrowed_total <= 0:
-            position.status = "FAILED"
-            position.error_message = "Borrow accumulated 0"
-            db.commit(); db.close()
-            return None
-        qty = borrowed_total   # 后续对冲/记账/通知按实际累加到的量
         position.status = "BORROWED_IDLE"
         position.borrow_qty = qty
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
-        logger.info(f"Borrowed (idle): {symbol} qty={qty} (累加 {borrowed_total}/目标, 每口≤{_chunk})")
+        logger.info(f"Borrowed (idle): {symbol} qty={qty}")
         # 写后即时刷新:借到币 → 让该用户 dashboard 现币/借币列秒级更新,不等 10s 轮询
         _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
         try:
@@ -551,126 +500,6 @@ async def execute_borrow(
         position.error_message = str(e)
         db.commit()
         return None
-    finally:
-        db.close()
-
-
-async def execute_borrow_topup(
-    position_id: int,
-    sub_account_id: int,
-    symbol: str,
-    spread: SpreadSnapshot,
-    rules: GlobalRulesSnapshot,
-    client: BinanceTradingClient,
-    notifier: FeishuSender,
-    account_note: str,
-    user_id: int = None,
-) -> Decimal:
-    """多周期补借:对未满「金额限制」的 BORROWED_IDLE 持仓,按「单笔挂单」order_amount 分块续借,
-    累加到 金额限制 ∩ maxBorrowable×抵押率 为止。仅挂单借币模式(otoco/single/multi)+已设金额限制才补。
-    ⚠️ money 安全:已借到的量【绝不】回滚;补借失败/库存耗尽 → 保持现有持仓不变(绝不 FAILED)。返回本次补借量。"""
-    from app.db.models import SymbolRule, AccountSymbolRule, SubAccount
-    base_asset = symbol.replace("USDT", "")
-    borrow_mode = getattr(rules, "borrow_mode", None) or ("otoco" if getattr(rules, "borrow_via_otoco", False) else "repay")
-    if borrow_mode not in ("otoco", "single", "multi"):
-        return Decimal("0")   # 仅挂单借币模式累加补借(repay 模式单笔即开,无累加语义)
-    db = SessionLocal()
-    try:
-        pos = db.query(Position).get(position_id)
-        if pos is None or pos.status != "BORROWED_IDLE":
-            return Decimal("0")   # 已被对冲/平仓 → 不补
-        already = Decimal(str(pos.borrow_qty or 0))
-        price = spread.spot_ask if (spread and spread.spot_ask and spread.spot_ask > 0) else Decimal("0")
-        if price <= 0:
-            return Decimal("0")
-        # 金额限制(逐账户 > 单币 > 子账户)—— 与 execute_borrow 同口径
-        cap_usdt = None
-        asr = db.query(AccountSymbolRule).filter(
-            AccountSymbolRule.sub_account_id == sub_account_id,
-            AccountSymbolRule.symbol.in_([symbol, base_asset]),
-        ).first()
-        if asr and asr.max_borrow_amount is not None:
-            cap_usdt = asr.max_borrow_amount
-        if cap_usdt is None and user_id is not None:
-            sr = db.query(SymbolRule).filter(
-                SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
-            ).first()
-            if sr and sr.max_borrow_amount is not None:
-                cap_usdt = sr.max_borrow_amount
-        if cap_usdt is None:
-            sa = db.query(SubAccount).get(sub_account_id)
-            if sa and sa.max_borrow_amount is not None:
-                cap_usdt = sa.max_borrow_amount
-        if cap_usdt is None or Decimal(str(cap_usdt)) <= 0:
-            return Decimal("0")   # 没设金额限制 → 不累加补借(一口模式)
-        lot_info = await client.get_lot_size(symbol, "spot")
-        try:
-            mb = await client.get_max_borrowable(base_asset)
-            max_borrowable = mb["amount"] if isinstance(mb, dict) else mb
-        except Exception:
-            max_borrowable = Decimal("0")
-        ratio = Decimal(str(getattr(rules, "collateral_ratio", 1) or 1))
-        if ratio <= 0 or ratio > 1:
-            ratio = Decimal("1")
-        cap_qty = Decimal(str(cap_usdt)) / price
-        headroom = cap_qty - already                  # 距金额限制的余量
-        eff_max = max_borrowable * ratio               # 当前还能借的量(×抵押率)
-        target = round_to_step(min(headroom, eff_max) if eff_max > 0 else headroom, lot_info["stepSize"])
-        if target <= 0:
-            return Decimal("0")   # 已满 / 当前无可借
-        # 每口 = 单笔挂单 order_amount(逐币 > 子账户 single_order_amount > 全局);未配 → 一口补满 target
-        eff_amount = rules.order_amount
-        sa2 = db.query(SubAccount).get(sub_account_id)
-        if sa2 and getattr(sa2, "single_order_amount", None):
-            eff_amount = sa2.single_order_amount
-        if user_id is not None:
-            sr2 = db.query(SymbolRule).filter(
-                SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
-            ).first()
-            if sr2 and sr2.order_amount is not None:
-                eff_amount = sr2.order_amount
-        chunk_qty = (Decimal(str(eff_amount)) / price) if (eff_amount is not None and Decimal(str(eff_amount)) > 0) else None
-        legs = int(getattr(rules, "otoco_legs", 2) or 2)
-        bid = Decimal(str(getattr(spread, "spot_bid", 0) or 0))
-        _chunk = chunk_qty if (chunk_qty is not None and chunk_qty > 0) else target
-        borrowed = Decimal("0")
-        while borrowed < target:
-            this_q = round_to_step(min(_chunk, target - borrowed), lot_info["stepSize"])
-            if this_q <= 0:
-                break
-            try:
-                if borrow_mode in ("single", "multi") or (borrow_mode == "otoco" and legs == 1):
-                    await client.margin_borrow_single(symbol, this_q, bid=bid if bid > 0 else None)
-                elif borrow_mode == "otoco":
-                    await client.margin_borrow_otoco(symbol, this_q, legs=max(2, legs))
-                else:
-                    await client.margin_borrow(base_asset, this_q)
-                borrowed += this_q
-            except Exception as e:   # 任何错(含 -3045/网络)→ 停在已补量,绝不回滚现仓
-                logger.warning(f"补借 {symbol} 中断(已补 {borrowed}/{target},保持现仓不回滚): {e}")
-                if "-3045" in str(e):
-                    try:
-                        import redis as _r3
-                        from app.config import settings as _s3
-                        _rc3 = _r3.from_url(_s3.redis_url, decode_responses=True)
-                        _rc3.set(f"engine:noinv:{symbol}", "1", ex=1800); _rc3.close()
-                    except Exception:
-                        pass
-                break
-        if borrowed > 0:
-            pos.borrow_qty = already + borrowed
-            db.commit()
-            _log_trade(db, position_id, sub_account_id, "BORROW", symbol, quantity=borrowed, status="SUCCESS")
-            logger.info(f"补借(topup): {symbol} +{borrowed} → {pos.borrow_qty} (目标 {cap_qty})")
-            _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
-        return borrowed
-    except Exception as e:
-        logger.warning(f"补借 {symbol} 异常(保持现仓,不回滚): {e}")
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        return Decimal("0")
     finally:
         db.close()
 
@@ -993,8 +822,10 @@ async def execute_unhedge(
                     pos.futures_close_order_id, "SUCCESS", latency=latency)
 
         # Step 2: buy back the borrowed coin (cover the short) — keep it for manual repay
-        total_debt, _ = await _get_asset_debt(client, pos.base_asset)
-        target = total_debt * FEE_BUFFER if total_debt > 0 else pos.borrow_qty
+        # 按仓分配债务:用本仓借量×利息缓冲作买回目标,不查账户级总债。
+        # 多仓并存时账户总债会被首个平仓的仓"全额买回",后续仓 spot_buy_qty 少记 → PnL 虚高。
+        # borrow_qty 是本仓实际借量；FEE_BUFFER(1.0015)覆盖利息+手续费扣币缺口。
+        target = pos.borrow_qty * FEE_BUFFER
         spot_lot = await client.get_lot_size(pos.symbol, "spot")
         buy_qty = round_to_step(target, spot_lot["stepSize"])
         # 现货手续费从收到的币里扣 —— 向下取整会吃掉 FEE_BUFFER(实收<负债,还币 -3041),
@@ -1073,12 +904,16 @@ async def execute_repay(
             return Decimal("0"), Decimal("0"), Decimal("0")
 
         total_debt, interest_amount, free_bal = await _read_debt_free()
+        pos_owed = pos.borrow_qty * FEE_BUFFER   # 本仓应还额(先算,等待循环用)
         for _ in range(6):
-            if total_debt <= 0 or free_bal >= total_debt:
+            if total_debt <= 0 or free_bal >= pos_owed:
                 break
             await asyncio.sleep(1.3)
             total_debt, interest_amount, free_bal = await _read_debt_free()
-        repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
+        # 按仓分配债务:本仓应还 = 本仓借量 × FEE_BUFFER(覆盖利息+扣币),与 unhedge 买回口径一致。
+        # 多仓并存时 total_debt 是账户总债,会被首个还币的仓"全额还清",后续仓 repay_qty=0 记账失真。
+        # min(pos_owed, total_debt) 防止最后一仓超还(前面仓已归还部分,剩余 < pos_owed 时封顶)。
+        repay_amount = min(pos_owed, total_debt) if total_debt > 0 else pos.borrow_qty
         # 等满后 free 仍不足(手续费扣币的真实小额缺口): 按 free 封顶,真·粉尘留账
         if Decimal("0") < free_bal < repay_amount:
             logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount} after settle wait, "

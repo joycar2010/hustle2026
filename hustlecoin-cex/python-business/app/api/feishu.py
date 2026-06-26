@@ -52,6 +52,7 @@ def _to_response(cfg: FeishuConfig) -> dict:
         "enable_new_borrow_alert": cfg.enable_new_borrow_alert,
         "enable_borrow_success_alert": getattr(cfg, "enable_borrow_success_alert", True),
         "enable_repay_success_alert": getattr(cfg, "enable_repay_success_alert", True),
+        "alert_overrides": getattr(cfg, "alert_overrides", None),
         "updated_at": cfg.updated_at,
     }
 

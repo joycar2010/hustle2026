@@ -172,6 +172,9 @@ class FeishuConfig(Base):
     enable_new_borrow_alert = Column(Boolean, default=True)
     enable_borrow_success_alert = Column(Boolean, default=True)   # 借币成功(开仓/对冲完成)提醒
     enable_repay_success_alert = Column(Boolean, default=True)    # 还币成功(平仓/还币完成)提醒
+    # 每类型提醒覆盖:{alert_type: {count:int, interval:int}};缺失/留空回退全局 alert_count/alert_interval_sec。
+    # alert_type ∈ new_borrow/borrow_success/repay_success/transfer_fail/risk/margin_rate/error/naked_short
+    alert_overrides = Column(JSON, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

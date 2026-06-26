@@ -8,6 +8,12 @@ use tracing::{error, info, warn};
 
 const WS_IDLE_TIMEOUT_SECS: u64 = 30;
 
+/// 逐币(per-stream)新鲜度看门狗: 见 binance_spot.rs 同款说明(阈值按实测稳态校准)。合约腿 = tickers 的 .1。
+const FRESH_CHECK_SECS: u64 = 20;
+const SYMBOL_STALE_SECS: i64 = 600;
+const CHUNK_STALE_FRACTION: f64 = 0.4;
+const FRESH_GRACE_SECS: u64 = 75;
+
 pub async fn run(
     initial_symbols: Vec<String>,
     redis_url: String,
@@ -107,6 +113,45 @@ async fn connect_and_stream(
             Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
         });
         handles.push(handle);
+    }
+
+    // 逐币新鲜度看门狗(per-stream): 合约腿 = tickers 的 .1。某 200-分片整段静默即强制重连。
+    {
+        let mon_symbols: Vec<String> = symbols.to_vec();
+        let mon_tickers = tickers.clone();
+        let monitor = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(FRESH_GRACE_SECS)).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(FRESH_CHECK_SECS)).await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64;
+                for chunk in mon_symbols.chunks(200) {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let stale = chunk
+                        .iter()
+                        .filter(|s| {
+                            let last = mon_tickers.get(s.as_str()).map(|t| t.1.ts).unwrap_or(0);
+                            now - last > SYMBOL_STALE_SECS * 1000
+                        })
+                        .count();
+                    if (stale as f64 / chunk.len() as f64) >= CHUNK_STALE_FRACTION {
+                        warn!(
+                            stale,
+                            total = chunk.len(),
+                            "Futures per-symbol freshness: chunk mostly stale — forcing reconnect"
+                        );
+                        return Err::<(), Box<dyn std::error::Error + Send + Sync>>(
+                            "futures chunk stale".into(),
+                        );
+                    }
+                }
+            }
+        });
+        handles.push(monitor);
     }
 
     // try_join_all: 任一 chunk 出错立即返回 Err → 外层 loop 2s 后整体重连
