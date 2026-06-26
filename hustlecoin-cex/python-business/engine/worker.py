@@ -382,6 +382,33 @@ class Worker:
         borrow_buffer = float(getattr(rules, "open_spread_buffer", 0) or 0)
         no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
         self._auto_pushed_cache = self._load_auto_pushed_symbols()   # ③ 自动推送来源(点差不足移除区分手动/自动)
+
+        # ── TOP-UP 多周期补借:BORROWED_IDLE 未满「金额限制」+ 点差仍≥借币阈值 + 非无券冷却 → 续借到金额限制 ──
+        #    单周期 execute_borrow 已尽量借满;此处专补「中途 -3045 库存耗尽停在 partial」的持仓,后续周期续到满。
+        #    不新建仓(补到现有持仓 borrow_qty),不占 max_positions;补借失败/库存耗尽绝不动现仓(execute_borrow_topup 保证)。
+        can_topup = self._margin_safe and not (self._account_max_borrow is not None and self._account_max_borrow == 0)
+        if can_topup and self._running:
+            idle_topup = await asyncio.to_thread(self._load_positions_by_status, "BORROWED_IDLE")  # 重载(排除本周期已对冲的)
+            for _p in idle_topup:
+                _sym = _p.symbol
+                if _sym in no_inventory:
+                    continue   # 无券冷却中,本周期不重试补借
+                _sp = self.spread_feed.get_symbol(_sym)
+                if not self._spread_sane(_sp) or not self._spread_fresh(_sp):
+                    continue
+                _effb = float(self._sym_threshold(_sym, "borrow_spread", g_borrow_spread)) + borrow_buffer
+                if float(_sp.spread_short) < _effb:
+                    continue   # 点差不足,不补
+                # 廉价预判:有金额限制 + 未满(留1%容差)才调补借,避免对已满仓做无谓 REST
+                _cap = self._sym_threshold(_sym, "max_borrow_amount", None)
+                if _cap is None:
+                    _cap = self._account_max_borrow
+                if _cap is None or float(_cap) <= 0:
+                    continue   # 没设金额限制 → 不累加补借(一口模式)
+                if _sp.spot_ask and float(_sp.spot_ask) > 0 and float(_p.borrow_qty or 0) >= float(_cap) / float(_sp.spot_ask) * 0.99:
+                    continue   # 已满
+                await self._topup_borrow(_p, _sp, account_note)
+
         for symbol in pushed:
             # 已在途(借/持/待还)的币状态由上方 open/active 逻辑给定,这里不覆盖
             if symbol in active_symbols or symbol in statuses:
@@ -491,6 +518,19 @@ class Worker:
             self._last_borrow_at[symbol] = datetime.now(timezone.utc)  # C4 ban countdown
         except Exception as e:
             logger.error(f"Initiate borrow failed {symbol}: {e}")
+
+    async def _topup_borrow(self, pos: Position, spread: SpreadSnapshot, account_note: str):
+        """多周期补借:对未满金额限制的 BORROWED_IDLE 持仓,按 order_amount 续借到金额限制
+        (execute_borrow_topup,money 安全:补借失败/库存耗尽绝不动现仓)。"""
+        from engine.trading.order_executor import execute_borrow_topup
+        try:
+            await execute_borrow_topup(
+                pos.id, self.sub_account_id, pos.symbol, spread,
+                self.config.global_rules, self._trading_client,
+                self._notifier, account_note, user_id=self._user_id,
+            )
+        except Exception as e:
+            logger.warning(f"Topup borrow failed {pos.symbol}: {e}")
 
     async def _hedge_position(self, position: Position, spread: SpreadSnapshot, account_note: str):
         """Phase 2: sell spot + futures long. BORROWED_IDLE → OPEN.

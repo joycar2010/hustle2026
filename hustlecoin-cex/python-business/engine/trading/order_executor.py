@@ -515,6 +515,126 @@ async def execute_borrow(
         db.close()
 
 
+async def execute_borrow_topup(
+    position_id: int,
+    sub_account_id: int,
+    symbol: str,
+    spread: SpreadSnapshot,
+    rules: GlobalRulesSnapshot,
+    client: BinanceTradingClient,
+    notifier: FeishuSender,
+    account_note: str,
+    user_id: int = None,
+) -> Decimal:
+    """多周期补借:对未满「金额限制」的 BORROWED_IDLE 持仓,按「单笔挂单」order_amount 分块续借,
+    累加到 金额限制 ∩ maxBorrowable×抵押率 为止。仅挂单借币模式(otoco/single/multi)+已设金额限制才补。
+    ⚠️ money 安全:已借到的量【绝不】回滚;补借失败/库存耗尽 → 保持现有持仓不变(绝不 FAILED)。返回本次补借量。"""
+    from app.db.models import SymbolRule, AccountSymbolRule, SubAccount
+    base_asset = symbol.replace("USDT", "")
+    borrow_mode = getattr(rules, "borrow_mode", None) or ("otoco" if getattr(rules, "borrow_via_otoco", False) else "repay")
+    if borrow_mode not in ("otoco", "single", "multi"):
+        return Decimal("0")   # 仅挂单借币模式累加补借(repay 模式单笔即开,无累加语义)
+    db = SessionLocal()
+    try:
+        pos = db.query(Position).get(position_id)
+        if pos is None or pos.status != "BORROWED_IDLE":
+            return Decimal("0")   # 已被对冲/平仓 → 不补
+        already = Decimal(str(pos.borrow_qty or 0))
+        price = spread.spot_ask if (spread and spread.spot_ask and spread.spot_ask > 0) else Decimal("0")
+        if price <= 0:
+            return Decimal("0")
+        # 金额限制(逐账户 > 单币 > 子账户)—— 与 execute_borrow 同口径
+        cap_usdt = None
+        asr = db.query(AccountSymbolRule).filter(
+            AccountSymbolRule.sub_account_id == sub_account_id,
+            AccountSymbolRule.symbol.in_([symbol, base_asset]),
+        ).first()
+        if asr and asr.max_borrow_amount is not None:
+            cap_usdt = asr.max_borrow_amount
+        if cap_usdt is None and user_id is not None:
+            sr = db.query(SymbolRule).filter(
+                SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
+            ).first()
+            if sr and sr.max_borrow_amount is not None:
+                cap_usdt = sr.max_borrow_amount
+        if cap_usdt is None:
+            sa = db.query(SubAccount).get(sub_account_id)
+            if sa and sa.max_borrow_amount is not None:
+                cap_usdt = sa.max_borrow_amount
+        if cap_usdt is None or Decimal(str(cap_usdt)) <= 0:
+            return Decimal("0")   # 没设金额限制 → 不累加补借(一口模式)
+        lot_info = await client.get_lot_size(symbol, "spot")
+        try:
+            mb = await client.get_max_borrowable(base_asset)
+            max_borrowable = mb["amount"] if isinstance(mb, dict) else mb
+        except Exception:
+            max_borrowable = Decimal("0")
+        ratio = Decimal(str(getattr(rules, "collateral_ratio", 1) or 1))
+        if ratio <= 0 or ratio > 1:
+            ratio = Decimal("1")
+        cap_qty = Decimal(str(cap_usdt)) / price
+        headroom = cap_qty - already                  # 距金额限制的余量
+        eff_max = max_borrowable * ratio               # 当前还能借的量(×抵押率)
+        target = round_to_step(min(headroom, eff_max) if eff_max > 0 else headroom, lot_info["stepSize"])
+        if target <= 0:
+            return Decimal("0")   # 已满 / 当前无可借
+        # 每口 = 单笔挂单 order_amount(逐币 > 子账户 single_order_amount > 全局);未配 → 一口补满 target
+        eff_amount = rules.order_amount
+        sa2 = db.query(SubAccount).get(sub_account_id)
+        if sa2 and getattr(sa2, "single_order_amount", None):
+            eff_amount = sa2.single_order_amount
+        if user_id is not None:
+            sr2 = db.query(SymbolRule).filter(
+                SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
+            ).first()
+            if sr2 and sr2.order_amount is not None:
+                eff_amount = sr2.order_amount
+        chunk_qty = (Decimal(str(eff_amount)) / price) if (eff_amount is not None and Decimal(str(eff_amount)) > 0) else None
+        legs = int(getattr(rules, "otoco_legs", 2) or 2)
+        bid = Decimal(str(getattr(spread, "spot_bid", 0) or 0))
+        _chunk = chunk_qty if (chunk_qty is not None and chunk_qty > 0) else target
+        borrowed = Decimal("0")
+        while borrowed < target:
+            this_q = round_to_step(min(_chunk, target - borrowed), lot_info["stepSize"])
+            if this_q <= 0:
+                break
+            try:
+                if borrow_mode in ("single", "multi") or (borrow_mode == "otoco" and legs == 1):
+                    await client.margin_borrow_single(symbol, this_q, bid=bid if bid > 0 else None)
+                elif borrow_mode == "otoco":
+                    await client.margin_borrow_otoco(symbol, this_q, legs=max(2, legs))
+                else:
+                    await client.margin_borrow(base_asset, this_q)
+                borrowed += this_q
+            except Exception as e:   # 任何错(含 -3045/网络)→ 停在已补量,绝不回滚现仓
+                logger.warning(f"补借 {symbol} 中断(已补 {borrowed}/{target},保持现仓不回滚): {e}")
+                if "-3045" in str(e):
+                    try:
+                        import redis as _r3
+                        from app.config import settings as _s3
+                        _rc3 = _r3.from_url(_s3.redis_url, decode_responses=True)
+                        _rc3.set(f"engine:noinv:{symbol}", "1", ex=1800); _rc3.close()
+                    except Exception:
+                        pass
+                break
+        if borrowed > 0:
+            pos.borrow_qty = already + borrowed
+            db.commit()
+            _log_trade(db, position_id, sub_account_id, "BORROW", symbol, quantity=borrowed, status="SUCCESS")
+            logger.info(f"补借(topup): {symbol} +{borrowed} → {pos.borrow_qty} (目标 {cap_qty})")
+            _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
+        return borrowed
+    except Exception as e:
+        logger.warning(f"补借 {symbol} 异常(保持现仓,不回滚): {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return Decimal("0")
+    finally:
+        db.close()
+
+
 async def execute_hedge(
     position: Position,
     spread: SpreadSnapshot,
