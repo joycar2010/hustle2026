@@ -531,7 +531,7 @@ class Worker:
 
     async def _check_and_remove_symbol_after_close(self, symbol: str):
         """平仓后自动下架+清规则:检查该币所有持仓是否已 CLOSED,若是则从 pushed_symbols discard + 清 SymbolRule/AccountSymbolRule。"""
-        db = next(get_db())
+        db = SessionLocal()
         try:
             from app.db.models import Position
             # 检查该 user 该 symbol 是否还有非 CLOSED 持仓
