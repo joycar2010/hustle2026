@@ -411,9 +411,13 @@ class Worker:
                 statuses[symbol] = "行情异常"; continue
             if not self._spread_fresh(spread):
                 statuses[symbol] = "运行中"; continue
-            # ③ 点差不足移除:点差 < 借币阈值时,自动推送的币按 allow_remove 自动下架(手动推送一律不自动移除)
+            # ③ 点差不足移除:移除阈值=逐币/账户「移除差」(remove_spread),未配→回退借币阈值(旧行为)。
+            #    点差 < 移除阈值时,自动推送的币按 allow_remove 自动下架(手动推送一律不自动移除)。
+            #    移除差<借币阈值时形成迟滞带:[移除差,借币阈值) 区间留在列表等点差回升,不借也不移,防抖动。
+            _rm = self._sym_threshold(symbol, "remove_spread", None)
+            remove_th = float(_rm) if (_rm is not None and float(_rm) > 0) else eff_borrow
             if float(spread.spread_short) < eff_borrow:
-                if await self._maybe_auto_remove(symbol):
+                if float(spread.spread_short) < remove_th and await self._maybe_auto_remove(symbol):
                     continue
                 statuses[symbol] = "运行中"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):

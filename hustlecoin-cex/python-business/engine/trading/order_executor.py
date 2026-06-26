@@ -356,6 +356,23 @@ async def execute_borrow(
                 ratio = Decimal("1")
             eff_max = max_borrowable * ratio
             target = min(cap_qty, eff_max) if eff_max > 0 else cap_qty
+            # 单笔挂单(order_amount):每口挂单借币的量(USDT),以「金额限制 ∩ maxBorrowable×抵押率」封顶。
+            #   优先级 单币SymbolRule > 子账户single_order_amount > 全局;未配→借满上限(旧行为)。
+            #   含义=挂单借币一口的 USDT 量(非"开仓一口");设1000 即一口借进≈1000U(受上限/可借量约束)。
+            eff_amount = rules.order_amount
+            _sa = db.query(SubAccount).get(sub_account_id)
+            if _sa and getattr(_sa, "single_order_amount", None):
+                eff_amount = _sa.single_order_amount
+            if user_id is not None:
+                _sr = db.query(SymbolRule).filter(
+                    SymbolRule.user_id == user_id, SymbolRule.symbol.in_([symbol, base_asset]),
+                ).first()
+                if _sr and _sr.order_amount is not None:
+                    eff_amount = _sr.order_amount
+            if eff_amount is not None and Decimal(str(eff_amount)) > 0 and price > 0:
+                per_order_qty = Decimal(str(eff_amount)) / price
+                if per_order_qty > 0:
+                    target = min(target, per_order_qty)
             qty = round_to_step(target, lot_info["stepSize"])
         else:
             # 单笔金额(order_amount)优先级: 单币规则(SymbolRule) > 子账户(single_order_amount) > 全局
