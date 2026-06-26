@@ -81,7 +81,12 @@ class OnchainExec:
                 return int(rpc.estimate_gas(est_tx) * 1.25)
             except Exception as e:  # noqa: BLE001 —— 估gas失败用 build 提示兜底
                 logger.warning("estimate_gas 失败(%s),用兜底", e)
-                return int((gas_hint or 800000) * 1.3)
+                # gas_hint 来自 KyberSwap build.gas,是【字符串】→ 必须先转 int 再乘(否则 str*float 崩)
+                try:
+                    hint = int(gas_hint) if gas_hint else 800000
+                except (ValueError, TypeError):
+                    hint = 800000
+                return int(hint * 1.3)
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             f_fees = ex.submit(rpc.fees)

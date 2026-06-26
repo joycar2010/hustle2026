@@ -319,7 +319,13 @@ class ExecCoordinator(threading.Thread):
                     taker_fee_bps=cfg.taker_fee_bps, recycle_bps=ch.recycle_bps,
                     min_net_bps=cfg.exec_min_net_bps, exit_floor_bps=cfg.exit_floor_bps,
                 )
-                if paper.net_bps > cfg.exec_min_net_bps:
+                # 坏报价护栏:基差 >500bps(5%) 几乎必是某条腿返回垃圾价(实测见过229635bps),
+                # 真实跨场基差不可能这么大;此时执行=按错价下单,直接跳过不触发
+                if paper.net_bps > 500:
+                    self._log({"ts_seen": int(t0*1000), "market": m.key, "mode": self.mode,
+                               "paper_net_bps": round(paper.net_bps, 2), "decision": "SKIP_BADQUOTE",
+                               "outcome": "SKIP", "note": f"基差异常{paper.net_bps:.0f}bps疑坏报价,跳过"})
+                elif paper.net_bps > cfg.exec_min_net_bps:
                     ok, why = self._circuit_ok()
                     if ok:
                         self._attempt(m, q, bt, paper)
