@@ -920,24 +920,29 @@ class Worker:
                     if val is not None:
                         entry[k] = val
                 rules_map[sr.symbol] = entry
-            # account-level overrides
+            # account-level overrides —— 逐账户规则【可独立存在】:即便该币没有 user 级 SymbolRule,
+            # 逐账户「单一规则」(挂单点差/开/平/还…)也必须生效。
+            # 此前用 `if key in rules_map` 守卫,导致"只在某子账户设了规则、却无配套 user 级 SymbolRule"
+            # 的币被整条静默丢弃 —— 实测 hustle-011(sub9) 给 FILUSDT 设 borrow_spread=-1,因 FIL 无
+            # user 级规则而被丢 → eff_borrow 回退全局 0.5 → spread_short=0 < 0.5 → 永不借。
+            # 改为 setdefault 先建空基线再覆盖:有 SymbolRule 则在其上叠加(同旧),无则账户规则独立成行。
             for ar in db.query(AccountSymbolRule).filter(
                 AccountSymbolRule.sub_account_id == self.sub_account_id,
             ).all():
                 key = ar.symbol
-                if key in rules_map:
-                    if ar.remove_spread is not None:
-                        rules_map[key]["remove_spread"] = ar.remove_spread
-                    if ar.is_enabled is not None:
-                        rules_map[key]["account_enabled"] = ar.is_enabled
-                    if ar.max_borrow_amount is not None:
-                        rules_map[key]["max_borrow_amount"] = ar.max_borrow_amount
-                    # 逐账户阈值覆盖(优先于逐币基线;NULL 不覆盖)
-                    for k in ("open_spread", "borrow_spread", "close_spread", "close_funding_ratio",
-                              "repay_spread", "repay_funding_ratio"):
-                        val = getattr(ar, k, None)
-                        if val is not None:
-                            rules_map[key][k] = val
+                entry = rules_map.setdefault(key, {})
+                if ar.remove_spread is not None:
+                    entry["remove_spread"] = ar.remove_spread
+                if ar.is_enabled is not None:
+                    entry["account_enabled"] = ar.is_enabled
+                if ar.max_borrow_amount is not None:
+                    entry["max_borrow_amount"] = ar.max_borrow_amount
+                # 逐账户阈值覆盖(优先于逐币基线;NULL 不覆盖)
+                for k in ("open_spread", "borrow_spread", "close_spread", "close_funding_ratio",
+                          "repay_spread", "repay_funding_ratio"):
+                    val = getattr(ar, k, None)
+                    if val is not None:
+                        entry[k] = val
             self._symbol_rules = rules_map
         finally:
             db.close()

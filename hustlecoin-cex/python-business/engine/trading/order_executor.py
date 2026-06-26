@@ -200,20 +200,60 @@ def _release_margin_reserve(fc, amount: Decimal):
         pass
 
 
-async def _confirm_futures_result(fc, symbol: str, result: dict) -> dict:
-    """市价单应答 executedQty=0 时(ACK 语义/撮合未回),按 orderId 轮询终态补齐。"""
+def _ensure_avg_price(o: dict) -> dict:
+    """executedQty>0 但 avgPrice<=0 时,用 cumQuote/executedQty 兜底算成交均价并回写。
+    币安合约 MARKET RESULT 应答的 avgPrice 偶发填充滞后(executedQty 已>0 却 avgPrice=0),
+    直接落库会让 futures_long_price/futures_close_price=0 → 合约腿 PnL 恒算 0(漏算整条合约腿)。"""
     try:
-        if Decimal(str(result.get("executedQty", "0") or "0")) > 0:
-            return result
+        eq = Decimal(str(o.get("executedQty", "0") or "0"))
+        ap = Decimal(str(o.get("avgPrice", "0") or "0"))
+        if eq > 0 and ap <= 0:
+            cq = Decimal(str(o.get("cumQuote", "0") or "0"))
+            if cq > 0:
+                o = dict(o)
+                o["avgPrice"] = str(cq / eq)
+    except Exception:
+        pass
+    return o
+
+
+async def _confirm_futures_result(fc, symbol: str, result: dict) -> dict:
+    """市价单应答补齐:executedQty==0 → 轮询终态;executedQty>0 但 avgPrice<=0(RESULT 均价/cumQuote
+    填充滞后)→ 先 cumQuote/executedQty 兜底,仍缺则回查订单。每次查询【独立 try】(下单瞬间 -2013
+    订单查不到 / 网络瞬时错 不再中断整轮回查),窗口放宽到 ~3.2s 覆盖币安成交聚合延迟。
+    否则合约腿价落 0 → realized_pnl 漏算整条合约腿(实测 futures_long_price=0 致 pnl 虚高 +19.8)。"""
+    def _avg(o):
+        try:
+            return Decimal(str((o or {}).get("avgPrice", "0") or "0"))
+        except Exception:
+            return Decimal("0")
+    try:
+        eq0 = Decimal(str(result.get("executedQty", "0") or "0"))
         oid = result.get("orderId")
+        if eq0 > 0:
+            result = _ensure_avg_price(result)
+            if _avg(result) > 0 or not oid:
+                return result
+            for _ in range(8):
+                await asyncio.sleep(0.4)
+                try:
+                    o = _ensure_avg_price(await fc.futures_get_order(symbol, str(oid)))
+                except Exception:
+                    continue
+                if _avg(o) > 0:
+                    return o
+            return result
         if not oid:
             return result
-        for _ in range(5):
-            await asyncio.sleep(0.3)
-            o = await fc.futures_get_order(symbol, str(oid))
+        for _ in range(8):
+            await asyncio.sleep(0.4)
+            try:
+                o = await fc.futures_get_order(symbol, str(oid))
+            except Exception:
+                continue
             if Decimal(str(o.get("executedQty", "0") or "0")) > 0 or \
                o.get("status") in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
-                return o
+                return _ensure_avg_price(o)
         return result
     except Exception:
         return result
