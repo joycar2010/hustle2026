@@ -822,8 +822,10 @@ async def execute_unhedge(
                     pos.futures_close_order_id, "SUCCESS", latency=latency)
 
         # Step 2: buy back the borrowed coin (cover the short) — keep it for manual repay
-        total_debt, _ = await _get_asset_debt(client, pos.base_asset)
-        target = total_debt * FEE_BUFFER if total_debt > 0 else pos.borrow_qty
+        # 按仓分配债务:用本仓借量×利息缓冲作买回目标,不查账户级总债。
+        # 多仓并存时账户总债会被首个平仓的仓"全额买回",后续仓 spot_buy_qty 少记 → PnL 虚高。
+        # borrow_qty 是本仓实际借量；FEE_BUFFER(1.0015)覆盖利息+手续费扣币缺口。
+        target = pos.borrow_qty * FEE_BUFFER
         spot_lot = await client.get_lot_size(pos.symbol, "spot")
         buy_qty = round_to_step(target, spot_lot["stepSize"])
         # 现货手续费从收到的币里扣 —— 向下取整会吃掉 FEE_BUFFER(实收<负债,还币 -3041),
@@ -902,12 +904,16 @@ async def execute_repay(
             return Decimal("0"), Decimal("0"), Decimal("0")
 
         total_debt, interest_amount, free_bal = await _read_debt_free()
+        pos_owed = pos.borrow_qty * FEE_BUFFER   # 本仓应还额(先算,等待循环用)
         for _ in range(6):
-            if total_debt <= 0 or free_bal >= total_debt:
+            if total_debt <= 0 or free_bal >= pos_owed:
                 break
             await asyncio.sleep(1.3)
             total_debt, interest_amount, free_bal = await _read_debt_free()
-        repay_amount = total_debt if total_debt > 0 else pos.borrow_qty
+        # 按仓分配债务:本仓应还 = 本仓借量 × FEE_BUFFER(覆盖利息+扣币),与 unhedge 买回口径一致。
+        # 多仓并存时 total_debt 是账户总债,会被首个还币的仓"全额还清",后续仓 repay_qty=0 记账失真。
+        # min(pos_owed, total_debt) 防止最后一仓超还(前面仓已归还部分,剩余 < pos_owed 时封顶)。
+        repay_amount = min(pos_owed, total_debt) if total_debt > 0 else pos.borrow_qty
         # 等满后 free 仍不足(手续费扣币的真实小额缺口): 按 free 封顶,真·粉尘留账
         if Decimal("0") < free_bal < repay_amount:
             logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount} after settle wait, "
