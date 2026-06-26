@@ -24,7 +24,8 @@ export async function getAccountSymbolRules(subAccountId: number): Promise<Accou
 }
 
 export async function getAccountSymbolRule(subAccountId: number, symbol: string): Promise<AccountSymbolRule> {
-  const { data } = await client.get(`/api/account-symbol-rules/${subAccountId}/${symbol}`)
+  // 无逐账户规则时后端返 404(属正常,弹窗用全局/批量兜底);__silent 抑制全局错误 toast
+  const { data } = await client.get(`/api/account-symbol-rules/${subAccountId}/${symbol}`, { __silent: true })
   return data
 }
 

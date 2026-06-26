@@ -38,7 +38,8 @@ export async function getSymbolRules(size = 500) {
 }
 
 export async function getSymbolRule(symbol: string) {
-  const { data } = await client.get(`/api/symbol-rules/${symbol}`)
+  // 无自定义规则时后端返 404(属正常,弹窗用全局兜底);__silent 抑制全局错误 toast
+  const { data } = await client.get(`/api/symbol-rules/${symbol}`, { __silent: true })
   return data
 }
 

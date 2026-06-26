@@ -2,6 +2,13 @@ import axios from 'axios'
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useToastStore } from '@/components/ui/toast'
 
+// 让请求可带 __silent:true → 响应拦截器跳过该请求的错误 toast(用于"无则404属正常"的查询,如单一规则)
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    __silent?: boolean
+  }
+}
+
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '',
   timeout: 15000,
