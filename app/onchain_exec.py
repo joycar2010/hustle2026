@@ -190,7 +190,16 @@ class OnchainExec:
         rpc = self._get_rpc(ch.chain_id)
         signer = self._get_signer()
         wallet = signer.address()
-        amount_in = int(round(base_qty * (10 ** m.base_decimals)))
+        want = int(round(base_qty * (10 ** m.base_decimals)))
+        # 关键:卖回量不能超过链上【实际 wei 余额】。base_qty 来自浮点/取整,可能比真实余额多
+        # 一丁点零头 → transferFrom 拉满额超余额 → TRANSFER_FROM_FAILED(BSC canary 实测踩到)。
+        # 取 min(想卖, 实际余额),且若是卖全部则留 0.3% 零头避开边界。
+        bal = rpc.erc20_balance(m.base_token, wallet)
+        amount_in = min(want, bal)
+        if amount_in >= bal:  # 卖到接近全额 → 留零头
+            amount_in = int(bal * 0.997)
+        if amount_in <= 0:
+            return {"executed": False, "mode": "live", "note": f"卖回量为0(余额{bal})"}
         build = self._route_and_build(ch.kyber_slug, m.base_token, ch.stable, amount_in, wallet)
         router = rpc.checksum(build["routerAddress"])
         next_nonce = self._ensure_allowance(rpc, signer, wallet, m.base_token, router, amount_in, m.base_decimals)
