@@ -17,12 +17,21 @@ from datetime import datetime, timezone, timedelta
 from .config import cfg
 from .chains import chain_of
 
-WBTC_OP = "0x68f180fcCe6836688e9084f035309E29Bf0A2095"
 # 拆分缓存:基差轻(KyberSwap+币安~150ms)要实时→1.5s;余额持仓重、变化慢→8s
 _SPREAD_CACHE: dict = {"ts": 0.0, "data": None}
 _SPREAD_TTL = 1.5
 _BAL_CACHE: dict = {"ts": 0.0, "data": None}
 _BAL_TTL = 8.0
+
+
+def _market_ctx():
+    """按当前 cfg.exec_market 取链上下文(market对象/链/base_token/RPC/币安symbol),
+    不再写死 OP:BTC —— 切 BSC:CAKE 等市场时面板/对账自动跟随。"""
+    from .markets import load_markets
+    m = {x.key: x for x in load_markets()}.get(cfg.exec_market)
+    ch = chain_of(m.chain) if m else chain_of("OP")
+    return m, ch
+
 
 
 def _read_exec_rows() -> list[dict]:
@@ -138,9 +147,7 @@ def _spread_now() -> dict:
         from .binance_exec import BinanceExec, FUTURES_LIVE
         from .onchain_exec import OnchainExec
         from .spread_calc import compute_spread
-        from .markets import load_markets
-        ch = chain_of("OP")
-        m = {x.key: x for x in load_markets()}.get(cfg.exec_market)
+        m, ch = _market_ctx()
         bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, FUTURES_LIVE)
         oc = OnchainExec("dry-run", cfg.exec_wallet_addr, "", cfg.kyber_client_id)
         q = oc.quote_buy(m, cfg.exec_notional_usd)
@@ -164,32 +171,40 @@ def _spread_now() -> dict:
 
 
 def _balances() -> dict:
-    """链上余额 + 币安持仓(重,变化慢)。8s缓存。"""
+    """链上余额 + 币安持仓(重,变化慢)。8s缓存。按当前 market 自适应,不写死OP/WBTC/BTCUSDT。"""
     now = time.time()
     if _BAL_CACHE["data"] and now - _BAL_CACHE["ts"] < _BAL_TTL:
         return _BAL_CACHE["data"]
     out = {"chain": None, "binance": None, "errors": []}
-    ch = chain_of("OP")
+    m, ch = _market_ctx()
     W = cfg.exec_wallet_addr
+    base_sym = cfg.exec_market.split(":")[-1] if ":" in cfg.exec_market else "BASE"
     try:
         from .chain_rpc import ChainRpc
         rpc = ChainRpc(cfg.exec_rpc, ch.chain_id, timeout=8)
+        base_bal = rpc.erc20_balance(m.base_token, W) / (10 ** m.base_decimals) if m else 0.0
         out["chain"] = {
-            "wbtc": round(rpc.erc20_balance(WBTC_OP, W) / 1e8, 8),
-            "usdc": round(rpc.erc20_balance(ch.stable, W) / 1e6, 2),
+            "base": round(base_bal, 8), "base_sym": base_sym,
+            "stable": round(rpc.erc20_balance(ch.stable, W) / (10 ** ch.stable_decimals), 2),
+            "native": round(rpc.eth_balance(W) / 1e18, 6),
+            # 兼容旧前端字段名
+            "wbtc": round(base_bal, 8),
+            "usdc": round(rpc.erc20_balance(ch.stable, W) / (10 ** ch.stable_decimals), 2),
             "eth": round(rpc.eth_balance(W) / 1e18, 6),
         }
     except Exception as e:  # noqa: BLE001
         out["errors"].append(f"chain: {type(e).__name__}")
     try:
         from .binance_exec import BinanceExec, FUTURES_LIVE
+        sym = m.binance_symbol if m else "BTCUSDT"
         bn = BinanceExec(cfg.bn_api_key, cfg.bn_api_secret, FUTURES_LIVE)
-        pos = [p for p in bn._request("GET", "/fapi/v2/positionRisk", {"symbol": "BTCUSDT"})
+        pos = [p for p in bn._request("GET", "/fapi/v2/positionRisk", {"symbol": sym})
                if abs(_f(p.get("positionAmt"))) > 0]
         out["binance"] = {
             "short": _f(pos[0]["positionAmt"]) if pos else 0.0,
             "entry": _f(pos[0]["entryPrice"]) if pos else 0.0,
             "upnl": _f(pos[0]["unRealizedProfit"]) if pos else 0.0,
+            "sym": sym,
         }
     except Exception as e:  # noqa: BLE001
         out["errors"].append(f"binance: {type(e).__name__}")
@@ -219,9 +234,11 @@ def monitor_snapshot() -> dict:
     live = _live_blocks()
     match = None
     if live.get("chain") and live.get("binance") is not None:
-        wbtc = live["chain"]["wbtc"]; short = abs(live["binance"]["short"])
-        if wbtc > 0 or short > 0:
-            match = abs(wbtc - short) <= 0.0005
+        base = live["chain"].get("base", live["chain"].get("wbtc", 0)); short = abs(live["binance"]["short"])
+        # 容差按量级:CAKE等整数级币留1单位(避开卖回零头误报),BTC等小数级留0.0005
+        tol = 1.0 if max(base, short) > 10 else 0.0005
+        if base > tol or short > tol:
+            match = abs(base - short) <= tol
     bj_now = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
     return {
         "now_bj": bj_now,
