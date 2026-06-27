@@ -20,7 +20,7 @@ from app.spread_calc import compute_spread
 from app.chains import chain_of
 from app.chain_rpc import PendingTxError
 
-NOTIONAL = 64.0           # 币安 BTCUSDT 最小名义额 $50,0.001 BTC≈$64
+NOTIONAL = float(__import__("os").environ.get("CANARY_NOTIONAL", "64"))  # 可用环境变量覆盖
 LOSS_FLOOR_BPS = -80.0    # 亏损闸:paper net 低于此拒绝执行(防极端不利白亏)
 
 

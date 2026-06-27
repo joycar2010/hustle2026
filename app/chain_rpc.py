@@ -14,6 +14,7 @@ import requests
 SEL_APPROVE = "095ea7b3"      # approve(address,uint256)
 SEL_ALLOWANCE = "dd62ed3e"    # allowance(address,address)
 SEL_BALANCEOF = "70a08231"    # balanceOf(address)
+SEL_TRANSFER = "a9059cbb"     # transfer(address,uint256)
 
 
 def _enc_addr(addr: str) -> str:
@@ -96,10 +97,20 @@ class ChainRpc:
             return 1_000_000  # 0.001 gwei
 
     def fees(self) -> tuple[int, int]:
-        """返回 (maxFeePerGas, maxPriorityFeePerGas);maxFee 留 3x base 余量防区块抬费。
-        OP base fee 可能数秒内翻倍;2x 余量在突涨时会卡单致裸腿,故用 3x。
-        优化:一次 getBlock 同时拿 base+block(原 base_fee/priority_fee 两次RPC合并);
-        prio 用 OP 典型极小值(0.001gwei),省一次 eth_maxPriorityFeePerGas RPC。"""
+        """返回 (maxFeePerGas, maxPriorityFeePerGas);按链区分 gas 地板。
+        - OP/Arbitrum/Base 等 L2:base_fee 趋近0,prio 0.001gwei,base*3 余量;
+        - BSC(56):不走标准EIP-1559,baseFeePerGas常取不到(返回~0),但BSC实际要求
+          gasPrice≥~1gwei否则交易卡mempool不被打包。故 BSC 用 eth_gasPrice + 1gwei地板。
+        maxFee 留 3x 余量防区块抬费。"""
+        if self.chain_id == 56:  # BSC:用 legacy gasPrice,设 1gwei 地板防卡单
+            try:
+                gp = int(self._call("eth_gasPrice", []), 16)
+            except Exception:  # noqa: BLE001
+                gp = 0
+            floor = 1_000_000_000  # 1 gwei,BSC 最低可打包价
+            gp = max(gp, floor)
+            return gp * 2, gp  # BSC prio==gasPrice 同源(legacy 语义),2x 余量
+        # L2(OP/ARB/BASE...):EIP-1559,base 趋近 0
         blk = self._call("eth_getBlockByNumber", ["latest", False])
         base = int(blk.get("baseFeePerGas", "0x0"), 16)
         prio = 1_000_000  # 0.001 gwei,OP 典型;base*3 余量已足够覆盖波动
@@ -167,6 +178,11 @@ class ChainRpc:
     @staticmethod
     def erc20_approve_data(spender: str, amount: int) -> str:
         return "0x" + SEL_APPROVE + _enc_addr(spender) + _enc_uint(amount)
+
+    @staticmethod
+    def erc20_transfer_data(to: str, amount: int) -> str:
+        """ERC20 transfer(to, amount) calldata —— 退款转 USDC 用。"""
+        return "0x" + SEL_TRANSFER + _enc_addr(to) + _enc_uint(amount)
 
     @staticmethod
     def checksum(addr: str) -> str:
