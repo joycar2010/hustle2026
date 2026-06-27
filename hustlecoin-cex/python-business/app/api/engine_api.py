@@ -705,13 +705,15 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
 
     sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
     if sub_ids:
-        open_count = db.query(Position).filter(
+        # OPEN/BORROWED_IDLE/PENDING_REPAY 等活跃状态都算"持仓中",不允许移除
+        ACTIVE_STATUSES = ("OPEN", "BORROWED_IDLE", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING")
+        active_count = db.query(Position).filter(
             Position.sub_account_id.in_(sub_ids),
             Position.symbol == sym,
-            Position.status == "OPEN",
+            Position.status.in_(ACTIVE_STATUSES),
         ).count()
-        if open_count > 0:
-            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {open_count} 个持仓未平")
+        if active_count > 0:
+            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个活跃持仓(OPEN/借币中/待还币)")
 
     # 移除前还清该 symbol 在所有子账户的杠杆账户残留借贷(粉尘/利息),
     # 防止移除后前端"现币/借币"列仍显示残余数据(币安那边债务未清)。
