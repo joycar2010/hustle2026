@@ -699,7 +699,7 @@ def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: 
 
 
 @router.delete("/push-symbol/{symbol}")
-def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
+async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     sym = symbol.upper()
 
@@ -712,6 +712,34 @@ def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(ge
         ).count()
         if open_count > 0:
             raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {open_count} 个持仓未平")
+
+    # 移除前还清该 symbol 在所有子账户的杠杆账户残留借贷(粉尘/利息),
+    # 防止移除后前端"现币/借币"列仍显示残余数据(币安那边债务未清)。
+    # execute_borrow_only_repay 自包含:查实时债务→还币→记录 position,非零才执行,异常不阻断移除。
+    try:
+        from engine.trading.binance_trading import BinanceTradingClient
+        from engine.trading.order_executor import execute_borrow_only_repay, _get_asset_debt
+        from engine.notify.feishu_sender import FeishuSender
+        base_asset = sym.replace("USDT", "")
+        notifier = FeishuSender()
+        for sub_id in sub_ids:
+            account = db.query(SubAccount).filter(SubAccount.id == sub_id).first()
+            if not account:
+                continue
+            try:
+                async with BinanceTradingClient(
+                    account.api_key, account.api_secret, sub_account_id=sub_id
+                ) as client:
+                    debt, _ = await _get_asset_debt(client, base_asset)
+                    if debt > 0:
+                        await execute_borrow_only_repay(
+                            sub_id, sym, client, notifier,
+                            account.note or f"#{sub_id}", user_id=user_id,
+                        )
+            except Exception as _re:
+                logger.warning(f"remove {sym} sub{sub_id}: repay residual failed (non-blocking): {_re}")
+    except Exception as _outer:
+        logger.warning(f"remove {sym}: residual repay block failed: {_outer}")
 
     r = _redis()
     key = _user_redis_key(user_id, "push_commands")

@@ -231,10 +231,14 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   const lpStart = useRef<{ x: number; y: number } | null>(null)
 
   // 行情参数块:开(实时可开)/平(实时可平)/资/时/限/息
+  // 解耦陈旧暗化:仅【开/平】来自点差 feed,陈旧时只暗化这两个;【资/时/限/息】来自独立且健康的
+  // market_data(资金费/利率,与点差停更无关),不随点差陈旧一起暗化/置灰,避免「点差断了整格看着全废」。
   const paramBlock = (
-    <td className={cn('px-1.5 py-1 text-left', spreadStaleCls)} title={spreadStaleTitle}>
-      <Chip label="开" value={openPct != null ? formatNumber(openPct, 2) : '-'} cls="text-positive" />
-      {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 2) : '-'} cls="text-negative" />}
+    <td className="px-1.5 py-1 text-left">
+      <span className={spreadStaleCls} title={spreadStaleTitle}>
+        <Chip label="开" value={openPct != null ? formatNumber(openPct, 2) : '-'} cls="text-positive" />
+        {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 2) : '-'} cls="text-negative" />}
+      </span>
       <Chip label="资" value={marketInfo ? (marketInfo.funding_rate * 100).toFixed(4) : '-'}
         cls={marketInfo && marketInfo.funding_rate >= 0 ? 'text-positive' : 'text-negative'} />
       {!isMobile && <Chip label="时" value={marketInfo ? marketInfo.funding_interval : '-'} cls="text-muted-foreground" />}
@@ -568,18 +572,18 @@ const SubAccountRow = memo(function SubAccountRow({
           ) : '-'}
         </td>
       )}
-      {/* 保证金 — BNB U值 + USDT */}
+      {/* 保证金 — BNB U值 + 杠杆净资产(净资产=抵押物-已借价值,借非USDT资产时正确反映真实价值) */}
       {!isMobile && (() => {
         if (!balance) return <td className={numCell}>-</td>
         const bnbPrice = spreads.get('BNBUSDT')?.spot_bid ?? 0
         const bnbVal = balance.bnb_free * bnbPrice
-        const total = bnbVal + balance.margin_usdt_free
+        const total = bnbVal + balance.margin_net_usdt
         return <td className={numCell}>{formatNumber(total, 0)}</td>
       })()}
-      {/* 可用 — 杠杆账户可用USDT(可用来借币) */}
+      {/* 可用 — 杠杆账户净资产USDT(净资产低=余量少,借非USDT资产时 margin_usdt_free 不会降但净资产会降) */}
       {!isMobile && (
         <td className={numCell}>
-          {balance ? formatNumber(balance.margin_usdt_free, 0) : '-'}
+          {balance ? formatNumber(balance.margin_net_usdt, 0) : '-'}
         </td>
       )}
       {/* 参数块(持仓经济) */}
@@ -992,11 +996,6 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
           )}
           title={compact ? '切换为树形多账户视图' : '切换为紧凑单账户视图（折叠子账户）'}
         >{compact ? '紧凑' : '树形'}</button>
-        <button
-          onClick={() => onAction('cleanup_tail', '')}
-          className="px-1.5 py-0.5 rounded border border-border text-[10px] hover:bg-accent/50 text-amber-400"
-          title="清理碎仓:批量平掉名义价值低于阈值(默认10U)的尾仓"
-        >清理尾仓</button>
         <span>持仓 <span className="text-foreground">{posCount}</span> 币种</span>
         <span>推送 <span className="text-primary">{pushedSymbols.length}</span></span>
         <span>金额 <span className="text-foreground font-mono">{formatNumber(totalUsdt, 0)}</span></span>

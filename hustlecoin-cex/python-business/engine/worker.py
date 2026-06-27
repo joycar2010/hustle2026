@@ -100,6 +100,7 @@ class Worker:
         last_futmargin_check = 0
         last_balance_check = 0
         last_debtconv_check = 0
+        last_masterfund_check = 0
         last_rule_reload = 0
 
         try:
@@ -162,6 +163,18 @@ class Worker:
                         await run_debt_convert(self._trading_client, self.sub_account_id,
                                                self.spread_feed, self._notifier, account_note)
                         last_debtconv_check = now
+
+                    # 主账户资金纳管(hedge_via_master):BNB维护/USDT欠款/小额兑换也覆盖主账户。
+                    # Redis 锁保证每 user 每周期只一个 worker 真正执行(防 5 worker 重复打主账户)。
+                    if (now - last_masterfund_check > fund_rules.bnb_convert_interval_sec
+                            and getattr(self.config.global_rules, "hedge_via_master", False)):
+                        from engine.fund.master_fund import run_master_fund_check
+                        await run_master_fund_check(
+                            self._user_id, self._redis, fund_rules,
+                            self.config.global_rules, self._notifier,
+                            ttl_sec=fund_rules.bnb_convert_interval_sec,
+                        )
+                        last_masterfund_check = now
 
                     if now - last_health_check > 300:
                         from engine.fund.health_monitor import run_health_check
@@ -720,6 +733,17 @@ class Worker:
         if not ban_until:
             return False
         if datetime.now(timezone.utc) - ban_until < timedelta(minutes=self.config.global_rules.repay_ban_minutes):
+            # borrow_spread < 0(负阈值=提前借意图明确)→ 跳过 repay_ban 冷却,允许平仓后立即重借。
+            # 正常正阈值策略用冷却防反复开关,但负阈本就代表"基差很差也要借",30min 冷却反而阻碍。
+            eff = self._symbol_rules.get(symbol, {}).get("borrow_spread")
+            g_bs = getattr(self.config.global_rules, "borrow_spread", None)
+            try:
+                eff_bs = float(eff if eff is not None else (g_bs or 0))
+            except (TypeError, ValueError):
+                eff_bs = 0.0
+            if eff_bs < 0:
+                del self._repay_ban[symbol]
+                return False
             return True
         del self._repay_ban[symbol]
         return False
