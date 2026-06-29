@@ -16,6 +16,21 @@ from .markets import Market
 logger = logging.getLogger(__name__)
 
 
+class SwapWouldRevert(Exception):
+    """estimate_gas 预言 swap 会 revert(滑点minOut不满足等)。
+    广播必失败且白烧 gas,故中止不发 —— 防止 CAKE 那种 21 次连发烧光 gas。"""
+
+
+class GasTooLow(Exception):
+    """钱包 native(BNB/ETH) gas 余额不足以覆盖单笔交易,中止 —— 防止 insufficient funds 静默空转。"""
+
+
+# estimate_gas 返回这些信号 = swap 真会 revert(链状态决定,广播也会失败),应中止;
+# 其余失败(RPC 抖动/超时)才用兜底 gas 继续。
+_REVERT_SIGNALS = ("Return amount is not enough", "TRANSFER_FROM_FAILED",
+                   "execution reverted", "INSUFFICIENT_OUTPUT", "Too little received")
+
+
 class OnchainExec:
     def __init__(self, mode: str = "dry-run", wallet_addr: str = "", kms_key_id: str = "",
                  kyber_client_id: str = "crossarb", rpc_url: str = "",
@@ -79,9 +94,13 @@ class OnchainExec:
         def _gas():
             try:
                 return int(rpc.estimate_gas(est_tx) * 1.25)
-            except Exception as e:  # noqa: BLE001 —— 估gas失败用 build 提示兜底
-                logger.warning("estimate_gas 失败(%s),用兜底", e)
-                # gas_hint 来自 KyberSwap build.gas,是【字符串】→ 必须先转 int 再乘(否则 str*float 崩)
+            except Exception as e:  # noqa: BLE001
+                msg = str(e)
+                # swap 真会 revert → 中止,绝不广播(广播必败且白烧 gas;CAKE 实测21次连发烧光)
+                if any(s in msg for s in _REVERT_SIGNALS):
+                    raise SwapWouldRevert(msg[:120]) from e
+                # 仅 RPC 抖动/超时等临时失败 → 用 build 提示兜底继续
+                logger.warning("estimate_gas 临时失败(%s),用兜底 gas", msg[:80])
                 try:
                     hint = int(gas_hint) if gas_hint else 800000
                 except (ValueError, TypeError):
@@ -149,6 +168,13 @@ class OnchainExec:
         rpc = self._get_rpc(ch.chain_id)
         signer = self._get_signer()
         wallet = signer.address()  # 同时强制校验 == expected,不符即抛错
+        # gas 预检:BNB/ETH 余额够不够单笔最坏 gas(兜底900k×maxFee×安全垫)。
+        # 不够直接抛 GasTooLow → coordinator halt+告警,不再 insufficient funds 静默空转。
+        max_fee, _ = rpc.fees()
+        need_gas = int(900000 * max_fee * 1.2)  # 单笔最坏 + 20%垫
+        native = rpc.eth_balance(wallet)
+        if native < need_gas:
+            raise GasTooLow(f"gas余额 {native/1e18:.6f} < 单笔所需 {need_gas/1e18:.6f}(需补)")
         amount_in = int(round(notional_usd * (10 ** ch.stable_decimals)))
 
         # ① 构造可上链 calldata(GET routes → POST build),minOut 滑点保护已编进 data;过期自动重拉

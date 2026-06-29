@@ -17,7 +17,7 @@ from .binance_exec import FUTURES_LIVE, FUTURES_TESTNET, BinanceExec
 from .chain_rpc import PendingTxError
 from .config import cfg
 from .markets import load_markets
-from .onchain_exec import OnchainExec
+from .onchain_exec import OnchainExec, SwapWouldRevert, GasTooLow
 from .spread_calc import compute_spread
 from .chains import chain_of
 
@@ -201,6 +201,18 @@ class ExecCoordinator(threading.Thread):
             self.halted = True
             self._feishu(f"🛑 CrossArb 链上买入状态未知,已停机!\n{pe}\n请人工核对链上 tx 后处理")
             self._stop.set()  # 触发停机,防止带着未知敞口继续
+            return
+        except SwapWouldRevert as sr:
+            # estimate_gas 预言 swap 会 revert(滑点不满足)→ 中止不广播,不烧 gas、不停机,等下一拍
+            out.update(outcome="SKIP_REVERT", note=f"swap预判revert(滑点),跳过未广播: {sr}")
+            self._log(out); return
+        except GasTooLow as gl:
+            # gas 余额不足单笔 → halt + 告警,不再 insufficient funds 静默空转
+            out.update(outcome="GAS_LOW_HALT", note=f"gas不足已停机: {gl}")
+            self._log(out)
+            self.halted = True
+            self._feishu(f"🛑 CrossArb gas余额不足,已停机!\n{gl}\n请补 BNB/ETH 后重启服务")
+            self._stop.set()
             return
         except Exception as e:  # noqa: BLE001
             out.update(outcome="BUY_FAIL", note=f"{type(e).__name__}: {e}")
