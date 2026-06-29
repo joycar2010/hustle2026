@@ -1,0 +1,19 @@
+[Unit]
+Description=DexArb P0 shadow measurer (DEX-DEX read-only, no signing/no funds)
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/crossarb
+EnvironmentFile=-/home/ec2-user/crossarb/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/usr/bin/python3 -m app.dexarb_shadow
+Restart=always
+RestartSec=10
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

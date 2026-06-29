@@ -93,6 +93,18 @@ def p1_page():
     return (_STATIC / "p1.html").read_text(encoding="utf-8")
 
 
+@app.get("/api/dexarb")
+def api_dexarb():
+    """DEX-DEX 影子测量数据(只读,供 dd.hustle2026.xyz)。"""
+    from .dexarb_monitor import shadow_snapshot
+    return JSONResponse(shadow_snapshot())
+
+
+@app.get("/dexarb", response_class=HTMLResponse)
+def dexarb_page():
+    return (_STATIC / "dexarb.html").read_text(encoding="utf-8")
+
+
 if __name__ == "__main__":
     import uvicorn
 

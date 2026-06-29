@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEX-DEX 原子套利 · P0 影子测量</title>
+<style>
+  :root{--bg:#0d1117;--card:#161b22;--bd:#26303d;--fg:#e6edf3;--dim:#8b949e;--pos:#3fb950;--neg:#f85149;--accent:#58a6ff;--warn:#e0a800}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:12px;max-width:1100px;margin:0 auto}
+  .hd{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  h1{font-size:17px} h2{font-size:14px;margin-bottom:8px;color:var(--dim);font-weight:600}
+  .meta{color:var(--dim);font-size:12px}
+  .verdict{background:var(--card);border:1px solid var(--bd);border-left:3px solid var(--accent);border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:14px;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:11px 13px}
+  .card .k{color:var(--dim);font-size:11px} .card .v{font-size:21px;font-weight:700;margin-top:3px} .card .sub{color:var(--dim);font-size:11px;margin-top:2px}
+  .sec{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px 14px;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse;font-size:12px} th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--bd)} th{color:var(--dim);font-weight:600} td:first-child,th:first-child{text-align:left}
+  .pos{color:var(--pos)} .neg{color:var(--neg)} .warn{color:var(--warn)}
+  .tag{padding:1px 7px;border-radius:4px;font-size:11px} .tag.sv{background:rgba(63,185,80,.15);color:var(--pos)} .tag.dc{background:rgba(248,81,73,.15);color:var(--neg)} .tag.pd{background:rgba(139,148,158,.15);color:var(--dim)}
+  .foot{text-align:center;color:var(--dim);font-size:11px;margin-top:14px}
+  @media(max-width:520px){.card .v{font-size:18px} table{font-size:11px} th,td{padding:5px 4px}}
+</style>
+</head>
+<body>
+  <div class="hd">
+    <h1>🔬 DEX-DEX 原子套利 · P0 影子测量</h1>
+    <div class="meta"><span id="now">—</span></div>
+  </div>
+  <div class="meta" style="margin-bottom:10px;font-size:12px">只读测量 · 不写合约 · 不签名 · 不碰真金 · BSC Pancake/Biswap/Apeswap</div>
+
+  <div class="verdict" id="verdict">加载中…</div>
+
+  <div class="grid" id="kpis"></div>
+
+  <div class="sec">
+    <h2>📊 各交易对(回查完成的理论机会)</h2>
+    <div style="overflow-x:auto"><table id="pairs"><thead><tr><th>交易对</th><th>理论机会</th><th>存活</th><th>存活率</th><th>最佳净利</th></tr></thead><tbody><tr><td colspan="5" class="meta">加载中…</td></tr></tbody></table></div>
+  </div>
+
+  <div class="sec">
+    <h2>🎯 存活机会净利分布(后来者真能抓的)</h2>
+    <div id="survstats" class="meta">加载中…</div>
+  </div>
+
+  <div class="sec">
+    <h2>📜 最近机会</h2>
+    <div style="overflow-x:auto"><table id="recent"><thead><tr><th>交易对</th><th>路径</th><th>本金</th><th>原始价差</th><th>净利bps</th><th>存活块</th><th>结果</th></tr></thead><tbody><tr><td colspan="7" class="meta">加载中…</td></tr></tbody></table></div>
+  </div>
+
+  <div class="foot">每 10 秒刷新 · 机会判定:扣双边手续费+gas后净利>5bps · 存活=N块后仍在(未被抢跑)</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const fmt=(v,d=1)=>(v===null||v===undefined||v==='')?'—':(+v).toFixed(d);
+const cls=v=>{const n=+v;return isNaN(n)?'':(n>0?'pos':(n<0?'neg':''))};
+async function load(){
+  let d; try{ d=await(await fetch('/api/dexarb',{cache:'no-store'})).json(); }catch(e){ return; }
+  $('#now').textContent=d.now_bj||'—';
+  $('#verdict').innerHTML='<b>裁决:</b> '+(d.verdict||'—');
+  const k=[
+    {k:'累计理论机会',v:d.total_opps_logged||0,sub:'回查完成的'},
+    {k:'存活机会',v:d.survived||0,c:d.survived>0?'pos':'',sub:'N块后仍在=可捕获'},
+    {k:'存活率',v:(d.survive_rate||0)+'%',c:d.survive_rate>20?'pos':'neg',sub:'存活/总机会'},
+    {k:'近24h机会',v:d.opps_24h||0,sub:'回查完成'},
+    {k:'采集时长',v:d.span_hours!=null?d.span_hours+'h':'—',sub:'数据跨度'},
+  ];
+  $('#kpis').innerHTML=k.map(x=>`<div class="card"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="sub">${x.sub||''}</div></div>`).join('');
+  // 分对
+  const ps=d.by_pair||[];
+  $('#pairs tbody').innerHTML=ps.length?ps.map(p=>`<tr><td>${p.pair}</td><td>${p.opps}</td><td>${p.survived}</td><td class="${p.survive_rate>20?'pos':'neg'}">${p.survive_rate}%</td><td class="${cls(p.best_net)}">${fmt(p.best_net)}</td></tr>`).join(''):'<tr><td colspan="5" class="meta">暂无回查完成的机会</td></tr>';
+  // 存活净利分布
+  const s=d.surv_net_stats;
+  $('#survstats').innerHTML=s?`存活 ${s.count} 个 · 净利 中位<b class="pos">${s.median}</b>bps · 区间[${s.min}, ${s.max}]bps`:'<span class="warn">暂无存活机会(全部被抢跑或塌缩)</span>';
+  // 最近
+  const r=d.recent||[];
+  $('#recent tbody').innerHTML=r.length?r.map(x=>{
+    let tag=x.outcome==='SURVIVED'?'<span class="tag sv">存活</span>':(x.outcome==='DECAYED'?'<span class="tag dc">塌缩</span>':'<span class="tag pd">'+x.outcome+'</span>');
+    return `<tr><td>${x.pair}</td><td>${x.buy}→${x.sell}</td><td>$${x.notional}</td><td>${fmt(x.spread_bps)}</td><td class="${cls(x.net_bps)}">${fmt(x.net_bps)}</td><td>${x.survive_blocks||'—'}</td><td>${tag}</td></tr>`;
+  }).join(''):'<tr><td colspan="7" class="meta">暂无机会记录</td></tr>';
+}
+load(); setInterval(load,10000);
+</script>
+</body>
+</html>
