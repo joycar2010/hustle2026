@@ -2350,6 +2350,81 @@ def dm_version():
     except Exception: out["history"]=[]
     return out
 
+# ===== GitHub 推送(复刻 coinadmin 版本管理; 目标分支 qh; 仓库根 /opt/quanthedge; allowlist .gitignore 兜底) =====
+import threading as _threading
+_QH_REPO="/opt/quanthedge"; _QH_BRANCH="qh"; _QH_VERSION_FILE=_QH_REPO+"/VERSION"
+_git_push_lock=_threading.Lock()
+class GitPushReq(BaseModel):
+    message: str
+def _qh_read_ver():
+    try:
+        with open(_QH_VERSION_FILE) as f: return f.read().strip()
+    except Exception: return "1.0.0"
+def _qh_bump_ver(v):
+    p=v.split(".")
+    if len(p)==3 and p[2].isdigit(): p[2]=str(int(p[2])+1); return ".".join(p)
+    return v
+def _git(args, timeout=90):
+    return _sp.check_output(["git","-C",_QH_REPO]+args, stderr=_sp.STDOUT, timeout=timeout).decode()
+@app.post("/api/admin/datamgr/git-push", dependencies=[Depends(require_op("datamgr"))])
+def dm_git_push(req: GitPushReq):
+    """把当前服务器 /opt/quanthedge(app.py/engine/connector/web/admin/admin-src)提交并推送到 GitHub qh 分支。
+       allowlist .gitignore 已排除 channels.json/venv/*.bak/密钥; 单飞锁防并发 git; FF rebase 对齐, 绝不 force。"""
+    if not (req.message or "").strip():
+        raise HTTPException(400,"推送备注不能为空")
+    if not _git_push_lock.acquire(blocking=False):
+        return {"status":"error","output":"上一次推送仍在进行中，请等其完成后再试(已加单飞锁防并发 git 撞锁)。"}
+    try:
+        # 备份标签(best-effort)
+        ts=_dt.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        try: _git(["tag","backup-"+ts], timeout=8)
+        except Exception: pass
+        # 暂存(allowlist .gitignore 负责过滤); 再兜底剔除任何 .bak/backup_ 混入
+        _git(["add","-A"], timeout=90)
+        staged=_git(["diff","--cached","--name-only"], timeout=20).splitlines()
+        junk=[p for p in staged if (".bak" in p or "/backup_" in p or p.startswith("backup_") or "channels.json" in p)]
+        if junk:
+            _sp.run(["git","-C",_QH_REPO,"reset","-q","--"]+junk, timeout=30, check=False)
+        # 有变更才升版本
+        has_changes=True
+        try: _git(["diff","--cached","--quiet"], timeout=10); has_changes=False
+        except _sp.CalledProcessError: has_changes=True
+        if has_changes:
+            newv=_qh_bump_ver(_qh_read_ver())
+            with open(_QH_VERSION_FILE,"w") as f: f.write(newv+"\n")
+            _git(["add","VERSION"], timeout=8)
+            try:
+                _git(["commit","-m",req.message], timeout=30)
+            except _sp.CalledProcessError as e:
+                out=(e.output.decode() if e.output else "")
+                if "nothing to commit" not in out:
+                    return {"status":"error","output":"提交失败:\n"+out[:600]}
+        # 与 origin 对齐: fetch → 落后则 rebase(autostash), 冲突则 abort 回滚, 绝不 force
+        try: _git(["fetch","origin",_QH_BRANCH], timeout=60)
+        except _sp.CalledProcessError as e:
+            return {"status":"error","output":"拉取 origin 失败(检查网络/deploy key):\n"+(e.output.decode() if e.output else str(e))[:500]}
+        behind="0"
+        try: behind=_git(["rev-list","--count","HEAD..origin/"+_QH_BRANCH], timeout=15).strip()
+        except Exception: behind="0"
+        if behind.isdigit() and int(behind)>0:
+            try: _git(["rebase","--autostash","origin/"+_QH_BRANCH], timeout=90)
+            except _sp.CalledProcessError as e:
+                _sp.run(["git","-C",_QH_REPO,"rebase","--abort"], timeout=30, check=False)
+                return {"status":"error","output":("本地 qh 落后 origin %s 个提交且自动 rebase 冲突(已回滚,未改动工作区)。\n"
+                        "请在服务器 /opt/quanthedge 执行 `git pull --rebase origin qh` 人工解决后再推。\n"%behind)+(e.output.decode() if e.output else "")[:400]}
+        if not has_changes and (not behind.isdigit() or int(behind)==0):
+            return {"status":"success","output":"无变更可推送(工作区与 origin/qh 一致)。","version":_qh_read_ver(),"no_change":True}
+        # 推送(经对齐后应为 FF)
+        result=_git(["push","origin",_QH_BRANCH], timeout=180)
+        return {"status":"success","output":result[:800],"version":_qh_read_ver()}
+    except _sp.CalledProcessError as e:
+        return {"status":"error","output":(e.output.decode() if e.output else str(e))[:800]}
+    except Exception as e:
+        return {"status":"error","output":str(e)[:800]}
+    finally:
+        _git_push_lock.release()
+
+
 @app.get("/api/admin/datamgr/db/stats", dependencies=[Depends(require_op("datamgr"))])
 def dm_db_stats():
     c=db(); cur=c.cursor()
