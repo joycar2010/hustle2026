@@ -1,0 +1,112 @@
+﻿import axios from 'axios'
+const http = axios.create({ baseURL: '/api', timeout: 12000 })
+http.interceptors.response.use(r => r.data, e => Promise.reject(e))
+// 管理写操作需 admin token + license header
+function adminHeaders(){
+  return { 'X-Admin-Token': localStorage.getItem('qh_admin_token')||'', 'X-License': localStorage.getItem('qh_key')||'', 'X-Op-Token': localStorage.getItem('qh_op_token')||'' }
+}
+export const api = {
+  verify: (license_key) => http.post('/auth/verify', { license_key }),
+  engineState: () => http.get('/engine/state'),
+  legs: () => http.get('/engine/legs'),
+  alerts: (limit=30) => http.get('/engine/alerts', { params:{limit} }),
+  deals: (user, limit=100) => http.get(`/deals/${user}`, { params:{limit} }),
+  params: (user) => http.get(`/params/${user}`),
+  syncLast: () => http.get('/sync/last'),
+  sync: (user, days=1) => http.post(`/bridge/sync/${user}?days=${days}`),
+  // ── P0 内购/权益 ──
+  iapCatalog: () => http.get('/iap/catalog'),
+  iapFeatures: () => http.get('/iap/features'),
+  iapSaveFeature: (f) => http.post('/admin/iap/feature', { ...f, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  iapDelFeature: (key) => http.post('/admin/iap/feature_del', { key, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  iapSaveProduct: (p) => http.post('/admin/iap/product', { ...p, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  iapDelProduct: (key) => http.post('/admin/iap/product_del', { key, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  iapSaveCategory: (c) => http.post('/admin/iap/category', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  entitlements: (user) => http.get(`/entitlements/${user}`),
+  grant: (g) => http.post('/admin/entitlement/grant', { ...g, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── P2 三级代理 ──
+  agents: () => http.get('/admin/agents'),
+  agentSave: (a) => http.post('/admin/agent/save', { ...a, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  agentBind: (b) => http.post('/admin/agent/bind', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  commissions: (agent_code='', settled='') => http.get('/admin/commissions', { params:{ agent_code, settled } }),
+  commissionSettle: (agent_code) => http.post('/admin/commission/settle', { agent_code, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── P3 试用 + BI ──
+  trialGrant: (g) => http.post('/admin/trial/grant', { ...g, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  trials: () => http.get('/admin/trials'),
+  biSymbols: (days=30) => http.get('/admin/bi/symbols', { params:{ days } }),
+  biOverview: (days=30) => http.get('/admin/bi/overview', { params:{ days } }),
+  orders: (days=90, product='', username='') => http.get('/admin/orders', { params:{ days, product, username } }),
+  ordersFilter: (params) => http.get('/admin/orders', { params }),
+  orderReconcile: (b) => http.post('/admin/order/reconcile', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  orderReconcileBatch: (b) => http.post('/admin/order/reconcile_batch', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  reconcileDaily: (days=30) => http.get('/admin/reconcile/daily', { params:{ days }, headers: adminHeaders() }),
+  revenue: (days=30) => http.get('/admin/revenue', { params:{ days } }),
+  // ── P4a 用户管理 ──
+  adminUsers: (q='') => http.get('/admin/users', { params:{ q } }),
+  usersGeoStats: () => http.get('/admin/users/geo_stats'),
+  adminUser: (u) => http.get(`/admin/user/${u}`),
+  userOp: (body) => http.post('/admin/user/op', { ...body, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── P4b 系统 + 总控 ──
+  system: () => http.get('/admin/system'),
+  estop: () => http.post('/admin/system/estop', { confirm:true, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  estopClear: () => http.post('/admin/system/estop_clear', { license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  auditLog: (limit=100, action='') => http.get('/admin/audit', { params:{ limit, action } }),
+  // ── P5 操作员体系 ──
+  opLogin: (username, password) => http.post('/op/login', { username, password }),
+  opLogout: () => http.post('/op/logout', {}, { headers: { 'X-Op-Token': localStorage.getItem('qh_op_token')||'' } }),
+  opMe: () => http.get('/op/me', { headers: { 'X-Op-Token': localStorage.getItem('qh_op_token')||'' } }),
+  operators: () => http.get('/admin/operators', { headers: adminHeaders() }),
+  operatorSave: (o) => http.post('/admin/operator/save', { ...o, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  operatorResetPwd: (username, password) => http.post('/admin/operator/reset_password', { username, password, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  resetAdminToken: (new_token='') => http.post('/admin/reset_admin_token', { new_token, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  payConfigGet: () => http.get('/admin/pay/config', { headers: adminHeaders() }),
+  payConfigSave: (c) => http.post('/admin/pay/config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  operatorAudit: (limit=100) => http.get('/admin/operator_audit', { params:{ limit }, headers: adminHeaders() }),
+  roleSave: (r) => http.post('/admin/role/save', { ...r, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  roleDel: (role) => http.post('/admin/role/del', { role, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── P6 线索中台 + AI客服 ──
+  leads: (status='', channel='') => http.get('/admin/leads', { params:{ status, channel } }),
+  lead: (id) => http.get(`/admin/lead/${id}`),
+  leadReply: (b) => http.post('/admin/lead/reply', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  leadConvert: (b) => http.post('/admin/lead/convert', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  leadAssign: (b) => http.post('/admin/lead/assign', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  leadSetStatus: (b) => http.post('/admin/lead/set_status', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  leadNote: (b) => http.post('/admin/lead/note', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  channels: () => http.get('/admin/channels'),
+  channelStatus: () => http.get('/admin/channel/token_status', { headers: adminHeaders() }),
+  channelConfig: (c) => http.post('/admin/channel/config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  chatConfig: (site='qh') => http.get('/chat/config', { params:{ site } }),
+  chatConfigSave: (c) => http.post('/admin/chat/config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── P2-5 系统通知 ──
+  notifyFeishuStatus: () => http.get('/admin/notify/feishu_status', { headers: adminHeaders() }),
+  notifyFeishuTest: (recipient) => http.post('/admin/notify/feishu_test', { recipient, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyEmailGet: () => http.get('/admin/notify/email_config', { headers: adminHeaders() }),
+  notifyEmailSave: (c) => http.post('/admin/notify/email_config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyEmailTest: () => http.post('/admin/notify/email_test', { license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyTemplates: () => http.get('/admin/notify/templates', { headers: adminHeaders() }),
+  notifyTemplateSave: (t) => http.post('/admin/notify/template', { ...t, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyTemplateDel: (id) => http.post('/admin/notify/template_del', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyBroadcast: (b) => http.post('/admin/notify/broadcast', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyLogs: (channel='', status='', limit=100) => http.get('/admin/notify/logs', { params:{ channel, status, limit }, headers: adminHeaders() }),
+  notifySounds: () => http.get('/admin/notify/sounds', { headers: adminHeaders() }),
+  // ── P3 数据管理 ──
+  dmVersion: () => http.get('/admin/datamgr/version', { headers: adminHeaders() }),
+  dmDbStats: () => http.get('/admin/datamgr/db/stats', { headers: adminHeaders() }),
+  dmDbTables: () => http.get('/admin/datamgr/db/tables', { headers: adminHeaders() }),
+  dmDbTable: (name) => http.get(`/admin/datamgr/db/table/${name}`, { headers: adminHeaders() }),
+  dmDbBackup: () => http.post('/admin/datamgr/db/backup', { confirm:true, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dmDbCleanup: () => http.post('/admin/datamgr/db/cleanup', { confirm:true, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dmSslList: () => http.get('/admin/datamgr/ssl', { headers: adminHeaders() }),
+  dmSslUpload: (b) => http.post('/admin/datamgr/ssl/upload', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dmSslScan: () => http.post('/admin/datamgr/ssl/scan', { license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dmSslDeploy: (id) => http.post('/admin/datamgr/ssl/deploy', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dmSslDelete: (id) => http.post('/admin/datamgr/ssl/delete', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dmWsStats: () => http.get('/admin/datamgr/ws_stats', { headers: adminHeaders() }),
+}
+
+
+
+
+
+
+

@@ -1,0 +1,18 @@
+# ===== QH 仓库 allowlist(白名单): 默认忽略一切, 仅显式放行源码/产物 =====
+# 安全命门: channels.json(飞书/admin令牌)、venv、密钥、所有 backup_*/*.bak 一律不追踪
+/*
+!/.gitignore
+!/VERSION
+!/app.py
+!/connector.py
+!/engine.py
+!/web/
+!/admin/
+!/admin-src/
+# admin(已构建dist)与web下仍要排除潜在杂物
+web/*.bak*
+web/backup_*
+admin/**/*.map
+# admin-src 下排除依赖与构建产物
+admin-src/node_modules/
+admin-src/dist/

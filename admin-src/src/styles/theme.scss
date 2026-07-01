@@ -1,0 +1,35 @@
+﻿:root{
+  /* 品牌深蓝配色 (深蓝主#08113A + azure logo-blue#2E8BD6; 画布冷调灰蓝降眩光) */
+  --qh-primary:#2E8BD6; --qh-primary-dark:#08113A; --qh-primary-soft:#eaf0fa;
+  --qh-up:#ff5b6e; --qh-down:#54a8ff; --qh-ok:#26c281; --qh-warn:#e6a23c;
+}
+.el-button--primary{ --el-button-bg-color:var(--qh-primary); --el-button-border-color:var(--qh-primary);
+  --el-button-hover-bg-color:var(--qh-primary-dark); --el-button-hover-border-color:var(--qh-primary-dark);}
+.el-menu{ --el-menu-active-color:var(--qh-primary); }
+html,body,#app{height:100%;margin:0}
+body{font-family:"Microsoft YaHei",system-ui,sans-serif}
+.up{color:var(--qh-up)} .down{color:var(--qh-down)} .mono{font-family:"Roboto Mono",Consolas,monospace}
+/* 明亮风（默认）灰蓝画布 + 浮白卡片 */
+.layout{height:100vh;display:flex}
+.sidebar{background:#08113A;transition:width .2s;overflow:hidden}
+.sidebar .logo{height:56px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;letter-spacing:2px;
+  background:linear-gradient(135deg,#08113A,#040E32)}
+.main-wrap{flex:1;display:flex;flex-direction:column;min-width:0;background:#E9ECF3}
+.topbar{height:50px;background:#fff;border-bottom:1px solid #dde2ee;display:flex;align-items:center;padding:0 14px;gap:12px}
+.topbar .sp{flex:1}
+.tabs-bar{background:#fff;border-bottom:1px solid #dde2ee;padding:5px 10px}
+.crumb{padding:8px 16px;font-size:12px;color:#46506e;background:#E9ECF3}
+.page{flex:1;overflow:auto;padding:14px}
+.stat-card{border-radius:10px;border:none}
+.stat-card .v{font-size:26px;font-weight:700;font-family:"Roboto Mono",monospace}
+.stat-card .l{color:#46506e;font-size:12px}
+.dotok{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--qh-ok);margin-right:5px}
+.doterr{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--qh-up);margin-right:5px}
+/* 暗色 navy */
+html.dark body{background:#070b18;color:#dbe6ea}
+html.dark .main-wrap{background:#0a1224}
+html.dark .topbar,html.dark .tabs-bar{background:#101a33;border-color:#243056;color:#dbe6ea}
+html.dark .crumb{background:#0a1224}
+html.dark .el-card{background:#101a33;border-color:#243056;color:#dbe6ea}
+html.dark .el-table{--el-table-bg-color:#101a33;--el-table-tr-bg-color:#101a33;--el-table-border-color:#243056;--el-table-text-color:#dbe6ea;--el-table-header-bg-color:#16224a;--el-table-header-text-color:#5aa8e8}
+
