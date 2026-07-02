@@ -48,10 +48,10 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dlg" :title="editing?'编辑操作员':'新增操作员'" width="420">
+    <el-dialog :close-on-click-modal="false" v-model="dlg" :title="editing?'编辑操作员':'新增操作员'" width="420">
       <el-form label-width="92">
         <el-form-item label="账号"><el-input v-model="cur.username" :disabled="editing"/></el-form-item>
-        <el-form-item label="密码"><el-input v-model="cur.password" type="password" :placeholder="editing?'留空=不改':'必填'"/></el-form-item>
+        <el-form-item label="密码"><el-input v-model="cur.password" type="password" :placeholder="editing?'留空=不改':'必填'"  autocomplete="new-password"/></el-form-item>
         <el-form-item label="角色"><el-select v-model="cur.role"><el-option v-for="r in roles" :key="r.role" :label="r.name" :value="r.role"/></el-select></el-form-item>
         <el-form-item label="IP白名单"><el-input v-model="cur.allowed_ips" placeholder="逗号分隔,空=不限"/></el-form-item>
         <el-form-item label="启用"><el-switch v-model="cur.enabled"/></el-form-item>
@@ -59,7 +59,7 @@
       <template #footer><el-button @click="dlg=false">取消</el-button><el-button type="primary" @click="saveOp">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="roleDlg" :title="(roleEdit?'编辑':'新增')+'角色权限'" width="500">
+    <el-dialog :close-on-click-modal="false" v-model="roleDlg" :title="(roleEdit?'编辑':'新增')+'角色权限'" width="500">
       <el-form label-width="80">
         <el-form-item label="角色键"><el-input v-model="roleCur.role" :disabled="roleEdit" placeholder="如 finance"/></el-form-item>
         <el-form-item label="名称"><el-input v-model="roleCur.name"/></el-form-item>
@@ -89,19 +89,19 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 const operators=ref([]),roles=ref([]),audit=ref([]),dlg=ref(false),cur=ref({}),editing=ref(false)
 const roleDlg=ref(false),roleCur=ref({}),roleEdit=ref(false),roleMods=ref([]),allMods=ref(false)
-// 后台模块清单(perms = 这些 key 的逗号串; '*'=全部)
 // 后台模块清单(perms = 这些 key 的逗号串; '*'=全部)。按业务分组展示(对齐侧栏 分析/经营/运维)
 const MODULE_GROUPS=[
-  {name:'分析',items:[{k:'dashboard',n:'总控面板'},{k:'bi',n:'经营分析'}]},
-  {name:'经营',items:[{k:'users',n:'用户管理'},{k:'orders',n:'充值订单'},{k:'iap',n:'内购配置'},{k:'agents',n:'三级代理'},{k:'trials',n:'试用管理'},{k:'leads',n:'线索中台'},{k:'chat',n:'AI客服'}]},
-  {name:'运维',items:[{k:'system',n:'系统管理'},{k:'notify',n:'系统通知'},{k:'datamgr',n:'数据管理'},{k:'operators',n:'操作员'},{k:'params',n:'参数下发'},{k:'legs',n:'双腿监控'},{k:'recon',n:'对账'},{k:'deals',n:'成交记录'}]},
+  {name:'分析',items:[{k:'dashboard',n:'总控面板'}]},
+  {name:'经营',items:[{k:'bi',n:'经营分析'},{k:'users',n:'用户管理'},{k:'users_adv',n:'用户高级管理'},{k:'leads',n:'线索中台'},{k:'trials',n:'试用管理'},{k:'orders',n:'充值订单'},{k:'agents',n:'三级代理'},{k:'iap',n:'内购配置'},{k:'chat',n:'AI客服配置'}]},
+  {name:'运维',items:[{k:'system',n:'运维监控'},{k:'params',n:'参数下发'},{k:'product',n:'产品分析'},{k:'notify',n:'系统通知'},{k:'datamgr',n:'系统管理'},{k:'operators',n:'操作员'},{k:'legs',n:'双腿监控'},{k:'recon',n:'对账'},{k:'deals',n:'成交记录'}]},
 ]
 // 角色模板: 运营默认不含运维系统页
 const ROLE_TPLS=[
   {key:'ops',     label:'运营',     mods:['dashboard','bi','users','orders','iap','agents','trials','leads','chat']},
+  {key:'opsadv',  label:'高级运营', mods:['dashboard','bi','users','users_adv','orders','iap','agents','trials','leads','chat']},
   {key:'finance', label:'财务',     mods:['dashboard','bi','orders','iap','agents']},
   {key:'service', label:'客服',     mods:['dashboard','leads','chat','users','trials']},
-  {key:'opsro',   label:'只读运维', mods:['dashboard','legs','recon','deals','params']},
+  {key:'opsro',   label:'只读运维', mods:['dashboard','system','product','legs','recon','deals','params']},
 ]
 function applyRoleTpl(tpl){ allMods.value=false; roleMods.value=[...tpl.mods] }
 // 模块键→中文名 拍平映射(取自 MODULE_GROUPS),用于可见模块列中文化
@@ -130,7 +130,7 @@ async function resetPwd(row){
     await api.operatorResetPwd(row.username,value); ElMessage.success('密码已重置') }catch(e){ if(e!=='cancel')ElMessage.error(e?.response?.data?.detail||'失败') }
 }
 async function resetAdminToken(){
-  try{ await ElMessageBox.confirm('重置超管令牌?旧令牌立即失效,你需用新令牌重新登录。仅超级管理员可执行。','⚠ 高危确认',{type:'warning',confirmButtonText:'确认重置'})
+  try{ await ElMessageBox.confirm('重置超管令牌?旧令牌立即失效,你需用新令牌重新登录。仅超级管理员可执行。','高危确认',{type:'warning',confirmButtonText:'确认重置'})
     const {value}=await ElMessageBox.prompt('新令牌(留空=随机生成,≥12位):','设置新超管令牌',{inputPlaceholder:'留空随机',inputValidator:v=>(!v||v.length>=12)||'至少12位'}).catch(()=>({value:''}))
     const r=await api.resetAdminToken(value||'')
     await ElMessageBox.alert('新超管令牌(请立即复制保存):\n\n'+r.new_token+'\n\n旧令牌已失效。','重置成功',{type:'success'})

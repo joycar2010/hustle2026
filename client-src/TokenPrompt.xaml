@@ -1,0 +1,20 @@
+<Window x:Class="QhClient.TokenPrompt"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="管理员验证" Height="200" Width="380"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+  <Border CornerRadius="10" Background="#0B1220" BorderBrush="#1E2A44" BorderThickness="1">
+    <StackPanel Margin="22">
+      <TextBlock Text="管理员验证" FontSize="16" FontWeight="Bold" Foreground="White"/>
+      <TextBlock Text="自动进出场为真金写操作,请输入 Admin Token" Foreground="#7C8B9E" FontSize="12" Margin="0,6,0,12" TextWrapping="Wrap"/>
+      <Border CornerRadius="6" Background="#111A2E" BorderBrush="#243256" BorderThickness="1">
+        <PasswordBox x:Name="Box" Background="Transparent" Foreground="White" BorderThickness="0" Padding="10,8" FontSize="14"/>
+      </Border>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <Button Content="取消" Click="Cancel_Click" Padding="14,5" Margin="0,0,8,0" Background="#243256" Foreground="#C9D6E8" BorderThickness="0" Cursor="Hand"/>
+        <Button Content="确定" Click="Ok_Click" Padding="18,5" Background="#2E8BD6" Foreground="White" BorderThickness="0" Cursor="Hand"/>
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</Window>

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>QuantHedge</AssemblyName>
+    <RootNamespace>QhClient</RootNamespace>
+    <Version>1.1.0</Version>
+    <ApplicationTitle>Quant Hedge 交易终端</ApplicationTitle>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="ScottPlot.WPF" Version="5.0.55" />
+  </ItemGroup>
+
+  <!-- logo 内嵌资源: 离线时登录页 logo 兜底(WebView2 拦截该图请求返回本地字节) -->
+  <ItemGroup>
+    <EmbeddedResource Include="logo-mid.png" />
+  </ItemGroup>
+
+  <!-- 启用 WinForms(仅托盘 NotifyIcon)会把 System.Windows.Forms/Drawing 塞进全局 using,
+       与 WPF 的 Brush/Application/KeyEventArgs 冲突; 移除这两个隐式 using, 托盘处用 WinForms 别名显式引用 -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+</Project>

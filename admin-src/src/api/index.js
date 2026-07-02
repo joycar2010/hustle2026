@@ -12,6 +12,7 @@ export const api = {
   alerts: (limit=30) => http.get('/engine/alerts', { params:{limit} }),
   deals: (user, limit=100) => http.get(`/deals/${user}`, { params:{limit} }),
   params: (user) => http.get(`/params/${user}`),
+  paramsSave: (row) => http.post('/params/save', { ...row, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   syncLast: () => http.get('/sync/last'),
   sync: (user, days=1) => http.post(`/bridge/sync/${user}?days=${days}`),
   // ── P0 内购/权益 ──
@@ -34,6 +35,8 @@ export const api = {
   trialGrant: (g) => http.post('/admin/trial/grant', { ...g, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   trials: () => http.get('/admin/trials'),
   biSymbols: (days=30) => http.get('/admin/bi/symbols', { params:{ days } }),
+  biSymbolUsers: (symbol, days=30) => http.get('/admin/bi/symbol_users', { params:{ symbol, days } }),
+  biArbStats: (days=30) => http.get('/admin/bi/arb_stats', { params:{ days } }),
   biOverview: (days=30) => http.get('/admin/bi/overview', { params:{ days } }),
   orders: (days=90, product='', username='') => http.get('/admin/orders', { params:{ days, product, username } }),
   ordersFilter: (params) => http.get('/admin/orders', { params }),
@@ -43,6 +46,8 @@ export const api = {
   revenue: (days=30) => http.get('/admin/revenue', { params:{ days } }),
   // ── P4a 用户管理 ──
   adminUsers: (q='') => http.get('/admin/users', { params:{ q } }),
+  // 导出 xlsx: 带鉴权头以 blob 拉取(响应拦截器返回 r.data, 这里即 Blob)
+  usersExport: (q='') => http.get('/admin/users/export', { params:{ q }, responseType:'blob', headers: adminHeaders() }),
   usersGeoStats: () => http.get('/admin/users/geo_stats'),
   adminUser: (u) => http.get(`/admin/user/${u}`),
   userOp: (body) => http.post('/admin/user/op', { ...body, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
@@ -77,6 +82,13 @@ export const api = {
   channelConfig: (c) => http.post('/admin/channel/config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   chatConfig: (site='qh') => http.get('/chat/config', { params:{ site } }),
   chatConfigSave: (c) => http.post('/admin/chat/config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── AI 客服 LLM 服务(复刻 coinadmin ai-support, 跨 site 管理) ──
+  aiConfig: (site='qh') => http.get('/admin/ai/config', { params:{ site }, headers: adminHeaders() }),
+  aiConfigSave: (c) => http.post('/admin/ai/config', { ...c, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  aiStats: (site='') => http.get('/admin/ai/stats', { params:{ site }, headers: adminHeaders() }),
+  aiConversations: (site='', limit=50) => http.get('/admin/ai/conversations', { params:{ site, limit }, headers: adminHeaders() }),
+  aiConvMessages: (cid) => http.get(`/admin/ai/conversation/${cid}/messages`, { headers: adminHeaders() }),
+  aiChat: (body) => http.post('/ai/chat', body, { timeout: 60000 }),
   // ── P2-5 系统通知 ──
   notifyFeishuStatus: () => http.get('/admin/notify/feishu_status', { headers: adminHeaders() }),
   notifyFeishuTest: (recipient) => http.post('/admin/notify/feishu_test', { recipient, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
@@ -89,6 +101,10 @@ export const api = {
   notifyBroadcast: (b) => http.post('/admin/notify/broadcast', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   notifyLogs: (channel='', status='', limit=100) => http.get('/admin/notify/logs', { params:{ channel, status, limit }, headers: adminHeaders() }),
   notifySounds: () => http.get('/admin/notify/sounds', { headers: adminHeaders() }),
+  notifySoundSave: (s) => http.post('/admin/notify/sound', { ...s, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifySoundDel: (key) => http.post('/admin/notify/sound_del', { key, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  notifyEdgeVoices: (locale='zh-CN') => http.get('/admin/notify/edge_voices', { params:{ locale }, headers: adminHeaders() }),
+  notifyTtsUrl: (key, text='') => `/api/notify/tts?key=${encodeURIComponent(key)}${text?('&text='+encodeURIComponent(text)):''}`,
   // ── P3 数据管理 ──
   dmVersion: () => http.get('/admin/datamgr/version', { headers: adminHeaders() }),
   dmDbStats: () => http.get('/admin/datamgr/db/stats', { headers: adminHeaders() }),
@@ -102,6 +118,7 @@ export const api = {
   dmSslDeploy: (id) => http.post('/admin/datamgr/ssl/deploy', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   dmSslDelete: (id) => http.post('/admin/datamgr/ssl/delete', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   dmWsStats: () => http.get('/admin/datamgr/ws_stats', { headers: adminHeaders() }),
+  dmGitPush: (message) => http.post('/admin/datamgr/git-push', { message }, { headers: adminHeaders(), timeout: 240000 }),
 }
 
 

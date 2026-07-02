@@ -65,7 +65,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dlg" :title="cur.code&&editing?'编辑代理':'新增代理'" width="420">
+    <el-dialog :close-on-click-modal="false" v-model="dlg" :title="cur.code&&editing?'编辑代理':'新增代理'" width="420">
       <el-form label-width="92">
         <el-form-item label="推广码"><el-input v-model="cur.code" :disabled="editing" placeholder="唯一码,用户注册带此码"/></el-form-item>
         <el-form-item label="名称"><el-input v-model="cur.name"/></el-form-item>

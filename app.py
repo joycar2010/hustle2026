@@ -71,6 +71,7 @@ def verify(req: LoginReq, request: Request):
     c.close()
     expired = row["expire_at"] < datetime.datetime.now(datetime.timezone.utc)
     R.setex(RNS+"session:"+req.license_key, 86400, "1")
+    R.setex(RNS+"ws:primary_user", 86400, row["username"])   # HUB 路径无本地连接时的 user_data 归属(单用户场景)
     return {"ok":not expired,"username":row["username"],"nickname":row.get("nickname"),"plan":row["plan"],
             "expire_at":row["expire_at"].isoformat(),"expired":expired,"feishu_id":row["feishu_id"]}
 
@@ -100,7 +101,7 @@ def _self_register(username, contact, feishu_id, request, trial_days=0, agent_co
     cur.execute("""INSERT INTO users(username,license_key,plan,expire_at,feishu_id,status,created_at,last_ip,last_login,geo_country,geo_name,agent_id,source,
                    trial_until,trial_started)
                    VALUES(%s,%s,%s,%s,%s,%s,now(),%s,now(),%s,%s,%s,'self',%s,%s) RETURNING id""",
-                (username,newk,'basic',exp,feishu_id or None,status,ip,iso,zh,aid,
+                (username,newk,None,exp,feishu_id or None,status,ip,iso,zh,aid,
                  (exp if trial_days>0 else None),(now if trial_days>0 else None)))
     uid=cur.fetchone()[0]; c.close()
     if trial_days>0: R.set(RNS+"force_demo:"+username,"1")
@@ -388,6 +389,18 @@ def require_super(request: Request, x_op_token: str = Header(default=""), x_admi
     if sess and sess.get("role")=="super":
         return sess
     raise HTTPException(403,"仅超级管理员可操作")
+def _sess_has_perm(sess, perm):
+    """会话是否拥有某模块权限。super/admintoken(perms='*')恒真。"""
+    if not sess: return False
+    if sess.get("role")=="super" or sess.get("operator")=="admintoken": return True
+    perms=_op_perms(sess.get("role"))
+    if perms=="*": return True
+    return perm in [x.strip() for x in (perms or "").split(",") if x.strip()]
+def _require_adv(sess, what="该高级操作"):
+    """用户高级管理闸: 需 users_adv 权限或超管。用于套餐增删/权益/付费·试用日期/模式/状态/删除/封禁/重置密钥/导出。"""
+    if not _sess_has_perm(sess, "users_adv"):
+        raise HTTPException(403,"%s需要「用户高级管理(users_adv)」权限或超级管理员"%what)
+    return True
 def _op_log(sess, request, action, detail):
     try:
         c=db(); cur=c.cursor()
@@ -595,6 +608,7 @@ async def _engine_loop():
                     R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"err","msg":"单腿告警 %s 缺口%.3f"%(miss,gap)}))
                     R.ltrim(RNS+"alerts",0,49)
             R.set(RNS+"engine:cycle", json.dumps(cycle))
+            R.set(RNS+"engine:cycle_ts", _dt.datetime.utcnow().isoformat())   # 循环心跳戳(供运维监控算新鲜度)
         except Exception as e:
             R.set(RNS+"engine:err", "loop:%s"%e)
         await _aio.sleep(5)
@@ -628,6 +642,8 @@ async def _spread_sampler():
                 for _ in range(min(rps,20)):
                     pipe.rpush(RNS+"spread:hist", json.dumps({"t":_dt.datetime.utcnow().isoformat()+"Z","fs":fs,"rs":rs}))
                 pipe.ltrim(RNS+"spread:hist",-60000,-1); pipe.execute()
+                R.set(RNS+"engine:sampler_ts", _dt.datetime.utcnow().isoformat())  # 采样成功心跳(供新鲜度)
+                R.set(RNS+"engine:sampler_err","")  # 成功即清错
         except Exception as e:
             R.set(RNS+"engine:sampler_err", str(e))
         await _aio.sleep(interval)
@@ -1378,6 +1394,30 @@ def bi_symbols(days:int=30):
         out.append(d)
     return {"days":days,"symbols":out}
 
+@app.get("/api/admin/bi/symbol_users")
+def bi_symbol_users(symbol:str, days:int=30):
+    """产品分析·单产品下钻: 某 symbol 下每个用户的成交量/净盈亏/手续费/过夜费/胜率(点活跃用户查单用户)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT u.username,
+                          count(*) AS deals,
+                          COALESCE(SUM(d.lots),0) AS volume,
+                          COALESCE(SUM(d.profit),0) AS net_profit,
+                          COALESCE(SUM(d.commission),0) AS fees,
+                          COALESCE(SUM(d.swap),0) AS swap,
+                          SUM(CASE WHEN d.profit>0 THEN 1 ELSE 0 END) AS wins,
+                          SUM(CASE WHEN d.profit<0 THEN 1 ELSE 0 END) AS losses
+                   FROM deals d JOIN users u ON u.id=d.user_id
+                   WHERE d.is_trade=true AND d.symbol=%s AND d.dealt_at >= now() - (%s||' days')::interval
+                   GROUP BY u.username ORDER BY volume DESC""",(symbol,days))
+    rows=cur.fetchall(); c.close()
+    out=[]
+    for r in rows:
+        d=dict(r); w=int(d["wins"] or 0); l=int(d["losses"] or 0); tot=w+l
+        d["win_rate"]=round(w/tot*100,1) if tot else None
+        for k in ("volume","net_profit","fees","swap"): d[k]=round(float(d[k] or 0),2)
+        out.append(d)
+    return {"symbol":symbol,"days":days,"users":out}
+
 @app.get("/api/admin/bi/overview")
 def bi_overview(days:int=30):
     """平台总览 KPI: 用户/活跃/试用/付费 + 区间成交/净盈亏/费用 + Top 代理。"""
@@ -1528,12 +1568,12 @@ def revenue_report(days:int=30):
 def admin_users(q:str=""):
     """经营中心一屏: 每客户 授权状态/到期/累计充值/绑定代理/demo模式/引擎在跑/近7日盈亏。"""
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    sql="""SELECT u.id,u.username,u.plan,u.status,u.expire_at,u.paid_until,u.trial_until,
+    sql="""SELECT u.id,u.username,u.nickname,u.plan,u.status,u.expire_at,u.paid_until,u.trial_until,
                   u.total_recharge,u.risk_flags,u.created_at,u.last_ip,u.last_login,u.geo_country,u.geo_name, ag.code AS agent_code,
                   (SELECT COALESCE(SUM(profit),0) FROM deals d WHERE d.user_id=u.id AND d.is_trade=true AND d.dealt_at>=now()-interval '7 days') AS pnl_7d
            FROM users u LEFT JOIN agents ag ON ag.id=u.agent_id"""
     p=[]
-    if q: sql+=" WHERE u.username ILIKE %s"; p.append("%"+q+"%")
+    if q: sql+=" WHERE u.username ILIKE %s OR u.nickname ILIKE %s"; p.append("%"+q+"%"); p.append("%"+q+"%")
     sql+=" ORDER BY u.created_at DESC LIMIT 300"
     cur.execute(sql,tuple(p)); rows=cur.fetchall(); c.close()
     now=datetime.datetime.now(datetime.timezone.utc); out=[]
@@ -1562,6 +1602,63 @@ def admin_users_geo_stats():
     c.close()
     return {"by_country":rows,"located":located,"total":total}
 
+@app.get("/api/admin/users/export", dependencies=[Depends(require_op("users"))])
+def admin_users_export(request: Request, q:str="", x_op_token: str = Header(default=""), x_admin_token: str = Header(default="")):
+    """用户资料 Excel 导出(真 .xlsx)。仅超级管理员或持「用户高级管理(users_adv)」权限者可用。
+       列: 用户名/别名/状态/主套餐/已购套餐/权益/付费到期/试用到期/累计充值/余额/代理/地区/最后登录/模式/自动进出/创建时间。"""
+    # 权限闸(与用户高级管理一致)
+    _tok=_admin_token()
+    if _tok and x_admin_token==_tok: _sess={"operator":"admintoken","role":"super"}
+    else: _sess=_op_session(x_op_token) or {}
+    _require_adv(_sess, "导出用户资料")
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except Exception:
+        raise HTTPException(500,"服务端缺少 openpyxl 依赖, 请联系运维安装")
+    from fastapi.responses import StreamingResponse
+    import io as _io
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    sql="""SELECT u.id,u.username,u.nickname,u.plan,u.status,u.expire_at,u.paid_until,u.trial_until,
+                  u.total_recharge,u.balance,u.feishu_id,u.created_at,u.last_login,u.geo_name, ag.code AS agent_code
+           FROM users u LEFT JOIN agents ag ON ag.id=u.agent_id"""
+    p=[]
+    if q: sql+=" WHERE u.username ILIKE %s OR u.nickname ILIKE %s"; p=["%"+q+"%","%"+q+"%"]
+    sql+=" ORDER BY u.created_at DESC LIMIT 5000"
+    cur.execute(sql,tuple(p)); rows=cur.fetchall()
+    # 商品 key→名 映射(已购套餐列可读)
+    cur.execute("SELECT key,name FROM iap_products"); prodname={r["key"]:r["name"] for r in cur.fetchall()}
+    def _owned(uid):
+        cur.execute("SELECT DISTINCT product_key FROM iap_orders WHERE user_id=%s AND status='paid' AND product_key IS NOT NULL",(uid,))
+        ks=[x["product_key"] for x in cur.fetchall() if x["product_key"] and not str(x["product_key"]).startswith("_")]
+        return " / ".join(prodname.get(k,k) for k in ks)
+    def _ents(uid):
+        e=_ent_all(uid); return " · ".join("%s=%s"%(k,v) for k,v in e.items())
+    def _fd(dt): return dt.strftime("%Y-%m-%d") if dt else ""
+    wb=openpyxl.Workbook(); ws=wb.active; ws.title="用户资料"
+    headers=["用户名","别名","状态","主套餐","已购套餐","权益","付费到期","试用到期","累计充值","余额","飞书ID","代理","地区","最后登录","模式","自动进","自动出","创建时间"]
+    ws.append(headers)
+    hf=Font(bold=True,color="FFFFFF"); fill=PatternFill("solid",fgColor="08113A")
+    for cell in ws[1]: cell.font=hf; cell.fill=fill; cell.alignment=Alignment(horizontal="center")
+    for r in rows:
+        uname=r["username"]
+        fdemo=(R.get(RNS+"force_demo:"+uname)=="1")
+        ae=R.get(RNS+"auto_entry:"+uname) or "off"; ax=R.get(RNS+"auto_exit:"+uname) or "off"
+        ws.append([uname, r.get("nickname") or "", r.get("status") or "", r.get("plan") or "",
+                   _owned(r["id"]), _ents(r["id"]), _fd(r.get("paid_until")), _fd(r.get("trial_until")),
+                   float(r.get("total_recharge") or 0), float(r.get("balance") or 0), r.get("feishu_id") or "",
+                   r.get("agent_code") or "", r.get("geo_name") or "", _fd(r.get("last_login")),
+                   "演示" if fdemo else "真金", ae, ax, _fd(r.get("created_at"))])
+    c.close()
+    widths=[16,12,9,14,22,30,12,12,10,10,16,10,10,12,7,7,7,12]
+    for i,w in enumerate(widths,1): ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width=w
+    ws.freeze_panes="A2"
+    buf=_io.BytesIO(); wb.save(buf); buf.seek(0)
+    _audit("",_actor(x_admin_token),"users_export",{"count":len(rows),"q":q},DEMO_MODE,"exported")
+    fn="qh_users_%s.xlsx"%datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition":"attachment; filename=%s"%fn})
+
 @app.get("/api/admin/user/{username}")
 def admin_user_detail(username:str):
     uid=_uid(username)
@@ -1570,7 +1667,7 @@ def admin_user_detail(username:str):
     cur.execute("SELECT id,username,plan,status,expire_at,paid_until,trial_until,trial_started,total_recharge,risk_flags,feishu_id,created_at,last_ip,last_login,geo_country,geo_name FROM users WHERE id=%s",(uid,))
     u=dict(cur.fetchone())
     cur.execute("SELECT login,broker,role,enabled FROM mt_accounts WHERE user_id=%s",(uid,)); u["accounts"]=[dict(x) for x in cur.fetchall()]
-    cur.execute("SELECT product_key,amount,paid_at FROM iap_orders WHERE user_id=%s ORDER BY paid_at DESC LIMIT 20",(uid,)); u["orders"]=[dict(x) for x in cur.fetchall()]
+    cur.execute("SELECT product_key,amount,paid_at,status,kind FROM iap_orders WHERE user_id=%s ORDER BY paid_at DESC LIMIT 20",(uid,)); u["orders"]=[dict(x) for x in cur.fetchall()]
     cur.execute("SELECT count(*) n, COALESCE(SUM(profit),0) p FROM deals WHERE user_id=%s AND is_trade=true",(uid,)); dd=cur.fetchone(); u["deals_total"]=dd["n"]; u["pnl_total"]=round(float(dd["p"] or 0),2)
     c.close()
     u["entitlements"]=_ent_all(uid)
@@ -1582,9 +1679,23 @@ def admin_user_detail(username:str):
 class UserOpReq(BaseModel):
     license_key:str=""; username:str; op:str         # extend/ban/unban/reset_key/force_demo/feature/create/edit/delete/disable/enable
     days:int=0; force:bool=False; feature_key:str=""; value:str=""; reason:str=""
-    plan:str=""; feishu_id:str=""; expire_days:int=0; new_username:str=""
+    plan:str=""; feishu_id:str=""; expire_days:int=0; new_username:str=""; nickname:Optional[str]=None
+    paid_until:str=""; trial_until:str=""; status:str=""; mode:str=""   # 付费到期/试用到期(ISO)/状态/模式(demo|real)
+    product_key:str=""; revoke_grants:bool=True   # grant_package/revoke_package 用; revoke 是否连带撤权益
+# 需「用户高级管理」权限的敏感操作(基础运营仅可 extend/disable/enable/feature)
+_ADV_USER_OPS={"edit","delete","ban","unban","reset_key","force_demo","grant_package","revoke_package"}
 @app.post("/api/admin/user/op", dependencies=[Depends(require_op("users"))])
-def admin_user_op(r:UserOpReq):
+def admin_user_op(r:UserOpReq, request: Request, x_op_token: str = Header(default=""), x_admin_token: str = Header(default="")):
+    # 敏感操作二次鉴权: 需 users_adv 或超管(基础 users 权限只能做延期/停用/启用/功能开关)
+    _tok=_admin_token()
+    if _tok and x_admin_token==_tok:
+        _sess={"operator":"admintoken","role":"super"}
+    else:
+        _sess=_op_session(x_op_token) or {}
+    # edit 分支里若含高级字段(付费/试用/状态/模式)也要求 adv; 纯别名/飞书ID 归基础
+    _edit_has_adv = r.op=="edit" and bool(r.paid_until or r.trial_until or r.status or r.mode or r.plan)
+    if r.op in _ADV_USER_OPS or _edit_has_adv:
+        _require_adv(_sess, "该操作")
     # create 是唯一不要求用户已存在的分支
     if r.op=="create":
         if _uid(r.username): raise HTTPException(400,"用户名已存在")
@@ -1592,9 +1703,9 @@ def admin_user_op(r:UserOpReq):
         newk="QH-"+secrets.token_hex(8).upper()
         exp=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=max(1,r.expire_days or 30))
         c=db(); cur=c.cursor()
-        cur.execute("""INSERT INTO users(username,license_key,plan,expire_at,feishu_id,status,created_at)
-                       VALUES(%s,%s,%s,%s,%s,'active',now()) RETURNING id""",
-                    (r.username,newk,r.plan or 'basic',exp,r.feishu_id or None))
+        cur.execute("""INSERT INTO users(username,nickname,license_key,plan,expire_at,feishu_id,status,created_at)
+                       VALUES(%s,%s,%s,%s,%s,%s,'active',now()) RETURNING id""",
+                    (r.username,(r.nickname or None),newk,(r.plan or None),exp,r.feishu_id or None))
         c.close()
         _audit(r.username,_actor(r.license_key),"user_op",{"op":"create","license":newk},DEMO_MODE,"done")
         return {"ok":True,"op":"create","new_license":newk,"expire_at":str(exp)}
@@ -1604,16 +1715,25 @@ def admin_user_op(r:UserOpReq):
     if r.op=="extend":                       # 延期(改 paid_until + expire_at)
         cur.execute("UPDATE users SET paid_until=GREATEST(COALESCE(paid_until,now()),now())+(%s||' days')::interval, expire_at=GREATEST(COALESCE(paid_until,now()),now())+(%s||' days')::interval, status='active' WHERE id=%s",(r.days,r.days,uid))
         res["extended_days"]=r.days
-    elif r.op=="edit":                        # 编辑基础信息(套餐/飞书ID/到期天数,均可选)
+    elif r.op=="edit":                        # 编辑基础信息(套餐/飞书ID/到期天数/别名/付费到期/试用到期/状态/模式, 均可选)
         sets=[]; vals=[]
         if r.plan: sets.append("plan=%s"); vals.append(r.plan)
         if r.feishu_id: sets.append("feishu_id=%s"); vals.append(r.feishu_id)
+        if r.nickname is not None: sets.append("nickname=%s"); vals.append(r.nickname or None)
         if r.expire_days and r.expire_days>0:
             sets.append("expire_at=now()+(%s||' days')::interval"); vals.append(r.expire_days)
-        if not sets: c.close(); raise HTTPException(400,"无可更新字段")
-        vals.append(uid)
-        cur.execute("UPDATE users SET "+",".join(sets)+" WHERE id=%s",tuple(vals))
-        res["edited"]={"plan":r.plan,"feishu_id":r.feishu_id,"expire_days":r.expire_days}
+        if r.paid_until: sets.append("paid_until=%s"); vals.append(r.paid_until)   # ISO 日期串, 空=不改
+        if r.trial_until: sets.append("trial_until=%s"); vals.append(r.trial_until)
+        if r.status and r.status in ("active","disabled","banned","trial"): sets.append("status=%s"); vals.append(r.status)
+        if sets:
+            vals.append(uid); cur.execute("UPDATE users SET "+",".join(sets)+" WHERE id=%s",tuple(vals))
+        # 模式(force_demo)走 Redis, 与引擎一致: "demo"=强制演示 / "real"=真金
+        if r.mode in ("demo","real"):
+            if r.mode=="demo": R.set(RNS+"force_demo:"+r.username,"1")
+            else: R.delete(RNS+"force_demo:"+r.username)
+        if not sets and not r.mode: c.close(); raise HTTPException(400,"无可更新字段")
+        res["edited"]={"plan":r.plan,"feishu_id":r.feishu_id,"nickname":r.nickname,"expire_days":r.expire_days,
+                       "paid_until":r.paid_until,"trial_until":r.trial_until,"status":r.status,"mode":r.mode}
     elif r.op=="disable":                     # 轻量停用(阻止登录, 不动引擎/DEMO, 区别于 ban)
         cur.execute("UPDATE users SET status='disabled' WHERE id=%s",(uid,)); res["disabled"]=True
     elif r.op=="enable":                      # 解除停用
@@ -1643,6 +1763,36 @@ def admin_user_op(r:UserOpReq):
         if r.force: R.set(RNS+"force_demo:"+r.username,"1")
         else: R.delete(RNS+"force_demo:"+r.username)
         res["force_demo"]=r.force
+    elif r.op=="grant_package":               # 授予套餐(权益包): 应用商品 grants → entitlements + 补录 comp 赠送单(0元, 不计佣)
+        if not r.product_key: c.close(); raise HTTPException(400,"缺少 product_key")
+        cur.close(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT key,name,grants,duration_days FROM iap_products WHERE key=%s",(r.product_key,))
+        p=cur.fetchone()
+        if not p: c.close(); raise HTTPException(404,"套餐不存在: %s"%r.product_key)
+        grants=p["grants"] or {}; dur=p["duration_days"] or 0
+        exp=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=dur)) if dur>0 else None
+        for fk,val in grants.items():
+            cur.execute("""INSERT INTO entitlements(user_id,feature_key,value,source,expire_at,updated_at)
+                           VALUES(%s,%s,%s,'comp',%s,now())
+                           ON CONFLICT (user_id,feature_key) DO UPDATE SET value=EXCLUDED.value,source='comp',expire_at=EXCLUDED.expire_at,updated_at=now()""",
+                        (uid,fk,str(val),exp))
+        # 补录赠送单(kind=comp, 0元, status=paid, 不计佣)使"已购套餐"列体现
+        cur.execute("""INSERT INTO iap_orders(user_id,product_key,amount,unit,status,operator,kind,pay_method,paid_at)
+                       VALUES(%s,%s,0,'USDT','paid',%s,'comp','comp',now())""",
+                    (uid,r.product_key,_actor(r.license_key)))
+        res["granted_package"]={"product":r.product_key,"grants":list(grants.keys()),"expire_at":str(exp) if exp else None}
+    elif r.op=="revoke_package":              # 撤销套餐: 作废该 comp 赠送单; revoke_grants=true 时连带删除对应权益(仅 source=comp)
+        if not r.product_key: c.close(); raise HTTPException(400,"缺少 product_key")
+        cur.execute("UPDATE iap_orders SET status='void' WHERE user_id=%s AND product_key=%s AND kind='comp' AND status='paid'",(uid,r.product_key))
+        voided=cur.rowcount
+        removed=[]
+        if r.revoke_grants:
+            cur2=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur2.execute("SELECT grants FROM iap_products WHERE key=%s",(r.product_key,)); pp=cur2.fetchone(); cur2.close()
+            for fk in list((pp["grants"] if pp and pp["grants"] else {}).keys()):
+                cur.execute("DELETE FROM entitlements WHERE user_id=%s AND feature_key=%s AND source='comp'",(uid,fk))
+                if cur.rowcount>0: removed.append(fk)
+        res["revoked_package"]={"product":r.product_key,"voided_orders":voided,"removed_grants":removed}
     elif r.op=="feature":                     # per-user 功能可见性 = 写一条 entitlement(复用)
         cur.execute("""INSERT INTO entitlements(user_id,feature_key,value,source,updated_at) VALUES(%s,%s,%s,'manual',now())
                        ON CONFLICT (user_id,feature_key) DO UPDATE SET value=EXCLUDED.value,source='manual',updated_at=now()""",(uid,r.feature_key,r.value))
@@ -1656,23 +1806,74 @@ def admin_user_op(r:UserOpReq):
 # ================= P4b 系统管理 + 总控面板 =================
 @app.get("/api/admin/system")
 async def admin_system():
-    """系统健康: 桥(主/对冲)状态 + 引擎循环心跳 + 全局自动开关聚合 + 采样器。"""
-    out={"bridges":{},"engine":{},"auto":{}}
-    # 桥健康
-    try:
-        st=await CONN.both_status() if hasattr(CONN,"both_status") else {"main":await CONN.status(),"hedge":None}
-        out["bridges"]["main"]={"ok":bool(st.get("main")),"detail":st.get("main")}
-        out["bridges"]["hedge"]={"ok":bool(st.get("hedge")),"detail":st.get("hedge")}
-    except Exception as e: out["bridges"]["err"]=str(e)
-    # 引擎循环心跳(各 loop 写的 last)
+    """系统健康(全链路运维监控): 桥(主/对冲)状态+延迟 + 引擎循环/采样器新鲜度 + 波动闸/背离闸 + WS 连接 + 告警流 + 全局自动开关聚合。"""
+    import time as _t
+    def _age(iso):
+        """ISO 时间戳 → 距今秒数(无/解析失败返 None)。"""
+        if not iso: return None
+        try:
+            s=iso.replace("Z","").split(".")[0]
+            dt=_dt.datetime.fromisoformat(s)
+            return max(0,int((_dt.datetime.utcnow()-dt).total_seconds()))
+        except Exception: return None
+    out={"bridges":{},"engine":{},"auto":{},"gates":{},"ws":{},"alerts":[]}
+    # 桥健康 + 延迟(ms)
+    for leg in ("main","hedge"):
+        try:
+            conn=getattr(CONN,leg,None)
+            if conn is None: out["bridges"][leg]={"ok":False,"detail":None,"latency_ms":None}; continue
+            t0=_t.time()
+            st=await conn.status()
+            lat=int((_t.time()-t0)*1000)
+            out["bridges"][leg]={"ok":bool(st),"detail":st,"latency_ms":lat}
+        except Exception as e:
+            out["bridges"][leg]={"ok":False,"err":str(e)[:120],"latency_ms":None}
+    # 引擎循环 + 采样器新鲜度
+    cycle_ts=R.get(RNS+"engine:cycle_ts"); sampler_ts=R.get(RNS+"engine:sampler_ts")
+    _samperr=R.get(RNS+"engine:sampler_err") or ""
     out["engine"]={
         "cycle":json.loads(R.get(RNS+"engine:cycle") or "null"),
+        "cycle_age":_age(cycle_ts),                     # 引擎主循环距今秒(>15s 视为停滞)
         "market":json.loads(R.get(RNS+"engine:market") or "null"),
-        "sampler_last":R.get(RNS+"engine:sampler_err") or "ok",
-        "auto_exit_last":R.get(RNS+"auto_exit:last"),
-        "auto_entry_last":R.get(RNS+"auto_entry:last"),
-        "fluctuation":json.loads(R.get(RNS+"engine:fluctuation") or "null"),
+        "sampler_age":_age(sampler_ts),                 # 点差采样器距今秒(>60s 视为停更)
+        "sampler_err":_samperr or None,
+        "auto_exit_last":R.get(RNS+"auto_exit:last"), "auto_exit_age":_age(R.get(RNS+"auto_exit:last")),
+        "auto_entry_last":R.get(RNS+"auto_entry:last"), "auto_entry_age":_age(R.get(RNS+"auto_entry:last")),
+        "err":R.get(RNS+"engine:err"),
     }
+    # 点差新鲜度: 最后一条 spread:hist 距今秒
+    try:
+        last=R.lrange(RNS+"spread:hist",-1,-1)
+        out["engine"]["spread_age"]=_age(json.loads(last[0]).get("t")) if last else None
+        out["engine"]["spread_count"]=R.llen(RNS+"spread:hist")
+    except Exception: out["engine"]["spread_age"]=None
+    # 护栏闸: 波动闸 + 背离闸
+    out["gates"]={
+        "fluctuation":json.loads(R.get(RNS+"engine:fluctuation") or "null"),
+        "divergence":json.loads(R.get(RNS+"engine:divergence") or "null"),
+        "div_tripped":R.get(RNS+"engine:div_tripped")=="1",
+    }
+    # WS hub: 真实在线连接数取 Rust HUB 上报的 qh:ws:hub_clients(切 HUB 后本地 _WS_CLIENTS 恒空);
+    # 无 HUB 键(未部署/回退本地 /ws/stream)则回落本地连接数。broadcaster 状态以快照新鲜度为准。
+    try:
+        now=int(_t.time()); fts=_WS_SNAP.get("fast_ts",0) or 0
+        _hub_clients=R.get(RNS+"ws:hub_clients")
+        _hub_alive=(R.get(RNS+"ws:hub_alive")=="1")
+        if _hub_clients is not None:
+            clients=int(_hub_clients); src="hub"
+        else:
+            clients=len(_WS_CLIENTS); src="local"
+        # 新鲜度: 有连接且最近一帧 <15s = running; 无连接 = idle; 有连接但快照陈旧 = stale
+        if clients>0 and fts and (now-fts)<15: bstate="running"
+        elif clients==0: bstate="idle"
+        else: bstate="stale"
+        out["ws"]={"clients":clients,"src":src,"hub_alive":_hub_alive,
+                   "fast_age":(now-fts) if fts else None,"broadcaster":bstate}
+    except Exception as e: out["ws"]={"err":str(e)}
+    # 最近告警流(实时滚动)
+    try:
+        out["alerts"]=[json.loads(x) for x in (R.lrange(RNS+"alerts",0,29) or [])]
+    except Exception: out["alerts"]=[]
     # 全局自动开关聚合(扫所有用户)
     c=db(); cur=c.cursor(); cur.execute("SELECT username FROM users"); users=[x[0] for x in cur.fetchall()]; c.close()
     aentry=aexit=0
@@ -1682,7 +1883,9 @@ async def admin_system():
     out["auto"]={"users":len(users),"auto_entry_armed":aentry,"auto_exit_armed":aexit,
                  "global_estop":R.get(RNS+"global_estop")=="1"}
     out["demo_mode"]=DEMO_MODE
+    out["server_ts"]=_dt.datetime.utcnow().isoformat()
     return out
+
 
 class EstopReq(BaseModel):
     license_key:str=""; confirm:bool=False
@@ -2008,6 +2211,148 @@ def chat_config_get(site:str="qh"):
     cur.execute("SELECT site,greeting,kb,enabled FROM chat_config WHERE site=%s",(site,)); r=cur.fetchone(); c.close()
     return dict(r) if r else {"site":site,"greeting":"您好","kb":[],"enabled":True}
 
+# ================= AI 客服 LLM 服务(复刻 coinadmin ai-support; 完全隔离交易引擎) =================
+# 安全边界: 独立表(ai_config/ai_conversations/ai_messages) + 独立 httpx 出站 + 独立端点;
+#          绝不 import 引擎/不碰 CONN/交易 Redis 键。各站(qh/qhwww/qhadmin)按 site 硬隔离不串。
+_AI_DEFAULT={"id":0,"provider":"claude","api_key":"","base_url":"","model_name":"claude-sonnet-4-6",
+             "temperature":0.7,"max_tokens":2000,"system_prompt":"","is_enabled":False,"rate_limit_per_min":10}
+def _ai_get_config(site):
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM ai_config WHERE site=%s",(site,)); r=cur.fetchone(); c.close()
+    if not r: return {**_AI_DEFAULT,"site":site}
+    return dict(r)
+
+class AiConfigReq(BaseModel):
+    license_key:str=""; site:str="qh"
+    provider:Optional[str]=None; api_key:Optional[str]=None; base_url:Optional[str]=None
+    model_name:Optional[str]=None; temperature:Optional[float]=None; max_tokens:Optional[int]=None
+    system_prompt:Optional[str]=None; is_enabled:Optional[bool]=None; rate_limit_per_min:Optional[int]=None
+
+@app.get("/api/admin/ai/config", dependencies=[Depends(require_op("chat"))])
+def ai_config_get(site:str="qh"):
+    cfg=_ai_get_config(site)
+    return {**cfg,"site":site}
+
+@app.post("/api/admin/ai/config", dependencies=[Depends(require_op("chat"))])
+def ai_config_save(r:AiConfigReq):
+    cur_cfg=_ai_get_config(r.site)
+    merged={k:(getattr(r,k) if getattr(r,k) is not None else cur_cfg.get(k)) for k in
+            ("provider","api_key","base_url","model_name","temperature","max_tokens","system_prompt","is_enabled","rate_limit_per_min")}
+    if merged.get("base_url"): merged["base_url"]=str(merged["base_url"]).rstrip("/")
+    c=db(); cur=c.cursor()
+    cur.execute("""INSERT INTO ai_config(site,provider,api_key,base_url,model_name,temperature,max_tokens,system_prompt,is_enabled,rate_limit_per_min,updated_at)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                   ON CONFLICT (site) DO UPDATE SET provider=EXCLUDED.provider,api_key=EXCLUDED.api_key,base_url=EXCLUDED.base_url,
+                     model_name=EXCLUDED.model_name,temperature=EXCLUDED.temperature,max_tokens=EXCLUDED.max_tokens,
+                     system_prompt=EXCLUDED.system_prompt,is_enabled=EXCLUDED.is_enabled,rate_limit_per_min=EXCLUDED.rate_limit_per_min,updated_at=now()""",
+                (r.site,merged["provider"],merged["api_key"],merged["base_url"],merged["model_name"],
+                 merged["temperature"],merged["max_tokens"],merged["system_prompt"],merged["is_enabled"],merged["rate_limit_per_min"]))
+    c.close()
+    return {"ok":True,"site":r.site,"msg":"AI 服务配置已保存"}
+
+def _ai_call_llm(cfg, history):
+    """调用大模型(claude/openai 兼容). history=[{role,content}...]. 返回 (text, tokens). 失败抛异常。
+       独立 httpx 出站, 8~40s 超时; 支持中转 base_url。"""
+    provider=(cfg.get("provider") or "claude").lower()
+    key=cfg.get("api_key") or ""; base=(cfg.get("base_url") or "").rstrip("/")
+    model=cfg.get("model_name") or "claude-sonnet-4-6"
+    temp=float(cfg.get("temperature") or 0.7); maxtok=int(cfg.get("max_tokens") or 2000)
+    sysp=cfg.get("system_prompt") or ""
+    if not key: raise HTTPException(400,"AI 服务未配置 API Key")
+    if provider=="openai":
+        url=(base or "https://api.openai.com")+"/v1/chat/completions"
+        msgs=([{"role":"system","content":sysp}] if sysp else [])+history
+        body={"model":model,"messages":msgs,"temperature":temp,"max_tokens":maxtok}
+        headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"}
+        with _httpx.Client(timeout=40) as cl:
+            resp=cl.post(url,json=body,headers=headers); resp.raise_for_status(); j=resp.json()
+        text=j["choices"][0]["message"]["content"]; tok=(j.get("usage") or {}).get("total_tokens",0)
+        return text,int(tok or 0)
+    else:  # claude(anthropic)
+        url=(base or "https://api.anthropic.com")+"/v1/messages"
+        body={"model":model,"max_tokens":maxtok,"temperature":temp,"messages":history}
+        if sysp: body["system"]=sysp
+        headers={"x-api-key":key,"anthropic-version":"2023-06-01","Content-Type":"application/json"}
+        with _httpx.Client(timeout=40) as cl:
+            resp=cl.post(url,json=body,headers=headers); resp.raise_for_status(); j=resp.json()
+        text="".join(b.get("text","") for b in (j.get("content") or []) if b.get("type")=="text")
+        us=j.get("usage") or {}; tok=int(us.get("input_tokens",0))+int(us.get("output_tokens",0))
+        return text,tok
+
+class AiChatReq(BaseModel):
+    site:str="qh"; conversation_id:Optional[int]=None; message:str; user_id:str=""
+
+@app.post("/api/ai/chat")
+def ai_chat(r:AiChatReq, request:Request):
+    """公开: 用户发消息 → LLM 回复(带会话上下文+落库+限频)。未启用则回退 KB 关键词。site 隔离。"""
+    cfg=_ai_get_config(r.site)
+    uid=r.user_id or _client_ip(request) or "anon"
+    if not cfg.get("is_enabled"):
+        # 未接大模型 → 回退关键词知识库(与旧 chat 一致)
+        return {"reply":_kb_answer(r.site if r.site in ("qh","app","site") else "qh", r.message),"llm":False}
+    # 限频: 按 site+uid 每分钟
+    rl=int(cfg.get("rate_limit_per_min") or 10)
+    rk=RNS+"ai:rl:%s:%s"%(r.site,uid)
+    used=R.incr(rk);
+    if used==1: R.expire(rk,60)
+    if used>rl: raise HTTPException(429,"提问太频繁, 请稍后再试")
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # 会话: 复用或新建
+    conv_id=r.conversation_id
+    if conv_id:
+        cur.execute("SELECT id FROM ai_conversations WHERE id=%s AND site=%s",(conv_id,r.site))
+        if not cur.fetchone(): conv_id=None
+    if not conv_id:
+        cur.execute("INSERT INTO ai_conversations(site,user_id,title) VALUES(%s,%s,%s) RETURNING id",
+                    (r.site,uid,(r.message or "")[:40]))
+        conv_id=cur.fetchone()["id"]
+    # 取历史(最近 10 条)构造上下文
+    cur.execute("SELECT role,content FROM ai_messages WHERE conversation_id=%s ORDER BY id DESC LIMIT 10",(conv_id,))
+    hist=[{"role":x["role"],"content":x["content"]} for x in reversed(cur.fetchall())]
+    hist.append({"role":"user","content":r.message})
+    cur.execute("INSERT INTO ai_messages(conversation_id,role,content) VALUES(%s,'user',%s)",(conv_id,r.message))
+    c.connection.commit() if hasattr(c,"connection") else None
+    try:
+        text,tok=_ai_call_llm(cfg,hist)
+    except HTTPException:
+        c.close(); raise
+    except Exception as e:
+        c.close(); raise HTTPException(502,"AI 服务调用失败: "+str(e)[:120])
+    cur.execute("INSERT INTO ai_messages(conversation_id,role,content,tokens) VALUES(%s,'assistant',%s,%s)",(conv_id,text,tok))
+    cur.execute("UPDATE ai_conversations SET token_used=token_used+%s,updated_at=now() WHERE id=%s",(tok,conv_id))
+    c.close()
+    return {"reply":text,"conversation_id":conv_id,"tokens":tok,"llm":True}
+
+@app.get("/api/admin/ai/stats", dependencies=[Depends(require_op("chat"))])
+def ai_stats(site:str=""):
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    w=" WHERE site=%s" if site else ""; p=((site,) if site else ())
+    cur.execute("SELECT count(*) n, COALESCE(SUM(token_used),0) tok FROM ai_conversations"+w,p); conv=cur.fetchone()
+    mw=" WHERE c.site=%s" if site else ""
+    cur.execute("SELECT count(*) n FROM ai_messages m JOIN ai_conversations c ON c.id=m.conversation_id"+mw,p); msg=cur.fetchone()
+    cur.execute("SELECT count(*) n FROM ai_messages m JOIN ai_conversations c ON c.id=m.conversation_id"+
+                (mw+" AND " if site else " WHERE ")+"m.created_at>=date_trunc('day',now())",p); today=cur.fetchone()
+    c.close()
+    return {"total_conversations":conv["n"],"total_messages":msg["n"],"today_messages":today["n"],"total_tokens":int(conv["tok"] or 0)}
+
+@app.get("/api/admin/ai/conversations", dependencies=[Depends(require_op("chat"))])
+def ai_conversations(site:str="", limit:int=50):
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    w=" WHERE site=%s" if site else ""; p=((site,max(1,min(limit,200))) if site else (max(1,min(limit,200)),))
+    cur.execute("""SELECT c.id,c.site,c.user_id,c.title,c.token_used,c.updated_at,
+                          (SELECT count(*) FROM ai_messages m WHERE m.conversation_id=c.id) message_count
+                   FROM ai_conversations c"""+w+" ORDER BY c.updated_at DESC LIMIT %s",p)
+    rows=cur.fetchall(); c.close()
+    return {"conversations":[dict(x) for x in rows]}
+
+@app.get("/api/admin/ai/conversation/{cid}/messages", dependencies=[Depends(require_op("chat"))])
+def ai_conv_messages(cid:int):
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT role,content,tokens,created_at FROM ai_messages WHERE conversation_id=%s ORDER BY id",(cid,))
+    rows=cur.fetchall(); c.close()
+    return {"messages":[dict(x) for x in rows]}
+
+
 @app.get("/api/admin/channels")
 def channels_list():
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -2330,8 +2675,100 @@ def notify_logs(channel:str="", status:str="", limit:int=100):
     return {"logs":rows}
 @app.get("/api/admin/notify/sounds", dependencies=[Depends(require_op("notify"))])
 def notify_sounds():
-    return {"sounds":[{"key":"none","name":"无"},{"key":"ding","name":"叮"},{"key":"success","name":"成功"},
-                      {"key":"alert","name":"警告"},{"key":"error","name":"错误"},{"key":"chime","name":"提示音"}]}
+    """声音人设管理列表(含 TTS 调参)。用于通知模板「声音人设」下拉与广播声音选择。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT key,name,persona,engine,lang,rate,pitch,voice_hint,edge_voice,edge_rate,edge_pitch,sample_text,enabled,sort FROM notification_sounds ORDER BY sort,key")
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    # 固定首项「无(静音)」不入库, 前端联合展示
+    return {"sounds":rows}
+class SoundReq(BaseModel):
+    license_key:str=""; key:str; name:str; persona:str=""; engine:str="browser"; lang:str="zh-CN"
+    rate:float=1.0; pitch:float=1.0; voice_hint:str=""
+    edge_voice:str=""; edge_rate:str="+0%"; edge_pitch:str="+0Hz"
+    sample_text:str=""; enabled:bool=True; sort:int=0
+@app.post("/api/admin/notify/sound", dependencies=[Depends(require_op("notify"))])
+def notify_sound_save(r:SoundReq):
+    """新增/更新声音人设。key 唯一(sweet/mature 等)。engine=browser(浏览器TTS,voice_hint挑声/rate/pitch)
+       或 edge(edge-tts 微软神经语音, edge_voice 如 zh-CN-XiaoxiaoNeural + edge_rate/edge_pitch 如 +8%/-10Hz)。"""
+    if not r.key or r.key=="none": raise HTTPException(400,"key 不能为空或 none")
+    if r.engine not in ("browser","edge"): raise HTTPException(400,"engine 只能 browser/edge")
+    if r.engine=="edge" and not r.edge_voice: raise HTTPException(400,"edge 引擎需指定 edge_voice")
+    c=db(); cur=c.cursor()
+    cur.execute("""INSERT INTO notification_sounds(key,name,persona,engine,lang,rate,pitch,voice_hint,edge_voice,edge_rate,edge_pitch,sample_text,enabled,sort,updated_at)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                   ON CONFLICT (key) DO UPDATE SET name=EXCLUDED.name,persona=EXCLUDED.persona,engine=EXCLUDED.engine,lang=EXCLUDED.lang,
+                   rate=EXCLUDED.rate,pitch=EXCLUDED.pitch,voice_hint=EXCLUDED.voice_hint,edge_voice=EXCLUDED.edge_voice,
+                   edge_rate=EXCLUDED.edge_rate,edge_pitch=EXCLUDED.edge_pitch,sample_text=EXCLUDED.sample_text,
+                   enabled=EXCLUDED.enabled,sort=EXCLUDED.sort,updated_at=now()""",
+                (r.key,r.name,r.persona,r.engine,r.lang,r.rate,r.pitch,r.voice_hint,r.edge_voice,r.edge_rate,r.edge_pitch,r.sample_text,r.enabled,r.sort))
+    c.close(); _audit("",_actor(r.license_key),"notify_sound_save",{"key":r.key,"engine":r.engine},DEMO_MODE,"saved")
+    return {"ok":True,"key":r.key}
+class SoundDel(BaseModel):
+    license_key:str=""; key:str
+@app.post("/api/admin/notify/sound_del", dependencies=[Depends(require_op("notify"))])
+def notify_sound_del(r:SoundDel):
+    """删除声音人设。若仍被模板引用, 该模板的 sound_key 回落 none(静音)。"""
+    c=db(); cur=c.cursor()
+    cur.execute("UPDATE notification_templates SET sound_key='none' WHERE sound_key=%s",(r.key,))
+    cur.execute("DELETE FROM notification_sounds WHERE key=%s",(r.key,))
+    c.close(); _audit("",_actor(r.license_key),"notify_sound_del",{"key":r.key},DEMO_MODE,"deleted")
+    return {"ok":True}
+@app.get("/api/admin/notify/edge_voices", dependencies=[Depends(require_op("notify"))])
+async def notify_edge_voices(locale:str="zh-CN"):
+    """列出 edge-tts 可用神经语音(供人设选择)。默认中文; locale=all 列全部。"""
+    try:
+        import edge_tts
+        vs=await edge_tts.list_voices()
+    except Exception as e:
+        raise HTTPException(500,"edge-tts 不可用: %s"%e)
+    out=[]
+    for v in vs:
+        loc=v.get("Locale","")
+        if locale!="all" and not loc.startswith(locale): continue
+        out.append({"short_name":v.get("ShortName"),"gender":v.get("Gender"),"locale":loc,
+                    "friendly":v.get("FriendlyName","")})
+    out.sort(key=lambda x:(x["locale"],x["short_name"]))
+    return {"voices":out,"count":len(out)}
+
+# ---- edge-tts 合成(服务端调微软神经语音, 落盘缓存; 公开只读, 用户端/试听按 key 播放 MP3) ----
+_TTS_CACHE_DIR="/opt/quanthedge/tts_cache"
+def _tts_cache_path(key, text):
+    import hashlib as _h
+    os.makedirs(_TTS_CACHE_DIR, exist_ok=True)
+    h=_h.sha256(((key or "")+"|"+(text or "")).encode("utf-8")).hexdigest()[:24]
+    return os.path.join(_TTS_CACHE_DIR, "%s_%s.mp3"%(key or "x", h))
+@app.get("/api/notify/tts")
+async def notify_tts(key:str, text:str=""):
+    """按声音人设 key 合成语音并返回 MP3(engine=edge 走 edge-tts; 落盘缓存同 key+text 复用)。
+       公开只读: 用户端跑马灯播报 + qhadmin 试听共用。engine!=edge 或人设不存在 → 404 让前端回落浏览器 TTS。"""
+    from fastapi.responses import FileResponse
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT key,engine,edge_voice,edge_rate,edge_pitch,sample_text FROM notification_sounds WHERE key=%s AND enabled=true",(key,))
+    s=cur.fetchone(); c.close()
+    if not s or s["engine"]!="edge" or not s["edge_voice"]:
+        raise HTTPException(404,"该人设非 edge 引擎或不存在(前端回落浏览器 TTS)")
+    say=(text or s.get("sample_text") or "语音播报测试")[:200]
+    path=_tts_cache_path(key, say)
+    if not os.path.exists(path):
+        try:
+            import edge_tts
+            comm=edge_tts.Communicate(text=say, voice=s["edge_voice"],
+                                      rate=(s.get("edge_rate") or "+0%"), pitch=(s.get("edge_pitch") or "+0Hz"))
+            await comm.save(path)
+        except Exception as e:
+            raise HTTPException(502,"合成失败: %s"%str(e)[:120])
+    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control":"public, max-age=86400"})
+@app.get("/api/notify/sounds")
+def notify_sounds_public():
+    """用户端 TTS 声音参数(公开只读): key→引擎/浏览器调参/edge标记。
+       engine=edge 的项用户端改走 /api/notify/tts?key=... 取 MP3; browser 的项按 lang/rate/pitch/voice_hint 本地合成。"""
+    try:
+        c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT key,name,persona,engine,lang,rate,pitch,voice_hint,edge_voice FROM notification_sounds WHERE enabled=true ORDER BY sort,key")
+        rows=[dict(x) for x in cur.fetchall()]; c.close()
+        return {"sounds":rows}
+    except Exception:
+        return {"sounds":[]}
 
 # ================= P3 数据管理(版本只读 / DB / SSL / WS 心跳) =================
 import subprocess as _sp
@@ -2601,8 +3038,25 @@ def dm_ssl_logs(cid:int):
 
 @app.get("/api/admin/datamgr/ws_stats", dependencies=[Depends(require_op("datamgr"))])
 def dm_ws_stats():
-    """WS/引擎心跳只读面板(QH 无 WS hub, 读 Redis 引擎心跳 + 桥状态)。"""
-    out={"engine":{},"redis":{}}
+    """WS/引擎心跳只读面板(QH 单广播器架构: 读 WS hub 连接数/快照新鲜度 + Redis 引擎心跳 + 桥状态)。"""
+    import time as _t
+    out={"engine":{},"redis":{},"ws":{}}
+    # WS hub 实时态: 连接数取 Rust HUB 上报 qh:ws:hub_clients(切 HUB 后本地恒空), 回落本地
+    try:
+        now=int(_t.time())
+        fast_ts=_WS_SNAP.get("fast_ts",0) or 0; slow_ts=_WS_SNAP.get("slow_ts",0) or 0
+        _hub_clients=R.get(RNS+"ws:hub_clients")
+        if _hub_clients is not None: clients=int(_hub_clients); src="hub"
+        else: clients=len(_WS_CLIENTS); src="local"
+        out["ws"]={
+            "clients": clients, "src": src, "hub_alive": (R.get(RNS+"ws:hub_alive")=="1"),
+            "fast_age": (now-fast_ts) if fast_ts else None,
+            "slow_age": (now-slow_ts) if slow_ts else None,
+            "fast_ts": fast_ts, "slow_ts": slow_ts,
+            "broadcaster": "running" if (clients>0 and fast_ts and (now-fast_ts)<15) else ("idle" if clients==0 else "stale"),
+        }
+    except Exception as e:
+        out["ws"]={"err":str(e)}
     for k in ("engine:cycle","engine:market","auto_exit:last","auto_entry:last"):
         try: out["engine"][k.split(":")[-1]]=R.get(RNS+k)
         except Exception: pass
@@ -3082,10 +3536,45 @@ async def engine_arb_scan(username:str):
                       "main_ok":bool(mt),"hedge_ok":bool(ht)})
     pairs.sort(key=lambda p:p["score"],reverse=True)
     best=pairs[0] if pairs else None
-    summary={"pairs":len(pairs),"reachable":sum(1 for p in pairs if p["reachable"]),
+    _reach=sum(1 for p in pairs if p["reachable"])
+    summary={"pairs":len(pairs),"reachable":_reach,
              "top_score":best["score"] if best else 0,
-             "verdict": ("发现 %d 个可套利机会"%sum(1 for p in pairs if p["reachable"])) if any(p["reachable"] for p in pairs) else "当前无达标套利机会,继续监控"}
+             "verdict": ("发现 %d 个可套利机会"%_reach) if any(p["reachable"] for p in pairs) else "当前无达标套利机会,继续监控"}
+    # 埋点落库(供产品分析统计, best-effort 不阻断)
+    try:
+        c2=db(); cur2=c2.cursor()
+        cur2.execute("""INSERT INTO ai_arb_scans(user_id,username,pairs,reachable,top_score,hit,top_symbol,top_basis)
+                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
+                     (uid,username,len(pairs),_reach,(best["score"] if best else 0),(_reach>0),
+                      (best["main_symbol"]+"/"+best["hedge_symbol"]) if best else "",(best["basis"] if best else None)))
+        c2.close()
+    except Exception as _e: pass
     return {"username":username,"summary":summary,"pairs":pairs}
+
+@app.get("/api/admin/bi/arb_stats")
+def bi_arb_stats(days:int=30):
+    """AI套利分析成功数据统计(所有用户): 扫描次数/命中次数/命中率/活跃用户/平均最高分 + 每用户明细。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT count(*) scans, COALESCE(SUM(CASE WHEN hit THEN 1 ELSE 0 END),0) hits,
+                          count(DISTINCT user_id) users, COALESCE(AVG(top_score),0) avg_top,
+                          COALESCE(SUM(reachable),0) total_reachable
+                   FROM ai_arb_scans WHERE scanned_at>=now()-(%s||' days')::interval""",(days,))
+    ov=dict(cur.fetchone() or {})
+    cur.execute("""SELECT username, count(*) scans, SUM(CASE WHEN hit THEN 1 ELSE 0 END) hits,
+                          COALESCE(MAX(top_score),0) best_score, COALESCE(AVG(top_score),0) avg_score,
+                          MAX(scanned_at) last_scan
+                   FROM ai_arb_scans WHERE scanned_at>=now()-(%s||' days')::interval
+                   GROUP BY username ORDER BY hits DESC, scans DESC LIMIT 100""",(days,))
+    users=[dict(x) for x in cur.fetchall()]; c.close()
+    scans=int(ov.get("scans") or 0); hits=int(ov.get("hits") or 0)
+    for u in users:
+        u["scans"]=int(u["scans"] or 0); u["hits"]=int(u["hits"] or 0)
+        u["hit_rate"]=round(u["hits"]/u["scans"]*100,1) if u["scans"] else 0
+        u["best_score"]=int(u["best_score"] or 0); u["avg_score"]=round(float(u["avg_score"] or 0),1)
+        u["last_scan"]=u["last_scan"].isoformat() if u["last_scan"] else None
+    return {"days":days,"overview":{"scans":scans,"hits":hits,"hit_rate":round(hits/scans*100,1) if scans else 0,
+            "users":int(ov.get("users") or 0),"avg_top":round(float(ov.get("avg_top") or 0),1),
+            "total_reachable":int(ov.get("total_reachable") or 0)},"users":users}
 
 
 @app.get("/api/naked/{username}")
@@ -3323,6 +3812,26 @@ async def _ws_build_fast():
     except Exception: out["liq"]=None
     out["symbols"]={"main":msym,"hedge":hsym}
     return out
+async def _ws_build_ticks(prev):
+    """极轻字段(~0.3s): 仅主/对冲报价(并发拉, 桥可并发~50ms)。复用上一帧 fast 的 legs/account/state/liq
+       (重字段由 heavy 节流刷新), 让点差(卡/账本头/蓝框)达 2/s+ 而不放大重桥调用。"""
+    out=dict(prev or {})   # 继承上一帧的 legs/account/state/liq 等重字段
+    msym="XAUUSD"; hsym="XAUUSD"
+    try:
+        st=out.get("state") or {}; ev=(st.get("eval") or {})
+        if ev:
+            first=next(iter(ev.values()),{})
+            hsym=first.get("hedge_symbol") or "XAUUSD"; msym=first.get("symbol") or "XAUUSD"
+    except Exception: pass
+    # 主+对冲报价并发拉(bridge 支持并发, 两个一起 ~50ms 而非串行 ~100ms)
+    async def _safe(coro):
+        try: return await coro
+        except Exception: return None
+    mt, ht = await _asyncio.gather(_safe(quote_tick(msym,"main")), _safe(quote_tick(hsym,"hedge")))
+    if mt is not None: out["tick_main"]=mt
+    if ht is not None: out["tick_hedge"]=ht   # 失败保留上一帧 tick, 不清零
+    out["symbols"]={"main":msym,"hedge":hsym}
+    return out
 async def _ws_build_slow(user):
     """低频字段(~10s): 腿统计/日盈亏/配对历史/两腿成交。user 相关但成本高, 全局缓存(单用户场景)。"""
     out={}
@@ -3350,36 +3859,73 @@ def _ws_user_data(user):
         d["alerts"]=[json.loads(x) for x in (R.lrange(RNS+"alerts",0,19) or [])]
     except Exception: d["alerts"]=[]
     return d
-async def _ws_broadcaster():
-    """仅在有连接时运行: 每 ~1s 刷 fast, 每 ~10s 刷 slow。"""
+def _ws_gate_open():
+    return bool(_WS_CLIENTS) or (R.get(RNS+"ws:hub_alive")=="1")
+def _ws_publish():
+    """把当前 _WS_SNAP 组帧 PUBLISH 到 Redis(HUB 扇出) + 扇出本地 WS 连接。"""
     import time as _t
-    tick=0
+    if not _WS_SNAP.get("fast"): return
+    try:
+        _hub_user = (next(iter(_WS_CLIENTS)).__dict__.get("_qh_user","") if _WS_CLIENTS else (R.get(RNS+"ws:primary_user") or ""))
+        payload={"type":"snapshot","fast":_WS_SNAP.get("fast"),"slow":_WS_SNAP.get("slow"),
+                 "user_data":_ws_user_data(_hub_user) if _hub_user else {},"ts":_WS_SNAP.get("fast_ts") or int(_t.time())}
+        _j=json.dumps(payload,default=str)
+        R.publish(RNS+"ws:snapshot", _j)
+        R.setex(RNS+"ws:last_snapshot", 30, _j)
+    except Exception: pass
+async def _ws_local_fanout():
+    """扇出到本地 /ws/stream 连接(HUB 架构下通常为空; 保留向后兼容)。"""
+    import time as _t
+    dead=[]
+    for ws in list(_WS_CLIENTS):
+        try:
+            u=getattr(ws,"_qh_user","")
+            payload={"type":"snapshot","fast":_WS_SNAP.get("fast"),"slow":_WS_SNAP.get("slow"),
+                     "user_data":_ws_user_data(u) if u else {},"ts":_WS_SNAP.get("fast_ts") or int(_t.time())}
+            await ws.send_text(json.dumps(payload,default=str))
+        except Exception: dead.append(ws)
+    for ws in dead: _WS_CLIENTS.discard(ws)
+
+async def _ws_tick_loop():
+    """~0.3s: 仅刷报价+强平(轻, 继承重字段)并 PUBLISH → 点差达 2/s+。是唯一的发布者。
+       与 heavy/slow 循环并发, 桥调用皆 await I/O, 事件循环交错执行, heavy 不阻塞本循环。"""
+    import time as _t
     while True:
         try:
-            if _WS_CLIENTS:
-                _WS_SNAP["fast"]=await _ws_build_fast(); _WS_SNAP["fast_ts"]=int(_t.time())
-                if tick%10==0:
-                    # slow 用首个连接的 user(单用户场景足够)
-                    u=next(iter(_WS_CLIENTS)).__dict__.get("_qh_user","") if _WS_CLIENTS else ""
-                    _WS_SNAP["slow"]=await _ws_build_slow(u); _WS_SNAP["slow_ts"]=int(_t.time())
-                # 扇出
-                dead=[]
-                for ws in list(_WS_CLIENTS):
-                    try:
-                        u=getattr(ws,"_qh_user","")
-                        payload={"type":"snapshot","fast":_WS_SNAP["fast"],"slow":_WS_SNAP["slow"],
-                                 "user_data":_ws_user_data(u) if u else {},"ts":_WS_SNAP["fast_ts"]}
-                        await ws.send_text(json.dumps(payload,default=str))
-                    except Exception:
-                        dead.append(ws)
-                for ws in dead: _WS_CLIENTS.discard(ws)
-            tick+=1
-        except Exception as e:
-            print("ws_broadcaster err",e)
-        await _asyncio.sleep(1)
+            if _ws_gate_open():
+                _WS_SNAP["fast"]=await _ws_build_ticks(_WS_SNAP.get("fast"))
+                _WS_SNAP["fast_ts"]=int(_t.time())
+                _ws_publish()
+                await _ws_local_fanout()
+        except Exception as e: print("ws_tick err",e)
+        await _asyncio.sleep(0.3)
+async def _ws_heavy_loop():
+    """~1s: 刷双腿状态/持仓/账户/引擎态(桥调用最贵), 只更新 _WS_SNAP 不单独发布(tick 循环发)。"""
+    while True:
+        try:
+            if _ws_gate_open():
+                heavy=await _ws_build_fast()
+                # heavy 覆盖重字段; tick 循环随后会把最新报价并入
+                _WS_SNAP["fast"]={**(_WS_SNAP.get("fast") or {}), **heavy}
+        except Exception as e: print("ws_heavy err",e)
+        await _asyncio.sleep(1.0)
+async def _ws_slow_loop():
+    """~10s: 刷腿统计/日盈亏/配对/成交。"""
+    import time as _t
+    while True:
+        try:
+            if _ws_gate_open():
+                u=""
+                if _WS_CLIENTS: u=next(iter(_WS_CLIENTS)).__dict__.get("_qh_user","")
+                _WS_SNAP["slow"]=await _ws_build_slow(u); _WS_SNAP["slow_ts"]=int(_t.time())
+        except Exception as e: print("ws_slow err",e)
+        await _asyncio.sleep(10.0)
 @app.on_event("startup")
 async def _startup_ws():
-    _asyncio.create_task(_ws_broadcaster())
+    # 三档并发: tick(0.3s 发布) / heavy(1s) / slow(10s), 互不阻塞
+    _asyncio.create_task(_ws_heavy_loop())
+    _asyncio.create_task(_ws_slow_loop())
+    _asyncio.create_task(_ws_tick_loop())
 
 @app.websocket("/ws/stream")
 async def ws_stream(ws: WebSocket):

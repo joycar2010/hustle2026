@@ -1,7 +1,7 @@
 <template>
   <div>
     <el-card style="margin-bottom:12px" body-style="padding:12px">
-      <template #header><span>💳 收款配置 (TRC20)</span></template>
+      <template #header><span class="ch"><el-icon><Wallet/></el-icon> 收款配置 (TRC20)</span></template>
       <el-form inline>
         <el-form-item label="TRC20 收款地址"><el-input v-model="payAddr" size="small" style="width:340px" placeholder="Txxxxxxxxxxxx (用户端二维码/转账地址)"/></el-form-item>
         <el-form-item label="备注"><el-input v-model="payNote" size="small" style="width:180px" placeholder="选填,展示在支付页"/></el-form-item>

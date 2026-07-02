@@ -2,8 +2,8 @@
   <el-select :model-value="modelValue" filterable remote clearable :remote-method="search" :loading="loading"
     size="small" :style="{width:width}" :placeholder="placeholder" @update:model-value="$emit('update:modelValue',$event)" @focus="onFocus">
     <el-option v-for="u in opts" :key="u.username" :value="u.username"
-      :label="u.username + (u.status?(' · '+zh(USER_STATUS,u.status)):'')">
-      <span>{{u.username}}</span>
+      :label="u.username + (u.nickname?(' ('+u.nickname+')'):'') + (u.status?(' · '+zh(USER_STATUS,u.status)):'')">
+      <span>{{u.username}}<span v-if="u.nickname" style="color:#909399;font-size:11px;margin-left:4px">{{u.nickname}}</span></span>
       <span style="float:right;color:#909399;font-size:11px">{{zh(USER_STATUS,u.status)}}</span>
     </el-option>
   </el-select>

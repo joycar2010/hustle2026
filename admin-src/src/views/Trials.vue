@@ -26,7 +26,7 @@
         <el-form-item><el-button type="primary" size="small" @click="grant">发放试用</el-button></el-form-item>
       </el-form>
       <div style="color:#909399;font-size:11px">强制 DEMO=试用期只演示不真金下单(限风险); 试用到期自动降级。</div>
-      <div v-if="g.key==='flagship'" style="color:#E6A23C;font-size:11px;margin-top:4px">⚠ 旗舰档为真金下单,请确认用户已注资再发放。</div>
+      <div v-if="g.key==='flagship'" style="color:#E6A23C;font-size:11px;margin-top:4px">旗舰档为真金下单,请确认用户已注资再发放。</div>
     </el-card>
 
     <el-card>

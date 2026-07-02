@@ -33,3 +33,7 @@ html.dark .crumb{background:#0a1224}
 html.dark .el-card{background:#101a33;border-color:#243056;color:#dbe6ea}
 html.dark .el-table{--el-table-bg-color:#101a33;--el-table-tr-bg-color:#101a33;--el-table-border-color:#243056;--el-table-text-color:#dbe6ea;--el-table-header-bg-color:#16224a;--el-table-header-text-color:#5aa8e8}
 
+
+/* 卡头功能图标: 与文字对齐, 主色调(浅深主题自适应) */
+.ch{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.ch .el-icon{color:var(--el-color-primary);font-size:16px}

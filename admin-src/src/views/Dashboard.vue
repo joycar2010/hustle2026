@@ -1,11 +1,11 @@
 <template>
   <div>
     <el-alert v-if="ov&&ov.strategies&&ov.strategies.global_estop" type="error" :closable="false" show-icon
-              title="⛔ 全局急停生效中 — 所有用户自动进/出场已停" style="margin-bottom:12px"/>
+              title="全局急停生效中 — 所有用户自动进/出场已停" style="margin-bottom:12px"/>
 
     <!-- ========== 运营概览 ========== -->
     <el-card style="margin-bottom:12px" body-style="padding:14px">
-      <template #header><span>📈 运营概览</span>
+      <template #header><span class="ch"><el-icon><TrendCharts/></el-icon> 运营概览</span>
         <span style="float:right"><el-select v-model="days" size="small" style="width:110px" @change="load">
           <el-option :value="7" label="近7天"/><el-option :value="30" label="近30天"/><el-option :value="90" label="近90天"/></el-select>
           <el-button size="small" @click="load" style="margin-left:8px">刷新</el-button></span></template>
@@ -27,7 +27,7 @@
 
     <!-- ========== 系统运行 ========== -->
     <el-card body-style="padding:14px">
-      <template #header><span>🖥 系统运行</span>
+      <template #header><span class="ch"><el-icon><Monitor/></el-icon> 系统运行</span>
         <span v-if="ov" style="float:right;font-size:12px">
           <el-tag size="small" :type="ov.strategies.global_estop?'danger':'success'">{{ov.strategies.global_estop?'急停中':'运行中'}}</el-tag></span></template>
       <el-row :gutter="12" v-if="ov">

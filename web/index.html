@@ -183,12 +183,12 @@
 
   /* ---- order book ---- */
   .orderbook{flex:0 0 282px;background:#FDFDFD;border:1px solid var(--cardline);border-radius:4px;display:flex;flex-direction:column}
-  /* PC 端: 隐藏坑位区 反向Ask/正向Bid 表头与数据行(该数据已在账本表头 t-ask/t-bid 展示);
-     移动端保留显示(见 body.mobile-mode 规则)。仅留下 ob-foot 下单按钮。 */
-  .ob-head,.ob-rows{display:none}
+  /* PC 端: 显示坑位区 反向Ask/正向Bid 点差流(表头+滚动数据行)+ 下方下单按钮。
+     行区 overflow 滚动、min-height:0 防撑开顶掉下单按钮; 移动端另有精简规则(见 body.mobile-mode)。 */
+  .ob-head{display:flex}
   .ob-head .c{flex:1;text-align:center;padding:7px 0}
   .ob-head .c:first-child{border-right:1px solid var(--cardline)}
-  .ob-rows{flex:1}
+  .ob-rows{flex:1;overflow-y:auto;min-height:0}
   .ob-row{display:flex;border-bottom:1px solid #e6e9ec;font-family:var(--num);font-size:13px}
   .ob-row .c{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:3px 12px}
   .ob-row .c:first-child{border-right:1px solid #e6e9ec}
@@ -973,11 +973,12 @@
       <div id="arb-content" style="display:none">
         <div id="arb-summary" style="background:linear-gradient(135deg,#f3efff,#faf5ff);border:1px solid #e0d4fa;border-radius:8px;padding:12px;margin-bottom:12px"></div>
         <div id="arb-list"></div>
+        <div id="arb-narrate" style="display:none;background:#eaf0fa;border:1px solid #dde2ee;border-radius:8px;padding:12px;margin-top:10px;font-size:13px;line-height:1.7;white-space:pre-wrap;color:#1a2033"></div>
         <div style="font-size:11px;color:#8a959b;margin-top:10px">评分=当前基差相对入场阈值的达标度(0-100);≥100% 即达标可套利。数据实时取双腿行情,仅供参考。</div>
       </div>
       <div id="arb-loading" style="text-align:center;padding:30px;color:#8a959b">分析中…</div>
     </div>
-    <div class="df"><button class="btn-ghost" onclick="closeMask('arb-mask')">关闭</button><button class="btn-primary" onclick="loadArb()">刷新分析</button></div>
+    <div class="df"><button class="btn-ghost" onclick="closeMask('arb-mask')">关闭</button><button class="btn-ghost" onclick="arbNarrate()">AI 解读</button><button class="btn-primary" onclick="loadArb()">刷新分析</button></div>
   </div>
 </div>
 
@@ -1003,6 +1004,7 @@
       <span class="nb-i"><i>对冲账户</i><b>过夜<em id="h-day-swap">--</em> 手续<em id="h-day-fee">--</em> 返佣<em id="h-day-rb">--</em></b></span>
     </div>
     <span class="spacer"></span>
+    <button class="btn-theme tb-more" data-tbg id="soundBtn" onclick="toggleSound()" title="声音提醒开关"><svg class="svgi"><use href="#i-bell"/></svg> 声音</button>
     <button class="btn-theme tb-more" data-tbg id="themeBtn" onclick="toggleTheme()" title="切换浅色/深色"><svg class="svgi"><use href="#i-theme"/></svg> 深色</button>
     <div class="usermenu tb-more" data-tbg id="usermenu">
       <button class="um-btn" id="um-btn" onclick="toggleUserMenu()" title="用户登录管理">
@@ -1729,17 +1731,18 @@ const QH={user:null,key:null,started:false,
     const self=this;
     const sc=document.getElementById('sc-canvas');
     const startTimer=function(){ if(self._scTimer)return; self._scTimer=setInterval(function(){ if(self._scVisible && typeof scFetch==='function' && !SC.loading)scFetch(); },15000); };
+    // 兜底: 登录后无条件先拉一次(不再单纯依赖 IO 可见性触发, 防容器初始隐藏/尺寸0 时图空白)
+    if(typeof scQuick==='function'){ this._scInited=true; this._scVisible=true; try{ scQuick(1); }catch(e){} }
+    startTimer();
     if(sc && 'IntersectionObserver' in window){
       const io=new IntersectionObserver(function(ents){
         ents.forEach(function(en){
           self._scVisible=en.isIntersecting;
-          if(en.isIntersecting && !self._scInited){ self._scInited=true; if(typeof scQuick==='function')scQuick(1); startTimer(); }
+          // 进入视口且尚无数据时补拉一次(兜底已先拉, 这里只在数据为空时补)
+          if(en.isIntersecting && typeof scFetch==='function' && !SC.loading && !(SC.fwd&&SC.fwd.length)){ scFetch(); }
         });
       },{threshold:0.05});
       io.observe(sc);
-    } else {
-      // 无 IO 兜底: 直接初始化(旧浏览器)
-      this._scVisible=true; this._scInited=true; if(typeof scQuick==='function')scQuick(1); startTimer();
     }
   },
   /* 实时推送: WS 为主, 断线降级为 3s 轮询兜底; 心跳保活 + 指数退避 + 前台/联网自愈重连 */
@@ -1896,6 +1899,8 @@ function renderSnapshot(m){
     const ae=$('t-ask'); if(ae){ ae.textContent=revPts.toFixed(2); ae.className=(revPts>=0?'up':'down'); }
     const bce=$('t-bid'); if(bce){ bce.textContent=fwdPts.toFixed(2); bce.className=(fwdPts>=0?'up':'down'); }
     window.__lastSpread=revPts;
+    // 蓝框点差流直接吃 snapshot 的 tick(随广播 2/s+ 滚动; 不再自拉 REST)
+    if(typeof pushOBStream==='function') pushOBStream(revPts, fwdPts);
   }
   // 强平估算
   if(f.liq){ fillLiq('m',f.liq.main); fillLiq('h',f.liq.hedge); window.__liq=f.liq; }
@@ -2114,31 +2119,26 @@ setInterval(()=>{
   ob.forEach(r=>{ r[0]+=Math.round((Math.random()-.5)*4); r[1]+=Math.round((Math.random()-.5)*3);});
   renderOB();
 },1500);
-// 点差数据流: 每 tick 算 反向Ask(对冲ASK−主BID) / 正向Bid(主ASK−对冲BID), 滚动成流
-async function renderOBLive(){
-  try{
-    const msym=(window.QHSYM||'XAUUSD'), hsym=(window.__hedgeSym||'XAUUSD');
-    const mt=await QH.get('/quote/tick/'+encodeURIComponent(msym)).catch(()=>null);
-    const ht=await QH.get('/quote/tick/'+encodeURIComponent(hsym)+'?leg=hedge').catch(()=>null);
-    const w=$('ob-rows'); if(!w||!mt||!ht||mt.bid==null||ht.ask==null)return;
-    const rev=(Number(ht.ask)-Number(mt.bid)); const fwd=(Number(mt.ask)-Number(ht.bid));
-    if(!window.__obStream)window.__obStream=[];
-    window.__obStream.push({rev:rev,fwd:fwd}); if(window.__obStream.length>10)window.__obStream.shift();
-    window.__lastSpread=rev;
-    var mr=$('mob-rev'),mf=$('mob-fwd');
-    if(mr){mr.textContent=rev.toFixed(2);mr.className=(rev>=0?'up':'down');}
-    if(mf){mf.textContent=fwd.toFixed(2);mf.className=(fwd>=0?'up':'down');}
-    w.innerHTML='';
-    // 新到的在顶部; 每行箭头=相对上一笔的涨跌(参考图: 数字右侧逐行箭头)
-    for(let i=window.__obStream.length-1;i>=0;i--){ const r=window.__obStream[i]; const prev=window.__obStream[i-1];
-      const revUp = prev? (r.rev>prev.rev) : (r.rev>=0);
-      const fwdUp = prev? (r.fwd>prev.fwd) : (r.fwd>=0);
-      const div=document.createElement('div'); div.className='ob-row';
-      div.innerHTML='<div class="c"><span class="'+(r.rev>=0?'up':'down')+'">'+r.rev.toFixed(2)+'</span><span class="'+(revUp?'up':'down')+'">'+(revUp?SVGI('i-tri-up'):SVGI('i-tri-down'))+'</span></div>'+
-                    '<div class="c"><span class="'+(r.fwd>=0?'up':'down')+'">'+r.fwd.toFixed(2)+'</span><span class="'+(fwdUp?'up':'down')+'">'+(fwdUp?SVGI('i-tri-up'):SVGI('i-tri-down'))+'</span></div>';
-      w.appendChild(div);
-    }
-  }catch(e){}
+// 点差数据流: 反向Ask(对冲ASK−主BID) / 正向Bid(主ASK−对冲BID), 滚动成流。
+// 数据源已改为 WS snapshot 的 tick(renderSnapshot 调 pushOBStream), 不再自拉 REST(根除对冲符号 404 时序 bug + 随广播 2/s+ 提速)。
+function pushOBStream(rev, fwd){
+  const w=$('ob-rows'); if(!w||rev==null||fwd==null)return;
+  if(!window.__obStream)window.__obStream=[];
+  window.__obStream.push({rev:rev,fwd:fwd}); if(window.__obStream.length>10)window.__obStream.shift();
+  window.__lastSpread=rev;
+  var mr=$('mob-rev'),mf=$('mob-fwd');
+  if(mr){mr.textContent=rev.toFixed(2);mr.className=(rev>=0?'up':'down');}
+  if(mf){mf.textContent=fwd.toFixed(2);mf.className=(fwd>=0?'up':'down');}
+  w.innerHTML='';
+  // 新到的在顶部; 每行箭头=相对上一笔的涨跌
+  for(let i=window.__obStream.length-1;i>=0;i--){ const r=window.__obStream[i]; const prev=window.__obStream[i-1];
+    const revUp = prev? (r.rev>prev.rev) : (r.rev>=0);
+    const fwdUp = prev? (r.fwd>prev.fwd) : (r.fwd>=0);
+    const div=document.createElement('div'); div.className='ob-row';
+    div.innerHTML='<div class="c"><span class="'+(r.rev>=0?'up':'down')+'">'+r.rev.toFixed(2)+'</span><span class="'+(revUp?'up':'down')+'">'+(revUp?SVGI('i-tri-up'):SVGI('i-tri-down'))+'</span></div>'+
+                  '<div class="c"><span class="'+(r.fwd>=0?'up':'down')+'">'+r.fwd.toFixed(2)+'</span><span class="'+(fwdUp?'up':'down')+'">'+(fwdUp?SVGI('i-tri-up'):SVGI('i-tri-down'))+'</span></div>';
+    w.appendChild(div);
+  }
 }
 /* ===== 点差走势(移植 testgo /spread-chart): 方向切换/时间范围/记录频率/区间统计/悬浮提示 ===== */
 var SC={dir:'forward',fwd:[],rev:[],loading:false,quick:null};
@@ -2215,7 +2215,7 @@ function scTip(ev){
 }
 (function(){ const cv=$('sc-canvas'); if(cv){ cv.addEventListener('mousemove',scTip); cv.addEventListener('mouseleave',()=>{ const t=$('sc-tip'); if(t)t.style.display='none'; }); } })();
 window.addEventListener('resize',()=>{ if(typeof scDraw==='function')scDraw(); });
-setInterval(()=>{ if(window.__LIVE)renderOBLive(); },1500);
+// 蓝框点差流已改由 WS snapshot 驱动(renderSnapshot→pushOBStream), 原 1.5s REST 自拉定时器已移除。
 
 // account prices flicker (demo, 仅登录前; 元素已迁移→空操作守卫)
 let mAsk=4983.22,hAsk=4983.71;
@@ -3173,8 +3173,24 @@ async function loadArb(){
         +' · 基差 <b>'+(p.basis!=null?p.basis:'—')+'</b> / 入场阈值 '+p.entry_spread+'</div>'
         +bar+'<div style="font-size:12px;margin-top:6px;color:'+c+'">'+p.suggest+'</div></div>';
     }).join('') : '<div style="color:#8a959b;text-align:center;padding:16px">暂无配置的产品对(请先在参数配置里设置对冲品种)</div>';
+    window.__arbScan=r;   // 存扫描结果供 AI 解读
     $('arb-loading').style.display='none'; $('arb-content').style.display='block';
   }catch(e){ $('arb-loading').textContent='分析失败,请稍后重试'; }
+}
+// AI 解读: 把套利扫描结果喂给 LLM 生成自然语言叙述(site=qh, 未启用则回退提示)
+async function arbNarrate(){
+  const box=$('arb-narrate'); if(!box)return; const r=window.__arbScan; if(!r){ box.textContent='请先刷新分析'; return; }
+  box.style.display='block'; box.textContent='AI 解读生成中…';
+  const s=r.summary||{}; const pairs=(r.pairs||[]).slice(0,6);
+  const brief='套利扫描结果: 结论='+(s.verdict||'')+'; 产品对'+(s.pairs||0)+'个, 可套利'+(s.reachable||0)+'个, 最高评分'+(s.top_score||0)+'。明细: '
+    +pairs.map(p=>p.main_symbol+'/'+p.hedge_symbol+' 基差'+(p.basis!=null?p.basis:'—')+' 阈值'+p.entry_spread+' 评分'+p.score).join('; ')
+    +'。请用中文简明解读当前套利机会与风险, 给出关注建议(不构成投资建议)。';
+  try{
+    const resp=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({site:'qh',message:brief,user_id:(window.QH&&QH.user)||'arb'})});
+    const j=await resp.json();
+    box.textContent = j.reply || j.detail || 'AI 解读暂不可用(服务未配置)';
+  }catch(e){ box.textContent='AI 解读失败,请稍后重试'; }
 }
 function umFill(r){
   const set=function(id,v){const e=$(id);if(e)e.textContent=v;};
@@ -3368,6 +3384,52 @@ function toggleTheme(){
   if(typeof drawKline==='function') drawKline();
 }
 
+/* ============ 声音提醒(edge-tts 神经语音优先, 浏览器 TTS 兜底; 人设 /notify/sounds 管理) ============ */
+var __soundOn = (localStorage.getItem('qh_sound_on')==='1');
+var __soundCfg = {};   // key -> {engine,lang,rate,pitch,voice_hint,edge_voice,persona,name}
+var __ttsAudio = null;
+function __loadSoundCfg(){
+  try{ QH.get('/notify/sounds').then(function(r){
+    var m={}; ((r&&r.sounds)||[]).forEach(function(s){ m[s.key]=s; }); __soundCfg=m;
+  }).catch(function(){}); }catch(e){}
+}
+__loadSoundCfg(); setInterval(__loadSoundCfg, 300000);   // 5min 刷新人设参数
+function __soundBtnSync(){ var b=$('soundBtn'); if(b)b.innerHTML=SVGI('i-bell')+(__soundOn?' 声音开':' 声音关'); if(b)b.style.opacity=__soundOn?'1':'.55'; }
+function toggleSound(){ __soundOn=!__soundOn; localStorage.setItem('qh_sound_on',__soundOn?'1':'0'); __soundBtnSync();
+  if(__soundOn) speakAlert('声音提醒已开启','sweet'); }
+function __speakBrowser(text, cfg){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    var u=new SpeechSynthesisUtterance(String(text).replace(/<[^>]+>/g,'').slice(0,120));
+    u.lang=(cfg&&cfg.lang)||'zh-CN';
+    u.rate=(cfg&&Number(cfg.rate))||1.05;
+    u.pitch=(cfg&&Number(cfg.pitch))||1.1;
+    var vs=window.speechSynthesis.getVoices()||[]; var voice=null;
+    if(cfg&&cfg.voice_hint){ try{ var re=new RegExp(cfg.voice_hint,'i'); voice=vs.find(function(v){return re.test(v.name)||re.test(v.lang)}); }catch(e){} }
+    if(!voice) voice=vs.find(function(v){return /zh|Chinese/i.test(v.lang)&&/female|女|Ting|Yaoyao|Xiaoxiao|Huihui/i.test(v.name)})||vs.find(function(v){return /zh|Chinese/i.test(v.lang)});
+    if(voice)u.voice=voice;
+    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+function speakAlert(text, soundKey){
+  if(!__soundOn || !text) return;
+  var cfg=(soundKey && __soundCfg[soundKey]) ? __soundCfg[soundKey] : null;
+  var clean=String(text).replace(/<[^>]+>/g,'').slice(0,180);
+  // edge 引擎: 拉服务端合成的 MP3 播放; 失败回落浏览器 TTS
+  if(cfg && cfg.engine==='edge' && soundKey){
+    try{
+      if(__ttsAudio){ try{__ttsAudio.pause();}catch(e){} __ttsAudio=null; }
+      var url='/api/notify/tts?key='+encodeURIComponent(soundKey)+'&text='+encodeURIComponent(clean);
+      __ttsAudio=new Audio(url);
+      __ttsAudio.play().catch(function(){ __speakBrowser(clean, cfg); });
+      return;
+    }catch(e){ __speakBrowser(clean, cfg); return; }
+  }
+  __speakBrowser(clean, cfg);
+}
+try{ if('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged=function(){}; }catch(e){}
+setTimeout(__soundBtnSync, 200);
+
 /* ============ ACCOUNT SETTINGS ============ */
 async function openAcct(which){
   const isMain=which==='main';
@@ -3496,6 +3558,7 @@ async function pollMarquee(){
       mqSeed.unshift([lv,msg]); if(mqSeed.length>14)mqSeed.pop();
       renderMq();
       if(it.blink){ mqEl.classList.add('flash'); setTimeout(()=>mqEl.classList.remove('flash'),10*1000); }
+      if(it.sound && it.sound!=='none' && typeof speakAlert==='function') speakAlert(it.title||it.content||'新通知', it.sound);
     });
   }catch(e){}
 }
@@ -3602,9 +3665,10 @@ function qhChatPush(role,text){ __qhchatMsgs.push({id:'m'+Date.now()+Math.random
 function qhChatDel(id){ __qhchatMsgs=__qhchatMsgs.filter(function(m){return m.id!==id;}); __qhSave(); qhChatRender(); }
 function qhChatClear(){ if(!__qhchatMsgs.length)return; if(!confirm('确定清空所有对话记录？此操作不可撤销。'))return; __qhchatMsgs=[]; __qhSave(); qhChatRender(); }
 async function qhChatSend(){ var i=document.getElementById('qhchat-in'); var t=(i.value||'').trim(); if(!t)return; i.value=''; qhChatPush('me',t);
-  try{ const r=await fetch('/api/lead/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({channel:'site',ext_id:__qhchatId,nickname:(window.QH&&QH.user)||'访客',content:t})});
-    const j=await r.json(); if(j.reply)qhChatPush('ai',j.reply); }catch(e){ qhChatPush('ai','网络繁忙,请稍后重试'); } }
+  try{ const r=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({site:'qh',conversation_id:(window.__qhConvId||null),message:t,user_id:(window.QH&&QH.user)||__qhchatId})});
+    const j=await r.json(); if(j.conversation_id)window.__qhConvId=j.conversation_id;
+    if(j.reply)qhChatPush('ai',j.reply); else if(j.detail)qhChatPush('ai',j.detail); }catch(e){ qhChatPush('ai','网络繁忙,请稍后重试'); } }
 </script>
 </body>
 </html>

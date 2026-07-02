@@ -60,7 +60,7 @@
       <div style="color:#909399;font-size:11px;margin-top:6px">新增权益项后,商品编辑与用户授予处自动出现该项;纯开关/数值类前端门控即生效,无需改代码。</div>
     </el-card>
 
-    <el-dialog v-model="fdlg" :title="fediting?'编辑权益项':'新增权益项'" width="440">
+    <el-dialog :close-on-click-modal="false" v-model="fdlg" :title="fediting?'编辑权益项':'新增权益项'" width="440">
       <el-form label-width="92">
         <el-form-item label="权益键"><el-input v-model="fcur.key" :disabled="fediting" placeholder="如 max_pairs / vip_signal"/></el-form-item>
         <el-form-item label="中文名"><el-input v-model="fcur.name"/></el-form-item>
@@ -72,7 +72,7 @@
       <template #footer><el-button @click="fdlg=false">取消</el-button><el-button type="primary" @click="saveFeat">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="dlg" :title="cur.key?'编辑商品':'新增商品'" width="460">
+    <el-dialog :close-on-click-modal="false" v-model="dlg" :title="cur.key?'编辑商品':'新增商品'" width="460">
       <el-form label-width="92">
         <el-form-item label="商品键"><el-input v-model="cur.key" :disabled="editing" placeholder="如 pairs_3 / auto_loop_pro"/></el-form-item>
         <el-form-item label="分类"><el-select v-model="cur.category"><el-option v-for="c in categories" :key="c.key" :label="c.name" :value="c.key"/></el-select></el-form-item>
