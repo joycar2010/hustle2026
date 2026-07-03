@@ -16,11 +16,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from .collector import Collector
 from .config import cfg
 from .markets import load_markets
+from .options_fill_state import OptionsState
+from .options_probe import OptionsParityProbe
 from .report import build_report
 from .state import State
 
 state = State(csv_path=cfg.csv_path, redis_url=cfg.redis_url, min_net_bps=cfg.min_net_bps)
 collector = Collector(state)
+
+options_state = OptionsState(csv_path=cfg.options_csv, redis_url=cfg.redis_url,
+                             min_net_bps=cfg.options_min_net_bps)
+options_probe = OptionsParityProbe(options_state)
 
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 
@@ -28,10 +34,12 @@ _STATIC = Path(__file__).resolve().parent.parent / "static"
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     collector.start()
+    options_probe.start()
     try:
         yield
     finally:
         collector.stop()
+        options_probe.stop()
 
 
 app = FastAPI(title="CrossArb P0 — 只读经济性验证(多市场)", lifespan=lifespan)
@@ -100,9 +108,27 @@ def api_dexarb():
     return JSONResponse(shadow_snapshot())
 
 
+@app.get("/api/options")
+def api_options():
+    """币安期权买卖权平价只读探针数据(只能 KILL/证伪;KEEP 需真金 canary)。"""
+    return JSONResponse(options_state.snapshot())
+
+
+@app.get("/options", response_class=HTMLResponse)
+def options_page():
+    return (_STATIC / "options.html").read_text(encoding="utf-8")
+
+
 @app.get("/dexarb", response_class=HTMLResponse)
 def dexarb_page():
     return (_STATIC / "dexarb.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/cexdex")
+def api_cexdex():
+    """CEX-DEX 价差存活测量数据(只读)。"""
+    from .cexdex_monitor import cexdex_snapshot
+    return JSONResponse(cexdex_snapshot())
 
 
 if __name__ == "__main__":
