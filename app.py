@@ -76,8 +76,12 @@ def verify(req: LoginReq, request: Request):
             "expire_at":row["expire_at"].isoformat(),"expired":expired,"feishu_id":row["feishu_id"]}
 
 # ---- 用户自助注册 / 体验试用 / 内购下单(用户端公开, 防滥用限 IP) ----
-def _self_register(username, contact, feishu_id, request, trial_days=0, agent_code=""):
-    """建号(生成 license), trial_days>0 则写试用期+强制DEMO。返回 license/username。防滥用: 同 IP 24h 限 3 次。"""
+INVITE_REWARD_TRIAL = 100    # 邀请好友激活试用 → 邀请人 +100 积分
+INVITE_REWARD_PAID_RATE = 0.10  # 邀请好友首次付费 → 邀请人返实付 10% 积分(×POINTS_PER_USDT)
+def _self_register(username, contact, feishu_id, request, trial_days=0, agent_code="", staff_code="", inviter=""):
+    """建号(生成 license), trial_days>0 则写试用期+强制DEMO。返回 license/username。防滥用: 同 IP 24h 限 3 次。
+       staff_code: 员工首归因(终身); inviter: 好友邀请人(终身)。三者并行, 数据隔离。
+       试用激活额外发 +20 积分; 若有 inviter 且本次是试用 → 邀请人 +100(每被邀人一次)。"""
     import secrets
     ip=_client_ip(request)
     cnt_key=RNS+"reg_ip:"+ip
@@ -93,37 +97,220 @@ def _self_register(username, contact, feishu_id, request, trial_days=0, agent_co
     now=datetime.datetime.now(datetime.timezone.utc)
     exp = now+datetime.timedelta(days=trial_days) if trial_days>0 else now+datetime.timedelta(days=3650)
     status = "trial" if trial_days>0 else "active"
-    c=db(); cur=c.cursor()
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     # 绑定代理(分佣归因)
     aid=None
     if agent_code:
-        cur.execute("SELECT id FROM agents WHERE code=%s",(agent_code,)); a=cur.fetchone(); aid=a[0] if a else None
-    cur.execute("""INSERT INTO users(username,license_key,plan,expire_at,feishu_id,status,created_at,last_ip,last_login,geo_country,geo_name,agent_id,source,
+        cur.execute("SELECT id FROM agents WHERE code=%s",(agent_code,)); a=cur.fetchone(); aid=(a["id"] if a else None)
+    # 员工首归因: 校验 staff_code 存在且启用
+    sc=None
+    if staff_code:
+        cur.execute("SELECT code FROM staff WHERE code=%s AND enabled=true",(staff_code,)); s=cur.fetchone(); sc=(s["code"] if s else None)
+    # 邀请人首归因: 必须是存在的用户, 且不能自邀
+    inv=None
+    if inviter and inviter!=username:
+        cur.execute("SELECT id FROM users WHERE username=%s",(inviter,)); iv=cur.fetchone(); inv=(inviter if iv else None)
+    cur.execute("""INSERT INTO users(username,license_key,plan,expire_at,feishu_id,status,created_at,last_ip,last_login,geo_country,geo_name,agent_id,staff_code,inviter,source,
                    trial_until,trial_started)
-                   VALUES(%s,%s,%s,%s,%s,%s,now(),%s,now(),%s,%s,%s,'self',%s,%s) RETURNING id""",
-                (username,newk,None,exp,feishu_id or None,status,ip,iso,zh,aid,
+                   VALUES(%s,%s,%s,%s,%s,%s,now(),%s,now(),%s,%s,%s,%s,%s,'self',%s,%s) RETURNING id""",
+                (username,newk,None,exp,feishu_id or None,status,ip,iso,zh,aid,sc,inv,
                  (exp if trial_days>0 else None),(now if trial_days>0 else None)))
-    uid=cur.fetchone()[0]; c.close()
+    uid=cur.fetchone()["id"]
+    # 试用激活 +20 积分(与建号同事务)
+    if trial_days>0:
+        try: _points_add(cur, uid, 20, "试用激活", "trial", username, "self")
+        except Exception as pe: print("trial points err",pe)
+    # 邀请关系 + 邀请人试用奖励(每被邀人一次, reward_trial_done 防重)
+    if inv:
+        cur.execute("""INSERT INTO invites(inviter,invitee,stage,reward_trial_done)
+                       VALUES(%s,%s,%s,%s) ON CONFLICT (invitee) DO NOTHING""",
+                    (inv,username,("trial" if trial_days>0 else "registered"), False))
+        if trial_days>0:
+            cur.execute("SELECT reward_trial_done FROM invites WHERE invitee=%s",(username,)); iv2=cur.fetchone()
+            if iv2 and not iv2["reward_trial_done"]:
+                inv_uid=_uid(inv)
+                if inv_uid:
+                    try:
+                        _points_add(cur, inv_uid, INVITE_REWARD_TRIAL, "邀请好友激活试用(%s)"%username, "invite_trial", username, "self")
+                        cur.execute("UPDATE invites SET reward_trial_done=true,stage='trial' WHERE invitee=%s",(username,))
+                    except Exception as pe: print("invite trial reward err",pe)
+    # 活动引擎: register / trial_activate 事件 + 员工绩效自动发放(试用达标)
+    try:
+        _fire_campaigns(cur, "register", uid, username, {})
+        if trial_days>0:
+            _fire_campaigns(cur, "trial_activate", uid, username, {})
+            if sc: _staff_perf_auto(cur, sc, "trial_activate")
+    except Exception as ce: print("camp register err",ce)
+    c.close()
     if trial_days>0: R.set(RNS+"force_demo:"+username,"1")
-    _audit(username,"self","register",{"trial_days":trial_days,"ip":ip,"agent":agent_code},DEMO_MODE,status)
-    return {"ok":True,"username":username,"license_key":newk,"status":status,"expire_at":exp.isoformat(),"trial":trial_days>0}
+    _audit(username,"self","register",{"trial_days":trial_days,"ip":ip,"agent":agent_code,"staff":sc,"inviter":inv},DEMO_MODE,status)
+    return {"ok":True,"username":username,"license_key":newk,"status":status,"expire_at":exp.isoformat(),"trial":trial_days>0,"staff":sc,"inviter":inv}
 
 class RegisterReq(BaseModel):
-    username:str; contact:str=""; feishu_id:str=""; agent_code:str=""
+    username:str; contact:str=""; feishu_id:str=""; agent_code:str=""; staff_code:str=""; inviter:str=""
 @app.post("/api/auth/register")
 def auth_register(r:RegisterReq, request:Request):
     if not r.username or len(r.username)<3: raise HTTPException(400,"用户名至少3位")
-    return _self_register(r.username, r.contact, r.feishu_id, request, trial_days=0, agent_code=r.agent_code)
+    return _self_register(r.username, r.contact, r.feishu_id, request, trial_days=0, agent_code=r.agent_code, staff_code=r.staff_code, inviter=r.inviter)
 
 class TrialReq2(BaseModel):
-    username:str; contact:str=""; feishu_id:str=""; agent_code:str=""; days:int=7
+    username:str; contact:str=""; feishu_id:str=""; agent_code:str=""; staff_code:str=""; inviter:str=""; days:int=7
 @app.post("/api/auth/trial")
 def auth_trial(r:TrialReq2, request:Request):
     if not r.username or len(r.username)<3: raise HTTPException(400,"用户名至少3位")
-    return _self_register(r.username, r.contact, r.feishu_id, request, trial_days=max(1,min(30,r.days)), agent_code=r.agent_code)
+    return _self_register(r.username, r.contact, r.feishu_id, request, trial_days=max(1,min(30,r.days)), agent_code=r.agent_code, staff_code=r.staff_code, inviter=r.inviter)
 
 class PurchaseReq(BaseModel):
     license_key:str; product_key:str
+# ================= 会员积分 + 会员等级(第一阶段; 全在业务层, 绝不进交易引擎) =================
+# 积分: 消费返10/USDT、签到、试用激活/转正; 兑换权益写 entitlements。会员等级由订阅+成长值纯推导(就高)。
+POINTS_PER_USDT = 10          # 消费/成长: 每 1 USDT = 10 积分 + 10 成长值
+# 会员等级阈值(成长值; 与订阅档就高): L0<L1<L2<L3<L4
+_GROWTH_TIERS = [(30000,4),(9600,3),(2700,2),(1000,1)]   # 累计消费 3000/960/270/100 USDT ×10
+_LEVEL_NAME = {0:"体验交易者",1:"基础对冲者",2:"进阶交易者",3:"专业套利者",4:"旗舰合伙人"}
+def _member_level(u):
+    """u: dict 含 paid_until/plan/growth_value/total_recharge/trial_until。返回 {level,name,source}。
+       订阅档等级与成长值等级就高生效; 无付费但在试用=L0。"""
+    now=datetime.datetime.now(datetime.timezone.utc)
+    gv=int(u.get("growth_value") or 0)
+    # 订阅有效期内, 按累计充值折算的订阅档给一个下限(月100→L1, 季270→L2, 年960→L3)
+    lvl_sub=0
+    pu=u.get("paid_until")
+    if pu and pu>now:
+        tr=float(u.get("total_recharge") or 0)
+        lvl_sub = 3 if tr>=960 else 2 if tr>=270 else 1 if tr>=100 else 1
+    lvl_gv=0
+    for thr,lv in _GROWTH_TIERS:
+        if gv>=thr: lvl_gv=lv; break
+    lvl=max(lvl_sub,lvl_gv)
+    return {"level":lvl,"name":_LEVEL_NAME.get(lvl,"体验交易者"),
+            "source":("subscription" if lvl_sub>=lvl_gv and lvl_sub>0 else ("growth" if lvl_gv>0 else "trial"))}
+def _points_add(cur, uid, delta, reason, ref_type="", ref_id="", operator=""):
+    """积分入账(与调用方同事务): 更新 users.points 缓存 + 写 points_ledger。delta 可负; 余额不可为负。
+       返回新余额。cur 必须是 RealDictCursor(读 balance_after)。"""
+    delta=int(delta)
+    cur.execute("SELECT points FROM users WHERE id=%s FOR UPDATE",(uid,))
+    row=cur.fetchone()
+    if not row: raise HTTPException(404,"user not found")
+    cur_bal=int(row["points"] if isinstance(row,dict) else row[0])
+    new_bal=cur_bal+delta
+    if new_bal<0: raise HTTPException(400,"积分不足(当前 %d, 需扣 %d)"%(cur_bal,-delta))
+    cur.execute("UPDATE users SET points=%s WHERE id=%s",(new_bal,uid))
+    cur.execute("""INSERT INTO points_ledger(user_id,delta,balance_after,reason,ref_type,ref_id,operator)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s)""",(uid,delta,new_bal,reason,ref_type,str(ref_id),operator))
+    return new_bal
+def _grow_add(cur, uid, usdt):
+    """成长值累加(永久, 仅升不降): 每 USDT ×10。与调用方同事务。"""
+    inc=int(round(float(usdt)*POINTS_PER_USDT))
+    if inc>0: cur.execute("UPDATE users SET growth_value=COALESCE(growth_value,0)+%s WHERE id=%s",(inc,uid))
+    return inc
+
+# ================= 活动引擎(声明式: 事件+条件+动作; 运营在 qhadmin 建活动即生效) =================
+# 复用三期所有钩子点, 每个动作走已验证链路。全在业务层, 绝不进交易引擎。
+# event: register/trial_activate/first_paid/paid/recharge/checkin/recall_trial/recall_sub
+# cond(JSON, 全部满足才触发): min_amount / months_in([..]) / kind_in([..]) / first_paid(bool)
+# actions(JSON 数组, 每项 {type,...}):
+#   points   {value}            发固定积分
+#   points_pct {rate}           按 ctx.amount 实付比例发积分(×POINTS_PER_USDT)
+#   growth   {value}            加成长值
+#   extend_days {days}          延长 paid_until/expire_at N 天
+#   trial_days {days}           延长 trial_until N 天(演示)
+#   coupon   {code_prefix,kind,value,applies_to,max_discount,per_user_limit,valid_days}  发专属券给该用户
+def _camp_cond_ok(cond, ctx):
+    """条件全满足才触发。ctx: {amount,months,kind,first_paid}。"""
+    try:
+        if not cond: return True
+        if "min_amount" in cond and float(ctx.get("amount") or 0) < float(cond["min_amount"]): return False
+        if "kind_in" in cond and ctx.get("kind") not in (cond.get("kind_in") or []): return False
+        if "months_in" in cond and int(ctx.get("months") or 0) not in [int(x) for x in (cond.get("months_in") or [])]: return False
+        if cond.get("first_paid") is True and not ctx.get("first_paid"): return False
+        if "streak_min" in cond and int(ctx.get("streak") or 0) < int(cond["streak_min"]): return False
+        return True
+    except Exception: return True
+def _camp_do_action(cur, act, uid, username, ctx, campaign_id):
+    """执行单个动作(与调用方同事务)。返回简短结果串(供审计)。"""
+    t=act.get("type"); import secrets as _sx
+    if t=="points":
+        v=int(act.get("value") or 0)
+        if v>0: _points_add(cur, uid, v, "活动:%s"%act.get("_cname",""), "campaign", campaign_id, "campaign"); return "points+%d"%v
+    elif t=="points_pct":
+        v=int(round(float(ctx.get("amount") or 0)*float(act.get("rate") or 0)*POINTS_PER_USDT))
+        if v>0: _points_add(cur, uid, v, "活动:%s"%act.get("_cname",""), "campaign", campaign_id, "campaign"); return "points_pct+%d"%v
+    elif t=="growth":
+        v=int(act.get("value") or 0)
+        if v>0: cur.execute("UPDATE users SET growth_value=COALESCE(growth_value,0)+%s WHERE id=%s",(v,uid)); return "growth+%d"%v
+    elif t=="extend_days":
+        d=int(act.get("days") or 0)
+        if d>0: cur.execute("""UPDATE users SET paid_until=GREATEST(COALESCE(paid_until,now()),now())+(%s||' days')::interval,
+                 expire_at=GREATEST(COALESCE(paid_until,now()),now())+(%s||' days')::interval, status='active' WHERE id=%s""",(d,d,uid)); return "extend+%dd"%d
+    elif t=="trial_days":
+        d=int(act.get("days") or 0)
+        if d>0:
+            cur.execute("UPDATE users SET trial_until=GREATEST(COALESCE(trial_until,now()),now())+(%s||' days')::interval WHERE id=%s",(d,uid))
+            R.set(RNS+"force_demo:"+username,"1"); return "trial+%dd"%d
+    elif t=="coupon":
+        # 发一张该用户专属券(code=前缀+随机, target_username=用户)
+        code=(act.get("code_prefix") or "CAMP")+"-"+_sx.token_hex(3).upper()
+        vd=int(act.get("valid_days") or 30)
+        cur.execute("""INSERT INTO coupons(code,name,kind,value,applies_to,max_discount,total_qty,per_user_limit,target_username,valid_until,enabled)
+                       VALUES(%s,%s,%s,%s,%s,%s,1,%s,%s,now()+(%s||' days')::interval,true)""",
+                    (code, act.get("name") or "活动专属券", act.get("kind") or "percent", float(act.get("value") or 0),
+                     act.get("applies_to") or "any", float(act.get("max_discount") or 0), int(act.get("per_user_limit") or 1), username, vd))
+        return "coupon:"+code
+    return ""
+def _fire_campaigns(cur, event, uid, username, ctx=None):
+    """触发某事件的所有匹配活动(与调用方同事务)。cur 必须 RealDictCursor。
+       逐活动: 校验开关/有效期/总量/逐用户限次/条件 → 执行动作 → 记 campaign_grants + fired_count+1。
+       失败单个活动不阻断其他(try 包裹), 但动作内 _points_add 等异常会被吞以保主流程。"""
+    ctx=ctx or {}
+    try:
+        cur.execute("""SELECT id,name,category,cond,actions,per_user_limit,total_limit,fired_count
+                       FROM campaigns WHERE enabled=true AND event=%s
+                       AND (valid_from IS NULL OR valid_from<=now()) AND (valid_until IS NULL OR valid_until>now())
+                       ORDER BY priority DESC, id""",(event,))
+        camps=cur.fetchall()
+    except Exception as e:
+        print("fire_campaigns load err",e); return []
+    fired=[]
+    for cp in camps:
+        try:
+            if int(cp["total_limit"] or 0)>0 and int(cp["fired_count"] or 0)>=int(cp["total_limit"]): continue
+            if int(cp["per_user_limit"] or 0)>0:
+                cur.execute("SELECT count(*) n FROM campaign_grants WHERE campaign_id=%s AND username=%s",(cp["id"],username))
+                if cur.fetchone()["n"]>=int(cp["per_user_limit"]): continue
+            if not _camp_cond_ok(cp["cond"] or {}, ctx): continue
+            results=[]
+            for act in (cp["actions"] or []):
+                act=dict(act); act["_cname"]=cp["name"]
+                r=_camp_do_action(cur, act, uid, username, ctx, cp["id"])
+                if r: results.append(r)
+            if results:
+                cur.execute("INSERT INTO campaign_grants(campaign_id,username,event,detail) VALUES(%s,%s,%s,%s)",
+                            (cp["id"],username,event,json.dumps({"results":results,"ctx":{k:ctx.get(k) for k in ('amount','months','kind')}})))
+                cur.execute("UPDATE campaigns SET fired_count=COALESCE(fired_count,0)+1 WHERE id=%s",(cp["id"],))
+                fired.append({"campaign":cp["name"],"results":results})
+        except Exception as e:
+            print("campaign fire err (%s):"%cp.get("name"),e)
+    return fired
+
+# 员工"达标"自动发绩效积分(与用户对冲积分隔离; 挂在归因事件, 配置存 channels.json staff_perf 段)
+# 默认: 每有效试用 +10 / 每首单付费 +50 / 每 100USDT 订单额 +20(即 per_usdt=0.2)
+def _staff_perf_auto(cur, staff_code, event, amount=0):
+    if not staff_code: return
+    try:
+        cfg=_chcfg_load().get("staff_perf",{})
+        if cfg.get("enabled") is False: return   # 缺省启用(未配也发默认); 显式 false 才关
+        trial_pt=int(cfg.get("trial", 10)); first_pt=int(cfg.get("first_paid", 50)); per_usdt=float(cfg.get("per_usdt", 0.2))
+    except Exception:
+        trial_pt,first_pt,per_usdt=10,50,0.2
+    delta=0; reason=""
+    if event=="trial_activate": delta=trial_pt; reason="员工达标:有效试用"
+    elif event=="first_paid": delta=first_pt; reason="员工达标:首单付费"
+    elif event=="paid": delta=int(round(float(amount or 0)*per_usdt)); reason="员工达标:订单额提成分"
+    if delta>0:
+        try: _perf_add(cur, staff_code, delta, reason, "auto", event, "system")
+        except Exception as pe: print("staff_perf_auto err",pe)
+
 @app.post("/api/iap/purchase")
 def iap_purchase(r:PurchaseReq):
     """用户自助内购: 校验密钥→建订单(pending 待财务核对)→授商品权益→计佣。支付走演示(与现充值一致)。"""
@@ -154,7 +341,8 @@ class OrderSubmitReq(BaseModel):
     license_key:str; kind:str                     # iap / subscription / recharge
     product_key:str=""; months:int=0; amount:float=0
     pay_method:str="onchain"                        # onchain(TRC20 到账后财务核对) / balance(扣余额即时)
-    tx_hash:str=""
+    tx_hash:str=""; coupon_code:str=""              # 折扣券(仅 iap/subscription; 服务端权威计算)
+    points_use:int=0                                # 积分抵现(100分=1USDT, 单单≤30%; 抵现部分不计佣不返积分)
 @app.post("/api/order/submit")
 def order_submit(r:OrderSubmitReq):
     """用户自助下单统一入口。三类:
@@ -163,10 +351,10 @@ def order_submit(r:OrderSubmitReq):
        - recharge: 充值到 users.balance(仅 onchain)
        支付方式: onchain=建 pending 订单待财务核对(演示环境即时生效); balance=扣余额即时确认。"""
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,username,status,balance FROM users WHERE license_key=%s",(r.license_key,)); u=cur.fetchone()
+    cur.execute("SELECT id,username,status,balance,points FROM users WHERE license_key=%s",(r.license_key,)); u=cur.fetchone()
     if not u: c.close(); raise HTTPException(401,"invalid license key")
     if u["status"] in ("banned","disabled"): c.close(); raise HTTPException(403,"账户不可用")
-    uid=u["id"]; bal=float(u["balance"] or 0); prod=None; grants={}; amount=0.0; months=0; unit="USDT"
+    uid=u["id"]; bal=float(u["balance"] or 0); user_pts=int(u["points"] or 0); prod=None; grants={}; amount=0.0; months=0; unit="USDT"
     # 1) 计价 + 校验
     if r.kind=="iap":
         cur.execute("SELECT * FROM iap_products WHERE key=%s AND enabled=true",(r.product_key,)); prod=cur.fetchone()
@@ -182,6 +370,27 @@ def order_submit(r:OrderSubmitReq):
         if r.pay_method=="balance": c.close(); raise HTTPException(400,"充值不支持用余额支付")
     else:
         c.close(); raise HTTPException(400,"未知订单类型: %s"%r.kind)
+    # 1b) 折扣券(仅 iap/subscription; 服务端权威, 减免后为实付 amount, 佣金/积分按实付算)
+    gross=amount; discount=0.0; cp_used=None
+    if r.coupon_code and r.kind in ("iap","subscription"):
+        try:
+            discount, cp_used = _coupon_eval(cur, r.coupon_code, uid, u["username"], r.kind, amount)
+            amount=round(amount-discount, 2)
+        except HTTPException: c.close(); raise
+    # 1c) 积分抵现(仅 iap/subscription; 100分=1USDT, 单单≤券后金额30%; 抵现部分不计佣不返积分, 防刷)
+    POINTS_PER_USDT_CASH=100    # 抵现比: 100 积分抵 1 USDT
+    pts_use=0; pts_discount=0.0
+    if int(r.points_use or 0)>0 and r.kind in ("iap","subscription"):
+        want=int(r.points_use)
+        if want>user_pts: c.close(); raise HTTPException(400,"积分不足(当前 %d)"%user_pts)
+        cap_usdt=round(amount*0.30, 2)                       # 30% 上限(基于券后金额)
+        max_pts_by_cap=int(cap_usdt*POINTS_PER_USDT_CASH)
+        max_pts_by_amt=int(amount*POINTS_PER_USDT_CASH)      # 不超过订单额本身
+        pts_use=min(want, max_pts_by_cap, max_pts_by_amt)
+        pts_use=(pts_use//POINTS_PER_USDT_CASH)*POINTS_PER_USDT_CASH   # 取整到 100 的倍数(整 USDT)
+        if pts_use>0:
+            pts_discount=round(pts_use/POINTS_PER_USDT_CASH, 2)
+            amount=round(amount-pts_discount, 2)
     # 2) 支付方式
     if r.pay_method=="balance":
         if bal < amount: c.close(); raise HTTPException(400,"余额不足(当前 %.2f, 需 %.2f)"%(bal,amount))
@@ -202,22 +411,154 @@ def order_submit(r:OrderSubmitReq):
                        expire_at=GREATEST(COALESCE(paid_until,now()),now())+(%s||' months')::interval, status='active' WHERE id=%s""",(months,months,uid))
     elif r.kind=="recharge":
         cur.execute("UPDATE users SET balance=balance+%s,total_recharge=COALESCE(total_recharge,0)+%s WHERE id=%s",(amount,amount,uid))
-    # 4) 落订单(统一入 iap_orders, 供 admin/orders 财务核对)
+    # 4) 落订单(统一入 iap_orders, 供 admin/orders 财务核对); 带员工归因 staff_code
+    cur.execute("SELECT staff_code FROM users WHERE id=%s",(uid,)); _sc=(cur.fetchone() or {}).get("staff_code")
     pkey = r.product_key if r.kind=="iap" else ("_sub_%dm"%months if r.kind=="subscription" else "_recharge")
-    cur.execute("""INSERT INTO iap_orders(user_id,product_key,amount,unit,status,operator,reconcile_status,kind,pay_method,tx_hash,months,paid_at)
-                   VALUES(%s,%s,%s,%s,%s,'self',%s,%s,%s,%s,%s,now()) RETURNING id""",
-                (uid,pkey,amount,unit,ostatus,recon,r.kind,r.pay_method,r.tx_hash or None,months))
+    cur.execute("""INSERT INTO iap_orders(user_id,product_key,amount,unit,status,operator,reconcile_status,kind,pay_method,tx_hash,months,staff_code,points_used,points_discount,paid_at)
+                   VALUES(%s,%s,%s,%s,%s,'self',%s,%s,%s,%s,%s,%s,%s,%s,now()) RETURNING id""",
+                (uid,pkey,amount,unit,ostatus,recon,r.kind,r.pay_method,r.tx_hash or None,months,_sc,pts_use,pts_discount))
     oid=cur.fetchone()["id"]
-    # 计佣(充值不计佣, 内购/订阅计)
+    # 4a) 积分抵现扣分(同事务; _points_add 再锁行校验余额不可为负, 双保险)
+    if pts_use>0:
+        try: _points_add(cur, uid, -pts_use, "积分抵现(%s)"%r.kind, "order_pay", oid, "self")
+        except HTTPException: c.close(); raise
+    # 4b) 券核销(下单成功后记 redemption + 全局用量+1; 与订单同事务)
+    if cp_used and discount>0:
+        cur.execute("INSERT INTO coupon_redemptions(code,user_id,order_id,discount) VALUES(%s,%s,%s,%s)",
+                    (cp_used["code"],uid,oid,discount))
+        cur.execute("UPDATE coupons SET used_qty=COALESCE(used_qty,0)+1 WHERE code=%s",(cp_used["code"],))
+    # 计佣(充值不计佣, 内购/订阅计; 按券后+抵现后实付 amount 计 → 抵现部分自动不计佣)
     if r.kind in ("iap","subscription"):
         try: _calc_commissions(cur, oid, r.kind, uid, amount)
         except Exception as ce: print("commission err",ce)
-    cur.execute("SELECT balance FROM users WHERE id=%s",(uid,)); newbal=float(cur.fetchone()["balance"] or 0)
+    # 积分返 + 成长值(内购/订阅按实付 ×10; 充值不返积分不计成长, 与不计佣一致)
+    pts_gained=0
+    if r.kind in ("iap","subscription") and amount>0:
+        try:
+            pts_gained=_points_add(cur, uid, int(round(amount*POINTS_PER_USDT)),
+                                   "消费返积分(%s)"%r.kind, "order", oid, "self")
+            _grow_add(cur, uid, amount)
+        except Exception as pe: print("points err",pe)
+    # 邀请人首付返积分(被邀人首次付费, 返实付10%积分给邀请人; reward_paid_done 防重)
+    if r.kind in ("iap","subscription") and amount>0:
+        try:
+            cur.execute("SELECT inviter,reward_paid_done FROM invites WHERE invitee=%s",(u["username"],)); iv=cur.fetchone()
+            if iv and iv["inviter"] and not iv["reward_paid_done"]:
+                inv_uid=_uid(iv["inviter"])
+                if inv_uid:
+                    _points_add(cur, inv_uid, int(round(amount*INVITE_REWARD_PAID_RATE*POINTS_PER_USDT)),
+                                "邀请好友首付返积分(%s)"%u["username"], "invite_paid", oid, "self")
+                    cur.execute("UPDATE invites SET reward_paid_done=true,stage='paid' WHERE invitee=%s",(u["username"],))
+        except Exception as pe: print("invite paid reward err",pe)
+    # 活动引擎: paid/first_paid(内购/订阅) 或 recharge。first_paid=该用户此前无 paid 的内购/订阅单
+    # + 连续续费: renewal_streak 事件(近90天订阅单数, ctx.streak); 员工绩效自动发放(达标)
+    try:
+        ectx={"amount":amount,"months":months,"kind":r.kind}
+        if r.kind in ("iap","subscription"):
+            cur.execute("SELECT count(*) n FROM iap_orders WHERE user_id=%s AND status='paid' AND kind IN ('iap','subscription') AND id<>%s",(uid,oid))
+            is_first=(cur.fetchone()["n"]==0); ectx["first_paid"]=is_first
+            _fire_campaigns(cur, "paid", uid, u["username"], ectx)
+            if is_first: _fire_campaigns(cur, "first_paid", uid, u["username"], ectx)
+            # 连续续费: 近90天该用户订阅单数(含本单), 触发 renewal_streak(cond streak_min 判达标)
+            if r.kind=="subscription":
+                cur.execute("SELECT count(*) n FROM iap_orders WHERE user_id=%s AND status='paid' AND kind='subscription' AND paid_at>=now()-interval '90 days'",(uid,))
+                _fire_campaigns(cur, "renewal_streak", uid, u["username"], {**ectx,"streak":cur.fetchone()["n"]})
+            # 员工绩效自动发放(订单额提成分 + 首单)
+            if _sc:
+                _staff_perf_auto(cur, _sc, "paid", amount)
+                if is_first: _staff_perf_auto(cur, _sc, "first_paid")
+        elif r.kind=="recharge":
+            _fire_campaigns(cur, "recharge", uid, u["username"], ectx)
+    except Exception as ce: print("camp order err",ce)
+    cur.execute("SELECT balance,points FROM users WHERE id=%s",(uid,)); _row=cur.fetchone()
+    newbal=float(_row["balance"] or 0); newpts=int(_row["points"] or 0)
     c.close()
-    _audit(u["username"],"self","order_submit",{"kind":r.kind,"amount":amount,"pay":r.pay_method,"tx":bool(r.tx_hash)},DEMO_MODE,recon)
-    return {"ok":True,"order_id":oid,"kind":r.kind,"amount":amount,"pay_method":r.pay_method,
-            "reconcile_status":recon,"granted":list(grants.keys()),"balance":newbal,"demo":DEMO_MODE,
+    _audit(u["username"],"self","order_submit",{"kind":r.kind,"gross":gross,"coupon_disc":discount,"pts_use":pts_use,"pts_disc":pts_discount,"amount":amount,"coupon":(cp_used["code"] if cp_used else None),"pay":r.pay_method,"tx":bool(r.tx_hash),"pts":pts_gained},DEMO_MODE,recon)
+    return {"ok":True,"order_id":oid,"kind":r.kind,"gross":round(gross,2),"discount":round(discount,2),
+            "points_used":pts_use,"points_discount":round(pts_discount,2),"amount":amount,"pay_method":r.pay_method,
+            "reconcile_status":recon,"granted":list(grants.keys()),"balance":newbal,"points":newpts,"demo":DEMO_MODE,
             "expire_at":str(exp) if exp else None}
+
+# ================= 折扣券(第二阶段; 服务端权威计算, 与积分/佣金链路解耦) =================
+def _coupon_eval(cur, code, uid, username, kind, amount):
+    """校验券并算折扣(不落用量, 供预览与下单复用)。返回 (discount, coupon_row) 或 raise HTTPException。
+       cur 必须 RealDictCursor。规则: 启用/有效期/适用类型/最低额/专属用户/全局余量/逐用户次数。"""
+    cur.execute("SELECT * FROM coupons WHERE code=%s",(code,)); cp=cur.fetchone()
+    if not cp or not cp["enabled"]: raise HTTPException(400,"券不存在或已停用")
+    now=datetime.datetime.now(datetime.timezone.utc)
+    if cp["valid_from"] and now<cp["valid_from"]: raise HTTPException(400,"券未到生效时间")
+    if cp["valid_until"] and now>cp["valid_until"]: raise HTTPException(400,"券已过期")
+    at=cp["applies_to"] or "any"
+    if at!="any" and at!=kind: raise HTTPException(400,"该券仅适用于 %s 订单"%at)
+    if cp["target_username"] and cp["target_username"]!=username: raise HTTPException(400,"该券为专属券, 不可用")
+    if float(cp["min_amount"] or 0)>0 and amount<float(cp["min_amount"]): raise HTTPException(400,"未达最低金额 %.2f"%float(cp["min_amount"]))
+    if int(cp["total_qty"] or 0)>0 and int(cp["used_qty"] or 0)>=int(cp["total_qty"]): raise HTTPException(400,"券已被领完")
+    cur.execute("SELECT count(*) n FROM coupon_redemptions WHERE code=%s AND user_id=%s",(code,uid))
+    used_by_user=cur.fetchone()["n"]
+    if int(cp["per_user_limit"] or 1)>0 and used_by_user>=int(cp["per_user_limit"]): raise HTTPException(400,"该券你已用过")
+    # 折扣计算
+    if cp["kind"]=="percent":
+        disc=round(amount*float(cp["value"])/100.0, 2)
+    else:
+        disc=round(float(cp["value"]), 2)
+    md=float(cp["max_discount"] or 0)
+    if md>0: disc=min(disc, md)
+    disc=min(disc, round(amount,2))   # 折扣不超过订单额
+    if disc<=0: raise HTTPException(400,"券折扣为 0")
+    return disc, cp
+class CouponPreviewReq(BaseModel):
+    license_key:str=""; code:str; kind:str; amount:float=0; months:int=0; product_key:str=""
+@app.post("/api/coupon/preview")
+def coupon_preview(r:CouponPreviewReq, x_license: str = Header(default="")):
+    """下单前预览券折扣(不核销)。amount 缺省时按 kind 服务端算(防前端传假价)。"""
+    lk=x_license or r.license_key
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,username FROM users WHERE license_key=%s",(lk,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(401,"invalid license key")
+    amt=float(r.amount or 0)
+    if r.kind=="subscription": amt=SUB_PRICES.get(int(r.months or 0),0)
+    elif r.kind=="iap":
+        cur.execute("SELECT price FROM iap_products WHERE key=%s AND enabled=true",(r.product_key,)); p=cur.fetchone()
+        amt=float(p["price"] or 0) if p else 0
+    try:
+        disc,cp=_coupon_eval(cur, r.code, u["id"], u["username"], r.kind, amt)
+    except HTTPException: c.close(); raise
+    c.close()
+    return {"ok":True,"code":r.code,"name":cp["name"],"amount":round(amt,2),"discount":disc,"payable":round(amt-disc,2)}
+@app.get("/api/coupon/mine/{username}")
+def coupon_mine(username:str):
+    """用户可用券(通用启用券 + 该用户专属券; 排除已达用量的; 简单列出, 前端下单选)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id FROM users WHERE username=%s",(username,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(404,"user not found")
+    uid=u["id"]; now=datetime.datetime.now(datetime.timezone.utc)
+    cur.execute("""SELECT code,name,kind,value,applies_to,min_amount,max_discount,valid_until,target_username,total_qty,used_qty,per_user_limit
+                   FROM coupons WHERE enabled=true AND (target_username IS NULL OR target_username=%s)
+                   AND (valid_until IS NULL OR valid_until>now()) ORDER BY created_at DESC""",(username,))
+    out=[]
+    for cp in cur.fetchall():
+        if int(cp["total_qty"] or 0)>0 and int(cp["used_qty"] or 0)>=int(cp["total_qty"]): continue
+        cur.execute("SELECT count(*) n FROM coupon_redemptions WHERE code=%s AND user_id=%s",(cp["code"],uid))
+        if int(cp["per_user_limit"] or 1)>0 and cur.fetchone()["n"]>=int(cp["per_user_limit"]): continue
+        d=dict(cp); d.pop("total_qty",None); d.pop("used_qty",None); out.append(d)
+    c.close()
+    return {"coupons":out}
+
+# ================= 好友邀请(第三阶段; 用户侧) =================
+@app.get("/api/invite/mine/{username}")
+def invite_mine(username:str):
+    """我的邀请: 邀请链接 + 已邀好友列表(阶段/奖励状态) + 累计邀请奖励积分。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id FROM users WHERE username=%s",(username,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(404,"user not found")
+    cur.execute("SELECT invitee,stage,reward_trial_done,reward_paid_done,created_at FROM invites WHERE inviter=%s ORDER BY id DESC LIMIT 100",(username,))
+    rows=[dict(x) for x in cur.fetchall()]
+    cur.execute("SELECT COALESCE(SUM(delta),0) s FROM points_ledger WHERE user_id=%s AND ref_type IN ('invite_trial','invite_paid')",(u["id"],))
+    earned=int(cur.fetchone()["s"] or 0)
+    c.close()
+    n_trial=sum(1 for x in rows if x["reward_trial_done"]); n_paid=sum(1 for x in rows if x["reward_paid_done"])
+    return {"username":username,"invite_link":"https://qh.hustle2026.xyz/?inviter="+username,
+            "invites":rows,"total":len(rows),"trial_converted":n_trial,"paid_converted":n_paid,"points_earned":earned}
 
 @app.get("/api/user/wallet/{username}")
 def user_wallet(username:str):
@@ -227,6 +568,103 @@ def user_wallet(username:str):
     if not u: c.close(); raise HTTPException(404,"user not found")
     c.close()
     return {"balance":round(float(u["balance"] or 0),2),"total_recharge":round(float(u["total_recharge"] or 0),2)}
+
+# ================= 会员积分: 用户侧端点(余额/签到/兑换; 走 license 鉴权) =================
+# 兑换目录(第一阶段, 全对现有 iap_features 权益; 花积分→写 entitlements 带 expire_at)
+# key -> {name, cost(积分), feature_key, value, days(权益有效天), max_per_day(可选防刷)}
+_REDEEM_CATALOG = {
+    "ai_1":        {"name":"AI套利分析 1 次",  "cost":10,  "feature_key":"ai_arb",       "value":"true", "days":1},
+    "autoloop_1d": {"name":"全自动进出场日卡",  "cost":50,  "feature_key":"auto_loop",     "value":"true", "days":1},
+    "pairs3_1d":   {"name":"3对账户日权",       "cost":80,  "feature_key":"max_pairs",     "value":"3",    "days":1},
+    "mobile_7d":   {"name":"移动端权限周卡",    "cost":200, "feature_key":"mobile_access", "value":"true", "days":7},
+    "trial_7d":    {"name":"试用延长 7 天(演示)","cost":100, "feature_key":"_trial_ext",    "value":"7",    "days":0},
+}
+@app.get("/api/points/catalog")
+def points_catalog():
+    """兑换目录(公开只读, 用户端渲染)。"""
+    return {"catalog":[{"key":k,**{x:v[x] for x in ("name","cost")}} for k,v in _REDEEM_CATALOG.items()],
+            "points_per_usdt":POINTS_PER_USDT}
+@app.get("/api/points/{username}")
+def points_get(username:str):
+    """用户积分余额 + 会员等级 + 成长值 + 近期流水(用户端积分页)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,points,growth_value,paid_until,plan,total_recharge,trial_until FROM users WHERE username=%s",(username,))
+    u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(404,"user not found")
+    cur.execute("SELECT delta,balance_after,reason,ref_type,created_at FROM points_ledger WHERE user_id=%s ORDER BY id DESC LIMIT 30",(u["id"],))
+    led=[dict(x) for x in cur.fetchall()]; c.close()
+    ml=_member_level(u)
+    return {"username":username,"points":int(u["points"] or 0),"growth_value":int(u["growth_value"] or 0),
+            "level":ml["level"],"level_name":ml["name"],"level_source":ml["source"],
+            "paid_until":(str(u["paid_until"])[:10] if u.get("paid_until") else None),
+            "trial_until":(str(u["trial_until"])[:10] if u.get("trial_until") else None),"ledger":led}
+class CheckinReq(BaseModel):
+    license_key:str=""
+@app.post("/api/points/checkin")
+def points_checkin(r:CheckinReq, x_license: str = Header(default="")):
+    """每日签到 +5; 连续 7 天当天额外 +30。连签计数走 Redis(当日键 + 连签计数键)。"""
+    lk=x_license or r.license_key
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,username,status FROM users WHERE license_key=%s",(lk,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(401,"invalid license key")
+    if u["status"] in ("banned","disabled"): c.close(); raise HTTPException(403,"账户不可用")
+    uid=u["id"]; today=datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+    dk=RNS+"checkin:%s:%s"%(uid,today)
+    if R.get(dk): c.close(); raise HTTPException(400,"今日已签到")
+    # 连签: streak 键(2天过期, 隔天断签归1)
+    sk=RNS+"checkin_streak:%s"%uid
+    try:
+        prev=int(R.get(sk) or 0)
+    except Exception: prev=0
+    streak=prev+1
+    R.setex(dk, 172800, "1")           # 当日已签(48h TTL 足够跨日)
+    R.setex(sk, 172800, str(streak))   # 连签计数(隔天不续则失效归零)
+    gained=5
+    bonus = 30 if (streak%7==0) else 0
+    try:
+        new_bal=_points_add(cur, uid, gained+bonus, "每日签到" + ("(连签7天+30)" if bonus else ""), "checkin", today, "self")
+        # 活动引擎: checkin 事件(如连签额外奖/活动加码; ctx 带连签天数)
+        try: _fire_campaigns(cur, "checkin", uid, u["username"], {"streak":streak})
+        except Exception as ce: print("camp checkin err",ce)
+    except Exception as pe:
+        c.close(); raise HTTPException(500,"签到失败: %s"%pe)
+    c.close()
+    return {"ok":True,"gained":gained+bonus,"streak":streak,"bonus":bonus,"points":new_bal}
+class RedeemReq(BaseModel):
+    license_key:str=""; item:str
+@app.post("/api/points/redeem")
+def points_redeem(r:RedeemReq, x_license: str = Header(default="")):
+    """积分兑换权益: 扣积分 + 写 entitlements(带 expire_at), 全程同事务、余额不可为负。
+       _trial_ext 特例: 不写权益, 延长 trial_until N 天。"""
+    lk=x_license or r.license_key
+    item=_REDEEM_CATALOG.get(r.item)
+    if not item: raise HTTPException(400,"未知兑换项: %s"%r.item)
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,username,status FROM users WHERE license_key=%s",(lk,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(401,"invalid license key")
+    if u["status"] in ("banned","disabled"): c.close(); raise HTTPException(403,"账户不可用")
+    uid=u["id"]
+    try:
+        new_bal=_points_add(cur, uid, -int(item["cost"]), "兑换:"+item["name"], "redeem", r.item, "self")  # 余额不足会抛400
+        fk=item["feature_key"]
+        if fk=="_trial_ext":
+            days=int(item["value"])
+            cur.execute("""UPDATE users SET trial_until=GREATEST(COALESCE(trial_until,now()),now())+(%s||' days')::interval WHERE id=%s""",(days,uid))
+            R.set(RNS+"force_demo:"+u["username"],"1")   # 延长的是演示试用
+        else:
+            days=int(item.get("days") or 0)
+            exp=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=days)) if days>0 else None
+            cur.execute("""INSERT INTO entitlements(user_id,feature_key,value,source,expire_at,updated_at)
+                           VALUES(%s,%s,%s,'points',%s,now()) ON CONFLICT (user_id,feature_key) DO UPDATE SET
+                           value=EXCLUDED.value,source='points',expire_at=EXCLUDED.expire_at,updated_at=now()""",
+                        (uid,fk,item["value"],exp))
+    except HTTPException:
+        c.close(); raise
+    except Exception as e:
+        c.close(); raise HTTPException(500,"兑换失败: %s"%e)
+    c.close()
+    _audit(u["username"],"self","points_redeem",{"item":r.item,"cost":item["cost"]},DEMO_MODE,"redeemed")
+    return {"ok":True,"item":item["name"],"cost":item["cost"],"points":new_bal}
 
 # ---- 用户自助: 修改昵称(显示名) + 消费记录 ----
 # 设计: username 是全局唯一登录身份+Redis/DB 键(qh:slot_cfg:{user} 等), 不可改;
@@ -652,6 +1090,175 @@ async def _spread_sampler():
 async def _startup_sampler():
     _aio.create_task(_spread_sampler())
 
+# ================= 流失召回定时任务(第二阶段; 业务层, 绝不进交易引擎) =================
+# 每日扫一次: 试用到期(前3天/当天/后7天未转化) + 订阅到期(后7天未续) → 落跑马灯馈源 marquee_recent(个性化提示)。
+# 单 worker 内存态; 用 Redis 当日键防重复推送。发券留给运营在 qhadmin 建"召回券"活动券, 此处只推提醒(不自动造券, 避免误发)。
+def _recall_config():
+    """召回开关/文案(存 channels.json 的 recall 段, 与飞书凭证同源; 缺省关闭)。"""
+    try:
+        cfg=_chcfg_load().get("recall",{})
+        return {"enabled":bool(cfg.get("enabled")), "coupon_trial":cfg.get("coupon_trial",""), "coupon_sub":cfg.get("coupon_sub","")}
+    except Exception:
+        return {"enabled":False,"coupon_trial":"","coupon_sub":""}
+def _recall_push(title, content, priority=1, color="#E6A23C"):
+    """落一条召回跑马灯馈源(与 notify_broadcast 同一 marquee_recent 列表; 用户端轮询消费)。"""
+    payload={"title":title,"content":content,"priority":priority,"color":color,"blink":False,"sound":"none",
+             "src":"recall","ts":_dt.datetime.utcnow().isoformat()}
+    try:
+        R.lpush(RNS+"marquee_recent",json.dumps(payload)); R.ltrim(RNS+"marquee_recent",0,49)
+    except Exception: pass
+async def _recall_loop():
+    await _aio.sleep(40)   # 启动后错峰
+    while True:
+        try:
+            cfg=_recall_config()
+            today=_dt.datetime.utcnow().strftime("%Y%m%d")
+            dk=RNS+"recall:daily:"+today
+            if cfg["enabled"] and not R.get(dk):
+                c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # 试用到期前3天内 或 到期后7天内、且未转化(paid_until 为空)的用户数
+                cur.execute("""SELECT count(*) n FROM users
+                               WHERE trial_until IS NOT NULL AND paid_until IS NULL
+                               AND trial_until BETWEEN now()-interval '7 days' AND now()+interval '3 days'""")
+                n_trial=cur.fetchone()["n"]
+                # 订阅到期后7天内未续(paid_until 已过但在7天内)
+                cur.execute("""SELECT count(*) n FROM users
+                               WHERE paid_until IS NOT NULL AND paid_until BETWEEN now()-interval '7 days' AND now()""")
+                n_sub=cur.fetchone()["n"]
+                c.close()
+                if n_trial>0:
+                    ct=(" 专属券:"+cfg["coupon_trial"]) if cfg["coupon_trial"] else ""
+                    _recall_push("试用即将到期", "有 %d 位试用用户临近/刚到期未转化, 记得跟进转化。%s"%(n_trial,ct), 1, "#E6A23C")
+                if n_sub>0:
+                    cs=(" 回归券:"+cfg["coupon_sub"]) if cfg["coupon_sub"] else ""
+                    _recall_push("订阅到期召回", "有 %d 位订阅用户到期未续费, 建议推送回归优惠。%s"%(n_sub,cs), 1, "#E6A23C")
+                # 活动引擎: 逐用户触发 recall_trial / recall_sub(如自动发回归专属券)。当日键防重复扫。
+                try:
+                    c2=db(); cur2=c2.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur2.execute("""SELECT id,username FROM users WHERE trial_until IS NOT NULL AND paid_until IS NULL
+                                    AND trial_until BETWEEN now()-interval '7 days' AND now()+interval '3 days' LIMIT 500""")
+                    for uu in cur2.fetchall(): _fire_campaigns(cur2, "recall_trial", uu["id"], uu["username"], {})
+                    cur2.execute("""SELECT id,username FROM users WHERE paid_until IS NOT NULL
+                                    AND paid_until BETWEEN now()-interval '7 days' AND now() LIMIT 500""")
+                    for uu in cur2.fetchall(): _fire_campaigns(cur2, "recall_sub", uu["id"], uu["username"], {})
+                    c2.close()
+                except Exception as ce: print("camp recall err",ce)
+                R.setex(dk, 172800, "1")   # 当日已扫(48h TTL)
+        except Exception as e:
+            print("recall_loop err",e)
+        await _aio.sleep(3600)   # 每小时检查一次(当日键保证只推一次)
+@app.on_event("startup")
+async def _startup_recall():
+    _aio.create_task(_recall_loop())
+
+# ================= 周期冲榜赛结算(月度/季度; 业务层, 绝不进交易引擎) =================
+def _period_bounds(period, ref=None):
+    """返回"上一个已结束周期"的 (period_key, start, end)。period=month|quarter。
+       ref=参考时刻(默认现在)。月: 上月; 季: 上一季。"""
+    now=ref or _dt.datetime.utcnow()
+    if period=="quarter":
+        q=(now.month-1)//3           # 当前季 0-3
+        # 上一季
+        if q==0: y=now.year-1; pq=3
+        else: y=now.year; pq=q-1
+        sm=pq*3+1; start=_dt.datetime(y,sm,1)
+        em=sm+3; ey=y+(1 if em>12 else 0); em=em-12 if em>12 else em
+        end=_dt.datetime(ey,em,1)
+        return ("%d-Q%d"%(y,pq+1), start, end)
+    else:  # month
+        y=now.year; m=now.month-1
+        if m==0: y-=1; m=12
+        start=_dt.datetime(y,m,1)
+        em=m+1; ey=y+(1 if em>12 else 0); em=em-12 if em>12 else em
+        end=_dt.datetime(ey,em,1)
+        return ("%d-%02d"%(y,m), start, end)
+def _contest_rank(cur, kind, metric, start, end):
+    """返回 [(code,name,metric_value,owner_username)] 按 metric_value 降序。
+       kind=staff: 按 users.staff_code 归因; kind=agent: 按 users.agent_id→agents。
+       metric: paid_users(周期内首次付费用户数)/revenue(周期内订单额)/trials(周期内试用数)/new_users(周期内注册数)。"""
+    rows=[]
+    if kind=="staff":
+        if metric=="revenue":
+            cur.execute("""SELECT s.code,s.name, COALESCE(SUM(o.amount),0) v, ''::text owner
+                           FROM staff s LEFT JOIN iap_orders o ON o.staff_code=s.code AND o.status='paid'
+                             AND o.kind IN ('iap','subscription') AND o.paid_at>=%s AND o.paid_at<%s
+                           GROUP BY s.code,s.name ORDER BY v DESC""",(start,end))
+        else:
+            col={"paid_users":"count(DISTINCT u.id) FILTER (WHERE u.paid_until IS NOT NULL AND u.created_at>=%s AND u.created_at<%s)",
+                 "trials":"count(u.id) FILTER (WHERE u.trial_started>=%s AND u.trial_started<%s)",
+                 "new_users":"count(u.id) FILTER (WHERE u.created_at>=%s AND u.created_at<%s)"}.get(metric)
+            if not col: return []
+            cur.execute("""SELECT s.code,s.name, %s v, ''::text owner
+                           FROM staff s LEFT JOIN users u ON u.staff_code=s.code
+                           GROUP BY s.code,s.name ORDER BY v DESC"""%col,(start,end))
+        rows=[(r["code"],r["name"],float(r["v"] or 0),None) for r in cur.fetchall()]
+    else:  # agent
+        if metric=="revenue":
+            cur.execute("""SELECT a.code,a.name,a.owner_username, COALESCE(SUM(o.amount),0) v
+                           FROM agents a LEFT JOIN users u ON u.agent_id=a.id
+                             LEFT JOIN iap_orders o ON o.user_id=u.id AND o.status='paid'
+                             AND o.kind IN ('iap','subscription') AND o.paid_at>=%s AND o.paid_at<%s
+                           GROUP BY a.code,a.name,a.owner_username ORDER BY v DESC""",(start,end))
+        else:
+            col={"paid_users":"count(DISTINCT u.id) FILTER (WHERE u.paid_until IS NOT NULL AND u.created_at>=%s AND u.created_at<%s)",
+                 "new_users":"count(u.id) FILTER (WHERE u.created_at>=%s AND u.created_at<%s)"}.get(metric)
+            if not col: return []
+            cur.execute("""SELECT a.code,a.name,a.owner_username, %s v
+                           FROM agents a LEFT JOIN users u ON u.agent_id=a.id
+                           GROUP BY a.code,a.name,a.owner_username ORDER BY v DESC"""%col,(start,end))
+        rows=[(r["code"],r["name"],float(r["v"] or 0),r["owner_username"]) for r in cur.fetchall()]
+    return [r for r in rows if r[2]>0]   # 仅有成绩者上榜
+def _contest_settle(cur, cp, period_key, start, end, actor="system"):
+    """结算一个冲榜赛周期: 排名→分档发奖→落 contest_results→更 last_settled_period。返回发奖条数。"""
+    ranked=_contest_rank(cur, cp["kind"], cp["metric"], start, end)
+    ranked=ranked[:int(cp["top_n"] or 10)]
+    rewards=cp["rewards"] or []
+    def _reward_for(rank):   # rank 1-based
+        for rw in rewards:
+            if int(rw.get("rank_from",1))<=rank<=int(rw.get("rank_to",1)): return rw
+        return None
+    n=0
+    for i,(code,name,mv,owner) in enumerate(ranked):
+        rank=i+1; rw=_reward_for(rank)
+        rtype=""; rval=0; rto=""
+        if rw:
+            rtype=rw.get("type","points"); rval=float(rw.get("value") or 0)
+            try:
+                if cp["kind"]=="staff" and rtype=="perf":
+                    _perf_add(cur, code, int(rval), "冲榜赛[%s]第%d名"%(cp["name"],rank), "contest", period_key, actor); rto=code
+                elif rtype=="points":
+                    # 发积分: staff 无 owner 概念→跳过(改用 perf); agent 发 owner
+                    tgt = owner if cp["kind"]=="agent" else None
+                    if tgt:
+                        tuid=_uid(tgt)
+                        if tuid: _points_add(cur, tuid, int(rval), "冲榜赛[%s]第%d名"%(cp["name"],rank), "contest", period_key, actor); rto=tgt
+            except Exception as e: print("contest reward err",e)
+        cur.execute("""INSERT INTO contest_results(contest_id,period_key,rank,code,name,metric_value,reward_type,reward_value,reward_to)
+                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",(cp["id"],period_key,rank,code,name,mv,rtype,rval,rto))
+        n+=1
+    cur.execute("UPDATE contests SET last_settled_period=%s,updated_at=now() WHERE id=%s",(period_key,cp["id"]))
+    return n
+async def _contest_loop():
+    await _aio.sleep(70)   # 启动错峰
+    while True:
+        try:
+            c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM contests WHERE enabled=true")
+            for cp in cur.fetchall():
+                pk,start,end=_period_bounds(cp["period"])
+                if (cp.get("last_settled_period") or "")==pk: continue   # 该周期已结算
+                try:
+                    n=_contest_settle(cur, cp, pk, start, end)
+                    _recall_push("冲榜赛结算", "活动[%s] %s 周期已结算, %d 名上榜发奖。"%(cp["name"],pk,n), 1, "#2E8BD6")
+                except Exception as e: print("contest settle err",e)
+            c.close()
+        except Exception as e:
+            print("contest_loop err",e)
+        await _aio.sleep(3600)   # 每小时检查(周期键防重, 只在跨周期后结算一次)
+@app.on_event("startup")
+async def _startup_contest():
+    _aio.create_task(_contest_loop())
+
 # ================= 全自动出场循环 (逐对盈亏判定 → 按模式平仓; 默认 OFF) =================
 # 模式(Redis qh:auto_exit:{user}): off=不动 / shadow=只回显"将平哪些坑"不真发 / armed=仅平 exit_enabled 的坑 / full=平所有命中坑
 async def _close_one_pair(username, symbol, hedge_sym, main_side, hedge_side, mode_seq, speed, slot_no, reason):
@@ -1046,11 +1653,12 @@ def list_accounts(username:str):
 class AcctReg(BaseModel):
     username:str; label:str; login:str; platform:str="MT5"; broker:str=""
     role:str="main"; conn_mode:str="bridge"; bridge_url:str=""; bridge_key_ref:str=""
-@app.post("/api/accounts/register", dependencies=[Depends(require_admin)])
-def reg_account(a:AcctReg):
+@app.post("/api/accounts/register", dependencies=[Depends(require_license)])
+def reg_account(a:AcctReg, x_license: str = Header(default="")):
+    # 改为用户密钥验证(PC+移动端): 账户绑定到密钥对应用户本人, 忽略 body.username 防越权
     c=db(); cur=c.cursor()
-    cur.execute("SELECT id FROM users WHERE username=%s",(a.username,)); u=cur.fetchone()
-    if not u: c.close(); raise HTTPException(404,"user not found")
+    cur.execute("SELECT id,username FROM users WHERE license_key=%s",(x_license,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(403,"密钥无效")
     # P1 权益闸: max_pairs 限制对冲账户对数(按 role 计已有对; 新增不得超权益)
     try: maxp=int(float(_ent_get(u[0],"max_pairs") or 1))
     except (TypeError,ValueError): maxp=1
@@ -1266,21 +1874,32 @@ def _calc_commissions(cur, order_id, kind, user_id, base_amount):
 class AgentReq(BaseModel):
     license_key:str=""; code:str; name:str=""; parent_code:str=""
     rate_l1:float=0.10; rate_l2:float=0.05; rate_l3:float=0.02; contact:str=""; enabled:bool=True
+    owner_username:str=""    # 代理运营用户(招募奖励/代理活动的积分接收方)
 @app.post("/api/admin/agent/save", dependencies=[Depends(require_op("agents"))])
 def agent_save(r:AgentReq):
-    c=db(); cur=c.cursor()
-    parent_id=None; level=1
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    parent_id=None; level=1; parent_owner=None
     if r.parent_code:
-        cur.execute("SELECT id,level FROM agents WHERE code=%s",(r.parent_code,)); p=cur.fetchone()
+        cur.execute("SELECT id,level,owner_username FROM agents WHERE code=%s",(r.parent_code,)); p=cur.fetchone()
         if not p: c.close(); raise HTTPException(404,"上级代理码不存在")
-        parent_id=p[0]; level=min(3,(p[1] or 1)+1)
-    cur.execute("""INSERT INTO agents(code,name,parent_id,level,rate_l1,rate_l2,rate_l3,contact,enabled)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        parent_id=p["id"]; level=min(3,(p["level"] or 1)+1); parent_owner=p.get("owner_username")
+    # 是否新代理(招募事件只在新建且有上级时触发一次)
+    cur.execute("SELECT code FROM agents WHERE code=%s",(r.code,)); is_new=(cur.fetchone() is None)
+    cur.execute("""INSERT INTO agents(code,name,parent_id,level,rate_l1,rate_l2,rate_l3,contact,enabled,owner_username)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,parent_id=EXCLUDED.parent_id,level=EXCLUDED.level,
-                   rate_l1=EXCLUDED.rate_l1,rate_l2=EXCLUDED.rate_l2,rate_l3=EXCLUDED.rate_l3,contact=EXCLUDED.contact,enabled=EXCLUDED.enabled""",
-                (r.code,r.name,parent_id,level,r.rate_l1,r.rate_l2,r.rate_l3,r.contact,r.enabled))
+                   rate_l1=EXCLUDED.rate_l1,rate_l2=EXCLUDED.rate_l2,rate_l3=EXCLUDED.rate_l3,contact=EXCLUDED.contact,
+                   enabled=EXCLUDED.enabled,owner_username=EXCLUDED.owner_username""",
+                (r.code,r.name,parent_id,level,r.rate_l1,r.rate_l2,r.rate_l3,r.contact,r.enabled,(r.owner_username or None)))
+    # 活动引擎: 代理招募成功(新建 + 有上级 + 上级有 owner_username)→ 奖励发给上级 owner
+    fired=None
+    if is_new and parent_owner:
+        pu=_uid(parent_owner)
+        if pu:
+            try: fired=_fire_campaigns(cur, "agent_recruit", pu, parent_owner, {"new_agent":r.code,"level":level})
+            except Exception as ce: print("camp agent_recruit err",ce)
     c.close()
-    _audit("",_actor(r.license_key),"agent_save",{"code":r.code,"level":level},DEMO_MODE,"saved")
+    _audit("",_actor(r.license_key),"agent_save",{"code":r.code,"level":level,"recruit_reward":bool(fired)},DEMO_MODE,"saved")
     return {"ok":True,"code":r.code,"level":level}
 
 @app.get("/api/admin/agents")
@@ -1496,7 +2115,39 @@ def order_reconcile(r:ReconcileReq):
         cur.execute("UPDATE iap_orders SET reconcile_status='discrepancy',confirmed_by=%s,confirmed_at=now(),discrepancy_reason=%s,reconcile_note=%s WHERE id=%s",
                     (actor,r.reason or "人工标记差异",r.note,r.order_id)); st="discrepancy"
     elif r.action=="void":
-        cur.execute("UPDATE iap_orders SET reconcile_status='void',confirmed_by=%s,confirmed_at=now(),reconcile_note=%s WHERE id=%s",(actor,r.note,r.order_id)); st="void"
+        # 退款/作废联动(幂等: 已 void 不重复回退)。回退: 作废该单佣金 + 扣回所返积分 + 退还抵现积分 + 退还所用券次 + 余额单退回余额
+        cur.execute("SELECT reconcile_status,user_id,kind,amount,points_used,pay_method FROM iap_orders WHERE id=%s",(r.order_id,))
+        od=cur.fetchone()
+        if od and od["reconcile_status"]!="void":
+            oid2=r.order_id; ouid=od["user_id"]
+            rev={}
+            # 1) 作废该单未结佣金
+            cur.execute("UPDATE commissions SET settled=NULL WHERE order_id=%s AND settled=false",(oid2,))  # settled=NULL 视为作废(不参与结算)
+            cur.execute("DELETE FROM commissions WHERE order_id=%s AND settled IS NULL",(oid2,)); rev["comm_removed"]=cur.rowcount
+            # 2) 扣回该单曾返的积分(ref_type=order, 正数 delta)
+            cur.execute("SELECT COALESCE(SUM(delta),0) s FROM points_ledger WHERE ref_type='order' AND ref_id=%s AND delta>0",(str(oid2),))
+            gave=int(cur.fetchone()["s"] or 0)
+            if gave>0:
+                try: _points_add(cur, ouid, -gave, "订单作废扣回返积分", "order_void", oid2, actor); rev["pts_clawback"]=gave
+                except HTTPException:
+                    # 余额不足以扣回(已花掉)→ 记负差, 不阻断作废(资金安全优先, 差额人工跟进)
+                    cur.execute("SELECT points FROM users WHERE id=%s",(ouid,)); _p=int(cur.fetchone()["points"] or 0)
+                    if _p>0: _points_add(cur, ouid, -_p, "订单作废扣回返积分(部分)", "order_void", oid2, actor)
+                    rev["pts_clawback"]="部分(积分已花,差额人工跟进)"
+            # 3) 退还该单抵现所用积分(ref_type=order_pay, 负数 delta → 退正数)
+            cur.execute("SELECT COALESCE(SUM(-delta),0) s FROM points_ledger WHERE ref_type='order_pay' AND ref_id=%s AND delta<0",(str(oid2),))
+            used=int(cur.fetchone()["s"] or 0)
+            if used>0:
+                _points_add(cur, ouid, used, "订单作废退还抵现积分", "order_void", oid2, actor); rev["pts_refunded"]=used
+            # 4) 退还券用量(该单核销过的券 used_qty-1; 保留 redemption 历史)
+            cur.execute("SELECT code FROM coupon_redemptions WHERE order_id=%s",(oid2,))
+            for cr in cur.fetchall():
+                cur.execute("UPDATE coupons SET used_qty=GREATEST(0,COALESCE(used_qty,0)-1) WHERE code=%s",(cr["code"],)); rev["coupon_restored"]=cr["code"]
+            # 5) 余额支付的单 → 退回余额(链上单不动, 由财务线下处理)
+            if od["pay_method"]=="balance" and float(od["amount"] or 0)>0:
+                cur.execute("UPDATE users SET balance=balance+%s WHERE id=%s",(float(od["amount"]),ouid)); rev["balance_refund"]=float(od["amount"])
+            _audit("",actor,"order_void_reversal",{"order":oid2,**rev},DEMO_MODE,"reversed")
+        cur.execute("UPDATE iap_orders SET reconcile_status='void',status='void',confirmed_by=%s,confirmed_at=now(),reconcile_note=%s WHERE id=%s",(actor,r.note,r.order_id)); st="void"
     elif r.action=="reopen":
         cur.execute("UPDATE iap_orders SET reconcile_status='pending',confirmed_by=NULL,confirmed_at=NULL,discrepancy_reason=NULL WHERE id=%s",(r.order_id,)); st="pending"
     else:
@@ -1659,12 +2310,440 @@ def admin_users_export(request: Request, q:str="", x_op_token: str = Header(defa
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition":"attachment; filename=%s"%fn})
 
+# ================= 会员积分 + 员工推广: 运营侧端点(qhadmin; require_op) =================
+# 权限键: points(会员与积分) / staff(员工推广)。与 trials/iap/agents 数据隔离, 不改其行为。
+@app.get("/api/admin/members", dependencies=[Depends(require_op("points"))])
+def admin_members(q:str=""):
+    """会员等级分布 + 逐用户等级/积分/成长值(会员与积分页)。等级由订阅+成长值纯推导。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    sql="SELECT id,username,nickname,plan,status,paid_until,total_recharge,points,growth_value,staff_code FROM users"
+    p=[]
+    if q: sql+=" WHERE username ILIKE %s OR nickname ILIKE %s"; p=["%"+q+"%","%"+q+"%"]
+    sql+=" ORDER BY growth_value DESC, points DESC LIMIT 300"
+    cur.execute(sql,tuple(p)); rows=cur.fetchall(); c.close()
+    dist={0:0,1:0,2:0,3:0,4:0}; out=[]
+    for r in rows:
+        d=dict(r); ml=_member_level(d); d["member_level"]=ml["level"]; d["member_level_name"]=ml["name"]
+        d["points"]=int(d.get("points") or 0); d["growth_value"]=int(d.get("growth_value") or 0)
+        d["total_recharge"]=round(float(d.get("total_recharge") or 0),2)
+        dist[ml["level"]]=dist.get(ml["level"],0)+1
+        out.append(d)
+    return {"users":out,"level_dist":[{"level":k,"name":_LEVEL_NAME[k],"count":v} for k,v in sorted(dist.items())]}
+@app.get("/api/admin/points/ledger", dependencies=[Depends(require_op("points"))])
+def admin_points_ledger(username:str="", limit:int=100):
+    """积分流水(可按用户过滤)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if username:
+        cur.execute("""SELECT l.id,u.username,l.delta,l.balance_after,l.reason,l.ref_type,l.ref_id,l.operator,l.created_at
+                       FROM points_ledger l JOIN users u ON u.id=l.user_id WHERE u.username=%s ORDER BY l.id DESC LIMIT %s""",
+                    (username,max(1,min(500,limit))))
+    else:
+        cur.execute("""SELECT l.id,u.username,l.delta,l.balance_after,l.reason,l.ref_type,l.ref_id,l.operator,l.created_at
+                       FROM points_ledger l JOIN users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT %s""",(max(1,min(500,limit)),))
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"ledger":rows}
+class PointsAdjustReq(BaseModel):
+    license_key:str=""; username:str; delta:int; reason:str="手工调整"
+@app.post("/api/admin/points/adjust", dependencies=[Depends(require_op("points"))])
+def admin_points_adjust(r:PointsAdjustReq):
+    """运营手工加减积分(审计留痕; 余额不可为负)。"""
+    uid=_uid(r.username)
+    if not uid: raise HTTPException(404,"user not found")
+    if r.delta==0: raise HTTPException(400,"delta 不能为 0")
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        nb=_points_add(cur, uid, r.delta, r.reason or "手工调整", "manual", "", _actor(r.license_key))
+    except HTTPException: c.close(); raise
+    except Exception as e: c.close(); raise HTTPException(500,str(e))
+    c.close()
+    _audit(r.username,_actor(r.license_key),"points_adjust",{"delta":r.delta,"reason":r.reason,"balance":nb},DEMO_MODE,"done")
+    return {"ok":True,"username":r.username,"delta":r.delta,"points":nb}
+
+@app.get("/api/admin/staff", dependencies=[Depends(require_op("staff"))])
+def admin_staff_list():
+    """员工推广码列表(与三级代理 agents 完全隔离)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT code,name,dept,username,default_trial_days,default_force_demo,comm_trial,comm_first_rate,comm_repeat_rate,enabled,created_at FROM staff ORDER BY created_at DESC")
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"staff":rows}
+class StaffReq(BaseModel):
+    license_key:str=""; code:str; name:str=""; dept:str=""; username:str=""
+    default_trial_days:int=3; default_force_demo:bool=True; enabled:bool=True
+    comm_trial:float=0; comm_first_rate:float=0; comm_repeat_rate:float=0   # 每有效试用固定额 / 首单比例 / 复购比例
+@app.post("/api/admin/staff", dependencies=[Depends(require_op("staff"))])
+def admin_staff_save(r:StaffReq):
+    """新增/更新员工推广码(一人一码, 无层级)。含阶梯提成配置(走薪资, 此处仅配+算)。"""
+    if not r.code: raise HTTPException(400,"推广码不能为空")
+    c=db(); cur=c.cursor()
+    cur.execute("""INSERT INTO staff(code,name,dept,username,default_trial_days,default_force_demo,enabled,comm_trial,comm_first_rate,comm_repeat_rate)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,dept=EXCLUDED.dept,username=EXCLUDED.username,
+                   default_trial_days=EXCLUDED.default_trial_days,default_force_demo=EXCLUDED.default_force_demo,enabled=EXCLUDED.enabled,
+                   comm_trial=EXCLUDED.comm_trial,comm_first_rate=EXCLUDED.comm_first_rate,comm_repeat_rate=EXCLUDED.comm_repeat_rate""",
+                (r.code,r.name,r.dept,r.username,r.default_trial_days,r.default_force_demo,r.enabled,r.comm_trial,r.comm_first_rate,r.comm_repeat_rate))
+    c.close(); _audit("",_actor(r.license_key),"staff_save",{"code":r.code},DEMO_MODE,"saved")
+    return {"ok":True,"code":r.code}
+class StaffDel(BaseModel):
+    license_key:str=""; code:str
+@app.post("/api/admin/staff/del", dependencies=[Depends(require_op("staff"))])
+def admin_staff_del(r:StaffDel):
+    """删除员工码(不解除已归因用户的 staff_code, 保留历史归因)。"""
+    c=db(); cur=c.cursor(); cur.execute("DELETE FROM staff WHERE code=%s",(r.code,)); c.close()
+    _audit("",_actor(r.license_key),"staff_del",{"code":r.code},DEMO_MODE,"deleted")
+    return {"ok":True}
+@app.get("/api/admin/staff/stats", dependencies=[Depends(require_op("staff"))])
+def admin_staff_stats():
+    """员工业绩(按 users.staff_code + iap_orders.staff_code 聚合, 不单独建业绩表):
+       获客(注册/有效试用/试用转化) + 转化(付费用户) + 营收(订单额) + 应发提成(按阶梯配置算)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # 获客 + 提成配置
+    cur.execute("""SELECT s.code, s.name, s.dept, s.comm_trial, s.comm_first_rate, s.comm_repeat_rate,
+                     count(u.id) AS users,
+                     count(u.id) FILTER (WHERE u.trial_started IS NOT NULL) AS trials,
+                     count(u.id) FILTER (WHERE u.paid_until IS NOT NULL) AS paid_users
+                   FROM staff s LEFT JOIN users u ON u.staff_code=s.code
+                   GROUP BY s.code,s.name,s.dept,s.comm_trial,s.comm_first_rate,s.comm_repeat_rate ORDER BY users DESC""")
+    base={r["code"]:dict(r) for r in cur.fetchall()}
+    # 营收: 内购/订阅订单额(排除充值 _recharge, 提成不含充值)
+    cur.execute("""SELECT staff_code, count(*) AS orders, COALESCE(SUM(amount),0) AS revenue
+                   FROM iap_orders WHERE staff_code IS NOT NULL AND status='paid' AND kind IN ('iap','subscription') GROUP BY staff_code""")
+    for r in cur.fetchall():
+        if r["staff_code"] in base:
+            base[r["staff_code"]]["orders"]=r["orders"]; base[r["staff_code"]]["revenue"]=round(float(r["revenue"] or 0),2)
+    # 首单额(每用户最早一笔付费单) 与 复购额(其余), 用于阶梯提成
+    cur.execute("""WITH o AS (
+                     SELECT staff_code, user_id, amount, paid_at,
+                            row_number() OVER (PARTITION BY user_id ORDER BY paid_at) AS rn
+                     FROM iap_orders WHERE staff_code IS NOT NULL AND status='paid' AND kind IN ('iap','subscription'))
+                   SELECT staff_code,
+                          COALESCE(SUM(amount) FILTER (WHERE rn=1),0) AS first_amt,
+                          COALESCE(SUM(amount) FILTER (WHERE rn>1),0) AS repeat_amt
+                   FROM o GROUP BY staff_code""")
+    firstrep={r["staff_code"]:(float(r["first_amt"] or 0),float(r["repeat_amt"] or 0)) for r in cur.fetchall()}
+    c.close()
+    out=[]
+    for code,d in base.items():
+        d.setdefault("orders",0); d.setdefault("revenue",0.0)
+        u=d.get("users") or 0; d["conv_rate"]=round(100.0*(d.get("paid_users") or 0)/u,1) if u else 0.0
+        fa,ra=firstrep.get(code,(0.0,0.0))
+        comm = (d.get("trials") or 0)*float(d.get("comm_trial") or 0) \
+             + fa*float(d.get("comm_first_rate") or 0) + ra*float(d.get("comm_repeat_rate") or 0)
+        d["commission_due"]=round(comm,2); d["first_amt"]=round(fa,2); d["repeat_amt"]=round(ra,2)
+        for k in ("comm_trial","comm_first_rate","comm_repeat_rate"): d[k]=float(d.get(k) or 0)
+        out.append(d)
+    out.sort(key=lambda x:x.get("revenue",0), reverse=True)
+    return {"stats":out}
+@app.get("/api/admin/staff/self/{code}", dependencies=[Depends(require_op("staff"))])
+def admin_staff_self(code:str):
+    """员工个人看板(单员工业绩明细; 普通员工角色配 staff 权限即可只读自己)。"""
+    all_stats=admin_staff_stats().get("stats",[])
+    mine=[s for s in all_stats if s["code"]==code]
+    return {"code":code,"stat":(mine[0] if mine else None)}
+
+# ---- 员工绩效积分(与用户对冲积分完全隔离; 内部激励) ----
+def _perf_add(cur, staff_code, delta, reason, ref_type="", ref_id="", operator=""):
+    """绩效积分入账(同事务): 更新 staff.perf_points + 写 staff_perf_ledger。cur 必须 RealDictCursor。"""
+    delta=int(delta)
+    cur.execute("SELECT perf_points FROM staff WHERE code=%s FOR UPDATE",(staff_code,)); row=cur.fetchone()
+    if not row: raise HTTPException(404,"员工码不存在")
+    nb=int(row["perf_points"] or 0)+delta
+    if nb<0: raise HTTPException(400,"绩效积分不足")
+    cur.execute("UPDATE staff SET perf_points=%s WHERE code=%s",(nb,staff_code))
+    cur.execute("""INSERT INTO staff_perf_ledger(staff_code,delta,balance_after,reason,ref_type,ref_id,operator)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s)""",(staff_code,delta,nb,reason,ref_type,str(ref_id),operator))
+    return nb
+class PerfAdjustReq(BaseModel):
+    license_key:str=""; staff_code:str; delta:int; reason:str="手工调整"
+@app.post("/api/admin/staff/perf_adjust", dependencies=[Depends(require_op("staff"))])
+def admin_staff_perf_adjust(r:PerfAdjustReq):
+    """运营手工加减员工绩效积分(内部激励; 与用户积分隔离)。"""
+    if r.delta==0: raise HTTPException(400,"delta 不能为 0")
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try: nb=_perf_add(cur, r.staff_code, r.delta, r.reason or "手工调整", "manual", "", _actor(r.license_key))
+    except HTTPException: c.close(); raise
+    c.close(); _audit("",_actor(r.license_key),"perf_adjust",{"staff":r.staff_code,"delta":r.delta,"balance":nb},DEMO_MODE,"done")
+    return {"ok":True,"staff_code":r.staff_code,"perf_points":nb}
+@app.get("/api/admin/staff/perf_ledger", dependencies=[Depends(require_op("staff"))])
+def admin_staff_perf_ledger(staff_code:str="", limit:int=100):
+    """员工绩效积分流水。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if staff_code:
+        cur.execute("SELECT * FROM staff_perf_ledger WHERE staff_code=%s ORDER BY id DESC LIMIT %s",(staff_code,max(1,min(500,limit))))
+    else:
+        cur.execute("SELECT * FROM staff_perf_ledger ORDER BY id DESC LIMIT %s",(max(1,min(500,limit)),))
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"ledger":rows}
+
+# ================= 全渠道总看板(第三阶段; 员工渠道 + 代理渠道 + 自然流量 对比) =================
+@app.get("/api/admin/overview/channels", dependencies=[Depends(require_op("bi"))])
+def overview_channels(days:int=30):
+    """获客/转化/营收 按渠道汇总: 员工(staff_code) / 代理(agent_id) / 自然(都无)。统一漏斗口径。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    since="now()-interval '%d days'"%max(1,min(365,days))
+    def _bucket(where):
+        cur.execute("""SELECT count(*) users,
+                         count(*) FILTER (WHERE trial_started IS NOT NULL) trials,
+                         count(*) FILTER (WHERE paid_until IS NOT NULL) paid
+                       FROM users WHERE %s"""%where)
+        return dict(cur.fetchone())
+    ch={}
+    ch["staff"]=_bucket("staff_code IS NOT NULL")
+    ch["agent"]=_bucket("staff_code IS NULL AND agent_id IS NOT NULL")
+    ch["organic"]=_bucket("staff_code IS NULL AND agent_id IS NULL")
+    # 营收(近 days 天, 内购/订阅 paid 单)按渠道
+    cur.execute("""SELECT CASE WHEN o.staff_code IS NOT NULL THEN 'staff'
+                          WHEN u.agent_id IS NOT NULL THEN 'agent' ELSE 'organic' END AS ch,
+                     COALESCE(SUM(o.amount),0) revenue, count(*) orders
+                   FROM iap_orders o JOIN users u ON u.id=o.user_id
+                   WHERE o.status='paid' AND o.kind IN ('iap','subscription') AND o.paid_at>=%s
+                   GROUP BY 1"""%since)
+    rev={r["ch"]:{"revenue":round(float(r["revenue"] or 0),2),"orders":r["orders"]} for r in cur.fetchall()}
+    c.close()
+    for k in ch:
+        u=ch[k]["users"] or 0
+        ch[k]["conv_rate"]=round(100.0*(ch[k]["paid"] or 0)/u,1) if u else 0.0
+        ch[k]["revenue"]=rev.get(k,{}).get("revenue",0.0); ch[k]["orders"]=rev.get(k,{}).get("orders",0)
+    return {"days":days,"channels":ch}
+
+# ================= 活动引擎: 运营侧 CRUD(qhadmin; require_op('campaigns')) =================
+@app.get("/api/admin/campaigns", dependencies=[Depends(require_op("campaigns"))])
+def admin_campaigns():
+    """活动列表(含触发次数)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM campaigns ORDER BY priority DESC, id DESC"); rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"campaigns":rows}
+class CampaignReq(BaseModel):
+    license_key:str=""; id:int=0; name:str; category:str="retention"; event:str
+    cond:dict={}; actions:list=[]; per_user_limit:int=1; total_limit:int=0; priority:int=1
+    valid_from:str=""; valid_until:str=""; enabled:bool=True
+_CAMP_EVENTS={"register","trial_activate","first_paid","paid","renewal_streak","recharge","checkin","agent_recruit","recall_trial","recall_sub"}
+_CAMP_ACTION_TYPES={"points","points_pct","growth","extend_days","trial_days","coupon"}
+@app.post("/api/admin/campaign", dependencies=[Depends(require_op("campaigns"))])
+def admin_campaign_save(r:CampaignReq):
+    """新增/更新活动。event 与 action.type 白名单校验, 防误配。"""
+    if not r.name: raise HTTPException(400,"活动名不能为空")
+    if r.event not in _CAMP_EVENTS: raise HTTPException(400,"未知触发事件: %s"%r.event)
+    for a in (r.actions or []):
+        if a.get("type") not in _CAMP_ACTION_TYPES: raise HTTPException(400,"未知动作类型: %s"%a.get("type"))
+    c=db(); cur=c.cursor()
+    if r.id:
+        cur.execute("""UPDATE campaigns SET name=%s,category=%s,event=%s,cond=%s,actions=%s,per_user_limit=%s,total_limit=%s,
+                       priority=%s,valid_from=%s,valid_until=%s,enabled=%s,updated_at=now() WHERE id=%s""",
+                    (r.name,r.category,r.event,json.dumps(r.cond),json.dumps(r.actions),r.per_user_limit,r.total_limit,
+                     r.priority,(r.valid_from or None),(r.valid_until or None),r.enabled,r.id))
+    else:
+        cur.execute("""INSERT INTO campaigns(name,category,event,cond,actions,per_user_limit,total_limit,priority,valid_from,valid_until,enabled)
+                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (r.name,r.category,r.event,json.dumps(r.cond),json.dumps(r.actions),r.per_user_limit,r.total_limit,
+                     r.priority,(r.valid_from or None),(r.valid_until or None),r.enabled))
+    c.close(); _audit("",_actor(r.license_key),"campaign_save",{"name":r.name,"event":r.event},DEMO_MODE,"saved")
+    return {"ok":True}
+class CampaignDel(BaseModel):
+    license_key:str=""; id:int
+@app.post("/api/admin/campaign/del", dependencies=[Depends(require_op("campaigns"))])
+def admin_campaign_del(r:CampaignDel):
+    c=db(); cur=c.cursor(); cur.execute("DELETE FROM campaigns WHERE id=%s",(r.id,)); c.close()
+    _audit("",_actor(r.license_key),"campaign_del",{"id":r.id},DEMO_MODE,"deleted")
+    return {"ok":True}
+@app.get("/api/admin/campaign/grants", dependencies=[Depends(require_op("campaigns"))])
+def admin_campaign_grants(campaign_id:int=0, limit:int=100):
+    """活动发放记录。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if campaign_id:
+        cur.execute("SELECT * FROM campaign_grants WHERE campaign_id=%s ORDER BY id DESC LIMIT %s",(campaign_id,max(1,min(500,limit))))
+    else:
+        cur.execute("SELECT * FROM campaign_grants ORDER BY id DESC LIMIT %s",(max(1,min(500,limit)),))
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"grants":rows}
+@app.get("/api/admin/campaign/meta", dependencies=[Depends(require_op("campaigns"))])
+def admin_campaign_meta():
+    """前端渲染用: 事件/动作/条件 元数据 + 五大类模板。"""
+    return {
+      "events":[
+        {"key":"register","name":"注册","cat":"trial_convert"},
+        {"key":"trial_activate","name":"试用激活","cat":"trial_convert"},
+        {"key":"first_paid","name":"首次付费","cat":"trial_convert"},
+        {"key":"paid","name":"每次付费(内购/订阅)","cat":"retention"},
+        {"key":"renewal_streak","name":"连续续费(近90天订阅数)","cat":"retention"},
+        {"key":"recharge","name":"充值","cat":"retention"},
+        {"key":"checkin","name":"每日签到","cat":"retention"},
+        {"key":"agent_recruit","name":"代理招募成功(发上级)","cat":"agent"},
+        {"key":"recall_trial","name":"试用流失召回(日扫)","cat":"recall"},
+        {"key":"recall_sub","name":"订阅流失召回(日扫)","cat":"recall"},
+      ],
+      "action_types":[
+        {"key":"points","name":"发固定积分","fields":["value"]},
+        {"key":"points_pct","name":"按实付比例发积分","fields":["rate"]},
+        {"key":"growth","name":"加成长值","fields":["value"]},
+        {"key":"extend_days","name":"延长订阅天数","fields":["days"]},
+        {"key":"trial_days","name":"延长试用天数","fields":["days"]},
+        {"key":"coupon","name":"发专属券","fields":["kind","value","applies_to","max_discount","valid_days","code_prefix"]},
+      ],
+      "templates":[
+        {"name":"试用转正首单9折","category":"trial_convert","event":"first_paid","cond":{},"actions":[{"type":"coupon","name":"首单9折","kind":"percent","value":10,"applies_to":"subscription","valid_days":7},{"type":"points","value":500}]},
+        {"name":"年付赠2000积分","category":"retention","event":"paid","cond":{"months_in":[12]},"actions":[{"type":"points","value":2000}]},
+        {"name":"连续签到7天加码","category":"retention","event":"checkin","cond":{},"actions":[{"type":"points","value":10}]},
+        {"name":"试用流失召回券","category":"recall","event":"recall_trial","cond":{},"actions":[{"type":"coupon","name":"回归7折","kind":"percent","value":30,"applies_to":"subscription","valid_days":7}]},
+        {"name":"充值满赠成长值","category":"retention","event":"recharge","cond":{"min_amount":200},"actions":[{"type":"growth","value":500}]},
+        {"name":"连续续费3期赠1000分","category":"retention","event":"renewal_streak","cond":{"streak_min":3},"actions":[{"type":"points","value":1000}]},
+        {"name":"代理招募成功奖300分","category":"agent","event":"agent_recruit","cond":{},"actions":[{"type":"points","value":300}]},
+      ]
+    }
+class RecallCfgReq(BaseModel):
+    license_key:str=""; enabled:bool=False; coupon_trial:str=""; coupon_sub:str=""
+@app.get("/api/admin/recall/config", dependencies=[Depends(require_op("campaigns"))])
+def recall_config_get():
+    """召回日扫开关 + 提示券码(存 channels.json recall 段)。召回类活动依赖此开关开启才逐用户扫。"""
+    return _recall_config()
+@app.post("/api/admin/recall/config", dependencies=[Depends(require_op("campaigns"))])
+def recall_config_set(r:RecallCfgReq):
+    cfg=_chcfg_load(); cfg.setdefault("recall",{})
+    cfg["recall"]["enabled"]=bool(r.enabled)
+    cfg["recall"]["coupon_trial"]=r.coupon_trial or ""
+    cfg["recall"]["coupon_sub"]=r.coupon_sub or ""
+    if not _chcfg_save(cfg): raise HTTPException(500,"写入失败(检查文件权限)")
+    _audit("",_actor(r.license_key),"recall_config",{"enabled":r.enabled},DEMO_MODE,"saved")
+    return {"ok":True,**_recall_config()}
+class StaffPerfCfgReq(BaseModel):
+    license_key:str=""; enabled:bool=True; trial:int=10; first_paid:int=50; per_usdt:float=0.2
+@app.get("/api/admin/staff_perf/config", dependencies=[Depends(require_op("staff"))])
+def staff_perf_config_get():
+    """员工绩效自动发放配置(存 channels.json staff_perf 段)。"""
+    cfg=_chcfg_load().get("staff_perf",{})
+    return {"enabled":cfg.get("enabled",True),"trial":int(cfg.get("trial",10)),"first_paid":int(cfg.get("first_paid",50)),"per_usdt":float(cfg.get("per_usdt",0.2))}
+@app.post("/api/admin/staff_perf/config", dependencies=[Depends(require_op("staff"))])
+def staff_perf_config_set(r:StaffPerfCfgReq):
+    cfg=_chcfg_load(); cfg["staff_perf"]={"enabled":bool(r.enabled),"trial":int(r.trial),"first_paid":int(r.first_paid),"per_usdt":float(r.per_usdt)}
+    if not _chcfg_save(cfg): raise HTTPException(500,"写入失败")
+    _audit("",_actor(r.license_key),"staff_perf_config",{"enabled":r.enabled},DEMO_MODE,"saved")
+    return {"ok":True}
+
+# ================= 周期冲榜赛: 运营侧 CRUD + 手动结算(qhadmin; require_op('contests')) =================
+@app.get("/api/admin/contests", dependencies=[Depends(require_op("contests"))])
+def admin_contests():
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM contests ORDER BY id DESC"); rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"contests":rows}
+class ContestReq(BaseModel):
+    license_key:str=""; id:int=0; name:str; kind:str="staff"; period:str="month"
+    metric:str="paid_users"; top_n:int=10; rewards:list=[]; enabled:bool=True
+_CONTEST_KINDS={"staff","agent"}; _CONTEST_PERIODS={"month","quarter"}
+_CONTEST_METRICS={"paid_users","revenue","trials","new_users"}
+@app.post("/api/admin/contest", dependencies=[Depends(require_op("contests"))])
+def admin_contest_save(r:ContestReq):
+    if not r.name: raise HTTPException(400,"活动名不能为空")
+    if r.kind not in _CONTEST_KINDS: raise HTTPException(400,"kind 非法")
+    if r.period not in _CONTEST_PERIODS: raise HTTPException(400,"period 非法")
+    if r.metric not in _CONTEST_METRICS: raise HTTPException(400,"metric 非法")
+    for rw in (r.rewards or []):
+        if rw.get("type") not in ("perf","points"): raise HTTPException(400,"奖励类型只能 perf/points")
+    c=db(); cur=c.cursor()
+    if r.id:
+        cur.execute("""UPDATE contests SET name=%s,kind=%s,period=%s,metric=%s,top_n=%s,rewards=%s,enabled=%s,updated_at=now() WHERE id=%s""",
+                    (r.name,r.kind,r.period,r.metric,r.top_n,json.dumps(r.rewards),r.enabled,r.id))
+    else:
+        cur.execute("""INSERT INTO contests(name,kind,period,metric,top_n,rewards,enabled) VALUES(%s,%s,%s,%s,%s,%s,%s)""",
+                    (r.name,r.kind,r.period,r.metric,r.top_n,json.dumps(r.rewards),r.enabled))
+    c.close(); _audit("",_actor(r.license_key),"contest_save",{"name":r.name},DEMO_MODE,"saved")
+    return {"ok":True}
+class ContestDel(BaseModel):
+    license_key:str=""; id:int
+@app.post("/api/admin/contest/del", dependencies=[Depends(require_op("contests"))])
+def admin_contest_del(r:ContestDel):
+    c=db(); cur=c.cursor(); cur.execute("DELETE FROM contests WHERE id=%s",(r.id,)); c.close()
+    _audit("",_actor(r.license_key),"contest_del",{"id":r.id},DEMO_MODE,"deleted")
+    return {"ok":True}
+class ContestSettleReq(BaseModel):
+    license_key:str=""; id:int; force:bool=False
+@app.post("/api/admin/contest/settle", dependencies=[Depends(require_op("contests"))])
+def admin_contest_settle(r:ContestSettleReq):
+    """手动结算上一周期(force=True 忽略 last_settled_period 重复保护, 供测试/补结算)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM contests WHERE id=%s",(r.id,)); cp=cur.fetchone()
+    if not cp: c.close(); raise HTTPException(404,"活动不存在")
+    pk,start,end=_period_bounds(cp["period"])
+    if (cp.get("last_settled_period") or "")==pk and not r.force:
+        c.close(); raise HTTPException(400,"该周期(%s)已结算, force=true 可重结"%pk)
+    if r.force:
+        cur.execute("DELETE FROM contest_results WHERE contest_id=%s AND period_key=%s",(r.id,pk))
+    n=_contest_settle(cur, dict(cp), pk, start, end, _actor(r.license_key))
+    c.close(); _audit("",_actor(r.license_key),"contest_settle",{"id":r.id,"period":pk,"n":n},DEMO_MODE,"settled")
+    return {"ok":True,"period":pk,"ranked":n}
+@app.get("/api/admin/contest/results", dependencies=[Depends(require_op("contests"))])
+def admin_contest_results(contest_id:int, period_key:str=""):
+    """榜单结果(默认最近周期)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if not period_key:
+        cur.execute("SELECT period_key FROM contest_results WHERE contest_id=%s ORDER BY id DESC LIMIT 1",(contest_id,))
+        row=cur.fetchone(); period_key=row["period_key"] if row else ""
+    cur.execute("SELECT * FROM contest_results WHERE contest_id=%s AND period_key=%s ORDER BY rank",(contest_id,period_key))
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"period_key":period_key,"results":rows}
+@app.get("/api/admin/contest/preview", dependencies=[Depends(require_op("contests"))])
+def admin_contest_preview(kind:str="staff", metric:str="paid_users", period:str="month"):
+    """实时预览当前"上一周期"排名(不发奖, 供运营看效果)。"""
+    if kind not in _CONTEST_KINDS or metric not in _CONTEST_METRICS or period not in _CONTEST_PERIODS:
+        raise HTTPException(400,"参数非法")
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    pk,start,end=_period_bounds(period)
+    ranked=_contest_rank(cur, kind, metric, start, end); c.close()
+    return {"period_key":pk,"ranking":[{"rank":i+1,"code":x[0],"name":x[1],"value":x[2]} for i,x in enumerate(ranked[:50])]}
+
+# ================= 折扣券: 运营侧 CRUD + 发放(qhadmin; require_op('coupons')) =================
+@app.get("/api/admin/coupons", dependencies=[Depends(require_op("coupons"))])
+def admin_coupons():
+    """券列表 + 用量。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM coupons ORDER BY created_at DESC"); rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"coupons":rows}
+class CouponReq(BaseModel):
+    license_key:str=""; code:str; name:str=""; kind:str="percent"; value:float=0
+    applies_to:str="any"; min_amount:float=0; max_discount:float=0
+    total_qty:int=0; per_user_limit:int=1; target_username:str=""
+    valid_from:str=""; valid_until:str=""; enabled:bool=True
+@app.post("/api/admin/coupon", dependencies=[Depends(require_op("coupons"))])
+def admin_coupon_save(r:CouponReq):
+    """新增/更新券。kind=percent(value=0-100) / fixed(value=立减USDT)。target_username 非空=专属券。"""
+    if not r.code: raise HTTPException(400,"券码不能为空")
+    if r.kind not in ("percent","fixed"): raise HTTPException(400,"kind 只能 percent/fixed")
+    if r.applies_to not in ("any","iap","subscription"): raise HTTPException(400,"applies_to 非法")
+    c=db(); cur=c.cursor()
+    cur.execute("""INSERT INTO coupons(code,name,kind,value,applies_to,min_amount,max_discount,total_qty,per_user_limit,target_username,valid_from,valid_until,enabled)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,kind=EXCLUDED.kind,value=EXCLUDED.value,applies_to=EXCLUDED.applies_to,
+                   min_amount=EXCLUDED.min_amount,max_discount=EXCLUDED.max_discount,total_qty=EXCLUDED.total_qty,per_user_limit=EXCLUDED.per_user_limit,
+                   target_username=EXCLUDED.target_username,valid_from=EXCLUDED.valid_from,valid_until=EXCLUDED.valid_until,enabled=EXCLUDED.enabled""",
+                (r.code,r.name,r.kind,r.value,r.applies_to,r.min_amount,r.max_discount,r.total_qty,r.per_user_limit,
+                 (r.target_username or None),(r.valid_from or None),(r.valid_until or None),r.enabled))
+    c.close(); _audit("",_actor(r.license_key),"coupon_save",{"code":r.code},DEMO_MODE,"saved")
+    return {"ok":True,"code":r.code}
+class CouponDel(BaseModel):
+    license_key:str=""; code:str
+@app.post("/api/admin/coupon/del", dependencies=[Depends(require_op("coupons"))])
+def admin_coupon_del(r:CouponDel):
+    """删除券(核销历史 coupon_redemptions 保留)。"""
+    c=db(); cur=c.cursor(); cur.execute("DELETE FROM coupons WHERE code=%s",(r.code,)); c.close()
+    _audit("",_actor(r.license_key),"coupon_del",{"code":r.code},DEMO_MODE,"deleted")
+    return {"ok":True}
+@app.get("/api/admin/coupon/redemptions", dependencies=[Depends(require_op("coupons"))])
+def admin_coupon_redemptions(code:str="", limit:int=100):
+    """券核销记录(可按券码过滤)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if code:
+        cur.execute("""SELECT r.id,r.code,u.username,r.order_id,r.discount,r.created_at
+                       FROM coupon_redemptions r JOIN users u ON u.id=r.user_id WHERE r.code=%s ORDER BY r.id DESC LIMIT %s""",(code,max(1,min(500,limit))))
+    else:
+        cur.execute("""SELECT r.id,r.code,u.username,r.order_id,r.discount,r.created_at
+                       FROM coupon_redemptions r JOIN users u ON u.id=r.user_id ORDER BY r.id DESC LIMIT %s""",(max(1,min(500,limit)),))
+    rows=[dict(x) for x in cur.fetchall()]; c.close()
+    return {"redemptions":rows}
+
 @app.get("/api/admin/user/{username}")
 def admin_user_detail(username:str):
     uid=_uid(username)
     if not uid: raise HTTPException(404,"user not found")
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,username,plan,status,expire_at,paid_until,trial_until,trial_started,total_recharge,risk_flags,feishu_id,created_at,last_ip,last_login,geo_country,geo_name FROM users WHERE id=%s",(uid,))
+    cur.execute("SELECT id,username,plan,status,expire_at,paid_until,trial_until,trial_started,total_recharge,risk_flags,feishu_id,created_at,last_ip,last_login,geo_country,geo_name,points,growth_value,staff_code FROM users WHERE id=%s",(uid,))
     u=dict(cur.fetchone())
     cur.execute("SELECT login,broker,role,enabled FROM mt_accounts WHERE user_id=%s",(uid,)); u["accounts"]=[dict(x) for x in cur.fetchall()]
     cur.execute("SELECT product_key,amount,paid_at,status,kind FROM iap_orders WHERE user_id=%s ORDER BY paid_at DESC LIMIT 20",(uid,)); u["orders"]=[dict(x) for x in cur.fetchall()]
@@ -1674,6 +2753,10 @@ def admin_user_detail(username:str):
     u["force_demo"]=(R.get(RNS+"force_demo:"+username)=="1")
     u["auto_entry"]=R.get(RNS+"auto_entry:"+username) or "off"
     u["auto_exit"]=R.get(RNS+"auto_exit:"+username) or "off"
+    # 会员积分(第一阶段): 积分/成长值/会员等级/员工归属
+    _ml=_member_level(u)
+    u["points"]=int(u.get("points") or 0); u["growth_value"]=int(u.get("growth_value") or 0)
+    u["member_level"]=_ml["level"]; u["member_level_name"]=_ml["name"]; u["member_level_source"]=_ml["source"]
     return u
 
 class UserOpReq(BaseModel):
@@ -3494,62 +4577,154 @@ async def quote_tick(symbol:str, leg:str="main"):
 def quote_config():
     return {"demo_mode":DEMO_MODE}
 
+async def _arb_bridge_symbols():
+    """主桥全部品种名(A期机会雷达用; Redis 缓存 60s, 桥单线程不宜频拉)。失败返回 []。"""
+    ck=RNS+"arb:mainsyms"; cached=R.get(ck)
+    if cached:
+        try: return json.loads(cached)
+        except Exception: pass
+    try:
+        d=await CONN.main._get("/mt5/symbols")
+        syms=[x.get("name") for x in (d.get("symbols",d) if isinstance(d,dict) else d) if x.get("name")]
+        R.setex(ck, 60, json.dumps(syms)); return syms
+    except Exception: return []
+# 跨平台对冲符号别名(主平台 IC → 对冲 Bybit 命名不一致, 实测同标的价格量级一致):
+#   金 XAUUSD→XAUUSD+ / 银 XAGUSD→XAGUSD(无+) / 布伦特 XBRUSD→UKOUSD / WTI XTIUSD→USOUSD / 天然气 XNGUSD→NG-C
+# 可用 Redis 键 qh:arb:alias(JSON) 热覆盖, 无需重启。仅机会雷达用; 已配置对仍走用户自设 hedge_symbol。
+_ARB_HEDGE_ALIAS={"XAUUSD":"XAUUSD+","XAGUSD":"XAGUSD","XBRUSD":"UKOUSD","XTIUSD":"USOUSD","XNGUSD":"NG-C"}
+def _arb_alias_map():
+    m=dict(_ARB_HEDGE_ALIAS)
+    try:
+        ov=R.get(RNS+"arb:alias")
+        if ov: m.update(json.loads(ov))
+    except Exception: pass
+    return m
+def _arb_hedge_for(msym, alias, suffix):
+    """机会雷达: 主符号 → 对冲符号。优先别名表, 否则回落"主符号+推断后缀"。"""
+    h=alias.get(msym)
+    if h: return h
+    return (msym+suffix) if suffix else msym
+async def _arb_swap(conn, sym, tag):
+    """取某腿隔夜利息 swap_long/swap_short(via /mt5/symbol_info, Redis 缓存 600s — swap 每日设定变化慢)。
+       返回 (swap_long, swap_short) 或 (None,None)。tag 用于缓存键区分主/对冲桥。"""
+    ck=RNS+"arb:swap:%s:%s"%(tag,sym)
+    cached=R.get(ck)
+    if cached:
+        try: v=json.loads(cached); return v[0],v[1]
+        except Exception: pass
+    try:
+        d=await _asyncio.wait_for(conn._get("/mt5/symbol_info/"+sym), timeout=3.0)
+        sl=d.get("swap_long"); ss=d.get("swap_short")
+        sl=float(sl) if sl is not None else None; ss=float(ss) if ss is not None else None
+        R.setex(ck, 600, json.dumps([sl,ss])); return sl,ss
+    except Exception: return None,None
+def _arb_score(basis, entry):
+    """基差绝对值相对入场阈值的达标度 → (score,reachable,suggest)。"""
+    if basis is None or entry<=0: return 0,False,"数据不足"
+    ratio=abs(basis)/entry; score=int(max(0,min(100,ratio*100))); reachable=abs(basis)>=entry
+    if reachable: suggest="已达入场点差,可开仓套利"
+    elif ratio>=0.8: suggest="接近入场阈值(%.0f%%),密切关注"%(ratio*100)
+    elif ratio>=0.4: suggest="观望,点差偏小"
+    else: suggest="点差过小,暂无套利空间"
+    return score,reachable,suggest
 @app.get("/api/engine/arb_scan/{username}")
 async def engine_arb_scan(username:str):
-    """AI 套利分析: 扫描该用户主账户×对冲账户旗下所有产品对, 实时取双腿行情,
-       算当前点差/基差 vs 入场阈值, 给每对一个可套利性评分(0-100)+建议+可视化数据。
-       评分模型: 距离入场阈值越近/越过 → 分越高; 结合波动带惩罚(波动过大扣分)。"""
+    """AI 套利分析(A期: 全平台机会雷达)。两类:
+       ① configured=true「我的交易对」= param_templates 已配置(可交易);
+       ② configured=false「机会发现」= 主平台其余品种按推断后缀配对冲腿(仅分析, 多账户纳管落地后可一键接入)。
+       桥单线程: 结果 Redis 缓存 8s + tick 受控并发(信号量), 绝不饿死交易引擎。"""
     uid=_uid(username)
     if not uid: raise HTTPException(404,"user not found")
+    ck=RNS+"arb:scan:"+str(uid); cached=R.get(ck)
+    if cached:
+        try: return json.loads(cached)
+        except Exception: pass
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""SELECT symbol,hedge_symbol,entry_spread,tp_points,sl_points,basis_offset,
-                          main_spread_cap,hedge_spread_cap,fluctuation_band,digits
+    cur.execute("""SELECT symbol,hedge_symbol,entry_spread,basis_offset,fluctuation_band
                    FROM param_templates WHERE user_id=%s ORDER BY id""",(uid,))
     rows=[dict(x) for x in cur.fetchall()]; c.close()
-    pairs=[]
+    # 已配置对 + 推断对冲后缀(如 XAUUSD→XAUUSD+ 得 "+") + 默认阈值(取已配置对均值, 无则0.3)
+    cfg_syms=set(); suffix=""; thr_sum=0.0; thr_n=0
     for t in rows:
-        msym=t["symbol"]; hsym=ENG.map_hedge_symbol(msym,t.get("hedge_symbol")) or msym
-        entry=float(t.get("entry_spread") or 0); off=float(t.get("basis_offset") or 0)
-        mt=ht=None
-        try: mt=await CONN.main._get("/mt5/tick/"+msym)
-        except Exception: pass
-        try: ht=await CONN.hedge._get("/mt5/tick/"+hsym) if getattr(CONN,"hedge",None) else None
-        except Exception: pass
-        mp = (mt.get("bid",0)+mt.get("ask",0))/2 if mt else None
-        hp = (ht.get("bid",0)+ht.get("ask",0))/2 if ht else None
-        basis = round((mp-hp-off),4) if (mp is not None and hp is not None) else None
-        # 评分: 基差绝对值相对入场阈值的达标度
-        score=0; suggest="数据不足"; reachable=False
-        if basis is not None and entry>0:
-            ratio=abs(basis)/entry
-            score=int(max(0,min(100,ratio*100)))
-            reachable = abs(basis)>=entry
-            if reachable: suggest="✅ 已达入场点差,建议开仓套利"
-            elif ratio>=0.8: suggest="⏳ 接近入场阈值(%.0f%%),密切关注"%(ratio*100)
-            elif ratio>=0.4: suggest="观望,点差偏小"
-            else: suggest="点差过小,无套利空间"
-        # 波动带惩罚
-        fb=float(t.get("fluctuation_band") or 0)
-        pairs.append({"main_symbol":msym,"hedge_symbol":hsym,"main_price":mp,"hedge_price":hp,
-                      "basis":basis,"entry_spread":entry,"score":score,"reachable":reachable,
-                      "suggest":suggest,"fluctuation_band":fb,
-                      "main_ok":bool(mt),"hedge_ok":bool(ht)})
-    pairs.sort(key=lambda p:p["score"],reverse=True)
-    best=pairs[0] if pairs else None
+        cfg_syms.add(t["symbol"])
+        hs=(t.get("hedge_symbol") or "").strip()
+        if hs and hs.startswith(t["symbol"]) and hs!=t["symbol"]: suffix=hs[len(t["symbol"]):]
+        e=float(t.get("entry_spread") or 0)
+        if e>0: thr_sum+=e; thr_n+=1
+    default_thr=round(thr_sum/thr_n,4) if thr_n else 0.3
+    # 机会雷达候选: 主桥全品种里未配置的(≤5个, 无爆炸风险)
+    radar_syms=[]
+    if getattr(CONN,"hedge",None):   # 无对冲桥则不做雷达
+        for s in await _arb_bridge_symbols():
+            if s not in cfg_syms: radar_syms.append(s)
+    # 组装任务: (msym, hsym, entry, off, fb, configured)
+    tasks=[]
+    for t in rows:
+        tasks.append((t["symbol"], ENG.map_hedge_symbol(t["symbol"],t.get("hedge_symbol")) or t["symbol"],
+                      float(t.get("entry_spread") or 0), float(t.get("basis_offset") or 0),
+                      float(t.get("fluctuation_band") or 0), True))
+    alias=_arb_alias_map()
+    for s in radar_syms:
+        tasks.append((s, _arb_hedge_for(s,alias,suffix), default_thr, 0.0, 0.0, False))
+    # 受控并发拉双腿 tick(信号量=4, 限流保护单线程桥)
+    sem=_asyncio.Semaphore(4)
+    async def _one(ms,hs,entry,off,fb,configured):
+        async def _safe(coro):
+            async with sem:
+                try: return await _asyncio.wait_for(coro, timeout=3.0)   # 短超时: 桥慢/死时快速降级为数据不足, 不拖垮整扫描
+                except Exception: return None
+        _hasH=getattr(CONN,"hedge",None)
+        mt,ht,msw,hsw=await _asyncio.gather(
+            _safe(CONN.main._get("/mt5/tick/"+ms)),
+            _safe(CONN.hedge._get("/mt5/tick/"+hs)) if _hasH else _safe(_asyncio.sleep(0)),
+            _arb_swap(CONN.main, ms, "m"),
+            _arb_swap(CONN.hedge, hs, "h") if _hasH else _safe(_asyncio.sleep(0)))
+        mp=(mt.get("bid",0)+mt.get("ask",0))/2 if isinstance(mt,dict) else None
+        hp=(ht.get("bid",0)+ht.get("ask",0))/2 if isinstance(ht,dict) else None
+        basis=round((mp-hp-off),4) if (mp is not None and hp is not None) else None
+        score,reachable,suggest=_arb_score(basis,entry)
+        # 隔夜利息(swap): 对冲=两腿反向锁仓, 两种锁法各算净利息, 取更优者
+        #   锁法A: 主多+对冲空 = main.swap_long + hedge.swap_short
+        #   锁法B: 主空+对冲多 = main.swap_short + hedge.swap_long
+        # swap 单位=账户货币/手/夜(MT5 symbol_info 原值)。净为负=每夜倒扣, 会侵蚀点差利润。
+        m_sl,m_ss=msw if isinstance(msw,tuple) else (None,None)
+        h_sl,h_ss=hsw if isinstance(hsw,tuple) else (None,None)
+        swap_net=None; swap_dir=None; swap_ok=None
+        if None not in (m_sl,m_ss,h_sl,h_ss):
+            netA=m_sl+h_ss; netB=m_ss+h_sl
+            if netA>=netB: swap_net=round(netA,2); swap_dir="主多/对冲空"
+            else:          swap_net=round(netB,2); swap_dir="主空/对冲多"
+            swap_ok=swap_net>=0   # True=净收/持平(利好长持), False=净付(长持侵蚀利润)
+        return {"main_symbol":ms,"hedge_symbol":hs,"main_price":mp,"hedge_price":hp,
+                "basis":basis,"entry_spread":entry,"score":score,"reachable":reachable,
+                "suggest":suggest,"fluctuation_band":fb,"configured":configured,
+                "main_ok":isinstance(mt,dict),"hedge_ok":isinstance(ht,dict),
+                "swap_net":swap_net,"swap_dir":swap_dir,"swap_ok":swap_ok,
+                "main_swap_long":m_sl,"main_swap_short":m_ss,"hedge_swap_long":h_sl,"hedge_swap_short":h_ss}
+    pairs=await _asyncio.gather(*[_one(*t) for t in tasks])
+    # 排序: 已配置对优先, 再按评分
+    pairs.sort(key=lambda p:(not p["configured"], -p["score"]))
+    cfg_pairs=[p for p in pairs if p["configured"]]
     _reach=sum(1 for p in pairs if p["reachable"])
-    summary={"pairs":len(pairs),"reachable":_reach,
+    _reach_cfg=sum(1 for p in cfg_pairs if p["reachable"])
+    best=max(pairs,key=lambda p:p["score"]) if pairs else None
+    summary={"pairs":len(pairs),"configured_pairs":len(cfg_pairs),"radar_pairs":len(pairs)-len(cfg_pairs),
+             "reachable":_reach,"reachable_configured":_reach_cfg,
              "top_score":best["score"] if best else 0,
-             "verdict": ("发现 %d 个可套利机会"%_reach) if any(p["reachable"] for p in pairs) else "当前无达标套利机会,继续监控"}
-    # 埋点落库(供产品分析统计, best-effort 不阻断)
+             "verdict": ("发现 %d 个可套利机会(%d 个在你的交易对内)"%(_reach,_reach_cfg)) if _reach>0 else "当前无达标套利机会,继续监控"}
+    out={"username":username,"summary":summary,"pairs":pairs}
+    R.setex(ck, 8, json.dumps(out,default=str))   # 8s 缓存: 刷新/多端不重复打桥
+    # 埋点落库(仅统计已配置对的命中, 保持口径与交易一致)
     try:
         c2=db(); cur2=c2.cursor()
+        cb=cfg_pairs[0] if cfg_pairs else best
         cur2.execute("""INSERT INTO ai_arb_scans(user_id,username,pairs,reachable,top_score,hit,top_symbol,top_basis)
                         VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
                      (uid,username,len(pairs),_reach,(best["score"] if best else 0),(_reach>0),
-                      (best["main_symbol"]+"/"+best["hedge_symbol"]) if best else "",(best["basis"] if best else None)))
+                      (cb["main_symbol"]+"/"+cb["hedge_symbol"]) if cb else "",(cb["basis"] if cb else None)))
         c2.close()
     except Exception as _e: pass
-    return {"username":username,"summary":summary,"pairs":pairs}
+    return out
 
 @app.get("/api/admin/bi/arb_stats")
 def bi_arb_stats(days:int=30):
@@ -3787,6 +4962,19 @@ async def engine_daypnl(symbol:str="XAUUSD"):
 import asyncio as _asyncio
 _WS_CLIENTS=set()          # 活跃连接集合
 _WS_SNAP={"fast":{}, "slow":{}, "fast_ts":0, "slow_ts":0}
+def _ws_resolve_symbols(state):
+    """从引擎态解析主/对冲品种。命门: 多用户模板同存时不能取 next(iter(ev)) 任意一个
+       (否则别的用户配的非法对冲符号如 XAUUSD.m 会污染全局快照, 致对冲行情 404 无数据)。
+       优先取 primary_user(仪表盘归属用户)的 eval 条目; 无则回落首个; 全无回落 XAUUSD。"""
+    hsym="XAUUSD"; msym="XAUUSD"
+    try:
+        ev=((state or {}).get("eval") or {})
+        if ev:
+            pu=R.get(RNS+"ws:primary_user") or ""
+            entry = ev.get(pu) if (pu and pu in ev) else next(iter(ev.values()),{})
+            hsym=entry.get("hedge_symbol") or "XAUUSD"; msym=entry.get("symbol") or "XAUUSD"
+    except Exception: pass
+    return msym, hsym
 async def _ws_build_fast():
     """高频字段(~1s): 双腿状态/持仓 + 主对冲报价 + 引擎/市场态 + 强平估算。"""
     out={}
@@ -3796,14 +4984,8 @@ async def _ws_build_fast():
     except Exception: out["account"]=None
     try: out["state"]=engine_state()
     except Exception: out["state"]=None
-    # 品种(取首个模板的对冲映射)
-    hsym="XAUUSD"; msym="XAUUSD"
-    try:
-        st=out.get("state") or {}; ev=(st.get("eval") or {})
-        if ev:
-            first=next(iter(ev.values()),{})
-            hsym=first.get("hedge_symbol") or "XAUUSD"; msym=first.get("symbol") or "XAUUSD"
-    except Exception: pass
+    # 品种: 取 primary_user 模板的对冲映射(防他人非法符号污染全局)
+    msym, hsym = _ws_resolve_symbols(out.get("state"))
     try: out["tick_main"]=await quote_tick(msym,"main")
     except Exception: out["tick_main"]=None
     try: out["tick_hedge"]=await quote_tick(hsym,"hedge")
@@ -3816,13 +4998,7 @@ async def _ws_build_ticks(prev):
     """极轻字段(~0.3s): 仅主/对冲报价(并发拉, 桥可并发~50ms)。复用上一帧 fast 的 legs/account/state/liq
        (重字段由 heavy 节流刷新), 让点差(卡/账本头/蓝框)达 2/s+ 而不放大重桥调用。"""
     out=dict(prev or {})   # 继承上一帧的 legs/account/state/liq 等重字段
-    msym="XAUUSD"; hsym="XAUUSD"
-    try:
-        st=out.get("state") or {}; ev=(st.get("eval") or {})
-        if ev:
-            first=next(iter(ev.values()),{})
-            hsym=first.get("hedge_symbol") or "XAUUSD"; msym=first.get("symbol") or "XAUUSD"
-    except Exception: pass
+    msym, hsym = _ws_resolve_symbols(out.get("state"))
     # 主+对冲报价并发拉(bridge 支持并发, 两个一起 ~50ms 而非串行 ~100ms)
     async def _safe(coro):
         try: return await coro

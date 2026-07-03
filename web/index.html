@@ -429,21 +429,46 @@
   .um-ava{width:18px;height:18px;border-radius:50%;background:linear-gradient(var(--teal),var(--teal-deep));color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px}
   .um-name{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .um-caret{font-size:9px;color:#8a959b}
-  .um-pop{position:fixed;right:8px;top:38px;width:248px;max-height:calc(100vh - 60px);overflow-y:auto;background:#fff;border:1px solid var(--cardline);border-radius:8px;box-shadow:0 8px 26px rgba(8,17,58,.18);padding:10px 12px;display:none;z-index:600}
+  .um-pop{position:fixed;right:8px;top:38px;width:264px;max-height:calc(100vh - 60px);overflow-y:auto;background:#fff;border:1px solid var(--cardline);border-radius:10px;box-shadow:0 10px 30px rgba(8,17,58,.2);padding:12px;display:none;z-index:600}
+  /* 身份头部: 大头像 + 昵称/账户 */
+  .um-hd{display:flex;align-items:center;gap:10px;padding:2px 2px 4px}
+  .um-hd-ava{flex:0 0 auto;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#08113A,#2E8BD6);
+    color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;text-transform:uppercase;box-shadow:0 2px 8px rgba(46,139,214,.35)}
+  .um-hd-id{min-width:0;flex:1}
+  .um-hd-click{cursor:pointer;border-radius:8px;margin:-2px -2px 0;padding:4px;transition:background .15s}
+  .um-hd-click:hover{background:var(--teal-pale)}
+  .um-hd-name{font-size:15px;font-weight:800;color:#111a2e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+  .um-hd-pen{width:13px;height:13px;color:#8a95a8;flex:0 0 auto}
+  .um-hd-click:hover .um-hd-pen{color:var(--teal)}
+  .um-hd-sub{font-size:11px;color:#8a95a8;font-family:var(--num);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+  body.dark .um-hd-name{color:#eaf2f4}
   .um-pop.show{display:block}
   .um-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0}
   .um-row .k{color:var(--lbl)} .um-row .v{font-family:var(--num);color:#1c2429;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .um-sep{height:1px;background:var(--cardline);margin:7px 0}
+  /* 会员概览条(PC 下拉, qhwww 浅色调) */
+  .um-stats{background:linear-gradient(135deg,#08113A,#2E8BD6);border-radius:9px;padding:10px 12px}
+  .um-lvl-row{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;cursor:pointer}
+  .um-lvl-row:hover{opacity:.9}
+  .um-lvl{font-size:13px;font-weight:800;color:#fff}
+  .um-paid{font-size:10px;color:rgba(255,255,255,.8);white-space:nowrap}
+  .um-stats-row{display:flex;gap:6px}
+  .um-stat{flex:1;background:rgba(255,255,255,.14);border-radius:6px;padding:6px 4px;text-align:center}
+  .um-stat-click{cursor:pointer;transition:background .15s} .um-stat-click:hover{background:rgba(255,255,255,.26)}
+  .um-st-k{display:block;font-size:10px;color:rgba(255,255,255,.75);margin-bottom:2px}
+  .um-plus{color:#7dffb0;font-weight:700}
+  .um-st-v{font-family:var(--num);font-size:15px;font-weight:800;color:#fff}
+  .um-st-u{font-size:10px;color:rgba(255,255,255,.75);margin-left:1px}
+  .um-green{color:#7dffb0!important} .um-amber{color:#ffd479!important}
+  .um-auto{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:rgba(255,255,255,.9)}
+  .um-auto-dot{width:7px;height:7px;border-radius:50%;background:#8a93a8;flex:0 0 auto}
+  .um-auto-dot.on{background:#7dffb0;box-shadow:0 0 5px #7dffb0}
+  .um-auto-dot.demo{background:#ffd479;box-shadow:0 0 5px #ffd479}
   .um-item{display:block;width:100%;text-align:left;border:none;background:transparent;color:#2c4047;font-size:12.5px;padding:7px 8px;border-radius:5px;cursor:pointer}
   .um-item:hover{background:var(--teal-pale)}
   .um-item.danger{color:var(--red)} .um-item.danger:hover{background:#fdecec}
-  /* 编辑信息(改昵称) */
-  .um-edit-hd,.um-orders-hd{font-size:11px;font-weight:700;color:var(--lbl);margin-bottom:5px;letter-spacing:.4px}
-  .um-edit-row{display:flex;gap:6px;align-items:center}
-  .um-nick-input{flex:1;min-width:0;border:1px solid #c2c7cc;border-radius:5px;padding:5px 7px;font-size:12px;color:#1c2429;outline:none}
-  .um-nick-input:focus{border-color:var(--teal)}
-  .um-nick-save{flex:0 0 auto;border:none;background:linear-gradient(var(--teal),var(--teal-deep));color:#fff;font-size:12px;font-weight:700;border-radius:5px;padding:6px 12px;cursor:pointer}
-  .um-nick-save:hover{filter:brightness(1.08)}
+  /* 消费记录标题(编辑信息区已移除, 改点击昵称弹框) */
+  .um-orders-hd{font-size:11px;font-weight:700;color:var(--lbl);margin-bottom:5px;letter-spacing:.4px}
   /* 消费记录 */
   .um-orders-list{max-height:210px;overflow-y:auto;display:flex;flex-direction:column;gap:5px}
   .um-order{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:11.5px;padding:5px 6px;background:var(--teal-pale);border-radius:6px}
@@ -457,7 +482,6 @@
   body.dark .um-pop{background:#101a33;border-color:#243056}
   body.dark .um-row .v{color:#eaf2f4} body.dark .um-item{color:#bcd0d6}
   body.dark .um-item:hover{background:#16224a} body.dark .um-sep{background:#243056}
-  body.dark .um-nick-input{background:#0b1428;border-color:#243056;color:#eaf2f4}
   body.dark .um-order{background:#0b1428} body.dark .um-order .on{color:#eaf2f4}
 
   /* ===== titlebar 综合盈亏条 (逐笔口径) ===== */
@@ -590,6 +614,21 @@
     .netbar{flex-wrap:nowrap;margin-left:auto}
     .netbar .nb-i:nth-child(4), .netbar .nb-i:nth-child(5){display:none}  /* 收起主/对冲逐项明细, 留净利核心 */
   }
+  /* 窄屏桌面(641–1280px, 非移动 mobile-mode): 顶栏改换行不横滚 + 盈亏条缩成单值(仅当日总净利润),
+     保证 声音/主题/用户 右侧簇永不被挤出屏外 */
+  @media (min-width:641px) and (max-width:1280px){
+    .titlebar{flex-wrap:wrap;overflow-x:visible;row-gap:4px}
+    .titlebar .spacer{display:none}
+    .titlebar .usermenu{margin-left:auto}   /* 用户栏靠右, 与声音/主题同处 */
+    /* 盈亏条压缩: 只留"当日总净利润"单值(child 3), 隐标签/平仓大值/主对冲明细 */
+    .titlebar .netbar{flex:0 0 auto;padding:2px 8px;gap:4px}
+    .titlebar .netbar .nb-lbl,
+    .titlebar .netbar .nb-big,
+    .titlebar .netbar .nb-i:nth-child(4),
+    .titlebar .netbar .nb-i:nth-child(5){display:none}
+    .titlebar .netbar .nb-i:nth-child(3){font-size:12px}
+    .titlebar .netbar .nb-i:nth-child(3) i::before{content:"💰 "}
+  }
   @media (max-width:1024px){
     .content{flex-direction:column;gap:10px;overflow-y:auto}
     .top{flex-direction:column;height:auto}
@@ -717,22 +756,36 @@
   /* ================= 手机 UI 重设计(诉求7项, 全 mobile-mode 作用域) ================= */
   .mnav-toggle{display:none;background:transparent;border:none;color:#2c4047;font-size:20px;cursor:pointer;line-height:1;padding:2px 6px}
   #mnav-mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:610}
-  #mnav-panel{display:none;position:fixed;top:0;left:0;bottom:0;width:78vw;max-width:300px;background:#0b1428;z-index:611;
-    flex-direction:column;padding:12px;gap:6px;transform:translateX(-100%);transition:transform .22s;overflow:hidden}
+  #mnav-panel{display:none;position:fixed;top:0;left:0;bottom:0;width:80vw;max-width:320px;background:#0b1428;z-index:611;
+    flex-direction:column;padding:14px 12px calc(14px + env(safe-area-inset-bottom,0px));gap:6px;transform:translateX(-100%);transition:transform .22s;overflow-y:auto;-webkit-overflow-scrolling:touch}
   #mnav-panel .mnav-item{padding:10px 12px;font-size:13.5px}
   #mnav-panel.open{transform:translateX(0)}
   .mnav-hd{color:#fff;font-size:16px;font-weight:700;padding:4px 2px 8px}
-  .mnav-user{display:flex;align-items:center;gap:10px;padding:6px 2px 10px}
-  .mnav-ava{width:34px;height:34px;border-radius:50%;background:#2E8BD6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
-  .mnav-uname{color:#fff;font-size:15px;font-weight:600}
-  .mnav-exp{color:#ffd08a;font-size:12px;padding:4px 2px 10px;border-bottom:1px solid #1e2a52;margin-bottom:4px;text-align:center}
-  /* 移动菜单: 编辑信息 */
-  .mnav-edit{padding:4px 2px 10px;border-bottom:1px solid #1e2a52;margin-bottom:6px}
-  .mnav-edit-hd{color:#8aa0c8;font-size:11px;font-weight:700;letter-spacing:.4px;margin-bottom:6px}
-  .mnav-edit-row{display:flex;gap:8px;align-items:center}
-  .mnav-nick-input{flex:1;min-width:0;background:#111f42;border:1px solid #1e2a52;border-radius:8px;color:#eaf2f4;font-size:14px;padding:9px 10px;outline:none}
-  .mnav-nick-input:focus{border-color:#2E8BD6}
-  .mnav-nick-save{flex:0 0 auto;background:#2E8BD6;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:9px 14px;cursor:pointer}
+  /* 身份头部: 头像 + 昵称/到期 竖排(去顶部留白, 左对齐一体) */
+  .mnav-user{display:flex;align-items:center;gap:11px;padding:4px 2px 12px}
+  .mnav-ava{flex:0 0 auto;width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#0d1a52,#2E8BD6);
+    color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;text-transform:uppercase;box-shadow:0 2px 10px rgba(46,139,214,.4)}
+  .mnav-uid{min-width:0;flex:1}
+  .mnav-user-click{cursor:pointer;border-radius:10px;transition:background .15s}
+  .mnav-user-click:active{background:rgba(255,255,255,.08)}
+  .mnav-uname{color:#fff;font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25;display:flex;align-items:center;gap:7px}
+  .mnav-pen{width:14px;height:14px;color:rgba(255,255,255,.55);flex:0 0 auto}
+  .mnav-exp{color:#ffd08a;font-size:12px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 移动菜单: 会员概览条 */
+  .mnav-stats{background:linear-gradient(135deg,#0d1a52,#2E8BD6);border-radius:10px;padding:11px 12px;margin:2px 0 12px}
+  .mnav-lvl-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+  .mnav-lvl{font-size:14px;font-weight:800;color:#fff}
+  .mnav-paid{font-size:11px;color:rgba(255,255,255,.82);white-space:nowrap}
+  .mnav-stats-row{display:flex;gap:8px}
+  .mnav-stat{flex:1;background:rgba(255,255,255,.15);border-radius:8px;padding:8px 4px;text-align:center}
+  .mnav-stat span{display:block;font-size:11px;color:rgba(255,255,255,.78);margin-bottom:3px}
+  .mnav-stat b{font-family:var(--num);font-size:17px;font-weight:800;color:#fff}
+  .mnav-plus{font-size:11px;color:#7dffb0}
+  .mnav-green{color:#7dffb0!important} .mnav-amber{color:#ffd479!important}
+  .mnav-auto{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12px;color:rgba(255,255,255,.9)}
+  .mnav-auto-dot{width:8px;height:8px;border-radius:50%;background:#8a93a8;flex:0 0 auto}
+  .mnav-auto-dot.on{background:#7dffb0;box-shadow:0 0 6px #7dffb0}
+  .mnav-auto-dot.demo{background:#ffd479;box-shadow:0 0 6px #ffd479}
   /* 包月/充值/内购 横排三按钮 */
   .mnav-quick{display:flex;gap:8px;margin-bottom:6px}
   /* 功能区卡片: 3 列网格(5 项=3+2), 与 mnav-q 同卡片样式 */
@@ -863,6 +916,123 @@
 .tri .svgi,.pt .svgi{width:.85em;height:.85em;vertical-align:0}
 #acct-fab .svgi{width:1.4em;height:1.4em}
 .mi.on .svgi{opacity:1}.mi:not(.on) .svgi{opacity:.45}
+/* ===== 会员中心(qhwww 浅色配色: 底#E9ECF3 品牌#08113A logo#2E8BD6 文字#1a2033 绿#1aa86a) ===== */
+.pm-dlg{background:#E9ECF3}
+.pm-body{color:#1a2033}
+.pm-cards{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.pm-card{flex:1;min-width:150px;background:#FFFFFF;border:1px solid #dde2ee;border-radius:12px;padding:14px;box-shadow:0 1px 4px rgba(8,17,58,.05)}
+.pm-card-brand{background:linear-gradient(135deg,#08113A,#2E8BD6);border:none;color:#fff}
+.pm-card .pm-k{font-size:12px;color:#8a93a8;margin-bottom:6px}
+.pm-card-brand .pm-k{color:rgba(255,255,255,.8)}
+.pm-lvl{font-size:18px;font-weight:800;color:#fff}
+.pm-sub{font-size:11px;color:rgba(255,255,255,.85);margin-top:6px}
+.pm-big{font-size:24px;font-weight:800;line-height:1.1}
+.pm-u{font-size:12px;font-weight:600;color:#8a93a8}
+.pm-green{color:#1aa86a}.pm-amber{color:#e0863a}
+.pm-btn{margin-top:8px;background:#2E8BD6;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer}
+.pm-btn:hover{background:#2477bd}
+.pm-sec{font-weight:700;color:#08113A;font-size:14px;margin:14px 0 8px;padding-left:8px;border-left:3px solid #2E8BD6}
+.pm-acts{display:flex;flex-direction:column;gap:6px}
+.pm-act{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #dde2ee;border-radius:8px;padding:9px 12px;font-size:13px;color:#1a2033}
+.pm-act .pm-act-tag{font-size:11px;color:#fff;background:#e0683a;border-radius:10px;padding:2px 8px;font-weight:600}
+.pm-empty{color:#8a93a8;font-size:12px;text-align:center;padding:10px}
+.pm-catalog{display:flex;flex-wrap:wrap;gap:8px}
+.pm-item{flex:1;min-width:170px;background:#fff;border:1px solid #dde2ee;border-radius:8px;padding:10px}
+.pm-item .pm-item-n{color:#1a2033;font-size:13px}
+.pm-item .pm-item-b{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.pm-item .pm-item-c{color:#e0863a;font-weight:700}
+.pm-invite{background:#fff;border:1px solid #dde2ee;border-radius:8px;padding:12px}
+.pm-invrow{display:flex;gap:8px;align-items:center}
+.pm-invrow input{flex:1;background:#eaf0fa;color:#1a6bbf;border:1px solid #dde2ee;border-radius:6px;padding:7px;font-size:12px}
+.pm-invtip{font-size:11px;color:#8a93a8;margin-top:8px}.pm-invtip b{color:#1aa86a}
+.pm-ledger{max-height:170px;overflow:auto;background:#fff;border:1px solid #dde2ee;border-radius:8px;padding:4px 10px}
+.pm-lrow{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef1f7;font-size:12px;color:#46506e}
+.pm-lrow:last-child{border-bottom:none}
+.pm-lrow .pm-ld-pos{color:#1aa86a;font-weight:600}.pm-lrow .pm-ld-neg{color:#e0683a;font-weight:600}
+body.dark .pm-dlg{background:#0f1728}
+body.dark .pm-body{color:#dbe6ea}
+body.dark .pm-card{background:#141c2e;border-color:#243056}
+body.dark .pm-sec{color:#8fbfe6}
+body.dark .pm-act,body.dark .pm-item,body.dark .pm-invite,body.dark .pm-ledger{background:#141c2e;border-color:#243056;color:#dbe6ea}
+body.dark .pm-item .pm-item-n{color:#dbe6ea}
+body.dark .pm-invrow input{background:#0b1220;color:#8fbfe6;border-color:#243056}
+/* ===== AI 套利分析(量化信号终端风) ===== */
+#arb-mask .dlg{width:760px;max-width:96vw}
+.arb-loading{text-align:center;padding:44px;color:#8a959b;font-size:13px}
+.arb-spin{display:inline-block;width:14px;height:14px;border:2px solid #cdd6e6;border-top-color:#2E8BD6;border-radius:50%;vertical-align:-2px;animation:arbspin .7s linear infinite}
+@keyframes arbspin{to{transform:rotate(360deg)}}
+/* KPI 头部带: 深蓝量化仪表条 */
+.arb-kpi{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:1px;background:#26324f;border:1px solid #26324f;border-radius:10px;overflow:hidden;margin-bottom:14px}
+.arb-kpi .k{background:linear-gradient(160deg,#0c1730,#12203d);padding:11px 14px}
+.arb-kpi .k.verdict{background:linear-gradient(135deg,#0c1730,#1b3a5c)}
+.arb-kpi .k .kl{font-size:10px;color:#7e90b4;letter-spacing:.5px;text-transform:uppercase}
+.arb-kpi .k .kv{font-family:var(--num);font-size:20px;font-weight:800;color:#eaf2ff;margin-top:3px;line-height:1.1}
+.arb-kpi .k .kv.sm{font-size:14px;font-weight:700;line-height:1.35}
+.arb-kpi .k .kv .u{font-size:11px;color:#7e90b4;font-weight:600;margin-left:2px}
+.arb-kpi .k .kv.ok{color:#3ddc84} .arb-kpi .k .kv.warn{color:#ffca5f}
+.arb-sec-t{font-size:12px;font-weight:700;color:#08113A;letter-spacing:.4px;margin:2px 2px 8px;padding-left:8px;border-left:3px solid #2E8BD6;display:flex;align-items:center;gap:8px}
+.arb-cnt{font-size:11px;color:#8a959b;font-weight:600}
+.arb-tagr{font-size:10px;font-weight:700;color:#2E8BD6;background:#eaf0fa;border:1px solid rgba(46,139,214,.28);padding:1px 8px;border-radius:999px}
+.arb-card.radar{opacity:.94}
+.arb-card.radar .sym::after{content:"待接入";font-size:10px;font-weight:600;color:#8a959b;background:#f0f2f7;border-radius:999px;padding:1px 7px;margin-left:2px}
+.arb-list{display:flex;flex-direction:column;gap:8px}
+/* 信号卡 */
+.arb-card{display:grid;grid-template-columns:1fr auto;gap:10px 14px;background:#fff;border:1px solid #e2e8f4;border-radius:10px;padding:12px 14px;position:relative;overflow:hidden}
+.arb-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.arb-card.s-ok::before{background:#16a34a} .arb-card.s-near::before{background:#e6a23c} .arb-card.s-low::before{background:#c0c8d6}
+.arb-card .sym{display:flex;align-items:center;gap:8px;font-weight:800;color:#08113A;font-size:14px}
+.arb-card .sym .swap{color:#2E8BD6}
+.arb-legs{display:flex;gap:10px;margin-top:7px;font-size:11px}
+.arb-leg{display:flex;align-items:center;gap:4px;color:#5a678a}
+.arb-dot{width:7px;height:7px;border-radius:50%;background:#c0c8d6}
+.arb-dot.on{background:#16a34a;box-shadow:0 0 4px rgba(22,163,74,.5)}
+.arb-dot.off{background:#e0683a}
+/* 基差 vs 阈值 迷你条 */
+.arb-basis{margin-top:9px;font-size:11px;color:#5a678a}
+.arb-basis .bt{display:flex;justify-content:space-between;font-family:var(--num);margin-bottom:3px}
+.arb-basis .bt b{color:#08113A}
+.arb-bar{height:7px;background:#eef1f7;border-radius:4px;overflow:hidden;position:relative}
+.arb-bar .fill{height:100%;border-radius:4px}
+.arb-bar .thr{position:absolute;top:-2px;bottom:-2px;width:2px;background:#08113A;opacity:.55}
+/* 隔夜利息(swap)行 */
+.arb-swap{display:flex;align-items:center;gap:7px;margin-top:9px;padding:6px 9px;border-radius:7px;font-size:11px;
+  background:#f4f7fb;border:1px solid #e7ecf5}
+.arb-swap .sw-k{color:#8a95a8;font-size:10.5px;flex:0 0 auto}
+.arb-swap .sw-v{font-family:var(--num);font-weight:800;font-size:13px}
+.arb-swap .sw-dir{font-size:10px;color:#5a678a;background:#e9eefa;border-radius:999px;padding:1px 7px}
+.arb-swap .sw-tip{margin-left:auto;font-size:10.5px;font-weight:600}
+.arb-swap.pos{background:#eefaf2;border-color:#c9ecd8}
+.arb-swap.pos .sw-v,.arb-swap.pos .sw-tip{color:#12a150}
+.arb-swap.neg{background:#fdf1f0;border-color:#f6d5d2}
+.arb-swap.neg .sw-v,.arb-swap.neg .sw-tip{color:#e04a3f}
+.arb-swap.na{background:#f4f5f7;border-color:#e7e9ee}
+.arb-swap.na .sw-v{color:#9aa2b0;font-weight:600;font-size:11px}
+body.dark .arb-swap{background:#131f3a;border-color:#243056}
+body.dark .arb-swap.pos{background:#0f2a1e;border-color:#1f5a3c}
+body.dark .arb-swap.neg{background:#2e1513;border-color:#5a2a26}
+body.dark .arb-swap.na{background:#131f3a;border-color:#243056}
+/* 评分环 + 状态 */
+.arb-score{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:96px}
+.arb-ring{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+.arb-ring .rv{font-family:var(--num);font-weight:800;font-size:19px}
+.arb-ring .ru{font-size:9px;color:#8a959b}
+.arb-chip{margin-top:6px;font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px}
+.arb-chip.ok{background:#e5f7ec;color:#16a34a} .arb-chip.near{background:#fdf3e3;color:#e6a23c} .arb-chip.low{background:#eef1f7;color:#8a959b}
+.arb-suggest{grid-column:1/-1;font-size:12px;color:#46506e;border-top:1px dashed #e5e8f0;padding-top:8px;margin-top:2px}
+.arb-empty{color:#8a959b;text-align:center;padding:26px;font-size:13px}
+/* AI 研判终端 */
+.arb-narrate{margin-top:12px;background:#0c1730;border:1px solid #26324f;border-radius:10px;padding:14px 16px;font-size:13px;line-height:1.75;color:#c8d6ef;white-space:pre-wrap;position:relative}
+.arb-narrate .ai-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#8fbaff;letter-spacing:.5px;margin-bottom:8px;text-transform:uppercase}
+.arb-foot-note{font-size:11px;color:#96a2b8;margin-top:12px;line-height:1.6}
+body.dark .arb-card{background:#101a33;border-color:#243056}
+body.dark .arb-card .sym{color:#dbe6ea}
+body.dark .arb-sec-t{color:#8fbfe6}
+body.dark .arb-bar{background:#1a2740}
+@media (max-width:640px){
+  .arb-kpi{grid-template-columns:1fr 1fr}
+  .arb-card{grid-template-columns:1fr}
+  .arb-score{flex-direction:row;gap:12px;min-width:0;justify-content:flex-start}
+}
 </style>
 </head>
 <body>
@@ -948,6 +1118,56 @@
   </div>
 </div>
 
+<!-- ===== 积分与邀请(顶层, 登录后打开) ===== -->
+<div class="mask" id="points-mask">
+  <div class="dlg pm-dlg" style="width:640px">
+    <div class="dh"><b><svg class="svgi"><use href="#i-scale"/></svg> 我的会员中心</b><span class="sp"></span><button class="x" onclick="closeMask('points-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="db pm-body">
+      <!-- 概览: 会员等级 / 余额 / 积分 三卡 -->
+      <div class="pm-cards">
+        <div class="pm-card pm-card-brand">
+          <div class="pm-k">会员等级</div>
+          <div class="pm-lvl" id="pm-level">L0 体验交易者</div>
+          <div class="pm-sub">成长值 <b id="pm-growth">0</b></div>
+        </div>
+        <div class="pm-card">
+          <div class="pm-k">账户余额</div>
+          <div class="pm-big pm-green" id="pm-balance">0.00 <span class="pm-u">USDT</span></div>
+          <button class="pm-btn" onclick="closeMask('points-mask');openRenew('recharge')">充值</button>
+        </div>
+        <div class="pm-card">
+          <div class="pm-k">对冲积分</div>
+          <div class="pm-big pm-amber" id="pm-points">0</div>
+          <button class="pm-btn" onclick="doCheckin()">每日签到</button>
+        </div>
+      </div>
+
+      <!-- 进行中活动 -->
+      <div class="pm-sec">进行中的活动</div>
+      <div id="pm-acts" class="pm-acts"><div class="pm-empty">加载中…</div></div>
+
+      <!-- 积分兑换 -->
+      <div class="pm-sec">积分兑换</div>
+      <div id="pm-catalog" class="pm-catalog">加载中…</div>
+
+      <!-- 好友邀请 -->
+      <div class="pm-sec">好友邀请</div>
+      <div class="pm-invite">
+        <div class="pm-invrow">
+          <input id="pm-invite-link" readonly>
+          <button class="pm-btn" onclick="copyInvite()">复制链接</button>
+        </div>
+        <div class="pm-invtip">好友激活试用得 <b>+100</b> 积分,好友首次付费再返实付 <b>10%</b> 积分。已邀 <b id="pm-inv-total">0</b> 人 · 试用转化 <b id="pm-inv-trial">0</b> · 累计奖励 <b id="pm-inv-pts">0</b> 积分</div>
+      </div>
+
+      <!-- 积分明细 -->
+      <div class="pm-sec">积分明细</div>
+      <div id="pm-ledger" class="pm-ledger"></div>
+    </div>
+    <div class="df"><button class="btn-ghost" onclick="closeMask('points-mask')">关闭</button></div>
+  </div>
+</div>
+
 <!-- ===== 内购目录(顶层, 登录后打开) ===== -->
 <div class="mask" id="iap-mask">
   <div class="dlg" style="width:640px">
@@ -971,12 +1191,19 @@
         <button class="go" style="width:auto;padding:8px 24px;background:linear-gradient(135deg,#6a3df0,#a855f7)" onclick="closeMask('arb-mask');openIap()">前往内购解锁</button>
       </div>
       <div id="arb-content" style="display:none">
-        <div id="arb-summary" style="background:linear-gradient(135deg,#f3efff,#faf5ff);border:1px solid #e0d4fa;border-radius:8px;padding:12px;margin-bottom:12px"></div>
-        <div id="arb-list"></div>
-        <div id="arb-narrate" style="display:none;background:#eaf0fa;border:1px solid #dde2ee;border-radius:8px;padding:12px;margin-top:10px;font-size:13px;line-height:1.7;white-space:pre-wrap;color:#1a2033"></div>
-        <div style="font-size:11px;color:#8a959b;margin-top:10px">评分=当前基差相对入场阈值的达标度(0-100);≥100% 即达标可套利。数据实时取双腿行情,仅供参考。</div>
+        <!-- KPI 头部带(量化终端风) -->
+        <div class="arb-kpi" id="arb-kpi"></div>
+        <!-- 我的交易对(可交易) -->
+        <div class="arb-sec-t">我的交易对 · 可交易 <span id="arb-cfg-cnt" class="arb-cnt"></span></div>
+        <div id="arb-list-cfg" class="arb-list"></div>
+        <!-- 机会发现(仅分析, 全平台雷达) -->
+        <div class="arb-sec-t" style="margin-top:14px">机会发现 · 全平台雷达 <span class="arb-tagr">仅分析</span></div>
+        <div id="arb-list-radar" class="arb-list"></div>
+        <!-- AI 策略研判 -->
+        <div id="arb-narrate" class="arb-narrate" style="display:none"></div>
+        <div class="arb-foot-note">评分 = 当前基差相对入场阈值的达标度(0–100),≥100 即达标可套利。数据实时取双腿行情,仅供参考,不构成投资建议。</div>
       </div>
-      <div id="arb-loading" style="text-align:center;padding:30px;color:#8a959b">分析中…</div>
+      <div id="arb-loading" class="arb-loading"><span class="arb-spin"></span> 量化引擎扫描中…</div>
     </div>
     <div class="df"><button class="btn-ghost" onclick="closeMask('arb-mask')">关闭</button><button class="btn-ghost" onclick="arbNarrate()">AI 解读</button><button class="btn-primary" onclick="loadArb()">刷新分析</button></div>
   </div>
@@ -993,6 +1220,7 @@
     <button class="btn btn-green tb-more" data-tbg onclick="openRenew('month')"><svg class="svgi"><use href="#i-calendar"/></svg> 包月</button>
     <button class="btn btn-green tb-more" data-tbg onclick="openRenew('recharge')"><svg class="svgi"><use href="#i-money"/></svg> 充值</button>
     <button class="btn btn-green tb-more" data-tbg onclick="openIap()"><svg class="svgi"><use href="#i-cart"/></svg> 内购</button>
+    <button class="btn btn-green tb-more" data-tbg onclick="openPoints()"><svg class="svgi"><use href="#i-scale"/></svg> 积分/邀请</button>
     <button class="btn tb-more" data-tbg style="background:linear-gradient(135deg,#6a3df0,#a855f7);color:#fff" onclick="openArb()"><svg class="svgi"><use href="#i-robot"/></svg> AI套利分析</button>
     <button class="btn btn-white tb-more" data-tbg onclick="window.open('https://app.hustle2026.xyz','_blank')"><svg class="svgi"><use href="#i-globe"/></svg> 官网</button>
     <span class="spacer"></span>
@@ -1011,20 +1239,34 @@
         <span class="um-ava" id="um-ava">·</span><span class="um-name" id="um-name">未登录</span><span class="um-caret"><svg class="svgi"><use href="#i-caret-down"/></svg></span>
       </button>
       <div class="um-pop" id="um-pop">
-        <!-- 编辑信息: 可改显示昵称(登录身份=账户名不变) -->
-        <div class="um-edit">
-          <div class="um-edit-hd">编辑信息</div>
-          <div class="um-edit-row">
-            <input id="um-nick-input" class="um-nick-input" maxlength="32" placeholder="设置昵称(显示名)">
-            <button class="um-nick-save" id="um-nick-save" onclick="saveNickname()">保存</button>
+        <!-- 身份头部: 头像 + 昵称(点击改名) + 账户名; 点击即弹框改昵称 -->
+        <div class="um-hd um-hd-click" onclick="editNickname()" title="点击修改昵称">
+          <span class="um-hd-ava" id="um-hd-ava">·</span>
+          <div class="um-hd-id">
+            <div class="um-hd-name"><span id="um-hd-name">未登录</span> <svg class="svgi um-hd-pen"><use href="#i-edit"/></svg></div>
+            <div class="um-hd-sub" id="um-hd-sub">--</div>
           </div>
         </div>
         <div class="um-sep"></div>
-        <div class="um-row"><span class="k">账户</span><span class="v" id="um-user">--</span></div>
-        <div class="um-row"><span class="k">套餐</span><span class="v" id="um-plan">--</span></div>
+        <!-- 会员概览: 等级 / 余额 / 积分 三格(点击进会员中心) -->
+        <div class="um-stats">
+          <div class="um-lvl-row" onclick="toggleUserMenu();openPoints()" title="进入会员中心">
+            <span class="um-lvl" id="um-level">L0 体验交易者</span>
+            <span class="um-paid" id="um-paid">付费到期 --</span>
+          </div>
+          <div class="um-stats-row">
+            <div class="um-stat um-stat-click" onclick="event.stopPropagation();toggleUserMenu();openRenew('recharge')" title="点击充值">
+              <span class="um-st-k">余额 <span class="um-plus">+充值</span></span><b class="um-st-v um-green" id="um-balance">0.00</b><span class="um-st-u">U</span></div>
+            <div class="um-stat um-stat-click" onclick="event.stopPropagation();toggleUserMenu();openPoints()" title="进入会员中心"><span class="um-st-k">积分</span><b class="um-st-v um-amber" id="um-points">0</b></div>
+            <div class="um-stat um-stat-click" onclick="event.stopPropagation();toggleUserMenu();openPoints()" title="进入会员中心"><span class="um-st-k">成长值</span><b class="um-st-v" id="um-growth">0</b></div>
+          </div>
+          <div class="um-auto"><span class="um-auto-dot" id="um-auto-dot"></span><span id="um-auto">自动交易: 未启用</span></div>
+        </div>
+        <div class="um-sep"></div>
         <div class="um-row"><span class="k">到期</span><span class="v" id="um-exp">--</span></div>
         <div class="um-row"><span class="k">飞书ID</span><span class="v" id="um-feishu">--</span></div>
         <div class="um-sep"></div>
+        <button class="um-item" onclick="toggleUserMenu();openPoints()">会员中心 · 积分/邀请</button>
         <button class="um-item" onclick="openRenew('month');toggleUserMenu()">续费 / 充值</button>
         <button class="um-item" onclick="toggleUserMenu();openOrders()">消费记录</button>
         <button class="um-item" onclick="umSwitchKey()">切换密钥</button>
@@ -1063,13 +1305,6 @@
       <span id="ax-state" style="font-size:11px;opacity:.85">--</span>
     </div>
     <div class="seg">运行:正常-进单:正常-等待进单:<span id="wait-sec">4</span>秒</div>
-  </div>
-
-  <!-- ===== MARQUEE (飞书镜像跑马灯) ===== -->
-  <div class="marquee" id="marquee">
-    <span class="mq-label"><span class="mq-ic"><svg class="svgi"><use href="#i-bell"/></svg></span> 实时告警</span>
-    <div class="mq-track"><div class="mq-inner" id="mq-inner"></div></div>
-    <button class="mq-mute" id="mq-mute" onclick="toggleMq()" title="暂停/恢复跑马灯"><svg class="svgi"><use href="#i-pause"/></svg></button>
   </div>
 
   <!-- ===== MAIN ===== -->
@@ -1311,14 +1546,11 @@
     <button class="mtab-btn" data-mt="position" onclick="switchMTab('position')"><i><svg class="svgi"><use href="#i-chart-bar"/></svg></i><span>持仓</span></button>
   </nav>
   <!-- ===== BOTTOM STATUS BAR ===== -->
-  <div class="botbar">
-    <span class="bs">引擎 <i class="dot ok"></i><b id="bs-eng">运行中</b></span>
-    <span class="bs">本地DB <i class="dot ok"></i><b>SQLite · positions.db</b></span>
-    <span class="bs">授权服务 <i class="dot ok" id="auth-dot"></i><b>auth.quanthedge.io</b> · 到期 <b id="bs-exp">2027-02-21</b></span>
-    <span class="bs">云API <i class="dot ok"></i><b>MetaTraderApi · MT4/MT5</b></span>
-    <span class="sp"></span>
-    <span class="bs mono" id="bs-clock">2026-06-27 14:32:15</span>
-    <span class="bs">v2.0.1</span>
+  <!-- ===== 底部实时告警(取代原系统状态栏) ===== -->
+  <div class="marquee" id="marquee">
+    <span class="mq-label"><span class="mq-ic"><svg class="svgi"><use href="#i-bell"/></svg></span> 实时告警</span>
+    <div class="mq-track"><div class="mq-inner" id="mq-inner"></div></div>
+    <button class="mq-mute" id="mq-mute" onclick="toggleMq()" title="暂停/恢复跑马灯"><svg class="svgi"><use href="#i-pause"/></svg></button>
   </div>
 </div>
 </div>
@@ -1666,11 +1898,27 @@
         <button type="button" id="pm-balance" class="pm-tab" onclick="setPayMethod('balance')">余额支付 (<span id="pm-bal">0.00</span> U)</button>
       </div>
 
+      <!-- 折扣券 + 积分抵现(包月/内购模式显示; 充值不支持) -->
+      <div id="pay-discount" style="display:none;background:#141c26;border:1px solid #2a3a4a;border-radius:8px;padding:10px;margin:10px 0">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <label style="font-size:12px;color:#8a959b;white-space:nowrap">折扣券</label>
+          <select id="pay-coupon" style="flex:1;background:#0f1720;color:#e9ecf3;border:1px solid #2a3a4a;border-radius:4px;padding:5px" onchange="recalcPay()">
+            <option value="">不使用</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:#8a959b;white-space:nowrap">积分抵现</label>
+          <input id="pay-points" type="number" min="0" step="100" value="0" oninput="recalcPay()" style="flex:1;background:#0f1720;color:#e9ecf3;border:1px solid #2a3a4a;border-radius:4px;padding:5px" placeholder="100分=1U, 上限订单30%">
+          <span style="font-size:11px;color:#8a959b;white-space:nowrap">可用 <b id="pay-pts-avail">0</b></span>
+        </div>
+      </div>
       <div class="paybox">
         <div class="qr"><img id="pay-qr" alt="收款二维码" style="width:100%;height:100%;object-fit:contain;display:none"></div>
         <div class="pi">
           <div class="row"><span class="k">当前到期</span><span class="v" id="pay-cur-exp">--</span></div>
           <div class="row"><span class="k" id="pay-k">续费时长</span><span class="v" id="pay-len">3 个月</span></div>
+          <div class="row" id="pay-row-orig" style="display:none"><span class="k">原价</span><span class="v" id="pay-orig">—</span></div>
+          <div class="row" id="pay-row-disc" style="display:none"><span class="k">优惠</span><span class="v" id="pay-disc" style="color:#8fe0aa">—</span></div>
           <div class="row"><span class="k">应付金额</span><span class="v" id="pay-amt">270.00 USDT</span></div>
           <div class="row"><span class="k" id="pay-new-k">新到期日</span><span class="v" id="pay-new">2027-05-21</span></div>
         </div>
@@ -2432,7 +2680,7 @@ function toggleMNav(){
   if(exp&&e)e.textContent=exp.textContent;
   var un=$('um-name'), du=$('mnav-uname'), da=$('mnav-ava');
   if(un&&du){ var name=un.textContent||'未登录'; du.textContent=name; if(da)da.textContent=(name==='未登录'?'·':name.slice(0,1).toUpperCase()); }
-  var ni=$('mnav-nick-input'); if(ni)ni.value=window.__nickname||'';
+  if(open && typeof loadMemberStrip==='function')loadMemberStrip();   // 打开即刷新余额/积分/等级
 }
 // 账户浮球: 弹出两张账户卡并列(主账户+对冲账户)
 function toggleAcctBall(){
@@ -3099,11 +3347,25 @@ function openReg(mode){
   $('reg-user').value=''; $('reg-contact').value=''; $('reg-agent').value='';
   document.getElementById('reg-mask').classList.add('show');
 }
+// URL 归因参数(?staff= 员工推广 / ?inviter= 好友邀请 / ?agent= 代理), 页面加载即存, 注册时随行
+function _urlAttr(){
+  try{ const q=new URLSearchParams(location.search);
+    const o={staff:q.get('staff')||'', inviter:q.get('inviter')||'', agent:q.get('agent')||''};
+    // 存 localStorage(用户可能先浏览再注册, 保留归因)
+    ['staff','inviter','agent'].forEach(k=>{ if(o[k]) localStorage.setItem('qh_attr_'+k,o[k]); });
+    return { staff:o.staff||localStorage.getItem('qh_attr_staff')||'',
+             inviter:o.inviter||localStorage.getItem('qh_attr_inviter')||'',
+             agent:o.agent||localStorage.getItem('qh_attr_agent')||'' };
+  }catch(e){ return {staff:'',inviter:'',agent:''}; }
+}
 async function doRegister(){
   const u=$('reg-user').value.trim(), contact=$('reg-contact').value.trim(), agent=$('reg-agent').value.trim();
   if(u.length<3){ toast('用户名至少3位'); return; }
+  const attr=_urlAttr();
   const ep = REG_MODE==='trial'?'/auth/trial':'/auth/register';
-  const body = REG_MODE==='trial'?{username:u,contact,feishu_id:'',agent_code:agent,days:7}:{username:u,contact,feishu_id:'',agent_code:agent};
+  const body = REG_MODE==='trial'
+    ? {username:u,contact,feishu_id:'',agent_code:(agent||attr.agent),staff_code:attr.staff,inviter:attr.inviter,days:7}
+    : {username:u,contact,feishu_id:'',agent_code:(agent||attr.agent),staff_code:attr.staff,inviter:attr.inviter};
   try{
     const r=await QH.post(ep,body);
     if(!r||!r.license_key){ toast(r&&r.detail?r.detail:'注册失败'); return; }
@@ -3158,66 +3420,140 @@ async function loadArb(){
   try{
     const r=await QH.get('/engine/arb_scan/'+QH.user);
     const s=r.summary||{}; const pairs=r.pairs||[];
-    $('arb-summary').innerHTML='<div style="font-size:15px;font-weight:700;color:#6a3df0">'+(s.verdict||'')+'</div>'
-      +'<div style="display:flex;gap:20px;margin-top:8px;font-size:12px;color:#555">'
-      +'<span>产品对: <b>'+(s.pairs||0)+'</b></span><span>可套利: <b style="color:#16a34a">'+(s.reachable||0)+'</b></span>'
-      +'<span>最高评分: <b>'+(s.top_score||0)+'</b></span></div>';
-    $('arb-list').innerHTML = pairs.length ? pairs.map(p=>{
-      const c = p.score>=100?'#16a34a':(p.score>=80?'#e6a23c':'#909399');
-      const bar = '<div style="height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-top:5px"><div style="height:100%;width:'+Math.min(100,p.score)+'%;background:'+c+'"></div></div>';
-      return '<div style="border:1px solid #e5e5e5;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center">'
-        +'<b>'+p.main_symbol+' '+SVGI('i-swap-h')+' '+p.hedge_symbol+'</b>'
-        +'<span style="font-weight:800;color:'+c+'">'+p.score+'<small style="font-size:10px">/100</small></span></div>'
-        +'<div style="font-size:12px;color:#555;margin-top:4px">主 '+(p.main_price!=null?p.main_price:'—')+' · 对冲 '+(p.hedge_price!=null?p.hedge_price:'—')
-        +' · 基差 <b>'+(p.basis!=null?p.basis:'—')+'</b> / 入场阈值 '+p.entry_spread+'</div>'
-        +bar+'<div style="font-size:12px;margin-top:6px;color:'+c+'">'+p.suggest+'</div></div>';
-    }).join('') : '<div style="color:#8a959b;text-align:center;padding:16px">暂无配置的产品对(请先在参数配置里设置对冲品种)</div>';
-    window.__arbScan=r;   // 存扫描结果供 AI 解读
+    const vClass = (s.reachable>0)?'ok':'warn';
+    // KPI 头部带
+    $('arb-kpi').innerHTML=
+      '<div class="k verdict"><div class="kl">引擎研判</div><div class="kv sm">'+(s.verdict||'—')+'</div></div>'
+      +'<div class="k"><div class="kl">监测产品对</div><div class="kv">'+(s.pairs||0)+'<span class="u">对</span></div></div>'
+      +'<div class="k"><div class="kl">达标可套利</div><div class="kv '+vClass+'">'+(s.reachable||0)+'<span class="u">对</span></div></div>'
+      +'<div class="k"><div class="kl">最高达标度</div><div class="kv">'+(s.top_score||0)+'<span class="u">/100</span></div></div>';
+    // 隔夜利息(swap)行: 净利息+锁法方向; 负卡=每夜倒扣告警(点差大但过夜费吃利润)
+    const swapRow=function(p){
+      if(p.swap_net==null){ return '<div class="arb-swap na"><span class="sw-k">隔夜利息</span><span class="sw-v">— 数据不足</span></div>'; }
+      const ok=p.swap_ok, sign=p.swap_net>0?'+':'';
+      const cls=ok?'pos':'neg';
+      const tip=ok?'长持利好':'长持每夜倒扣,吃利润';
+      return '<div class="arb-swap '+cls+'">'
+        +'<span class="sw-k">隔夜利息/手·夜</span>'
+        +'<span class="sw-v">'+sign+p.swap_net+'</span>'
+        +'<span class="sw-dir">'+(p.swap_dir||'')+'</span>'
+        +'<span class="sw-tip">'+tip+'</span>'
+      +'</div>';
+    };
+    // 单张信号卡渲染器(radar=机会发现, 卡片加"待接入"标)
+    const card=function(p,radar){
+      const sc=Math.max(0,Math.min(100,p.score||0));
+      const cls = sc>=100?'s-ok':(sc>=80?'s-near':'s-low');
+      const col = sc>=100?'#16a34a':(sc>=80?'#e6a23c':'#c0c8d6');
+      const chip = sc>=100?'<span class="arb-chip ok">可套利</span>':(sc>=80?'<span class="arb-chip near">接近达标</span>':'<span class="arb-chip low">监控中</span>');
+      const ring='<div class="arb-ring" style="background:conic-gradient('+col+' '+(sc*3.6)+'deg,#eef1f7 0)">'
+        +'<div style="width:50px;height:50px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center">'
+        +'<span class="rv" style="color:'+col+'">'+sc+'</span><span class="ru">/100</span></div></div>';
+      const bar='<div class="arb-bar"><div class="fill" style="width:'+sc+'%;background:'+col+'"></div><div class="thr" style="left:100%"></div></div>';
+      const mp=(p.main_price!=null?p.main_price:'—'), hp=(p.hedge_price!=null?p.hedge_price:'—'), bs=(p.basis!=null?p.basis:'—');
+      return '<div class="arb-card '+cls+(radar?' radar':'')+'">'
+        +'<div>'
+          +'<div class="sym">'+p.main_symbol+'<span class="swap">'+SVGI('i-swap-h')+'</span>'+p.hedge_symbol+'</div>'
+          +'<div class="arb-legs">'
+            +'<span class="arb-leg"><span class="arb-dot '+(p.main_ok?'on':'off')+'"></span>主 '+mp+'</span>'
+            +'<span class="arb-leg"><span class="arb-dot '+(p.hedge_ok?'on':'off')+'"></span>对冲 '+hp+'</span>'
+            +(p.fluctuation_band?('<span class="arb-leg">波动带 '+p.fluctuation_band+'</span>'):'')+'</div>'
+          +'<div class="arb-basis"><div class="bt"><span>当前基差 <b>'+bs+'</b></span><span>入场阈值 <b>'+p.entry_spread+'</b></span></div>'+bar+'</div>'
+          +swapRow(p)
+        +'</div>'
+        +'<div class="arb-score">'+ring+chip+'</div>'
+        +'<div class="arb-suggest">'+(p.suggest||'')+'</div>'
+      +'</div>';
+    };
+    const cfg=pairs.filter(p=>p.configured), radar=pairs.filter(p=>!p.configured);
+    $('arb-cfg-cnt').textContent='('+cfg.length+' 对)';
+    $('arb-list-cfg').innerHTML = cfg.length ? cfg.map(p=>card(p,false)).join('')
+      : '<div class="arb-empty">暂无配置的交易对 — 请先在「参数配置」里设置对冲品种</div>';
+    $('arb-list-radar').innerHTML = radar.length ? radar.map(p=>card(p,true)).join('')
+      : '<div class="arb-empty">平台其余品种暂无可分析数据</div>';
+    window.__arbScan=r;
     $('arb-loading').style.display='none'; $('arb-content').style.display='block';
-  }catch(e){ $('arb-loading').textContent='分析失败,请稍后重试'; }
+  }catch(e){ $('arb-loading').innerHTML='分析失败,请稍后重试'; }
 }
 // AI 解读: 把套利扫描结果喂给 LLM 生成自然语言叙述(site=qh, 未启用则回退提示)
 async function arbNarrate(){
-  const box=$('arb-narrate'); if(!box)return; const r=window.__arbScan; if(!r){ box.textContent='请先刷新分析'; return; }
-  box.style.display='block'; box.textContent='AI 解读生成中…';
+  const box=$('arb-narrate'); if(!box)return; const r=window.__arbScan; if(!r){ toast('请先刷新分析'); return; }
+  const tag='<div class="ai-tag">'+SVGI('i-robot')+' AI 策略研判</div>';
+  box.style.display='block'; box.innerHTML=tag+'<span style="color:#8fbaff">量化模型研判生成中…</span>';
   const s=r.summary||{}; const pairs=(r.pairs||[]).slice(0,6);
   const brief='套利扫描结果: 结论='+(s.verdict||'')+'; 产品对'+(s.pairs||0)+'个, 可套利'+(s.reachable||0)+'个, 最高评分'+(s.top_score||0)+'。明细: '
     +pairs.map(p=>p.main_symbol+'/'+p.hedge_symbol+' 基差'+(p.basis!=null?p.basis:'—')+' 阈值'+p.entry_spread+' 评分'+p.score).join('; ')
-    +'。请用中文简明解读当前套利机会与风险, 给出关注建议(不构成投资建议)。';
+    +'。请以专业量化分析师口吻用中文简明研判当前套利机会与风险, 给出关注建议(不构成投资建议)。';
   try{
     const resp=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({site:'qh',message:brief,user_id:(window.QH&&QH.user)||'arb'})});
     const j=await resp.json();
-    box.textContent = j.reply || j.detail || 'AI 解读暂不可用(服务未配置)';
-  }catch(e){ box.textContent='AI 解读失败,请稍后重试'; }
+    box.innerHTML = tag + (j.reply || j.detail || 'AI 解读暂不可用(服务未配置)');
+  }catch(e){ box.innerHTML=tag+'AI 解读失败,请稍后重试'; }
 }
 function umFill(r){
   const set=function(id,v){const e=$(id);if(e)e.textContent=v;};
   const disp=(r.nickname&&r.nickname.trim())||r.username||'用户';
   window.__nickname=r.nickname||'';
   set('um-name', disp); set('um-ava',(disp||'U').slice(0,1).toUpperCase());
+  set('um-hd-name', disp); set('um-hd-ava',(disp||'U').slice(0,1).toUpperCase());
+  set('um-hd-sub', '账户 '+(r.username||'--'));
   set('um-user', r.username||'--'); set('um-plan', r.plan||'--');
   set('um-exp', (r.expire_at||'').slice(0,10)||'--'); set('um-feishu', r.feishu_id||'未绑定');
-  const ni=$('um-nick-input'); if(ni)ni.value=r.nickname||'';
-  // 移动端菜单同步
+  // 移动端菜单同步(昵称→内层 span, 保留 pen 图标)
   const mn=$('mnav-uname'); if(mn)mn.textContent=disp;
   const ma=$('mnav-ava'); if(ma)ma.textContent=(disp||'U').slice(0,1).toUpperCase();
-  const mni=$('mnav-nick-input'); if(mni)mni.value=r.nickname||'';
+  loadMemberStrip();
 }
-async function saveNickname(){
-  const ni=$('um-nick-input')||$('mnav-nick-input'); const nn=(ni&&ni.value||'').trim();
-  if(!nn){ toast('昵称不能为空'); return; }
+// 会员概览条(等级/余额/积分/成长值) — 同时填 PC 下拉与移动面板; 登录后 + 打开菜单时刷新
+async function loadMemberStrip(){
+  if(!QH.user)return;
+  const setBoth=function(pc,mob,val){ const a=$(pc); if(a)a.textContent=val; const b=$(mob); if(b)b.textContent=val; };
   try{
-    const j=await licPost('/user/nickname',{license_key:QH.key,nickname:nn});
-    window.__nickname=j.nickname||nn;
-    const disp=j.nickname||nn;
-    ['um-name','mnav-uname'].forEach(id=>{const e=$(id);if(e)e.textContent=disp;});
-    ['um-ava','mnav-ava'].forEach(id=>{const e=$(id);if(e)e.textContent=(disp||'U').slice(0,1).toUpperCase();});
-    ['um-nick-input','mnav-nick-input'].forEach(id=>{const e=$(id);if(e)e.value=disp;});
+    const p=await QH.get('/points/'+QH.user);
+    const lvl='L'+(p.level||0)+' '+(p.level_name||'体验交易者');
+    setBoth('um-level','mnav-level',lvl);
+    setBoth('um-points','mnav-points',p.points||0);
+    setBoth('um-growth','mnav-growth',p.growth_value||0);
+    const paidTxt = p.paid_until ? ('付费到期 '+p.paid_until) : (p.trial_until ? ('试用到期 '+p.trial_until) : '免费用户');
+    setBoth('um-paid','mnav-paid',paidTxt);
+  }catch(e){}
+  // 自动交易状态(进/出场档位) — 拉 auto_entry/auto_exit, 组合展示 + 圆点色
+  try{
+    const MODE={off:'关',shadow:'影子',armed:'武装',full:'全量'};
+    const DIR={reverse:'反向',forward:'正向'};
+    const ae=await QH.get('/engine/auto_entry/'+QH.user).catch(()=>null);
+    const ax=await QH.get('/engine/auto_exit/'+QH.user).catch(()=>null);
+    const aem=(ae&&ae.mode)||'off', axm=(ax&&ax.mode)||'off';
+    const demo=(ae&&ae.demo);
+    const dirTxt=(aem!=='off')?('·'+(DIR[(ae&&ae.direction)]||'')):'';
+    const txt='自动: 进'+MODE[aem]+dirTxt+' / 出'+MODE[axm]+(demo?' (演示)':'');
+    setBoth('um-auto','mnav-auto',txt);
+    // 圆点: 任一为 armed/full → 真金绿(或演示黄); 否则灰
+    const live=(aem==='armed'||aem==='full'||axm==='armed'||axm==='full');
+    const cls = live ? (demo?'demo':'on') : '';
+    ['um-auto-dot','mnav-auto-dot'].forEach(function(id){ const e=$(id); if(e)e.className=(id.indexOf('mnav')>=0?'mnav-auto-dot ':'um-auto-dot ')+cls; });
+  }catch(e){}
+  try{ const w=await QH.get('/user/wallet/'+QH.user); setBoth('um-balance','mnav-balance',Number(w.balance||0).toFixed(2)); }catch(e){}
+}
+// 点击昵称/头像 → 弹框改昵称(替代常驻"编辑信息"区, 精简面板)
+async function editNickname(){
+  if(!QH.user){ toast('请先登录'); return; }
+  const cur=window.__nickname||'';
+  const nn=await uiPrompt('修改昵称','显示名',{placeholder:'输入新的昵称(显示名)'});
+  if(nn===null) return;                 // 取消
+  const v=(nn||'').trim();
+  if(!v){ toast('昵称不能为空'); return; }
+  try{
+    const j=await licPost('/user/nickname',{license_key:QH.key,nickname:v});
+    const disp=j.nickname||v; window.__nickname=disp;
+    ['um-name','mnav-uname','um-hd-name'].forEach(id=>{const e=$(id);if(e)e.textContent=disp;});
+    ['um-ava','mnav-ava','um-hd-ava'].forEach(id=>{const e=$(id);if(e)e.textContent=(disp||'U').slice(0,1).toUpperCase();});
     toast('昵称已更新');
   }catch(e){ toast('保存失败：'+(e.message||e)); }
 }
+// 兼容旧调用点(若残留): 走弹框式
+function saveNickname(){ return editNickname(); }
 function _orderStatusZh(o){
   const rc=o.reconcile_status;
   if(rc==='confirmed')return '已确认'; if(rc==='discrepancy')return '差异'; if(rc==='void')return '作废';
@@ -3248,6 +3584,7 @@ function toggleUserMenu(){ const p=$('um-pop'); if(!p)return;
     const b=$('um-btn'); if(b){ const r=b.getBoundingClientRect();
       let right=Math.max(6, window.innerWidth - r.right);
       p.style.right=right+'px'; p.style.top=(r.bottom+4)+'px'; }
+    if(typeof loadMemberStrip==='function')loadMemberStrip();   // 打开即刷新余额/积分
   }
 }
 document.addEventListener('click',function(e){ const m=$('usermenu'); const p=$('um-pop'); if(m&&p&&!m.contains(e.target))p.classList.remove('show'); });
@@ -3293,10 +3630,69 @@ function openRenew(mode, iapProd){
     $('pay-new-k').textContent='权益'; $('pay-new').textContent='购买后即时生效';
   }
   $('pm-balance').style.display = (mode==='recharge') ? 'none' : '';   // 充值不支持余额支付
+  // 折扣区: 仅包月/内购(充值不支持券与抵现)
+  const showDisc = (mode==='month'||mode==='iap');
+  $('pay-discount').style.display = showDisc ? '' : 'none';
+  if($('pay-coupon'))$('pay-coupon').value='';
+  if($('pay-points'))$('pay-points').value='0';
+  window.__couponDisc=0; window.__ptsUse=0; window.__ptsDisc=0;
   setPayMethod('onchain');
   refreshWalletBal();
   loadPayAddr();
+  if(showDisc) loadMyCouponsAndPoints();
   openMask('renew-mask');
+}
+// 加载可用券 + 积分余额, 填充抵现区
+async function loadMyCouponsAndPoints(){
+  if(!QH.user)return;
+  const kind=(window.__payMode==='month')?'subscription':'iap';
+  try{
+    const c=await QH.get('/coupon/mine/'+QH.user);
+    const sel=$('pay-coupon'); if(sel){
+      sel.innerHTML='<option value="">不使用</option>';
+      (c.coupons||[]).filter(cp=>cp.applies_to==='any'||cp.applies_to===kind).forEach(cp=>{
+        const label=cp.name+' ('+(cp.kind==='percent'?(cp.value+'%'):('减'+cp.value))+')';
+        const o=document.createElement('option'); o.value=cp.code; o.textContent=label; sel.appendChild(o);
+      });
+    }
+  }catch(e){}
+  try{ const p=await QH.get('/points/'+QH.user); window.__ptsAvail=p.points||0; if($('pay-pts-avail'))$('pay-pts-avail').textContent=p.points||0; }catch(e){}
+}
+// 实时算价: 券预览(服务端) + 积分抵现(本地按30%上限估算, 最终以服务端为准)
+let __recalcTimer=null;
+function recalcPay(){
+  clearTimeout(__recalcTimer);
+  __recalcTimer=setTimeout(_recalcPayNow, 250);
+}
+async function _recalcPayNow(){
+  const mode=window.__payMode; if(mode!=='month'&&mode!=='iap')return;
+  const kind=(mode==='month')?'subscription':'iap';
+  const gross=payAmount();
+  let couponDisc=0; const code=($('pay-coupon')||{}).value||'';
+  if(code){
+    try{
+      const body={kind:kind}; if(mode==='month')body.months=renewMonths; else if(window.__payIap)body.product_key=window.__payIap.key;
+      const pv=await QH.post('/coupon/preview',{...body,code:code});
+      if(pv&&!pv.detail) couponDisc=pv.discount||0; else if(pv&&pv.detail){ toast(pv.detail); if($('pay-coupon'))$('pay-coupon').value=''; }
+    }catch(e){}
+  }
+  window.__couponDisc=couponDisc;
+  const afterCoupon=Math.max(0, gross-couponDisc);
+  // 积分抵现: 100分=1U, 上限=券后金额30%, 取整到100倍数, 不超可用
+  let ptsWant=parseInt(($('pay-points')||{}).value)||0; if(ptsWant<0)ptsWant=0;
+  const capU=Math.floor(afterCoupon*0.30);            // 整U上限
+  const maxPts=Math.min(ptsWant, capU*100, (window.__ptsAvail||0));
+  const ptsUse=Math.floor(maxPts/100)*100;
+  const ptsDisc=ptsUse/100;
+  window.__ptsUse=ptsUse; window.__ptsDisc=ptsDisc;
+  const payable=Math.max(0, afterCoupon-ptsDisc);
+  // 更新展示
+  const hasDisc=(couponDisc>0||ptsDisc>0);
+  $('pay-row-orig').style.display=hasDisc?'':'none'; $('pay-row-disc').style.display=hasDisc?'':'none';
+  $('pay-orig').textContent=gross.toFixed(2)+' USDT';
+  $('pay-disc').textContent='-'+(couponDisc+ptsDisc).toFixed(2)+' USDT'+(ptsUse>0?(' (含积分'+ptsUse+')'):'');
+  $('pay-amt').textContent=payable.toFixed(2)+' USDT';
+  $('pay-bal-cost').textContent=payable.toFixed(2);
 }
 async function loadPayAddr(){
   try{
@@ -3359,22 +3755,100 @@ async function confirmPay(){
   else if(mode==='recharge') body.amount=parseFloat($('rc-amt').value)||0;
   else if(mode==='iap'&&window.__payIap) body.product_key=window.__payIap.key;
   if(pm==='onchain') body.tx_hash=$('pay-hash').value.trim();
+  // 券 + 积分抵现(仅包月/内购)
+  if(mode==='month'||mode==='iap'){
+    const code=($('pay-coupon')||{}).value||''; if(code) body.coupon_code=code;
+    const pts=parseInt(($('pay-points')||{}).value)||0; if(pts>0) body.points_use=pts;
+  }
   const btn=$('pay-submit-btn'); btn.disabled=true;
   try{
     const r=await QH.post('/order/submit',body);
     if(r&&r.detail){ toast(r.detail); btn.disabled=false; return; }   // 400 返 JSON(余额不足等)
     closeMask('renew-mask');
+    const discTxt = (r.discount>0||r.points_used>0) ? (' · 实付'+Number(r.amount).toFixed(2)+'U'+(r.points_used>0?('(用'+r.points_used+'积分)'):'')) : '';
     if(mode==='month'){ const nd=(r.expire_at||addMonths(renewMonths)).slice(0,10);
       const e=document.querySelector('.titlebar .expire'); if(e)e.textContent='到期时间: '+nd; if($('bs-exp'))$('bs-exp').textContent=nd;
-      toast('续费成功 · '+(pm==='balance'?'余额已扣':'待财务核对')+' · 至 '+nd);
+      toast('续费成功 · '+(pm==='balance'?'余额已扣':'待财务核对')+discTxt+' · 至 '+nd);
     }else if(mode==='recharge'){ toast('充值已提交 · 余额 '+(r.balance!=null?r.balance.toFixed(2)+'U':'待到账')); }
     else if(mode==='iap'){
-      toast('购买成功 · '+(pm==='balance'?'余额已扣':'权益已开通'));
+      toast('购买成功 · '+(pm==='balance'?'余额已扣':'权益已开通')+discTxt);
       try{ const en=await QH.get('/entitlements/'+QH.user); if(en&&en.entitlements){ window.__ent=en.entitlements; if(typeof applyEntGates==='function')applyEntGates(); } }catch(e){}
     }
     if($('pay-hash'))$('pay-hash').value='';
   }catch(e){ toast('支付失败:'+(e.message||'')); }
   btn.disabled=false;
+}
+
+/* ============ 会员积分 + 好友邀请 ============ */
+async function openPoints(){
+  if(!QH.user){ toast('请先登录'); return; }
+  openMask('points-mask');
+  loadPointsPanel(); loadPointsCatalog(); loadInvitePanel(); loadMemberWallet(); loadMemberActs();
+}
+async function loadMemberWallet(){
+  try{ const w=await QH.get('/user/wallet/'+QH.user); if($('pm-balance'))$('pm-balance').innerHTML=Number(w.balance||0).toFixed(2)+' <span class="pm-u">USDT</span>'; }catch(e){}
+}
+async function loadMemberActs(){
+  // 进行中活动: 公开跑马灯馈源里 src=broadcast 的营销条(近似"活动"展示); 无则占位
+  const box=$('pm-acts'); if(!box)return;
+  try{
+    const r=await QH.get('/notify/marquee/recent?limit=20');
+    const acts=((r&&r.items)||[]).filter(it=>it.src==='broadcast');
+    if(!acts.length){ box.innerHTML='<div class="pm-empty">暂无进行中的活动,敬请期待</div>'; return; }
+    box.innerHTML=acts.slice(0,5).map(it=>
+      '<div class="pm-act"><span>'+(it.title?('【'+it.title+'】'):'')+(it.content||'')+'</span>'+
+      (it.blink?'<span class="pm-act-tag">HOT</span>':'')+'</div>').join('');
+  }catch(e){ box.innerHTML='<div class="pm-empty">活动加载失败</div>'; }
+}
+async function loadPointsPanel(){
+  try{
+    const p=await QH.get('/points/'+QH.user);
+    $('pm-level').textContent='L'+(p.level||0)+' '+(p.level_name||'体验交易者');
+    $('pm-growth').textContent=p.growth_value||0;
+    $('pm-points').textContent=p.points||0;
+    const led=$('pm-ledger');
+    if(led){ led.innerHTML=(p.ledger||[]).map(l=>{
+      const d=(l.delta>=0?'+':'')+l.delta; const cls=l.delta>=0?'pm-ld-pos':'pm-ld-neg';
+      const t=(l.created_at||'').slice(5,16).replace('T',' ');
+      return '<div class="pm-lrow"><span>'+(t?('<span style="color:#a6adbf">'+t+'</span> '):'')+(l.reason||'')+'</span><span class="'+cls+'">'+d+'</span></div>';
+    }).join('')||'<div class="pm-empty">暂无积分记录</div>'; }
+  }catch(e){}
+}
+async function loadPointsCatalog(){
+  try{
+    const c=await QH.get('/points/catalog'); const box=$('pm-catalog'); if(!box)return;
+    box.innerHTML=(c.catalog||[]).map(it=>
+      '<div class="pm-item"><div class="pm-item-n">'+it.name+'</div>'+
+      '<div class="pm-item-b"><span class="pm-item-c">'+it.cost+' 分</span>'+
+      '<button class="pm-btn" style="margin-top:0;padding:3px 12px" onclick="doRedeem(\''+it.key+'\')">兑换</button></div></div>'
+    ).join('');
+  }catch(e){}
+}
+async function loadInvitePanel(){
+  try{
+    const v=await QH.get('/invite/mine/'+QH.user);
+    if($('pm-invite-link'))$('pm-invite-link').value=v.invite_link||'';
+    if($('pm-inv-total'))$('pm-inv-total').textContent=v.total||0;
+    if($('pm-inv-trial'))$('pm-inv-trial').textContent=v.trial_converted||0;
+    if($('pm-inv-pts'))$('pm-inv-pts').textContent=v.points_earned||0;
+  }catch(e){}
+}
+async function doCheckin(){
+  try{ const r=await QH.post('/points/checkin',{license_key:QH.key});
+    if(r&&r.detail){ toast(r.detail); return; }
+    toast('签到成功 +'+r.gained+' 分'+(r.bonus>0?'(连签奖励+'+r.bonus+')':'')); loadPointsPanel(); }
+  catch(e){ toast('签到失败'); }
+}
+async function doRedeem(item){
+  try{ const r=await QH.post('/points/redeem',{license_key:QH.key,item:item});
+    if(r&&r.detail){ toast(r.detail); return; }
+    toast('兑换成功 · '+r.item+' · 余 '+r.points+' 分'); loadPointsPanel();
+    try{ const en=await QH.get('/entitlements/'+QH.user); if(en&&en.entitlements){ window.__ent=en.entitlements; if(typeof applyEntGates==='function')applyEntGates(); } }catch(e){}
+  }catch(e){ toast('兑换失败'); }
+}
+function copyInvite(){
+  const t=($('pm-invite-link')||{}).value||'';
+  if(navigator.clipboard){ navigator.clipboard.writeText(t).then(()=>toast('邀请链接已复制'),()=>toast(t)); } else toast(t);
 }
 
 /* ============ THEME TOGGLE ============ */
@@ -3472,7 +3946,7 @@ async function saveAcct(){
     toast('本地直连：凭证保留在用户端，未上传服务端');
   }
   try{
-    await adminPost('/accounts/register',{username:QH.user,label:$('acct-title-t').textContent,login:login,
+    await licPost('/accounts/register',{username:QH.user,label:$('acct-title-t').textContent,login:login,
       platform:(document.querySelector('#acct-plat .on')?.textContent.indexOf('5')>=0?'MT5':'MT4'),
       broker:'', role:role, conn_mode:mode});
     closeMask('acct-mask'); toast('账户已保存 ('+(mode==='bridge'?'Bridge':'本地直连')+')');
@@ -3485,7 +3959,7 @@ let bt=new Date(2026,5,27,14,32,15);
 setInterval(()=>{
   bt=new Date(bt.getTime()+1000);
   const p=n=>String(n).padStart(2,'0');
-  $('bs-clock').textContent=`2026-06-27 ${p(bt.getHours())}:${p(bt.getMinutes())}:${p(bt.getSeconds())}`;
+  const bc=$('bs-clock'); if(bc)bc.textContent=`2026-06-27 ${p(bt.getHours())}:${p(bt.getMinutes())}:${p(bt.getSeconds())}`;
 },1000);
 /* engine state mirror to bottom bar + marquee */
 const _origSetRunning=setRunning;
@@ -3580,18 +4054,25 @@ bindFeishuMirror();
 <div id="mnav-mask" onclick="toggleMNav()"></div>
 <button id="pair-close" onclick="closePairSheet()" title="关闭配对历史"><svg class="svgi"><use href="#i-close"/></svg> 关闭</button>
 <div id="mnav-panel">
-  <div class="mnav-user" id="mnav-user">
+  <div class="mnav-user mnav-user-click" id="mnav-user" onclick="editNickname()">
     <span class="mnav-ava" id="mnav-ava">·</span>
-    <span class="mnav-uname" id="mnav-uname">未登录</span>
-  </div>
-  <div class="mnav-exp" id="mnav-exp">到期时间: --</div>
-  <!-- 编辑信息: 改显示昵称 -->
-  <div class="mnav-edit">
-    <div class="mnav-edit-hd">编辑信息</div>
-    <div class="mnav-edit-row">
-      <input id="mnav-nick-input" class="mnav-nick-input" maxlength="32" placeholder="设置昵称(显示名)">
-      <button class="mnav-nick-save" onclick="saveNickname()">保存</button>
+    <div class="mnav-uid">
+      <div class="mnav-uname"><span id="mnav-uname">未登录</span> <svg class="svgi mnav-pen"><use href="#i-edit"/></svg></div>
+      <div class="mnav-exp" id="mnav-exp">到期时间: --</div>
     </div>
+  </div>
+  <!-- 会员概览: 等级 + 余额/积分/成长值(点进会员中心) -->
+  <div class="mnav-stats">
+    <div class="mnav-lvl-row" onclick="toggleMNav();openPoints()">
+      <span class="mnav-lvl" id="mnav-level">L0 体验交易者</span>
+      <span class="mnav-paid" id="mnav-paid">付费到期 --</span>
+    </div>
+    <div class="mnav-stats-row">
+      <div class="mnav-stat" onclick="event.stopPropagation();toggleMNav();openRenew('recharge')"><span>余额 <b class="mnav-plus">+充值</b></span><b class="mnav-green" id="mnav-balance">0.00</b></div>
+      <div class="mnav-stat" onclick="event.stopPropagation();toggleMNav();openPoints()"><span>积分</span><b class="mnav-amber" id="mnav-points">0</b></div>
+      <div class="mnav-stat" onclick="event.stopPropagation();toggleMNav();openPoints()"><span>成长值</span><b id="mnav-growth">0</b></div>
+    </div>
+    <div class="mnav-auto"><span class="mnav-auto-dot" id="mnav-auto-dot"></span><span id="mnav-auto">自动交易: 未启用</span></div>
   </div>
   <!-- 包月/充值/内购: 橙色区横排三按钮 -->
   <div class="mnav-quick">
