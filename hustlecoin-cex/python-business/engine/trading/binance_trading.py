@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import logging
 import time
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from urllib.parse import urlencode
 
 import httpx
@@ -345,10 +345,17 @@ class BinanceTradingClient:
             "sideEffectType": "MARGIN_BUY", "isIsolated": "FALSE",
         })
 
-    async def margin_repay(self, asset: str, amount: Decimal) -> dict:
+    async def margin_repay(self, asset: str, amount) -> dict:
         await _pace_borrow(self._sub_account_id)  # repay = 1500 UID, shares borrow budget → same pacer
+        # 币安 amount 参数正则 ^[0-9]{1,20}(\.[0-9]{1,8})?$ —— 最多 8 位小数。
+        # 手动还币路径把金额归一成 float 后,min()/×0.999 重试等浮点运算会让 str() 带出
+        # 15+ 位小数(如 25.001517999999998)→ -1100 "Illegal characters found in a parameter"。
+        # 在此咽喉点统一量化到 8 位(HALF_UP 贴回币安 8 位真值,不留 1e-8 债务尾差),
+        # format(...,"f") 防科学计数法。引擎侧 Decimal 调用方(本就≤8位)行为不变。
+        amt = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+        amt_s = format(amt.quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP), "f")
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
-            "asset": asset, "amount": str(amount),
+            "asset": asset, "amount": amt_s,
             "type": "REPAY", "isIsolated": "FALSE",
         })
 

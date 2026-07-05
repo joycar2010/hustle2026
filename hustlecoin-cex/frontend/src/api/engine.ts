@@ -138,7 +138,7 @@ export async function partialRepay(subAccountId: number, symbol: string, amount:
     symbol,
     amount,
     sell_residual: sellResidual,
-  }, { timeout: 60000 })
+  }, { timeout: 60000, __silent: true })  // 失败由各弹窗自己 toast(带账户上下文),不与全局拦截器双报
   return data
 }
 
