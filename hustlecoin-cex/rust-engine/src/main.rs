@@ -137,8 +137,12 @@ async fn process_updates(
                 return None;
             }
             // 冻结护栏: bookTicker 在「数量」变化时也推送(价不变也刷新 ts),ts 护栏漏。
-            // 某腿买一/卖一价连续 frozen_ms 未变 → 视为价格冻结(停牌/退市挂单未撤),
-            // 与活腿相乘会产生假基差 → 不发布。活跃币价毫秒级跳动,此处永不触发。
+            // 风险形态是「单腿价格冻结 × 另一腿仍在变价」(停牌/退市挂单未撤),与活腿相乘
+            // 产生假基差 → 拦。但「双腿价格同静」是粗刻度低价币(如 FIL,$0.79/tick$0.001)
+            // 静市时段的真实盘口:qty 在变、ts 新鲜、价格确实没动 —— 原实现按"任一腿冻结
+            // 即拦"把这类活币长时间停更(实测健康时段 1/4 币被压),下游全被误判"行情陈旧/
+            // 死币"。改为仅拦「恰好一腿冻结」;双腿真死(bookTicker 停推)由上方 ts 护栏负责,
+            // 离谱基差另有 divergent 兜底。
             let st = px_state.entry(symbol.clone()).or_insert((
                 spot.bid, spot.ask, now_ms, futures.bid, futures.ask, now_ms,
             ));
@@ -148,7 +152,9 @@ async fn process_updates(
             if futures.bid != st.3 || futures.ask != st.4 {
                 st.3 = futures.bid; st.4 = futures.ask; st.5 = now_ms;
             }
-            if now_ms - st.2 > frozen_ms || now_ms - st.5 > frozen_ms {
+            let spot_frozen = now_ms - st.2 > frozen_ms;
+            let fut_frozen = now_ms - st.5 > frozen_ms;
+            if spot_frozen != fut_frozen {
                 frozen = true;
                 return None;
             }
