@@ -158,6 +158,16 @@ function ruleIsCustom(r: SymbolRuleInfo | null | undefined): boolean {
 // 状态列着色(分级):正常=绿、在途=蓝、队列=黄、等待=紫、异常=橙红、停止=红
 const EXEC_STATUSES = new Set(['借币中', '开仓中', '平仓中', '买回中', '还币中', '待还币'])
 const ABNORMAL_STATUSES = new Set(['无券', '量不足', '行情异常', '行情陈旧', '借币冷却', '移除冷却', '禁借', '不可交易'])
+// 等待态悬停解释:这些词容易被误读为故障,给一句人话(尤其「行情陈旧」是 10s 交易闸口径,非死币)
+const STATUS_TITLES: Record<string, string> = {
+  '行情陈旧': '盘口 >10 秒无新报价(币安 bookTicker 仅价/量变动才推送,冷清币属正常微观结构),本周期暂不开新仓,来行情自动恢复;不是故障',
+  '点差不符': '当前点差未达挂单/开仓阈值,持续监控中',
+  '无券': '币安杠杆池当前无该币可借库存(API -3045),冷却到期自动复查',
+  '量不足': '24h 成交量低于最低门槛,暂不交易',
+  '借币冷却': '平仓后重借冷却中(负挂单差可跳过)',
+  '移除冷却': '移除后再借冷却中',
+  '运行中': '有券+点差达标,挂单借币中',
+}
 function statusColorCls(s: string): string {
   if (s === '运行中') return 'text-positive'        // 正常运行(有券+点差达标,挂单借币中)→ 绿
   if (s === '借币停止') return 'text-negative'
@@ -223,12 +233,17 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   const dh = group.durationHours
   const dhText = dh != null ? (dh > 24 ? `${Math.floor(dh / 24)}d${Math.floor(dh % 24)}h` : `${Math.floor(dh)}h`) : '-'
 
-  // 真死币:feed 停更(行情陈旧)或盘口异常 → 币名标红 + 💀 图标 + tooltip(陈旧秒数,从 spread.ts 算)
-  const isDeadCoin = symbolStatus === '行情陈旧' || symbolStatus === '行情异常'
+  // 真死币:盘口异常(价格冻结/单腿停更) 或 长窗口停更(>600s,运维口径) → 币名标红 + 💀。
+  // 注意「行情陈旧」状态本身是 10 秒交易闸口径:bookTicker 仅价/量变才推,冷清时段稳态下
+  // 约一半币任意时刻 >10s 无 tick(实测 stale>10s≈49%),属正常微观结构、来 tick 即恢复 ——
+  // 不能直接当死币,否则半个市场天天挂骷髅。死币须用 spread.ts 实际停更时长(>600s)判。
   const staleSec = group.spread?.ts ? Math.floor((Date.now() - group.spread.ts) / 1000) : null
+  const DEAD_STALE_SEC = 600
+  const isDeadCoin = symbolStatus === '行情异常'
+    || (symbolStatus === '行情陈旧' && staleSec != null && staleSec > DEAD_STALE_SEC)
   const deadTitle = isDeadCoin
     ? (symbolStatus === '行情异常' ? '盘口异常(价格冻结/单腿停更),已停止开仓'
-       : `行情停更${staleSec != null ? ` ${staleSec} 秒` : ''},feed 死币,已停止开仓`)
+       : `行情停更 ${staleSec} 秒(>10分钟),feed 死币,已停止开仓`)
     : undefined
 
   const rule = group.ruleInfo
@@ -323,7 +338,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {!isMobile && (
         <td className="px-1.5 py-1 text-right whitespace-nowrap text-[10px]">
           {compact && symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
+            <span className={statusColorCls(symbolStatus)} title={STATUS_TITLES[symbolStatus]}>{symbolStatus}</span>
           ) : group.pushTime ? (
             <span className="text-muted-foreground">推 {group.pushTime}</span>
           ) : group.pushedAtText ? (
@@ -613,7 +628,7 @@ const SubAccountRow = memo(function SubAccountRow({
           ) : (symbolStatus && EXEC_STATUSES.has(symbolStatus)) ? (
             <span className="text-sky-400">借币</span>
           ) : symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>
+            <span className={statusColorCls(symbolStatus)} title={STATUS_TITLES[symbolStatus]}>{symbolStatus}</span>
           ) : (
             <span className="text-muted-foreground">{durationText(pos.opened_at)}</span>
           )}
