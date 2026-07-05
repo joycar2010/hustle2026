@@ -581,18 +581,18 @@ const SubAccountRow = memo(function SubAccountRow({
           ) : '-'}
         </td>
       )}
-      {/* 保证金 — BNB U值 + USDT */}
+      {/* 保证金 — BNB U值 + 杠杆净资产(净资产=抵押物-已借价值,借非USDT资产时正确反映真实价值) */}
       {!isMobile && (() => {
         if (!balance) return <td className={numCell}>-</td>
         const bnbPrice = spreads.get('BNBUSDT')?.spot_bid ?? 0
         const bnbVal = balance.bnb_free * bnbPrice
-        const total = bnbVal + balance.margin_usdt_free
+        const total = bnbVal + balance.margin_net_usdt
         return <td className={numCell}>{formatNumber(total, 0)}</td>
       })()}
-      {/* 可用 — 杠杆账户可用USDT(可用来借币) */}
+      {/* 可用 — 杠杆账户净资产USDT(净资产低=余量少,借非USDT资产时 margin_usdt_free 不会降但净资产会降) */}
       {!isMobile && (
         <td className={numCell}>
-          {balance ? formatNumber(balance.margin_usdt_free, 0) : '-'}
+          {balance ? formatNumber(balance.margin_net_usdt, 0) : '-'}
         </td>
       )}
       {/* 参数块(持仓经济) */}
