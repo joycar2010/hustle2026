@@ -825,7 +825,11 @@ async def _sell_residual_spot(client, symbol_upper: str, base_asset: str, qty: f
 class PartialRepayRequest(BaseModel):
     sub_account_id: int
     symbol: str
-    amount: Decimal
+    # 还币数量(币)。与 amount_usdt 二选一:数量>0 按数量还;否则看金额。
+    amount: Decimal = Decimal("0")
+    # 还币金额(USDT):后端按现价(REST ticker,回退 Redis spreads)换算成币数量再还。
+    # 换算放后端 = 单一权威价格源,避免前端过期价把金额算错。
+    amount_usdt: Decimal | None = None
     # 前端「卖回」按钮:债务为 0 但杠杆户仍有现币残留时,显式请求把残留市价卖回 USDT。
     # 默认 False 保持旧行为(仅同步持仓状态),防其它调用方误触发卖出。
     sell_residual: bool = False
@@ -876,8 +880,29 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
 
             # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
             # 归一为 float,避免下游 `repay_amount - free`(shortfall)/`*= 0.999`(重试)触发 Decimal-float
-            # 类型崩溃;margin_repay 内部 str(amount) 故 float 入参亦正常序列化。
-            repay_amount = min(float(data.amount), total_debt)
+            # 类型崩溃;margin_repay 出口统一 8 位量化,float 入参安全。
+            req_qty = float(data.amount)
+            if req_qty <= 0 and data.amount_usdt is not None and float(data.amount_usdt) > 0:
+                # 金额(USDT)还币:按现价换算成币数量。REST ticker 为权威价,失败回退 Redis spreads。
+                cv_price = 0.0
+                try:
+                    tk0 = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                                {"symbol": data.symbol.upper()}, signed=False)
+                    cv_price = float(tk0.get("price", 0) or 0)
+                except Exception:
+                    cv_price = 0.0
+                if cv_price <= 0:
+                    try:
+                        snap0 = _build_spread_snapshot(data.symbol.upper())
+                        cv_price = float(snap0.spot_bid) if snap0 and snap0.spot_bid else 0.0
+                    except Exception:
+                        cv_price = 0.0
+                if cv_price <= 0:
+                    raise HTTPException(status_code=400, detail=f"无法获取 {base_asset} 现价,按金额还币暂不可用,请稍后重试或改用数量")
+                req_qty = float(data.amount_usdt) / cv_price
+            if req_qty <= 0:
+                raise HTTPException(status_code=400, detail="还币数量或还币金额需大于 0")
+            repay_amount = min(req_qty, total_debt)
 
             # 2) free 不足时:用 USDT 市价买入差额(常见于已平仓残留利息零头)。
             #    币安 MARKET BUY 受 NOTIONAL.minNotional(常 5 USDT)+ LOT_SIZE.stepSize 约束,
