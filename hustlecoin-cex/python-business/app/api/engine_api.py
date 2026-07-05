@@ -817,6 +817,36 @@ async def _sell_residual_spot(client, symbol_upper: str, base_asset: str, qty: f
     return float(sold), note
 
 
+async def _dust_residual_to_bnb(client, base_asset: str, qty: float) -> tuple[bool, str]:
+    """尘埃残留(名义 < 币安 minNotional=5U,市价单卖不掉)的唯一清理正路:
+    杠杆户 → 现货钱包划转(transfer MARGIN_MAIN,无 minNotional 约束) → 现货「小额兑换 BNB」。
+    币安约束:该币须在 dust 可转列表(并非所有币支持)、同币 ~6h 频控;不满足则转换不发生。
+    容错:dust 未成功时把币回划杠杆户,避免留在现货钱包更难被发现。只在手动「卖回」按钮触发,
+    不进引擎自动平仓热路径(transfer+dust+结算等待较重)。"""
+    from decimal import Decimal as _D, ROUND_DOWN as _RD
+    q = _D(str(qty)).quantize(_D("0.00000001"), rounding=_RD)
+    if q <= 0:
+        return False, "残留过小无法处理"
+    try:
+        await client.transfer("MARGIN_MAIN", base_asset, q)   # 全仓杠杆 → 现货
+    except Exception as e:
+        return False, f"划转现货失败: {str(e)[:60]}"
+    await asyncio.sleep(1.2)   # 等钱包间划转结算
+    dust_err = "币安不支持该币兑换 BNB 或 6h 频控中"
+    try:
+        res = await client.dust_to_bnb([base_asset])
+        if (res or {}).get("transferResult"):
+            return True, f"{q} {base_asset} 尘埃已兑换为 BNB"
+    except Exception as e:
+        dust_err = str(e)[:60]
+    # 未转成 → 回划杠杆户(尽力,失败则留现货并提示)
+    try:
+        await client.transfer("MAIN_MARGIN", base_asset, q)
+        return False, f"名义低于 5U 且转 BNB 未成功({dust_err}),已回划杠杆户留账"
+    except Exception:
+        return False, f"名义低于 5U 且转 BNB 未成功({dust_err}),币现暂存现货钱包"
+
+
 class PartialRepayRequest(BaseModel):
     sub_account_id: int
     symbol: str
@@ -863,14 +893,22 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                 if data.sell_residual and free > 1e-8:
                     # 显式卖回:零债务现币残留原本没有任何清理入口(还币闸只认债务,
                     # debt_converter/reconcile 均 debt<=0 跳过,dust→BNB 够不到杠杆户)。
+                    # ① 名义 ≥ 5U → 市价卖回 USDT;② < 5U 尘埃 → 杠杆户划现货 + 兑换 BNB。
                     sold, note = await _sell_residual_spot(client, data.symbol.upper(), base_asset, free)
+                    if sold <= 0:
+                        dust_ok, dust_note = await _dust_residual_to_bnb(client, base_asset, free)
+                        try:
+                            _redis().publish("balance:refresh", str(user_id))
+                        except Exception:
+                            pass
+                        if dust_ok:
+                            return {"message": f"{account.note} {dust_note}", "dusted": True}
+                        raise HTTPException(status_code=400, detail=f"{base_asset} 残留无法清理: {note};{dust_note}")
                     try:
                         _redis().publish("balance:refresh", str(user_id))
                     except Exception:
                         pass
-                    if sold > 0:
-                        return {"message": f"{account.note} {base_asset} 无债务,{note}", "sold": sold}
-                    raise HTTPException(status_code=400, detail=f"{base_asset} 卖回未执行: {note}")
+                    return {"message": f"{account.note} {base_asset} 无债务,{note}", "sold": sold}
                 return {"message": f"{account.note} {base_asset} 无需还币(债务为0),已同步持仓状态"}
 
             # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
