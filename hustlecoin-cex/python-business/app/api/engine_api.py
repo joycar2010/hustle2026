@@ -618,6 +618,7 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
     r.hsetnx(_user_redis_key(user_id, "pushed_at"), sym, int(time.time()))  # 记首次推送时刻(已存在不覆盖)
+    r.delete(f"engine:{user_id}:repayhold:{sym}")  # 重新推送=显式再武装,清还币暂停标记允许重借
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
     return {"message": f"Pushed {sym}"}
@@ -642,9 +643,11 @@ def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids:
 
 def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: int, symbol: str, repay_qty: Decimal):
     """手动还币(/partial-repay)后收口 position 状态:把该子账户该币的未终态 position 置 CLOSED
-    (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。若该 user 该币全部 CLOSED → 自动下架
-    pushed_symbols + 清单一规则,对齐引擎平仓后行为(worker._check_and_remove_symbol_after_close),
-    防止刚还清又被引擎按残留规则(如 borrow_spread=-1)立即重借。失败回滚不阻断还币主流程。"""
+    (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。
+    ⚠不再自动下架 pushed / 清单一规则 —— 旧行为把用户的 -1 挂单差连同推送一起静默拆掉,
+    "借-还-再借"测试循环每次还币都要重推+重填规则,体感"很久才再借"。改为写 30 分钟
+    repayhold 标记(worker 借币前检查,状态显示「还币暂停」),防"刚还清被负阈值立即重借";
+    用户重新保存该币规则或重新推送 = 显式再武装,标记即清。失败回滚不阻断还币主流程。"""
     from datetime import datetime as _dt, timezone as _tz
     try:
         active = db.query(Position).filter(
@@ -673,7 +676,8 @@ def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: 
                 }))
         except Exception:
             pass
-        # 该 user 该 symbol 是否还有未终态持仓;无 → 下架 + 清规则
+        # 该 user 该 symbol 是否还有未终态持仓;无 → 写 30min 还币暂停标记(不下架、不清规则,
+        # 保留用户的推送与 -1 挂单差配置;worker 见标记跳过借币并显示「还币暂停」)
         sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
         remaining = db.query(Position).filter(
             Position.sub_account_id.in_(sub_ids), Position.symbol == symbol,
@@ -681,18 +685,9 @@ def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: 
         ).count() if sub_ids else 0
         if remaining == 0:
             try:
-                r = _redis()
-                ps_key = _user_redis_key(user_id, "pushed_symbols")
-                raw = r.get(ps_key)
-                if raw:
-                    current = set(json.loads(raw))
-                    if symbol in current:
-                        current.discard(symbol)
-                        r.set(ps_key, json.dumps(sorted(current)))
-                        r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+                _redis().set(f"engine:{user_id}:repayhold:{symbol}", "1", ex=1800)
             except Exception:
                 pass
-            _purge_symbol_rules(db, user_id, symbol, sub_ids)
     except Exception as e:
         db.rollback()
         logger.warning(f"reconcile positions after repay failed ({symbol}): {e}")

@@ -22,24 +22,30 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
   const addToast = useToastStore((s) => s.addToast)
   const [repaying, setRepaying] = useState<string | null>(null)
 
-  const rows: HeldRow[] = useMemo(() => {
+  const { rows, residuals } = useMemo(() => {
     const out: HeldRow[] = []
+    const res: HeldRow[] = []
     for (const b of balances) {
       const sm = b.symbol_margin || {}
       for (const [symbol, m] of Object.entries(sm)) {
         const borrowed = m.borrowed ?? 0
         const interest = m.interest ?? 0
         const free = m.free ?? 0
-        if (borrowed + interest > 1e-8) {
-          out.push({
-            accountId: b.account_id, note: b.note, symbol,
-            base: symbol.replace('USDT', ''),
-            free, borrowed, interest, total: borrowed + interest,
-          })
+        const row: HeldRow = {
+          accountId: b.account_id, note: b.note, symbol,
+          base: symbol.replace('USDT', ''),
+          free, borrowed, interest, total: borrowed + interest,
         }
+        if (borrowed + interest > 1e-8) out.push(row)
+        // 零债务现币残留(含未推送币,后端 residual_only 通道):历史超买零头/遗留现货,
+        // 不在交易对列表上完全不可见 → 在此提供唯一的"看见+卖回"入口
+        else if (free > 1e-8) res.push(row)
       }
     }
-    return out.sort((a, b) => b.total - a.total)
+    return {
+      rows: out.sort((a, b) => b.total - a.total),
+      residuals: res.sort((a, b) => b.free - a.free),
+    }
   }, [balances])
 
   const handleRepay = useCallback(async (r: HeldRow) => {
@@ -59,6 +65,24 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
     }
     setRepaying(null)
   }, [addToast, markRepaid])
+
+  // 卖回零债务现币残留:走 partial-repay 的 sell_residual 分支市价卖回 USDT(<5U 名义会被币安拒,后端如实提示)
+  const handleSellResidual = useCallback(async (r: HeldRow) => {
+    if (!(await confirmDialog({
+      title: '卖回残留',
+      message: `确认把 ${r.note} 的 ${r.free.toFixed(6)} ${r.base}(无债务残留)市价卖回 USDT？`,
+      danger: true,
+    }))) return
+    const key = `${r.accountId}-${r.symbol}`
+    setRepaying(key)
+    try {
+      const res = await partialRepay(r.accountId, r.symbol, r.free, true)
+      addToast(`${r.note} ${(res as { message?: string })?.message || '卖回已提交'}`, 'success')
+    } catch (e) {
+      addToast(`卖回失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
+    }
+    setRepaying(null)
+  }, [addToast])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2" onClick={onClose}>
@@ -108,8 +132,37 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
             </tbody>
           </table>
         </div>
+        {residuals.length > 0 && (
+          <div className="border-t border-border">
+            <div className="px-4 py-2 bg-[#0d0d14] text-[11px] font-semibold">
+              现币残留(无债务) <span className="text-muted-foreground font-normal">共 {residuals.length} 笔 — 历史超买零头/遗留现货,不占债务但占资金,可市价卖回 USDT</span>
+            </div>
+            <table className="w-full text-[11px] border-collapse">
+              <tbody>
+                {residuals.map((r) => {
+                  const key = `${r.accountId}-${r.symbol}`
+                  return (
+                    <tr key={key} className="border-b border-border/30 hover:bg-[#1a1a22]/60">
+                      <td className="px-3 py-1.5 font-medium">{r.note}</td>
+                      <td className="px-3 py-1.5">{r.base}</td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">{r.free.toFixed(6)}</td>
+                      <td className="px-3 py-1.5 text-center w-24">
+                        <button
+                          onClick={() => handleSellResidual(r)}
+                          disabled={repaying === key}
+                          className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-40"
+                        >{repaying === key ? '卖回中' : '卖回'}</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
         <p className="text-[10px] text-muted-foreground/50 px-3 py-2">
           数据来自引擎实时余额快照(杠杆账户已借本金 + 已计利息);还币按"本金+利息"全额还清该币。还币后约数秒刷新。
+          残留区名义价值低于币安最小卖出额(约5U)的属真尘埃,卖回会被拒并如实提示。
         </p>
       </div>
     </div>

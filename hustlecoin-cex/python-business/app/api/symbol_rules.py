@@ -143,6 +143,15 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
     db.commit()
     db.refresh(rule)
     _publish_rules_reload(user_id)   # 0 秒通知引擎重载
+    try:
+        # 保存该币规则=显式再武装 → 清还币暂停标记(手动还币后设的),允许引擎立即重新借币
+        import redis as _rr
+        from app.config import settings as _ss
+        _rc = _rr.from_url(_ss.redis_url, decode_responses=True)
+        _rc.delete(f"engine:{user_id}:repayhold:{symbol}")
+        _rc.close()
+    except Exception:
+        pass
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 

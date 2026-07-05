@@ -157,7 +157,7 @@ function ruleIsCustom(r: SymbolRuleInfo | null | undefined): boolean {
 
 // 状态列着色(分级):正常=绿、在途=蓝、队列=黄、等待=紫、异常=橙红、停止=红
 const EXEC_STATUSES = new Set(['借币中', '开仓中', '平仓中', '买回中', '还币中', '待还币'])
-const ABNORMAL_STATUSES = new Set(['无券', '量不足', '行情异常', '行情陈旧', '借币冷却', '移除冷却', '禁借', '不可交易'])
+const ABNORMAL_STATUSES = new Set(['无券', '量不足', '行情异常', '行情陈旧', '借币冷却', '移除冷却', '禁借', '不可交易', '还币暂停'])
 // 等待态悬停解释:这些词容易被误读为故障,给一句人话(尤其「行情陈旧」是 10s 交易闸口径,非死币)
 const STATUS_TITLES: Record<string, string> = {
   '行情陈旧': '盘口 >10 秒无新报价(币安 bookTicker 仅价/量变动才推送,冷清币属正常微观结构),本周期暂不开新仓,来行情自动恢复;不是故障',
@@ -166,6 +166,7 @@ const STATUS_TITLES: Record<string, string> = {
   '量不足': '24h 成交量低于最低门槛,暂不交易',
   '借币冷却': '平仓后重借冷却中(负挂单差可跳过)',
   '移除冷却': '移除后再借冷却中',
+  '还币暂停': '手动还币后暂停自动借币(防还完立刻被重借);重新保存该币规则或重新推送即恢复',
   '运行中': '有券+点差达标,挂单借币中',
 }
 function statusColorCls(s: string): string {
@@ -560,14 +561,26 @@ const SubAccountRow = memo(function SubAccountRow({
               )
             }
             const px = spread?.spot_bid ?? 0
-            // 最大可借 = 优先 borrowLimit(VIP档借贷上限,与持U无关、恒定);无则降级 maxBorrowable(amount,实际可借)
+            // 最大可借 = 优先 borrowLimit(VIP档借贷上限,与持U/库存无关、恒定);无则降级 maxBorrowable(amount,实际可借)
             const val = (sm.borrow_limit ?? 0) > 0 ? sm.borrow_limit! : (sm.max_borrowable ?? sm.effective_borrowable ?? 0)
             const isBorrowLimit = (sm.borrow_limit ?? 0) > 0
             const shown = borrowDisplayUsdt ? formatNumber(val * px, 0) : formatNumber(val, 2)
             const title = isBorrowLimit
-              ? '币安 VIP 档借贷上限(borrowLimit,与持U无关、同VIP各账户相同)'
+              ? '币安 VIP 档借贷上限(borrowLimit,与持U/库存无关、同VIP各账户相同)'
               : `币安实际最大可借(maxBorrowable amount)${sm.borrow_cap_reason ? ` · 受限于: ${sm.borrow_cap_reason}` : ''}`
-            return <span className={isBorrowLimit ? 'text-emerald-400/90' : ''} title={title}>{shown}</span>
+            // 无券时不再盖掉数字:额度照显(VIP上限与库存无关),无券降级为角标提示
+            const remMin2 = sm.noinv_remaining_sec ? Math.ceil(sm.noinv_remaining_sec / 60) : 0
+            return (
+              <span>
+                <span className={isBorrowLimit ? 'text-emerald-400/90' : ''} title={title}>{shown}</span>
+                {sm.no_inventory && (
+                  <span className="ml-0.5 text-amber-500/80"
+                    title={`币安杠杆池暂无可借库存(-3045)${remMin2 ? `,冷却剩约 ${remMin2} 分钟自动复查` : ''};左侧数值为 VIP 档额度上限,与库存无关`}>
+                    无券{remMin2 ? `(${remMin2}分)` : ''}
+                  </span>
+                )}
+              </span>
+            )
           })()}
         </td>
       )}
@@ -692,7 +705,6 @@ const SubAccountRow = memo(function SubAccountRow({
 
 const FILTER_KEY = 'hc_filter_positions_only'
 const BORROW_DISPLAY_KEY = 'hc_borrow_display_mode'
-const COMPACT_KEY = 'hc_compact_view'
 // 币种行点差陈旧阈值(ms):某币 ts 落后全表最新 ts 超过此值视为陈旧(就近值变灰),与 /spreads 默认 300s 一致
 const DASH_SPREAD_STALE_MS = 300_000
 
@@ -713,16 +725,8 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
   const [showPositionsOnly, setShowPositionsOnly] = useState(() => {
     try { return localStorage.getItem(FILTER_KEY) === 'true' } catch { return false }
   })
-  const [compact, setCompact] = useState(() => {
-    try { return localStorage.getItem(COMPACT_KEY) === 'true' } catch { return false }
-  })
-  const toggleCompact = useCallback(() => {
-    setCompact(prev => {
-      const next = !prev
-      try { localStorage.setItem(COMPACT_KEY, String(next)) } catch { /* ignore */ }
-      return next
-    })
-  }, [])
+  // 紧凑/树形切换按钮已按用户要求移除,固定树形多账户视图(compact 恒 false,保留下游 prop 以少动代码)
+  const compact = false
   const borrowDisplayUsdt = useMemo(() => {
     try { return localStorage.getItem(BORROW_DISPLAY_KEY) === 'usdt' } catch { return false }
   }, [])
@@ -807,8 +811,8 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
         if (cached) { sp = cached; spreadStale = true }
       }
       const pos = bySymbol.get(symbol) || []
-
-      if (showPositionsOnly && pos.length === 0) continue
+      // 「隐」语义=隐藏无持仓的【子账户行】(见 CoinGroup 内伪行过滤),币种行永远保留 —— 原先在
+      // 这里整币 continue,用户全无持仓时点击后所有币种行消失,体感"全被隐藏"。
 
       const totalQty = pos.reduce((s, p) => s + parseFloat(p.borrow_qty || '0'), 0)
       const totalUsdt = pos.reduce((s, p) => s + parseFloat(p.open_usdt_amount || '0'), 0)
@@ -1015,19 +1019,11 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
               ? 'border-primary text-primary bg-primary/10'
               : 'border-border hover:bg-accent/50',
           )}
-          title={showPositionsOnly ? '显示全部币种' : '仅显示有持仓/借币'}
+          title={showPositionsOnly ? '显示全部子账户行' : '隐藏无持仓/无借币的子账户行(币种行保留)'}
         >
           {showPositionsOnly ? <Eye size={10} /> : <EyeOff size={10} />}
           {showPositionsOnly ? '显' : '隐'}
         </button>
-        <button
-          onClick={toggleCompact}
-          className={cn(
-            'px-1.5 py-0.5 rounded border text-[10px]',
-            compact ? 'border-primary text-primary bg-primary/10' : 'border-border hover:bg-accent/50',
-          )}
-          title={compact ? '切换为树形多账户视图' : '切换为紧凑单账户视图（折叠子账户）'}
-        >{compact ? '紧凑' : '树形'}</button>
         <span>持仓 <span className="text-foreground">{posCount}</span> 币种</span>
         <span>推送 <span className="text-primary">{pushedSymbols.length}</span></span>
         <span>金额 <span className="text-foreground font-mono">{formatNumber(totalUsdt, 0)}</span></span>
@@ -1042,9 +1038,9 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
           {/* 标题行已与 CoinHeaderRow 合并(coinmini 同款):每个币种汇总行兼列标签,不再单独 sticky 表头 */}
           <tbody>
             {groups.map((g) => {
-              // 挂单中(已推送无持仓)默认展开显示各子账户状态;expanded 集合记录"被手动 toggle 过"的币
-              // → 实际展开 = 默认态 XOR 手动 toggle(挂单币默认开、持仓币默认关,均可手动反转)。
-              const defaultOpen = g.isPushed && g.positions.length === 0
+              // 推送中的币默认展开(无论有无持仓 —— 原先"持仓币默认关"导致借到币的瞬间子账户行
+              // 自动收起,用户以为被隐藏);expanded 记录"被手动 toggle 过"的币,实际展开=默认态 XOR 手动。
+              const defaultOpen = g.isPushed
               const isExp = !compact && (expanded.has(g.symbol) ? !defaultOpen : defaultOpen)
               return (
                 <CoinGroupRows
@@ -1052,6 +1048,7 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
                   group={g}
                   isExpanded={isExp}
                   compact={compact}
+                  hideIdleAccounts={showPositionsOnly}
                   isMobile={isMobile}
                   isDelisting={delistingSymbols?.has(g.symbol)}
                   isRisky={riskySymbols?.has(g.symbol)}
@@ -1117,6 +1114,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   group,
   isExpanded,
   compact,
+  hideIdleAccounts,
   isMobile,
   isDelisting,
   isRisky,
@@ -1137,6 +1135,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   group: SymbolGroup
   isExpanded: boolean
   compact?: boolean
+  hideIdleAccounts?: boolean
   isMobile: boolean
   isDelisting?: boolean
   isRisky?: boolean
@@ -1155,7 +1154,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   onOpenRules: () => void
 }) {
   const headerStatus = useMemo(() => {
-    const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '运行中', '并联满', '点差不符', '无券', '借币冷却', '移除冷却', '量不足', '行情陈旧', '行情异常', '禁借', '黑名单', '不可交易']
+    const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '运行中', '并联满', '点差不符', '无券', '还币暂停', '借币冷却', '移除冷却', '量不足', '行情陈旧', '行情异常', '禁借', '黑名单', '不可交易']
     // 状态口径与下方"显示哪些子账户行"保持并集一致:持仓账户 ∪ (该币被推送/有生效规则时的所有 enabled 账户)
     const ids = new Set<number>()
     group.positions.forEach(p => ids.add(p.sub_account_id))
@@ -1220,6 +1219,8 @@ const CoinGroupRows = memo(function CoinGroupRows({
       {isExpanded && (group.isPushed || group.ruleInfo != null) &&
         [...balanceMap.values()]
           .filter((bal) => !group.positions.some((p) => p.sub_account_id === bal.account_id))
+          // 「隐」开启时:无持仓的伪子账户行里,只保留借币余额>0 的(余额真值秒级,不受持仓15s轮询滞后影响)
+          .filter((bal) => !hideIdleAccounts || ((bal.symbol_margin?.[group.symbol]?.borrowed ?? 0) > 1e-8))
           .map((bal) => {
           const acctStatus = symbolStatuses.get(`${bal.account_id}:${group.symbol}`) ?? null
           const acctRestriction = restrictionFor(restrictions, bal.account_id)

@@ -41,6 +41,11 @@ class BalancePusher:
         self._max_borrow_cache: dict[int, dict[str, float]] = {}  # account_id -> {asset: amount}
         self._no_inventory: dict[str, float] = {}  # asset -> 最近一次 -3045 的 monotonic 时刻(TTL 见 NOINV_TTL_SEC)
         self._mb_cursor: dict[int, int] = {}  # account_id -> maxBorrowable 轮转游标(targets 超单轮预算时轮转窗口)
+        # 推送即查:pushed:updates 到达时把该用户推送资产加入强查集,下一次(即时)fetch 无视节流立即查
+        self._force_mb_assets: set[str] = set()
+        # VIP 档借贷上限缓存: asset -> (borrowLimit, monotonic取数时刻)。与库存无关、按VIP恒定,6h 缓存;
+        # 取数失败负缓存 10min 防连环重试。是无券币(-3045 连 borrowLimit 都拿不到)额度显示的唯一来源。
+        self._vip_limit_cache: dict[str, tuple[float, float]] = {}
         self._interest_rate_cache: dict[str, float] = {}  # asset -> daily_interest_rate (global)
         # 即时刷新(immediate)时不重查主账户合约持仓(省 REST);沿用上一次整轮采集的缓存,
         # 避免即时推送把「现-期/爆率」列清空闪烁。整轮 _fetch_and_push 会刷新这两个缓存。
@@ -75,11 +80,25 @@ class BalancePusher:
         独立连接(pubsub 自带),收集后立即返回,真正的拉取/推送交给 _refresh_worker(去抖一次)。"""
         try:
             pubsub = self._redis.pubsub()
-            await pubsub.subscribe(REFRESH_CHANNEL)
+            # pushed:updates: 推送列表变化(手动/自动推送)→ 对该用户所有推送资产立即强查
+            # maxBorrowable/VIP额度,做到"推送进来马上显示最大可借",不等 60s 轮询节拍。
+            await pubsub.subscribe(REFRESH_CHANNEL, "pushed:updates")
             async for msg in pubsub.listen():
                 if not self._running:
                     break
                 if msg.get("type") != "message":
+                    continue
+                if msg.get("channel") == "pushed:updates":
+                    try:
+                        payload = json.loads(msg["data"])
+                        uid = int(payload.get("user_id"))
+                        assets = {s.replace("USDT", "") for s in payload.get("pushed_symbols", [])}
+                        self._force_mb_assets |= assets
+                        self._refresh_pending.add(uid)
+                        if self._refresh_event:
+                            self._refresh_event.set()
+                    except Exception:
+                        pass
                     continue
                 try:
                     uid = int(msg["data"])
@@ -270,6 +289,22 @@ class BalancePusher:
                 out[a] = rem
         return out
 
+    async def _vip_borrow_limit(self, client, asset: str) -> float:
+        """VIP 档借贷上限(与库存/持U无关,同VIP各账户相同),进程内 6h 缓存;失败负缓存 10min。"""
+        VIP_TTL, NEG_TTL = 21600.0, 600.0
+        hit = self._vip_limit_cache.get(asset)
+        now = time.monotonic()
+        if hit and now - hit[1] < (VIP_TTL if hit[0] > 0 else NEG_TTL):
+            return hit[0]
+        limit = 0.0
+        try:
+            d = await client.get_cross_margin_data(asset)
+            limit = float(d.get("borrowLimit", 0) or 0)
+        except Exception:
+            limit = 0.0
+        self._vip_limit_cache[asset] = (limit, now)
+        return limit
+
     def _compute_effective_borrowable(self, db, acc, sym_key: str, mb: float,
                                       policy: dict, spot_bids: dict) -> tuple[float, str]:
         """有效可借(币数量)+ 受限原因,口径与 order_executor.execute_borrow 完全一致。
@@ -349,6 +384,7 @@ class BalancePusher:
             noinv_rem = await self._noinv_remaining(all_assets)
 
             interest_fetched: set[str] = set()
+            force_consumed: set[str] = set()   # 本轮已消费的"推送即查"强查资产,轮末从全局集扣除
 
             user_balances: dict[int, list] = {}
             for acc in accounts:
@@ -360,7 +396,9 @@ class BalancePusher:
                             client.get_futures_account(),
                         )
 
-                        if fetch_max_borrow and targets:
+                        force_assets = self._force_mb_assets & targets  # 推送即查:无视节流/无券缓存
+                        force_consumed |= force_assets
+                        if (fetch_max_borrow or force_assets) and targets:
                             mb_results = dict(self._max_borrow_cache.get(acc.id, {}))
                             # _limits 是嵌套 dict,浅拷贝后与缓存共享同一内层对象 → 重新复制一份再写
                             mb_results["_limits"] = dict(mb_results.get("_limits", {}))
@@ -371,14 +409,18 @@ class BalancePusher:
                             # 原固定切片 list(targets)[:40] 让 40 名以外的币在进程生命周期内永远查不到,
                             # 其 max_borrowable 恒 0/无券标志永不复查。
                             tlist = sorted(targets)
-                            if len(tlist) > MAX_BORROW_PER_CYCLE:
+                            if not fetch_max_borrow:
+                                batch = []   # 即时(推送触发)模式只查强查资产,不跑整轮
+                            elif len(tlist) > MAX_BORROW_PER_CYCLE:
                                 start = self._mb_cursor.get(acc.id, 0) % len(tlist)
                                 batch = (tlist + tlist)[start:start + MAX_BORROW_PER_CYCLE]
                                 self._mb_cursor[acc.id] = (start + MAX_BORROW_PER_CYCLE) % len(tlist)
                             else:
                                 batch = tlist
+                            batch = list(dict.fromkeys(list(batch) + sorted(force_assets)))
                             for asset in batch:
-                                if self._noinv_active(asset) and not recheck_noinv:
+                                forced = asset in force_assets
+                                if (not forced) and self._noinv_active(asset) and not recheck_noinv:
                                     mb_results[asset] = 0.0   # 沿用无券缓存,跳过查询(TTL 过期自动失效)
                                 else:
                                     try:
@@ -396,6 +438,12 @@ class BalancePusher:
                                             self._no_inventory[asset] = time.monotonic()
                                         else:
                                             mb_results[asset] = mb_results.get(asset, 0)
+                                # 无券/查询失败拿不到 borrowLimit → 回退 VIP 档额度(crossMarginData,
+                                # 与库存无关):推送进来就能显示"账户最大能借多少",无券只是角标。
+                                if not mb_results["_limits"].get(asset):
+                                    vl = await self._vip_borrow_limit(client, asset)
+                                    if vl > 0:
+                                        mb_results["_limits"][asset] = vl
                                 if asset not in interest_fetched:
                                     try:
                                         rate = await client.get_margin_interest_rate(asset)
@@ -418,6 +466,23 @@ class BalancePusher:
                         elif asset_name == "BNB":
                             bnb_free = a.get("free", "0")
                             bnb_interest = a.get("interest", "0")
+                        if asset_name not in targets and asset_name not in ("USDT", "BNB") and (
+                            float(a.get("free", "0") or 0) > 1e-8
+                            or float(a.get("borrowed", "0") or 0) > 1e-8
+                            or float(a.get("interest", "0") or 0) > 1e-8
+                        ):
+                            # 非推送/持仓币但账户里有残留(历史零债残留如 PLUME 610个≈24U,不推送就完全
+                            # 不可见,用户以为"钱没恢复")→ 也入 payload,让「持币汇总」可见并提供卖回入口。
+                            # 不进 targets(不参与 maxBorrowable 查询,零 REST 开销);USDT/BNB 另有专列不掺和。
+                            symbol_margin[f"{asset_name}USDT"] = {
+                                "free": float(a.get("free", "0")),
+                                "borrowed": float(a.get("borrowed", "0")),
+                                "interest": float(a.get("interest", "0")),
+                                "max_borrowable": 0, "borrow_limit": 0,
+                                "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
+                                "no_inventory": False, "noinv_remaining_sec": 0,
+                                "residual_only": True,   # 前端据此归入"残留区",不当作可交易行
+                            }
                         if asset_name in targets:
                             sym_key = f"{asset_name}USDT"
                             mb_cache = self._max_borrow_cache.get(acc.id, {})
@@ -453,6 +518,8 @@ class BalancePusher:
                     # 有效可借: 在理论上限(max_borrowable)基础上,套引擎同一封顶口径
                     # (金额限制/抵押率/单笔金额),给前端展示「实际会借到的量」。
                     for sym_key, sm in symbol_margin.items():
+                        if sm.get("residual_only"):
+                            continue   # 残留展示行,无借币语义,不算有效可借
                         try:
                             eff, reason = self._compute_effective_borrowable(
                                 db, acc, sym_key, sm.get("max_borrowable", 0),
@@ -539,6 +606,7 @@ class BalancePusher:
                 # 整轮采集成功 → 刷新主账户合约缓存,供后续 immediate 即时刷新兜底(避免清空闪烁)
                 self._last_master_pos.update(master_futures_positions)
                 self._last_master_liq.update(master_futures_liq)
+            self._force_mb_assets -= force_consumed   # 强查已完成,防同资产反复无视节流
 
             for uid, balances in user_balances.items():
                 position_count = db.query(Position).filter(

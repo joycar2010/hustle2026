@@ -404,6 +404,13 @@ class Worker:
                 statuses[symbol] = "借币冷却"; continue
             if self._is_removed_banned(symbol):
                 statuses[symbol] = "移除冷却"; continue
+            # 手动还币后的暂停标记(engine_api 写,EX=1800):防"刚还清又被负阈值秒级重借"。
+            # 用户重新保存该币规则/重新推送即清除(显式再武装),显示「还币暂停」而非静默。
+            try:
+                if self._redis.get(f"engine:{self._user_id}:repayhold:{symbol}"):
+                    statuses[symbol] = "还币暂停"; continue
+            except Exception:
+                pass
             sym_rule = self._symbol_rules.get(symbol, {})
             if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                 statuses[symbol] = "禁借"; continue

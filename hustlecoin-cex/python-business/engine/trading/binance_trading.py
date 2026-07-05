@@ -370,6 +370,15 @@ class BinanceTradingClient:
     async def get_margin_account(self) -> dict:
         return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/account")
 
+    async def get_cross_margin_data(self, coin: str) -> dict:
+        """全仓杠杆币种数据(按当前账户 VIP 档):borrowLimit/dailyInterest 等,与池子库存无关。
+        maxBorrowable 在 -3045(无券)时整个报错、连 borrowLimit 一起拿不到 —— 此接口是
+        无券币"账户最大可借额度"的唯一来源(推送即显示额度数字,而非只会写「无券」)。"""
+        data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/crossMarginData", {"coin": coin})
+        if isinstance(data, list):
+            return data[0] if data else {}
+        return data or {}
+
     async def get_dust_assets(self) -> dict:
         """现货钱包可转 BNB 的小额资产清单(币安「小额资产兑换 BNB」)。该端点为 POST(非 GET)。
         返回 {details:[{asset, amountFree, toBNB, ...}], totalTransferBtc:..., totalTransferBNB:...}。"""
