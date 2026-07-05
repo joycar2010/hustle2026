@@ -827,6 +827,17 @@ async def _dust_residual_to_bnb(client, base_asset: str, qty: float) -> tuple[bo
     q = _D(str(qty)).quantize(_D("0.00000001"), rounding=_RD)
     if q <= 0:
         return False, "残留过小无法处理"
+    # 预检可划出额:全仓杠杆有负债时,所有资产被当抵押物锁定,maxTransferable=0 → 划不出。
+    # 先查清楚给准确原因,避免徒劳撞 -3020(Transfer out amount exceeds max)。
+    try:
+        mt = await client._request("GET", f"{SPOT_BASE}/sapi/v1/margin/maxTransferable",
+                                   {"asset": base_asset}, signed=True)
+        max_tx = _D(str(mt.get("amount", "0") or "0"))
+    except Exception:
+        max_tx = q   # 查不到就照常尝试
+    if max_tx < q:
+        return False, (f"账户有借币,{base_asset} 被全仓杠杆当抵押物锁定(可划出 {max_tx}),"
+                       f"无法划转清理;还清该账户全部借币后再清尘埃(总值极小,可忽略)")
     try:
         await client.transfer("MARGIN_MAIN", base_asset, q)   # 全仓杠杆 → 现货
     except Exception as e:

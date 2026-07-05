@@ -135,7 +135,7 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
         {residuals.length > 0 && (
           <div className="border-t border-border">
             <div className="px-4 py-2 bg-[#0d0d14] text-[11px] font-semibold">
-              现币残留(无债务) <span className="text-muted-foreground font-normal">共 {residuals.length} 笔 — 历史超买零头/遗留现货。名义 ≥5U 市价卖回 USDT;&lt;5U 属币安不可单卖的尘埃,自动划现货并兑换 BNB</span>
+              现币残留(无债务) <span className="text-muted-foreground font-normal">共 {residuals.length} 笔 — 历史超买零头/遗留现货。名义 ≥5U 卖回 USDT;&lt;5U 尘埃划现货兑 BNB(需该账户先还清全部借币,否则被全仓杠杆抵押锁定,总值极小可忽略)</span>
             </div>
             <table className="w-full text-[11px] border-collapse">
               <tbody>
