@@ -469,6 +469,13 @@ const SubAccountRow = memo(function SubAccountRow({
 
   const numCell = 'px-1 py-0.5 text-right tabular-nums font-mono text-[10px]'
 
+  // 无券状态(-3045):从「最大可借」列移到「状态列」展示,带冷却剩余分钟。数据源=balance 快照。
+  const _sm = balance?.symbol_margin?.[pos.symbol]
+  const noInvActive = !!_sm?.no_inventory
+  const noInvMin = noInvActive && _sm?.noinv_remaining_sec ? Math.ceil(_sm.noinv_remaining_sec / 60) : 0
+  const noInvLabel = noInvActive ? `无券${noInvMin ? `(${noInvMin}分)` : ''}` : null
+  const noInvTitle = `币安杠杆池当前无该币可借库存(API -3045)${noInvMin ? `;冷却剩约 ${noInvMin} 分钟自动复查` : ''}`
+
   return (
     <tr
       className="border-b border-border/10 hover:bg-accent/10 cursor-pointer text-[11px] bg-[#0c0c11]"
@@ -480,10 +487,13 @@ const SubAccountRow = memo(function SubAccountRow({
       <td className="px-1.5 py-0.5 pl-4 text-foreground">
         <div className="whitespace-nowrap">
           ↳ {pos.account_note || `#${pos.sub_account_id}`}
-          {isMobile && symbolStatus && (
+          {isMobile && noInvLabel && (
+            <span className="ml-1.5 text-[10px] text-amber-500/80" title={noInvTitle}>{noInvLabel}</span>
+          )}
+          {isMobile && !noInvLabel && symbolStatus && (
             <span className={cn('ml-1.5 text-[10px]', statusColorCls(symbolStatus))}>{symbolStatus}</span>
           )}
-          {isMobile && !symbolStatus && (
+          {isMobile && !noInvLabel && !symbolStatus && (
             <span className="ml-1.5 text-[10px] text-muted-foreground">{durationText(pos.opened_at)}</span>
           )}
         </div>
@@ -497,14 +507,12 @@ const SubAccountRow = memo(function SubAccountRow({
           const futVal = parseFloat(pos.futures_long_qty || '0') * (spread?.fut_bid ?? 0)
           const blow = summary?.masterFuturesLiqPct ?? null  // 爆率=主账户合约户维持保证金率(与桌面同源)
           const px = spread?.spot_bid ?? 0
-          const eff = sm ? (sm.effective_borrowable ?? sm.max_borrowable) : null
-          const noInv = sm?.no_inventory && !(sm.max_borrowable > 0)
+          // 可借优先显示 VIP 额度(borrow_limit,与库存无关);无券状态已挪到账户名旁,此处只显额度数字
+          const eff = sm ? ((sm.borrow_limit ?? 0) > 0 ? sm.borrow_limit! : (sm.effective_borrowable ?? sm.max_borrowable)) : null
           return (
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] tabular-nums font-mono leading-tight">
               <span className="text-muted-foreground/60">爆<span className={cn('ml-0.5', blow != null ? (blow > 80 ? 'text-negative' : blow > 50 ? 'text-yellow-400' : 'text-positive') : 'text-foreground')}>{blow != null ? `${formatNumber(blow, 1)}%` : '-'}</span></span>
-              <span className="text-muted-foreground/60">可借{noInv
-                ? <span className="ml-0.5 text-amber-500/90">无券{sm?.noinv_remaining_sec ? `(${Math.ceil(sm.noinv_remaining_sec / 60)}分)` : ''}</span>
-                : <span className="ml-0.5 text-sky-300/90">{eff != null ? (borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)) : '-'}</span>}</span>
+              <span className="text-muted-foreground/60">可借<span className="ml-0.5 text-sky-300/90">{eff != null ? (borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)) : '-'}</span></span>
               <span className="text-muted-foreground/60">现币<span className="ml-0.5 text-foreground">{sm?.free != null ? formatNumber(sm.free, 4) : '-'}</span></span>
               <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{sm?.borrowed != null ? formatNumber(sm.borrowed, 4) : '-'}</span></span>
               <span className="text-muted-foreground/60">额<span className="ml-0.5 text-foreground">{(() => { const v = (sm?.borrowed ?? 0) * px; return v > 0.01 ? formatNumber(v, 0) : '-' })()}</span></span>
@@ -550,37 +558,16 @@ const SubAccountRow = memo(function SubAccountRow({
           {(() => {
             const sm = balance?.symbol_margin?.[pos.symbol]
             if (!sm) return '-'
-            // 该币杠杆池无可借库存 → 币安 maxBorrowable 直接 -3045 拿不到任何数 → 「无券」(真实市场状态)
-            if (sm.no_inventory && !((sm.borrow_limit ?? 0) > 0) && !(sm.max_borrowable > 0)) {
-              const remMin = sm.noinv_remaining_sec ? Math.ceil(sm.noinv_remaining_sec / 60) : 0
-              return (
-                <span className="text-amber-500/80"
-                  title={`币安杠杆池当前无该币可借库存(API -3045)${remMin ? `;冷却剩余约 ${remMin} 分钟,到期自动复查库存` : ''}`}>
-                  无券{remMin ? `(${remMin}分)` : ''}
-                </span>
-              )
-            }
             const px = spread?.spot_bid ?? 0
-            // 最大可借 = 优先 borrowLimit(VIP档借贷上限,与持U/库存无关、恒定);无则降级 maxBorrowable(amount,实际可借)
+            // 最大可借 = 优先 borrowLimit(VIP档借贷上限,与持U/库存无关、恒定);无则降级 maxBorrowable(amount,实际可借)。
+            // 「无券」状态已移至右侧「状态列」展示,此处只显示可借额度数字(不再掺市场状态)。
             const val = (sm.borrow_limit ?? 0) > 0 ? sm.borrow_limit! : (sm.max_borrowable ?? sm.effective_borrowable ?? 0)
             const isBorrowLimit = (sm.borrow_limit ?? 0) > 0
             const shown = borrowDisplayUsdt ? formatNumber(val * px, 0) : formatNumber(val, 2)
             const title = isBorrowLimit
               ? '币安 VIP 档借贷上限(borrowLimit,与持U/库存无关、同VIP各账户相同)'
               : `币安实际最大可借(maxBorrowable amount)${sm.borrow_cap_reason ? ` · 受限于: ${sm.borrow_cap_reason}` : ''}`
-            // 无券时不再盖掉数字:额度照显(VIP上限与库存无关),无券降级为角标提示
-            const remMin2 = sm.noinv_remaining_sec ? Math.ceil(sm.noinv_remaining_sec / 60) : 0
-            return (
-              <span>
-                <span className={isBorrowLimit ? 'text-emerald-400/90' : ''} title={title}>{shown}</span>
-                {sm.no_inventory && (
-                  <span className="ml-0.5 text-amber-500/80"
-                    title={`币安杠杆池暂无可借库存(-3045)${remMin2 ? `,冷却剩约 ${remMin2} 分钟自动复查` : ''};左侧数值为 VIP 档额度上限,与库存无关`}>
-                    无券{remMin2 ? `(${remMin2}分)` : ''}
-                  </span>
-                )}
-              </span>
-            )
+            return <span className={isBorrowLimit ? 'text-emerald-400/90' : ''} title={title}>{shown}</span>
           })()}
         </td>
       )}
@@ -632,12 +619,14 @@ const SubAccountRow = memo(function SubAccountRow({
       )}
       {/* 参数块(持仓经济) */}
       {paramBlock}
-      {/* 推/状态 — 子账户行状态(三态互斥):被限流=API错误(红);正在借/已借到=借币(青);
-          其余等待态(运行中/点差不符/无券…)保留原状态词;无状态显持仓时长 */}
+      {/* 推/状态 — 子账户行状态(优先级):被限流=API错误(红)> 无券(-3045市场状态,从最大可借列移来,橙)
+          > 正在借/已借到=借币(青)> 其余等待态(运行中/点差不符/还币暂停…)> 无状态显持仓时长 */}
       {!isMobile && (
         <td className="px-1.5 py-0.5 text-right whitespace-nowrap text-[10px]">
           {restriction ? (
             <span className="text-red-500 font-medium">API错误</span>
+          ) : noInvLabel ? (
+            <span className="text-amber-500/80" title={noInvTitle}>{noInvLabel}</span>
           ) : (symbolStatus && EXEC_STATUSES.has(symbolStatus)) ? (
             <span className="text-sky-400">借币</span>
           ) : symbolStatus ? (
