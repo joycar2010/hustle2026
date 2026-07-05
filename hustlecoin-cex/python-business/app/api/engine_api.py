@@ -617,16 +617,6 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     current = set(json.loads(raw)) if raw else set()
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
-    # ③ 手动推送 → 从 auto_pushed_symbols 移除(手动推送的币不参与"点差不足自动移除")
-    try:
-        ap_key = _user_redis_key(user_id, "auto_pushed_symbols")
-        ap_raw = r.get(ap_key)
-        ap = set(json.loads(ap_raw)) if ap_raw else set()
-        if sym in ap:
-            ap.discard(sym)
-            r.set(ap_key, json.dumps(sorted(ap)))
-    except Exception:
-        pass
     r.hsetnx(_user_redis_key(user_id, "pushed_at"), sym, int(time.time()))  # 记首次推送时刻(已存在不覆盖)
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
@@ -709,19 +699,49 @@ def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: 
 
 
 @router.delete("/push-symbol/{symbol}")
-def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
+async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
     sym = symbol.upper()
 
     sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
     if sub_ids:
-        open_count = db.query(Position).filter(
+        # OPEN/BORROWED_IDLE/PENDING_REPAY 等活跃状态都算"持仓中",不允许移除
+        ACTIVE_STATUSES = ("OPEN", "BORROWED_IDLE", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING")
+        active_count = db.query(Position).filter(
             Position.sub_account_id.in_(sub_ids),
             Position.symbol == sym,
-            Position.status == "OPEN",
+            Position.status.in_(ACTIVE_STATUSES),
         ).count()
-        if open_count > 0:
-            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {open_count} 个持仓未平")
+        if active_count > 0:
+            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个活跃持仓(OPEN/借币中/待还币)")
+
+    # 移除前还清该 symbol 在所有子账户的杠杆账户残留借贷(粉尘/利息),
+    # 防止移除后前端"现币/借币"列仍显示残余数据(币安那边债务未清)。
+    # execute_borrow_only_repay 自包含:查实时债务→还币→记录 position,非零才执行,异常不阻断移除。
+    try:
+        from engine.trading.binance_trading import BinanceTradingClient
+        from engine.trading.order_executor import execute_borrow_only_repay, _get_asset_debt
+        from engine.notify.feishu_sender import FeishuSender
+        base_asset = sym.replace("USDT", "")
+        notifier = FeishuSender()
+        for sub_id in sub_ids:
+            account = db.query(SubAccount).filter(SubAccount.id == sub_id).first()
+            if not account:
+                continue
+            try:
+                async with BinanceTradingClient(
+                    account.api_key, account.api_secret, sub_account_id=sub_id
+                ) as client:
+                    debt, _ = await _get_asset_debt(client, base_asset)
+                    if debt > 0:
+                        await execute_borrow_only_repay(
+                            sub_id, sym, client, notifier,
+                            account.note or f"#{sub_id}", user_id=user_id,
+                        )
+            except Exception as _re:
+                logger.warning(f"remove {sym} sub{sub_id}: repay residual failed (non-blocking): {_re}")
+    except Exception as _outer:
+        logger.warning(f"remove {sym}: residual repay block failed: {_outer}")
 
     r = _redis()
     key = _user_redis_key(user_id, "push_commands")

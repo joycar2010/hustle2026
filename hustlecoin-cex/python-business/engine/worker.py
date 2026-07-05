@@ -733,6 +733,17 @@ class Worker:
         if not ban_until:
             return False
         if datetime.now(timezone.utc) - ban_until < timedelta(minutes=self.config.global_rules.repay_ban_minutes):
+            # borrow_spread < 0(负阈值=提前借意图明确)→ 跳过 repay_ban 冷却,允许平仓后立即重借。
+            # 正常正阈值策略用冷却防反复开关,但负阈本就代表"基差很差也要借",30min 冷却反而阻碍。
+            eff = self._symbol_rules.get(symbol, {}).get("borrow_spread")
+            g_bs = getattr(self.config.global_rules, "borrow_spread", None)
+            try:
+                eff_bs = float(eff if eff is not None else (g_bs or 0))
+            except (TypeError, ValueError):
+                eff_bs = 0.0
+            if eff_bs < 0:
+                del self._repay_ban[symbol]
+                return False
             return True
         del self._repay_ban[symbol]
         return False
