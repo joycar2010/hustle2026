@@ -125,7 +125,8 @@ export async function pushSymbol(symbol: string) {
 }
 
 export async function removePushedSymbol(symbol: string) {
-  const { data } = await client.delete(`/api/engine/push-symbol/${symbol}`)
+  // __silent: 移除失败由 RemoveSymbolDialog 自己 toast(带上下文),避免与全局拦截器双报同一错误
+  const { data } = await client.delete(`/api/engine/push-symbol/${symbol}`, { __silent: true })
   return data
 }
 

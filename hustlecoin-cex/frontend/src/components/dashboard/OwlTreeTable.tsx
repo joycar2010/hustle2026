@@ -316,7 +316,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">借币金额</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">风险</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">保证金</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="杠杆账户净资产USDT(账户级口径):借币时资产负债同增、净资产不变,卖出只换资产形态 —— 该数不随单币借入/卖出变动,属正常。想看该币借入后剩余的现货数量请看「现币」列。">净值</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="杠杆账户可用USDT(纯U口径,不含BNB与其它币):这是能直接拿来支撑借币的保证金。借入的币卖出后回款计入此数、买回还币时扣减。该币剩余现货数量看「现币」列。">净值</td>}
       {/* 参数块(行情) */}
       {paramBlock}
       {/* 推/状态 — 紧凑型: 显运行状态(无子账户行可承载);否则显提币(推送)时间 */}
@@ -595,11 +595,11 @@ const SubAccountRow = memo(function SubAccountRow({
         const total = bnbVal + (balance.margin_net_usdt ?? 0)
         return <td className={numCell}>{formatNumber(total, 0)}</td>
       })()}
-      {/* 净值(原列名"可用"易误读为该币可用现货) — 杠杆账户净资产USDT,账户级口径:
-          借币资产负债同增净资产不变、卖币只换资产形态,借完卖完该数不动是正常的 */}
+      {/* 净值 — 杠杆账户可用USDT(纯U口径,按用户要求不含BNB/其它币):
+          可用U=借币的保证金,借入卖出后回款计入、买回还币时扣减,随交易周期真实变动 */}
       {!isMobile && (
-        <td className={numCell} title="杠杆账户净资产USDT(账户级),不随单币借入/卖出变动;该币剩余现货看「现币」列">
-          {balance?.margin_net_usdt != null ? formatNumber(balance.margin_net_usdt, 0) : '-'}
+        <td className={numCell} title="杠杆账户可用USDT(纯U口径,不含BNB与其它币),借币保证金;该币剩余现货看「现币」列">
+          {balance?.margin_usdt_free != null ? formatNumber(balance.margin_usdt_free, 0) : '-'}
         </td>
       )}
       {/* 参数块(持仓经济) */}

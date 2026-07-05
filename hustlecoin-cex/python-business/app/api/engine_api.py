@@ -705,6 +705,44 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
 
     sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
     if sub_ids:
+        # 活跃保护之前先收口"状态孤儿": BORROWED_IDLE/PENDING_REPAY 但币安实测债务=0 ——
+        # 借币已被外部(币安App/手动)还清,引擎生命周期没机会回写,DB 行永久停在活跃态,
+        # 会让"该币无借币"的移除弹窗撞上 409"仍有活跃持仓"(两个真相源打架)。
+        # 只收 BORROWED_IDLE/PENDING_REPAY(生死只取决于债务);OPEN 有合约对冲腿,绝不在此自动收口。
+        try:
+            orphan_rows = db.query(Position).filter(
+                Position.sub_account_id.in_(sub_ids),
+                Position.symbol == sym,
+                Position.status.in_(("BORROWED_IDLE", "PENDING_REPAY")),
+            ).all()
+            if orphan_rows:
+                from datetime import datetime as _odt, timezone as _otz
+                from engine.trading.binance_trading import BinanceTradingClient as _BTC
+                from engine.trading.order_executor import _get_asset_debt as _gad
+                _base = sym.replace("USDT", "")
+                _by_sub: dict[int, list] = {}
+                for p in orphan_rows:
+                    _by_sub.setdefault(p.sub_account_id, []).append(p)
+                for sid, rows in _by_sub.items():
+                    acct = db.query(SubAccount).filter(SubAccount.id == sid).first()
+                    if not acct:
+                        continue
+                    try:
+                        async with _BTC(acct.api_key, acct.api_secret, sub_account_id=sid) as c0:
+                            debt0, _i0 = await _gad(c0, _base)
+                        if float(debt0) < 1e-8:
+                            for p in rows:
+                                p.status = "CLOSED"
+                                p.closed_at = _odt.now(_otz.utc)
+                                p.error_message = (((p.error_message + " | ") if p.error_message else "")
+                                                   + "移除时收口:币安实测债务为0的状态孤儿")
+                            db.commit()
+                            logger.info(f"remove {sym} sub{sid}: reconciled {len(rows)} zero-debt orphan position(s)")
+                    except Exception as _oe:
+                        logger.warning(f"remove {sym} sub{sid}: orphan reconcile skipped: {_oe}")
+        except Exception as _oo:
+            logger.warning(f"remove {sym}: orphan pass failed (non-blocking): {_oo}")
+
         # OPEN/BORROWED_IDLE/PENDING_REPAY 等活跃状态都算"持仓中",不允许移除
         ACTIVE_STATUSES = ("OPEN", "BORROWED_IDLE", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING")
         active_count = db.query(Position).filter(
