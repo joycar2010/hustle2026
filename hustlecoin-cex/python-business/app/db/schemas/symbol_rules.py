@@ -23,13 +23,14 @@ class SymbolRuleUpdate(BaseModel):
     follow_type: Optional[str] = None
     note: Optional[str] = None
 
-    @field_validator("open_spread", "close_spread", "remove_spread", "repay_spread", "slippage_pct")
+    @field_validator("slippage_pct")
     @classmethod
     def _v_pct(cls, v, info):
         return V.rng(v, 0, 100, info.field_name)
 
-    # 挂单点差允许负值(如 -1 = 任何点差都先借,提前囤券);范围 [-100, 100]
-    @field_validator("borrow_spread")
+    # 点差阈值允许负值(挂单 -1=任何点差都先借提前囤券;负基差行情下开/平/还阈值同样需要负值,
+    # 引擎侧全为纯数值比较天然兼容);范围 [-100, 100]
+    @field_validator("open_spread", "close_spread", "remove_spread", "repay_spread", "borrow_spread")
     @classmethod
     def _v_borrow(cls, v, info):
         return V.rng(v, -100, 100, info.field_name)

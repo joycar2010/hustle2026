@@ -394,12 +394,12 @@ class Worker:
                 statuses[symbol] = "黑名单"; continue
             if symbol not in tradable_symbols:
                 statuses[symbol] = "不可交易"; continue
-            # 无券/量不足/行情陈旧/点差不符 均为"正常等待态"(非故障)→ 统一显示"运行中",
-            # 但仍 continue 不借(仅展示口径统一,借币逻辑不变)。
+            # 无券/量不足/行情陈旧/点差不符 均为"正常等待态"(非故障),但各自如实显示 ——
+            # 曾统一显示"运行中",用户无从区分"在等什么/是否真在借"(只能去币安App查借币记录),已拆回。
             if symbol in no_inventory:
-                statuses[symbol] = "运行中"; continue
+                statuses[symbol] = "无券"; continue
             if not self._volume_ok(symbol):
-                statuses[symbol] = "运行中"; continue
+                statuses[symbol] = "量不足"; continue
             if self._is_banned(symbol):
                 statuses[symbol] = "借币冷却"; continue
             if self._is_removed_banned(symbol):
@@ -413,9 +413,9 @@ class Worker:
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
             if not self._spread_fresh(spread):
-                statuses[symbol] = "运行中"; continue
+                statuses[symbol] = "行情陈旧"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
-                statuses[symbol] = "运行中"; continue
+                statuses[symbol] = "点差不符"; continue
             # 有券 + 无异常 + 点差达标 → 正常运行(挂单借币中);本轮真借或受满仓/账户护栏暂缓,均标"运行中"
             statuses[symbol] = "运行中"
             if not can_borrow or active_count >= max_positions or not self._running:
@@ -547,11 +547,13 @@ class Worker:
         db = SessionLocal()
         try:
             from app.db.models import Position
-            # 检查该 user 该 symbol 是否还有非 CLOSED 持仓
+            # 检查该 user 该 symbol 是否还有活跃持仓。FAILED 是终态且永久留库(借币点差中止等
+            # 高频产生),必须与 CLOSED 一并排除 —— 原 `!= "CLOSED"` 把 FAILED 也当"未平仓",
+            # 导致交易过的币几乎永不自动下架(engine_api 手动路径早已用 notin_ 口径,此处对齐)。
             open_count = db.query(Position).filter(
                 Position.user_id == self._user_id,
                 Position.symbol == symbol,
-                Position.status != "CLOSED",
+                Position.status.notin_(["CLOSED", "FAILED"]),
             ).count()
             if open_count > 0:
                 return  # 还有未平仓位,不下架

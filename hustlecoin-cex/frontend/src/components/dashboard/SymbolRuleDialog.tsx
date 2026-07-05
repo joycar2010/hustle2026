@@ -168,7 +168,14 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
       await Promise.all(tasks)
       addToast(`已保存 ${tasks.length} 项`, 'success')
       onClose()
-    } catch { addToast('保存失败(请检查数值是否合法)', 'error') }
+    } catch (e) {
+      // 透出后端 422 detail(pydantic 校验错误是数组,取 msg;字符串直接用),用户才知道具体哪个值越界
+      const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof d === 'string' ? d
+        : Array.isArray(d) ? d.map((x) => (x as { msg?: string })?.msg || '').filter(Boolean).join('; ')
+        : ''
+      addToast(`保存失败: ${msg || '请检查数值是否合法'}`, 'error')
+    }
     setSaving(false)
   }, [symbol, symbolRule, accountRules, accounts, dirty, onClose, addToast])
 

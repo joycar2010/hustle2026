@@ -22,12 +22,13 @@ class AccountSymbolRuleUpsert(BaseModel):
     note: Optional[str] = None
     is_enabled: Optional[bool] = None
 
-    @field_validator("open_spread", "close_spread", "remove_spread", "repay_spread", "slippage_pct")
+    @field_validator("slippage_pct")
     @classmethod
     def _v_pct(cls, v, info):
         return V.rng(v, 0, 100, info.field_name)
 
-    @field_validator("borrow_spread")
+    # 点差阈值允许负值(负基差行情下需要负阈值才能开/平/还,引擎侧为纯数值比较);范围 [-100, 100]
+    @field_validator("open_spread", "close_spread", "remove_spread", "repay_spread", "borrow_spread")
     @classmethod
     def _v_borrow(cls, v, info):
         return V.rng(v, -100, 100, info.field_name)

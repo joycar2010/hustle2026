@@ -77,7 +77,10 @@ client.interceptors.response.use(
     if (!config) return Promise.reject(error)
 
     const status = error.response?.status
-    const isRetryable = !status || RETRYABLE_STATUSES.has(status)
+    // 自动重试只给幂等的 GET:资金操作 POST(还币/买回/划转/开平仓)超时或 5xx 时服务端可能已执行,
+    // 静默重发会重复下单/重复买回。非 GET 一律把错误如实抛给调用方自行决定。
+    const isIdempotent = (config.method || 'get').toLowerCase() === 'get'
+    const isRetryable = isIdempotent && (!status || RETRYABLE_STATUSES.has(status))
     const retryCount = config.__retryCount || 0
 
     if (isRetryable && retryCount < RETRY_MAX) {

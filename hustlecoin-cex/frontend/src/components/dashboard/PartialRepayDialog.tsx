@@ -64,6 +64,21 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
     doRepay(r, r.total)
   }, [doRepay, addToast])
 
+  // 卖回现币残留(零债务行):平仓超买/尾批零头没有债务、还币闸不认,原先无任何操作入口。
+  // 走 partial-repay 的 sell_residual 分支市价卖回 USDT;结果以后端 balance:refresh 推送对账。
+  const sellResidual = useCallback(async (r: Row) => {
+    setRepaying(r.accountId)
+    try {
+      const res = await partialRepay(r.accountId, symbol, r.free, true)
+      addToast(`${r.note} ${(res as { message?: string })?.message || '卖回已提交'}`, 'success')
+      onDone?.()
+    } catch (e) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message
+      addToast(`${r.note} 卖回失败: ${msg}`, 'error')
+    }
+    setRepaying(null)
+  }, [symbol, addToast, onDone])
+
   // 一键全还(所有账户):逐账户全额还
   const repayAllAccounts = useCallback(async () => {
     const need = rows.filter((r) => r.total > 1e-8)
@@ -141,6 +156,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
                           doRepay(r, v)
                         }}
                         disabled={!hasDebt || repaying === r.accountId || bulkBusy}
+                        title={hasDebt ? undefined : '无借币,无需还币;现币残留用「卖回」清理'}
                         className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-40 mr-1"
                       >{repaying === r.accountId ? '还币中' : '还币'}</button>
                       <button
@@ -148,6 +164,14 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
                         disabled={!hasDebt || repaying === r.accountId || bulkBusy}
                         className="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 disabled:opacity-40"
                       >一键全还</button>
+                      {!hasDebt && r.free > 1e-8 && (
+                        <button
+                          onClick={() => sellResidual(r)}
+                          disabled={repaying === r.accountId || bulkBusy}
+                          title="无债务但杠杆户仍有现币残留(平仓超买/尾批零头),市价卖回 USDT"
+                          className="ml-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-40"
+                        >{repaying === r.accountId ? '卖回中' : '卖回'}</button>
+                      )}
                     </td>
                   </tr>
                 )

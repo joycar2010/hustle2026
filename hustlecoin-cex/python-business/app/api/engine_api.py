@@ -760,10 +760,41 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
     return {"message": f"Removed {sym}"}
 
 
+async def _sell_residual_spot(client, symbol_upper: str, base_asset: str, qty: float) -> tuple[float, str]:
+    """把杠杆户里的 base_asset 现币残留市价卖回 USDT(NO_SIDE_EFFECT,不借币)。
+    残留来源=平仓买回按 1.0015 超买/开仓尾批不足额,还清债务后无人消费。
+    qty 向下对齐 stepSize;名义 < minNotional 时币安不接单,如实返回原因。
+    返回 (实际卖出数量, 说明)。"""
+    info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                 {"symbol": symbol_upper}, signed=False)
+    sp = info.get("symbols", [{}])[0]
+    flt = {f["filterType"]: f for f in sp.get("filters", [])}
+    step = float(flt.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+    min_notional = float(flt.get("NOTIONAL", {}).get("minNotional", "5") or "5")
+    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                {"symbol": symbol_upper}, signed=False)
+    price = float(tkr.get("price", 0) or 0)
+    import math as _math
+    sell_qty = _math.floor(qty / step) * step if step > 0 else 0.0
+    if price <= 0:
+        return 0.0, "取价失败,稍后重试"
+    if sell_qty <= 0 or sell_qty * price < min_notional:
+        return 0.0, f"残留 {qty:.6f} 名义价值 {qty * price:.2f}U 低于币安最小卖出额 {min_notional:g}U,暂留账"
+    await client._request(
+        "POST", "https://api.binance.com/sapi/v1/margin/order",
+        {"symbol": symbol_upper, "side": "SELL", "type": "MARKET",
+         "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT", "isIsolated": "FALSE"},
+    )
+    return sell_qty, f"已卖回 {sell_qty:.6f} {base_asset}"
+
+
 class PartialRepayRequest(BaseModel):
     sub_account_id: int
     symbol: str
     amount: Decimal
+    # 前端「卖回」按钮:债务为 0 但杠杆户仍有现币残留时,显式请求把残留市价卖回 USDT。
+    # 默认 False 保持旧行为(仅同步持仓状态),防其它调用方误触发卖出。
+    sell_residual: bool = False
 
 
 @router.post("/partial-repay")
@@ -796,6 +827,17 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                 # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED + 自动下架),
                 # 修复"已还币但状态仍待对冲"的孤儿。
                 _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(), Decimal("0"))
+                if data.sell_residual and free > 1e-8:
+                    # 显式卖回:零债务现币残留原本没有任何清理入口(还币闸只认债务,
+                    # debt_converter/reconcile 均 debt<=0 跳过,dust→BNB 够不到杠杆户)。
+                    sold, note = await _sell_residual_spot(client, data.symbol.upper(), base_asset, free)
+                    try:
+                        _redis().publish("balance:refresh", str(user_id))
+                    except Exception:
+                        pass
+                    if sold > 0:
+                        return {"message": f"{account.note} {base_asset} 无债务,{note}", "sold": sold}
+                    raise HTTPException(status_code=400, detail=f"{base_asset} 卖回未执行: {note}")
                 return {"message": f"{account.note} {base_asset} 无需还币(债务为0),已同步持仓状态"}
 
             # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
@@ -941,27 +983,9 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             try:
                 leftover = free - repay_amount
                 if leftover > 0:
-                    sp_info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
-                                                    {"symbol": data.symbol.upper()}, signed=False)
-                    sp0 = sp_info.get("symbols", [{}])[0]
-                    flt0 = {f["filterType"]: f for f in sp0.get("filters", [])}
-                    sell_step = float(flt0.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
-                    sell_min_notional = float(flt0.get("NOTIONAL", {}).get("minNotional", "5") or "5")
-                    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
-                                                {"symbol": data.symbol.upper()}, signed=False)
-                    sell_price = float(tkr.get("price", 0) or 0)
-                    import math as _math
-                    sell_qty = _math.floor(leftover / sell_step) * sell_step  # 向下对齐,不卖超持有
-                    if sell_price > 0 and sell_qty > 0 and sell_qty * sell_price >= sell_min_notional:
-                        await client._request(
-                            "POST", "https://api.binance.com/sapi/v1/margin/order",
-                            {
-                                "symbol": data.symbol.upper(), "side": "SELL", "type": "MARKET",
-                                "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT",
-                                "isIsolated": "FALSE",
-                            }
-                        )
-                        logger.info(f"partial_repay: sold leftover {sell_qty} {base_asset} back to USDT (acct {data.sub_account_id})")
+                    sold, _note = await _sell_residual_spot(client, data.symbol.upper(), base_asset, leftover)
+                    if sold > 0:
+                        logger.info(f"partial_repay: sold leftover {sold} {base_asset} back to USDT (acct {data.sub_account_id})")
             except Exception as se:
                 logger.warning(f"partial_repay 卖回零头残留失败(还币已成功): {se}")
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
 import redis.asyncio as aioredis
@@ -18,6 +19,10 @@ SNAPSHOT_EVERY = 60
 # 无券币(-3045)重查节流:fetch_max_borrow 每 6 周期(~60s)触发一次,此值=10 → 无券币约每 10 分钟
 # 才重查一次 maxBorrowable(看库存是否恢复),避免每分钟对一批无券币重查刷高 400 错误率/SAPI 消耗。
 RECHECK_NOINV_EVERY = 10
+# 无券标志 TTL(秒):与引擎侧 engine:noinv EX=1800 对齐。原实现为无过期的进程内存布尔,
+# 清除只能靠一次成功查询,而复查又被节流/40币切片卡住 → 库存恢复后"无券"被无限期钉死。
+# 加 TTL 后到期自动失效,下轮 fetch 真实重查。
+NOINV_TTL_SEC = 1800
 
 # ── 写后即时余额刷新(事件驱动)──
 # 借/还币成功后,生产者(还币端点 / 引擎 execute_borrow·execute_repay)往此频道 publish user_id,
@@ -34,7 +39,8 @@ class BalancePusher:
         self._running = False
         self._max_borrow_tick = 0
         self._max_borrow_cache: dict[int, dict[str, float]] = {}  # account_id -> {asset: amount}
-        self._no_inventory: dict[str, bool] = {}  # asset -> True 表示币安杠杆池无可借库存(-3045)
+        self._no_inventory: dict[str, float] = {}  # asset -> 最近一次 -3045 的 monotonic 时刻(TTL 见 NOINV_TTL_SEC)
+        self._mb_cursor: dict[int, int] = {}  # account_id -> maxBorrowable 轮转游标(targets 超单轮预算时轮转窗口)
         self._interest_rate_cache: dict[str, float] = {}  # asset -> daily_interest_rate (global)
         # 即时刷新(immediate)时不重查主账户合约持仓(省 REST);沿用上一次整轮采集的缓存,
         # 避免即时推送把「现-期/爆率」列清空闪烁。整轮 _fetch_and_push 会刷新这两个缓存。
@@ -231,6 +237,17 @@ class BalancePusher:
                     pass
         return eff
 
+    def _noinv_active(self, asset: str) -> bool:
+        """无券标志是否仍有效:超过 NOINV_TTL_SEC 自动过期(顺手清 key),
+        到期后下轮 fetch 会真实重查 maxBorrowable,库存恢复不再被永久钉成"无券"。"""
+        ts = self._no_inventory.get(asset)
+        if ts is None:
+            return False
+        if time.monotonic() - ts >= NOINV_TTL_SEC:
+            self._no_inventory.pop(asset, None)
+            return False
+        return True
+
     def _compute_effective_borrowable(self, db, acc, sym_key: str, mb: float,
                                       policy: dict, spot_bids: dict) -> tuple[float, str]:
         """有效可借(币数量)+ 受限原因,口径与 order_executor.execute_borrow 完全一致。
@@ -242,7 +259,9 @@ class BalancePusher:
         if mb is None:
             mb = 0.0
         if mb <= 0:
-            return 0.0, "无券"
+            # 只有确认过 -3045 才叫"无券";还没查到(刚推送/排在本轮预算外/查询失败)如实标"待查询",
+            # 不再把"未查询"混标成无券误导用户。
+            return 0.0, ("无券" if self._noinv_active(base_asset) else "待查询")
         cap_usdt = self._resolve_amount_cap(db, acc.id, uid, sym_key, base_asset)
         if policy["otoco"] and cap_usdt is not None and cap_usdt > 0:
             cap_qty = (cap_usdt / price) if price > 0 else 0.0
@@ -315,26 +334,38 @@ class BalancePusher:
 
                         if fetch_max_borrow and targets:
                             mb_results = dict(self._max_borrow_cache.get(acc.id, {}))
+                            # _limits 是嵌套 dict,浅拷贝后与缓存共享同一内层对象 → 重新复制一份再写
+                            mb_results["_limits"] = dict(mb_results.get("_limits", {}))
                             # 已知无券的币(-3045)不必每轮重查 maxBorrowable(每次都 400 刷错误率/耗 SAPI);
                             # 仅每 RECHECK_NOINV_EVERY 次 fetch(fetch 自身每 6 周期一次)重试一次看库存是否恢复。
                             recheck_noinv = self._max_borrow_tick % (6 * RECHECK_NOINV_EVERY) == 0
-                            for asset in list(targets)[:MAX_BORROW_PER_CYCLE]:
-                                if self._no_inventory.get(asset) and not recheck_noinv:
-                                    mb_results[asset] = 0.0   # 沿用无券缓存,跳过查询
+                            # 轮转游标:targets 超过单轮预算(40)时按排序轮转取窗,保证所有币最终都轮得到。
+                            # 原固定切片 list(targets)[:40] 让 40 名以外的币在进程生命周期内永远查不到,
+                            # 其 max_borrowable 恒 0/无券标志永不复查。
+                            tlist = sorted(targets)
+                            if len(tlist) > MAX_BORROW_PER_CYCLE:
+                                start = self._mb_cursor.get(acc.id, 0) % len(tlist)
+                                batch = (tlist + tlist)[start:start + MAX_BORROW_PER_CYCLE]
+                                self._mb_cursor[acc.id] = (start + MAX_BORROW_PER_CYCLE) % len(tlist)
+                            else:
+                                batch = tlist
+                            for asset in batch:
+                                if self._noinv_active(asset) and not recheck_noinv:
+                                    mb_results[asset] = 0.0   # 沿用无券缓存,跳过查询(TTL 过期自动失效)
                                 else:
                                     try:
                                         mb_data = await client.get_max_borrowable(asset)
                                         mb_results[asset] = float(mb_data["amount"])
-                                        # 新增:缓存 borrowLimit(VIP档借贷上限,与持U无关)
-                                        if "borrowLimit" not in mb_results:
-                                            mb_results["_limits"] = {}
+                                        # 缓存 borrowLimit(VIP档借贷上限,与持U无关)。
+                                        # 原判断误写为 `if "borrowLimit" not in mb_results` 恒真,
+                                        # 每次成功查询都把 _limits 清空、只剩最后一个币 —— 已修。
                                         mb_results["_limits"][asset] = float(mb_data["borrowLimit"])
-                                        self._no_inventory[asset] = False
+                                        self._no_inventory.pop(asset, None)  # 查询成功 = 有券,清除无券标志
                                     except Exception as e:
                                         # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
                                         if "-3045" in str(e):
                                             mb_results[asset] = 0.0
-                                            self._no_inventory[asset] = True
+                                            self._no_inventory[asset] = time.monotonic()
                                         else:
                                             mb_results[asset] = mb_results.get(asset, 0)
                                 if asset not in interest_fetched:
@@ -369,7 +400,7 @@ class BalancePusher:
                                 "max_borrowable": mb_cache.get(asset_name, 0),
                                 "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),  # VIP档借贷上限(与持U无关)
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
-                                "no_inventory": self._no_inventory.get(asset_name, False),
+                                "no_inventory": self._noinv_active(asset_name),
                             }
 
                     # Pushed-but-not-held assets aren't in userAssets — still surface
@@ -385,7 +416,7 @@ class BalancePusher:
                                 "max_borrowable": mb_cache.get(asset_name, 0),
                                 "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
-                                "no_inventory": self._no_inventory.get(asset_name, False),
+                                "no_inventory": self._noinv_active(asset_name),
                             }
 
                     # 有效可借: 在理论上限(max_borrowable)基础上,套引擎同一封顶口径

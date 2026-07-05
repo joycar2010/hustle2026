@@ -339,21 +339,29 @@ async def execute_borrow(
         position.borrow_interest_rate = interest_rate
 
         # delay + re-confirm spread still above the borrow threshold(含 ts 新鲜度,防陈旧缓存)
+        # 负阈值(挂单差<0)=任何点差都借的囤券意图,点差质量/新鲜度与借币决策无关 → 跳过两道确认闸。
+        # 否则冷门币(bookTicker 仅价/量变才推,常几十秒~分钟无 tick)会在「睡 borrow_delay_sec 后
+        # 要求快照 ≤BORROW_FRESH_MS(3s) 新鲜」上反复 FAILED,借币落地被拖成分钟级随机延迟。
+        skip_confirm = confirm_spread is not None and confirm_spread < 0
         await asyncio.sleep(rules.borrow_delay_sec)
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
-            now_ms = int(time.time() * 1000)
-            fresh = bool(current and getattr(current, "ts", 0) and now_ms - int(current.ts) <= BORROW_FRESH_MS)
-            if not fresh or current.spread_short <= confirm_spread:
-                position.status = "FAILED"
-                position.error_message = (
-                    f"Spread degraded/stale after delay: "
-                    f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}% 或快照陈旧"
-                )
-                db.commit()
-                db.close()
-                return None
-            spread = current
+            if skip_confirm:
+                if current:
+                    spread = current   # 有新快照就用(仅用于数量换算),陈旧也不拦
+            else:
+                now_ms = int(time.time() * 1000)
+                fresh = bool(current and getattr(current, "ts", 0) and now_ms - int(current.ts) <= BORROW_FRESH_MS)
+                if not fresh or current.spread_short <= confirm_spread:
+                    position.status = "FAILED"
+                    position.error_message = (
+                        f"Spread degraded/stale after delay: "
+                        f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}% 或快照陈旧"
+                    )
+                    db.commit()
+                    db.close()
+                    return None
+                spread = current
 
         # quantity
         lot_info = await client.get_lot_size(symbol, "spot")
@@ -428,7 +436,8 @@ async def execute_borrow(
 
         # 借币前最终二次确认: 算 qty 期间(get_lot_size / maxBorrowable REST)又过去若干 ms,
         # 重读最新点差,确认仍新鲜且 ≥ 阈值 → 否则放弃,减少在已消失点差上完成 ~160ms 借币。
-        if spread_feed:
+        # 负阈值同上跳过(囤券不依赖点差存活)。
+        if spread_feed and not skip_confirm:
             latest = spread_feed.get_symbol(symbol)
             now_ms = int(time.time() * 1000)
             fresh = bool(latest and getattr(latest, "ts", 0) and now_ms - int(latest.ts) <= BORROW_FRESH_MS)

@@ -129,12 +129,15 @@ export async function removePushedSymbol(symbol: string) {
   return data
 }
 
-export async function partialRepay(subAccountId: number, symbol: string, amount: number) {
+export async function partialRepay(subAccountId: number, symbol: string, amount: number, sellResidual = false) {
+  // sellResidual=true: 债务为0时把现币残留市价卖回USDT(后端 sell_residual 分支)。
+  // 慢路径(free不足买回+主账户归集划转)串行多个币安REST调用,须放宽默认15s超时。
   const { data } = await client.post('/api/engine/partial-repay', {
     sub_account_id: subAccountId,
     symbol,
     amount,
-  })
+    sell_residual: sellResidual,
+  }, { timeout: 60000 })
   return data
 }
 

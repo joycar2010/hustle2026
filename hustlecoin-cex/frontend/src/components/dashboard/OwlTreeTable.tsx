@@ -316,7 +316,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">借币金额</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">风险</td>}
       {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">保证金</td>}
-      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap">可用</td>}
+      {!isMobile && <td className="px-1 py-1 text-right text-[10px] text-foreground whitespace-nowrap" title="杠杆账户净资产USDT(账户级口径):借币时资产负债同增、净资产不变,卖出只换资产形态 —— 该数不随单币借入/卖出变动,属正常。想看该币借入后剩余的现货数量请看「现币」列。">净值</td>}
       {/* 参数块(行情) */}
       {paramBlock}
       {/* 推/状态 — 紧凑型: 显运行状态(无子账户行可承载);否则显提币(推送)时间 */}
@@ -586,13 +586,14 @@ const SubAccountRow = memo(function SubAccountRow({
         if (!balance) return <td className={numCell}>-</td>
         const bnbPrice = spreads.get('BNBUSDT')?.spot_bid ?? 0
         const bnbVal = balance.bnb_free * bnbPrice
-        const total = bnbVal + balance.margin_net_usdt
+        const total = bnbVal + (balance.margin_net_usdt ?? 0)
         return <td className={numCell}>{formatNumber(total, 0)}</td>
       })()}
-      {/* 可用 — 杠杆账户净资产USDT(净资产低=余量少,借非USDT资产时 margin_usdt_free 不会降但净资产会降) */}
+      {/* 净值(原列名"可用"易误读为该币可用现货) — 杠杆账户净资产USDT,账户级口径:
+          借币资产负债同增净资产不变、卖币只换资产形态,借完卖完该数不动是正常的 */}
       {!isMobile && (
-        <td className={numCell}>
-          {balance ? formatNumber(balance.margin_net_usdt, 0) : '-'}
+        <td className={numCell} title="杠杆账户净资产USDT(账户级),不随单币借入/卖出变动;该币剩余现货看「现币」列">
+          {balance?.margin_net_usdt != null ? formatNumber(balance.margin_net_usdt, 0) : '-'}
         </td>
       )}
       {/* 参数块(持仓经济) */}
@@ -1133,7 +1134,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   onOpenRules: () => void
 }) {
   const headerStatus = useMemo(() => {
-    const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '运行中', '无券', '点差不符', '量不足', '行情陈旧', '行情异常']
+    const priority = ['借币停止', '借币红', '排队中', '借币中', '开仓中', '平仓中', '买回中', '还币中', '运行中', '并联满', '点差不符', '无券', '借币冷却', '移除冷却', '量不足', '行情陈旧', '行情异常', '禁借', '黑名单', '不可交易']
     // 状态口径与下方"显示哪些子账户行"保持并集一致:持仓账户 ∪ (该币被推送/有生效规则时的所有 enabled 账户)
     const ids = new Set<number>()
     group.positions.forEach(p => ids.add(p.sub_account_id))

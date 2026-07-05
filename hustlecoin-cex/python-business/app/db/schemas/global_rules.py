@@ -50,12 +50,17 @@ class GlobalRulesUpdate(BaseModel):
     def _v_stale(cls, v, info):
         return V.rng(v, 5, 86400, info.field_name)
 
-    @field_validator("auto_push_spread", "remove_spread", "borrow_spread", "open_spread",
-                     "close_spread", "confirm_skip_spread", "max_spread_pct", "slippage_pct",
+    @field_validator("auto_push_spread", "confirm_skip_spread", "max_spread_pct", "slippage_pct",
                      "interest_filter", "open_spread_buffer")
     @classmethod
     def _v_pct(cls, v, info):
         return V.rng(v, 0, 100, info.field_name)
+
+    # 点差阈值允许负值(与单币/逐账户规则口径一致:负基差行情下开/平/还/挂单需要负阈值);范围 [-100, 100]
+    @field_validator("remove_spread", "borrow_spread", "open_spread", "close_spread")
+    @classmethod
+    def _v_spread(cls, v, info):
+        return V.rng(v, -100, 100, info.field_name)
 
     @field_validator("close_funding_ratio", "repay_funding_ratio")
     @classmethod
