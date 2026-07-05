@@ -13,14 +13,18 @@ from app.middleware.permissions import get_current_user_id
 router = APIRouter(prefix="/api/account-symbol-rules", tags=["account-symbol-rules"])
 
 
-def _publish_rules_reload(user_id: int):
+def _publish_rules_reload(user_id: int, clear_repayhold_symbol: str = None):
     """事件驱动 0 秒规则热重载:保存/删除逐账户单一规则后立即通知该 user 的 worker 重读规则
-    (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。"""
+    (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。
+    clear_repayhold_symbol: 保存该币规则=显式再武装 → 清「还币暂停」标记允许立即重借。
+    (此前只有批量行 symbol_rules PUT 清标记,用户在逐账户行填 -1 清不掉,还币后要干等30分钟)"""
     try:
         import redis as _r
         from app.config import settings as _s
         rc = _r.from_url(_s.redis_url, decode_responses=True)
         rc.publish(f"rules:reload:{user_id}", "1")
+        if clear_repayhold_symbol:
+            rc.delete(f"engine:{user_id}:repayhold:{clear_repayhold_symbol.upper()}")
         rc.close()
     except Exception:
         pass
@@ -78,7 +82,7 @@ def upsert_rule(
 
     db.commit()
     db.refresh(rule)
-    _publish_rules_reload(user_id)   # 0 秒通知引擎重载
+    _publish_rules_reload(user_id, clear_repayhold_symbol=sym)   # 0 秒重载 + 清还币暂停标记
     return rule
 
 
@@ -142,4 +146,14 @@ def batch_upsert(data: BatchAccountSymbolRuleRequest, request: Request, db: Sess
 
     db.commit()
     _publish_rules_reload(user_id)   # 0 秒通知引擎重载
+    # 批量保存涉及的每个币都视为显式再武装,逐一清还币暂停标记
+    try:
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        for _sym in {it.symbol.upper() for it in data.items}:
+            rc.delete(f"engine:{user_id}:repayhold:{_sym}")
+        rc.close()
+    except Exception:
+        pass
     return {"message": f"Batch complete: {created} created, {updated} updated"}

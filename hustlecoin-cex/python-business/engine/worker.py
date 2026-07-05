@@ -396,8 +396,10 @@ class Worker:
                 statuses[symbol] = "不可交易"; continue
             # 无券/量不足/行情陈旧/点差不符 均为"正常等待态"(非故障),但各自如实显示 ——
             # 曾统一显示"运行中",用户无从区分"在等什么/是否真在借"(只能去币安App查借币记录),已拆回。
+            # 无券冷却:按用户口径显示"运行中"(运行中而借不进=市场没券,无需单独状态词);
+            # 最大可借列已恒显 VIP 额度数字,无券信息不再单独上屏。
             if symbol in no_inventory:
-                statuses[symbol] = "无券"; continue
+                statuses[symbol] = "运行中"; continue
             if not self._volume_ok(symbol):
                 statuses[symbol] = "量不足"; continue
             if self._is_banned(symbol):
