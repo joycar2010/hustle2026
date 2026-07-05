@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 from pydantic import BaseModel
 from uuid import UUID
 
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.security import get_current_user_id
 from app.models.platform import Platform, PlatformSymbol, HedgingPair
 from app.models.mt5_client import MT5Client
@@ -156,30 +156,35 @@ def _row_to_dict(obj) -> Dict[str, Any]:
 @router.get("/platforms")
 async def list_platforms(
     user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
 ) -> List[Dict[str, Any]]:
     import httpx as _httpx
-    r = await db.execute(select(Platform).order_by(Platform.platform_id))
-    platforms = r.scalars().all()
-
-    # For each MT5 platform, find the system-service MT5 client via account.platform_id
-    sys_clients_r = await db.execute(
-        select(MT5Client, Account.platform_id)
-        .join(Account, MT5Client.account_id == Account.account_id)
-        .where(MT5Client.is_system_service == True, MT5Client.is_active == True)
-    )
-    # Build map: platform_id -> system client info
+    # 连接池护栏：用【短会话】取平台行 + system client 信息后立即归还连接；
+    # 其后的桥健康检查是 2–3s/个的 httpx 慢调用，不再占用 DB 连接（idle-in-transaction）。
+    # 不走 Depends(get_db)——否则连接会被持有到整个请求结束（覆盖桥检查全程）。
+    # AsyncSessionLocal(expire_on_commit=False) 保证关闭后 _row_to_dict 仍可读取 platform 已加载列。
     sys_client_map: Dict[int, Dict] = {}
-    for mc, pid in sys_clients_r.all():
-        sys_client_map[pid] = {
-            "client_id": mc.client_id,
-            "client_name": mc.client_name,
-            "bridge_url": mc.bridge_url,
-            "bridge_service_port": mc.bridge_service_port,
-            "connection_status": mc.connection_status,  # DB fallback
-            "is_active": mc.is_active,
-            "account_id": str(mc.account_id),
-        }
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Platform).order_by(Platform.platform_id))
+        platforms = r.scalars().all()
+
+        # For each MT5 platform, find the system-service MT5 client via account.platform_id
+        sys_clients_r = await db.execute(
+            select(MT5Client, Account.platform_id)
+            .join(Account, MT5Client.account_id == Account.account_id)
+            .where(MT5Client.is_system_service == True, MT5Client.is_active == True)
+        )
+        # Build map: platform_id -> system client info
+        for mc, pid in sys_clients_r.all():
+            sys_client_map[pid] = {
+                "client_id": mc.client_id,
+                "client_name": mc.client_name,
+                "bridge_url": mc.bridge_url,
+                "bridge_service_port": mc.bridge_service_port,
+                "connection_status": mc.connection_status,  # DB fallback
+                "is_active": mc.is_active,
+                "account_id": str(mc.account_id),
+            }
+    # 连接已归还至此
 
     # Real-time health check for each MT5 client bridge (parallel, 2s timeout)
     async def _check_bridge(info: Dict) -> str:

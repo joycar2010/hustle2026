@@ -40,6 +40,27 @@ router = APIRouter()
 ADMIN_ROLES = {'超级管理员', '系统管理员', 'super_admin', 'system_admin', 'admin'}
 
 
+def _parse_invested_at(raw: Optional[str]):
+    """把「投入时间」字符串按北京时间(UTC+8)解析为带时区 datetime(asyncpg 需 datetime 实例)。
+    接受 'YYYY-MM-DD HH:MM[:SS]' / 'YYYY-MM-DD' / ISO('T'分隔)。无法解析或空→None(调用方自行决定用 NOW() 或不更新)。
+    create / update 共用,确保两处时区语义完全一致。"""
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+        _cn = _tz2(_td2(hours=8))
+        _s = str(raw).strip().replace("T", " ")
+        for _fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return _dt2.strptime(_s, _fmt).replace(tzinfo=_cn)
+            except Exception:
+                continue
+        _parsed = _dt2.fromisoformat(str(raw))
+        return _parsed if _parsed.tzinfo is not None else _parsed.replace(tzinfo=_cn)
+    except Exception:
+        return None
+
+
 # ───────────────────── Request/Response models ─────────────────────
 class SubAccountCreate(BaseModel):
     username: str = Field(..., min_length=2, max_length=50)
@@ -239,6 +260,7 @@ async def _row_to_sub_response(db: AsyncSession, row: Any, sub_username: str) ->
         "nav_per_share_at_join": float(row[8]) if row[8] else 1.0,
         "status": row[9],
         "created_at": row[10].isoformat() if row[10] else "",
+        "invested_at": (row[12].isoformat() if len(row) > 12 and row[12] else None),
         "parent_nav_per_share_now": float(nav.nav_per_share),
         "sub_current_value_usdt": cur_value,
         "sub_current_value_cny": cur_value * float(row[4]),
@@ -323,26 +345,7 @@ async def create_sub_account(
 
     # 投入时间(20260620): 可选, 作为子账户收益起算点; 解析失败或留空→用 NOW()。
     # 输入按北京时间理解, 存为带时区 datetime 对象(asyncpg 需 datetime 实例, 不能传 str)。
-    _iat_param = None  # datetime(带+08时区) 或 None→用NOW()
-    if body.invested_at:
-        try:
-            from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
-            _s = body.invested_at.strip().replace("T", " ")
-            _parsed = None
-            for _fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-                try:
-                    _parsed = _dt2.strptime(_s, _fmt); break
-                except Exception:
-                    continue
-            if _parsed is None:
-                _parsed = _dt2.fromisoformat(body.invested_at)
-                if _parsed.tzinfo is None:
-                    _parsed = _parsed.replace(tzinfo=_tz2(_td2(hours=8)))
-                _iat_param = _parsed
-            else:
-                _iat_param = _parsed.replace(tzinfo=_tz2(_td2(hours=8)))
-        except Exception:
-            _iat_param = None
+    _iat_param = _parse_invested_at(body.invested_at)  # datetime(带+08时区) 或 None→用NOW()
 
     # Insert subscription
     sub_id_row = (await db.execute(text("""
@@ -378,7 +381,7 @@ async def create_sub_account(
     full = (await db.execute(text("""
         SELECT id, sub_user_id, parent_user_id, invested_cny, fx_cny_to_usdt,
                invested_usdt, parent_total_assets_at_join, shares,
-               nav_per_share_at_join, status, created_at
+               nav_per_share_at_join, status, created_at, NULL AS _username_ph, invested_at
         FROM sub_account_subscriptions WHERE id = :i
     """), {"i": str(sub_id_row[0])})).first()
     resp = await _row_to_sub_response(db, full, body.username)
@@ -396,7 +399,7 @@ async def list_sub_accounts(
     rows = (await db.execute(text("""
         SELECT s.id, s.sub_user_id, s.parent_user_id, s.invested_cny, s.fx_cny_to_usdt,
                s.invested_usdt, s.parent_total_assets_at_join, s.shares,
-               s.nav_per_share_at_join, s.status, s.created_at, u.username
+               s.nav_per_share_at_join, s.status, s.created_at, u.username, s.invested_at
         FROM sub_account_subscriptions s
         JOIN users u ON u.user_id = s.sub_user_id
         WHERE s.parent_user_id = CAST(:u AS UUID)
@@ -501,6 +504,17 @@ async def update_sub_account(
         updates.append("shares = :sh")
         params["sh"] = float(body["shares"])
 
+    # 投入时间(收益起算点, 北京时间)。支持改时间;显式传空串 → 清空回退创建时刻语义(置 NULL)。
+    if "invested_at" in body:
+        _raw = body["invested_at"]
+        if _raw is None or (isinstance(_raw, str) and not _raw.strip()):
+            updates.append("invested_at = NULL")
+        else:
+            _iat = _parse_invested_at(_raw)
+            if _iat is not None:
+                updates.append("invested_at = :iat")
+                params["iat"] = _iat
+
     if not updates:
         return {"ok": True, "message": "nothing to update"}
 
@@ -516,7 +530,7 @@ async def update_sub_account(
     full = (await db.execute(text("""
         SELECT s.id, s.sub_user_id, s.parent_user_id, s.invested_cny, s.fx_cny_to_usdt,
                s.invested_usdt, s.parent_total_assets_at_join, s.shares,
-               s.nav_per_share_at_join, s.status, s.created_at, u.username
+               s.nav_per_share_at_join, s.status, s.created_at, u.username, s.invested_at
         FROM sub_account_subscriptions s
         JOIN users u ON u.user_id = s.sub_user_id
         WHERE s.id = CAST(:i AS UUID)

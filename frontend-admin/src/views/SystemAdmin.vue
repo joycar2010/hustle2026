@@ -608,6 +608,7 @@
                 </td>
                 <td class="py-2 px-3">
                   <div class="flex gap-1 flex-wrap">
+                    <span v-if="tpl.enable_marquee" class="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 rounded text-xs">跑马灯</span>
                     <span v-if="tpl.enable_feishu" class="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">飞书</span>
                     <span v-if="tpl.enable_email" class="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded text-xs">邮件</span>
                     <span v-if="tpl.enable_sms" class="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs">短信</span>
@@ -795,6 +796,10 @@
             <div>
               <label class="block text-xs text-text-secondary mb-2">推送渠道</label>
               <div class="flex gap-4">
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" v-model="editingTemplate.enable_marquee" class="accent-primary" />
+                  <span class="text-sm">跑马灯</span>
+                </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                   <input type="checkbox" v-model="editingTemplate.enable_feishu" class="accent-primary" />
                   <span class="text-sm">飞书</span>
@@ -1738,7 +1743,7 @@
         <button v-for="s in aiAllSites" :key="s" @click="switchAiSite(s)"
           :class="['px-4 py-2 text-xs font-medium transition-colors relative',
             aiSite===s ? 'text-text-primary' : 'text-text-tertiary hover:text-text-secondary']">
-          {{ s === 'auto' ? 'Auto (OpenCLAW)' : s === 'admin' ? 'Admin (总控)' : 'Go (交易)' }}
+          {{ s === 'auto' ? 'Auto (OpenCLAW)' : s === 'admin' ? 'Admin (总控)' : s === 'go' ? 'Go (交易)' : s === 'app' ? 'App (轻应用)' : s }}
           <div v-if="aiSite===s" class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"></div>
         </button>
       </div>
@@ -2182,10 +2187,11 @@ async function openRolePermissions(role) {
   try {
     const [allR, roleR] = await Promise.all([
       api.get('/api/v1/rbac/permissions'),
-      api.get(`/api/v1/rbac/roles/${role.role_id || role.id}/permissions`),
+      api.get(`/api/v1/rbac/roles/${role.role_id || role.id}`),
     ])
     allPerms.value = allR.data || []
-    const assigned = roleR.data || []
+    // 角色详情 RoleWithPermissions.permissions 即该角色已分配权限
+    const assigned = roleR.data?.permissions || []
     selectedPerms.value = assigned.map(p => p.permission_id || p)
   } catch { allPerms.value = []; selectedPerms.value = [] }
   showPermModal.value = true
@@ -2193,22 +2199,8 @@ async function openRolePermissions(role) {
 async function savePermissions() {
   const roleId = permRole.value.role_id || permRole.value.id
   try {
-    // 1. Get current role permissions
-    const existing = (await api.get(`/api/v1/rbac/roles/${roleId}/permissions`).catch(() => ({ data: [] }))).data || []
-    const existingIds = existing.map(p => p.permission_id || p.id || p)
-
-    // 2. Delete permissions no longer selected
-    const toRemove = existingIds.filter(id => !selectedPerms.value.includes(id))
-    for (const pid of toRemove) {
-      await api.delete(`/api/v1/rbac/roles/${roleId}/permissions/${pid}`).catch(() => {})
-    }
-
-    // 3. Add newly selected permissions
-    const toAdd = selectedPerms.value.filter(id => !existingIds.includes(id))
-    for (const pid of toAdd) {
-      await api.post(`/api/v1/rbac/roles/${roleId}/permissions`, { permission_id: pid }).catch(() => {})
-    }
-
+    // 后端 POST /roles/{id}/permissions 为批量覆盖式（先清空再写入 permission_ids 全集）
+    await api.post(`/api/v1/rbac/roles/${roleId}/permissions`, { permission_ids: selectedPerms.value })
     toast('权限保存成功')
     showPermModal.value = false
     await loadRoles()
@@ -3084,7 +3076,7 @@ async function viewAiMessages(userId, username) {
 
 // ── AI客服 Config / Prompt / Hot Questions ─────────────────
 const aiSite = ref('auto')
-const aiAllSites = ['auto', 'admin', 'go']
+const aiAllSites = ['auto', 'admin', 'go', 'app']
 const aiCfg = ref({})
 const aiCfgRateLimit = ref(20)
 const aiPromptText = ref('')

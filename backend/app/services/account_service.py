@@ -74,6 +74,31 @@ _commission_rate_cache: Dict[str, Dict] = {}  # api_key[:16] -> {"data": ..., "t
 # Cache last-known-good liquidation prices per account (survives proxy blips)
 _liq_price_cache = {}  # key: account_id -> {"long": float, "short": float, "ts": datetime}
 
+
+def _extract_ipv4(text: str) -> str:
+    """Pull the first IPv4 out of a Binance error string (e.g. 'request ip: 35.74.138.6'
+    or '(当前服务器IP: 35.74.138.6)'). Returns '' if none found."""
+    try:
+        m = re.search(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", text or "")
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
+def _binance_error_hint(kind: str, server_ip: str = "") -> str:
+    """Actionable Chinese hint for a classified Binance failure, shown on the account card."""
+    if kind == "ip_not_whitelisted":
+        ip = server_ip or "本机出口IP"
+        return f"IP未加白：API Key 已开启 IP 限制，当前服务器 IP（{ip}）不在白名单。请在币安 API 管理为该 Key 添加此 IP。"
+    if kind == "key_invalid":
+        return "密钥失效：API Key/Secret 无效、已删除或签名错误。请在「账户管理」更新该账户的 API 密钥。"
+    if kind == "network":
+        return "网络/代理异常：暂时无法连接币安。请检查账户代理或稍后重试。"
+    if kind == "rate_limited":
+        return "API 限流：请求过于频繁，系统已自动降频，请稍候。"
+    return "实时余额获取失败，请稍后重试或检查密钥/网络。"
+
+
 class AccountDataService:
     """Service for fetching account data from exchanges"""
 
@@ -96,6 +121,79 @@ class AccountDataService:
     def _set_cached_data(self, cache_key: str, data: Any):
         """Store data in cache with timestamp"""
         self._cache[cache_key] = (data, datetime.utcnow())
+
+    async def classify_binance_failure(self, account, err_text: str = "") -> dict:
+        """Classify a Binance account data-fetch failure into an actionable kind so the
+        UI can tell the user what to fix instead of silently hiding the account.
+
+        Why a probe is needed: Binance returns the SAME -2015 code for both an
+        invalid/deleted API key AND an IP that isn't on the key's whitelist. The only
+        reliable discriminator is whether a fapi/sapi error message contains
+        'request ip' (present => key is valid but the calling IP is not whitelisted;
+        absent / -2008/-2014/-1022 => the key itself is invalid). But
+        get_binance_balance awaits the SPOT account first (whose -2015 message omits
+        'request ip') and the binance gather has no deterministic raise order, so the
+        error text that bubbles up here is ambiguous. When it's inconclusive we make
+        ONE fapi probe to settle it. Result is cached 120s per account to avoid
+        re-probing every dashboard cycle (which would worsen REST rate-limit / IP-ban
+        pressure — see binance REST budget notes).
+
+        Returns {'kind': str, 'server_ip': str} where kind is one of
+        ip_not_whitelisted | key_invalid | network | rate_limited | transient | other.
+        """
+        low = (err_text or "").lower()
+        # Fast paths — no probe required
+        if "request ip" in low:
+            return {"kind": "ip_not_whitelisted", "server_ip": _extract_ipv4(err_text)}
+        if low.startswith("rate_limit") or "-1003" in low or "banned" in low:
+            return {"kind": "rate_limited", "server_ip": ""}
+        if any(k in low for k in ("网络错误", "proxy", "timeout", "timed out", "cannot connect", "connection")):
+            return {"kind": "network", "server_ip": ""}
+
+        # Cached classification (per account, 120s) — keyed separately from account_data
+        ck = self._get_cache_key(str(account.account_id), "fail_kind")
+        cached = self._cache.get(ck)
+        if cached:
+            _val, _ts = cached
+            if (datetime.utcnow() - _ts).total_seconds() < 120:
+                return _val
+
+        # Ambiguous -2015 / auth error → deterministic fapi probe
+        from app.services.binance_client import BinanceIPWhitelistError
+        result = {"kind": "other", "server_ip": ""}
+        try:
+            proxy_url = build_proxy_url(account.proxy_config)
+            client = BinanceFuturesClient(account.api_key, account.api_secret, proxy_url=proxy_url)
+            try:
+                await client.get_account()
+                result = {"kind": "transient", "server_ip": ""}
+            except BinanceIPWhitelistError as e:
+                msg = str(e)
+                if "request ip" in msg.lower():
+                    result = {"kind": "ip_not_whitelisted",
+                              "server_ip": getattr(e, "server_ip", "") or _extract_ipv4(msg)}
+                else:
+                    result = {"kind": "key_invalid", "server_ip": ""}
+            except Exception as e:
+                msg = str(e).lower()
+                if "request ip" in msg:
+                    result = {"kind": "ip_not_whitelisted", "server_ip": _extract_ipv4(str(e))}
+                elif any(k in msg for k in ("-2008", "-2014", "-1022", "invalid api",
+                                            "api-key", "signature", "签名")):
+                    result = {"kind": "key_invalid", "server_ip": ""}
+                else:
+                    result = {"kind": "other", "server_ip": ""}
+            finally:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+        except Exception as _ce:
+            logger.warning(f"[FAIL_CLASSIFY] probe failed for {getattr(account, 'account_id', '?')}: {_ce}")
+            result = {"kind": "other", "server_ip": ""}
+
+        self._cache[ck] = (result, datetime.utcnow())
+        return result
 
     def invalidate_cache(self, account_id: str = None):
         """Invalidate account data cache so the next streamer cycle fetches fresh data.
@@ -1871,6 +1969,20 @@ class AccountDataService:
                         successful_accounts.append(_stale_data)
                         continue
 
+                # Classify the failure so the UI can show an actionable, distinguishable
+                # reason (IP 未白名单 vs 密钥失效 ...) instead of silently hiding the account.
+                _err_kind = "other"
+                _err_server_ip = ""
+                if unique_accounts[i].platform_id == 1:  # Binance only
+                    try:
+                        _c = await self.classify_binance_failure(unique_accounts[i], error_msg)
+                        _err_kind = _c.get("kind", "other")
+                        _err_server_ip = _c.get("server_ip", "")
+                    except Exception as _clserr:
+                        logger.warning(f"[FAIL_CLASSIFY] classify error for "
+                                       f"{unique_accounts[i].account_id}: {_clserr}")
+                _err_hint = _binance_error_hint(_err_kind, _err_server_ip)
+
                 failed_accounts.append({
                     "account_id": str(unique_accounts[i].account_id),
                     "account_name": unique_accounts[i].account_name,
@@ -1880,6 +1992,9 @@ class AccountDataService:
                     "account_role": getattr(unique_accounts[i], 'account_role', None),
                     "proxy_config": unique_accounts[i].proxy_config,
                     "error": error_msg,
+                    "error_kind": _err_kind,          # ip_not_whitelisted | key_invalid | network | rate_limited | transient | other
+                    "server_ip": _err_server_ip,      # for the IP-whitelist hint
+                    "error_hint": _err_hint,          # actionable Chinese text for the card
                 })
             else:
                 # Attach pair_code(s) from binding

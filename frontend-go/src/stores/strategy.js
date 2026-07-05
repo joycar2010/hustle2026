@@ -29,18 +29,27 @@ export const useStrategyStore = defineStore('strategy', () => {
    * 尝试获取策略锁
    * 同方向动作级锁可共存，跨方向互斥
    */
+  // key 格式(2026-07-04 多交易对): '{pair}::{type}_{action}' 或方向级 '{pair}::{type}'。
+  // 解析: '::' 前为 pair(隔离维度), 后段沿用原 '_' 解析 dir/action。互斥【仅在同 pair 内】,
+  // 跨 pair 完全独立 → 黄金开反向组不再锁住原油/白银的同组按钮。
+  function _parseKey(key) {
+    const _ci = key.indexOf('::')
+    const pair = _ci >= 0 ? key.slice(0, _ci) : ''
+    const rest = _ci >= 0 ? key.slice(_ci + 2) : key
+    const dir = rest.includes('_') ? rest.split('_')[0] : rest
+    const isAction = rest.includes('_')
+    return { pair, dir, isAction }
+  }
+
   function acquire(key) {
     if (runningStrategies.value.has(key)) return true
 
-    const keyDir = key.includes('_') ? key.split('_')[0] : key
-    const keyIsAction = key.includes('_')
-
+    const k = _parseKey(key)
     for (const running of runningStrategies.value) {
-      const runDir = running.includes('_') ? running.split('_')[0] : running
-      const runIsAction = running.includes('_')
-
-      if (runDir !== keyDir) return false
-      if (!runIsAction || !keyIsAction) return false
+      const r = _parseKey(running)
+      if (r.pair !== k.pair) continue  // 跨 pair 独立, 不互斥
+      if (r.dir !== k.dir) return false
+      if (!r.isAction || !k.isAction) return false
     }
 
     runningStrategies.value = new Set([...runningStrategies.value, key])
@@ -72,13 +81,12 @@ export const useStrategyStore = defineStore('strategy', () => {
   function isLocked(key) {
     if (runningStrategies.value.size === 0) return false
     if (runningStrategies.value.has(key)) return false
-    const keyDir = key.includes('_') ? key.split('_')[0] : key
-    const keyIsAction = key.includes('_')
+    const k = _parseKey(key)
     for (const running of runningStrategies.value) {
-      const runDir = running.includes('_') ? running.split('_')[0] : running
-      const runIsAction = running.includes('_')
-      if (runDir !== keyDir) return true
-      if (!runIsAction || !keyIsAction) return true
+      const r = _parseKey(running)
+      if (r.pair !== k.pair) continue  // 跨 pair 独立, 不锁
+      if (r.dir !== k.dir) return true
+      if (!r.isAction || !k.isAction) return true
     }
     return false
   }

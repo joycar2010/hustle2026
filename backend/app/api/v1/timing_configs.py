@@ -1,6 +1,7 @@
 """Timing Configuration API Endpoints"""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from typing import List, Optional
 from app.core.database import get_db
 from app.core.security import get_current_user_id
@@ -17,6 +18,30 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# 这些 timing 配置是全局执行引擎参数(超时/重试/单腿检查延迟等)，每次用户启动策略时
+# 被注入执行器、影响所有用户的交易时序——写操作必须限管理员。读操作(GET effective 等)
+# 保持登录级别，因为执行器启动流程也要读 effective，绝不能锁死。
+# 约定沿用 strategy_processes.py / accounts.py / openclaw_access.py：文件内自带角色集 + 本地校验。
+ADMIN_ROLES = {'超级管理员', '系统管理员', '安全管理员', '管理员', 'admin', 'super_admin'}
+
+
+async def require_admin(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> str:
+    """写操作鉴权：仅管理员角色可改全局执行引擎参数。"""
+    row = (await db.execute(
+        text("SELECT role FROM users WHERE user_id = CAST(:u AS UUID)"),
+        {'u': user_id},
+    )).first()
+    if not row or row[0] not in ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='策略引擎参数为全局执行配置，仅管理员可修改',
+        )
+    return user_id
+
 
 
 @router.get("/timing-configs", response_model=List[TimingConfigResponse])
@@ -68,7 +93,7 @@ async def get_timing_config(
 async def create_timing_config(
     config_data: TimingConfigCreate,
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(require_admin)
 ):
     """Create new timing configuration"""
     # Validate config_level
@@ -109,7 +134,7 @@ async def update_timing_config(
     config_id: int,
     config_data: TimingConfigUpdate,
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(require_admin)
 ):
     """Update timing configuration"""
     # Check if config exists
@@ -142,7 +167,7 @@ async def update_timing_config(
 async def delete_timing_config(
     config_id: int,
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(require_admin)
 ):
     """Delete timing configuration"""
     # Check if config exists and is not global
@@ -173,7 +198,7 @@ async def delete_timing_config(
 
 @router.post("/timing-configs/reload")
 async def reload_timing_configs(
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(require_admin)
 ):
     """Manually trigger timing configuration reload notification"""
     await timing_config_service._clear_cache_and_notify('global', None, None)
@@ -208,7 +233,7 @@ async def get_custom_templates(
 async def create_custom_template(
     template_data: TimingConfigTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(require_admin)
 ):
     """Create a custom template"""
     try:
@@ -225,7 +250,7 @@ async def create_custom_template(
 async def delete_custom_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
+    user_id: str = Depends(require_admin)
 ):
     """Delete a custom template"""
     success = await timing_config_service.delete_custom_template(db, template_id, user_id)

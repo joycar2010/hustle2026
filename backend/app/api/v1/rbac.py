@@ -458,8 +458,10 @@ async def assign_permissions_to_role(
         if not role:
             raise HTTPException(status_code=404, detail="角色不存在")
 
-        if role.is_system:
-            raise HTTPException(status_code=403, detail="系统内置角色不可修改权限")
+        # 注(2026-06-21)：系统内置角色(含超级管理员)的【权限】允许管理员设置。
+        # 仅保留对系统角色「改名/删除」的保护(见 update_role / delete_role)，
+        # 权限分配本身不再受 is_system 限制。testadmin 登录由 users.role 字符串守卫
+        # (非 RBAC 权限)，/rbac/* 端点也不受 RBAC 门控，故放开此处不会造成锁死。
 
         # 删除现有权限
         await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))

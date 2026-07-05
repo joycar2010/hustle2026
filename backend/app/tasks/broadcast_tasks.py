@@ -37,6 +37,30 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+# ── 根因修复(2026-06-24): 终止性币安错误(密钥/IP白名单失效, -2015)账号冷却 ──
+# 一个账号密钥/IP失效后, 后台 BinancePositionPusher 每8s 重试一次, 失败调用(SOCKS5+TLS握手)
+# 反复打满事件循环 → 拖慢/拖死同循环里别人的 cancel-all 等后台任务(实测主账号币安端 cancel-all
+# 静默失效根因)。此处给【返回终止性错误的账号】加冷却: 冷却期内后台轮询直接跳过、不再发起网络调用,
+# 消除洪水。按 api_key 维度, 健康账号不受影响; 冷却到期自动恢复(账号若已修好则继续正常轮询)。
+import time as _ipcd_time
+_BINANCE_TERMINAL_COOLDOWN: dict = {}      # api_key -> expiry_monotonic
+_BINANCE_TERMINAL_COOLDOWN_S = 300.0       # 5min: 终止性错误极少是瞬时的(IP白名单/密钥配置问题)
+
+def _binance_acct_in_cooldown(api_key: str) -> bool:
+    if not api_key:
+        return False
+    _exp = _BINANCE_TERMINAL_COOLDOWN.get(api_key)
+    if _exp is None:
+        return False
+    if _exp > _ipcd_time.monotonic():
+        return True
+    _BINANCE_TERMINAL_COOLDOWN.pop(api_key, None)
+    return False
+
+def _binance_acct_mark_cooldown(api_key: str):
+    if api_key:
+        _BINANCE_TERMINAL_COOLDOWN[api_key] = _ipcd_time.monotonic() + _BINANCE_TERMINAL_COOLDOWN_S
+
 
 def _get_pair_symbols():
     """Get symbol names from hedging pair config, with fallback"""
@@ -966,8 +990,12 @@ class PendingOrdersStreamer:
                                 proxy_url=build_proxy_url(account.proxy_config)
                             )
                             try:
-                                sym_a, _ = _get_pair_symbols()
-                                open_orders = await client.get_open_orders(symbol=sym_a)
+                                # 多品种覆盖修复(2026-07-04): 原 get_open_orders(symbol=XAU) 只回 XAU
+                                # 挂单, 多交易对(XAG/CL/BZ/NG)启用后其它品种的币安挂单在面板漏显。
+                                # 改为 symbol=None 拉该账户【全部品种】挂单(与 bybit/gateio/okx 分支一致)。
+                                # 权重40(vs 1), 但本 streamer 10s 一轮、走全局令牌桶, 且下单/撤单热路径
+                                # 豁免令牌桶 → 对成交速度零影响。纯显示层冷路径。
+                                open_orders = await client.get_open_orders(symbol=None)
                                 for order in open_orders:
                                     out.append({
                                         "id": str(order.get("orderId")),
@@ -1494,6 +1522,11 @@ class PositionStreamer:
         # MT5 last-known-good cache: prevents flicker when bridge read times out.
         # Structure same as _binance_positions: {user_id: {symbol: (long, short)}}
         self._mt5_lkg: dict = {}
+        # Per-user per-pair last snapshot (pair_code -> {mt5_long/short, binance_long/short}).
+        # Stashed from the broadcast loop's pairs_out so admin process-monitor can read
+        # the engine's OWN correct pair attribution (symbols are shared across pairs;
+        # only pairs_map disambiguates which symbol belongs to which pair_code).
+        self._last_pairs_by_user: dict = {}
 
     def get_stats(self):
         return {
@@ -1622,6 +1655,18 @@ class PositionStreamer:
                             break
                     if not _primary_pd and pairs_out:
                         _primary_pd = next(iter(pairs_out.values()))
+                    # Stash for admin process-monitor (only pairs with any non-zero leg,
+                    # keeps the map small; read-only consumer recomputes flags).
+                    try:
+                        _nz = {pc: pd for pc, pd in pairs_out.items()
+                               if any(abs(pd.get(k, 0) or 0) > 1e-9
+                                      for k in ("mt5_long", "mt5_short", "binance_long", "binance_short"))}
+                        if _nz:
+                            self._last_pairs_by_user[uid] = _nz
+                        else:
+                            self._last_pairs_by_user.pop(uid, None)
+                    except Exception:
+                        pass
                     evt = {
                         "user_id": uid, "type": "position_snapshot",
                         "data": {
@@ -2676,10 +2721,20 @@ class BinancePositionPusher:
         """
         if not user_id:
             return
+        # 终止性错误冷却期内: 直接跳过, 不发起网络调用(消除洪水拖死事件循环)
+        if _binance_acct_in_cooldown(api_key):
+            return
         try:
             rows = await client.get_position_risk(symbol=None)
         except Exception as e:
-            logger.warning(f"[BinancePositionPusher] bootstrap REST error {api_key[:8]}…: {e}")
+            # -2015(密钥/IP白名单失效)等终止性错误 → 冷却该账号, 停止8s级重试洪水
+            from app.services.binance_client import BinanceTerminalError
+            if isinstance(e, BinanceTerminalError):
+                _binance_acct_mark_cooldown(api_key)
+                logger.warning(f"[BinancePositionPusher] {api_key[:8]}… 终止性错误(密钥/IP), "
+                               f"冷却{int(_BINANCE_TERMINAL_COOLDOWN_S)}s暂停轮询: {e}")
+            else:
+                logger.warning(f"[BinancePositionPusher] bootstrap REST error {api_key[:8]}…: {e}")
             return
         if not rows or not isinstance(rows, list):
             logger.info(f"[BinancePositionPusher] bootstrap {api_key[:8]}…: no positions")

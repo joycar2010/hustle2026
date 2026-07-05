@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "min_trade_xau": 1.0,
+  "min_gap_xau": 10.0,
+  "delta_gap_xau": 16.0,
+  "hard_gap_xau": 60.0,
+  "_doc": "单腿告警噪音过滤(热读,5s缓存)。min_trade_xau:本笔A腿成交<此值=碎单跳过(1.0=0.01手)。min_gap_xau:总缺口<此值(碎单地板)不告警(10.0=0.1手)。【P1根治】delta_gap_xau:有向不平衡变化量>=此值=新生裸敞口才告警(16.0≈一笔15XAU的settle抖动之上,站立偏移恒定delta≈0不报)。hard_gap_xau:绝对缺口>=此值无条件告警防漏报(60.0=0.6手,>实测站立偏移20~41)。enabled=false回退旧abs行为。"
+}

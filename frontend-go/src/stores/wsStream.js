@@ -18,12 +18,33 @@ export const useWsStream = defineStore('wsStream', () => {
   let reconnectAttempts = 0
   let reconnectTimer = null
   let pingTimer = null
+  let deadTimer = null
 
   function _reconnect() {
     if (reconnectTimer) return
     const wait = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts)) * (0.8 + Math.random() * 0.4)
     reconnectAttempts++
     reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, wait)
+  }
+
+  // 数据活性看门狗:Rust Hub 对每个连接无条件每≤3.5s 推一帧;静默 >20s 即判半开假死 → 主动 close 触发重连。
+  // (服务端不回应用层 pong,故以"入站消息活性"判活,而非等 pong。)
+  function _armDead() {
+    if (deadTimer) clearTimeout(deadTimer)
+    deadTimer = setTimeout(() => { try { socket && socket.close() } catch (_) {} }, 20000)
+  }
+  function _clearDead() { if (deadTimer) { clearTimeout(deadTimer); deadTimer = null } }
+
+  // 聚焦/联网自愈:回前台或网络恢复时,已断则立即重连(清退避),仍连着则补探一次活性。
+  function _wake() {
+    if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+      reconnectAttempts = 0
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+      connect()
+    } else if (socket.readyState === WebSocket.OPEN) {
+      _armDead()
+      try { socket.send(JSON.stringify({ type: 'ping', t: Date.now() })) } catch (_) {}
+    }
   }
 
   function connect() {
@@ -36,6 +57,7 @@ export const useWsStream = defineStore('wsStream', () => {
     socket.onopen = () => {
       connected.value = true
       reconnectAttempts = 0
+      _armDead()
       for (const ch of subs) socket.send(JSON.stringify({ type: 'subscribe', channel: ch }))
       if (pingTimer) clearInterval(pingTimer)
       pingTimer = setInterval(() => {
@@ -45,6 +67,7 @@ export const useWsStream = defineStore('wsStream', () => {
       }, 25000)
     }
     socket.onmessage = (ev) => {
+      _armDead()
       let m; try { m = JSON.parse(ev.data) } catch (_) { return }
       // Python stream 格式（兼容旧协议）
       if (m.type === 'stream' && m.channel) { channels[m.channel] = m.payload; return }
@@ -57,6 +80,7 @@ export const useWsStream = defineStore('wsStream', () => {
     socket.onclose = () => {
       connected.value = false
       if (pingTimer) { clearInterval(pingTimer); pingTimer = null }
+      _clearDead()
       _reconnect()
     }
     socket.onerror = () => {}
@@ -77,10 +101,17 @@ export const useWsStream = defineStore('wsStream', () => {
   }
   function disconnect() {
     if (pingTimer) { clearInterval(pingTimer); pingTimer = null }
+    _clearDead()
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
     if (socket) { try { socket.close() } catch (_) {} socket = null }
     connected.value = false
     subs.clear()
+  }
+
+  // 聚焦/联网自愈监听(store 单例,仅注册一次)
+  if (typeof window !== 'undefined') {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') _wake() })
+    window.addEventListener('online', _wake)
   }
 
   return { connected, channels, connect, subscribe, unsubscribe, disconnect }

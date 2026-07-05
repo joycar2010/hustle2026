@@ -607,7 +607,7 @@ async def get_account_pnl(
 @router.get("/dashboard/aggregated")
 async def get_aggregated_dashboard(
     include_inactive: bool = False,
-    view: str = Query("merged", description="资金视图: merged(合并全部关联)/<user_id>(单用户), 同收益页下拉"),
+    view: str = Query("self", description="资金视图: self(仅本人,默认/交易面板用)/merged(合并全部关联)/<user_id>(单用户)"),
     ctx: ViewContext = Depends(get_view_context),
 ):
     user_id = ctx.data_user_id
@@ -637,8 +637,11 @@ async def get_aggregated_dashboard(
             accounts = result.scalars().all()
         else:
             # 资金账号集 = 同收益: data_user_id 自己 ∪ 关联用户(view=merged) 或单用户(view=<uid>)
+            # 安全默认(20260628): view=self → 仅本人账户(交易面板隔离, 不泄漏关联用户账户到左侧列表);
+            # 纯展示汇总看板(资产总览/系统状态弹框)显式传 view=merged 才合并。
             from app.api.v1.subaccount import resolve_pnl_account_ids as _resolve_aids
-            _aids = await _resolve_aids(db, str(user_id), view=view, is_sub=ctx.is_sub)
+            _eff_view = str(user_id) if view == "self" else view
+            _aids = await _resolve_aids(db, str(user_id), view=_eff_view, is_sub=ctx.is_sub)
             if _aids:
                 result = await db.execute(select(Account).where(Account.account_id.in_(_aids)))
                 accounts = result.scalars().all()

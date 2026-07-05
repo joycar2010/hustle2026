@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
 from app.models.account import Account
 from app.models.user import User
-from app.services import account_data_service
+from app.services.account_service import account_data_service
 from app.websocket.stream_hub import stream_hub
 
 logger = logging.getLogger(__name__)

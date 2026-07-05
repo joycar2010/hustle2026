@@ -10,7 +10,7 @@ from uuid import UUID
 class RoleBase(BaseModel):
     """角色基础Schema"""
     role_name: str = Field(..., min_length=2, max_length=50, description="角色名称")
-    role_code: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z_]+$", description="角色代码（小写字母和下划线）")
+    role_code: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z0-9_-]+$", description="角色代码（小写字母/数字/下划线/连字符）")
     description: Optional[str] = Field(None, max_length=500, description="角色描述")
 
 
@@ -42,7 +42,7 @@ class RoleResponse(RoleBase):
 class RoleCopy(BaseModel):
     """复制角色Schema"""
     new_role_name: str = Field(..., min_length=2, max_length=50, description="新角色名称")
-    new_role_code: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z_]+$", description="新角色代码")
+    new_role_code: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z0-9_-]+$", description="新角色代码")
     copy_permissions: bool = Field(default=True, description="是否复制权限")
 
 
@@ -51,7 +51,7 @@ class RoleCopy(BaseModel):
 class PermissionBase(BaseModel):
     """权限基础Schema"""
     permission_name: str = Field(..., min_length=2, max_length=100, description="权限名称")
-    permission_code: str = Field(..., min_length=2, max_length=100, pattern=r"^[a-z:_]+$", description="权限代码")
+    permission_code: str = Field(..., min_length=2, max_length=100, pattern=r"^[a-z0-9:_-]+$", description="权限代码（小写字母/数字/冒号/下划线/连字符）")
     resource_type: str = Field(..., description="资源类型: api, menu, button")
     resource_path: Optional[str] = Field(None, max_length=255, description="资源路径")
     http_method: Optional[str] = Field(None, max_length=10, description="HTTP方法")

@@ -21,7 +21,8 @@ from app.models.account import Account
 from app.api.v1.subaccount import get_view_context, ViewContext
 from app.services.subaccount_projector import project_response
 from app.models.mt5_client import MT5Client
-from app.services.binance_client import BinanceFuturesClient
+from app.services.binance_client import BinanceFuturesClient, BinanceIPBanError
+from app.services import pnl_persistence as _pp
 from app.utils.time_utils import mt5_server_ts_to_utc
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,21 @@ def _swr_get(key: str):
 
 async def _earliest_binance_ms(account, scan_from_ms: int, now_ms: int):
     """币安账户最早成交(非TRANSFER)的 ms 时间戳。从 scan_from_ms 按7天段向前扫, 命中第一个
-    有成交的段即返回该段最小时间(币安 income 按时间正序)。无成交返回 None。"""
+    有成交的段即返回该段最小时间(币安 income 按时间正序)。无成交返回 None。
+    持久化ON(20260628): 优先查 binance_income 表 MIN(income_time_ms), 命中即返回, 免实时按7天段
+    向前扫描打爆限频(根因: inception缓存重启清空→冷算时5账户~130段)。表为空才回退实时扫描。"""
+    if _pp.is_enabled():
+        try:
+            async with AsyncSessionLocal() as db:
+                row = (await db.execute(text(
+                    "SELECT MIN(income_time_ms) FROM binance_income "
+                    "WHERE account_id=CAST(:a AS UUID) AND income_type<>'TRANSFER'"
+                ), {"a": str(account.account_id)})).first()
+            if row and row[0] is not None:
+                return int(row[0])
+            # 表空: 落到实时扫描(首次未回填场景), 下方原逻辑
+        except Exception as e:
+            logger.warning(f"[inception] DB MIN probe failed [{account.account_name}], fallback live: {e}")
     client = BinanceFuturesClient(
         account.api_key, account.api_secret, proxy_url=build_proxy_url(account.proxy_config)
     )
@@ -151,16 +166,8 @@ def _mt5_ts_to_beijing_date(ts_sec: int) -> str:
 
 # ── 数据获取 ─────────────────────────────────────────
 
-async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str = None) -> list:
-    """获取 Binance income 记录。
-
-    20260620 修(收益随查询范围漂移的根因): 原实现单次大跨度 + limit=1000 游标分页,
-    当某热点日(如对冲密集日)单日 income 笔数多、且分页边界恰好切在该日时, 会漏取该日
-    后续记录(实测 hcz987 6/9: 30天范围只取63笔/581.03, 90天/单日均66笔/913.40)。
-    根因: 币安 /fapi/v1/income 大跨度+1000上限分页, 游标 records[-1].time+1 在同毫秒多笔
-    或跨度过大时丢数。改为【按7天分段】拉取, 每段内再分页(段内跨度小, 分页边界不会切在
-    热点日中间), 跨段用 ticket/tranId 去重。同一区间无论从30/90/全部范围进入, 结果一致。
-    """
+async def _pull_binance_income_live(account, start_ms: int, end_ms: int, income_type: str = None) -> list:
+    """实时从币安 /fapi/v1/income 拉取(7天分段+游标分页+tranId去重)。失败抛异常(不静默返空)。"""
     client = BinanceFuturesClient(
         account.api_key, account.api_secret,
         proxy_url=build_proxy_url(account.proxy_config)
@@ -173,17 +180,13 @@ async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type
         while seg_start <= end_ms:
             seg_end = min(seg_start + _SEG_MS - 1, end_ms)
             cursor = seg_start
-            for _ in range(50):  # 段内分页(7天单段一般远不到, 50页=50000条上限兜底)
+            for _ in range(50):
                 records = await client.get_income(
-                    income_type=income_type,
-                    start_time=cursor,
-                    end_time=seg_end,
-                    limit=1000,
+                    income_type=income_type, start_time=cursor, end_time=seg_end, limit=1000,
                 )
                 if not records:
                     break
                 for r in records:
-                    # 去重键: tranId 优先(币安唯一), 退化用 (time,type,income,symbol)
                     k = r.get("tranId") or (r.get("time"), r.get("incomeType"), r.get("income"), r.get("symbol"), r.get("tradeId"))
                     if k not in seen:
                         seen.add(k)
@@ -192,11 +195,61 @@ async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type
                     break
                 cursor = int(records[-1].get("time", 0)) + 1
             seg_start = seg_end + 1
+            # 回填/长周期: 段间退避, 避免快速连打触发限频(代理IP额度紧, 见 [[testgo-binance-rest-budget]])
+            import asyncio as _a; await _a.sleep(float(os.getenv("PNL_BIN_SEG_SLEEP", "0.8")))
+    except BinanceIPBanError:
+        logger.error(f"Binance income ({income_type}) IP BANNED [{account.account_name}]")
+        await client.close(); raise
     except Exception as e:
         logger.error(f"Binance income ({income_type}) fetch failed [{account.account_name}]: {e}")
+        await client.close(); raise
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except Exception:
+            pass
     return all_records
+
+
+async def _fetch_binance_income(account, start_ms: int, end_ms: int, income_type: str = None) -> list:
+    """获取 Binance income。持久化开关 ON 时走 read-through(历史读DB/只补缺口/近端7天重拉upsert,
+    见 [[coin-pnl-income-persistence]]); OFF 或带 income_type 时走原实时逻辑(行为零变化)。"""
+    if not _pp.is_enabled() or income_type is not None:
+        return await _pull_binance_income_live(account, start_ms, end_ms, income_type)
+
+    acct_id = account.account_id
+    now_ms = int(_time.time() * 1000)
+    tail_start = max(start_ms, now_ms - _pp.TAIL_REFETCH_MS)
+
+    # 1) 历史段 [start_ms, tail_start): 水位覆盖→跳过; 缺口→补拉upsert推进水位
+    async with AsyncSessionLocal() as db:
+        wm = await _pp.get_watermark(db, acct_id, "binance_income")
+    hist_covered = (wm and wm.get("covered_from_ms") is not None
+                    and wm["covered_from_ms"] <= start_ms
+                    and wm.get("covered_to_ms", 0) >= tail_start - 1)
+    if tail_start > start_ms and not hist_covered:
+        gap_to = tail_start - 1
+        rows = await _pull_binance_income_live(account, start_ms, gap_to)  # 失败抛→上层503
+        async with AsyncSessionLocal() as db:
+            await _pp.upsert_binance_income(db, acct_id, rows)
+            await _pp.advance_watermark(db, acct_id, "binance_income", cov_from=start_ms, cov_to=gap_to, error=None)
+            await db.commit()
+
+    # 2) 近端段 [tail_start, end_ms]: 冷却期内且已覆盖到end→跳过实时拉取(读DB); 否则重拉upsert。
+    #    冷却(默认10min)把"近端重拉频率"与"请求量/range数"解耦, 跨worker共享, 避免反复拉不可变数据。
+    tail_fresh = (wm and wm.get("age_sec") is not None and wm["age_sec"] < _pp.TAIL_COOLDOWN_SEC
+                  and wm.get("covered_to_ms") is not None and wm["covered_to_ms"] >= end_ms - 1
+                  and not wm.get("last_error"))
+    if end_ms >= tail_start and not tail_fresh:
+        rows = await _pull_binance_income_live(account, tail_start, end_ms)
+        async with AsyncSessionLocal() as db:
+            await _pp.upsert_binance_income(db, acct_id, rows)
+            await _pp.advance_watermark(db, acct_id, "binance_income", cov_from=tail_start, cov_to=end_ms, error=None)
+            await db.commit()
+
+    # 3) 统一从DB读[start,end]重建返回(字段与币安原结构一致, 调用方无感)
+    async with AsyncSessionLocal() as db:
+        return await _pp.read_binance_income(db, acct_id, start_ms, end_ms)
 
 
 async def _get_active_mt5_symbols(db: AsyncSession) -> set:
@@ -217,13 +270,12 @@ async def _get_active_mt5_symbols(db: AsyncSession) -> set:
         return _FALLBACK_MT5_SYMBOLS
 
 
-async def _fetch_mt5_deals(account, start_ms: int, end_ms: int) -> list:
-    """获取 MT5 平仓 deal（entry==1），从该 account 下所有活跃 bridge 聚合并按 ticket 去重"""
+async def _pull_mt5_deals_live(account, start_ms: int, end_ms: int) -> list:
+    """实时从该 account 所有活跃 bridge 拉全量 deal(按 ticket 跨桥去重)。返回原始 deal dict 列表。
+    days 用 (now-start)×3+7 冗余覆盖桥"最近N交易日"截断坑; 时间精确过滤交给调用方/DB读。"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
     api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
     headers = {"X-Api-Key": api_key} if api_key else {}
-
-    # 短会话仅做 bridge 端口快查，随即归还连接；下面的 httpx 打桥(可达15s超时)不再占 DB 连接。
     try:
         async with AsyncSessionLocal() as _db:
             result = await _db.execute(
@@ -237,39 +289,92 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int) -> list:
             bridge_ports = [row[0] for row in result.fetchall()]
     except Exception:
         bridge_ports = []
-
     if not bridge_ports:
         return []
-
     start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
     now_utc = datetime.now(tz=timezone.utc)
-    # MT5桥 days 参数实测按"最近N条/交易日"截断而非N个日历日(8002 days=32 实际只回~12天),
-    # 直接用(now-start)天数会漏掉早段平仓→收益虚高(单腿假象)。故 ×3+7 大幅冗余覆盖;
-    # 下方已用真实时间戳 start_ts<=ts<=end_ts 二次精确过滤, 多取无害(只是多拉后丢弃)。
     _span_days = int((now_utc - start_dt).total_seconds() / 86400)
-    days = max(1, _span_days * 3 + 7)
-    days = min(days, 365)
-
+    days = min(max(1, _span_days * 3 + 7), 365)
     seen_tickets = set()
     all_deals = []
     for port in bridge_ports:
         try:
             async with httpx.AsyncClient(timeout=15.0) as http:
-                resp = await http.get(
-                    f"{bridge_host}:{port}/mt5/history/deals",
-                    headers=headers, params={"days": days},
-                )
+                resp = await http.get(f"{bridge_host}:{port}/mt5/history/deals", headers=headers, params={"days": days})
                 resp.raise_for_status()
                 for d in resp.json().get("deals", []):
                     ticket = d.get("ticket")
                     if ticket and ticket not in seen_tickets:
                         seen_tickets.add(ticket)
+                        d["_bridge_port"] = port
                         all_deals.append(d)
         except Exception as e:
             logger.warning(f"MT5 deals fetch from port {port} failed [{account.account_name}]: {e}")
+    return all_deals
 
+
+# 同请求内 deals/cashflows 共享一次桥同步(60s去重), 避免重复打桥
+_mt5_sync_recent: dict = {}
+
+async def _sync_mt5_deals(account, start_ms: int, end_ms: int):
+    """read-through 同步: 历史段缺口补拉 + 近端7天重拉, upsert 进 mt5_deals, 推进水位。
+    deals 与 cashflows 共用同一张表/同一水位, 故同步一次即可。"""
+    acct_id = account.account_id
+    skey = str(acct_id)
+    now_ms = int(_time.time() * 1000)
+    last = _mt5_sync_recent.get(skey)
+    if last and now_ms - last < 60_000:
+        return  # 60s 内已同步过(同请求 deals→cashflows 第二次跳过)
+    tail_start = max(start_ms, now_ms - _pp.TAIL_REFETCH_MS)
+
+    async with AsyncSessionLocal() as db:
+        wm = await _pp.get_watermark(db, acct_id, "mt5_deals")
+    hist_covered = (wm and wm.get("covered_from_ms") is not None
+                    and wm["covered_from_ms"] <= start_ms
+                    and wm.get("covered_to_ms", 0) >= tail_start - 1)
+
+    async def _persist(rows, cf, ct):
+        std = []
+        for d in rows:
+            t_raw = int(d.get("time", 0))
+            t_utc = mt5_server_ts_to_utc(t_raw)  # 秒(UTC)
+            iso = datetime.fromtimestamp(t_utc, tz=timezone.utc).isoformat()
+            std.append({
+                "ticket": d.get("ticket"), "order_id": d.get("order"), "symbol": d.get("symbol"),
+                "deal_type": d.get("type"), "entry": d.get("entry"), "volume": d.get("volume"),
+                "price": d.get("price"), "profit": d.get("profit"), "swap": d.get("swap"),
+                "commission": d.get("commission"), "comment": d.get("comment"),
+                "deal_time_raw": t_raw, "deal_time_utc": iso, "bridge_port": d.get("_bridge_port"),
+                "raw": d,
+            })
+        async with AsyncSessionLocal() as db:
+            await _pp.upsert_mt5_deals(db, acct_id, std)
+            await _pp.advance_watermark(db, acct_id, "mt5_deals", cov_from=cf, cov_to=ct, error=None)
+            await db.commit()
+
+    if tail_start > start_ms and not hist_covered:
+        rows = await _pull_mt5_deals_live(account, start_ms, tail_start - 1)
+        await _persist(rows, start_ms, tail_start - 1)
+    # 近端: 冷却期(默认10min)内且水位已覆盖到end→跳过实时拉桥, 直接靠DB(读侧自会查DB)。
+    tail_fresh = (wm and wm.get("age_sec") is not None and wm["age_sec"] < _pp.TAIL_COOLDOWN_SEC
+                  and wm.get("covered_to_ms") is not None and wm["covered_to_ms"] >= end_ms - 1
+                  and not wm.get("last_error"))
+    if end_ms >= tail_start and not tail_fresh:
+        rows = await _pull_mt5_deals_live(account, tail_start, end_ms)
+        await _persist(rows, tail_start, end_ms)
+    _mt5_sync_recent[skey] = now_ms
+
+
+async def _fetch_mt5_deals(account, start_ms: int, end_ms: int) -> list:
+    """MT5 平仓 deal(entry==1)。持久化ON→同步后读DB; OFF→实时拉取(行为零变化)。"""
     start_ts = start_ms / 1000
     end_ts = end_ms / 1000
+    if not _pp.is_enabled():
+        all_deals = await _pull_mt5_deals_live(account, start_ms, end_ms)
+    else:
+        await _sync_mt5_deals(account, start_ms, end_ms)
+        async with AsyncSessionLocal() as db:
+            all_deals = await _pp.read_mt5_deals(db, account.account_id, start_ms, end_ms)
     return [
         d for d in all_deals
         if d.get("symbol")
@@ -279,58 +384,15 @@ async def _fetch_mt5_deals(account, start_ms: int, end_ms: int) -> list:
 
 
 async def _fetch_mt5_cashflows(account, start_ms: int, end_ms: int) -> list:
-    """获取 MT5 入出金记录，从该 account 下所有活跃 bridge 聚合并按 ticket 去重"""
-    bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
-    api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
-    headers = {"X-Api-Key": api_key} if api_key else {}
-
-    # 短会话仅做 bridge 端口快查，随即归还连接；下面的 httpx 打桥(可达15s超时)不再占 DB 连接。
-    try:
-        async with AsyncSessionLocal() as _db:
-            result = await _db.execute(
-                select(MT5Client.bridge_service_port).where(
-                    MT5Client.account_id == account.account_id,
-                    MT5Client.is_active == True,
-                    MT5Client.is_system_service == False,
-                    MT5Client.bridge_service_port.isnot(None),
-                ).order_by(MT5Client.priority)
-            )
-            bridge_ports = [row[0] for row in result.fetchall()]
-    except Exception:
-        bridge_ports = []
-
-    if not bridge_ports:
-        return []
-
-    start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
-    now_utc = datetime.now(tz=timezone.utc)
-    # MT5桥 days 参数实测按"最近N条/交易日"截断而非N个日历日(8002 days=32 实际只回~12天),
-    # 直接用(now-start)天数会漏掉早段平仓→收益虚高(单腿假象)。故 ×3+7 大幅冗余覆盖;
-    # 下方已用真实时间戳 start_ts<=ts<=end_ts 二次精确过滤, 多取无害(只是多拉后丢弃)。
-    _span_days = int((now_utc - start_dt).total_seconds() / 86400)
-    days = max(1, _span_days * 3 + 7)
-    days = min(days, 365)
-
-    seen_tickets = set()
-    all_deals = []
-    for port in bridge_ports:
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as http:
-                resp = await http.get(
-                    f"{bridge_host}:{port}/mt5/history/deals",
-                    headers=headers, params={"days": days},
-                )
-                resp.raise_for_status()
-                for d in resp.json().get("deals", []):
-                    ticket = d.get("ticket")
-                    if ticket and ticket not in seen_tickets:
-                        seen_tickets.add(ticket)
-                        all_deals.append(d)
-        except Exception as e:
-            logger.warning(f"MT5 cashflow fetch from port {port} failed [{account.account_name}]: {e}")
-
+    """MT5 入出金(entry==0, symbol空, profit!=0)。持久化ON→同步后读DB; OFF→实时拉取。"""
     start_ts = start_ms / 1000
     end_ts = end_ms / 1000
+    if not _pp.is_enabled():
+        all_deals = await _pull_mt5_deals_live(account, start_ms, end_ms)
+    else:
+        await _sync_mt5_deals(account, start_ms, end_ms)
+        async with AsyncSessionLocal() as db:
+            all_deals = await _pp.read_mt5_deals(db, account.account_id, start_ms, end_ms)
     return [
         d for d in all_deals
         if d.get("entry") == 0
@@ -680,7 +742,13 @@ async def get_daily_pnl(
         for account in accounts:
             if account.platform_id != 1:
                 continue
-            all_income = await _fetch_binance_income(account, start_ms, end_ms)
+            try:
+                all_income = await _fetch_binance_income(account, start_ms, end_ms)
+            except Exception as _be:
+                # 方案1(20260628): Binance 数据不完整时绝不显示错误负数(对冲系统单边假亏)。
+                # 直接 503 让前端"重试", 且下方不写缓存(避免错误值被缓存放大成恶性循环)。
+                logger.error(f"[PnL] Binance fetch incomplete, abort to avoid wrong PnL: {_be}")
+                raise HTTPException(status_code=503, detail="行情数据暂时不可用(交易所限频/封禁), 请稍后重试")
             for r in all_income:
                 dk = _utc_ms_to_beijing_date(int(r.get("time", 0)))
                 income = float(r.get("income", 0))

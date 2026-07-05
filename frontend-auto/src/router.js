@@ -8,6 +8,7 @@ const routes = [
   { path: '/proposals', name: 'proposals', component: () => import('./views/Proposals.vue'), meta: { auth: true } },
   { path: '/risk', name: 'risk', component: () => import('./views/RiskControl.vue'), meta: { auth: true } },
   { path: '/infra', name: 'infra', component: () => import('./views/Infrastructure.vue'), meta: { auth: true } },
+  { path: '/ladder-advisor', name: 'ladderAdvisor', component: () => import('./views/LadderAdvisor.vue'), meta: { auth: true } },
   { path: '/settings', redirect: '/risk' },
 ]
 

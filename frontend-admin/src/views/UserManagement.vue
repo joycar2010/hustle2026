@@ -1245,7 +1245,7 @@
     <!-- ════════ 子账号管理 Modal ════════ -->
     <div v-if="subModalOpen" @click.self="closeSubModal"
          class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div class="bg-dark-100 rounded-xl border border-border-primary p-5 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+      <div class="bg-dark-100 rounded-xl border border-border-primary p-5 w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-hide">
         <div class="flex items-center justify-between mb-3">
           <h3 class="font-bold">子账号管理 — 父账号 <span class="text-primary">{{ subParent?.username }}</span></h3>
           <button @click="closeSubModal" class="text-text-tertiary hover:text-text-primary text-lg">×</button>
@@ -1272,6 +1272,7 @@
                 <th class="text-right py-1.5">份额</th>
                 <th class="text-right py-1.5">当前估值(USDT)</th>
                 <th class="text-right py-1.5">占比</th>
+                <th class="text-center py-1.5">投入时间</th>
                 <th class="text-center py-1.5">状态</th>
                 <th class="text-center py-1.5">操作</th>
               </tr>
@@ -1288,6 +1289,7 @@
                   {{ Number(row.sub_current_value_usdt).toFixed(2) }}
                 </td>
                 <td class="py-1.5 text-right font-mono">{{ ((row.multiplier || 0) * 100).toFixed(2) }}%</td>
+                <td class="py-1.5 text-center font-mono text-[10px] text-text-tertiary">{{ fmtInvestedAt(row.invested_at) }}</td>
                 <td class="py-1.5 text-center">
                   <span :class="row.status === 'active' ? 'text-success' : 'text-text-tertiary'"
                     class="text-[10px] px-1.5 py-0.5 rounded"
@@ -1306,7 +1308,7 @@
               </tr>
               <!-- Inline edit row -->
               <tr v-if="editingSub && editingSub.id === row.id" class="bg-dark-100/50">
-                <td colspan="8" class="py-3 px-3">
+                <td colspan="9" class="py-3 px-3">
                   <div class="space-y-2">
                     <div class="grid grid-cols-4 gap-2 text-[10px] bg-dark-200/50 rounded p-2">
                       <div>
@@ -1335,6 +1337,12 @@
                       <div class="flex items-center gap-1">
                         <span class="text-[10px] text-text-tertiary">用户名:</span>
                         <span class="text-xs font-mono text-text-primary">{{ row.sub_username }}</span>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <span class="text-[10px] text-text-tertiary">投入时间:</span>
+                        <input v-model="editSubForm.invested_at" type="datetime-local"
+                          class="bg-dark-200 border border-border-primary rounded px-2 py-1 text-xs font-mono"
+                          title="收益起算点(北京时间);留空=回退创建时刻" />
                       </div>
                       <div class="flex items-center gap-1">
                         <span class="text-[10px] text-text-tertiary">新密码:</span>
@@ -1397,7 +1405,7 @@
               {{ cashSubmitting ? '登记中…' : '登记并重算份额' }}
             </button>
           </div>
-          <div v-if="cashEvents.length" class="max-h-44 overflow-y-auto">
+          <div v-if="cashEvents.length" class="max-h-44 overflow-y-auto scrollbar-hide">
             <table class="w-full text-[10px]">
               <thead class="text-text-tertiary border-b border-border-primary">
                 <tr>
@@ -1888,8 +1896,20 @@ async function reactivateSub(row) {
 }
 
 const editingSub = ref(null)
-const editSubForm = ref({ password: '', is_active: true, showPw: false, invested_cny: 0, invested_usdt: 0, shares: 0 })
+const editSubForm = ref({ password: '', is_active: true, showPw: false, invested_cny: 0, invested_usdt: 0, shares: 0, invested_at: '' })
 const editSubSaving = ref(false)
+
+// 后端 invested_at 经 asyncpg 以 UTC 的 ISO 返回(如 '2026-05-31T16:00:00+00:00')。datetime-local
+// 需北京墙钟 'YYYY-MM-DDTHH:mm',故 +8h 换算到北京时区再取墙钟分量(用 epoch 加偏移,避开 dayjs
+// utc 插件未加载 + 浏览器本地时区的双重坑)。
+function isoToBeijingLocal(iso) {
+  if (!iso) return ''
+  const t = Date.parse(iso)           // iso 含时区偏移 → 绝对时刻(ms)
+  if (isNaN(t)) return ''
+  const bj = new Date(t + 8 * 3600 * 1000)  // 移到北京墙钟
+  const p = (n) => String(n).padStart(2, '0')
+  return `${bj.getUTCFullYear()}-${p(bj.getUTCMonth() + 1)}-${p(bj.getUTCDate())}T${p(bj.getUTCHours())}:${p(bj.getUTCMinutes())}`
+}
 
 function startEditSub(row) {
   editingSub.value = row
@@ -1898,6 +1918,7 @@ function startEditSub(row) {
     invested_cny: Number(row.invested_cny),
     invested_usdt: Number(row.invested_usdt),
     shares: Number(row.shares),
+    invested_at: isoToBeijingLocal(row.invested_at),
   }
 }
 
@@ -1922,6 +1943,12 @@ async function saveEditSub() {
     if (f.invested_cny !== Number(row.invested_cny)) shareData.invested_cny = f.invested_cny
     if (f.invested_usdt !== Number(row.invested_usdt)) shareData.invested_usdt = f.invested_usdt
     if (f.shares !== Number(row.shares)) shareData.shares = f.shares
+    // 投入时间(收益起算点):与回填值不同才提交。datetime-local 'T'→' ' 发北京墙钟,后端按+08解析。
+    // 清空=显式置 NULL(回退创建时刻)。
+    const origIat = isoToBeijingLocal(row.invested_at)
+    if ((f.invested_at || '') !== origIat) {
+      shareData.invested_at = f.invested_at ? String(f.invested_at).replace('T', ' ') : ''
+    }
     if (Object.keys(shareData).length > 0) {
       await api.put(`/api/v1/sub-accounts/${row.id}`, shareData)
     }
@@ -1940,6 +1967,11 @@ async function saveEditSub() {
 function fmtDate(d) {
   if (!d) return '-'
   return dayjs(d).format('MM-DD HH:mm')
+}
+// 投入时间只读展示(北京墙钟);null=未单独设置(收益从创建时刻起算)
+function fmtInvestedAt(iso) {
+  const v = isoToBeijingLocal(iso)
+  return v ? v.replace('T', ' ') : '默认'
 }
 function maskStr(s) {
   if (!s) return 'N/A'
@@ -3422,4 +3454,7 @@ onMounted(async () => {
 .toast-enter-active, .toast-leave-active { transition: all 0.3s ease; }
 .toast-enter-from { opacity: 0; transform: translateX(16px); }
 .toast-leave-to   { opacity: 0; transform: translateX(16px); }
+/* 隐藏滚动条但保留滚动能力(鼠标滚轮/触摸);用于内容较高的模态框,外观无滑条且矮屏不截断 */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; width: 0; height: 0; }
 </style>

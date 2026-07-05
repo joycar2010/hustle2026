@@ -3,5 +3,12 @@
   "winter_open": "周一 07:00",
   "winter_close": "周六 06:00",
   "summer_open": "周一 06:00",
-  "summer_close": "周六 05:00"
+  "summer_close": "周六 05:00",
+  "pairs": {
+    "_doc": "per-pair 时段覆盖(2026-07-04)。summer_open_h/winter_open_h=周一(周末后)开市小时; summer_daily_reopen_h/winter_daily_reopen_h=周二~周五日级 rollover 重开小时。缺失走全局(金银)。布伦特BZ特殊: 周一正常(全局06:00夏), 但周二~五日级重开北京08:00夏/09:00冬(IC/Bybit官方规格均如此, 比WTI/金银晚2h)。WTI(CL)/NG/金银全走全局无覆盖。",
+    "BZ": {
+      "summer_daily_reopen_h": 8,
+      "winter_daily_reopen_h": 9
+    }
+  }
 }

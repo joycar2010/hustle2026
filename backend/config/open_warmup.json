@@ -1,7 +1,25 @@
 {
-  "_comment": "开市后各交易对预热分钟数; 开市后未满该值该对暂不下单(开/平都等), 到点自动放行。热生效每轮读取。未列出的对走 default。",
+  "_comment": "开市后各对预热分钟(开/平都等,热读每轮生效)。回退: ①本表显式该对→用它; ②未列出→按对冲B腿平台 by_platform 自动(2=Bybit+1/3=ICMarkets+2, 新增对无需手工配); ③default。",
   "default": 0,
   "XAU": 1,
+  "XAG": 1,
+  "BXAU": 1,
+  "BTB": 1,
+  "BTB5X": 1,
+  "BTBT": 1,
+  "GBXAU": 1,
+  "GBXAUT": 1,
+  "OBXAU": 1,
   "ICXAU": 2,
-  "BXAU": 1
+  "ICXAG": 2,
+  "GCXAU": 2,
+  "GCXAUT": 2,
+  "CL": 2,
+  "BZ": 2,
+  "NG": 2,
+  "OCXAU": 2,
+  "by_platform": {
+    "2": 1,
+    "3": 2
+  }
 }

@@ -434,7 +434,9 @@ class PositionManager:
         from app.services.hedging_pair_service import hedging_pair_service
         _pair = hedging_pair_service.get_pair("XAU")
         _sym_a = _pair.symbol_a.symbol if _pair else "XAUUSDT"
-        client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret)
+        from app.core.proxy_utils import build_proxy_url
+        client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
+                                      proxy_url=build_proxy_url(binance_account.proxy_config))   # 必须走账户socks5代理,否则直连出口IP→币安-2015
         try:
             positions_data = await client.get_position_risk(symbol=_sym_a)
 

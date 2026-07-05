@@ -63,6 +63,7 @@ class NotificationTemplateUpdate(BaseModel):
     enable_email: Optional[bool] = None
     enable_sms: Optional[bool] = None
     enable_feishu: Optional[bool] = None
+    enable_marquee: Optional[bool] = None
     priority: Optional[int] = None
     cooldown_seconds: Optional[int] = None
     auto_check_enabled: Optional[bool] = None
@@ -349,6 +350,7 @@ async def get_notification_templates(
                 "enable_email": t.enable_email,
                 "enable_sms": t.enable_sms,
                 "enable_feishu": t.enable_feishu,
+                "enable_marquee": t.enable_marquee,
                 "priority": t.priority,
                 "cooldown_seconds": t.cooldown_seconds,
                 # 旧字段（保留兼容）
@@ -406,6 +408,7 @@ async def get_notification_template(
             "enable_email": template.enable_email,
             "enable_sms": template.enable_sms,
             "enable_feishu": template.enable_feishu,
+            "enable_marquee": template.enable_marquee,
             "priority": template.priority,
             "cooldown_seconds": template.cooldown_seconds,
             # 旧字段（保留兼容）

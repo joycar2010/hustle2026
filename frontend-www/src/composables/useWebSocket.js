@@ -15,6 +15,8 @@ export function useWebSocket() {
   let reconnectTimer = null
   let reconnectDelay = 1000
   let intentionalClose = false
+  let deadTimer = null
+  let _hooked = false
   const _handlers = {}
 
   function getWsUrl() {
@@ -24,16 +26,41 @@ export function useWebSocket() {
     return proto + '//' + location.host + '/api/v1/ws?token=' + token
   }
 
+  // 数据活性看门狗:Rust Hub 每≤3.5s 推一帧;静默 >20s 判半开假死 → close 触发重连。
+  function _armDead() {
+    if (deadTimer) clearTimeout(deadTimer)
+    deadTimer = setTimeout(() => { try { ws && ws.close() } catch (_) {} }, 20000)
+  }
+  function _clearDead() { if (deadTimer) { clearTimeout(deadTimer); deadTimer = null } }
+
+  // 聚焦/联网自愈:回前台/联网,断了立即重连(清退避),连着则补探活性。
+  function _wake() {
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      reconnectDelay = 1000
+      clearTimeout(reconnectTimer)
+      connect()
+    } else if (ws.readyState === WebSocket.OPEN) {
+      _armDead()
+    }
+  }
+  function _onVisible() { if (document.visibilityState === 'visible') _wake() }
+
   function connect() {
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return
     const url = getWsUrl()
     if (!url) return
     intentionalClose = false
+    if (!_hooked && typeof window !== 'undefined') {
+      _hooked = true
+      document.addEventListener('visibilitychange', _onVisible)
+      window.addEventListener('online', _wake)
+    }
     try { ws = new WebSocket(url) } catch { return }
 
     ws.onopen = () => {
       connected.value = true
       reconnectDelay = 1000
+      _armDead()
       ws.send(JSON.stringify({ type: 'request_snapshot' }))
       for (const [ch, params] of Object.entries(pending)) {
         ws.send(JSON.stringify({ type: 'request_data', channel: ch, params: params }))
@@ -41,6 +68,7 @@ export function useWebSocket() {
     }
 
     ws.onmessage = (event) => {
+      _armDead()
       try {
         const msg = JSON.parse(event.data)
         lastMessage.value = msg
@@ -62,6 +90,7 @@ export function useWebSocket() {
     ws.onclose = () => {
       connected.value = false
       ws = null
+      _clearDead()
       if (!intentionalClose) scheduleReconnect()
     }
     ws.onerror = () => {}
@@ -69,6 +98,12 @@ export function useWebSocket() {
 
   function disconnect() {
     intentionalClose = true
+    _clearDead()
+    if (_hooked) {
+      document.removeEventListener('visibilitychange', _onVisible)
+      window.removeEventListener('online', _wake)
+      _hooked = false
+    }
     clearTimeout(reconnectTimer)
     if (ws) { ws.close(); ws = null }
     connected.value = false

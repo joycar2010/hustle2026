@@ -40,6 +40,7 @@ class NotificationTemplate(Base):
     enable_email = Column(Boolean, default=False)
     enable_sms = Column(Boolean, default=False)
     enable_feishu = Column(Boolean, default=False)
+    enable_marquee = Column(Boolean, default=False, nullable=False)  # 前端跑马灯推送渠道
 
     # 优先级和频率控制
     priority = Column(Integer, default=1)  # 1=low, 2=medium, 3=high, 4=urgent

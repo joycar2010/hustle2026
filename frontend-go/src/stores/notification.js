@@ -254,8 +254,12 @@ export const useNotificationStore = defineStore('notification', () => {
     // Check if single-leg alert is enabled
     if (!singleLegAlertEnabled.value) return
 
-    // Create a unique key for deduplication based on strategy, action, and quantities
-    const alertKey = `${data.strategy_type}_${data.action}_${data.binance_filled}_${data.bybit_filled}`
+    // Dedup key (P0 噪音过滤): 仅按 策略+方向 聚合, 不再带入逐笔成交量 —— 否则每笔数量
+    // 都不同会生成不同 key, 5 分钟去重形同虚设、弹框照样刷屏。粗化后同一策略方向的单腿
+    // 在窗口内只弹一次。
+    // 多交易对(2026-07-04): 去重键带 pair_code, 否则不同品种的"正向套利开仓"碰撞→
+    // 一个品种的单腿告警把另一品种的真单腿在5min窗口内静默吞掉(跨对漏报)。
+    const alertKey = `${data.pair_code || 'XAU'}_${data.strategy_type}_${data.action}`
 
     // Check if we already have a recent alert with the same key (within last 5 minutes)
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000

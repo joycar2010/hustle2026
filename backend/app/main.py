@@ -53,12 +53,13 @@ def _setup_logging():
 _setup_logging()
 from app.core.redis_client import redis_client
 from app.middleware.permission_interceptor import PermissionInterceptor
-from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, mt5_clients, mt5_instances, mt5_server, mt5_infra, pnl, hedging, hedge_ratio, agent, site_status, hedge_records, dashboard_viz
+from app.api.v1 import pair_accounts, auth, users, accounts, strategies, market, websocket, risk, automation, system, trading, test, rbac, security_components, ssl_certificates, key_management, notifications, sound_files, health, arbitrage_opportunities, system_monitor, timing_configs, proxies, strategy_processes, mt5_clients, mt5_instances, mt5_server, mt5_infra, pnl, hedging, hedge_ratio, agent, site_status, hedge_records, dashboard_viz
 from app.api.v1 import aicoin
 from app.tasks.market_data import market_streamer
 from app.tasks.broadcast_tasks import account_balance_streamer, risk_metrics_streamer, mt5_connection_streamer, pending_orders_streamer, redis_status_streamer, position_streamer, binance_position_pusher, market_state_monitor, snapshot_request_listener, market_rate_streamer, quote_divergence_monitor, pnl_fast_streamer
 from app.tasks.data_request_handler import data_request_listener
 from app.tasks.redis_monitor import redis_monitor
+from app.tasks.system_health_monitor import system_health_monitor
 from app.tasks.arbitrage_opportunity_scheduler import arbitrage_opportunity_scheduler
 from app.tasks.timing_config_subscriber import timing_config_subscriber
 from app.services.position_monitor import position_monitor
@@ -103,6 +104,7 @@ async def init_redis_and_feishu():
     try:
         await redis_client.connect()
         await redis_monitor.start()
+        await system_health_monitor.start()
         await timing_config_subscriber.start()
         app_state["redis_connected"] = True
         logger.info("Redis connected successfully")
@@ -283,6 +285,8 @@ async def lifespan(app: FastAPI):
         from app.services.agent.balance_monitor import start_model_refresh
         start_model_refresh()
         openclaw_reviewer.start()
+        from app.services.agent import ladder_advisor as openclaw_ladder_advisor
+        openclaw_ladder_advisor.start()  # 阶梯自动调参(env LADDER_ADVISOR_ENABLED 默认off)
         openclaw_legs.start()
         logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer + leg_monitor scheduled')
     except Exception as e:
@@ -352,6 +356,11 @@ async def lifespan(app: FastAPI):
         await openclaw_loop.stop()
         await openclaw_fsm.stop()
         await openclaw_reviewer.stop()
+        try:
+            from app.services.agent import ladder_advisor as _lad
+            await _lad.stop()
+        except Exception:
+            pass
         await openclaw_npm.stop()
         await openclaw_bm.stop()
         from app.services.agent.balance_monitor import stop_model_refresh
@@ -392,6 +401,7 @@ async def lifespan(app: FastAPI):
         await market_data_service.stop()
         await status_pusher.stop()
         await timing_config_subscriber.stop()
+        await system_health_monitor.stop()
         await redis_monitor.stop()
         await redis_client.disconnect()
     except Exception as e:
@@ -572,12 +582,17 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include API routers
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+from app.api.v1 import manual_ledger as _mledger
+app.include_router(_mledger.router, prefix="/api/v1/manual-ledger", tags=["ManualLedger"])
+from app.api.v1 import ai_arb_analysis as _aiarb
+app.include_router(_aiarb.router, prefix="/api/v1/ai-arb", tags=["AIArbAnalysis"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["Accounts"])
 app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["Strategies"])
 app.include_router(market.router, prefix="/api/v1/market", tags=["Market Data"])
 app.include_router(risk.router, prefix="/api/v1/risk", tags=["Risk Control"])
 app.include_router(automation.router, prefix="/api/v1/automation", tags=["Automation"])
+app.include_router(strategy_processes.router, prefix="/api/v1/automation", tags=["StrategyProcesses"])
 app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(pnl.router, prefix="/api/v1/pnl", tags=["PnL Analytics"])
 app.include_router(hedging.router, prefix="/api/v1/hedging", tags=["Hedging Platform Management"])

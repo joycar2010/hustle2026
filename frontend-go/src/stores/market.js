@@ -42,6 +42,24 @@ export const useMarketStore = defineStore('market', () => {
   let ws = null
   let reconnectTimer = null
   let token = null
+  let deadTimer = null
+
+  // 数据活性看门狗:Rust /ws 对每个连接每≤3.5s 推一帧;静默 >20s 判半开假死 → close 触发重连。
+  // (服务端不回应用层 pong,故以"入站消息活性"判活,而非等 pong。)
+  function _armDead() {
+    if (deadTimer) clearTimeout(deadTimer)
+    deadTimer = setTimeout(() => { try { ws && ws.close() } catch (_) {} }, 20000)
+  }
+  function _clearDead() { if (deadTimer) { clearTimeout(deadTimer); deadTimer = null } }
+  // 聚焦/联网自愈:回前台/联网,断了立即重连,连着则补探活性。
+  function _wake() {
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+      connect()
+    } else if (ws.readyState === WebSocket.OPEN) {
+      _armDead()
+    }
+  }
 
   function getToken() {
     return localStorage.getItem('token') || ''
@@ -69,6 +87,7 @@ export const useMarketStore = defineStore('market', () => {
     ws.onopen = () => {
       console.log('[WebSocket] Connected successfully')
       connected.value = true
+      _armDead()
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
@@ -81,6 +100,7 @@ export const useMarketStore = defineStore('market', () => {
     }
 
     ws.onmessage = (event) => {
+      _armDead()
       try {
         const msg = JSON.parse(event.data)
 
@@ -206,6 +226,7 @@ export const useMarketStore = defineStore('market', () => {
     ws.onclose = (event) => {
       connected.value = false
       ws = null
+      _clearDead()
 
       // If closed due to authentication failure (code 1008), don't reconnect
       // User needs to login again
@@ -232,6 +253,7 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   function disconnect() {
+    _clearDead()
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -280,6 +302,12 @@ export const useMarketStore = defineStore('market', () => {
       ws.send(JSON.stringify({ type: 'subscribe', pairs: [newPair] }))
     }
   })
+
+  // 聚焦/联网自愈监听(store 单例,仅注册一次)
+  if (typeof window !== 'undefined') {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') _wake() })
+    window.addEventListener('online', _wake)
+  }
 
   return {
     marketRates,

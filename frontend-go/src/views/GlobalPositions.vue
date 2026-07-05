@@ -187,7 +187,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useMarketStore } from '@/stores/market'
 import { useStrategyStore } from '@/stores/strategy'
 import { TRADING_PAIRS } from '@/composables/useTradingPair'
@@ -281,5 +281,38 @@ onMounted(() => {
   fetchFees()
   feeTimer = setInterval(fetchFees, 300000) // fees change infrequently; poll every 5 min
 })
-onUnmounted(() => clearInterval(feeTimer))
+onUnmounted(() => {
+  clearInterval(feeTimer)
+  if (priceFallbackTimer) { clearInterval(priceFallbackTimer); priceFallbackTimer = null }
+})
+
+// WS 断开时的价格兜底轮询(5s)。说明:持仓快照(positionSnapshot)是后端聚合广播、无对应 REST,
+// 故断线期持仓数靠"看门狗→WS 重连"恢复;此处只兜底刷新实时价格(/market/data/latest),
+// 让强平距/中间价不至于在断线期定格。恢复连接即停。
+let priceFallbackTimer = null
+async function _pollPriceFallback() {
+  try {
+    const r = await api.get('/api/v1/market/data/latest')
+    const d = r.data
+    if (d) {
+      marketStore.marketData = {
+        ...(marketStore.marketData || {}),
+        binance_bid: d.binance_bid ?? 0,
+        binance_ask: d.binance_ask ?? 0,
+        binance_mid: d.binance_bid != null ? (d.binance_bid + d.binance_ask) / 2 : (marketStore.marketData?.binance_mid ?? 0),
+        bybit_bid: d.bybit_bid ?? 0,
+        bybit_ask: d.bybit_ask ?? 0,
+        bybit_mid: d.bybit_bid != null ? (d.bybit_bid + d.bybit_ask) / 2 : (marketStore.marketData?.bybit_mid ?? 0),
+        timestamp: d.timestamp,
+      }
+    }
+  } catch (e) { /* silent */ }
+}
+watch(connected, (val) => {
+  if (val) {
+    if (priceFallbackTimer) { clearInterval(priceFallbackTimer); priceFallbackTimer = null }
+  } else if (!priceFallbackTimer) {
+    priceFallbackTimer = setInterval(_pollPriceFallback, 5000)
+  }
+}, { immediate: true })
 </script>

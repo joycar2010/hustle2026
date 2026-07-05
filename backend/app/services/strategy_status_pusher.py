@@ -428,6 +428,33 @@ class StrategyExecutionStatusPusher:
         }
         await self._push_queue.put(message)
 
+    async def push_manual_trade_result(
+        self,
+        user_id: str,
+        request_id: str,
+        action: str,
+        success: bool,
+        results: Optional[list] = None,
+        error: Optional[str] = None,
+    ):
+        """Async result of an emergency manual-trading action -> one user over the
+        production WS path (Redis ws:user_event -> Go hub). action in
+        order|close-long|close-short|close-all|cancel-all; results per-leg list."""
+        message = {
+            'type': 'manual_trade_result',
+            'data': {
+                'request_id': request_id, 'action': action, 'success': success,
+                'results': results or [], 'error': error,
+                'timestamp': datetime.utcnow().isoformat(),
+            },
+            'user_id': str(user_id),
+        }
+        logger.info(f"[manual_trade_result] user={user_id} req={request_id} action={action} success={success} err={error}")
+        if self._push_queue is None:
+            await self._send_message(message)
+            return
+        await self._push_queue.put(message)
+
 
 # Global status pusher instance
 status_pusher = StrategyExecutionStatusPusher()

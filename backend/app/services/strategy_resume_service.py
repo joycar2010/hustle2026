@@ -116,12 +116,77 @@ async def clear_on_manual_stop_by_strategy_id(strategy_id):
         logger.warning("[RESUME] clear on manual stop failed: " + str(e))
 
 
+async def _fetch_db_ladders_for_replay(user_id, pair_code, direction):
+    """恢复回放前【现读 DB strategy_configs】, 返回 {ladders(请求字段格式), opening_m_coin, closing_m_coin} 或 None。
+    根因修复(2026-06-24): 快照(record_start_snapshot 存的是 start 时 request.ladders)在用户后续改阈值保存后
+    会变旧; 回放旧快照会按旧阈值成交(实测 cq001 改 3.5 后重启恢复仍按 3.0 成交)。此处与 _reload_strategy_config
+    同源同映射现读 DB, 覆盖快照里的旧 ladders/m_coin, 使恢复=按最新配置启动。"""
+    from app.core.database import AsyncSessionLocal
+    from app.models.strategy import StrategyConfig
+    from sqlalchemy import select
+    from uuid import UUID as _UUID
+    try:
+        _uid = _UUID(str(user_id))
+    except Exception:
+        _uid = user_id
+    async with AsyncSessionLocal() as _db:
+        _res = await _db.execute(
+            select(StrategyConfig).where(
+                StrategyConfig.user_id == _uid,
+                StrategyConfig.strategy_type == direction,
+                StrategyConfig.pair_code == pair_code,
+            ).order_by(StrategyConfig.create_time.desc())
+        )
+        _cfg = _res.scalars().first()
+    if not _cfg or not _cfg.ladders:
+        return None
+    _otc = int(_cfg.opening_sync_count or 1)
+    _ctc = int(_cfg.closing_sync_count or 1)
+    _lds = []
+    for _ld in _cfg.ladders:
+        try:
+            _lds.append({
+                "enabled": bool(_ld.get('enabled', True)),
+                "opening_spread": float(_ld.get('openPrice', 0) or 0),
+                "closing_spread": float(_ld.get('threshold', 0) or 0),
+                "total_qty": float(_ld.get('qtyLimit', 0) or 0),
+                "opening_trigger_count": _otc,
+                "closing_trigger_count": _ctc,
+            })
+        except Exception:
+            continue
+    if not _lds:
+        return None
+    return {
+        "ladders": _lds,
+        "opening_m_coin": (float(_cfg.opening_m_coin) if _cfg.opening_m_coin is not None else None),
+        "closing_m_coin": (float(_cfg.closing_m_coin) if _cfg.closing_m_coin is not None else None),
+    }
+
+
 async def _replay_launch(user_id, pair_code, action, payload_json):
     from app.core.database import AsyncSessionLocal
     direction = "reverse" if action.startswith("reverse") else "forward"
     phase = "opening" if action.endswith("opening") else "closing"
     try:
         payload = json.loads(payload_json)
+        # ── 根因修复(2026-06-24): 回放前 ladders/阈值/m_coin 一律【现读 DB】覆盖旧快照, 防按旧阈值成交 ──
+        try:
+            _fresh = await _fetch_db_ladders_for_replay(user_id, pair_code, direction)
+            if _fresh is not None and _fresh.get("ladders"):
+                payload["ladders"] = _fresh["ladders"]
+                if "opening_m_coin" in payload and _fresh.get("opening_m_coin") is not None:
+                    payload["opening_m_coin"] = _fresh["opening_m_coin"]
+                if "closing_m_coin" in payload and _fresh.get("closing_m_coin") is not None:
+                    payload["closing_m_coin"] = _fresh["closing_m_coin"]
+                logger.info("[RESUME] " + _member(user_id, pair_code, action)
+                            + " 回放前现读DB覆盖快照ladders: " + str(len(_fresh["ladders"])) + "阶")
+            else:
+                logger.warning("[RESUME] " + _member(user_id, pair_code, action)
+                               + " DB无ladders, 回退用快照(可能旧阈值)")
+        except Exception as _fe:
+            logger.warning("[RESUME] " + _member(user_id, pair_code, action)
+                           + " 现读DB失败, 回退用快照: " + str(_fe))
         async with AsyncSessionLocal() as db:
             if phase == "opening":
                 from app.api.v1.strategies import execute_continuous_opening, ContinuousExecuteRequest
@@ -156,7 +221,7 @@ async def _try_resume_one(member):
             return
     except Exception:
         pass
-    is_open, _ = is_bybit_trading_hours()
+    is_open, _ = is_bybit_trading_hours(pair_code)
     if not is_open:
         return
     # 收盘前缓冲期闸门(2026-06-18新增): continuous_executor 的软/硬停在此窗口内
@@ -170,7 +235,7 @@ async def _try_resume_one(member):
         _mtc = None
     if _mtc is not None and _mtc <= SOFT_STOP_BUFFER_MIN:
         return
-    so = minutes_since_mt5_open()
+    so = minutes_since_mt5_open(pair_code)
     wm = open_warmup_minutes(pair_code)
     if so is None or so < wm:
         return
@@ -184,6 +249,42 @@ async def _try_resume_one(member):
     if ok:
         await clear_pending(user_id, pair_code, action)
         logger.info("[RESUME] resumed " + member + " (open " + str(round(so, 1)) + "min >= " + str(wm) + "min)")
+
+
+async def recover_running_after_restart():
+    """后端重启自恢复: 重启会清空 execution_task_manager 的内存任务,导致所有连续策略被静默停掉。
+    此处在启动时, 把所有"曾启动且未手动停"(redis 仍存 snapshot)的连续策略标记为待恢复,
+    交由 StrategyResumeMonitor 在 开市+预热+当前未在跑 时用 snapshot 原样回放。
+
+    安全性(完全复用既有恢复路径与护栏, 不另造回放):
+      * 仅凭 snapshot 存在 → 手动停会清 snapshot, 故【手动停的不会被恢复】;
+      * _try_resume_one 先查 get_running_task_id, 已在跑则跳过+清 pending → 【不会重复开仓】;
+      * 开市/预热闸 → 不在休市或刚开盘抢跑;
+      * opening 回放后按【实际持仓】算 remaining → 不会重复多开;capacity 已满则空转无害。
+    """
+    try:
+        rc = await _rc()
+        raw = getattr(rc, "client", None)
+        if raw is None:
+            logger.warning("[RESUME] post-restart recovery: redis raw client unavailable, skip")
+            return
+        members = []
+        async for key in raw.scan_iter(match=_SNAPSHOT_PREFIX + "*"):
+            k = key.decode() if isinstance(key, (bytes, bytearray)) else key
+            members.append(k[len(_SNAPSHOT_PREFIX):])
+        count = 0
+        for m in members:
+            user_id, pair_code, action = _split(m)
+            if not user_id or action not in _VALID_ACTIONS:
+                continue
+            await mark_resume_pending(user_id, pair_code, action)
+            count += 1
+        logger.info(
+            "[RESUME] post-restart recovery: marked " + str(count)
+            + " previously-running strategies pending (will resume on open+warmup if not already running)"
+        )
+    except Exception as e:
+        logger.error("[RESUME] post-restart recovery failed: " + str(e))
 
 
 class StrategyResumeMonitor:

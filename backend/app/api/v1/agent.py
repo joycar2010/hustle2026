@@ -4,13 +4,14 @@ RBAC: ALL endpoints require role ∈ {超级管理员, 系统管理员, super_ad
 """
 import re
 from typing import Any, Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_DNS
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth import get_current_user_id
+from app.core.security import get_current_user_id_optional
 from app.core.database import get_db
 from app.models.user import User
 from app.services.agent import config_loader
@@ -20,6 +21,39 @@ from app.services.agent.rate_buckets import RateBuckets
 router = APIRouter()
 
 ADMIN_ROLES = {'超级管理员', '系统管理员', 'super_admin', 'system_admin', 'admin'}
+
+# ── Hustle chat identity resolver ───────────────────────────────────────────
+# Public sites (app) allow anonymous use, rate-limited by a stable UUID derived
+# from the client IP. All other sites keep admin-only access (same rule as
+# require_admin). hustle_chat_messages.user_id has no FK, so a synthetic uuid5
+# is safe to store.
+PUBLIC_CHAT_SITES = {'app'}
+
+def _chat_client_ip(request) -> str:
+    xff = request.headers.get('x-forwarded-for', '')
+    if xff:
+        return xff.split(',')[0].strip()
+    xri = request.headers.get('x-real-ip', '')
+    if xri:
+        return xri.strip()
+    return request.client.host if request.client else 'unknown'
+
+def _anon_chat_uid(request) -> str:
+    return str(uuid5(NAMESPACE_DNS, 'hustle-app-anon:' + _chat_client_ip(request)))
+
+async def _resolve_chat_user_id(site, auth_uid, request, db):
+    if site in PUBLIC_CHAT_SITES:
+        return auth_uid if auth_uid else _anon_chat_uid(request)
+    if not auth_uid:
+        raise HTTPException(status_code=401, detail='未授权')
+    row = (await db.execute(text("SELECT role, openclaw_enabled FROM users WHERE user_id = CAST(:u AS UUID)"), {'u': auth_uid})).first()
+    if not row:
+        raise HTTPException(status_code=403, detail='用户不存在')
+    role, oce = row[0], bool(row[1])
+    if role in ADMIN_ROLES or oce:
+        return auth_uid
+    raise HTTPException(status_code=403, detail='需管理员或授权账户')
+
 
 _redis = None
 
@@ -3176,8 +3210,9 @@ class ChatReq(BaseModel):
 @router.post("/chat")
 async def hustle_chat(req: ChatReq, request: Request,
                       db: AsyncSession = Depends(get_db),
-                      user_id: str = Depends(require_admin)):
+                      auth_uid: Optional[str] = Depends(get_current_user_id_optional)):
     """Hustle AI chat — SSE streaming response."""
+    user_id = await _resolve_chat_user_id(req.site, auth_uid, request, db)
     import aiohttp, json as _json, logging
     from starlette.responses import StreamingResponse
     log = logging.getLogger(__name__)
@@ -3317,11 +3352,13 @@ async def hustle_chat(req: ChatReq, request: Request,
 
 @router.get("/chat/history")
 async def chat_history(
+    request: Request,
     site: str = Query("auto"),
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(require_admin),
+    auth_uid: Optional[str] = Depends(get_current_user_id_optional),
 ) -> Dict[str, Any]:
     """Load chat history for the Hustle assistant."""
+    user_id = await _resolve_chat_user_id(site, auth_uid, request, db)
     rows = (await db.execute(text("""
         SELECT id, role, content, created_at FROM hustle_chat_messages
         WHERE user_id = CAST(:uid AS UUID) AND site = :site
@@ -3350,10 +3387,12 @@ async def chat_history(
 @router.delete("/chat/messages/{message_id}")
 async def delete_chat_message(
     message_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(require_admin),
+    auth_uid: Optional[str] = Depends(get_current_user_id_optional),
 ) -> Dict[str, Any]:
     """Delete a single chat message (user can only delete own messages)."""
+    user_id = auth_uid or _anon_chat_uid(request)
     result = await db.execute(text("""
         DELETE FROM hustle_chat_messages
         WHERE id = :mid AND user_id = CAST(:uid AS UUID)
@@ -3368,11 +3407,13 @@ async def delete_chat_message(
 
 @router.delete("/chat/history")
 async def clear_chat_history(
+    request: Request,
     site: str = Query("auto"),
     db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(require_admin),
+    auth_uid: Optional[str] = Depends(get_current_user_id_optional),
 ) -> Dict[str, Any]:
     """Clear all chat history for the current user on this site."""
+    user_id = await _resolve_chat_user_id(site, auth_uid, request, db)
     result = await db.execute(text("""
         DELETE FROM hustle_chat_messages
         WHERE user_id = CAST(:uid AS UUID) AND site = :site
@@ -3661,3 +3702,75 @@ async def update_guard_rules(rules: Dict[str, Any] = Body(...),
     await db.commit()
     _invalidate_config()
     return {'status': 'ok', 'message': 'Guard rules updated, effective within 5s'}
+
+
+# ─────────────────────── ladder_advisor(阶梯自动调参) ───────────────────────
+
+@router.get('/ladder-advisor/config')
+async def get_ladvisor_config(db: AsyncSession = Depends(get_db),
+                              user_id: str = Depends(get_current_user_id)):
+    r = (await db.execute(text(
+        "SELECT mode, max_auto_pct, cooldown_hours, enabled, updated_at FROM ladder_advisor_config WHERE id=1"))).first()
+    if not r:
+        return {"mode": "shadow", "max_auto_pct": 10, "cooldown_hours": 24, "enabled": False}
+    return {"mode": r[0], "max_auto_pct": float(r[1]), "cooldown_hours": r[2],
+            "enabled": r[3], "updated_at": r[4].isoformat() if r[4] else None}
+
+
+@router.put('/ladder-advisor/config')
+async def put_ladvisor_config(body: dict, db: AsyncSession = Depends(get_db),
+                              user_id: str = Depends(get_current_user_id)):
+    mode = body.get('mode', 'shadow')
+    if mode not in ('shadow', 'suggest', 'auto_small', 'auto'):
+        raise HTTPException(status_code=400, detail='mode 须为 shadow/suggest/auto_small/auto')
+    await db.execute(text("""
+        UPDATE ladder_advisor_config SET mode=:m,
+            max_auto_pct=COALESCE(:p, max_auto_pct),
+            cooldown_hours=COALESCE(:c, cooldown_hours),
+            enabled=COALESCE(:e, enabled), updated_at=now() WHERE id=1
+    """), {"m": mode, "p": body.get('max_auto_pct'), "c": body.get('cooldown_hours'),
+           "e": body.get('enabled')})
+    await db.commit()
+    return {"ok": True, "mode": mode}
+
+
+@router.get('/ladder-advisor/log')
+async def list_ladvisor_log(limit: int = 50, offset: int = 0,
+                            db: AsyncSession = Depends(get_db),
+                            user_id: str = Depends(get_current_user_id)):
+    rows = (await db.execute(text("""
+        SELECT l.id, u.username, l.strategy_type, l.pair_code, l.mode, l.action,
+               l.old_ladders, l.new_ladders, l.rationale, l.spread_stats,
+               l.pnl_before_7d, l.pnl_after_24h, l.created_at
+        FROM ladder_advisor_log l LEFT JOIN users u ON u.user_id = l.user_id
+        ORDER BY l.id DESC LIMIT :lim OFFSET :off
+    """), {"lim": min(limit, 200), "off": offset})).all()
+    return {"items": [{
+        "id": r[0], "username": r[1], "strategy_type": r[2], "pair_code": r[3],
+        "mode": r[4], "action": r[5], "old_ladders": r[6], "new_ladders": r[7],
+        "rationale": r[8], "spread_stats": r[9],
+        "pnl_before_7d": float(r[10]) if r[10] is not None else None,
+        "pnl_after_24h": float(r[11]) if r[11] is not None else None,
+        "created_at": r[12].isoformat() if r[12] else None,
+    } for r in rows]}
+
+
+@router.post('/ladder-advisor/rollback/{log_id}')
+async def rollback_ladvisor(log_id: int, db: AsyncSession = Depends(get_db),
+                            user_id: str = Depends(get_current_user_id)):
+    r = (await db.execute(text(
+        "SELECT user_id, strategy_type, pair_code, old_ladders, action FROM ladder_advisor_log WHERE id=:i"),
+        {"i": log_id})).first()
+    if not r:
+        raise HTTPException(status_code=404, detail='记录不存在')
+    if r[4] != 'applied':
+        raise HTTPException(status_code=400, detail='仅 applied 记录可回滚')
+    await db.execute(text("""
+        UPDATE strategy_configs SET ladders=CAST(:l AS JSONB), update_time=now() at time zone 'utc'
+        WHERE user_id=:u AND strategy_type=:st AND pair_code=:pc
+    """), {"l": _json.dumps(r[3]) if not isinstance(r[3], str) else r[3],
+           "u": r[0], "st": r[1], "pc": r[2]})
+    await db.execute(text(
+        "UPDATE ladder_advisor_log SET action='rolled_back' WHERE id=:i"), {"i": log_id})
+    await db.commit()
+    return {"ok": True, "rolled_back": log_id}

@@ -155,17 +155,17 @@
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpeningExecution"
-              :disabled="isStopping.opening || (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type))"
+              :disabled="isStopping.opening || (strategyStore.isLocked(`${currentPair}::${type}_opening`) && strategyStore.isLocked(`${currentPair}::${type}`))"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (strategyStore.isLocked(`${currentPair}::${type}_opening`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 isStopping.opening
                   ? 'bg-[#F59E0B] text-white animate-pulse cursor-wait'
                   : continuousExecutionEnabled.opening
                     ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                     : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
-              :title="(strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="(strategyStore.isLocked(`${currentPair}::${type}_opening`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ isStopping.opening ? '停止中...' : (continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓')) }}
             </button>
@@ -176,17 +176,17 @@
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosingExecution"
-              :disabled="isStopping.closing || (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type))"
+              :disabled="isStopping.closing || (strategyStore.isLocked(`${currentPair}::${type}_closing`) && strategyStore.isLocked(`${currentPair}::${type}`))"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (strategyStore.isLocked(`${currentPair}::${type}_closing`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 isStopping.closing
                   ? 'bg-[#F59E0B] text-white animate-pulse cursor-wait'
                   : continuousExecutionEnabled.closing
                     ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                     : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
               ]"
-              :title="(strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="(strategyStore.isLocked(`${currentPair}::${type}_closing`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ isStopping.closing ? '停止中...' : (continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓')) }}
             </button>
@@ -973,6 +973,13 @@ async function setHedgeMultiplier(m) {
 
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
+// 多交易对(2026-07-04): 记录每个 action 启动时的 pair, 使 acquire/release 的锁 key 严格一致
+// (组件单实例跟随全局 currentPair, 若 release 时 currentPair 已切走会泄漏锁→按钮永久卡死)。
+const continuousExecutionPair = ref({ opening: null, closing: null })
+function _lockKey(action) {
+  const p = continuousExecutionPair.value[action] || currentPair.value
+  return `${p}::${props.type}_${action}`
+}
 const isStopping = ref({ opening: false, closing: false })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
 const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null, express: false }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null, express: false } })
@@ -1347,7 +1354,7 @@ function handleTriggerProgress(data) {
 
   if (isContinuousExecution) {
     // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${props.type}_`)) return
+    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
   } else {
     // For regular execution, check strategy_id match
     if (data.strategy_id !== configId.value) {
@@ -1437,7 +1444,7 @@ function handlePositionChange(data) {
 
   if (isContinuous) {
     const strategyIdStr = String(data.strategy_id)
-    if (!strategyIdStr.includes(`_${props.type}_`)) return
+    if (!strategyIdStr.includes(`_${currentPair.value}_${props.type}_`)) return
 
     const action = strategyIdStr.includes('_opening_') ? 'opening' : 'closing'
     const idx = data.ladder_index ?? 0
@@ -1472,7 +1479,7 @@ function handleExecutionStarted(data) {
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
     // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${props.type}_`)) return
+    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution started: ${action}`)
 
@@ -1511,7 +1518,7 @@ function handleExecutionCompleted(data) {
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
     // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${props.type}_`)) return
+    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
     // 完成后刷新后端权威账本(平仓到 flat 时清零开仓均价)
@@ -1555,7 +1562,7 @@ function handleExecutionError(data) {
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
     // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${props.type}_`)) return
+    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution error: ${action}, ${data.error_message}`)
 
@@ -1589,7 +1596,7 @@ function handleOrderExecuted(data) {
 
   if (isContinuous) {
     const strategyIdStr = String(data.strategy_id)
-    if (!strategyIdStr.includes(`_${props.type}_`)) return
+    if (!strategyIdStr.includes(`_${currentPair.value}_${props.type}_`)) return
 
     const action = strategyIdStr.includes('_opening_') ? 'opening' : 'closing'
     const idx = data.ladder_index ?? 0
@@ -2188,8 +2195,9 @@ function formatNumber(num) {
 
 // Continuous execution methods
 async function startContinuousExecution(action) {
-  // ── 并发策略锁：同方向开平可共存，跨方向互斥 ──
-  const strategyKey = `${props.type}_${action}`
+  // ── 并发策略锁：同方向开平可共存，跨方向互斥; 多交易对(2026-07-04) 锁 key 带 pair, 跨 pair 独立 ──
+  continuousExecutionPair.value[action] = currentPair.value
+  const strategyKey = _lockKey(action)
   if (!strategyStore.acquire(strategyKey)) {
     const running = strategyStore.activeStrategy
     notificationStore.showStrategyNotification(
@@ -2336,7 +2344,7 @@ async function startContinuousExecution(action) {
 async function stopContinuousExecution(action) {
   try {
     if (!continuousExecutionTaskId.value[action]) {
-      strategyStore.release(`${props.type}_${action}`)
+      strategyStore.release(_lockKey(action))
       return
     }
 
@@ -2359,7 +2367,7 @@ async function stopContinuousExecution(action) {
         continuousExecutionStatus.value[action] = null
         continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0, triggerSpread: null, threshold: null }
         stopStatusPolling(action)
-        strategyStore.release(`${props.type}_${action}`)
+        strategyStore.release(_lockKey(action))
         ladderExecutionDetails.value[action] = {}
         expandedLadders.value[action] = {}
         notificationStore.showStrategyNotification(`${action === 'opening' ? '开仓' : '平仓'}已超时停止`, 'warning')
@@ -2370,7 +2378,7 @@ async function stopContinuousExecution(action) {
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`停止连续执行失败: ${errorMsg}`, 'error')
     isStopping.value[action] = false
-    strategyStore.release(`${props.type}_${action}`)
+    strategyStore.release(_lockKey(action))
   }
 }
 
@@ -2381,9 +2389,12 @@ async function syncContinuousRunningState() {
     const r = await api.get('/api/v1/strategies/execution/tasks')
     tasks = r.data?.tasks || []
   } catch { return }
+  // 多交易对(2026-07-04): 只认【当前 pair + 本 type】的 running task(strategy_id={user}_{pair}_{stype}_..._continuous),
+  // 否则别的 pair 的运行态会污染本面板按钮。并据后端真实态校准锁(切 pair 后 sync 重建当前 pair 的锁)。
+  const _pairTypeTag = `_${currentPair.value}_${props.type}_`
   const running = { opening: null, closing: null }
   for (const t of tasks) {
-    if (t.status === 'running' && t.strategy_id?.includes(props.type)) {
+    if (t.status === 'running' && t.strategy_id?.includes(_pairTypeTag)) {
       if (t.strategy_type?.includes('opening')) running.opening = t.task_id
       if (t.strategy_type?.includes('closing')) running.closing = t.task_id
     }
@@ -2395,6 +2406,8 @@ async function syncContinuousRunningState() {
       if (!continuousExecutionEnabled.value[action] || feTaskId !== beTaskId) {
         continuousExecutionEnabled.value[action] = true
         continuousExecutionTaskId.value[action] = beTaskId
+        continuousExecutionPair.value[action] = currentPair.value
+        strategyStore.acquire(_lockKey(action))  // 校准: 恢复/切换后重建当前 pair 的锁
         const cur = continuousExecutionStatus.value[action]
         if (!cur || cur.status !== 'running') continuousExecutionStatus.value[action] = { status: 'running' }
         startStatusPolling(action)
@@ -2402,8 +2415,10 @@ async function syncContinuousRunningState() {
     } else if (feTaskId) {
       const st = continuousExecutionStatus.value[action]?.status
       if (st !== 'completed' && st !== 'failed') continuousExecutionStatus.value[action] = null
+      strategyStore.release(_lockKey(action))
       continuousExecutionEnabled.value[action] = false
       continuousExecutionTaskId.value[action] = null
+      continuousExecutionPair.value[action] = null
       stopStatusPolling(action)
     }
   }
@@ -2450,7 +2465,7 @@ async function fetchExecutionStatus(action) {
       isStopping.value[action] = false
       continuousExecutionEnabled.value[action] = false
       stopStatusPolling(action)
-      strategyStore.release(`${props.type}_${action}`)
+      strategyStore.release(_lockKey(action))
 
       if (taskStatus.status === 'completed') {
         notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
@@ -2475,8 +2490,8 @@ onUnmounted(() => {
   stopStatusPolling('opening')
   stopStatusPolling('closing')
   // 组件卸载时释放该 Panel 持有的策略锁（防止导航切换后锁残留）
-  strategyStore.release(`${props.type}_opening`)
-  strategyStore.release(`${props.type}_closing`)
+  strategyStore.release(_lockKey('opening'))
+  strategyStore.release(_lockKey('closing'))
 })
 </script>
 

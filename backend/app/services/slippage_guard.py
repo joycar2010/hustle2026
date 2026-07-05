@@ -179,7 +179,7 @@ async def _write_event_and_notify(
                     "sp": actual_spread,
                     "sl": slippage,
                     "lv": level,
-                    "oid": binance_order_id,
+                    "oid": str(binance_order_id) if binance_order_id is not None else None,  # 列为 varchar, 币安order_id是int必须转str(否则asyncpg DataError整条写库失败)
                     "bap": binance_avg_price,
                     "bbp": bybit_avg_price,
                 },
@@ -189,22 +189,26 @@ async def _write_event_and_notify(
         logger.error(f"[SLIPPAGE_GUARD] failed to write event: {e}")
 
     # 2. 发送飞书
+    # 修(20260622): RiskAlertService 无模块级单例(只有类,需传 db 构造),原 `import risk_alert_service`
+    # 恒报 ImportError 致滑点告警从不发出。改为 RiskAlertService(db) 实例化(与 broadcast_tasks 同口径)。
     try:
-        from app.services.risk_alert_service import risk_alert_service
+        from app.core.database import AsyncSessionLocal
+        from app.services.risk_alert_service import RiskAlertService
         template_key = (
             "slippage_warning_alert" if level == 1 else "slippage_critical_alert"
         )
-        await risk_alert_service._send_alert(
-            user_id=user_id,
-            template_key=template_key,
-            variables={
-                "pair_code": pair_code,
-                "strategy_type": strategy_type,
-                "threshold": f"{spread_threshold:.4f}" if spread_threshold else "0",
-                "actual_spread": f"{actual_spread:.4f}",
-                "slippage": f"{slippage:.4f}",
-            },
-        )
+        async with AsyncSessionLocal() as db:
+            await RiskAlertService(db)._send_alert(
+                user_id=user_id,
+                template_key=template_key,
+                variables={
+                    "pair_code": pair_code,
+                    "strategy_type": strategy_type,
+                    "threshold": f"{spread_threshold:.4f}" if spread_threshold else "0",
+                    "actual_spread": f"{actual_spread:.4f}",
+                    "slippage": f"{slippage:.4f}",
+                },
+            )
     except Exception as e:
         logger.error(f"[SLIPPAGE_GUARD] feishu notify failed: {e}")
 

@@ -7,7 +7,9 @@ from typing import Optional, List
 from app.core.database import get_db
 from app.core.security import get_current_user_id
 import json
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DEFAULT_MULTIPLIER_OPTIONS = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
@@ -133,5 +135,41 @@ async def toggle_hedge_ratio(
             text("UPDATE users SET hedge_ratio_enabled=:enabled WHERE user_id=:uid"),
             {"enabled": body.enabled, "uid": body.user_id}
         )
+    # 关闭对冲倍数功能时,同步把该用户【所有】策略的 hedge_multiplier 复位为 1.0。
+    # 必须如此:引擎下单是无条件 × hedge_multiplier(从不检查 hedge_ratio_enabled),
+    # 残留的非1倍数会造成"后台已关、引擎仍按旧倍数放大对冲"的脱节与残留敞口。
+    multipliers_reset = 0
+    if not body.enabled:
+        _r = await db.execute(
+            text("UPDATE strategy_configs SET hedge_multiplier=1.0, update_time=NOW() "
+                 "WHERE user_id=:uid AND hedge_multiplier IS DISTINCT FROM 1.0"),
+            {"uid": body.user_id}
+        )
+        multipliers_reset = _r.rowcount or 0
     await db.commit()
-    return {"user_id": body.user_id, "hedge_ratio_enabled": body.enabled}
+
+    # 让该用户【运行中】的策略实例立即用 1.0(否则需等下次启动才从DB读到1.0)。
+    # 执行器与本请求同一事件循环, 属性赋值原子安全; 不改核心交易循环。
+    runtime_reset = 0
+    if not body.enabled:
+        try:
+            from app.services.execution_task_manager import execution_task_manager
+            for _ex in list(execution_task_manager.executors.values()):
+                try:
+                    if str(getattr(_ex, "user_id", "")) == str(body.user_id) and getattr(_ex, "hedge_multiplier", 1.0) != 1.0:
+                        _ex.hedge_multiplier = 1.0
+                        runtime_reset += 1
+                except Exception:
+                    continue
+        except Exception as _e:
+            logger.warning(f"[hedge-toggle] runtime hedge_multiplier reset failed for {body.user_id}: {_e}")
+
+    if not body.enabled:
+        logger.info(f"[hedge-toggle] disabled user={body.user_id}: reset {multipliers_reset} DB config(s) + {runtime_reset} running executor(s) hedge_multiplier->1.0")
+
+    return {
+        "user_id": body.user_id,
+        "hedge_ratio_enabled": body.enabled,
+        "multipliers_reset": multipliers_reset,
+        "runtime_reset": runtime_reset,
+    }

@@ -263,7 +263,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
@@ -308,6 +308,7 @@ const alertSettings = ref({
 
 // Recent Orders
 const recentOrders = ref([])
+let fallbackTimer = null   // WS 断线时的 REST 兜底轮询(看门狗判死→connected翻false即启动)
 
 onMounted(async () => {
   // Ensure WebSocket connection
@@ -323,6 +324,24 @@ onMounted(async () => {
 
   // Note: Removed 30s polling - now using WebSocket risk_metrics messages
   // Backend broadcasts risk_metrics every 30s via WebSocket
+})
+
+// WS 断开时启动 REST 兜底(5s 刷最近成交 + 告警计数),恢复即停。
+// 配合数据活性看门狗:半开假死时 connected 会被翻成 false → 这里接管,列表不再静默冻结。
+function _pollRiskFallback() {
+  fetchRecentOrders()
+  riskMetrics.value.activeAlerts = notificationStore.riskAlerts.length
+}
+watch(() => marketStore.connected, (val) => {
+  if (val) {
+    if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null }
+  } else if (!fallbackTimer) {
+    fallbackTimer = setInterval(_pollRiskFallback, 5000)
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null }
 })
 
 // Watch for pair changes — refetch settings for that pair

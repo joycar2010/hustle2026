@@ -1,0 +1,288 @@
+<template>
+  <div class="p-4 space-y-4 text-text-primary">
+    <!-- 标题 + 刷新 -->
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-bold">策略进程监控</h1>
+        <p class="text-xs text-text-tertiary mt-0.5">所有在交易的用户 × 产品对 · 进程活性 / 三源对账（只读）</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-1 text-[11px]"
+          :class="liveMode ? 'text-green-400' : 'text-text-tertiary'">
+          <span class="w-1.5 h-1.5 rounded-full" :class="liveMode ? 'bg-green-500 animate-pulse' : 'bg-gray-500'"></span>
+          {{ liveMode ? '实时推送' : '轮询' }}
+        </span>
+        <span class="text-[11px] text-text-tertiary">{{ lastUpdated }}</span>
+        <button @click="fetchAll" :disabled="loading"
+          class="px-2.5 py-1 bg-dark-200 hover:bg-dark-50 rounded-lg text-xs transition-colors disabled:opacity-50">
+          <span :class="loading && 'animate-spin inline-block'">⟳</span> 刷新
+        </button>
+      </div>
+    </div>
+
+    <!-- ① 全局概览条 -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div class="bg-dark-100 rounded-xl p-3 border border-border-primary">
+        <div class="text-[11px] text-text-tertiary">在交易用户</div>
+        <div class="text-2xl font-bold font-mono">{{ summary.trading_users ?? '--' }}</div>
+      </div>
+      <div class="bg-dark-100 rounded-xl p-3 border border-border-primary">
+        <div class="text-[11px] text-text-tertiary">活跃产品对</div>
+        <div class="text-2xl font-bold font-mono">{{ summary.active_pairs ?? '--' }}</div>
+      </div>
+      <div class="bg-dark-100 rounded-xl p-3 border border-border-primary">
+        <div class="text-[11px] text-text-tertiary">运行中进程</div>
+        <div class="text-2xl font-bold font-mono text-green-400">{{ summary.running_processes ?? '--' }}</div>
+      </div>
+      <div class="bg-dark-100 rounded-xl p-3 border"
+        :class="(summary.abnormal_processes>0) ? 'border-red-800/60 bg-red-900/10' : 'border-border-primary'">
+        <div class="text-[11px] text-text-tertiary">异常进程</div>
+        <div class="text-2xl font-bold font-mono" :class="(summary.abnormal_processes>0)?'text-red-400':'text-text-secondary'">
+          {{ summary.abnormal_processes ?? '--' }}
+        </div>
+      </div>
+      <div class="bg-dark-100 rounded-xl p-3 border border-border-primary">
+        <div class="text-[11px] text-text-tertiary">留存库存用户</div>
+        <div class="text-2xl font-bold font-mono text-amber-400">{{ summary.inventory_users ?? '--' }}</div>
+      </div>
+      <div class="bg-dark-100 rounded-xl p-3 border"
+        :class="(summary.abnormal_cells>0) ? 'border-red-800/60 bg-red-900/10' : 'border-border-primary'">
+        <div class="text-[11px] text-text-tertiary">异常单元</div>
+        <div class="text-2xl font-bold font-mono" :class="(summary.abnormal_cells>0)?'text-red-400':'text-text-secondary'">
+          {{ summary.abnormal_cells ?? '--' }}
+        </div>
+      </div>
+    </div>
+
+    <!-- 连接/错误提示 -->
+    <div v-if="errMsg" class="text-xs text-red-400 bg-red-900/20 border border-red-800/40 rounded px-3 py-2">
+      {{ errMsg }}
+    </div>
+
+    <!-- ② 用户 × 对 矩阵 -->
+    <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border-primary flex items-center justify-between">
+        <span class="text-sm font-semibold">进程 / 持仓 明细</span>
+        <span class="text-[11px] text-text-tertiary">{{ matrix.length }} 个单元</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-text-tertiary border-b border-border-secondary">
+              <th class="text-left px-3 py-2">用户</th>
+              <th class="text-left px-3 py-2">产品对 / 类型</th>
+              <th class="text-left px-3 py-2">活性</th>
+              <th class="text-center px-3 py-2">阶梯</th>
+              <th class="text-right px-3 py-2">MT5 多 / 空</th>
+              <th class="text-right px-3 py-2">Binance 多 / 空</th>
+              <th class="text-left px-3 py-2">对账</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!matrix.length">
+              <td colspan="7" class="text-center py-6 text-text-tertiary">当前无在交易的进程或留存持仓</td>
+            </tr>
+            <template v-for="(c, i) in matrix" :key="i">
+            <tr
+              class="border-b border-border-secondary/40"
+              :class="[rowBg(c.severity), hasDetail(c) && 'cursor-pointer hover:bg-dark-50/40']"
+              @click="hasDetail(c) && toggle(i)">
+              <td class="px-3 py-2 font-medium">
+                <span v-if="hasDetail(c)" class="inline-block w-3 text-text-tertiary">{{ expanded.has(i) ? '▾' : '▸' }}</span>
+                {{ nameOf(c.user_id) }}
+              </td>
+              <td class="px-3 py-2">
+                <span class="font-mono">{{ c.pair_code }}</span>
+                <span v-if="c.kind==='inventory'" class="ml-1 text-[10px] text-amber-400/80">留存库存</span>
+                <span v-else-if="c.processes && c.processes[0]" class="ml-1 text-[10px] text-text-tertiary">
+                  {{ c.processes[0].action }}
+                </span>
+              </td>
+              <td class="px-3 py-2">
+                <template v-if="c.kind==='process' && c.processes && c.processes.length">
+                  <span :class="['inline-flex items-center gap-1', liveColor(c.processes[0].liveness)]">
+                    <span class="w-2 h-2 rounded-full" :class="liveDot(c.processes[0].liveness)"></span>
+                    {{ liveLabel(c.processes[0].liveness) }}
+                    <span v-if="c.processes[0].heartbeat_age_s != null" class="text-text-tertiary">
+                      ({{ c.processes[0].heartbeat_age_s }}s)
+                    </span>
+                  </span>
+                </template>
+                <span v-else class="text-text-tertiary">无进程</span>
+              </td>
+              <td class="px-3 py-2 text-center font-mono">
+                <span v-if="c.processes && c.processes[0] && c.processes[0].current_ladder_index != null">
+                  阶{{ c.processes[0].current_ladder_index }}<span v-if="c.processes[0].total_ladders" class="text-text-tertiary">/{{ c.processes[0].total_ladders }}</span>
+                </span>
+                <span v-else class="text-text-tertiary">—</span>
+              </td>
+              <td class="px-3 py-2 text-right font-mono">
+                <span v-if="c.positions">{{ fmt(c.positions.mt5_long) }} / {{ fmt(c.positions.mt5_short) }}</span>
+                <span v-else class="text-text-tertiary">—</span>
+              </td>
+              <td class="px-3 py-2 text-right font-mono">
+                <span v-if="c.positions">{{ fmt(c.positions.binance_long) }} / {{ fmt(c.positions.binance_short) }}</span>
+                <span v-else class="text-text-tertiary">—</span>
+              </td>
+              <td class="px-3 py-2">
+                <span v-if="!c.reconcile_flags || !c.reconcile_flags.length" class="text-green-400">✓ 正常</span>
+                <span v-for="f in (c.reconcile_flags||[])" :key="f"
+                  class="inline-block mr-1 px-1.5 py-0.5 rounded text-[10px]"
+                  :class="flagClass(f)">{{ flagLabel(f) }}</span>
+              </td>
+            </tr>
+            <!-- P1: 进程详情(阶梯/触发/8组件健康灯) -->
+            <tr v-if="hasDetail(c) && expanded.has(i)" class="bg-dark-200/50 border-b border-border-secondary/40">
+              <td colspan="7" class="px-6 py-3">
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px] mb-2">
+                  <span class="text-text-tertiary">触发计数: <span class="font-mono text-text-primary">{{ c.processes[0].trigger_count ?? '—' }}</span></span>
+                  <span class="text-text-tertiary">阶梯: <span class="font-mono text-text-primary">{{ c.processes[0].current_ladder_index ?? '—' }} / {{ c.processes[0].total_ladders ?? '—' }}</span></span>
+                  <span class="text-text-tertiary">对冲倍数: <span class="font-mono text-text-primary">{{ c.processes[0].hedge_multiplier ?? '—' }}</span></span>
+                  <span class="text-text-tertiary">启动: <span class="font-mono text-text-primary">{{ fmtTime(c.processes[0].started_at) }}</span></span>
+                  <span v-if="c.processes[0].stop_reason" class="text-amber-400">停止原因: {{ c.processes[0].stop_reason }}</span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+                  <div v-for="(comp, ck) in (c.processes[0].components||{})" :key="ck"
+                    class="flex items-center gap-1.5 bg-dark-100 rounded px-2 py-1 border border-border-secondary/50">
+                    <span class="w-2 h-2 rounded-full shrink-0" :class="compDot(comp.state)"></span>
+                    <span class="text-[10px] text-text-secondary">{{ compLabel(ck) }}</span>
+                    <span class="text-[10px] text-text-tertiary ml-auto truncate" :title="comp.detail">{{ comp.detail }}</span>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import api from '@/services/api.js'
+import { useWsStream } from '@/stores/wsStream.js'
+
+const summary = ref({})
+const users = ref([])
+const matrix = ref([])
+const loading = ref(false)
+const errMsg = ref('')
+const lastUpdated = ref('')
+const liveMode = ref(false)   // true=WS实时推送中, false=REST兜底轮询
+let timer = null
+let lastWsApplyAt = 0
+
+const ws = useWsStream()
+
+const nameById = ref({})
+function nameOf(uid) { return nameById.value[uid] || (uid ? uid.slice(0, 8) : '?') }
+
+const expanded = ref(new Set())
+function toggle(i) {
+  const s = new Set(expanded.value)
+  s.has(i) ? s.delete(i) : s.add(i)
+  expanded.value = s
+}
+function hasDetail(c) {
+  return c.kind === 'process' && c.processes && c.processes.length > 0 && c.processes[0].components
+}
+function fmtTime(iso) {
+  if (!iso) return '—'
+  try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }) } catch { return iso }
+}
+function compDot(state) {
+  return { ok: 'bg-green-500', warn: 'bg-amber-500', down: 'bg-red-500 animate-pulse',
+           idle: 'bg-gray-500', unknown: 'bg-gray-600' }[state] || 'bg-gray-600'
+}
+function compLabel(k) {
+  return {
+    execution_loop: '执行循环', trigger_manager: '触发管理', ladder_mapper: '阶梯映射',
+    order_executor: '下单执行', position_manager: '持仓账本', status_pusher: '状态推送',
+    mt5_preflight: 'MT5预检', redis_active_key: '活性键',
+  }[k] || k
+}
+
+function applySnapshot(d, viaWs) {
+  if (!d) return
+  summary.value = d.summary || {}
+  users.value = d.users || []
+  matrix.value = d.matrix || []
+  const m = {}
+  for (const u of users.value) m[u.user_id] = u.username
+  nameById.value = m
+  errMsg.value = ''
+  if (viaWs) { liveMode.value = true; lastWsApplyAt = Date.now() }
+  lastUpdated.value = (viaWs ? '实时 ' : '更新于 ') + new Date().toLocaleTimeString('zh-CN')
+}
+
+async function fetchAll() {
+  // WS 实时数据新鲜(<8s)时跳过轮询,避免覆盖更及时的推送
+  if (liveMode.value && (Date.now() - lastWsApplyAt) < 8000) return
+  loading.value = true
+  try {
+    const r = await api.get('/api/v1/automation/strategies/processes')
+    applySnapshot(r.data || {}, false)
+    liveMode.value = false  // 此刻靠轮询
+  } catch (e) {
+    const st = e.response?.status
+    errMsg.value = st === 403 ? '需要管理员权限' : ('加载失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    loading.value = false
+  }
+}
+
+function fmt(v) {
+  if (v == null) return '0'
+  const n = Number(v)
+  if (!isFinite(n)) return '0'
+  return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(2)
+}
+
+function rowBg(sev) {
+  if (sev === 'critical') return 'bg-red-900/15'
+  if (sev === 'warn') return 'bg-amber-900/10'
+  return ''
+}
+function liveColor(l) {
+  return { running: 'text-green-400', silent: 'text-amber-400', zombie: 'text-red-400',
+           stalled: 'text-red-400', cancelled: 'text-text-tertiary', failed: 'text-red-400',
+           completed: 'text-text-tertiary' }[l] || 'text-text-secondary'
+}
+function liveDot(l) {
+  return { running: 'bg-green-500 animate-pulse', silent: 'bg-amber-500', zombie: 'bg-red-500 animate-pulse',
+           stalled: 'bg-red-500', cancelled: 'bg-gray-500', failed: 'bg-red-500',
+           completed: 'bg-gray-500' }[l] || 'bg-gray-500'
+}
+function liveLabel(l) {
+  return { running: '运行中', silent: '静默', zombie: '僵尸', stalled: '挂死',
+           cancelled: '已取消', failed: '失败', completed: '已完成' }[l] || l
+}
+function flagLabel(f) {
+  return {
+    zombie: '僵尸进程', silent: '心跳静默', single_leg: '单腿暴露',
+    naked_position: '无进程看管', inventory_imbalance: '库存失衡',
+    active_key_orphan: '孤儿活性键', missing_active_key: '缺活性键',
+  }[f] || f
+}
+function flagClass(f) {
+  const crit = ['zombie', 'single_leg', 'inventory_imbalance']
+  return crit.includes(f) ? 'bg-red-900/40 text-red-300' : 'bg-amber-900/40 text-amber-300'
+}
+
+// WS 实时推送:订阅 strategy.processes 频道(后端 stream_hub→Rust hub.broadcast)
+watch(() => ws.channels['strategy.processes'], (payload) => {
+  if (payload) applySnapshot(payload, true)
+})
+
+onMounted(() => {
+  fetchAll()
+  try { ws.connect(); ws.subscribe('strategy.processes') } catch (e) { /* WS 不可用则纯轮询 */ }
+  timer = setInterval(fetchAll, 3000)  // 兜底轮询(WS 新鲜时自动让路)
+})
+onUnmounted(() => {
+  if (timer) { clearInterval(timer); timer = null }
+  try { ws.unsubscribe('strategy.processes') } catch (e) {}
+})
+</script>

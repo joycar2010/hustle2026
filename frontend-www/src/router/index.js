@@ -5,6 +5,7 @@ const routes = [
   { path: '/login', name: 'Login', component: () => import('@/views/Login.vue'), meta: { requiresAuth: false } },
   { path: '/',       name: 'Overview', component: () => import('@/views/Overview.vue'), meta: { requiresAuth: true } },
   { path: '/fund-flow', name: 'FundFlow', component: () => import('@/views/FundFlow.vue'), meta: { requiresAuth: true } },
+  { path: '/manual-ledger', name: 'ManualLedger', component: () => import('@/views/ManualLedger.vue'), meta: { requiresAuth: true } },
   // 20260620: 日/周/月三页已合并进单页收益总览(/), 旧路径重定向到 / 避免书签404
   { path: '/daily',   redirect: '/' },
   { path: '/weekly',  redirect: '/' },

@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hustle2026 · 多端量化套利轻应用</title>
+<link rel="icon" type="image/png" href="/hustle-xau-logo.png" />
+<link rel="apple-touch-icon" href="/hustle-xau-logo.png" />
+<meta name="description" content="Hustle2026 黄金(XAU)跨平台对冲套利多端 Web 轻应用：免安装、手机/平板/PC 一处登录多端通用，实时行情、点差走势、阶梯套利、自动护栏与 AI 智能客服。" />
+<style>
+  :root{
+    --gold:#f0b90b; --gold-2:#ffd34e; --bg:#0b0e11; --bg-1:#12161c; --bg-2:#1a1f27;
+    --line:#252b34; --txt:#e8edf3; --txt-2:#9aa6b2; --txt-3:#67707b; --green:#0ecb81; --red:#f6465d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+  .gold{color:var(--gold)}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;font-weight:700;font-size:15px;transition:.2s;cursor:pointer;border:1px solid transparent}
+  .btn-primary{background:var(--gold);color:#1e2329}
+  .btn-primary:hover{background:var(--gold-2)}
+  .btn-ghost{border-color:var(--line);color:var(--txt)}
+  .btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+  .tag{display:inline-block;font-size:12px;color:var(--gold);background:rgba(240,185,11,.1);border:1px solid rgba(240,185,11,.3);padding:4px 12px;border-radius:999px;font-weight:600}
+
+  /* nav */
+  header{position:sticky;top:0;z-index:40;background:rgba(11,14,17,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}
+  .logo .mark{width:30px;height:30px;border-radius:8px;background:var(--gold);color:#1e2329;display:flex;align-items:center;justify-content:center;font-weight:900}
+  .logo .mark-img{height:34px;width:auto;border-radius:8px;display:block}
+  .nav-links{display:flex;gap:26px;font-size:14px;color:var(--txt-2)}
+  .nav-links a:hover{color:var(--gold)}
+  .nav-cta{display:flex;gap:10px;align-items:center}
+  .burger{display:none;font-size:24px;color:var(--txt)}
+
+  /* hero */
+  .hero{position:relative;padding:84px 0 70px;overflow:hidden;text-align:center}
+  .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(700px 360px at 50% -10%,rgba(240,185,11,.14),transparent 70%);pointer-events:none}
+  .hero h1{font-size:46px;line-height:1.18;font-weight:900;letter-spacing:-.5px;margin:18px auto;max-width:880px}
+  .hero h1 span{color:var(--gold)}
+  .hero .sub{font-size:18px;color:var(--txt-2);max-width:680px;margin:0 auto 14px}
+  .slogan{font-size:15px;color:var(--gold);letter-spacing:4px;margin-bottom:26px;font-weight:700}
+  .hero .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .hero .trust{margin-top:30px;display:flex;gap:26px;justify-content:center;flex-wrap:wrap;color:var(--txt-3);font-size:13px}
+  .hero .trust b{color:var(--txt);font-size:18px;display:block}
+
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  .sec-head{text-align:center;max-width:720px;margin:0 auto 42px}
+  .sec-head h2{font-size:32px;font-weight:800;margin:14px 0 10px}
+  .sec-head p{color:var(--txt-2);font-size:16px}
+
+  .grid{display:grid;gap:18px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:24px;transition:.2s}
+  .card:hover{border-color:rgba(240,185,11,.4);transform:translateY(-3px)}
+  .card .ic{width:46px;height:46px;border-radius:11px;background:rgba(240,185,11,.1);border:1px solid rgba(240,185,11,.22);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+  .card .ic svg{width:24px;height:24px;stroke:var(--gold);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{font-size:17px;margin-bottom:8px}
+  .card p{color:var(--txt-2);font-size:14px}
+
+  /* multi-device */
+  .devices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;text-align:center}
+  .device{background:var(--bg-1);border:1px solid var(--line);border-radius:16px;padding:34px 22px}
+  .device .scr{margin:0 auto 18px;border:2px solid var(--line);border-radius:12px;background:linear-gradient(180deg,var(--bg-2),var(--bg));position:relative;overflow:hidden}
+  .device .scr::after{content:"";position:absolute;left:10%;right:10%;top:16%;height:8px;border-radius:4px;background:rgba(240,185,11,.35);box-shadow:0 16px 0 rgba(154,166,178,.18),0 30px 0 rgba(154,166,178,.12)}
+  .d-phone .scr{width:90px;height:170px}
+  .d-tablet .scr{width:150px;height:160px}
+  .d-pc .scr{width:230px;height:150px}
+  .device h3{font-size:18px;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:8px}
+  .device h3 svg{width:20px;height:20px;stroke:var(--gold);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .device p{color:var(--txt-2);font-size:14px}
+
+  /* AI feature */
+  .ai{background:linear-gradient(135deg,rgba(240,185,11,.08),rgba(14,203,129,.04));border:1px solid rgba(240,185,11,.25);border-radius:18px;padding:42px;display:grid;grid-template-columns:1.1fr .9fr;gap:36px;align-items:center}
+  .ai ul{list-style:none;margin-top:18px;display:grid;gap:12px}
+  .ai li{display:flex;gap:10px;font-size:15px;color:var(--txt)}
+  .ai li .dot{color:var(--gold);font-weight:900}
+  .ai-mock{background:var(--bg);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .ai-mock .bar{display:flex;align-items:center;gap:8px;padding:12px 14px;background:var(--bg-2);border-bottom:1px solid var(--line);font-size:13px;font-weight:700}
+  .ai-mock .bar .h{width:24px;height:24px;border-radius:6px;background:var(--gold);color:#1e2329;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px}
+  .ai-mock .body{padding:16px;display:grid;gap:10px;font-size:13px}
+  .bub{max-width:85%;padding:9px 12px;border-radius:10px;line-height:1.5}
+  .bub.u{justify-self:end;background:rgba(240,185,11,.14);border:1px solid rgba(240,185,11,.3)}
+  .bub.a{justify-self:start;background:var(--bg-2);border:1px solid var(--line);color:var(--txt-2)}
+
+  /* modules showcase */
+  .mod{display:flex;gap:14px;align-items:flex-start;background:var(--bg-1);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .mod .n{flex:0 0 auto;width:34px;height:34px;border-radius:8px;background:var(--bg-2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:800}
+  .mod h3{font-size:15px;margin-bottom:4px}
+  .mod p{color:var(--txt-2);font-size:13px}
+
+  /* pricing */
+  .plans{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;max-width:760px;margin:0 auto}
+  .plan{background:var(--bg-1);border:1px solid var(--line);border-radius:16px;padding:30px;position:relative}
+  .plan.feat{border-color:var(--gold);box-shadow:0 0 0 1px rgba(240,185,11,.3)}
+  .plan .badge{position:absolute;top:-12px;left:30px;background:var(--gold);color:#1e2329;font-size:12px;font-weight:800;padding:4px 12px;border-radius:999px}
+  .plan h3{font-size:20px;margin-bottom:6px}
+  .plan .price{font-size:15px;color:var(--txt-2);margin-bottom:16px}
+  .plan ul{list-style:none;display:grid;gap:10px;margin-bottom:20px}
+  .plan li{font-size:14px;color:var(--txt-2);display:flex;gap:8px}
+  .plan li::before{content:"✓";color:var(--green);font-weight:900}
+
+  /* legal */
+  .legal{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:26px;color:var(--txt-3);font-size:13px;line-height:1.8}
+  .legal b{color:var(--txt-2)}
+  .legal-links{margin-top:18px;text-align:center}
+
+  /* modal */
+  .modal-mask{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.62);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px}
+  .modal-mask.open{display:flex}
+  .modal-box{background:var(--bg-1);border:1px solid var(--line);border-radius:16px;width:100%;max-width:760px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
+  .modal-head h3{font-size:18px;color:var(--gold)}
+  .modal-head .x{background:none;border:none;color:var(--txt-2);font-size:26px;cursor:pointer;line-height:1}
+  .modal-head .x:hover{color:var(--txt)}
+  .modal-body{padding:24px 26px;overflow-y:auto;font-size:13.5px;color:var(--txt-2);line-height:1.95}
+  .modal-body .lead{color:var(--txt-2);margin-bottom:6px}
+  .modal-body h4{color:var(--txt);font-size:15px;margin:20px 0 6px}
+  .modal-body p{margin-bottom:7px}
+  .modal-body .warn{color:var(--gold)}
+  .modal-foot{padding:16px 22px;border-top:1px solid var(--line);text-align:right}
+
+  @media (max-width:900px){
+    .g4{grid-template-columns:repeat(2,1fr)}
+    .g3{grid-template-columns:repeat(2,1fr)}
+    .ai{grid-template-columns:1fr;padding:28px}
+    .hero h1{font-size:34px}
+    .nav-links{display:none}
+    .nav-links.open{display:flex;flex-direction:column;align-items:flex-start;position:fixed;top:62px;left:0;right:0;background:var(--bg-1);border-bottom:1px solid var(--line);padding:16px 22px;gap:18px;z-index:39;box-shadow:0 12px 24px rgba(0,0,0,.4)}
+    .burger{display:block}
+  }
+  @media (max-width:600px){
+    .g4,.g3,.g2,.plans,.devices{grid-template-columns:1fr}
+    .hero{padding:56px 0 46px}
+    .hero h1{font-size:28px}
+    .sec-head h2{font-size:25px}
+    section{padding:48px 0}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="logo" href="#top"><img class="mark-img" src="/hustle-xau-logo.png" alt="Hustle2026 XAU" /> Hustle<span class="gold">2026</span></a>
+      <div class="nav-links" onclick="this.classList.remove('open')">
+        <a href="#features">核心功能</a>
+        <a href="#devices">多端轻应用</a>
+        <a href="#ai">AI 客服</a>
+        <a href="#modules">功能模块</a>
+        <a href="#plans">版本授权</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-primary" href="https://testgo.hustle2026.xyz/" target="_blank">登录控制台</a>
+        <span class="burger" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</span>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="wrap">
+      <span class="tag">黄金(XAU)跨平台对冲套利 · 多端 Web 轻应用</span>
+      <h1>把专业量化套利<br>装进<span>手机 · 平板 · PC</span></h1>
+      <p class="sub">免下载、免安装，打开浏览器即用。一处登录多端通用，实时行情、点差走势、阶梯套利、自动护栏与 AI 智能客服，一站集成。</p>
+      <div class="slogan">简单 · 实用 · 高效 · 安全 · 稳定</div>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://testgo.hustle2026.xyz/" target="_blank">▶ 立即打开轻应用</a>
+        <a class="btn btn-ghost" href="#features">了解核心功能</a>
+      </div>
+      <div class="trust">
+        <div><b>5+</b> 支持交易平台</div>
+        <div><b>7×24</b> 实时监控不掉线</div>
+        <div><b>3 端</b> 自适应同一体验</div>
+        <div><b>AI</b> 智能客服随时答疑</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">核心功能</span>
+        <h2>一套轻应用，覆盖套利全流程</h2>
+        <p>从行情监控到对冲执行，从风控护栏到数据复盘，专业能力全部 Web 化。</p>
+      </div>
+      <div class="grid g4">
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></div>
+          <h3>多平台多账户</h3><p>Binance / Bybit / IC Markets MT5 / Gate.io / OKX 同屏监控，主腿与对冲腿双向对冲。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+          <h3>云端安全</h3><p>API 密钥加密存储、敏感金额一键遮罩、角色权限分级，账户安全可控。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>自动护栏</h3><p>强平收口、滑点二级暂停、行情背离软暂停、休市自动停 / 开市自动恢复。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg></div>
+          <h3>行情与点差分析</h3><p>实时盘口、点差(基差)走势、布林统计、强平距离与延迟监控。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><polygon points="13 2 4 14 11 14 10 22 20 9 13 9 13 2"/></svg></div>
+          <h3>极速执行</h3><p>maker 限价 + 触发计数防插针 + WebSocket 实时推送，低延迟稳定下单。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 20h4v-5h4v-5h4v-5h6"/></svg></div>
+          <h3>阶梯套利策略</h3><p>正向/反向、开/平四类策略一键启停，累计阶梯分档加减仓，进度实时可见。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="14" y2="15"/></svg></div>
+          <h3>数据统计</h3><p>逐笔成交盈亏、平均点差、阶梯进度账本、持仓与权益汇总一目了然。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></div>
+          <h3>定制服务</h3><p>支持代理 / OEM / API 对接与功能定制，满足团队与机构化需求。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEVICES -->
+  <section id="devices">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">多端轻应用</span>
+        <h2>免安装，一处登录多端通用</h2>
+        <p>纯 Web 轻应用，功能随云端实时更新、永远最新版；断网自动重连，弱网也能用。</p>
+      </div>
+      <div class="devices">
+        <div class="device d-phone"><div class="scr"></div><h3><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg> 手机</h3><p>单列布局 + 底部「账户 / 风险」浮动按钮，AI 客服悬浮球随手可达，地铁里也能盯盘。</p></div>
+        <div class="device d-tablet"><div class="scr"></div><h3><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg> 平板</h3><p>双栏自适应，触控滑动顺手，行情与策略面板并排查看，移动办公两不误。</p></div>
+        <div class="device d-pc"><div class="scr"></div><h3><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> PC</h3><p>三栏专业布局（账户 / 行情策略 / 风控），键鼠高效操作，复盘下单全掌握。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AI -->
+  <section id="ai">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">特色 · AI 智能客服</span>
+        <h2>内置 Hustle AI 助手，随时答疑</h2>
+        <p>右下角悬浮球随时唤起，7×24 中文实时解答平台用法、套利流程与阶梯策略。</p>
+      </div>
+      <div class="ai">
+        <div>
+          <h3 style="font-size:22px">不懂就问，秒级响应</h3>
+          <ul>
+            <li><span class="dot">●</span> 实时流式逐字回答，体验如真人对话</li>
+            <li><span class="dot">●</span> 保留对话上下文，历史记录可查 / 可删 / 可清空</li>
+            <li><span class="dot">●</span> 知识库独立，仅基于本应用内容应答，不串站不跑题</li>
+            <li><span class="dot">●</span> 每用户限频防滥用，绝不泄露密钥 / 密码 / 会话信息</li>
+            <li><span class="dot">●</span> 由后台统一配置更新，问答口径始终与功能同步</li>
+          </ul>
+          <div style="margin-top:22px"><a class="btn btn-primary" href="#" onclick="var b=document.getElementById('hustle-chat-btn');if(b)b.click();return false;">💬 唤起 AI 客服试试</a></div>
+        </div>
+        <div class="ai-mock">
+          <div class="bar"><span class="h">H</span> Hustle · AI 助手 <span style="margin-left:auto;color:var(--txt-3);font-weight:500">在线</span></div>
+          <div class="body">
+            <div class="bub u">阶梯策略是怎么加仓的？</div>
+            <div class="bub a">按「累计总手数」分档：点差越大解锁越高档，从低到高逐档填满；每笔下单量受该档剩余容量和「每笔手数」共同限制，分多笔慢慢吃。</div>
+            <div class="bub u">为什么弹出红色强平弹框？</div>
+            <div class="bub a">对冲腿被强平、主腿裸露时会提示「确认收口」，以主账户 maker 限价平掉裸露主腿…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODULES -->
+  <section id="modules">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">功能模块</span>
+        <h2>核心模块一览</h2>
+        <p>登录控制台后，以下模块均已 Web 化、多端自适应。</p>
+      </div>
+      <div class="grid g2">
+        <div class="mod"><div class="n">1</div><div><h3>控制面板</h3><p>三栏布局：账户状态 · 实时行情卡片 + 正/反套利策略面板 · 风险仪表盘。</p></div></div>
+        <div class="mod"><div class="n">2</div><div><h3>点差走势</h3><p>点差(基差)历史折线 + 多档时间范围，对照开/平阈值把握进出场节奏。</p></div></div>
+        <div class="mod"><div class="n">3</div><div><h3>全局持仓</h3><p>所有产品对跨平台持仓只读总览，含强平价、距离与费率信息。</p></div></div>
+        <div class="mod"><div class="n">4</div><div><h3>挂单查询</h3><p>按来源/状态筛选当前与历史挂单，支持人工补单与实时推送。</p></div></div>
+        <div class="mod"><div class="n">5</div><div><h3>风控仪表盘</h3><p>保证金率 / 风险率 / 权益汇总，分级预警一眼看清。</p></div></div>
+        <div class="mod"><div class="n">6</div><div><h3>AI 智能客服</h3><p>悬浮球随时唤起，独立知识库，答疑平台用法与策略逻辑。</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ADVANTAGES -->
+  <section>
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">技术优势</span>
+        <h2>为什么选择 Hustle2026</h2>
+      </div>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg></div>
+          <h3>多平台适配</h3><p>统一对接多家 CEX 与 MT5 桥，新增平台/产品对配置即生效。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><line x1="12" y1="3" x2="12" y2="21"/><line x1="5" y1="7" x2="19" y2="7"/><path d="M5 7l-3 6h6z"/><path d="M19 7l-3 6h6z"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+          <h3>双腿对冲分散风险</h3><p>A 腿 CEX + B 腿 MT5 同步对冲，单腿保护与背离软暂停层层兜底。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="9" cy="8" r="2.4"/><circle cx="15" cy="16" r="2.4"/></svg></div>
+          <h3>灵活可配 · 热生效</h3><p>阶梯档位、点差阈值、触发次数运行中保存即热加载，无需停机。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANS -->
+  <section id="plans">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">版本与授权</span>
+        <h2>一次授权，多设备通用</h2>
+        <p>已授权用户无需重复购买；具体价格与开通请通过页面客服联系。</p>
+      </div>
+      <div class="plans">
+        <div class="plan feat">
+          <span class="badge">常用选择</span>
+          <h3>单币种对冲套利版</h3>
+          <div class="price">黄金(XAU)对冲套利 · 价格以客服报价为准</div>
+          <ul>
+            <li>多平台多账户实时监控</li>
+            <li>正/反向阶梯套利策略</li>
+            <li>全套自动护栏与强平预警</li>
+            <li>AI 智能客服 + 多端轻应用</li>
+            <li>一次授权，多设备通用</li>
+          </ul>
+          <a class="btn btn-primary" href="https://testgo.hustle2026.xyz/" target="_blank">立即开通 / 体验</a>
+        </div>
+        <div class="plan">
+          <h3>高级版 / 多币种</h3>
+          <div class="price">更多品种与高级策略</div>
+          <ul>
+            <li>多币种 / 多品种对冲</li>
+            <li>更丰富的策略模板</li>
+            <li>机构化与定制能力</li>
+            <li>专属支持</li>
+          </ul>
+          <a class="btn btn-ghost" href="#">敬请期待</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LEGAL -->
+  <section>
+    <div class="wrap" style="max-width:900px">
+      <div class="sec-head"><span class="tag">法律声明</span><h2>风险提示与服务性质</h2></div>
+      <div class="legal">
+        <b>服务性质：</b>本平台为<b>纯技术工具服务</b>，仅提供行情监控、数据对比与交易执行辅助，<b>不构成任何投资建议</b>，不提供金融服务，不保证盈利。<br>
+        <b>平台中立：</b>本工具不参与用户与第三方交易平台之间的资金往来，账户与资金安全由用户自行负责。<br>
+        <b>风险警示：</b>杠杆交易风险较高，可能导致本金损失，请在充分了解风险后<b>自行评估、谨慎决策并自担风险</b>。<br>
+        <b>合法使用：</b>请在所在国家/地区法律法规允许的范围内使用本工具，因违规使用产生的一切后果由使用者承担。
+      </div>
+      <div class="legal-links">
+        <a class="btn btn-ghost" href="#" onclick="openAgreement();return false;">《软件服务协议》</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer style="border-top:1px solid var(--line);padding:34px 0;color:var(--txt-3);font-size:13px">
+  <div class="wrap">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;align-items:center">
+      <div><span class="logo" style="font-size:16px"><img class="mark-img" src="/hustle-xau-logo.png" alt="Hustle2026" style="height:26px" /> Hustle<span class="gold">2026</span></span></div>
+      <div>多端量化套利轻应用 · 行情监控 / 对冲套利 / 风控护栏 / AI 客服</div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);text-align:center;line-height:2.1;font-size:12px;color:var(--txt-3)">
+      <div>© 2026 Hustle2026　保留所有权利 All Rights Reserved</div>
+      <div>客服邮箱：support@hustle2026.xyz　|　商务 / 客服 QQ：000000000　|　联系电话：+86 000-0000-0000　<span>（占位，待补）</span></div>
+      <div><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color:var(--txt-3)">浙ICP备 0000000000 号-0</a>　|　浙公网安备 00000000000000 号　<span>（占位，待补）</span></div>
+    </div>
+  </div>
+</footer>
+
+<!-- 软件服务协议 弹窗 -->
+<div id="agreement-mask" class="modal-mask" onclick="if(event.target===this)closeAgreement()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>软件服务协议</h3>
+      <button class="x" onclick="closeAgreement()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="lead">本协议由您（甲方，下称"用户"）与 Hustle2026（乙方，app.hustle2026.xyz 多端量化套利轻应用之提供方，下称"本平台"）共同订立。用户点击"我已阅读并知悉"或实际使用本服务，即视为已充分阅读、理解并同意本协议全部条款。</p>
+
+      <h4>第一条　声明与承诺</h4>
+      <p>1.1 用户为具备完全民事行为能力的自然人或合法设立的组织，所用资金为合法、自有且为闲置资金，并具备相应的风险识别与承受能力。</p>
+      <p>1.2 用户理解：量化 / 自动化交易仅为辅助工具，市场存在不确定性，交易结果<b>可能盈利，也可能亏损</b>。一切经本软件辅助发出的交易指令，均视为用户本人自主决策并发出，由此产生的盈亏与后果由用户自行承担。</p>
+      <p>1.3 用户承诺尊重本平台知识产权，不得复制、反编译、逆向工程、出租、转售、转让或以其他方式非法使用本软件。</p>
+      <p>1.4 用户应自行遵守其所接入各交易平台的规则；因违反平台规则导致的冻结账户、扣留收益等后果由用户承担。</p>
+      <p>1.5 本平台不提供任何投资建议，不代理操作用户资金，软件仅为辅助交易之技术工具，本平台拥有软件相关知识产权且不与用户分享盈亏。</p>
+
+      <h4>第二条　服务内容与费用</h4>
+      <p>2.1 本平台为付费软件服务，用户完成约定费用支付后获得相应使用授权；一次授权可在手机、平板、PC 多端通用。</p>
+      <p>2.2 本平台在收到费用后于合理时间内开通服务。除法律强制性规定或双方另有约定外，已收取的服务费用<b>一经支付不予退还</b>。</p>
+      <p>2.3 本平台有权根据运营需要对软件功能进行升级、调整与维护。</p>
+
+      <h4>第三条　双方权利与义务</h4>
+      <p>3.1 用户应妥善保管账号与密码，不得向第三方泄露或出借账号；因保管不善造成的损失由用户承担。</p>
+      <p>3.2 本平台软件以"现状"和"可提供"的基础提供，在法律允许范围内不对其适用性、连续性、无错误作出明示或默示担保。</p>
+      <p>3.3 本平台可对运行风险进行必要监控，但不对用户的交易决策及其所接入平台的行为负责。</p>
+
+      <h4>第四条　不可抗力与免责</h4>
+      <p>4.1 因不可抗力、第三方服务（交易所、网络、行情源、中转服务等）故障、用户设备或网络问题、恶意程序攻击、监管政策变化等非本平台可控原因导致的服务中断或损失，本平台不承担责任。</p>
+      <p>4.2 交易固有风险（滑点、点差波动、平台风控、强制平仓、本金损失等）不属于本平台责任范围。</p>
+
+      <h4>第五条　违约责任</h4>
+      <p>5.1 用户未按约支付费用的，本平台有权暂停或终止服务。</p>
+      <p>5.2 用户违反知识产权或保密义务的，本平台有权终止服务、追回费用，并要求用户支付相当于本协议总服务费用<b>【五倍】</b>的违约金；造成损失的，应另行赔偿。</p>
+
+      <h4>第六条　争议解决</h4>
+      <p>6.1 本协议的订立、效力、解释与履行均适用中华人民共和国法律。</p>
+      <p>6.2 因本协议引起的争议，双方应友好协商；协商不成的，任一方可向本平台所在地有管辖权的人民法院提起诉讼。</p>
+
+      <h4>第七条　其他</h4>
+      <p>7.1 本协议自用户点击同意或实际使用本服务之时起生效，至授权服务期限届满或依约终止时自动终止。</p>
+      <p>7.2 本协议未尽事宜，双方可另行协商签订补充协议，补充协议与本协议具有同等效力。</p>
+      <p class="warn">7.3 风险提示：杠杆交易风险较高，可能导致本金损失，请在合法合规前提下自行评估并谨慎决策。本协议为软件技术服务协议，不构成任何投资建议或盈利承诺。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" onclick="closeAgreement()">我已阅读并知悉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openAgreement(){document.getElementById('agreement-mask').classList.add('open');document.body.style.overflow='hidden';}
+  function closeAgreement(){document.getElementById('agreement-mask').classList.remove('open');document.body.style.overflow='';}
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAgreement();});
+</script>
+
+<!-- Hustle AI 智能客服（独立知识库 site=app） -->
+<script src="/hustle-chat.js" data-site="app"></script>
+</body>
+</html>

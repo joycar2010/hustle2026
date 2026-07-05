@@ -889,6 +889,7 @@ class ManualOrderRequest(BaseModel):
     price: Optional[float] = None  # custom price; None = auto (bid/ask)
     order_type: Optional[str] = None  # "maker" or "taker"; None = auto
     request_id: Optional[str] = None  # client-supplied idempotency / WS-correlation id
+    confirm_duplicate: Optional[bool] = False  # True=用户已对"45s内重复开仓"二次确认, 放行
 
 
 
@@ -910,6 +911,36 @@ async def _push_position_after_trade(user_id: str):
 _manual_inflight: dict = {}        # (user_id, action, pair_code) -> expiry_monotonic
 _MANUAL_INFLIGHT_TTL = 6.0
 _manual_bg_tasks: set = set()
+
+# ── 重复开仓二次确认(2026-06-26): 前端 inflight 防重入是第一道; 此为后端兜底第二道。
+# 对【同用户+同交易所+同方向+同量+同对】的【手动开仓】, 在更长窗口内若再次提交且未带
+# confirm_duplicate=True, 返回 409 + code=DUPLICATE_CONFIRM, 由前端弹"X秒内已下过相同单,
+# 确认要再下一笔吗?"二次确认; 用户确认后带 confirm_duplicate=True 重发即放行。
+# 仅作用于开仓(action='order'), 平仓/撤单不拦(平多次安全)。窗口比单飞6s长, 覆盖"相隔较久的
+# 误触/重复提交"(实证 cq001 两笔 SELL 相隔101s)。
+_MANUAL_DUP_WINDOW = 45.0
+_manual_last_open: dict = {}       # fingerprint -> expiry_monotonic
+
+def _manual_open_fingerprint(user_id, exchange, side, pair_code, quantity) -> tuple:
+    try:
+        _q = round(float(quantity), 4)
+    except Exception:
+        _q = quantity
+    return (str(user_id), str(exchange), str(side), str(pair_code), _q)
+
+def _check_manual_dup_open(fp) -> bool:
+    """True=窗口内已有相同开仓指纹(应要求二次确认)。无副作用,不记录。"""
+    now = _time_sf.monotonic()
+    exp = _manual_last_open.get(fp)
+    return bool(exp and exp > now)
+
+def _record_manual_open(fp):
+    now = _time_sf.monotonic()
+    _manual_last_open[fp] = now + _MANUAL_DUP_WINDOW
+    # 顺手清理过期项, 防 dict 无界增长
+    if len(_manual_last_open) > 256:
+        for _k in [k for k, v in _manual_last_open.items() if v <= now]:
+            _manual_last_open.pop(_k, None)
 
 def _claim_manual_inflight(user_id, action, pair_code) -> bool:
     now = _time_sf.monotonic()
@@ -933,7 +964,13 @@ async def _run_manual_execution(user_id, request_id, action, pair_code, legs_fac
     user_id = str(user_id)
     success, results, err = False, [], None
     try:
-        success, results = await legs_factory()
+        # 根因修复(2026-06-24): 给后台 _legs 加硬超时, 杜绝"代理/事件循环抖动致后台任务静默挂死、
+        # 既不撤单也不回结果"(实测 cancel-all 14:00/14:02 静默未完成→按钮像失效→用户只能进币安App撤)。
+        # 超时即按失败回推明确结果, 让前端永远有反馈(成功/失败-请重试), 绝不再静默死按钮。
+        success, results = await asyncio.wait_for(legs_factory(), timeout=30.0)
+    except asyncio.TimeoutError:
+        err = '执行超时(网络/代理抖动)，请重试'
+        logger.error(f"[manual:{action}] legs timed out (30s) user={user_id} req={request_id}")
     except Exception as e:
         logger.error(f"[manual:{action}] background exec failed: {e}", exc_info=True)
         err = str(e)
@@ -1176,8 +1213,28 @@ async def place_manual_order(
         # ── single-flight claim BEFORE the ACK (validation already passed) ──
         request_id = (getattr(req, 'request_id', None) or uuid.uuid4().hex)
         action = 'order'
+
+        # ── 重复开仓二次确认(后端兜底): 同账户+同方向+同量+同对 在 45s 窗口内重复开仓,
+        #    且前端未带 confirm_duplicate=True → 409 DUPLICATE_CONFIRM, 让前端弹二次确认。──
+        _dup_fp = _manual_open_fingerprint(
+            current_user.user_id, req.exchange, req.side, req.pair_code, req.quantity)
+        _confirm_dup = bool(getattr(req, 'confirm_duplicate', False))
+        if not _confirm_dup and _check_manual_dup_open(_dup_fp):
+            _side_cn = '买入开多' if req.side == 'buy' else '卖出开空'
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    'code': 'DUPLICATE_CONFIRM',
+                    'message': f'{int(_MANUAL_DUP_WINDOW)}秒内已下过相同的{_side_cn}单'
+                               f'（{req.quantity}）。确认要再下一笔吗？',
+                },
+            )
+
         if not _claim_manual_inflight(current_user.user_id, action, req.pair_code):
             raise HTTPException(status_code=409, detail='重复指令执行中，请勿重复点击')
+
+        # 通过校验+单飞, 记录本次开仓指纹(供 45s 内的重复提交触发二次确认)
+        _record_manual_open(_dup_fp)
 
         async def _legs():
             # Runs AFTER the 202 ACK. Uses only detached account objects +
@@ -1972,32 +2029,49 @@ async def cancel_all_orders(
             results = []
 
             if binance_account:
+                # 根因修复(2026-06-24): 每个 Binance 查单/撤单调用都套 wait_for 硬超时, 杜绝代理/事件循环
+                # 抖动时单个调用挂死拖垮整条 cancel-all(实测主账号币安端静默失效根因)。失败必回明确结果。
+                _manual_cancelled = 0
+                _skipped_strategy = 0
                 try:
                     from app.services.binance_client import BinanceFuturesClient
                     client = BinanceFuturesClient(binance_account.api_key, binance_account.api_secret,
                                                    proxy_url=build_proxy_url(binance_account.proxy_config))
                     try:
-                        open_orders = await client.get_open_orders(_sym_a_open)
+                        # 根因3修复(2026-07-04): get_open_orders 单次8s超时即判整单失败(今晚两次
+                        # cancel-all 均此因, 用户误以为按钮失效)。查单超时多为瞬态代理抖动, 补一次
+                        # 重试(共2次×8s), 明显提高慢网下成功率; 两次都超时才回明确失败文案。
+                        open_orders = None
+                        _last_q_err = None
+                        for _q_try in range(2):
+                            try:
+                                open_orders = await asyncio.wait_for(client.get_open_orders(_sym_a_open), timeout=8.0)
+                                break
+                            except asyncio.TimeoutError as _qe:
+                                _last_q_err = _qe
+                                logger.warning(f"[manual/cancel-all] Binance 查单超时(8s) 第{_q_try+1}/2次 sym={_sym_a_open}")
+                        if open_orders is None:
+                            raise (_last_q_err or asyncio.TimeoutError())
 
                         # SAFETY (方案 A): only cancel manual ("m-" prefix) and
                         # legacy/no-prefix orders. Strategy orders ("s-" prefix) are
                         # owned by the running ContinuousStrategyExecutor and MUST
                         # be preserved — user should stop the strategy from the
                         # strategy panel if they want to cancel those.
-                        skipped_strategy = 0
                         for order in open_orders:
                             coid = str(order.get("clientOrderId", "") or "")
                             if coid.startswith("s-"):
-                                skipped_strategy += 1
+                                _skipped_strategy += 1
                                 continue
                             order_id = order.get("orderId")
-                            result = await order_executor.cancel_binance_order(
-                                binance_account,
-                                _sym_a_open,
-                                order_id
+                            result = await asyncio.wait_for(
+                                order_executor.cancel_binance_order(binance_account, _sym_a_open, order_id),
+                                timeout=8.0,
                             )
 
                             _ok = result.get("success") if isinstance(result, dict) else True
+                            if _ok:
+                                _manual_cancelled += 1
                             results.append({
                                 "leg": PlatformId.BINANCE.key,
                                 "order_id": order_id,
@@ -2005,16 +2079,30 @@ async def cancel_all_orders(
                                 "success": bool(_ok),
                                 "error": None if _ok else (result.get("error") if isinstance(result, dict) else None),
                             })
-                        if skipped_strategy:
+                        if _skipped_strategy:
                             logger.info(
-                                f"[manual/cancel-all] Binance: kept {skipped_strategy} strategy orders "
+                                f"[manual/cancel-all] Binance: kept {_skipped_strategy} strategy orders "
                                 f"(s- prefix). Stop strategy from panel to cancel those."
                             )
+                        logger.info(
+                            f"[manual/cancel-all] Binance done: 撤手动单 {_manual_cancelled} 笔, "
+                            f"保留策略单 {_skipped_strategy} 笔 (sym={_sym_a_open})"
+                        )
                     finally:
                         await client.close()
+                except asyncio.TimeoutError:
+                    logger.error(f"[manual/cancel-all] Binance 查/撤单超时(重试2次后仍超时) sym={_sym_a_open}")
+                    results.append({"leg": PlatformId.BINANCE.key, "success": False,
+                                    "error": "币安查单超时(已重试2次)，未撤任何单，请重试或去币安App手动撤单"})
                 except Exception as e:
                     logger.error(f"Binance cancel orders error: {str(e)}", exc_info=True)
                     results.append({"leg": PlatformId.BINANCE.key, "success": False, "error": str(e)})
+                # 汇总条(供前端明确显示: 撤了几笔手动单 / 保留几笔策略单)
+                results.append({
+                    "leg": PlatformId.BINANCE.key, "kind": "cancel_summary",
+                    "manual_cancelled": _manual_cancelled, "strategy_kept": _skipped_strategy,
+                    "success": True,
+                })
 
             # Cancel hedge-side (MT5) 挂单 via Bridge HTTP。
             # 桥【真实】端点 = POST /mt5/cancel-all (按 symbol 撤该 symbol 全部挂单)。

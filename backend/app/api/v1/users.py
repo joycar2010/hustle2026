@@ -94,6 +94,55 @@ async def update_current_user(
     return user
 
 
+@router.post("/me/feishu-lookup", status_code=status.HTTP_200_OK)
+async def lookup_own_feishu_id(
+    payload: dict,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """按手机号解析当前用户自己的飞书 Open ID / Union ID（用户自助，无需管理员）。
+
+    供 testgo 用户端「编辑个人信息」弹框的「获取飞书ID」按钮调用，复用飞书服务
+    get_user_by_mobile。与管理员端 /users/feishu-lookup 区别：仅鉴权登录、不校验管理员角色。
+    """
+    mobile = (str(payload.get("mobile") or "")).strip()
+    if not mobile:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="手机号不能为空")
+
+    from app.services.feishu_service import get_feishu_service
+    feishu = get_feishu_service()
+    if feishu is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="飞书服务未配置，请联系管理员在系统管理-通知服务中填入 App ID/Secret",
+        )
+
+    try:
+        result = await feishu.get_user_by_mobile(mobile)
+    except Exception as e:
+        logger.exception("[me/feishu-lookup] lookup failed")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"飞书 API 调用异常: {e}")
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.get("error") or "未查到该手机号的飞书用户",
+        )
+
+    user = result.get("user") or {}
+    open_id = user.get("open_id") or user.get("openid")
+    union_id = user.get("union_id")
+    return {
+        "ok": True,
+        "mobile": mobile,
+        "open_id": open_id,
+        "union_id": union_id,
+        "feishu_open_id": open_id,
+        "feishu_union_id": union_id,
+        "name": user.get("name"),
+    }
+
+
 @router.put("/password", status_code=status.HTTP_200_OK)
 async def change_password(
     password_change: PasswordChange,

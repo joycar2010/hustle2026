@@ -1357,7 +1357,7 @@ async def execute_continuous_opening(
         order_executor_v2.max_retries = api_retry_times
         order_executor_v2.order_check_interval = order_check_interval
         order_executor_v2.spread_check_interval = spread_check_interval
-        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.35)  # 默认0.5→0.35: 与 incremental_hedge.json 统一; TimingConfig 暂无此字段故恒取默认
+        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.29)  # 默认0.5→0.35→0.29(20260621): 与 incremental_hedge.json 统一; TimingConfig 暂无此字段故恒取默认
         order_executor_v2.spread_cancel_tolerance = _spread_cancel_tolerance
         order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
         order_executor_v2.api_retry_delay = api_retry_delay
@@ -1598,7 +1598,7 @@ async def execute_continuous_closing(
         order_executor_v2.max_retries = api_retry_times
         order_executor_v2.order_check_interval = order_check_interval
         order_executor_v2.spread_check_interval = spread_check_interval
-        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.35)  # 默认0.5→0.35: 与 incremental_hedge.json 统一; TimingConfig 暂无此字段故恒取默认
+        _spread_cancel_tolerance = timing_config.get('spread_cancel_tolerance', 0.29)  # 默认0.5→0.35→0.29(20260621): 与 incremental_hedge.json 统一; TimingConfig 暂无此字段故恒取默认
         order_executor_v2.spread_cancel_tolerance = _spread_cancel_tolerance
         order_executor_v2.mt5_deal_sync_wait = mt5_deal_sync_wait
         order_executor_v2.api_retry_delay = api_retry_delay
@@ -1811,6 +1811,162 @@ async def get_all_execution_tasks(
         "success": True,
         "tasks": tasks
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Strategy mechanisms aggregate (read-only, no hot-path instrumentation)
+# 供前端「系统状态监控」面板图形化展示策略各机制运行状态。
+# 全部读现成状态源(Redis 键 / execution_task_manager 单例属性 / 现有 service),
+# 绝不插桩 continuous_executor 热执行路径。
+# ──────────────────────────────────────────────────────────────────────
+@router.get("/mechanisms/{pair_code}")
+async def get_strategy_mechanisms(
+    pair_code: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """聚合返回某 (user, pair) 下所有策略机制的实时只读状态。"""
+    import time as _time
+    from app.services.execution_task_manager import execution_task_manager
+
+    result = {
+        "pair_code": pair_code,
+        "running_tasks": [],
+        "mechanisms": {},
+    }
+
+    # ── 运行中任务 + 每任务的执行器只读属性(停市/看门狗/当前阶梯) ──
+    prefix = f"{user_id}_{pair_code}_"
+    market_close_stopped = False
+    market_close_detail = []
+    hb_worst_age = None       # 最久未心跳(秒)
+    hb_stale = False
+    ladder_by_type = {}
+    try:
+        all_tasks = execution_task_manager.get_all_tasks() or {}
+        for _tid, _info in all_tasks.items():
+            if not isinstance(_info, dict):
+                continue
+            _sid = _info.get("strategy_id", "") or ""
+            if not _sid.startswith(prefix):
+                continue
+            _stype = ""
+            for _k in ("reverse_opening", "reverse_closing", "forward_opening", "forward_closing"):
+                if _k in _sid:
+                    _stype = _k
+                    break
+            _exec = execution_task_manager.executors.get(_tid)
+            _hb_age = None
+            if _exec is not None:
+                # 心跳新鲜度
+                _hb = getattr(_exec, "_last_heartbeat", None)
+                if _hb is not None:
+                    _hb_age = round(_time.monotonic() - _hb, 1)
+                    if hb_worst_age is None or _hb_age > hb_worst_age:
+                        hb_worst_age = _hb_age
+                    if _hb_age > 120:
+                        hb_stale = True
+                # 停市自动停
+                if getattr(_exec, "stop_reason", None) == "market_close":
+                    market_close_stopped = True
+                    market_close_detail.append(_stype or _sid)
+                # 当前阶梯
+                _cli = getattr(_exec, "current_ladder_index", None)
+                if _cli is not None and _stype:
+                    ladder_by_type[_stype] = _cli
+            result["running_tasks"].append({
+                "task_id": _info.get("task_id", _tid),
+                "strategy_type": _stype,
+                "status": _info.get("status", ""),
+                "started_at": _info.get("started_at"),
+                "heartbeat_age_sec": _hb_age,
+                "current_ladder_index": ladder_by_type.get(_stype),
+            })
+    except Exception:
+        logger.exception("[mechanisms] task scan failed")
+
+    mech = result["mechanisms"]
+
+    # ── 1) 背离护栏(全局 XAU 监控, 读 Redis quote_divergence:state) ──
+    try:
+        from app.core.redis_client import redis_client
+        raw = await redis_client.get("quote_divergence:state")
+        if raw:
+            import json as _json
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", "ignore")
+            d = _json.loads(raw)
+            ts = d.get("ts")
+            age = round(_time.time() - ts, 1) if ts else None
+            mech["divergence_guard"] = {
+                "readable": True,
+                "tripped": bool(d.get("diverged")),
+                "disabled": bool(d.get("disabled", False)),
+                "basis_diff": d.get("diff"),
+                "trip_threshold": d.get("trip"),
+                "recover_threshold": d.get("recover"),
+                "freshness_sec": age,
+                "fresh": (age is not None and age <= 10),
+            }
+        else:
+            mech["divergence_guard"] = {"readable": True, "tripped": False, "disabled": False, "fresh": False, "note": "无数据(监控未推送)"}
+    except Exception:
+        mech["divergence_guard"] = {"readable": False, "note": "读取失败"}
+
+    # ── 2) 停市自动停/恢复(执行器 stop_reason) ──
+    mech["market_close_guard"] = {
+        "readable": True,
+        "stopped": market_close_stopped,
+        "affected": market_close_detail,
+    }
+
+    # ── 3) 滑点保护(slippage_guard.get_pause_state) ──
+    try:
+        from app.services.slippage_guard import get_pause_state
+        st = await get_pause_state(user_id, pair_code)
+        mech["slippage_guard"] = {
+            "readable": True,
+            "paused": st is not None,
+            "level": (st or {}).get("level"),
+            "reason": (st or {}).get("reason"),
+            "auto_resume_at": (st or {}).get("auto_resume_at"),
+        }
+    except Exception:
+        mech["slippage_guard"] = {"readable": False, "note": "读取失败"}
+
+    # ── 4) 紧急停止(risk_monitor / Redis emergency_stop) ──
+    try:
+        from app.services.risk_monitor import risk_monitor
+        active = await risk_monitor.is_emergency_stop_active()
+        mech["emergency_stop"] = {"readable": True, "active": bool(active)}
+    except Exception:
+        mech["emergency_stop"] = {"readable": False, "note": "读取失败"}
+
+    # ── 5) 心跳看门狗(execution_task_manager 监控 executor._last_heartbeat) ──
+    mech["heartbeat_watchdog"] = {
+        "readable": True,
+        "running_tasks": len(result["running_tasks"]),
+        "worst_heartbeat_age_sec": hb_worst_age,
+        "stale": hb_stale,
+    }
+
+    # ── 6) 撤单容差(配置真源 config/incremental_hedge.json, 回退默认 0.35) ──
+    try:
+        import json as _json
+        _tol = 0.29
+        try:
+            with open("/data/hustle2026/backend/config/incremental_hedge.json") as _f:
+                _tol = float(_json.load(_f).get("spread_cancel_tolerance", 0.29))
+        except Exception:
+            pass
+        mech["maker_cancel_tolerance"] = {"readable": True, "tolerance": _tol}
+    except Exception:
+        mech["maker_cancel_tolerance"] = {"readable": False, "note": "读取失败"}
+
+    # ── 7) 单腿防线 / 容量护栏: 无常驻状态位, 仅事件驱动(不伪造指示灯) ──
+    mech["single_leg_defense"] = {"readable": False, "event_driven": True, "note": "事件驱动告警(无常驻计数)"}
+    mech["capacity_guard"] = {"readable": False, "event_driven": True, "note": "执行内部态(触发即撤在途单结束本阶梯)"}
+
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────

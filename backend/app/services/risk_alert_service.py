@@ -58,13 +58,17 @@ class RiskAlertService:
         return RiskAlertService._cooldown_cache
 
     async def _can_send_alert(
-        self, user_id: str, template_key: str, cooldown_seconds: int = 60
+        self, user_id: str, template_key: str, cooldown_seconds: int = 60,
+        dedup_suffix: str = None,
     ) -> bool:
         """Cross-process dedup via AlertBus (Redis SETNX EX). Falls back to
-        the in-process cooldown_cache if Redis is down."""
+        the in-process cooldown_cache if Redis is down.
+        dedup_suffix(2026-07-04): 多交易对隔离——附加到 dedup_key 使各 pair 独立冷却,
+        否则多对共用一个模板冷却→一个对告警把其它对静默节流(跨对漏报)。默认None=原行为。"""
         if cooldown_seconds <= 0:
             return True
-        dedup_key = f"alert:dedup:{user_id}:_:{template_key}"
+        _sfx = f":{dedup_suffix}" if dedup_suffix else ""
+        dedup_key = f"alert:dedup:{user_id}:_:{template_key}{_sfx}"
         claimed = await alert_bus.try_dedup(dedup_key, cooldown_seconds)
         if not claimed:
             return False
@@ -77,8 +81,9 @@ class RiskAlertService:
         user_id: str,
         template_key: str,
         variables: Dict[str, any],
+        dedup_suffix: str = None,
     ) -> bool:
-        """发送提醒通知"""
+        """发送提醒通知。dedup_suffix(2026-07-04): 透传给冷却去重, 多交易对 per-pair 隔离。"""
         try:
             logger.info(f"[RISK_ALERT] Starting to send risk alert: user_id={user_id}, template_key={template_key}, variables={variables}")
             # 获取模板
@@ -105,7 +110,8 @@ class RiskAlertService:
 
             # 检查冷却时间
             if not await self._can_send_alert(
-                user_id, template_key, template.cooldown_seconds
+                user_id, template_key, template.cooldown_seconds,
+                dedup_suffix=dedup_suffix,
             ):
                 logger.debug(
                     f"Alert {template_key} for user {user_id} is in cooldown"
@@ -695,6 +701,7 @@ class RiskAlertService:
         direction: str,
         binance_filled: float = 0,
         bybit_filled: float = 0,
+        pair_code: str = None,
     ) -> bool:
         """
         检查单腿持仓
@@ -731,6 +738,7 @@ class RiskAlertService:
                 "bybit_filled": f"{bybit_filled:.4f}",
                 "unfilled_qty": f"{quantity:.4f}",
             },
+            dedup_suffix=pair_code,  # 多交易对 per-pair 冷却隔离(2026-07-04)
         )
 
     # ========================================================================

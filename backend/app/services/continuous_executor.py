@@ -42,6 +42,53 @@ def _get_pair_config(pair_code: str = "XAU"):
     return "XAUUSDT", "XAUUSD+", 100.0
 
 
+_sl_filter_cache = {"ts": 0.0, "val": None}
+
+
+def _single_leg_pair_label(pair_code: str) -> str:
+    """单腿告警品种中文名(前缀匹配, 多交易对下告警区分品种)。未知→回退pair_code。"""
+    pc = (pair_code or "").upper()
+    if "XAU" in pc:
+        return "黄金"
+    if "XAG" in pc:
+        return "白银"
+    if pc.startswith("CL") or "USO" in pc or "XTI" in pc or "WTI" in pc:
+        return "美原油"
+    if pc.startswith("BZ") or "UKO" in pc or "XBR" in pc or "BRN" in pc:
+        return "布伦特原油"
+    if pc.startswith("NG") or "XNG" in pc or "NATGAS" in pc:
+        return "天然气"
+    return pair_code or "未知品种"
+
+
+def _load_single_leg_filter():
+    """单腿告警噪音过滤阈值（热读 config/single_leg_filter.json，5s 缓存，fail-open 到默认）。
+    - min_trade_xau: 本笔 A 腿成交量低于此值视为碎单、直接跳过单腿检测（默认 1.0 XAU = 0.01 手最小步长）。
+    - min_gap_xau:   总缺口低于此值不告警（默认 10.0 XAU = 0.1 手），抑制亚手/碎单噪音。
+    真单腿（裸敞口 >= min_gap_xau）不受影响；纯过滤“显示侧”噪音，不改下单/对冲路径。"""
+    import os as _os, time as _t, json as _j
+    _now = _t.time()
+    c = _sl_filter_cache
+    if c["val"] is not None and (_now - c["ts"]) < 5.0:
+        return c["val"]
+    val = {"min_trade_xau": 1.0, "min_gap_xau": 10.0, "enabled": True}
+    try:
+        _p = _os.path.join(_os.path.dirname(__file__), "..", "..", "config", "single_leg_filter.json")
+        with open(_p, "r", encoding="utf-8") as _f:
+            data = _j.load(_f)
+        if isinstance(data, dict):
+            for k in ("min_trade_xau", "min_gap_xau"):
+                if k in data and isinstance(data[k], (int, float)):
+                    val[k] = float(data[k])
+            if "enabled" in data:
+                val["enabled"] = bool(data["enabled"])
+    except Exception:
+        pass
+    c["ts"] = _now
+    c["val"] = val
+    return val
+
+
 @dataclass
 class LadderConfig:
     """Ladder configuration for tiered execution"""
@@ -109,6 +156,11 @@ class ContinuousStrategyExecutor:
         self._binance_account = None
         # 心跳看门狗(20260617): 每轮循环更新; 看门狗监控, 长时间不更新=挂死->cancel+自恢复(方案B)
         self._last_heartbeat = None  # set on loop entry; monotonic seconds
+        # 平仓过度平仓修复(20260622): fstream WS黑洞期持仓WS缓存陈旧,平仓循环若读陈旧值会死锁顶部
+        # 阶梯、用错条件过度平下一阶梯。① 每平成一笔→置位, 下一轮强制 force_fresh 直取REST真值(绕双缓存,
+        # 仅成交后取一次, 不打爆REST); ② 记录平仓前持仓, 若刷新后仍未下降=feed严重滞后→本轮不平等刷新。
+        self._force_fresh_pos_next = False
+        self._closing_pos_before = None  # 上一笔平仓前的真实持仓, 用于过度平仓护栏
 
     async def _init_redis(self):
         if not hasattr(self, '_redis') or self._redis is None:
@@ -119,6 +171,34 @@ class ContinuousStrategyExecutor:
         direction = 'reverse' if 'reverse' in strategy_type else 'forward'
         action = 'opening' if 'opening' in strategy_type else 'closing'
         return f"strategy_active:{self.user_id}:{direction}_{action}"
+
+    async def _write_proc_heartbeat(self):
+        """P2: 把进程运行态写入 Redis 心跳哈希 strategy_proc:{user}:{dir}_{act}(ex=90s)。
+        这是给 admin 策略进程监控的【跨进程/抗重启】真相源——内存注册表重启即丢、未来多 worker
+        会分裂,而 Redis 哈希过期=进程死,语义天然。非致命:任何异常静默跳过,绝不影响交易循环。"""
+        try:
+            if not (self._redis and self._active_key):
+                return
+            import time as _pt, json as _pj
+            pk = self._active_key.replace("strategy_active:", "strategy_proc:")
+            tm = getattr(self, "trigger_mgr", None)
+            ladders = getattr(self, "ladders", None)
+            mapping = {
+                "user_id": str(self.user_id or ""),
+                "pair_code": str(self.pair_code or ""),
+                "current_ladder_index": int(getattr(self, "current_ladder_index", 0) or 0),
+                "total_ladders": int(len(ladders)) if isinstance(ladders, (list, tuple)) else 0,
+                "trigger_count": int(getattr(tm, "count", 0) or 0) if tm is not None else 0,
+                "hedge_multiplier": float(getattr(self, "hedge_multiplier", 1.0) or 1.0),
+                "is_running": "1" if getattr(self, "is_running", False) else "0",
+                "stop_requested": "1" if getattr(self, "stop_requested", False) else "0",
+                "stop_reason": str(getattr(self, "stop_reason", "") or ""),
+                "hb_ts": str(int(_pt.time())),
+            }
+            await self._redis.hset(pk, mapping=mapping)
+            await self._redis.expire(pk, 90)
+        except Exception:
+            pass
 
     async def _is_peer_running(self, strategy_type: str) -> bool:
         try:
@@ -358,6 +438,9 @@ class ContinuousStrategyExecutor:
         import time as _t_re
         _last_reeval = _t_re.time()
         _REEVAL_INTERVAL_S = 12.0
+        # ── 内层收盘闸节流: minutes_to_mt5_close() 含文件I/O, 每≈5s 查一次即可(硬停粒度足够) ──
+        _last_closegate = float('-inf')
+        _CLOSEGATE_INTERVAL_S = 5.0
         # ── 开仓持仓上限硬约束：入口读一次权威真实持仓(force_fresh REST)作封顶基线 ──
         # 免疫 WS 冷启/陈旧导致 remaining 多算 → 开仓冲破上限(实盘已观测 1→3)。
         base_pos = None
@@ -374,6 +457,56 @@ class ContinuousStrategyExecutor:
         while self.is_running and not self.stop_requested:
             loop_count += 1
             import time as _hb_t; self._last_heartbeat = _hb_t.monotonic()  # 心跳
+
+            # ── 内层 MT5 收盘自动停闸(根因修复 2026-06-23) ──────────────────────
+            # 收盘软/硬停闸原本只在外层 V2 主循环; 一旦本内层 ladder 持有 active 阶梯,
+            # 控制权会 captive 在此反复挂撤 maker, 跨越收盘软停(15min)/硬停(5min)两个时刻
+            # 都回不到外层闸 → 自动停不掉(实测平仓按钮到硬停时刻仍未停)。此处下沉同一判据,
+            # 节流≈5s 一查(含文件I/O), 触发即 set stop_requested 退出, 与外层语义一致:
+            #   硬停(<=5min): 无条件停; 软停(<=15min): 仅"启动时>15min"(收盘前一直在跑的)才停,
+            #   手动重启(启动时已在窗口内)不软停、继续跑到硬停。打 market_close 标走隔日恢复。
+            _ng = _hb_t.monotonic()
+            if (_ng - _last_closegate) >= _CLOSEGATE_INTERVAL_S:
+                _last_closegate = _ng
+                try:
+                    from app.utils.trading_time import (
+                        minutes_to_mt5_close as _mins_to_close_i,
+                        SOFT_STOP_BUFFER_MIN as _SOFT_MIN_i,
+                        HARD_STOP_BUFFER_MIN as _HARD_MIN_i,
+                    )
+                    _mins_i = _mins_to_close_i()
+                except Exception:
+                    _mins_i = None
+                if _mins_i is not None:
+                    _sm_i = getattr(self, "_start_mins_to_close", None)
+                    _do_stop = False
+                    if _mins_i <= _HARD_MIN_i:
+                        logger.info(f"[ladder={ladder_idx}][MT5收盘] 距收盘 {_mins_i:.1f} 分钟 <= {_HARD_MIN_i}，内层硬停 {strategy_type}")
+                        _do_stop = True
+                    elif _mins_i <= _SOFT_MIN_i and (_sm_i is not None and _sm_i > _SOFT_MIN_i):
+                        logger.info(f"[ladder={ladder_idx}][MT5收盘] 距收盘 {_mins_i:.1f} 分钟 <= {_SOFT_MIN_i}，内层软停 {strategy_type}（启动时={_sm_i:.1f}分钟）")
+                        _do_stop = True
+                    if _do_stop:
+                        self.stop_reason = 'market_close'
+                        await self._mark_resume_pending(strategy_type)
+                        self.stop_requested = True
+                        break
+                # 根因1修复(2026-07-04): 节假日提前休市时 minutes_to_mt5_close()=None, 上方倒计时闸
+                # 被跳过; 若本内层 ladder 此刻 captive(持 active 阶梯), 外层休市闸也跑不到 → 永远停不掉。
+                # 此处在同一节流窗口内补一道休市硬闸(与外层同源 is_bybit_trading_hours), 命中休市即
+                # 停按钮+mark_resume+break, 走"停按钮+重开自动恢复"语义。
+                if not self.stop_requested:
+                    try:
+                        from app.utils.trading_time import is_bybit_trading_hours as _mkt_i
+                        _open_i, _rsn_i = _mkt_i(self.pair_code)
+                    except Exception:
+                        _open_i, _rsn_i = True, ""
+                    if not _open_i:
+                        logger.info(f"[ladder={ladder_idx}][MT5休市] 当前休市({_rsn_i})，内层停 {strategy_type}（停按钮+开市自动恢复）")
+                        self.stop_reason = 'market_close'
+                        await self._mark_resume_pending(strategy_type)
+                        self.stop_requested = True
+                        break
 
             # ── 阶梯重判: 每~12s 重读持仓+点差, 并"重读最新DB配置重建mapper"(捕捉运行中改的总手数); 若最优阶梯已变为另一个阶梯, 或开仓时本阶梯按新总手数已满 → 退出本阶梯交还V2主循环重选 ──
             # 修两类锁死: ①平仓死等下层阈值不去平上层(如锁阶梯2不平阶梯3); ②开仓运行中把本阶梯总手数改小后, _execute_ladder 仍按旧total死等开下一手、进不了下一阶梯。
@@ -409,6 +542,20 @@ class ContinuousStrategyExecutor:
                         if _switch or _cur_full:
                             logger.info(f"[ladder={ladder_idx}] 阶梯重判: pos={_re_pos:.2f} spread={_re_spread:.3f} 新最优={_re_active.index if _re_active else None} 本阶梯满={_cur_full} ({strategy_type}) → 退出本阶梯交还主循环重选")
                             break
+                        # ── 同阶梯阈值热刷新(根因修复2026-06-24): 本阶梯仍在跑(未切换/未满)时,
+                        #    若DB里本阶梯的开/平差值或触发数已改 → 即时刷新入口捕获的 spread_threshold/触发数,
+                        #    修"captive 在内层挂单时改阈值保存却仍按旧阈值成交"(与外层热重载只重建mapper互补)。
+                        elif _f_ladders is not None and 0 <= ladder_idx < len(_f_ladders):
+                            try:
+                                _cur_ld = _f_ladders[ladder_idx]
+                                _new_thr = float(_cur_ld.opening_spread if is_opening else _cur_ld.closing_spread)
+                                _new_tcr = int(_cur_ld.opening_trigger_count if is_opening else _cur_ld.closing_trigger_count)
+                                if _new_thr != spread_threshold or _new_tcr != trigger_count_required:
+                                    logger.info(f"[ladder={ladder_idx}] 阈值热刷新: 点差阈值 {spread_threshold}->{_new_thr}, 触发数 {trigger_count_required}->{_new_tcr} ({strategy_type})")
+                                    spread_threshold = _new_thr
+                                    trigger_count_required = _new_tcr
+                            except Exception:
+                                pass
                 except Exception as _ree:
                     logger.debug(f"[ladder={ladder_idx}] 阶梯重判 skipped: {_ree}")
 
@@ -661,6 +808,54 @@ class ContinuousStrategyExecutor:
                 )
                 await self._sleep_or_stop(self.api_spam_prevention_delay)
                 continue
+
+            # Step 7.95: 挂单前【单向】二次确认(20260622)。触发达成处取价 → 真正挂单之间会隔
+            # 清挂单/preflight 等延迟(开盘 REST 拥堵实测可达 8s),期间点差可能已朝【不利】方向漂移,
+            # 导致用陈旧决策挂单、在已不达标的点差上成交(本次 06:09/06:13 两笔即此因)。
+            # 用 WS 实时点差(零 REST,与触发轮询同源)复核:仅当点差朝【不利】方向越过撤单容差才
+            # 放弃本轮、重置触发重来;【有利方向(点差更优)照常下单成交】。正常行情下决策→挂单为
+            # 亚秒级,此复核几乎恒通过,不影响成交效率;只在出现陈旧间隔时拦掉劣质成交。
+            try:
+                _pre_tol = float(getattr(self.order_executor, 'spread_cancel_tolerance', 0.29) or 0.29)
+            except Exception:
+                _pre_tol = 0.29
+            try:
+                _pre_spread = await asyncio.wait_for(self._get_current_spread(strategy_type), timeout=5.0)
+            except Exception:
+                _pre_spread = None
+            if _pre_spread is not None:
+                _pre_ok = (
+                    (compare_op == CompareOperator.GREATER_EQUAL and _pre_spread >= spread_threshold - _pre_tol) or
+                    (compare_op == CompareOperator.LESS_EQUAL and _pre_spread <= spread_threshold + _pre_tol)
+                )
+                if not _pre_ok:
+                    logger.info(
+                        f"[ladder={ladder_idx}] 挂单前二次确认: 点差朝不利方向越容差 "
+                        f"(spread={_pre_spread:.3f} threshold={spread_threshold} tol={_pre_tol}) - 放弃本轮重新触发"
+                    )
+                    self.trigger_mgr.reset()
+                    await self._push_trigger_reset(ladder_idx, strategy_type)
+                    await asyncio.sleep(self.trigger_check_interval)
+                    continue
+
+            # 根因2修复(2026-07-04): 下单最后一跳前二次复查。Step7.95 二次确认含数秒 REST/WS 等待,
+            # 手动停/休市停信号在此间隙到达时, 原代码仍会把这笔 maker 挂出去(实测按停后 2~8s 仍冒
+            # 委托单, 靠 active-cancel/下单监控6s超时事后撤)。此处前移到事前拦截: 停止已请求或已休市
+            # → 放弃本轮不挂单, 交还外层干净退出, 从源头消除"按停后仍挂单"的竞态窗口。
+            if self.stop_requested or not self.is_running:
+                logger.info(f"[ladder={ladder_idx}] 下单前复查: 停止已请求, 放弃本轮不挂单 {strategy_type}")
+                break
+            try:
+                from app.utils.trading_time import is_bybit_trading_hours as _mkt_pre
+                _pre_open, _pre_rsn = _mkt_pre(self.pair_code)
+            except Exception:
+                _pre_open, _pre_rsn = True, ""
+            if not _pre_open:
+                logger.info(f"[ladder={ladder_idx}] 下单前复查: 已休市({_pre_rsn}), 放弃本轮不挂单 {strategy_type}")
+                self.stop_reason = 'market_close'
+                await self._mark_resume_pending(strategy_type)
+                self.stop_requested = True
+                break
 
             # Step 8: Execute order
             logger.info(f"[ladder={ladder_idx}] Executing {strategy_type}: {order_qty} units")
@@ -1479,6 +1674,8 @@ class ContinuousStrategyExecutor:
             _start_mins = _mins_to_close()
         except Exception:
             _start_mins = None
+        # 供内层 _execute_ladder 收盘闸沿用同一"启动时距收盘"软停判据(captive 在内层时外层闸跑不到)
+        self._start_mins_to_close = _start_mins
 
         while self.is_running and not self.stop_requested:
             scan_count += 1
@@ -1509,6 +1706,8 @@ class ContinuousStrategyExecutor:
                     _active_key_last_set = _now_ak
                 except Exception:
                     pass
+                # P2: 同节奏写进程心跳哈希(跨进程/抗重启真相源, admin 进程监控读它)
+                await self._write_proc_heartbeat()
 
             # ── MT5 收盘自动停检查 ──────────────────────────────────────────
             try:
@@ -1557,21 +1756,26 @@ class ContinuousStrategyExecutor:
 
             try:
                 from app.utils.trading_time import is_bybit_trading_hours as _is_mkt_open
-                _mkt_open, _mkt_reason = _is_mkt_open()
+                _mkt_open, _mkt_reason = _is_mkt_open(self.pair_code)
             except Exception as _mkt_e:
                 _mkt_open, _mkt_reason = True, ""  # 判定异常→放行(下游 MT5 预检兜底), 不误锁交易
                 if scan_count % 200 == 1:
                     logger.warning(f"[V2][MT5休市] 开/休市判定异常, 暂放行交由 MT5 预检兜底: {_mkt_e}")
             if not _mkt_open:
-                if scan_count % 50 == 1:
-                    logger.info(f"[V2][MT5休市] 当前休市({_mkt_reason}), 等待开市, 暂不下单 {strategy_type}")
-                await self._sleep_or_stop(2.0)
-                continue
+                # 根因1修复(2026-07-04): 节假日提前休市/日级休市/周末命中时, 原逻辑仅 sleep+continue
+                # 干等(按钮不熄、进度照走)。真正能停按钮的收盘倒计时闸(minutes_to_mt5_close)在已休市态
+                # 返回 None 被跳过 → 节假日永远停不掉。此处改为: 命中休市即走"停按钮+隔日/重开自动恢复"
+                # 语义(与倒计时硬停一致), 由 StrategyResumeMonitor 在开市并过预热后回放同一启动快照。
+                logger.info(f"[V2][MT5休市] 当前休市({_mkt_reason}), 停按钮+开市自动恢复 {strategy_type}")
+                self.stop_reason = 'market_close'
+                await self._mark_resume_pending(strategy_type)
+                self.stop_requested = True
+                break
 
             # ── 开市预热闸: 开市后未满本交易对预热分钟数(XAU 1min/ICXAU 2min, 见 config/open_warmup.json), 只等待不下单 ──
             try:
                 from app.utils.trading_time import minutes_since_mt5_open as _mins_open, open_warmup_minutes as _warmup_min
-                _since_open = _mins_open()
+                _since_open = _mins_open(self.pair_code)
                 _warmup_m = _warmup_min(self.pair_code)
             except Exception:
                 _since_open, _warmup_m = None, 0.0
@@ -1589,13 +1793,31 @@ class ContinuousStrategyExecutor:
                 continue
 
             try:
-                live_pos = await asyncio.wait_for(self._get_live_position(binance_account, strategy_type), timeout=8.0)
+                # 平仓成交后下一轮强制取真实持仓(force_fresh 绕 WS+REST 双缓存, 仅成交后一次)
+                _ff_pos = self._force_fresh_pos_next
+                self._force_fresh_pos_next = False
+                live_pos = await asyncio.wait_for(
+                    self._get_live_position(binance_account, strategy_type, force_fresh=_ff_pos), timeout=8.0)
             except Exception as _lpe:
                 logger.warning(f"[V2] live_pos 读取超时/失败, 本轮跳过: {_lpe}")
                 live_pos = -1.0
             if live_pos < 0:
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
+
+            # ── 过度平仓护栏: 上一笔平仓后(已 force_fresh)持仓仍未下降=持仓feed严重滞后,
+            #    本轮不平、再强制刷新一次, 杜绝"同一顶部阶梯按陈旧持仓反复平、吃掉下一阶梯"。──
+            if (not is_opening) and self._closing_pos_before is not None:
+                if live_pos >= self._closing_pos_before - 1e-9:
+                    if scan_count % 50 == 1:
+                        logger.warning(
+                            f"[V2] 平仓护栏: 持仓未随上笔平仓下降(live_pos={live_pos:.2f} >= 平仓前={self._closing_pos_before:.2f}), "
+                            f"疑似持仓feed滞后, 本轮暂不平、强制刷新")
+                    self._closing_pos_before = None
+                    self._force_fresh_pos_next = True
+                    await self._sleep_or_stop(2.0)
+                    continue
+                self._closing_pos_before = None  # 已正常下降, 解除护栏
 
             # 实仓为0自动对账: 清陈旧开仓账本(force_fresh复核, 20s持续+60s节流, 不影响交易)
             try:
@@ -1614,17 +1836,27 @@ class ContinuousStrategyExecutor:
                 active = mapper.get_active_ladder_for_opening(live_pos, current_spread)
             else:
                 active = mapper.get_active_ladder_for_closing(live_pos, current_spread)
-                # Dust guard: if the remaining closeable amount is smaller than one
-                # close-order unit (closing_m_coin), treat it as un-closeable dust and
-                # skip. Prevents a tiny residual (e.g. 0.0022) from sending a sub-min
-                # hedge order that the hedge account cannot fill -> single-leg error.
-                if active is not None and active.remaining_capacity < order_qty_limit:
-                    if scan_count % 100 == 1:
-                        logger.info(
-                            f"[V2] Closing dust skipped: remaining={active.remaining_capacity:.4f} "
-                            f"< close_unit={order_qty_limit} (left as dust, loop continues)"
-                        )
-                    active = None
+                # 收尾平仓(20260622修): 原逻辑"残量 < 平仓单位(close_unit)"就整段当 dust 跳过,
+                # 会把【可对冲的末尾残量】(如 1.0 = B腿0.01手)永久留仓、平仓进度条卡死。
+                # 改为只在残量【凑不齐 B 腿最小手(0.01 Lot)对应的 A 量】时才留 dust;
+                # 残量 >= 该最小可对冲量则按残量(<=close_unit)做最小量收尾平掉。
+                # 平仓侧 B 腿已 floor 到 0.01 手(order_executor_v2: max(qty,0.01)),故残量>=最小量
+                # 收尾平仓 A/B 平衡、不产生单腿(各金对 0.01手=1.0 A量, 即"1手"是安全最小量)。
+                if active is not None:
+                    try:
+                        from app.services.order_executor_v2 import _b_to_a as _b2a
+                        _min_closeable = _b2a(0.01, self.pair_code)
+                    except Exception:
+                        _min_closeable = order_qty_limit  # 回退: 换算不可用时保持原保守行为
+                    if not (_min_closeable and _min_closeable > 0):
+                        _min_closeable = order_qty_limit
+                    if active.remaining_capacity < _min_closeable:
+                        if scan_count % 100 == 1:
+                            logger.info(
+                                f"[V2] Closing dust skipped: remaining={active.remaining_capacity:.4f} "
+                                f"< 最小可对冲量={_min_closeable:.4f}(B腿0.01手) (left as dust)"
+                            )
+                        active = None
 
             if active is None:
                 if scan_count % 100 == 1:
@@ -1650,6 +1882,10 @@ class ContinuousStrategyExecutor:
             self.current_ladder_index = active.index
             self.position_mgr.reset_ladder(self.strategy_id, active.index)
 
+            # 平仓前记录真实持仓基线(供过度平仓护栏在下一轮校验持仓是否真的下降)
+            if not is_opening:
+                self._closing_pos_before = live_pos
+
             result = await self._execute_ladder(
                 ladder_idx=active.index,
                 ladder=iter_config,
@@ -1660,6 +1896,13 @@ class ContinuousStrategyExecutor:
                 opening_ceiling=(active.range_upper if is_opening else None),
                 mapper=mapper,
             )
+
+            # 平仓成交后→下一轮强制取真实持仓(防 WS 黑洞陈旧致死锁顶部阶梯过度平)
+            if (not is_opening) and result.get('success') and (result.get('binance_filled') or 0) > 0:
+                self._force_fresh_pos_next = True
+            elif not is_opening:
+                # 本轮未成交(无填充)→解除基线, 避免护栏误判后续正常轮
+                self._closing_pos_before = None
 
             if not result['success']:
                 logger.error(f"[V2] Ladder {active.index} failed: {result.get('error')}")
@@ -2389,7 +2632,15 @@ class ContinuousStrategyExecutor:
             bybit_filled_lot = exec_result.get('bybit_filled_qty', 0)
             bybit_filled_xau = bybit_filled_lot * conv_factor
 
-            if binance_filled < 0.001:
+            # ── 噪音过滤(P0): 本笔 A 腿成交过小=碎单, 直接跳过(经济意义可忽略, 且 B 腿最小
+            #    步长=0.01手=conv_factor*0.01 XAU, 低于此根本无法对冲)。纯过滤显示侧,不改交易路径。──
+            _sl_flt = _load_single_leg_filter()
+            _min_trade = max(0.001, _sl_flt.get("min_trade_xau", 1.0)) if _sl_flt.get("enabled", True) else 0.001
+            if binance_filled < _min_trade:
+                logger.info(
+                    f"[SINGLE_LEG_CHECK] 跳过(碎单): 本笔 Binance成交={binance_filled:.4f} XAU "
+                    f"< min_trade_xau={_min_trade:.4f}"
+                )
                 return
 
             ratio = bybit_filled_xau / binance_filled if binance_filled > 0 else 0
@@ -2471,18 +2722,69 @@ class ContinuousStrategyExecutor:
                 # 容差下限(20260619): 防 MT5 手数量化(1手=conv_factor XAU, 最小0.01手)的正常小偏差
                 # 误报; conv_factor*0.02 ≈ 2个最小手数步长。真单腿(如 6.36 XAU 裸敞口)远超此容差,
                 # 不会被掩盖; 总量对账用绝对缺口而非单笔比例, 才能抓住"累计偏离"。
-                _gap_tol = max(binance_filled * 0.5, conv_factor * 0.02)
+                # 噪音过滤(P0): 在原相对容差之外, 再叠加一个【绝对最小告警缺口】min_gap_xau(默认10 XAU
+                # =0.1手, 可在 config/single_leg_filter.json 热调)。缺口低于它=亚手/碎单噪音, 不告警;
+                # 真单腿裸敞口 >= min_gap_xau 仍正常告警。两条件取“更宽松”地板, 杜绝碎单刷屏。
+                _sl_enabled = _sl_flt.get("enabled", True)
+                _min_gap = _sl_flt.get("min_gap_xau", 10.0) if _sl_enabled else 0.0
+                _gap_tol = max(binance_filled * 0.5, conv_factor * 0.02, _min_gap)
                 if position_gap <= _gap_tol:
                     logger.info(
                         f"[SINGLE_LEG_CHECK] Phase2 RESOLVED: gap={position_gap:.4f} "
-                        f"<= threshold={_gap_tol:.4f}, no alert"
+                        f"<= threshold={_gap_tol:.4f} (min_gap_xau={_min_gap:.2f}), no alert"
                     )
                     return
+
+                # ── P1 根治(2026-07-04) signed delta-gap ──────────────────────────
+                # 根因: 上面的 position_gap=abs(Σabs币安 − Σabs_MT5) 是【全账户绝对持仓差】。
+                # MT5 可同时持多腿+空腿(abs双重计数)、加残留/并发开平共用symbol → 存在【恒定的
+                # 站立偏移】(实测20~41 XAU)。于是每一笔成交(哪怕本笔exec_ratio=100%完全对冲)都撞上
+                # 同一偏移 → 反复 CONFIRMED 误报(用户"完全成交也弹框"的根源)。
+                # 修法: 判据从"绝对缺口水平"改为"【有向不平衡的变化量】":
+                #   signed_imb = post_binance − post_bybit_xau  (有向, 不取abs)
+                #   仅当 |signed_imb − 上次基线| >= delta_gap_xau (=新生裸敞口跳变) 才告警;
+                #   站立偏移恒定 → 每笔 delta≈0 → 不报。用【有向】而非abs, 防"新裸腿恰好抵消旧偏移"漏报。
+                # 绝对硬兜底 hard_gap_xau: 缺口 >= 它则【无条件】告警(防"缓慢漂移累积成大裸敞口"被delta漏报)。
+                # 首次(无基线, 如重启后)只认硬兜底、不凭delta报(防重启首帧把站立偏移误当新敞口)。
+                # enabled:false → 跳过本段, 回退旧"过gap_tol即告警"行为。纯判定, 零成交延迟。
+                _trigger = 'LEGACY'
+                if _sl_enabled:
+                    signed_imb = post_binance_qty - post_bybit_qty_xau
+                    _delta_gap = float(_sl_flt.get("delta_gap_xau", 16.0))
+                    _hard_gap = float(_sl_flt.get("hard_gap_xau", 60.0))
+                    _base_key = f"single_leg_imb_baseline:{self.user_id}:{self.pair_code}"
+                    _last_base = None
+                    try:
+                        if self._redis:
+                            _rv = await self._redis.get(_base_key)
+                            if _rv is not None:
+                                _last_base = float(_rv)
+                    except Exception:
+                        _last_base = None
+                    _delta = abs(signed_imb - _last_base) if _last_base is not None else None
+                    _is_hard = (_hard_gap > 0 and position_gap >= _hard_gap)
+                    _is_new_naked = (_delta is not None and _delta_gap > 0 and _delta >= _delta_gap)
+                    # 基线每次刷新: 站立偏移/已知敞口成为"新常态", 下次delta归零不再刷屏;
+                    # 真新裸腿只在【形成的那一刻】跳变告警一次(不变的裸敞口靠hard_gap兜底持续报)。
+                    try:
+                        if self._redis:
+                            await self._redis.set(_base_key, f"{signed_imb:.4f}", ex=86400)
+                    except Exception:
+                        pass
+                    if not (_is_hard or _is_new_naked):
+                        logger.info(
+                            f"[SINGLE_LEG_CHECK] Phase2 SUPPRESSED(站立偏移非新敞口): "
+                            f"gap={position_gap:.4f} signed_imb={signed_imb:.4f} "
+                            f"last_base={_last_base} delta={_delta} "
+                            f"(delta_gap={_delta_gap} hard_gap={_hard_gap}) — 不告警"
+                        )
+                        return
+                    _trigger = 'HARD' if _is_hard else 'DELTA'
 
                 logger.error(
                     f"[SINGLE_LEG_CHECK] Phase2 CONFIRMED SINGLE-LEG: "
                     f"Binance={post_binance_qty:.4f}, Bybit={post_bybit_qty_xau:.4f}, "
-                    f"gap={position_gap:.4f} XAU, "
+                    f"gap={position_gap:.4f} XAU, trigger={_trigger}, "
                     f"exec_ratio={ratio:.2%}"
                 )
                 exec_result['single_leg_details'] = {
@@ -2608,21 +2910,43 @@ class ContinuousStrategyExecutor:
         # We wrap this as a risk_alert so the global handler in market.js dispatches it,
         # and so the alert_type "single_leg_alert" is gated by the frontend
         # singleLegAlertEnabled toggle (see notification.js handleRiskAlert).
+        # 读取 single_leg_alert 模板的「跑马灯」推送渠道开关(enable_marquee),
+        # 写入 WS 事件 data.marquee → 前端 MarketCards 跑马灯按此开关决定是否滚动展示。
+        # 模板缺失/查询异常一律 False(fail-safe, 不影响弹窗/飞书原有链路)。
+        _marquee_on = False
+        try:
+            from app.core.database import AsyncSessionLocal as _ASL
+            from app.models.notification_config import NotificationTemplate as _NT
+            from sqlalchemy import select as _sel
+            async with _ASL() as _mdb:
+                _row = (await _mdb.execute(
+                    _sel(_NT.enable_marquee).where(_NT.template_key == "single_leg_alert")
+                )).scalar_one_or_none()
+                _marquee_on = bool(_row)
+        except Exception as _me:
+            logger.debug(f"[SINGLE_LEG] read enable_marquee failed (default off): {_me}")
+
         try:
             from app.core.redis_client import redis_client as _rc
             import json as _json
 
-            msg = f"{strategy_name} {action}: Binance成交 {details.get('binance_filled', 0)}, Bybit成交 {details.get('bybit_filled', 0)}, 未成交 {details.get('unfilled_qty', 0)}"
+            # 多交易对(2026-07-04): 文案+payload 带品种, 前端去重键按 pair 隔离、用户一眼看清哪个品种
+            _pair_label = _single_leg_pair_label(self.pair_code)
+            msg = f"【{_pair_label}】{strategy_name} {action}: Binance成交 {details.get('binance_filled', 0)}, Bybit成交 {details.get('bybit_filled', 0)}, 未成交 {details.get('unfilled_qty', 0)}"
             evt = {
                 "user_id": self.user_id,
                 "type": "risk_alert",
                 "data": {
                     "alert_type": "single_leg_alert",
                     "level": "critical",
-                    "title": "单腿交易警告",
+                    "title": f"单腿交易警告 - {_pair_label}",
                     "message": msg,
+                    "pair_code": self.pair_code,
+                    "pair_label": _pair_label,
                     "timestamp": details.get("timestamp"),
                     "template_key": "single_leg_alert",
+                    # 跑马灯推送渠道(由 testadmin 通知模板的 enable_marquee 控制)
+                    "marquee": _marquee_on,
                     "popup_config": {
                         "title": "单腿交易警告",
                         "content": msg,
@@ -2661,7 +2985,8 @@ class ContinuousStrategyExecutor:
                     duration=0,  # Immediate alert
                     direction=direction,
                     binance_filled=details.get("binance_filled", 0),
-                    bybit_filled=details.get("bybit_filled", 0)
+                    bybit_filled=details.get("bybit_filled", 0),
+                    pair_code=self.pair_code,  # 多交易对 per-pair 冷却隔离(2026-07-04)
                 )
                 break  # Only need first session
         except Exception as e:

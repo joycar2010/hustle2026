@@ -93,6 +93,7 @@ const nav = [
   { path: '/decisions', label: '决策流' },
   { path: '/proposals', label: '提议中心' },
   { path: '/risk', label: '风控中心' },
+  { path: '/ladder-advisor', label: '阶梯调参' },
   { path: '/infra', label: '基础设施' },
 ]
 const me = ref(null)
