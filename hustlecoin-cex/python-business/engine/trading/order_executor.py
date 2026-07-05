@@ -343,7 +343,10 @@ async def execute_borrow(
         # 否则冷门币(bookTicker 仅价/量变才推,常几十秒~分钟无 tick)会在「睡 borrow_delay_sec 后
         # 要求快照 ≤BORROW_FRESH_MS(3s) 新鲜」上反复 FAILED,借币落地被拖成分钟级随机延迟。
         skip_confirm = confirm_spread is not None and confirm_spread < 0
-        await asyncio.sleep(rules.borrow_delay_sec)
+        # 负阈值零等待:确认闸已跳过时,borrow_delay_sec 的唯一意义(睡后复核点差)不复存在,
+        # 这 3s 纯属死等 → 连同省去,借币立即执行。正阈值路径行为不变。
+        if not skip_confirm:
+            await asyncio.sleep(rules.borrow_delay_sec)
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
             if skip_confirm:

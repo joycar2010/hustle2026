@@ -412,7 +412,11 @@ class Worker:
             spread = self.spread_feed.get_symbol(symbol)
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
-            if not self._spread_fresh(spread):
+            # 负有效阈值(挂单差<0)=无条件囤券,借币决策不依赖点差质量:行情新鲜度只影响换算
+            # 数量用的价格新旧 → 跳过 10s 新鲜闸(与 execute_borrow 内层 skip_confirm 呼应),
+            # 用最近一次快照价换算数量,做到零等待借币;冷清币不再"等下一个 tick 才借"。
+            # 盘口 sane 闸(非正价格/离谱点差)仍保留 —— 换算数量至少要一个正常价。
+            if eff_borrow >= 0 and not self._spread_fresh(spread):
                 statuses[symbol] = "行情陈旧"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
                 statuses[symbol] = "点差不符"; continue
