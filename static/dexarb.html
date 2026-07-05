@@ -51,12 +51,16 @@
 
   <hr style="border:none;border-top:1px solid var(--bd);margin:18px 0">
   <div class="hd"><h1 style="font-size:16px">⚡ CEX-DEX + MEV · 价差存活窗口测量</h1></div>
-  <div class="meta" style="margin-bottom:10px;font-size:12px">币安BNB现货 vs Pancake池 · 测"缝隙张开>成本后能存活几秒/几块" · 秒内闭合=被专业玩家同块吃掉</div>
+  <div class="meta" style="margin-bottom:10px;font-size:12px">加固版:BNB/ETH/BTC × Pancake/Biswap/Apeswap × 双门槛(散户38bps/专业25bps) · 测"缝隙张开>门槛后存活几秒/块"</div>
   <div class="verdict" id="cd_verdict">加载中…</div>
   <div class="grid" id="cd_kpis"></div>
   <div class="sec">
+    <h2>📊 分对×门槛统计</h2>
+    <div style="overflow-x:auto"><table id="cd_groups"><thead><tr><th>对</th><th>门槛</th><th>缝隙</th><th>存活</th><th>存活率</th><th>峰值max</th><th>最厚肉</th></tr></thead><tbody><tr><td colspan="7" class="meta">加载中…</td></tr></tbody></table></div>
+  </div>
+  <div class="sec">
     <h2>📜 最近价差缝隙</h2>
-    <div style="overflow-x:auto"><table id="cd_recent"><thead><tr><th>峰值价差</th><th>张开价差</th><th>存活秒</th><th>存活块</th><th>结果</th></tr></thead><tbody><tr><td colspan="5" class="meta">加载中…</td></tr></tbody></table></div>
+    <div style="overflow-x:auto"><table id="cd_recent"><thead><tr><th>对</th><th>门槛</th><th>峰值</th><th>存活秒</th><th>存活块</th><th>结果</th></tr></thead><tbody><tr><td colspan="6" class="meta">加载中…</td></tr></tbody></table></div>
   </div>
 
   <div class="foot">每 10 秒刷新 · 上=DEX-DEX原子套利 · 下=CEX-DEX+MEV价差存活 · 只读测量不碰真金</div>
@@ -93,21 +97,20 @@ async function load(){
 async function loadCexDex(){
   let d; try{ d=await(await fetch('/api/cexdex',{cache:'no-store'})).json(); }catch(e){ return; }
   $('#cd_verdict').innerHTML='<b>裁决:</b> '+(d.verdict||'—');
-  const ss=d.surv_sec_stats, pk=d.peak_stats;
   const k=[
-    {k:'累计缝隙(>成本)',v:d.total_gaps||0,sub:'张开到38bps以上'},
-    {k:'存活缝隙',v:d.survived||0,c:d.survived>0?'pos':'',sub:'撑过≥2区块=可捕获'},
-    {k:'存活率',v:(d.survive_rate||0)+'%',c:d.survive_rate>20?'pos':'neg',sub:'存活/总缝隙'},
-    {k:'缝隙存活中位',v:ss?ss.median+'s':'—',sub:ss?'区间['+ss.min+','+ss.max+']s':''},
-    {k:'峰值价差中位',v:pk?pk.median+'bps':'—',sub:pk?'最大'+pk.max+'bps':''},
-    {k:'采集时长',v:d.span_hours!=null?d.span_hours+'h':'—',sub:''},
+    {k:'累计缝隙',v:d.total_gaps||0,sub:'散户'+(d.retail_gaps||0)+' 专业'+(d.pro_gaps||0)},
+    {k:'散户门槛缝隙',v:d.retail_gaps||0,c:d.retail_gaps>0?'':'',sub:'>38bps=对你有肉'},
+    {k:'专业门槛缝隙',v:d.pro_gaps||0,sub:'>25bps=专业玩家视角'},
+    {k:'采集时长',v:d.span_hours!=null?d.span_hours+'h':'—',sub:'3对×3池×双门槛'},
   ];
   $('#cd_kpis').innerHTML=k.map(x=>`<div class="card"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="sub">${x.sub||''}</div></div>`).join('');
+  const g=d.by_group||[];
+  $('#cd_groups tbody').innerHTML=g.length?g.map(x=>`<tr><td>${x.pair}</td><td>${x.threshold}</td><td>${x.gaps}</td><td>${x.survived}</td><td class="${x.survive_rate>20?'pos':'neg'}">${x.survive_rate}%</td><td>${fmt(x.peak_max)}</td><td class="${cls(x.max_meat_bps)}">${fmt(x.max_meat_bps)}</td></tr>`).join(''):'<tr><td colspan="7" class="meta">暂无缝隙(池被焊死在成本线内)</td></tr>';
   const r=d.recent||[];
   $('#cd_recent tbody').innerHTML=r.length?r.map(x=>{
     let tag=x.outcome==='SURVIVED'?'<span class="tag sv">存活</span>':(x.outcome==='SNIPED'?'<span class="tag dc">被抢</span>':'<span class="tag pd">'+x.outcome+'</span>');
-    return `<tr><td class="${cls(x.peak_bps)}">${fmt(x.peak_bps)}</td><td>${fmt(x.open_bps)}</td><td>${fmt(x.survive_sec)}</td><td>${x.survive_blocks||'—'}</td><td>${tag}</td></tr>`;
-  }).join(''):'<tr><td colspan="5" class="meta">暂无缝隙(市场高效,平静期价差<成本)</td></tr>';
+    return `<tr><td>${x.pair}</td><td>${x.threshold}</td><td class="${cls(x.peak_bps)}">${fmt(x.peak_bps)}</td><td>${fmt(x.survive_sec)}</td><td>${x.survive_blocks||'—'}</td><td>${tag}</td></tr>`;
+  }).join(''):'<tr><td colspan="6" class="meta">暂无缝隙(市场高效,价差<门槛)</td></tr>';
 }
 load(); setInterval(load,10000);
 loadCexDex(); setInterval(loadCexDex,10000);
