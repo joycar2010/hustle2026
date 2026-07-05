@@ -830,7 +830,7 @@ async def _dust_residual_to_bnb(client, base_asset: str, qty: float) -> tuple[bo
     # 预检可划出额:全仓杠杆有负债时,所有资产被当抵押物锁定,maxTransferable=0 → 划不出。
     # 先查清楚给准确原因,避免徒劳撞 -3020(Transfer out amount exceeds max)。
     try:
-        mt = await client._request("GET", f"{SPOT_BASE}/sapi/v1/margin/maxTransferable",
+        mt = await client._request("GET", "https://api.binance.com/sapi/v1/margin/maxTransferable",
                                    {"asset": base_asset}, signed=True)
         max_tx = _D(str(mt.get("amount", "0") or "0"))
     except Exception:
