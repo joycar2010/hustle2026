@@ -738,6 +738,21 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
                             sub_id, sym, client, notifier,
                             account.note or f"#{sub_id}", user_id=user_id,
                         )
+                    # 债清后顺带清扫现币残留:端点入口已确保该币无任何活跃持仓,此时 free 里的
+                    # 零头(历史超买/尾批)属纯残留;不清的话移除后会不可见地躺在杠杆户。
+                    try:
+                        mi = await client.get_margin_account()
+                        ai = next((a for a in mi.get("userAssets", []) if a.get("asset") == base_asset), None)
+                        free_now = float(ai.get("free", "0") or 0) if ai else 0.0
+                        debt_now = (float(ai.get("borrowed", "0") or 0) + float(ai.get("interest", "0") or 0)) if ai else 0.0
+                        if free_now > 0 and debt_now < 1e-8:
+                            sold, note = await _sell_residual_spot(client, sym, base_asset, free_now)
+                            if sold > 0:
+                                logger.info(f"remove {sym} sub{sub_id}: residual sold back {sold}")
+                            else:
+                                logger.info(f"remove {sym} sub{sub_id}: residual not sold — {note}")
+                    except Exception as _se:
+                        logger.warning(f"remove {sym} sub{sub_id}: residual sweep failed (non-blocking): {_se}")
             except Exception as _re:
                 logger.warning(f"remove {sym} sub{sub_id}: repay residual failed (non-blocking): {_re}")
     except Exception as _outer:
@@ -761,31 +776,12 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
 
 
 async def _sell_residual_spot(client, symbol_upper: str, base_asset: str, qty: float) -> tuple[float, str]:
-    """把杠杆户里的 base_asset 现币残留市价卖回 USDT(NO_SIDE_EFFECT,不借币)。
-    残留来源=平仓买回按 1.0015 超买/开仓尾批不足额,还清债务后无人消费。
-    qty 向下对齐 stepSize;名义 < minNotional 时币安不接单,如实返回原因。
-    返回 (实际卖出数量, 说明)。"""
-    info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
-                                 {"symbol": symbol_upper}, signed=False)
-    sp = info.get("symbols", [{}])[0]
-    flt = {f["filterType"]: f for f in sp.get("filters", [])}
-    step = float(flt.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
-    min_notional = float(flt.get("NOTIONAL", {}).get("minNotional", "5") or "5")
-    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
-                                {"symbol": symbol_upper}, signed=False)
-    price = float(tkr.get("price", 0) or 0)
-    import math as _math
-    sell_qty = _math.floor(qty / step) * step if step > 0 else 0.0
-    if price <= 0:
-        return 0.0, "取价失败,稍后重试"
-    if sell_qty <= 0 or sell_qty * price < min_notional:
-        return 0.0, f"残留 {qty:.6f} 名义价值 {qty * price:.2f}U 低于币安最小卖出额 {min_notional:g}U,暂留账"
-    await client._request(
-        "POST", "https://api.binance.com/sapi/v1/margin/order",
-        {"symbol": symbol_upper, "side": "SELL", "type": "MARKET",
-         "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT", "isIsolated": "FALSE"},
-    )
-    return sell_qty, f"已卖回 {sell_qty:.6f} {base_asset}"
+    """把杠杆户里的 base_asset 现币残留市价卖回 USDT。
+    权威实现在 engine.trading.order_executor.sell_residual_spot(引擎自动卖回与手动「卖回」共用),
+    此处仅做 float 适配。调用方须保证债务已清且无其它非终态持仓。"""
+    from engine.trading.order_executor import sell_residual_spot
+    sold, note = await sell_residual_spot(client, symbol_upper, base_asset, qty)
+    return float(sold), note
 
 
 class PartialRepayRequest(BaseModel):

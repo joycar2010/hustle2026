@@ -248,6 +248,28 @@ class BalancePusher:
             return False
         return True
 
+    async def _noinv_remaining(self, assets: set[str]) -> dict[str, int]:
+        """逐资产合并两处无券冷却的剩余秒数,取大者:
+        ① 引擎借币 -3045 写的 engine:noinv:{sym} 键(EX=1800,借币真正被闸住的时长);
+        ② 本进程 maxBorrowable 查询 -3045 标志(NOINV_TTL_SEC)。
+        供前端「无券(剩N分)」倒计时;不在冷却中的资产不出现在结果里。"""
+        out: dict[str, int] = {}
+        now = time.monotonic()
+        for a in assets:
+            rem = 0
+            ts = self._no_inventory.get(a)
+            if ts is not None:
+                rem = max(0, int(NOINV_TTL_SEC - (now - ts)))
+            try:
+                t = await self._redis.ttl(f"engine:noinv:{a}USDT")
+                if t and t > 0:
+                    rem = max(rem, int(t))
+            except Exception:
+                pass
+            if rem > 0:
+                out[a] = rem
+        return out
+
     def _compute_effective_borrowable(self, db, acc, sym_key: str, mb: float,
                                       policy: dict, spot_bids: dict) -> tuple[float, str]:
         """有效可借(币数量)+ 受限原因,口径与 order_executor.execute_borrow 完全一致。
@@ -319,6 +341,12 @@ class BalancePusher:
                 ).all()
                 positioned = {p.symbol.replace("USDT", "") for p in positions}
                 target_assets[acc.id] = positioned | pushed_by_user[uid]
+
+            # 无券冷却剩余秒数(全用户 targets 并集,每周期一次;供前端「无券(剩N分)」倒计时)
+            all_assets: set[str] = set()
+            for s in target_assets.values():
+                all_assets |= s
+            noinv_rem = await self._noinv_remaining(all_assets)
 
             interest_fetched: set[str] = set()
 
@@ -400,7 +428,9 @@ class BalancePusher:
                                 "max_borrowable": mb_cache.get(asset_name, 0),
                                 "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),  # VIP档借贷上限(与持U无关)
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
-                                "no_inventory": self._noinv_active(asset_name),
+                                # 无券=本进程 -3045 标志 或 引擎借币冷却键仍在(引擎真正被闸住的口径)
+                                "no_inventory": self._noinv_active(asset_name) or noinv_rem.get(asset_name, 0) > 0,
+                                "noinv_remaining_sec": noinv_rem.get(asset_name, 0),
                             }
 
                     # Pushed-but-not-held assets aren't in userAssets — still surface
@@ -416,7 +446,8 @@ class BalancePusher:
                                 "max_borrowable": mb_cache.get(asset_name, 0),
                                 "borrow_limit": mb_cache.get("_limits", {}).get(asset_name, 0),
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
-                                "no_inventory": self._noinv_active(asset_name),
+                                "no_inventory": self._noinv_active(asset_name) or noinv_rem.get(asset_name, 0) > 0,
+                                "noinv_remaining_sec": noinv_rem.get(asset_name, 0),
                             }
 
                     # 有效可借: 在理论上限(max_borrowable)基础上,套引擎同一封顶口径

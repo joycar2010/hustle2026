@@ -152,6 +152,24 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   }
 
   const handleSave = useCallback(async () => {
+    // 防呆:开仓值设为负(负基差测试)而生效的平仓值不是更低的负值时,
+    // 开仓后当前点差(<0)大概率立即 < 平仓值 → 开完即平。提醒一次,可确认继续。
+    {
+      const num = (v: unknown) => (v === '' || v == null ? null : parseFloat(String(v)))
+      const gClose = num(globalRules['close_spread'])
+      const sClose = num(symbolRule['close_spread'])
+      const rowsToCheck: Row[] = []
+      if (dirty.has('common')) rowsToCheck.push(symbolRule)
+      for (const a of accounts) if (dirty.has(String(a.id))) rowsToCheck.push(accountRules[a.id] || {})
+      const risky = rowsToCheck.some((r) => {
+        const o = num(r['open_spread'])
+        if (o == null || Number.isNaN(o) || o >= 0) return false
+        const c = num(r['close_spread']) ?? sClose ?? gClose
+        // 负点差行情下平仓值仍 ≥0(或未设) → 开仓瞬间点差(<0)即 < 平仓值,开完即平
+        return c == null || Number.isNaN(c) || c >= 0
+      })
+      if (risky && !confirm('开仓值为负,但生效的平仓值不是更低的负值:\n负点差行情下开仓后很可能立即满足平仓条件、开完即平。\n确认按当前值保存?')) return
+    }
     setSaving(true)
     try {
       const tasks: Promise<unknown>[] = []

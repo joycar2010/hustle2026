@@ -487,7 +487,7 @@ const SubAccountRow = memo(function SubAccountRow({
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] tabular-nums font-mono leading-tight">
               <span className="text-muted-foreground/60">爆<span className={cn('ml-0.5', blow != null ? (blow > 80 ? 'text-negative' : blow > 50 ? 'text-yellow-400' : 'text-positive') : 'text-foreground')}>{blow != null ? `${formatNumber(blow, 1)}%` : '-'}</span></span>
               <span className="text-muted-foreground/60">可借{noInv
-                ? <span className="ml-0.5 text-amber-500/90">无券</span>
+                ? <span className="ml-0.5 text-amber-500/90">无券{sm?.noinv_remaining_sec ? `(${Math.ceil(sm.noinv_remaining_sec / 60)}分)` : ''}</span>
                 : <span className="ml-0.5 text-sky-300/90">{eff != null ? (borrowDisplayUsdt ? formatNumber(eff * px, 0) : formatNumber(eff, 2)) : '-'}</span>}</span>
               <span className="text-muted-foreground/60">现币<span className="ml-0.5 text-foreground">{sm?.free != null ? formatNumber(sm.free, 4) : '-'}</span></span>
               <span className="text-muted-foreground/60">借<span className="ml-0.5 text-foreground">{sm?.borrowed != null ? formatNumber(sm.borrowed, 4) : '-'}</span></span>
@@ -536,7 +536,13 @@ const SubAccountRow = memo(function SubAccountRow({
             if (!sm) return '-'
             // 该币杠杆池无可借库存 → 币安 maxBorrowable 直接 -3045 拿不到任何数 → 「无券」(真实市场状态)
             if (sm.no_inventory && !((sm.borrow_limit ?? 0) > 0) && !(sm.max_borrowable > 0)) {
-              return <span className="text-amber-500/80" title="币安杠杆池当前无该币可借库存(API -3045)">无券</span>
+              const remMin = sm.noinv_remaining_sec ? Math.ceil(sm.noinv_remaining_sec / 60) : 0
+              return (
+                <span className="text-amber-500/80"
+                  title={`币安杠杆池当前无该币可借库存(API -3045)${remMin ? `;冷却剩余约 ${remMin} 分钟,到期自动复查库存` : ''}`}>
+                  无券{remMin ? `(${remMin}分)` : ''}
+                </span>
+              )
             }
             const px = spread?.spot_bid ?? 0
             // 最大可借 = 优先 borrowLimit(VIP档借贷上限,与持U无关、恒定);无则降级 maxBorrowable(amount,实际可借)

@@ -875,6 +875,36 @@ async def execute_unhedge(
         db.close()
 
 
+async def sell_residual_spot(client: BinanceTradingClient, symbol: str, base_asset: str, qty) -> tuple[Decimal, str]:
+    """把杠杆户 base_asset 现币残留市价卖回 USDT(NO_SIDE_EFFECT,不借币)。残留来源=平仓买回按
+    FEE_BUFFER 超买/开仓尾批不足额,还清债务后无人消费。qty 向下对齐 stepSize;名义 < minNotional
+    时币安不接单,如实返回原因。返回 (实际卖出数量, 说明)。
+    ⚠调用方必须自行保证: 该账户该币债务已清 且 无其它非终态持仓 —— 否则会把别的仓等待还币的
+    买回币卖掉,制造裸债。(engine_api 手动「卖回」与 execute_repay 自动卖回共用此实现)"""
+    q = Decimal(str(qty))
+    info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                 {"symbol": symbol}, signed=False)
+    sp = info.get("symbols", [{}])[0]
+    flt = {f["filterType"]: f for f in sp.get("filters", [])}
+    step = str(flt.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+    min_notional = Decimal(str(flt.get("NOTIONAL", {}).get("minNotional", "5") or "5"))
+    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                {"symbol": symbol}, signed=False)
+    price = Decimal(str(tkr.get("price", 0) or 0))
+    if price <= 0:
+        return Decimal("0"), "取价失败,稍后重试"
+    sell_qty = round_to_step(q, step)
+    if sell_qty <= 0 or sell_qty * price < min_notional:
+        return Decimal("0"), (f"残留 {q:.6f} 名义价值 {float(q * price):.2f}U "
+                              f"低于币安最小卖出额 {min_notional}U,暂留账")
+    await client._request(
+        "POST", "https://api.binance.com/sapi/v1/margin/order",
+        {"symbol": symbol, "side": "SELL", "type": "MARKET",
+         "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT", "isIsolated": "FALSE"},
+    )
+    return sell_qty, f"已卖回 {sell_qty:.6f} {base_asset}"
+
+
 async def execute_repay(
     position: Position,
     client: BinanceTradingClient,
@@ -965,6 +995,34 @@ async def execute_repay(
         db.commit()
 
         logger.info(f"Position closed (repaid): {pos.symbol} pnl={pos.realized_pnl}")
+
+        # 自动卖回本轮残留零头:买回按 FEE_BUFFER 超买、还币只还 min(pos_owed,债务),差额
+        # 无人消费会永久躺在"现币"列。护栏(缺一不卖):
+        #   ① 该账户该币无其它非终态持仓 —— 多仓并存时 free 里是别的仓等待还币的买回币,卖了=裸债;
+        #   ② 还后实测债务已为 0 —— 部分还(pos_owed<总债)说明还有仓欠着,零头要留给后续还币。
+        # 只卖本轮算术零头 min(free_bal-repay_amount, 当前free),不碰账户里其它来源的持币。
+        # best-effort:任何失败只记日志,不影响已完成的平仓。
+        try:
+            leftover = free_bal - repay_amount
+            if leftover > 0:
+                others = db.query(Position).filter(
+                    Position.sub_account_id == pos.sub_account_id,
+                    Position.symbol == pos.symbol,
+                    Position.id != pos.id,
+                    Position.status.notin_(["CLOSED", "FAILED"]),
+                ).count()
+                if others == 0:
+                    debt_now, _i2, free_now = await _read_debt_free()
+                    if debt_now <= 0 and free_now > 0:
+                        sold, note = await sell_residual_spot(
+                            client, pos.symbol, pos.base_asset, min(leftover, free_now))
+                        if sold > 0:
+                            logger.info(f"Repay {pos.symbol}: residual sold back {sold} ({account_note})")
+                        else:
+                            logger.info(f"Repay {pos.symbol}: residual not sold — {note}")
+        except Exception as se:
+            logger.warning(f"Repay {pos.symbol}: residual sell-back skipped: {se}")
+
         # 写后即时刷新:还币平仓(引擎自动 / manual-repay 端点都走此函数)→ 该用户余额秒级刷新
         _publish_balance_refresh(
             pos.user_id if getattr(pos, "user_id", None) is not None

@@ -21,6 +21,7 @@ export interface AccountBalance {
     borrow_limit?: number  // VIP档借贷上限(与持U无关、同VIP各账户相同)
     daily_interest_rate: number
     no_inventory?: boolean
+    noinv_remaining_sec?: number  // 无券冷却剩余秒数(引擎engine:noinv TTL与pusher标志取大),0=不在冷却
     effective_borrowable?: number
     borrow_cap_reason?: string
   }>
