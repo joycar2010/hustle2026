@@ -345,7 +345,7 @@ async def account_info():
         total_swap += p.swap
 
     from_date = datetime.utcnow() - timedelta(days=30)
-    deals = mt5.history_deals_get(from_date, datetime.utcnow()) or []
+    deals = mt5.history_deals_get(from_date, datetime.utcnow() + timedelta(hours=6)) or []
     for d in deals:
         if hasattr(d, "swap") and d.swap != 0:
             total_swap += d.swap
@@ -421,6 +421,11 @@ async def get_symbol_info(symbol: str):
         "currency_profit":     info.currency_profit,
         "currency_margin":     info.currency_margin,
         "visible":             info.visible,
+        # Trade-engine status: only TRADE_FULL (4) accepts both open+close.
+        # Exposed for backend's first-trade-after-MT5-reopen preflight check.
+        # MT5 ENUM_SYMBOL_TRADE_MODE: 0=DISABLED 1=LONGONLY 2=SHORTONLY 3=CLOSEONLY 4=FULL
+        "trade_mode":          int(info.trade_mode),
+        "trade_allowed":       int(info.trade_mode) == 4,
     }
 
 
@@ -451,7 +456,7 @@ async def history_deals(
     if not mgr.ensure():
         raise HTTPException(503, "MT5 not connected")
     from_date = datetime.utcnow() - timedelta(days=days)
-    deals = mt5.history_deals_get(from_date, datetime.utcnow()) or []
+    deals = mt5.history_deals_get(from_date, datetime.utcnow() + timedelta(hours=6)) or []
     mgr.ping()
     result = []
     for d in deals:
