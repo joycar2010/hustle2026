@@ -445,7 +445,6 @@ const SubAccountRow = memo(function SubAccountRow({
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
 }) {
-  const spreads = useSpreadStore((s) => s.spreads)
   const summary = useBalanceStore((s) => s.summary)
   // 持仓经济参数块:润(净盈亏)/资(累计资金费)/开(开仓点差)/息(当日利率)/累息(累计利息)/平(平仓点差)
   const profit = parseFloat(pos.realized_pnl || '0')
@@ -595,14 +594,13 @@ const SubAccountRow = memo(function SubAccountRow({
           ) : '-'}
         </td>
       )}
-      {/* 保证金 — BNB U值 + 杠杆净资产(净资产=抵押物-已借价值,借非USDT资产时正确反映真实价值) */}
-      {!isMobile && (() => {
-        if (!balance) return <td className={numCell}>-</td>
-        const bnbPrice = spreads.get('BNBUSDT')?.spot_bid ?? 0
-        const bnbVal = balance.bnb_free * bnbPrice
-        const total = bnbVal + (balance.margin_net_usdt ?? 0)
-        return <td className={numCell}>{formatNumber(total, 0)}</td>
-      })()}
+      {/* 保证金 — 杠杆账户净资产USDT(币安 totalNetAssetOfBtc×BTC价,即账户总权益,已含BNB+所有
+          持币折算)。原代码又 +bnbVal 把 BNB 重复计算(净资产本已含 BNB)→保证金虚高,已修。 */}
+      {!isMobile && (
+        <td className={numCell} title="杠杆账户净资产USDT(账户总权益,已含BNB及所有持币折算);无负债时=总资产">
+          {balance?.margin_net_usdt != null ? formatNumber(balance.margin_net_usdt, 0) : '-'}
+        </td>
+      )}
       {/* 净值 — 杠杆账户可用USDT(纯U口径,按用户要求不含BNB/其它币):
           可用U=借币的保证金,借入卖出后回款计入、买回还币时扣减,随交易周期真实变动 */}
       {!isMobile && (

@@ -406,10 +406,11 @@ class Worker:
                 statuses[symbol] = "借币冷却"; continue
             if self._is_removed_banned(symbol):
                 statuses[symbol] = "移除冷却"; continue
-            # 手动还币后的暂停标记(engine_api 写,EX=1800):防"刚还清又被负阈值秒级重借"。
-            # 用户重新保存该币规则/重新推送即清除(显式再武装),显示「还币暂停」而非静默。
+            # 手动还币后的暂停标记(engine_api 写,勾选1800s/在途10s):防"刚还清又被负阈值秒级重借"。
+            # ⚠self._redis 是 aioredis(异步),必须 await —— 漏 await 时 get() 返回 coroutine 对象
+            # 恒为 truthy → 每个币每周期恒判「还币暂停」永不借币(Redis 无 key 也照样暂停)。已修。
             try:
-                if self._redis.get(f"engine:{self._user_id}:repayhold:{symbol}"):
+                if await self._redis.get(f"engine:{self._user_id}:repayhold:{symbol}"):
                     statuses[symbol] = "还币暂停"; continue
             except Exception:
                 pass
