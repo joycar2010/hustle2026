@@ -40,6 +40,9 @@ FACTORIES = [
 # 双门槛: 你的散户往返成本 vs 专业玩家(做市费率+co-lo)成本. 缝隙>门槛=对该视角有肉
 COST_RETAIL = 38.0    # 散户: DEX25 + CEX taker7.5 + gas
 COST_PRO = 25.0       # 专业: DEX25 但CEX maker~0 + 快速通道(乐观下界,看专业玩家钉宽在哪)
+DEAD_POOL_BPS = 100.0 # 池对CEX偏离>此值=脱锚僵尸池(流动性枯竭),剔除不参与缝隙判定
+EWMA_ALPHA = 0.002    # 滚动均值权重(~500样本半衰,追踪锚定折价慢漂移,不被瞬时缝隙带偏)
+WARMUP_N = 300        # 预热样本数:EWMA收敛前不判缝隙(约5分钟)
 POLL_SEC = 1.0
 LOG = "./data/cexdex_shadow.csv"
 COLS = ["pair", "threshold", "open_ts", "close_ts", "open_block", "close_block",
@@ -59,6 +62,8 @@ class CexDexShadow(threading.Thread):
         self._gaps = {}    # (pair_key, threshold) -> gap dict
         self._samples = 0
         self._over = {"retail": 0, "pro": 0}
+        self._ewma = {}    # pair_key -> 结构性锚定折价的滚动均值(EWMA)
+        self._warmup = {}  # pair_key -> 已喂样本数(预热期不判缝隙)
         self._init_log()
         self._resolve_pools()
 
@@ -102,24 +107,27 @@ class CexDexShadow(threading.Thread):
                 self._pools[p["key"]] = pools
                 print(f"[cexdex] {p['key']}: {len(pools)}池")
 
-    def _dex_best_price(self, pair_key) -> float | None:
-        """取该对各池价的中位(抗单池坏数据),= base 的 USDT 价。"""
-        prices = []
+    def _pair_live_dev(self, pair_key, cex_px) -> float | None:
+        """返回该对【最优活池对CEX的有符号偏差bps】(取|偏差|最小的活池=最紧跟CEX的主池)。
+        修复1(死池): 剔除脱锚僵尸池(|偏离|>DEAD_POOL_BPS)。
+        有符号(非绝对值): 供上层去锚——BTCB/ETH是跨链锚定币,对CEX有结构性折价(常态-25bps),
+        必须减去滚动均值才是【可套利的瞬时偏离】。取最紧跟CEX的活池(主池),它才是套利腿会用的。"""
+        best = None
         for addr, t0, base in self._pools.get(pair_key, []):
             try:
                 r = self.rpc.call(addr, SEL_GETRESERVES)
                 r0 = int(r[2:66], 16); r1 = int(r[66:130], 16)
                 if r0 <= 0 or r1 <= 0:
                     continue
-                # base 是 token0 还是 token1; 价 = USDT储备/base储备
                 px = (r1 / r0) if t0 == base else (r0 / r1)
-                prices.append(px)
+                dev = (px - cex_px) / cex_px * 1e4
+                if abs(dev) > DEAD_POOL_BPS:   # 死池,剔除
+                    continue
+                if best is None or abs(dev) < abs(best):
+                    best = dev
             except Exception:  # noqa: BLE001
                 continue
-        if not prices:
-            return None
-        prices.sort()
-        return prices[len(prices) // 2]
+        return best
 
     def _cex_price(self, sym) -> float:
         d = json.load(urllib.request.urlopen(
@@ -164,11 +172,17 @@ class CexDexShadow(threading.Thread):
                     pk = p["key"]
                     if pk not in self._pools:
                         continue
-                    dx = self._dex_best_price(pk)
-                    if dx is None:
-                        continue
                     c = self._cex_price(p["cex"])
-                    diff = abs((dx - c) / c * 1e4)
+                    dev = self._pair_live_dev(pk, c)   # 有符号偏差(已剔死池)
+                    if dev is None:
+                        continue
+                    # 去锚:更新滚动均值(结构性折价),缝隙=偏离均值的瞬时幅度(才是可套利的)
+                    self._ewma[pk] = dev if pk not in self._ewma else \
+                        (1 - EWMA_ALPHA) * self._ewma[pk] + EWMA_ALPHA * dev
+                    self._warmup[pk] = self._warmup.get(pk, 0) + 1
+                    if self._warmup[pk] < WARMUP_N:
+                        continue   # 预热期不判缝隙
+                    diff = abs(dev - self._ewma[pk])   # 去锚后的瞬时偏离
                     if diff > COST_RETAIL:
                         self._over["retail"] += 1
                     if diff > COST_PRO:
