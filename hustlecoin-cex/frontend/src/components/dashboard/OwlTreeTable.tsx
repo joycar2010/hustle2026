@@ -229,7 +229,12 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   const closePct = group.spread ? group.spread.spread_long : null
   // 点差陈旧(WS 断流/ts 过期但保留就近值)→ 整块淡化,提示"非实时,仅供参考"
   const spreadStaleCls = group.spreadStale ? 'opacity-50' : ''
-  const spreadStaleTitle = group.spreadStale ? '点差非实时(行情断流,显示最近一次有效值)' : undefined
+  // 悬停显示行情新鲜度:粗刻度低价币(如 FIL,tick=1.27bp)点差量子化、数字长时间不变属正常,
+  // 用「行情 N 秒前更新」让用户区分"值没变"与"真断流"(断流会走上方 spreadStale 暗化)。
+  const spreadAgeSec = group.spread?.ts ? Math.max(0, Math.floor((Date.now() - group.spread.ts) / 1000)) : null
+  const spreadStaleTitle = group.spreadStale
+    ? '点差非实时(行情断流,显示最近一次有效值)'
+    : (spreadAgeSec != null ? `行情 ${spreadAgeSec} 秒前更新(粗刻度币点差按 tick 步进,值可能长时间不变属正常)` : undefined)
 
   const coinName = group.symbol
   const dh = group.durationHours
@@ -262,8 +267,8 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   const paramBlock = (
     <td className="px-1.5 py-1 text-left">
       <span className={spreadStaleCls} title={spreadStaleTitle}>
-        <Chip label="开" value={openPct != null ? formatNumber(openPct, 2) : '-'} cls="text-positive" />
-        {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 2) : '-'} cls="text-negative" />}
+        <Chip label="开" value={openPct != null ? formatNumber(openPct, 3) : '-'} cls="text-positive" />
+        {!isMobile && <Chip label="平" value={closePct != null ? formatNumber(closePct, 3) : '-'} cls="text-negative" />}
       </span>
       <Chip label="资" value={marketInfo ? (marketInfo.funding_rate * 100).toFixed(4) : '-'}
         cls={marketInfo && marketInfo.funding_rate >= 0 ? 'text-positive' : 'text-negative'} />
