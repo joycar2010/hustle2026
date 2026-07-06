@@ -48,6 +48,31 @@ def _publish_balance_refresh(user_id):
         pass
 
 
+def _publish_position(position, user_id):
+    """状态机推进(借到币/对冲/还币)后把 position 实时推给前端(position:updates),让 dashboard
+    子账户行不等 15s REST 轮询就切换成真实持仓行 —— 修复"手推借到币后黄框列(现-期/最大可借/
+    现币/借币/保证金/净值)要手动刷新才出"。sub_account_id 用 int(与前端 balanceMap 的 account_id
+    同类型,get 才命中)。失败静默,持仓最终仍由轮询兜底。"""
+    if user_id is None:
+        return
+    try:
+        import json as _json
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.publish("position:updates", _json.dumps({
+            "id": position.id,
+            "user_id": int(user_id),
+            "sub_account_id": int(position.sub_account_id),
+            "symbol": position.symbol,
+            "status": position.status,
+            "borrow_qty": str(position.borrow_qty or "0"),
+        }))
+        rc.close()
+    except Exception:
+        pass
+
+
 TAKER_FEE_RATE = Decimal("0.00075")
 FEE_BUFFER = Decimal("1.0015")
 BORROW_FRESH_MS = 3000   # 借币二次确认: 点差快照超此毫秒数视为陈旧,不在已死/过期点差上完成借币
@@ -477,7 +502,11 @@ async def execute_borrow(
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
         logger.info(f"Borrowed (idle): {symbol} qty={qty}")
         # 写后即时刷新:借到币 → 让该用户 dashboard 现币/借币列秒级更新,不等 10s 轮询
-        _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
+        _uid = user_id if user_id is not None else _resolve_user_id(db, sub_account_id)
+        _publish_balance_refresh(_uid)
+        # 持仓实时推送:让前端 positions 立即含这条 BORROWED_IDLE(切换成真实持仓行),不等 15s 轮询 →
+        # 修复"手推借到币后子账户行整块(现-期/最大可借/现币/借币/保证金/净值)要手动刷新才出"
+        _publish_position(position, _uid)
         try:
             await notifier.notify_new_borrow(account_note, symbol, qty, qty * price)
         except Exception as e:
