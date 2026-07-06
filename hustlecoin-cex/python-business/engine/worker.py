@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
@@ -705,6 +706,15 @@ class Worker:
             if immediate:
                 current |= immediate
                 await self._redis.set(key, json.dumps(sorted(current)))
+                # 通知链与手动推送对齐:记首次推送时刻 + publish pushed:updates。
+                # 原先只写 Redis 不广播 → 前端(WS pushed_update→refreshPushed)与 BalancePusher
+                # (推送即查 maxBorrowable)都收不到,自动推进来的币要手动刷新页面才出现。
+                now_ts = int(time.time())
+                for s in immediate:
+                    await self._redis.hsetnx(f"engine:{self._user_id}:pushed_at", s, now_ts)
+                await self._redis.publish("pushed:updates", json.dumps({
+                    "user_id": self._user_id, "pushed_symbols": sorted(current),
+                }))
                 logger.info(f"Auto-pushed {len(immediate)} (spread≥{threshold}, 直推): {sorted(immediate)[:10]}")
             if need_confirm and cd > 0:
                 asyncio.create_task(self._confirm_push(need_confirm, threshold, cd, key))
@@ -728,6 +738,13 @@ class Worker:
             if add:
                 current |= ok
                 await self._redis.set(key, json.dumps(sorted(current)))
+                # 与直推分支同款:记推送时刻 + 广播,前端/BalancePusher 实时感知
+                now_ts = int(time.time())
+                for s in add:
+                    await self._redis.hsetnx(f"engine:{self._user_id}:pushed_at", s, now_ts)
+                await self._redis.publish("pushed:updates", json.dumps({
+                    "user_id": self._user_id, "pushed_symbols": sorted(current),
+                }))
                 logger.info(f"Auto-pushed {len(add)} after 2nd-confirm({cd}s): {sorted(add)[:10]}")
         except Exception as e:
             logger.debug(f"confirm_push failed: {e}")
