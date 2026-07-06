@@ -65,7 +65,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
     const base = symbol.replace('USDT', '')
     if (!(await confirmDialog({
       title: '还币',
-      message: `确认为 ${note} 还清 ${base}？\n本金 ${borrowed.toFixed(6)} + 利息 ${interest.toFixed(6)} ≈ ${total.toFixed(6)} ${base}`,
+      message: `确认为 ${note} 还清 ${base}？\n本金 ${borrowed.toFixed(6)} + 利息 ${interest.toFixed(6)} ≈ ${total.toFixed(6)} ${base}\n\n注意:还清后该币立即恢复自动借币(挂单差为负会秒级重借);\n如需暂停借币,请从右键「部分还币」弹窗勾选暂停选项。`,
       danger: true,
     }))) return
     setRepaying(accountId)

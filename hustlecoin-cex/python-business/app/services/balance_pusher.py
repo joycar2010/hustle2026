@@ -383,6 +383,17 @@ class BalancePusher:
                 all_assets |= s
             noinv_rem = await self._noinv_remaining(all_assets)
 
+            # 还币暂停剩余秒数(engine:{uid}:repayhold:{SYM},用户勾选/在途静默):供状态列倒计时+点击解除
+            hold_rem: dict[tuple[int, str], int] = {}
+            for uid2, assets2 in pushed_by_user.items():
+                for a2 in assets2:
+                    try:
+                        t2 = await self._redis.ttl(f"engine:{uid2}:repayhold:{a2}USDT")
+                        if t2 and t2 > 0:
+                            hold_rem[(uid2, a2)] = int(t2)
+                    except Exception:
+                        pass
+
             interest_fetched: set[str] = set()
             force_consumed: set[str] = set()   # 本轮已消费的"推送即查"强查资产,轮末从全局集扣除
 
@@ -496,6 +507,7 @@ class BalancePusher:
                                 # 无券=本进程 -3045 标志 或 引擎借币冷却键仍在(引擎真正被闸住的口径)
                                 "no_inventory": self._noinv_active(asset_name) or noinv_rem.get(asset_name, 0) > 0,
                                 "noinv_remaining_sec": noinv_rem.get(asset_name, 0),
+                                "repayhold_remaining_sec": hold_rem.get((acc.user_id or 0, asset_name), 0),
                             }
 
                     # Pushed-but-not-held assets aren't in userAssets — still surface
@@ -513,6 +525,7 @@ class BalancePusher:
                                 "daily_interest_rate": self._interest_rate_cache.get(asset_name, 0),
                                 "no_inventory": self._noinv_active(asset_name) or noinv_rem.get(asset_name, 0) > 0,
                                 "noinv_remaining_sec": noinv_rem.get(asset_name, 0),
+                                "repayhold_remaining_sec": hold_rem.get((acc.user_id or 0, asset_name), 0),
                             }
 
                     # 有效可借: 在理论上限(max_borrowable)基础上,套引擎同一封顶口径

@@ -29,6 +29,8 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
   const [inputs, setInputs] = useState<Record<number, string>>({})    // 各账户输入的还币数量(币)
   const [amtInputs, setAmtInputs] = useState<Record<number, string>>({})  // 各账户输入的还币金额(USDT),与数量互斥
   const [bulkBusy, setBulkBusy] = useState(false)
+  // 还币后暂停自动借币30分钟(默认不勾):不勾且挂单差为负 → 还完立即重借是设计行为(挂单开着=持续借)
+  const [pauseBorrow, setPauseBorrow] = useState(false)
 
   // 该币所有子账户(全部展示,与图一致;有借币的可还)
   const rows: Row[] = useMemo(() => {
@@ -48,7 +50,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
     if ((opts.qty ?? 0) <= 0 && (opts.usdt ?? 0) <= 0) { addToast('还币数量/金额需为正数', 'error'); return }
     setRepaying(r.accountId)
     try {
-      const res = await partialRepay(r.accountId, symbol, opts.qty ?? 0, false, opts.usdt)
+      const res = await partialRepay(r.accountId, symbol, opts.qty ?? 0, false, opts.usdt, pauseBorrow)
       // 乐观递减用后端返回的实际还币量(金额换算/债务封顶后的真值),比前端输入更准
       const repaid = (res as { repaid?: number })?.repaid ?? opts.qty ?? 0
       if (repaid > 0) markRepaid(r.accountId, symbol, repaid)
@@ -61,7 +63,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
       addToast(`${r.note} 还币失败: ${msg}`, 'error')
     }
     setRepaying(null)
-  }, [symbol, base, markRepaid, addToast, onDone])
+  }, [symbol, base, markRepaid, addToast, onDone, pauseBorrow])
 
   // 一键全还(单账户):按本金+利息全额
   const repayAllOne = useCallback((r: Row) => {
@@ -92,7 +94,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
     for (const r of need) {
       setRepaying(r.accountId)
       try {
-        await partialRepay(r.accountId, symbol, r.total)
+        await partialRepay(r.accountId, symbol, r.total, false, undefined, pauseBorrow)
         markRepaid(r.accountId, symbol, r.total)   // 全额还:按 total 递减→自然归零
       } catch (e) {
         const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message
@@ -103,7 +105,7 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
     setBulkBusy(false)
     addToast(`已对 ${need.length} 个子账户提交全额还币`, 'success')
     onDone?.()
-  }, [rows, symbol, markRepaid, addToast, onDone])
+  }, [rows, symbol, markRepaid, addToast, onDone, pauseBorrow])
 
   const cellInput = 'w-20 bg-[#1a1a22] border border-border rounded px-1.5 py-0.5 text-[11px] text-right text-foreground focus:outline-none focus:border-primary'
 
@@ -216,6 +218,11 @@ export function PartialRepayDialog({ symbol, onClose, onDone }: {
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+          <label className="mr-auto flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none"
+            title="不勾:还完立即恢复自动借币(挂单差为负会秒级重借,持续囤券语义)。勾选:暂停30分钟,状态列显示「还币暂停」可点击提前解除">
+            <input type="checkbox" checked={pauseBorrow} onChange={(e) => setPauseBorrow(e.target.checked)} className="accent-amber-500" />
+            还币后暂停该币自动借币 30 分钟
+          </label>
           <button onClick={bulkBusy ? undefined : onClose} disabled={bulkBusy}
             className="rounded border border-border px-4 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40">关闭</button>
           <button onClick={repayAllAccounts} disabled={bulkBusy}

@@ -22,6 +22,7 @@ export interface AccountBalance {
     daily_interest_rate: number
     no_inventory?: boolean
     noinv_remaining_sec?: number  // 无券冷却剩余秒数(引擎engine:noinv TTL与pusher标志取大),0=不在冷却
+    repayhold_remaining_sec?: number  // 还币暂停剩余秒数(用户勾选/在途静默),0=未暂停;点状态可解除
     residual_only?: boolean  // 非推送/持仓币的零债务现币残留(仅供「持币汇总」卖回,不是可交易行)
     effective_borrowable?: number
     borrow_cap_reason?: string

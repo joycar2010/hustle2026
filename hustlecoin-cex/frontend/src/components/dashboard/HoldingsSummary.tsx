@@ -21,6 +21,8 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
   const markRepaid = useBalanceStore((s) => s.markRepaid)
   const addToast = useToastStore((s) => s.addToast)
   const [repaying, setRepaying] = useState<string | null>(null)
+  // 还币后暂停自动借币30分钟(默认不勾=还完立即恢复借币,挂单负阈会秒级重借,持续囤券语义)
+  const [pauseBorrow, setPauseBorrow] = useState(false)
 
   const { rows, residuals } = useMemo(() => {
     const out: HeldRow[] = []
@@ -57,14 +59,14 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
     const key = `${r.accountId}-${r.symbol}`
     setRepaying(key)
     try {
-      await partialRepay(r.accountId, r.symbol, r.total)
+      await partialRepay(r.accountId, r.symbol, r.total, false, undefined, pauseBorrow)
       markRepaid(r.accountId, r.symbol)   // 乐观清零 → 该行即时消失,下次WS推送对账
       addToast(`${r.note} ${r.base} 还币已提交`, 'success')
     } catch (e) {
       addToast(`还币失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
     }
     setRepaying(null)
-  }, [addToast, markRepaid])
+  }, [addToast, markRepaid, pauseBorrow])
 
   // 卖回零债务现币残留:走 partial-repay 的 sell_residual 分支市价卖回 USDT(<5U 名义会被币安拒,后端如实提示)
   const handleSellResidual = useCallback(async (r: HeldRow) => {
@@ -160,6 +162,13 @@ export function HoldingsSummary({ onClose }: { onClose: () => void }) {
             </table>
           </div>
         )}
+        <div className="flex items-center px-3 py-2 border-t border-border/50">
+          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none"
+            title="不勾:还完立即恢复自动借币(挂单差为负会秒级重借)。勾选:暂停30分钟,状态列「还币暂停」可点击提前解除">
+            <input type="checkbox" checked={pauseBorrow} onChange={(e) => setPauseBorrow(e.target.checked)} className="accent-amber-500" />
+            还币后暂停该币自动借币 30 分钟
+          </label>
+        </div>
         <p className="text-[10px] text-muted-foreground/50 px-3 py-2">
           数据来自引擎实时余额快照(杠杆账户已借本金 + 已计利息);还币按"本金+利息"全额还清该币。还币后约数秒刷新。
           残留区名义价值低于币安最小卖出额(约5U)的属真尘埃,卖回会被拒并如实提示。

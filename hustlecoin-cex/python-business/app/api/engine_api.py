@@ -644,10 +644,9 @@ def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids:
 def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: int, symbol: str, repay_qty: Decimal):
     """手动还币(/partial-repay)后收口 position 状态:把该子账户该币的未终态 position 置 CLOSED
     (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。
-    ⚠不再自动下架 pushed / 清单一规则 —— 旧行为把用户的 -1 挂单差连同推送一起静默拆掉,
-    "借-还-再借"测试循环每次还币都要重推+重填规则,体感"很久才再借"。改为写 30 分钟
-    repayhold 标记(worker 借币前检查,状态显示「还币暂停」),防"刚还清被负阈值立即重借";
-    用户重新保存该币规则或重新推送 = 显式再武装,标记即清。失败回滚不阻断还币主流程。"""
+    ⚠只做持仓收口,不下架 pushed、不清规则、也不再写还币暂停标记 —— 「挂单开着=持续借」
+    是策略语义,还币后是否暂停自动借币由还币端点按用户勾选(pause_borrow)决定,不在此隐式改变。
+    失败回滚不阻断还币主流程。"""
     from datetime import datetime as _dt, timezone as _tz
     try:
         active = db.query(Position).filter(
@@ -676,18 +675,6 @@ def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: 
                 }))
         except Exception:
             pass
-        # 该 user 该 symbol 是否还有未终态持仓;无 → 写 30min 还币暂停标记(不下架、不清规则,
-        # 保留用户的推送与 -1 挂单差配置;worker 见标记跳过借币并显示「还币暂停」)
-        sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
-        remaining = db.query(Position).filter(
-            Position.sub_account_id.in_(sub_ids), Position.symbol == symbol,
-            Position.status.notin_(["CLOSED", "FAILED"]),
-        ).count() if sub_ids else 0
-        if remaining == 0:
-            try:
-                _redis().set(f"engine:{user_id}:repayhold:{symbol}", "1", ex=1800)
-            except Exception:
-                pass
     except Exception as e:
         db.rollback()
         logger.warning(f"reconcile positions after repay failed ({symbol}): {e}")
@@ -869,6 +856,22 @@ class PartialRepayRequest(BaseModel):
     # 前端「卖回」按钮:债务为 0 但杠杆户仍有现币残留时,显式请求把残留市价卖回 USDT。
     # 默认 False 保持旧行为(仅同步持仓状态),防其它调用方误触发卖出。
     sell_residual: bool = False
+    # 还币后暂停该币自动借币 30 分钟(前端勾选,默认不勾)。不勾且挂单差为负 → 还完立即重借
+    # 是设计行为(挂单开着=持续借);勾选才写 repayhold 标记,状态列可见可点击解除。
+    pause_borrow: bool = False
+
+
+@router.delete("/repay-hold/{symbol}")
+def clear_repay_hold(symbol: str, request: Request):
+    """解除「还币暂停」:立即恢复该币自动借币(状态列点击/用户显式操作)。
+    等价再武装动作:重存该币规则、重新推送。幂等。"""
+    user_id = get_current_user_id(request)
+    sym = symbol.upper()
+    try:
+        _redis().delete(f"engine:{user_id}:repayhold:{sym}")
+    except Exception:
+        pass
+    return {"message": f"{sym} 已恢复自动借币"}
 
 
 @router.post("/partial-repay")
@@ -898,9 +901,14 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             usdt_free = float(usdt_info.get("free", "0") or 0) if usdt_info else 0.0
             total_debt = borrowed + interest
             if total_debt < 1e-8:
-                # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED + 自动下架),
+                # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED),
                 # 修复"已还币但状态仍待对冲"的孤儿。
                 _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(), Decimal("0"))
+                if data.pause_borrow:
+                    try:
+                        _redis().set(f"engine:{user_id}:repayhold:{data.symbol.upper()}", "1", ex=1800)
+                    except Exception:
+                        pass
                 if data.sell_residual and free > 1e-8:
                     # 显式卖回:零债务现币残留原本没有任何清理入口(还币闸只认债务,
                     # debt_converter/reconcile 均 debt<=0 跳过,dust→BNB 够不到杠杆户)。
@@ -921,6 +929,13 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
                         pass
                     return {"message": f"{account.note} {base_asset} 无债务,{note}", "sold": sold}
                 return {"message": f"{account.note} {base_asset} 无需还币(债务为0),已同步持仓状态"}
+
+            # 在途静默窗:还币操作(可能含买回/划转,数秒~数十秒)期间引擎不抢跑借币,
+            # 防"边还边借"账目打架。秒级窗口对囤券策略无感;成功后按 pause_borrow 决定去留。
+            try:
+                _redis().set(f"engine:{user_id}:repayhold:{data.symbol.upper()}", "1", ex=10)
+            except Exception:
+                pass
 
             # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
             # 归一为 float,避免下游 `repay_amount - free`(shortfall)/`*= 0.999`(重试)触发 Decimal-float
@@ -1096,6 +1111,17 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             #    position 会永久卡在「待对冲」(状态孤儿)。债已清 → 收口该币 position(见 helper)。
             _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(),
                                              Decimal(str(repay_amount)))
+
+            # 借币暂停按用户勾选定去留:勾了 → 30 分钟(状态列可见可点解);没勾 → 立即删掉
+            # 在途静默窗,挂单负阈的币下个周期(≤1s)就恢复借币(「挂单开着=持续借」)。
+            try:
+                _hk = f"engine:{user_id}:repayhold:{data.symbol.upper()}"
+                if data.pause_borrow:
+                    _redis().set(_hk, "1", ex=1800)
+                else:
+                    _redis().delete(_hk)
+            except Exception:
+                pass
 
             # 写后即时刷新:手动部分/全额还币 → 请求 BalancePusher 立刻重推该用户余额(不等 10s 轮询,问题4)
             try:

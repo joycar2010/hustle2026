@@ -11,6 +11,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { cn, formatNumber, pnlColor } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { ContextMenu } from './ContextMenu'
+import { clearRepayHold } from '@/api/engine'
 
 export interface Position {
   id: number
@@ -166,7 +167,7 @@ const STATUS_TITLES: Record<string, string> = {
   '量不足': '24h 成交量低于最低门槛,暂不交易',
   '借币冷却': '平仓后重借冷却中(负挂单差可跳过)',
   '移除冷却': '移除后再借冷却中',
-  '还币暂停': '手动还币后暂停自动借币(防还完立刻被重借);重新保存该币规则或重新推送即恢复',
+  '还币暂停': '手动还币时勾选的暂停(或还币在途的短暂静默);点击状态可立即恢复,重存该币规则/重新推送亦可',
   '运行中': '有券+点差达标,挂单借币中',
 }
 function statusColorCls(s: string): string {
@@ -620,7 +621,20 @@ const SubAccountRow = memo(function SubAccountRow({
             <span className="text-red-500 font-medium">API错误</span>
           ) : (symbolStatus && EXEC_STATUSES.has(symbolStatus)) ? (
             <span className="text-sky-400">借币</span>
-          ) : symbolStatus ? (
+          ) : symbolStatus === '还币暂停' ? (() => {
+            const holdSec = balance?.symbol_margin?.[pos.symbol]?.repayhold_remaining_sec ?? 0
+            const holdMin = holdSec > 0 ? Math.ceil(holdSec / 60) : 0
+            return (
+              <span
+                className={cn(statusColorCls(symbolStatus), 'cursor-pointer underline decoration-dotted')}
+                title={`手动还币时勾选的暂停${holdMin ? `,剩余约 ${holdMin} 分钟` : ''};点击立即恢复自动借币(重存该币规则/重新推送亦可)`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  clearRepayHold(pos.symbol).catch(() => { /* 幂等,失败静默 */ })
+                }}
+              >还币暂停{holdMin ? `(${holdMin}分)` : ''}</span>
+            )
+          })() : symbolStatus ? (
             <span className={statusColorCls(symbolStatus)} title={STATUS_TITLES[symbolStatus]}>{symbolStatus}</span>
           ) : (
             <span className="text-muted-foreground">{durationText(pos.opened_at)}</span>
