@@ -725,15 +725,17 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
         except Exception as _oo:
             logger.warning(f"remove {sym}: orphan pass failed (non-blocking): {_oo}")
 
-        # OPEN/BORROWED_IDLE/PENDING_REPAY 等活跃状态都算"持仓中",不允许移除
-        ACTIVE_STATUSES = ("OPEN", "BORROWED_IDLE", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING")
+        # 有对冲敞口/正在对冲平仓的状态才拦移除(必须先正常平仓);
+        # BORROWED_IDLE(纯借币未对冲,净平无方向敞口)不拦 —— 下方还债块会还清借币并收口该 position,
+        # 消除"借了没对冲想移除却撞 409、移除后又留待对冲孤儿"的两难(用户实测 FIL 场景)。
+        HEDGED_STATUSES = ("OPEN", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING", "SPOT_SOLD")
         active_count = db.query(Position).filter(
             Position.sub_account_id.in_(sub_ids),
             Position.symbol == sym,
-            Position.status.in_(ACTIVE_STATUSES),
+            Position.status.in_(HEDGED_STATUSES),
         ).count()
         if active_count > 0:
-            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个活跃持仓(OPEN/借币中/待还币)")
+            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个对冲持仓,请先平仓")
 
     # 移除前还清该 symbol 在所有子账户的杠杆账户残留借贷(粉尘/利息),
     # 防止移除后前端"现币/借币"列仍显示残余数据(币安那边债务未清)。
@@ -773,6 +775,27 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
                                 logger.info(f"remove {sym} sub{sub_id}: residual not sold — {note}")
                     except Exception as _se:
                         logger.warning(f"remove {sym} sub{sub_id}: residual sweep failed (non-blocking): {_se}")
+                    # 还债后收口该子账户该币的非终态孤儿(BORROWED_IDLE/PENDING_BORROW/PENDING_REPAY):
+                    # execute_borrow_only_repay 只新建 CLOSED 记账、不回写已存在的 BORROWED_IDLE,
+                    # 不收口就留下"借着币待对冲"却实际零债务的孤儿(用户实测 hustle-012「待对冲」根因)。
+                    try:
+                        from datetime import datetime as _cdt, timezone as _ctz
+                        orphans = db.query(Position).filter(
+                            Position.sub_account_id == sub_id,
+                            Position.symbol == sym,
+                            Position.status.in_(("BORROWED_IDLE", "PENDING_BORROW", "PENDING_REPAY")),
+                        ).all()
+                        if orphans:
+                            for _p in orphans:
+                                _p.status = "CLOSED"
+                                _p.closed_at = _cdt.now(_ctz.utc)
+                                _p.error_message = (((_p.error_message + " | ") if _p.error_message else "")
+                                                    + "移除交易对时收口(还清借币,原借仓未回写)")
+                            db.commit()
+                            logger.info(f"remove {sym} sub{sub_id}: reconciled {len(orphans)} idle orphan position(s) to CLOSED")
+                    except Exception as _rc:
+                        db.rollback()
+                        logger.warning(f"remove {sym} sub{sub_id}: orphan reconcile after repay failed: {_rc}")
             except Exception as _re:
                 logger.warning(f"remove {sym} sub{sub_id}: repay residual failed (non-blocking): {_re}")
     except Exception as _outer:
