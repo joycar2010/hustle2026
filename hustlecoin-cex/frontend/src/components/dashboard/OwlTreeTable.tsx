@@ -1210,10 +1210,11 @@ const CoinGroupRows = memo(function CoinGroupRows({
           />
         )
       })}
-      {/* 子账户行渲染并集:除上方"有持仓"账户外,只要该币被推送或有生效规则(全局/单一),
+      {/* 子账户行渲染并集:除上方"有持仓"账户外,只要该币被推送 / 有生效规则 / 或已有真实持仓,
           就把其余 enabled 子账户(去重)也造最小伪 position 显示(账户名+余额+逐账户状态)。
-          修复"只有全局规则、别的账户已持仓时,该子账户整行不显示"(问题2;原 positions.length===0 互斥闸)。 */}
-      {isExpanded && (group.isPushed || group.ruleInfo != null) &&
+          加 group.positions.length>0:某账户借着币但该币已不在 pushed(如移除后残留持仓)时,
+          其它没持仓的子账户行也要显示,保持同一币下账户列表完整(修复"hustle-012 不见了")。 */}
+      {isExpanded && (group.isPushed || group.ruleInfo != null || group.positions.length > 0) &&
         [...balanceMap.values()]
           .filter((bal) => !group.positions.some((p) => p.sub_account_id === bal.account_id))
           // 「隐」开启时:无持仓的伪子账户行里,只保留借币余额>0 的(余额真值秒级,不受持仓15s轮询滞后影响)
