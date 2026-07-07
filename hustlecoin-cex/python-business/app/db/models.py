@@ -141,6 +141,8 @@ class GlobalRules(Base):
     removed_cooldown_minutes = Column(Integer, default=0)    # 移除/平仓冷却(分钟): 同币退出后此时长内禁止再借,抑制反复进出(0=不启用)
     spread_stale_sec = Column(Integer, default=300)          # 利差监控新鲜阈值(秒,系统全局): ts 落后全表最新值超此秒数的币在 /spreads 不显示(死币剔除;前端读)
     net_gate_mode = Column(String(10), default="shadow")     # 净期望闸(系统级): off不评估/shadow评估记录不拦/enforce E≤0拒开
+    hedge_auto_converge = Column(Boolean, default=False)     # 净敞口自动收敛(系统级): 裸多(实仓>对冲)自动 reduceOnly 对齐(默认关,只告警)
+    spot_order_mode = Column(String(10), default="market")   # 现货腿下单模式(系统级): market市价/maker post-only限价(省手续费,扩点差空间)
     version = Column(Integer, default=0)                      # 乐观锁版本号(保存事务化用)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -89,13 +89,16 @@ def run_fund_alert_checks(db: Session, agg_by_user: dict[int, dict]) -> None:
 
 
 def run_hedge_reconcile_checks(db: Session, master_pos_by_user: dict[int, dict],
-                               prices: dict[str, float]) -> None:
+                               prices: dict[str, float]) -> list[dict]:
     """净敞口对账:主账户每个币的合约净仓 vs DB 在管对冲量(该 user 该币非终态、hedge_account='master'
     的 futures_long_qty 合计)。差额名义 > HEDGE_MISMATCH_NOTIONAL → 裸多/裸空告警。
     数据全部现成(master_pos 由 balance_pusher 本轮采集,prices 用 spot_bids),零额外 REST。
-    master_pos_by_user: {uid: {SYMBOL: positionAmt}}; prices: {SYMBOL: spot_bid}。"""
+    master_pos_by_user: {uid: {SYMBOL: positionAmt}}; prices: {SYMBOL: spot_bid}。
+    返回【裸多收敛任务列表】[{uid,symbol,excess_qty,notional}] 供 balance_pusher 在开关开启时
+    reduceOnly 自动对齐(P1-7)。只返回裸多(可 reduceOnly 卖多单,不开新敞口最安全);裸空只告警不自动补。"""
+    converge_tasks: list[dict] = []
     if not master_pos_by_user:
-        return
+        return converge_tasks
     unames = {u.id: u.username for u in db.query(User.id, User.username).all()}
     for uid, pos in master_pos_by_user.items():
         if not pos:
@@ -124,3 +127,8 @@ def run_hedge_reconcile_checks(db: Session, master_pos_by_user: dict[int, dict],
             _fire(db, f"hedge:{sym}", uid, "资金告警·净敞口",
                   f"⚠ 用户 {uname} {sym} {kind} 差额 {diff:+.4f}(实仓 {actual:.4f} vs 在管对冲 {managed:.4f}"
                   f"{f',名义≈{notional:.1f}U' if notional > 0 else ''}),请核对合约仓")
+            # 裸多(diff>0)加入自动收敛任务:reduceOnly 卖掉多余多单对齐,不会开新敞口
+            if diff > 0:
+                converge_tasks.append({"uid": uid, "symbol": sym, "excess_qty": diff,
+                                       "actual": actual, "managed": managed, "notional": notional})
+    return converge_tasks

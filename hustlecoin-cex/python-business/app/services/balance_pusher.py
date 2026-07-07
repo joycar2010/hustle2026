@@ -289,6 +289,59 @@ class BalancePusher:
                 out[a] = rem
         return out
 
+    async def _auto_converge_hedge(self, db, tasks: list[dict]):
+        """P1-7 净敞口自动收敛:对裸多(master实仓>在管对冲)reduceOnly 市价卖出对齐。
+        仅当系统规则 hedge_auto_converge 开启才执行(默认关=只告警不动仓)。用主账户 key 下单,
+        reduceOnly 保证只减不反向开仓(绝对安全)。量向下取整到合约步长,不超卖。收敛后飞书+跑马灯报告。"""
+        from app.db.models import MasterAccount, GlobalRules
+        try:
+            enabled = db.query(GlobalRules.hedge_auto_converge).filter(
+                GlobalRules.user_id.is_(None)).order_by(GlobalRules.id).scalar()
+        except Exception:
+            enabled = None
+        if not enabled:
+            return   # 开关默认关:只告警(上游已发),不自动动仓
+        from engine.trading.binance_trading import BinanceTradingClient
+        by_uid: dict[int, list] = {}
+        for t in tasks:
+            by_uid.setdefault(t["uid"], []).append(t)
+        for uid, uid_tasks in by_uid.items():
+            master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
+            if not master or not master.api_key:
+                continue
+            try:
+                async with BinanceTradingClient(master.api_key, master.api_secret) as mc:
+                    info = await mc._request("GET", "https://fapi.binance.com/fapi/v1/exchangeInfo", {}, signed=False)
+                    steps = {}
+                    for s in info.get("symbols", []):
+                        lot = next((f for f in s.get("filters", []) if f["filterType"] == "LOT_SIZE"), None)
+                        if lot:
+                            steps[s["symbol"]] = float(lot.get("stepSize", "0.001") or "0.001")
+                    for t in uid_tasks:
+                        sym = t["symbol"]; excess = float(t["excess_qty"])
+                        step = steps.get(sym, 0.001)
+                        import math as _m
+                        qty = _m.floor(excess / step) * step if step > 0 else 0.0
+                        if qty <= 0:
+                            continue
+                        try:
+                            await mc._request("POST", "https://fapi.binance.com/fapi/v1/order", {
+                                "symbol": sym, "side": "SELL", "type": "MARKET",
+                                "quantity": f"{qty:.8f}".rstrip("0").rstrip("."), "reduceOnly": "true",
+                            }, signed=True)
+                            logger.info(f"[auto-converge] u{uid} {sym} reduceOnly SELL {qty} (裸多{excess:.4f}→对齐)")
+                            try:
+                                self._redis and await self._redis.publish("notification:broadcast", json.dumps({
+                                    "title": "净敞口自动收敛", "priority": "high", "color": "#f59e0b", "blink": False,
+                                    "content": f"{sym} 裸多 {excess:.4f} 已 reduceOnly 卖出 {qty} 对齐对冲量 {t['managed']:.4f}",
+                                }))
+                            except Exception:
+                                pass
+                        except Exception as _oe:
+                            logger.warning(f"[auto-converge] u{uid} {sym} reduceOnly failed: {_oe}")
+            except Exception as e:
+                logger.warning(f"[auto-converge] u{uid} master client failed: {e}")
+
     async def _vip_borrow_limit(self, client, asset: str) -> float:
         """VIP 档借贷上限(与库存/持U无关,同VIP各账户相同),进程内 6h 缓存;失败负缓存 10min。"""
         VIP_TTL, NEG_TTL = 21600.0, 600.0
@@ -672,15 +725,20 @@ class BalancePusher:
                     db.rollback()
                     logger.warning(f"balance_snapshot persist failed: {e}")
                 # 资金风险告警(回撤/保证金/日亏)→ 跑马灯,节流自管,失败不影响主流程
+                converge_tasks = []
                 try:
                     from app.services.fund_alerts import run_fund_alert_checks, run_hedge_reconcile_checks
                     run_fund_alert_checks(db, agg_by_user)
                     # 净敞口对账:主账户合约净仓 vs DB 在管对冲量(本轮已采集的 master_futures_positions
-                    # + spot_bids,零额外 REST),裸多/裸空差额名义超阈值 → 告警
-                    run_hedge_reconcile_checks(db, master_futures_positions, spot_bids)
+                    # + spot_bids,零额外 REST),裸多/裸空差额名义超阈值 → 告警;返回裸多收敛任务
+                    converge_tasks = run_hedge_reconcile_checks(db, master_futures_positions, spot_bids) or []
                 except Exception as e:
                     db.rollback()
                     logger.warning(f"fund alert checks failed: {e}")
+                # P1-7 净敞口自动收敛:开关开启时,对裸多(实仓>对冲)reduceOnly 市价卖出对齐 + 飞书报告。
+                # 只裸多(reduceOnly 不开新敞口最安全);节流靠对账阈值+币安 reduceOnly 幂等。失败不影响主流程。
+                if converge_tasks:
+                    await self._auto_converge_hedge(db, converge_tasks)
 
             # P0: publish IP-wide used weight (this process makes frequent SAPI calls)
             try:
