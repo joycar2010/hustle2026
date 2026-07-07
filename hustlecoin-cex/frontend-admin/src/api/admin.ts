@@ -1121,6 +1121,33 @@ export async function getRankings() {
   return data as RankingsData
 }
 
+// ─── 净期望收益 E 榜(P0-1) ───
+export interface NetExpectRow {
+  user_id: number
+  symbol: string
+  E: number | null
+  notional_usdt: number | null
+  spread_capture: number | null
+  interest_cost: number | null
+  fee_cost: number | null
+  tick_cost: number | null
+  funding_expect: number | null
+  decision: string | null
+  gate_mode: string | null
+  ts: number | null
+}
+export interface NetExpectBoard {
+  rows: NetExpectRow[]
+  count: number
+  positive: number
+  negative: number
+  gate_mode: string | null
+}
+export async function getNetExpect() {
+  const { data } = await client.get('/api/admin/market/net-expect')
+  return data as NetExpectBoard
+}
+
 export async function resetHistoryScores() {
   const { data } = await client.delete('/api/admin/market/rankings/history')
   return data

@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   getAnnouncements, checkDelist, listPendingBlacklist, confirmBlacklist, dismissPending,
-  getKlineData, searchCoin, getRankings, resetHistoryScores,
+  getKlineData, searchCoin, getRankings, resetHistoryScores, getNetExpect,
   type AnnouncementItem, type PendingBlacklistItem, type CoinSearchItem, type RankingItem, type HistoryScoreItem,
+  type NetExpectRow,
 } from '@/api/admin'
 import { extractError } from '@/api/client'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,11 +14,11 @@ import { useToastStore } from '@/components/ui/toast'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import {
   AlertTriangle, Search, CheckCircle, XCircle, ExternalLink, RefreshCw, ShieldAlert,
-  CandlestickChart, TrendingUp,
+  CandlestickChart, TrendingUp, Calculator,
 } from 'lucide-react'
 import { createChart, type IChartApi, CandlestickSeries, HistogramSeries, ColorType, type UTCTimestamp } from 'lightweight-charts'
 
-type Tab = 'kline' | 'rankings' | 'announcements' | 'blacklist'
+type Tab = 'kline' | 'rankings' | 'announcements' | 'blacklist' | 'netexpect'
 
 export function MarketMonitorPage() {
   const [tab, setTab] = useState<Tab>('kline')
@@ -44,13 +45,92 @@ export function MarketMonitorPage() {
         <button onClick={() => setTab('blacklist')} className={tabCls('blacklist')}>
           <ShieldAlert className="h-4 w-4" /> 待审核黑名单
         </button>
+        <button onClick={() => setTab('netexpect')} className={tabCls('netexpect')}>
+          <Calculator className="h-4 w-4" /> 净期望E榜
+        </button>
       </div>
 
       {tab === 'kline' && <KlineTab />}
       {tab === 'rankings' && <RankingsTab />}
       {tab === 'announcements' && <AnnouncementsTab />}
       {tab === 'blacklist' && <BlacklistTab />}
+      {tab === 'netexpect' && <NetExpectTab />}
     </div>
+  )
+}
+
+// ─── 净期望 E 榜 Tab(P0-1: 开仓成本线) ───
+
+function NetExpectTab() {
+  const [rows, setRows] = useState<NetExpectRow[]>([])
+  const [meta, setMeta] = useState<{ positive: number; negative: number; gate_mode: string | null }>({ positive: 0, negative: 0, gate_mode: null })
+
+  const fetch = useCallback(async () => {
+    try {
+      const d = await getNetExpect()
+      setRows(d.rows || [])
+      setMeta({ positive: d.positive, negative: d.negative, gate_mode: d.gate_mode })
+    } catch { /* 静默 */ }
+  }, [])
+  useAutoRefresh(fetch, 10000)
+
+  const modeLabel = meta.gate_mode === 'enforce' ? '强制(E≤0拒开)'
+    : meta.gate_mode === 'off' ? '关闭' : '影子(记录不拦)'
+  const fmt = (v: number | null | undefined, d = 4) => v == null ? '—' : v.toFixed(d)
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">开仓净期望收益 E</span>
+          <Badge variant={meta.gate_mode === 'enforce' ? 'default' : 'secondary'}>闸模式: {modeLabel}</Badge>
+          <span className="text-emerald-500">可做(E&gt;0): {meta.positive}</span>
+          <span className="text-red-500">被成本吃(E≤0): {meta.negative}</span>
+          <span className="text-muted-foreground text-xs">E = 点差捕获 − 利息 − 4腿手续费 − tick摩擦(USDT);60s内引擎评估过的币</span>
+        </div>
+        {rows.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">近 60 秒无开仓评估记录(点差达标才评估;shadow 模式下有借币尝试才写入)</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-muted-foreground text-left">
+                  <th className="px-2 py-1.5">币种</th>
+                  <th className="px-2 py-1.5 text-right">净期望 E(U)</th>
+                  <th className="px-2 py-1.5 text-right">名义(U)</th>
+                  <th className="px-2 py-1.5 text-right">点差捕获</th>
+                  <th className="px-2 py-1.5 text-right">利息</th>
+                  <th className="px-2 py-1.5 text-right">手续费</th>
+                  <th className="px-2 py-1.5 text-right">tick摩擦</th>
+                  <th className="px-2 py-1.5 text-center">决定</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const pos = (r.E ?? 0) > 0
+                  return (
+                    <tr key={`${r.user_id}-${r.symbol}`} className="border-b border-border/30 hover:bg-accent/10">
+                      <td className="px-2 py-1.5 font-medium">{r.symbol.replace('USDT', '')}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono font-semibold ${pos ? 'text-emerald-500' : 'text-red-500'}`}>{fmt(r.E)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">{fmt(r.notional_usdt, 1)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-emerald-500/80">{fmt(r.spread_capture)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-amber-500/80">−{fmt(r.interest_cost)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-amber-500/80">−{fmt(r.fee_cost)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-amber-500/80">−{fmt(r.tick_cost)}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <Badge variant={r.decision === 'reject' ? 'destructive' : pos ? 'default' : 'secondary'}>
+                          {r.decision === 'reject' ? '拒开' : r.decision === 'borrow' && !pos ? '影子放行' : '可做'}
+                        </Badge>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
