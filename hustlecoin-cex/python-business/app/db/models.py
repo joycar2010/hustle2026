@@ -140,6 +140,7 @@ class GlobalRules(Base):
     bnb_burn_enabled = Column(Boolean, default=False)        # BNB 抵扣手续费开关(每用户):引擎对本用户各子账户统一下发 spot/marginBNBBurn
     removed_cooldown_minutes = Column(Integer, default=0)    # 移除/平仓冷却(分钟): 同币退出后此时长内禁止再借,抑制反复进出(0=不启用)
     spread_stale_sec = Column(Integer, default=300)          # 利差监控新鲜阈值(秒,系统全局): ts 落后全表最新值超此秒数的币在 /spreads 不显示(死币剔除;前端读)
+    net_gate_mode = Column(String(10), default="shadow")     # 净期望闸(系统级): off不评估/shadow评估记录不拦/enforce E≤0拒开
     version = Column(Integer, default=0)                      # 乐观锁版本号(保存事务化用)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

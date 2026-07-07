@@ -55,6 +55,7 @@ class GlobalRulesSnapshot:
     removed_cooldown_minutes: int = 0
     open_spread_buffer: Decimal = Decimal("0")
     max_loss_per_position: Decimal | None = None   # 单仓最大亏损止损(USDT,None/0=禁用)
+    net_gate_mode: str = "shadow"   # 净期望闸: off(不评估)/shadow(评估记录不拦)/enforce(E≤0拒开)
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ _SYSTEM_FIELDS = (
     "hedge_via_master", "max_spread_pct", "min_volume_24h",
     "min_volume_24h_futures", "block_risky_open", "filter_duration_ms", "min_borrow_usdt",
     "collateral_ratio", "removed_cooldown_minutes", "open_spread_buffer",
-    "taker_fee_spot", "taker_fee_futures",
+    "taker_fee_spot", "taker_fee_futures", "net_gate_mode",
 )
 _SYS_BOOL = {"borrow_via_otoco", "hedge_via_master", "block_risky_open"}
 _SYS_INT = {"otoco_legs", "multi_max_accounts_per_symbol", "filter_duration_ms", "removed_cooldown_minutes"}
@@ -170,6 +171,7 @@ class ConfigLoader:
                     removed_cooldown_minutes=int(getattr(rules, "removed_cooldown_minutes", 0) or 0),
                     open_spread_buffer=rules.open_spread_buffer if getattr(rules, "open_spread_buffer", None) is not None else Decimal("0"),
                     max_loss_per_position=getattr(rules, "max_loss_per_position", None),
+                    net_gate_mode=(getattr(rules, "net_gate_mode", None) or "shadow"),
                 )
 
             # 系统后端规则(黄框)由全局 NULL 行主管:per-user worker 把这些字段从 NULL 行覆盖

@@ -46,6 +46,10 @@ class Position(Base):
     # pnl
     realized_pnl = Column(Numeric(15, 4))
     fee_total = Column(Numeric(15, 4))
+    # 净期望闸(P0-1): 开仓时预期净收益 E(USDT) + 各分项JSON;平仓时本回路真实净损益(=realized+已结算资金费)
+    expected_e = Column(Numeric(15, 4), nullable=True)
+    round_net_pnl = Column(Numeric(15, 4), nullable=True)
+    e_breakdown = Column(Text, nullable=True)
 
     # timestamps + error
     opened_at = Column(DateTime(timezone=True))

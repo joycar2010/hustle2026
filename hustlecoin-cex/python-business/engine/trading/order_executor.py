@@ -78,6 +78,46 @@ FEE_BUFFER = Decimal("1.0015")
 BORROW_FRESH_MS = 3000   # 借币二次确认: 点差快照超此毫秒数视为陈旧,不在已死/过期点差上完成借币
 
 
+def _compute_net_expect(spread_short_pct, notional_usdt: float, interest_rate_daily,
+                        hold_hours: float, f_spot, f_fut, buffer_pct) -> tuple[float, dict]:
+    """开仓前净期望收益 E(USDT,统一绝对值口径)。所有输入折成 USDT 再比较,避免 %/币/分数混算。
+      E = 点差捕获 − 利息(持有期) − 4腿手续费 − tick/滑点摩擦
+    - 点差捕获 = spread_short(%)/100 × 名义额。本策略借币→卖现货→多合约,收敛即赚这段基差。
+    - 利息 = 日利率 × 名义额 × 持有小时/24。持有小时取"预期最短持仓"(≥1,币安按小时头计息)。
+    - 4腿手续费 = (现卖+现买)×f_spot + (期开+期平)×f_fut = 2×名义×(f_spot+f_fut)。
+    - tick摩擦 = open_spread_buffer(%)/100 × 名义额(近似腿间滑点/tick 步进,现状唯一摩擦旋钮)。
+    资金费预期第一版不计入(短持有常跨不到8h结算,且可正可负):作为已知保守偏差,E 偏低=宁可少开。
+    返回 (E, 分项dict)。E≤0 = 结构性亏损,不该开。"""
+    n = float(notional_usdt or 0)
+    cap = float(spread_short_pct or 0) / 100.0 * n
+    interest = float(interest_rate_daily or 0) * n * max(1.0, hold_hours) / 24.0
+    fee = 2.0 * n * (float(f_spot or 0) + float(f_fut or 0))
+    tick = float(buffer_pct or 0) / 100.0 * n
+    e = cap - interest - fee - tick
+    return e, {
+        "notional_usdt": round(n, 4), "spread_capture": round(cap, 4),
+        "interest_cost": round(interest, 4), "fee_cost": round(fee, 4),
+        "tick_cost": round(tick, 4), "funding_expect": 0.0, "E": round(e, 4),
+    }
+
+
+def _publish_net_eval(user_id, symbol: str, e: float, br: dict, decision: str, gate_mode: str):
+    """把开仓净期望评估写 Redis(供 coinadmin market-monitor 实时 E 榜)。
+    键 engine:{uid}:neteval:{SYMBOL},60s TTL 保鲜;失败静默,绝不影响借币主流程。"""
+    if user_id is None:
+        return
+    try:
+        import json as _json, time as _t, redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.setex(f"engine:{user_id}:neteval:{symbol}", 60, _json.dumps({
+            **br, "decision": decision, "gate_mode": gate_mode, "ts": int(_t.time() * 1000),
+        }))
+        rc.close()
+    except Exception:
+        pass
+
+
 async def _get_asset_debt(client: BinanceTradingClient, asset: str) -> tuple[Decimal, Decimal]:
     margin_info = await client.get_margin_account()
     for a in margin_info.get("userAssets", []):
@@ -462,6 +502,37 @@ async def execute_borrow(
             db.close()
             return None
 
+        # ── P0-1 净期望收益闸(成本线) ── 借币前评估这笔套利的净期望 E(USDT);此刻所有成本变量齐全
+        # (点差/名义/利率/费率/缓冲)且尚未真花钱。shadow=只记录不拦(先跑一周看会拦掉多少);
+        # enforce=E≤0 直接放弃(结构性亏损不开);off=不评估。评估结果写 Redis 供 market-monitor E 榜。
+        gate_mode = getattr(rules, "net_gate_mode", "shadow") or "shadow"
+        expected_e = None
+        e_break = None
+        if gate_mode != "off":
+            hold_hours = float(getattr(rules, "repay_ban_minutes", 30) or 30) / 60.0
+            expected_e, e_break = _compute_net_expect(
+                spread_short_pct=float(getattr(spread, "spread_short", 0) or 0),
+                notional_usdt=float(qty * price),
+                interest_rate_daily=float(interest_rate or 0),
+                hold_hours=hold_hours,
+                f_spot=float(getattr(rules, "taker_fee_spot", TAKER_FEE_RATE) or TAKER_FEE_RATE),
+                f_fut=float(getattr(rules, "taker_fee_futures", TAKER_FEE_RATE) or TAKER_FEE_RATE),
+                buffer_pct=float(getattr(rules, "open_spread_buffer", 0) or 0),
+            )
+            decision = "borrow" if (gate_mode == "shadow" or expected_e > 0) else "reject"
+            _publish_net_eval(user_id, symbol, expected_e, e_break, decision, gate_mode)
+            if gate_mode == "enforce" and expected_e <= 0:
+                position.status = "FAILED"
+                position.error_message = (f"净期望闸拒开: E={expected_e:.4f}U≤0 "
+                                          f"(点差捕获{e_break['spread_capture']:.4f}−利息{e_break['interest_cost']:.4f}"
+                                          f"−手续费{e_break['fee_cost']:.4f}−摩擦{e_break['tick_cost']:.4f})")
+                logger.info(f"Net-expect gate REJECT {symbol}: {position.error_message}")
+                db.commit()
+                db.close()
+                return None
+            if expected_e is not None and expected_e <= 0:
+                logger.info(f"[shadow] Net-expect≤0 {symbol}: E={expected_e:.4f}U (借币仍继续, gate={gate_mode})")
+
         # 借币前最终二次确认: 算 qty 期间(get_lot_size / maxBorrowable REST)又过去若干 ms,
         # 重读最新点差,确认仍新鲜且 ≥ 阈值 → 否则放弃,减少在已消失点差上完成 ~160ms 借币。
         # 负阈值同上跳过(囤券不依赖点差存活)。
@@ -498,6 +569,14 @@ async def execute_borrow(
         latency = int((time.monotonic() - t0) * 1000)
         position.status = "BORROWED_IDLE"
         position.borrow_qty = qty
+        # 记开仓预期净收益 E + 分项(事后与 round_net_pnl 校准闸的准度)
+        if expected_e is not None:
+            position.expected_e = Decimal(str(round(expected_e, 4)))
+            try:
+                import json as _j
+                position.e_breakdown = _j.dumps(e_break)
+            except Exception:
+                pass
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
         logger.info(f"Borrowed (idle): {symbol} qty={qty}")
@@ -1022,6 +1101,11 @@ async def execute_repay(
         interest_cost = interest_amount * pos.spot_buy_price if interest_amount else Decimal("0")
         pos.fee_total = total_fee + interest_cost
         pos.realized_pnl = spot_pnl + futures_pnl - total_fee - interest_cost
+        # P0-3 逐回路净损益:realized_pnl 不含资金费(资金费单独落 cumulative_funding_fee),
+        # 本回路真实净 = realized + 已结算资金费。这是"这一轮开平到底赚没赚"的唯一真值,
+        # 与 expected_e(开仓预期)同 USDT 口径,供 dashboard/admin 历史逐笔展示 + 事后校准 E 闸准度。
+        _funding = pos.cumulative_funding_fee or Decimal("0")
+        pos.round_net_pnl = pos.realized_pnl + _funding
         pos.closed_at = datetime.now(timezone.utc)
         pos.status = "CLOSED"
         db.commit()

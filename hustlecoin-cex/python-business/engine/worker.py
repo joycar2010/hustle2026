@@ -431,6 +431,13 @@ class Worker:
                 statuses[symbol] = "行情陈旧"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
                 statuses[symbol] = "点差不符"; continue
+            # ── P0-2 自杀组合校验 ── 开仓阈值 < 平仓阈值 = 必然循环:借币对冲开仓(spread>open_spread)
+            # 后立刻满足平仓(spread<close_spread),整夜开→平→重开烧 4 腿手续费+每轮小时头利息
+            # (FIL 开-1/平1.0 即此)。从借币源头掐掉:开<平直接不借,记"配置冲突"提示用户改配置。
+            _open_th = self._sym_threshold(symbol, "open_spread", rules.open_spread)
+            _close_th = self._sym_threshold(symbol, "close_spread", rules.close_spread)
+            if _open_th is not None and _close_th is not None and float(_open_th) < float(_close_th):
+                statuses[symbol] = "配置冲突"; continue
             # 有券 + 无异常 + 点差达标 → 正常运行(挂单借币中);本轮真借或受满仓/账户护栏暂缓,均标"运行中"
             statuses[symbol] = "运行中"
             if not can_borrow or active_count >= max_positions or not self._running:
@@ -944,13 +951,25 @@ class Worker:
         return rule.get("allow_repay", True)
 
     def _is_borrow_banned(self, symbol: str) -> bool:
-        """C4: Check if symbol is within the post-borrow repay ban window."""
+        """C4 + P1-4: 借币后最短持仓闸,并【对齐利息整点】。
+        币安杠杆利息按小时头计(整点结算):借了就要付这一个小时头,提前平仓=白付。
+        原实现是"借币后固定 repay_ban_minutes 分钟"→ 配合恒满足的开/平点差变成 30 分钟振荡器,
+        每小时借还两轮吃两个小时头利息。改为:满足最短持仓时长后,再对齐到下一个 UTC 整点才放行平仓
+        —— 把已按小时头付的利息用满,每个利息小时最多一轮开平。repay_ban_minutes<=0 则不 ban。"""
         last_borrow = self._last_borrow_at.get(symbol)
         if not last_borrow:
             return False
-        elapsed = (datetime.now(timezone.utc) - last_borrow).total_seconds()
-        ban_seconds = self.config.global_rules.repay_ban_minutes * 60
-        return elapsed < ban_seconds
+        ban_min = self.config.global_rules.repay_ban_minutes
+        if ban_min is None or ban_min <= 0:
+            return False
+        now = datetime.now(timezone.utc)
+        # 最短持仓(防秒级抖动)
+        min_release = last_borrow + timedelta(minutes=ban_min)
+        # 对齐到 min_release 之后的下一个 UTC 整点(利息小时边界)
+        aligned = min_release.replace(minute=0, second=0, microsecond=0)
+        if aligned < min_release:
+            aligned = aligned + timedelta(hours=1)
+        return now < aligned
 
     def _is_removed_banned(self, symbol: str) -> bool:
         """移除/平仓冷却: 同币退出后 removed_cooldown_minutes 分钟内禁止再借(0=不启用)。"""

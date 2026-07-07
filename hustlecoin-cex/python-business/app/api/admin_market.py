@@ -52,6 +52,47 @@ def _redis():
     return redis_lib.from_url(settings.redis_url, socket_connect_timeout=2, decode_responses=True)
 
 
+@router.get("/net-expect")
+def net_expect_board(request: Request):
+    """净期望收益 E 榜(P0-1):扫所有用户的 engine:{uid}:neteval:{SYMBOL} Redis 键(60s TTL,
+    引擎每次开仓评估写入),聚合成榜供 coinadmin market-monitor 展示——哪些币 E>0 可做、哪些被
+    成本吃成负、成本线由点差捕获/利息/手续费/摩擦四项构成。shadow 模式下能直接看到"若开会亏多少"。"""
+    require_admin(request)
+    try:
+        r = _redis()
+        rows = []
+        for key in r.scan_iter("engine:*:neteval:*", count=500):
+            try:
+                parts = key.split(":")
+                uid = int(parts[1]); sym = parts[3]
+                d = json.loads(r.get(key) or "{}")
+                if not d:
+                    continue
+                rows.append({
+                    "user_id": uid, "symbol": sym,
+                    "E": d.get("E"), "notional_usdt": d.get("notional_usdt"),
+                    "spread_capture": d.get("spread_capture"), "interest_cost": d.get("interest_cost"),
+                    "fee_cost": d.get("fee_cost"), "tick_cost": d.get("tick_cost"),
+                    "funding_expect": d.get("funding_expect"),
+                    "decision": d.get("decision"), "gate_mode": d.get("gate_mode"),
+                    "ts": d.get("ts"),
+                })
+            except Exception:
+                continue
+        rows.sort(key=lambda x: (x.get("E") if x.get("E") is not None else -1e9), reverse=True)
+        gate_mode = rows[0]["gate_mode"] if rows else None
+        return {
+            "rows": rows,
+            "count": len(rows),
+            "positive": sum(1 for x in rows if (x.get("E") or 0) > 0),
+            "negative": sum(1 for x in rows if (x.get("E") or 0) <= 0),
+            "gate_mode": gate_mode,
+        }
+    except Exception as e:
+        logger.warning(f"net-expect board error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class ConfirmBlacklistRequest(BaseModel):
     symbol: str
     reason: str | None = None
