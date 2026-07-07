@@ -21,6 +21,7 @@ MAX_PER_SYMBOL = 3
 SPREAD_FRESH_MS = 10_000   # 借币门:快照 ts 超此毫秒数视为 feed 停更/陈旧,不在死数据上开仓(与 rust 新鲜度护栏对齐)
 STALE_PENDING_BORROW_SEC = 120   # PENDING_BORROW 超此秒数视为僵尸(正常秒级转 IDLE/FAILED),每周期回收(与 orchestrator 启动回收阈值一致)
 NAKED_CHECK_INTERVAL = 0.5       # 裸空安全网检查周期(秒):0.5s 准实时发现「孤儿债务」(借币未对冲)
+IDLE_GIVEUP_MINUTES = 30         # BORROWED_IDLE 超时放弃:正阈值仓借后超此分钟仍达不到对冲阈值 → 还币止损(负阈值囤券不适用)
 AUTO_REMEDIATE = True            # 裸空全自动收口(用户已选):检测+告警+自动买回还币;False=仅检测告警
 
 
@@ -374,6 +375,11 @@ class Worker:
             if spread.spread_short > self._sym_threshold(pos.symbol, "open_spread", rules.open_spread):
                 await self._hedge_position(pos, spread, account_note)
                 open_positions = await asyncio.to_thread(self._load_open_positions)
+                continue
+            # 超时放弃:状态机原本 BORROWED_IDLE 唯一出路是对冲,点差借完回落就永久卡住白付利息
+            # +dashboard 挂"现-期残留"(实测 FIL 借后 open 阈值够不着卡 15min+)。正阈值(非囤券)的
+            # idle 仓超时未能对冲 → 放弃还币止损。负阈值=故意囤券持币等点差,不适用超时。
+            await self._maybe_giveup_idle(pos, rules)
 
         # ── BORROW: pushed ∩ tradable, spread > borrow_spread → execute_borrow (idle) ──
         # 同时为挂单中(未持仓)的每个推送币算逐账户状态写入 statuses(点差不符/无券/量不足/冷却…),
@@ -576,6 +582,51 @@ class Worker:
         except Exception as e:
             logger.error(f"Repay failed {position.symbol}: {e}")
 
+    async def _maybe_giveup_idle(self, position, rules):
+        """BORROWED_IDLE 超时放弃(状态机补洞):借币后点差回落、对冲阈值长时间够不着的仓,
+        原状态机无任何出路 → 永久 idle 白付小时头利息 + dashboard 挂「现-期残留」。
+        条件(全满足才放弃):
+          ① 有效挂单点差阈值 ≥ 0 —— 负阈值=故意囤券(借币持券等点差),持有即策略,不放弃;
+          ② idle 时长 > IDLE_GIVEUP_MINUTES;
+          ③ 还币未被该币规则禁止(allow_repay)。
+        放弃 = 腿字段归零 + CAS 翻 PENDING_REPAY,复用既有还币路径(repay_spread 未配即立即还)。"""
+        try:
+            g_borrow = getattr(rules, "borrow_spread", rules.open_spread)
+            eff = self._sym_threshold(position.symbol, "borrow_spread", g_borrow)
+            if eff is not None and float(eff) < 0:
+                return   # 囤券意图,不超时
+            if not self._is_repay_allowed(position.symbol):
+                return
+            anchor = position.created_at or position.updated_at
+            if anchor is None:
+                return
+            if anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=timezone.utc)
+            age_min = (datetime.now(timezone.utc) - anchor).total_seconds() / 60
+            if age_min <= IDLE_GIVEUP_MINUTES:
+                return
+            def _flip():
+                db = SessionLocal()
+                try:
+                    z = Decimal("0")
+                    n = db.query(Position).filter(
+                        Position.id == position.id, Position.status == "BORROWED_IDLE",
+                    ).update({
+                        "status": "PENDING_REPAY",
+                        "spot_sell_qty": z, "spot_sell_price": z,
+                        "spot_buy_qty": z, "spot_buy_price": z,
+                        "futures_long_qty": z, "futures_long_price": z, "futures_close_price": z,
+                        "error_message": f"idle 超时 {int(age_min)}min 未达对冲阈值,放弃还币止损",
+                    }, synchronize_session=False)
+                    db.commit()
+                    return n
+                finally:
+                    db.close()
+            if await asyncio.to_thread(_flip):
+                logger.info(f"Idle give-up {position.symbol}: {int(age_min)}min 未达对冲阈值 → 转还币")
+        except Exception as e:
+            logger.warning(f"idle give-up check failed {position.symbol}: {e}")
+
     async def _check_and_remove_symbol_after_close(self, symbol: str):
         """平仓后自动下架+清规则:检查该币所有持仓是否已 CLOSED,若是则从 pushed_symbols discard + 清 SymbolRule/AccountSymbolRule。"""
         db = SessionLocal()
@@ -592,14 +643,17 @@ class Worker:
             if open_count > 0:
                 return  # 还有未平仓位,不下架
             # 所有持仓已 CLOSED → 从 pushed_symbols 下架 + 清规则
+            # ⚠self._redis 是 aioredis,get/set/publish 必须 await —— 曾漏 await 致 raw 为 coroutine,
+            # json.loads 崩 TypeError 被 except 吞 → 全部币的平仓后自动下架+清规则从未生效
+            # (FIL 残留配置本该在全平后被清,就是被这里挡住;实测 12:19:55 "not coroutine" 日志)。
             ps_key = f"engine:{self._user_id}:pushed_symbols"
-            raw = self._redis.get(ps_key)
+            raw = await self._redis.get(ps_key)
             if raw:
                 current = set(json.loads(raw))
                 if symbol in current:
                     current.discard(symbol)
-                    self._redis.set(ps_key, json.dumps(sorted(current)))
-                    self._redis.publish("pushed:updates", json.dumps({
+                    await self._redis.set(ps_key, json.dumps(sorted(current)))
+                    await self._redis.publish("pushed:updates", json.dumps({
                         "user_id": self._user_id, "pushed_symbols": sorted(current)
                     }))
                     logger.info(f"Auto-removed {symbol} from pushed_symbols (all positions CLOSED)")

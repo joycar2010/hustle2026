@@ -1158,18 +1158,25 @@ async def execute_repay(
                     quantity=repay_amount, status="SUCCESS", latency=latency)
 
         # Finalize PnL (fees + interest)
-        spot_pnl = (pos.spot_sell_qty * pos.spot_sell_price) - (pos.spot_buy_qty * pos.spot_buy_price)
-        futures_pnl = (pos.futures_close_price - pos.futures_long_price) * pos.futures_long_qty
-        spot_sell_notional = pos.spot_sell_qty * pos.spot_sell_price
-        spot_buy_notional = pos.spot_buy_qty * pos.spot_buy_price
-        futures_open_notional = pos.futures_long_qty * pos.futures_long_price
-        futures_close_notional = pos.futures_long_qty * pos.futures_close_price
+        # 腿字段 None 归零:BORROWED_IDLE(借了未开腿)直转 PENDING_REPAY 还币时,现/期四腿字段
+        # 全 NULL → None*None TypeError,margin_repay 已成功但状态写不回 → 卡 REPAYING 二次卡死。
+        _z = Decimal("0")
+        _ssq = pos.spot_sell_qty or _z; _ssp = pos.spot_sell_price or _z
+        _sbq = pos.spot_buy_qty or _z;  _sbp = pos.spot_buy_price or _z
+        _flq = pos.futures_long_qty or _z; _flp = pos.futures_long_price or _z
+        _fcp = pos.futures_close_price or _z
+        spot_pnl = (_ssq * _ssp) - (_sbq * _sbp)
+        futures_pnl = (_fcp - _flp) * _flq
+        spot_sell_notional = _ssq * _ssp
+        spot_buy_notional = _sbq * _sbp
+        futures_open_notional = _flq * _flp
+        futures_close_notional = _flq * _fcp
         # 双腿吃单费率(可配): 现货腿与合约腿分开,None 回退硬编码常量(旧行为)
         f_spot = Decimal(str(fee_spot)) if fee_spot is not None else TAKER_FEE_RATE
         f_fut = Decimal(str(fee_futures)) if fee_futures is not None else TAKER_FEE_RATE
         total_fee = (spot_sell_notional + spot_buy_notional) * f_spot \
             + (futures_open_notional + futures_close_notional) * f_fut
-        interest_cost = interest_amount * pos.spot_buy_price if interest_amount else Decimal("0")
+        interest_cost = interest_amount * _sbp if interest_amount else Decimal("0")
         pos.fee_total = total_fee + interest_cost
         pos.realized_pnl = spot_pnl + futures_pnl - total_fee - interest_cost
         # P0-3 逐回路净损益:realized_pnl 不含资金费(资金费单独落 cumulative_funding_fee),
