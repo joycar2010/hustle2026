@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import Blacklist, PendingBlacklist, AiCoinConfig
+from app.db.models import Blacklist, PendingBlacklist, AiCoinConfig, GlobalRules
 from app.db.models_auth import User
 from app.db.session import get_db, SessionLocal
 from app.middleware.permissions import require_admin
@@ -430,3 +430,159 @@ def reset_history_scores(request: Request):
         return {"message": "History scores reset"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── P2-a 跨所标尺(OKX/Bybit 公共行情,只读参照,绝不做腿) ───
+
+_VENUE_CACHE_TTL = 60
+
+
+async def _fetch_json(cli, url, params=None):
+    resp = await cli.get(url, params=params)
+    return resp.json()
+
+
+@router.get("/cross-venue")
+async def cross_venue_ruler(request: Request, top: int = 60):
+    """跨所标尺(P2):并排对比 Binance / OKX / Bybit 三所同币的现货买卖价差 + 合约资金费率。
+    纯参照标尺——判断 Binance 点差/资金费是否有竞争力、carry 是否别处更优;不做任何下单腿。
+    全走公共行情(免鉴权),每所批量一次拉全量(约 5 次调用),60s redis 缓存,打开页面才算、不常驻轮询。"""
+    require_admin(request)
+    r = _redis()
+    cached = r.get("crossvenue:ruler")
+    if cached:
+        try:
+            return json.loads(cached)
+        except Exception:
+            pass
+
+    bn_spot: dict[str, tuple] = {}
+    okx_spot: dict[str, tuple] = {}
+    bb_spot: dict[str, tuple] = {}
+    bn_fund: dict[str, float] = {}
+    bb_fund: dict[str, float] = {}
+    errors = []
+    async with httpx.AsyncClient(timeout=12, headers={"User-Agent": "Mozilla/5.0"}) as cli:
+        try:  # Binance 现货 bookTicker(全量一次)
+            for t in await _fetch_json(cli, "https://api.binance.com/api/v3/ticker/bookTicker"):
+                s = t.get("symbol", "")
+                if s.endswith("USDT"):
+                    bid = _safe_float(t.get("bidPrice")); ask = _safe_float(t.get("askPrice"))
+                    if bid > 0 and ask > 0:
+                        bn_spot[s] = (bid, ask)
+        except Exception as e:
+            errors.append(f"binance_spot:{e}")
+        try:  # Binance 合约资金费(premiumIndex 全量一次)
+            for t in await _fetch_json(cli, "https://fapi.binance.com/fapi/v1/premiumIndex"):
+                s = t.get("symbol", "")
+                if s.endswith("USDT"):
+                    bn_fund[s] = _safe_float(t.get("lastFundingRate")) * 100
+        except Exception as e:
+            errors.append(f"binance_fund:{e}")
+        try:  # OKX 现货 tickers(全量一次,instId 形如 BTC-USDT)
+            d = await _fetch_json(cli, "https://www.okx.com/api/v5/market/tickers", {"instType": "SPOT"})
+            for t in d.get("data", []):
+                inst = t.get("instId", "")
+                if inst.endswith("-USDT"):
+                    bid = _safe_float(t.get("bidPx")); ask = _safe_float(t.get("askPx"))
+                    if bid > 0 and ask > 0:
+                        bn_key = inst.replace("-", "")
+                        okx_spot[bn_key] = (bid, ask)
+        except Exception as e:
+            errors.append(f"okx_spot:{e}")
+        try:  # Bybit 现货 tickers(全量一次)
+            d = await _fetch_json(cli, "https://api.bybit.com/v5/market/tickers", {"category": "spot"})
+            for t in d.get("result", {}).get("list", []):
+                s = t.get("symbol", "")
+                if s.endswith("USDT"):
+                    bid = _safe_float(t.get("bid1Price")); ask = _safe_float(t.get("ask1Price"))
+                    if bid > 0 and ask > 0:
+                        bb_spot[s] = (bid, ask)
+        except Exception as e:
+            errors.append(f"bybit_spot:{e}")
+        try:  # Bybit 合约 linear tickers(全量一次,含 fundingRate)
+            d = await _fetch_json(cli, "https://api.bybit.com/v5/market/tickers", {"category": "linear"})
+            for t in d.get("result", {}).get("list", []):
+                s = t.get("symbol", "")
+                if s.endswith("USDT"):
+                    bb_fund[s] = _safe_float(t.get("fundingRate")) * 100
+        except Exception as e:
+            errors.append(f"bybit_fund:{e}")
+
+    def _spr(pair):
+        if not pair:
+            return None
+        bid, ask = pair
+        return round((ask - bid) / bid * 100, 4) if bid > 0 else None
+
+    rows = []
+    for s in bn_spot:  # 以 Binance 现货宇宙为基(=我们在做的币)
+        o = okx_spot.get(s); b = bb_spot.get(s)
+        venues = 1 + (1 if o else 0) + (1 if b else 0)
+        if venues < 2:
+            continue   # 至少两所有价才有对比意义
+        bnf = bn_fund.get(s); bbf = bb_fund.get(s)
+        rows.append({
+            "symbol": s,
+            "bn_spread": _spr(bn_spot.get(s)),
+            "okx_spread": _spr(o),
+            "bybit_spread": _spr(b),
+            "bn_funding": round(bnf, 5) if bnf is not None else None,
+            "bybit_funding": round(bbf, 5) if bbf is not None else None,
+            "funding_gap": round(bnf - bbf, 5) if (bnf is not None and bbf is not None) else None,
+            "venues": venues,
+        })
+    # 排序:资金费跨所背离绝对值降序(carry 差异最大的币最有参照意义;None 沉底)
+    rows.sort(key=lambda x: abs(x["funding_gap"]) if x["funding_gap"] is not None else -1, reverse=True)
+    result = {
+        "rows": rows[:top],
+        "count": len(rows),
+        "errors": errors,
+        "note": "现货价差%越大=盘口越宽/流动性越差;资金费%为合约多头每期成本(正=多头付)。"
+                "funding_gap=Binance−Bybit(正=Bybit 对多头更便宜)。OKX 资金费需逐 inst 查,已省略。仅参照不做腿。",
+        "ts": int(time.time() * 1000),
+    }
+    try:
+        r.setex("crossvenue:ruler", _VENUE_CACHE_TTL, json.dumps(result))
+    except Exception:
+        pass
+    return result
+
+
+# ─── P2-b Portfolio Margin 纸面对比表(只读参照,不动工) ───
+
+@router.get("/pm-compare")
+def pm_compare(request: Request, db: Session = Depends(get_db)):
+    """PM 纸面评估(P2):当前全仓杠杆 vs 统一账户 Portfolio Margin 的利率/抵押率/保证金效率对比。
+    纯纸面参照(未接 papi、本期不动工):本系统持"现货空 + 合约多" delta 中性组合,PM 的组合保证金会把
+    两腿净额算保证金 → 保证金占用大幅下降、资金效率提升,是最值得评估的迁移点。数值为 Binance 公布的
+    PM 参考参数 + 本账户实配抵押率,供决策参考,非实盘回测。"""
+    require_admin(request)
+    coll = None
+    try:
+        gr = db.query(GlobalRules).filter(GlobalRules.user_id.is_(None)).first()
+        if gr and getattr(gr, "collateral_ratio", None) is not None:
+            coll = float(gr.collateral_ratio)
+    except Exception:
+        pass
+    return {
+        "rows": [
+            {"dim": "账户模式", "current": "全仓杠杆(逐子账户借币)",
+             "pm": "统一账户 Portfolio Margin(USDT 本位组合保证金)"},
+            {"dim": "两腿净额", "current": "无 — 现货空腿与合约多腿各自独立占保证金",
+             "pm": "现货空 + 合约多 视为对冲组合,按组合净风险算保证金"},
+            {"dim": "维持保证金", "current": "两腿分别计:现货杠杆维保 + 合约维保,delta 中性也不互抵",
+             "pm": "delta 中性组合维保显著低于两腿独立之和(本系统核心收益点)"},
+            {"dim": "抵押折算", "current": f"我方配置抵押率 = {coll if coll is not None else '未配置'}",
+             "pm": "分层折算(Binance 公布):USDT=1.00 / BTC·ETH≈0.95 / 主流≈0.90"},
+            {"dim": "借币利息", "current": "按 VIP 档杠杆借币小时计息(见规则页实时利率)",
+             "pm": "同 VIP 档;组合净额降低实际借入 → 综合利息可能下降"},
+            {"dim": "开仓容量", "current": "受各子账户独立保证金 + 借币额度天花板约束",
+             "pm": "释放的保证金可提升借币/开仓容量(需实测)"},
+        ],
+        "verdict": ("本系统结构(现货空 + 合约多)天然 delta 中性,是 PM 组合保证金最能省保证金的形态;"
+                    "纸面看迁 PM 可释放大量占用保证金、提升开仓容量。但需接 papi 并改动执行腿路由,"
+                    "本期只做纸面对比、不动工。"),
+        "caveat": "纸面参考:未接入 Portfolio Margin API(papi),数值为 Binance 公布参数 + 本账户配置,非实盘回测。",
+        "collateral_ratio_current": coll,
+    }

@@ -1148,6 +1148,42 @@ export async function getNetExpect() {
   return data as NetExpectBoard
 }
 
+// ─── P2-a 跨所标尺 ───
+export interface CrossVenueRow {
+  symbol: string
+  bn_spread: number | null
+  okx_spread: number | null
+  bybit_spread: number | null
+  bn_funding: number | null
+  bybit_funding: number | null
+  funding_gap: number | null
+  venues: number
+}
+export interface CrossVenueBoard {
+  rows: CrossVenueRow[]
+  count: number
+  errors: string[]
+  note: string
+  ts: number
+}
+export async function getCrossVenue() {
+  const { data } = await client.get('/api/admin/market/cross-venue')
+  return data as CrossVenueBoard
+}
+
+// ─── P2-b PM 纸面对比 ───
+export interface PmCompareRow { dim: string; current: string; pm: string }
+export interface PmCompareBoard {
+  rows: PmCompareRow[]
+  verdict: string
+  caveat: string
+  collateral_ratio_current: number | null
+}
+export async function getPmCompare() {
+  const { data } = await client.get('/api/admin/market/pm-compare')
+  return data as PmCompareBoard
+}
+
 export async function resetHistoryScores() {
   const { data } = await client.delete('/api/admin/market/rankings/history')
   return data
