@@ -19,6 +19,9 @@ SNAPSHOT_EVERY = 60
 # 无券币(-3045)重查节流:fetch_max_borrow 每 6 周期(~60s)触发一次,此值=10 → 无券币约每 10 分钟
 # 才重查一次 maxBorrowable(看库存是否恢复),避免每分钟对一批无券币重查刷高 400 错误率/SAPI 消耗。
 RECHECK_NOINV_EVERY = 10
+# P1-5 抢券:对"有人在盯(在 targets)且当前无券"的币,按此秒数节流补一次强查(远快于 10min 常规复查),
+# 一旦库存恢复立即删全局 noinv 键解冻,把"盲等到 1800s TTL 过期"缩短到秒级抢券。单币每 15s 至多多查一次,REST 可控。
+GRAB_POLL_SEC = 15
 # 无券标志 TTL(秒):与引擎侧 engine:noinv EX=1800 对齐。原实现为无过期的进程内存布尔,
 # 清除只能靠一次成功查询,而复查又被节流/40币切片卡住 → 库存恢复后"无券"被无限期钉死。
 # 加 TTL 后到期自动失效,下轮 fetch 真实重查。
@@ -43,6 +46,7 @@ class BalancePusher:
         self._mb_cursor: dict[int, int] = {}  # account_id -> maxBorrowable 轮转游标(targets 超单轮预算时轮转窗口)
         # 推送即查:pushed:updates 到达时把该用户推送资产加入强查集,下一次(即时)fetch 无视节流立即查
         self._force_mb_assets: set[str] = set()
+        self._grab_last: dict[str, float] = {}   # P1-5 抢券:asset -> 最近一次抢券强查的 monotonic 时刻(GRAB_POLL_SEC 节流)
         # VIP 档借贷上限缓存: asset -> (borrowLimit, monotonic取数时刻)。与库存无关、按VIP恒定,6h 缓存;
         # 取数失败负缓存 10min 防连环重试。是无券币(-3045 连 borrowLimit 都拿不到)额度显示的唯一来源。
         self._vip_limit_cache: dict[str, tuple[float, float]] = {}
@@ -289,6 +293,89 @@ class BalancePusher:
                 out[a] = rem
         return out
 
+    async def _check_borrow_heartbeats(self, db):
+        """P1-8 借币子路径停摆检测。worker 每周期借币评估跑完写 engine:{uid}:borrow_hb:{sid}
+        (300s TTL)。这里对 EngineState=RUNNING 的子账户核对该戳:缺失或停更 > STALE 秒 = 借币
+        子路径卡死(进程还活/systemd 看着正常,但事件循环停摆或借币循环抛错那类,主心跳按10周期
+        可能才发现)。命中 → 飞书 + 跑马灯,单账户 600s 冷却防刷。"""
+        from app.db.models import EngineState, SubAccount
+        from datetime import datetime, timezone
+        STALE = 180          # 借币戳每 ~1s 更新,>180s 未更新即异常
+        COOLDOWN = 600       # 单账户告警冷却
+        try:
+            rows = db.query(EngineState).filter(
+                EngineState.status == "RUNNING", EngineState.scope.like("sub:%")).all()
+        except Exception:
+            return
+        now = datetime.now(timezone.utc)
+        for st in rows:
+            try:
+                sid = int(str(st.scope).split(":")[1])
+            except Exception:
+                continue
+            # 刚启动宽限:主心跳 last_heartbeat 距今 < STALE 说明刚起,借币戳可能还没写第一次
+            try:
+                lhb = st.last_heartbeat
+                if lhb is not None:
+                    if lhb.tzinfo is None:
+                        lhb = lhb.replace(tzinfo=timezone.utc)
+                    if (now - lhb).total_seconds() > 600:
+                        continue  # 主心跳自己都停了>10min:那是引擎整体停/停用,交由既有引擎存活告警,不在此重复报
+            except Exception:
+                pass
+            sa = db.query(SubAccount).filter(SubAccount.id == sid).first()
+            if not sa:
+                continue
+            uid = sa.user_id
+            name = sa.account_name or f"sub#{sid}"
+            try:
+                raw = await self._redis.get(f"engine:{uid}:borrow_hb:{sid}")
+            except Exception:
+                continue
+            reason = None
+            if not raw:
+                reason = "借币心跳缺失(>300s 未写)"
+            else:
+                try:
+                    ts = datetime.fromisoformat(raw)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    age = (now - ts).total_seconds()
+                    if age > STALE:
+                        reason = f"借币心跳停更 {int(age)}s"
+                except Exception:
+                    reason = "借币心跳戳无法解析"
+            if not reason:
+                continue
+            # 冷却:命中才占位,避免每周期刷
+            try:
+                ck = f"alert:borrow_hb_stale:{sid}"
+                if await self._redis.get(ck):
+                    continue
+                await self._redis.setex(ck, COOLDOWN, "1")
+            except Exception:
+                pass
+            msg = f"⚠️ 借币子路径停摆 | 账户 {name}(sub#{sid}) | {reason} | 引擎进程或事件循环可能卡死,请检查"
+            logger.error(msg)
+            try:
+                if self._redis:
+                    await self._redis.publish("notification:broadcast", json.dumps({
+                        "type": "engine_alert", "level": "critical",
+                        "title": "借币子路径停摆", "message": msg,
+                        "marquee": True, "user_id": uid,
+                    }))
+            except Exception:
+                pass
+            # 飞书(复用引擎告警发送器 async send,自带令牌桶节流;失败静默)
+            try:
+                from engine.notify.feishu_sender import FeishuSender
+                await FeishuSender().send(
+                    "借币子路径停摆", msg, marquee=True, priority=1,
+                    color="#ef4444", blink=True,
+                    throttle_key=f"borrow_hb_stale:{sid}", alert_type="engine_health")
+            except Exception:
+                pass
+
     async def _auto_converge_hedge(self, db, tasks: list[dict]):
         """P1-7 净敞口自动收敛:对裸多(master实仓>在管对冲)reduceOnly 市价卖出对齐。
         仅当系统规则 hedge_auto_converge 开启才执行(默认关=只告警不动仓)。用主账户 key 下单,
@@ -460,7 +547,14 @@ class BalancePusher:
                             client.get_futures_account(),
                         )
 
-                        force_assets = self._force_mb_assets & targets  # 推送即查:无视节流/无券缓存
+                        # P1-5 抢券:对 targets 中当前无券的币,按 GRAB_POLL_SEC 节流补进强查集,
+                        # 使其绕过 10min 常规复查节流、下面立即查一次 maxBorrowable(库存恢复即秒级解冻)。
+                        _gnow = time.monotonic()
+                        for _a in targets:
+                            if self._noinv_active(_a) and (_gnow - self._grab_last.get(_a, 0.0)) >= GRAB_POLL_SEC:
+                                self._force_mb_assets.add(_a)
+                                self._grab_last[_a] = _gnow
+                        force_assets = self._force_mb_assets & targets  # 推送即查/抢券:无视节流/无券缓存
                         force_consumed |= force_assets
                         if (fetch_max_borrow or force_assets) and targets:
                             mb_results = dict(self._max_borrow_cache.get(acc.id, {}))
@@ -489,12 +583,29 @@ class BalancePusher:
                                 else:
                                     try:
                                         mb_data = await client.get_max_borrowable(asset)
-                                        mb_results[asset] = float(mb_data["amount"])
+                                        _amt = float(mb_data["amount"])
+                                        mb_results[asset] = _amt
                                         # 缓存 borrowLimit(VIP档借贷上限,与持U无关)。
                                         # 原判断误写为 `if "borrowLimit" not in mb_results` 恒真,
                                         # 每次成功查询都把 _limits 清空、只剩最后一个币 —— 已修。
                                         mb_results["_limits"][asset] = float(mb_data["borrowLimit"])
                                         self._no_inventory.pop(asset, None)  # 查询成功 = 有券,清除无券标志
+                                        # P1-5 抢券:查到库存恢复(amount>0)且该币此前被引擎标记全局无券
+                                        # (engine:noinv:{sym},-3045 冷却 1800s)→ 立即删全局键解冻,worker 下一周期(≤3s)
+                                        # 即可重新借该币。原来只清本进程 local 标志、全局键一直钉到 TTL 过期 → worker 盲等30min。
+                                        # delete 返回删除数>0 = 真发生"无券→有券"跃迁,只在跃迁时记日志/播报(天然去重)。
+                                        if _amt > 0:
+                                            try:
+                                                if await self._redis.delete(f"engine:noinv:{asset}USDT"):
+                                                    logger.info(f"抢券:{asset} 库存恢复(可借{_amt:.4f}),已解冻全局无券标志,worker 下周期可借")
+                                                    self._grab_last.pop(asset, None)
+                                                    await self._redis.publish("notification:broadcast", json.dumps({
+                                                        "type": "inventory_grab", "level": "info",
+                                                        "title": "库存恢复", "message": f"🎯 {asset} 券已恢复,解冻可借",
+                                                        "marquee": True,
+                                                    }))
+                                            except Exception:
+                                                pass
                                     except Exception as e:
                                         # -3045 = 币安杠杆池该币无可借库存(真实市场状态,非故障)→ 明确置 0 + 标记池空
                                         if "-3045" in str(e):
@@ -739,6 +850,13 @@ class BalancePusher:
                 # 只裸多(reduceOnly 不开新敞口最安全);节流靠对账阈值+币安 reduceOnly 幂等。失败不影响主流程。
                 if converge_tasks:
                     await self._auto_converge_hedge(db, converge_tasks)
+
+                # P1-8 借币子路径心跳检测:RUNNING 子账户借币戳停更/缺失 → 借币停摆告警
+                try:
+                    await self._check_borrow_heartbeats(db)
+                except Exception as e:
+                    db.rollback()
+                    logger.warning(f"borrow heartbeat check failed: {e}")
 
             # P0: publish IP-wide used weight (this process makes frequent SAPI calls)
             try:

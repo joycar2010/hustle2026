@@ -453,6 +453,17 @@ class Worker:
 
         self._symbol_statuses = statuses
 
+        # P1-8 借币子路径心跳:借币评估循环每跑完一轮就打戳,证明借币子路径真活着。
+        # 区别于 _update_state 每10周期的主循环心跳——主循环心跳在借币子路径卡死时照跳
+        # (就像"漏 await 致借币全废但主循环空转"那类);此戳一旦停更(而主心跳仍在)= 借币停摆。
+        if self._redis:
+            try:
+                await self._redis.setex(
+                    f"engine:{self._user_id}:borrow_hb:{self.sub_account_id}", 300,
+                    datetime.now(timezone.utc).isoformat())
+            except Exception:
+                pass
+
         # ── Auto-push: symbols whose spread ≥ auto_push_spread join the user's pushed list ──
         if self._cycle_count % 10 == 0 and getattr(rules, "auto_push_spread", 0) and rules.auto_push_spread > 0:
             await self._auto_push(float(rules.auto_push_spread), tradable_symbols)
@@ -678,6 +689,30 @@ class Worker:
         except Exception:
             return set()
 
+    async def _filter_by_tick(self, syms: set, threshold: float) -> set:
+        """P1-6 tick 粒度过滤:剔除"一个 tick 的点差步进 > 阈值一半"的币。
+        粗刻度低价币(如 RPL,tick=0.54%)点差只能按 tick 大档跳、量子化,开平各付半个 tick 摩擦
+        就吃掉大半空间,推了也是伪机会。tick 从现货 exchangeInfo(_get_spot_filters,缓存1h),
+        price 用点差快照 spot_ask。查不到价/tick 时不过滤(保守放行)。"""
+        if not syms or not self._trading_client:
+            return syms
+        kept = set()
+        for sym in syms:
+            try:
+                sp = self.spread_feed.get_symbol(sym)
+                px = float(getattr(sp, "spot_ask", 0) or 0) if sp else 0.0
+                if px <= 0:
+                    kept.add(sym); continue
+                f = await self._trading_client._get_spot_filters(sym)
+                tick_pct = float(f["tick"]) / px * 100.0   # 一个 tick 的点差步进(%)
+                if tick_pct <= threshold / 2.0:
+                    kept.add(sym)
+                else:
+                    logger.info(f"auto_push tick-filter 剔除 {sym}: tick步进 {tick_pct:.3f}% > 阈值半 {threshold/2:.3f}%")
+            except Exception:
+                kept.add(sym)   # 查失败保守放行
+        return kept
+
     async def _auto_push(self, threshold: float, tradable_symbols: set[str]):
         """Add symbols whose spread_short ≥ auto_push_spread to the user's pushed set."""
         try:
@@ -697,6 +732,10 @@ class Worker:
             raw = await self._redis.get(key)
             current = set(json.loads(raw)) if raw else set()
             new = candidates - current
+            if not new:
+                return
+            # P1-6 tick 粒度过滤:一个 tick 的点差步进 > 阈值一半的币剔除(量子化伪点差)
+            new = await self._filter_by_tick(new, threshold)
             if not new:
                 return
             # 二次确认推送:点差≥confirm_skip_spread 直推;否则等 confirm_delay_sec 复核防抖(防瞬时跳点误推)
