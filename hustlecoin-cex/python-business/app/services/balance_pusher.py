@@ -606,9 +606,13 @@ class BalancePusher:
                         for sym_bytes in pushed:
                             try:
                                 sym = sym_bytes.decode() if isinstance(sym_bytes, bytes) else sym_bytes
+                                # futures_position_risk 返回【单个 dict】(或 None),不是 list ——
+                                # 原代码按 list 取 pos_data[0] → dict 取键 0 → KeyError 被逐币
+                                # except 吞掉 → master_futures_positions 恒 {},「现-期」列永远看不到
+                                # 主账户真实合约仓(75.7裸多在dashboard上不可见的直接原因)。已修为 dict 直取。
                                 pos_data = await mc.futures_position_risk(sym)
-                                if pos_data and len(pos_data) > 0:
-                                    positions[sym] = float(pos_data[0].get("positionAmt", "0") or 0)
+                                if pos_data:
+                                    positions[sym] = float(pos_data.get("positionAmt", "0") or 0)
                             except Exception:
                                 pass  # 某币查不到持仓不影响其他币
                         master_futures_positions[uid] = positions
