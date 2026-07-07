@@ -189,8 +189,8 @@ function BackendRulesTab() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const addToast = useToastStore((s) => s.addToast)
 
-  const STR = ['follow_type', 'tier_ratios', 'borrow_mode']
-  const BOOL = ['hedge_via_master', 'borrow_via_otoco', 'block_risky_open']
+  const STR = ['follow_type', 'tier_ratios', 'borrow_mode', 'net_gate_mode', 'spot_order_mode']
+  const BOOL = ['hedge_via_master', 'borrow_via_otoco', 'block_risky_open', 'hedge_auto_converge']
   const INT = ['otoco_legs', 'multi_max_accounts_per_symbol', 'filter_duration_ms', 'removed_cooldown_minutes', 'spread_stale_sec']
   const NUM = ['slippage_pct', 'stabilize_sec', 'borrow_rate_per_sec', 'max_spread_pct', 'min_volume_24h',
     'min_volume_24h_futures', 'min_borrow_usdt', 'collateral_ratio', 'open_spread_buffer', 'taker_fee_spot', 'taker_fee_futures']
@@ -259,6 +259,22 @@ function BackendRulesTab() {
           <span className="text-muted-foreground/70">限流</span>
           <span className={lbl}>每账户借币速率 <input className={inp} value={val('borrow_rate_per_sec')} onChange={(e) => setV('borrow_rate_per_sec', e.target.value)} /> 次/秒</span>
           <span className={desc}>单 UID 硬顶 2/秒;多账户聚合 = 本值×账户数</span>
+        </div>
+        <div className="flex items-center gap-4 flex-wrap border-t border-border/40 pt-3">
+          <span className="text-amber-500/80 font-medium">策略经济学(P0/P1)</span>
+          <span className={lbl}>净期望闸
+            <select value={String(form.net_gate_mode || 'shadow')} onChange={(e) => setV('net_gate_mode', e.target.value)} className={sel}>
+              <option value="off">关闭</option><option value="shadow">影子(记录不拦)</option><option value="enforce">强制(E≤0拒开)</option>
+            </select></span>
+          <span className={lbl}>现货腿下单
+            <select value={String(form.spot_order_mode || 'market')} onChange={(e) => setV('spot_order_mode', e.target.value)} className={sel}>
+              <option value="market">市价</option><option value="maker">Maker(post-only,省手续费)</option>
+            </select></span>
+          <span className={lbl}>
+            <input type="checkbox" checked={form.hedge_auto_converge === true} onChange={(e) => setV('hedge_auto_converge', e.target.checked)} className="accent-amber-500" />
+            净敞口自动收敛(裸多reduceOnly对齐)
+          </span>
+          <span className={desc}>净期望闸:E=点差捕获−利息−4腿费−tick,建议先 shadow 跑一周看E榜;现货Maker省近半手续费扩点差空间;自动收敛:裸多超5U自动对齐</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-muted-foreground/70">借币方式</span>

@@ -44,6 +44,9 @@ class GlobalRulesUpdate(BaseModel):
     open_spread_buffer: Optional[Decimal] = None
     max_loss_per_position: Optional[Decimal] = None   # 单仓最大亏损止损(USDT,0/空=禁用)
     spread_stale_sec: Optional[int] = None            # 利差监控新鲜阈值(秒,系统全局)
+    net_gate_mode: Optional[str] = None               # 净期望闸: off/shadow/enforce
+    hedge_auto_converge: Optional[bool] = None        # 净敞口自动收敛(裸多reduceOnly对齐)
+    spot_order_mode: Optional[str] = None             # 现货腿下单: market/maker
 
     @field_validator("spread_stale_sec")
     @classmethod
@@ -124,6 +127,24 @@ class GlobalRulesUpdate(BaseModel):
             return v
         if str(v) not in ("repay", "otoco", "single", "multi"):
             raise ValueError("借币方式只能是 repay/otoco/single/multi")
+        return v
+
+    @field_validator("net_gate_mode")
+    @classmethod
+    def _v_net_gate(cls, v):
+        if v is None:
+            return v
+        if str(v) not in ("off", "shadow", "enforce"):
+            raise ValueError("净期望闸模式只能是 off/shadow/enforce")
+        return v
+
+    @field_validator("spot_order_mode")
+    @classmethod
+    def _v_spot_mode(cls, v):
+        if v is None:
+            return v
+        if str(v) not in ("market", "maker"):
+            raise ValueError("现货下单模式只能是 market/maker")
         return v
 
     @field_validator("multi_max_accounts_per_symbol")
