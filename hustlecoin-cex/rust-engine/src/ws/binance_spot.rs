@@ -1,10 +1,14 @@
 use crate::config::load_universe_symbols;
 use crate::types::{BinanceCombinedStream, TickerData};
 use dashmap::DashMap;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+
+/// 每条 chunk 连接分配一个自增 id,便于日志把 connected / idle timeout / server close / reconnect 串起来看。
+static SPOT_CONN_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// half-open 看门狗: 超过此秒数未收任何帧 → 视为 TCP 半开假死 → 返回 Err 触发重连。
 const WS_IDLE_TIMEOUT_SECS: u64 = 30;
@@ -70,10 +74,14 @@ async fn connect_and_stream(
         let update_tx = update_tx.clone();
 
         let handle = tokio::spawn(async move {
+            let conn_id = SPOT_CONN_SEQ.fetch_add(1, Ordering::Relaxed);
             let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
-            info!(streams = num_streams, "Spot WS connected");
+            info!(conn_id, streams = num_streams, "Spot WS connected");
 
-            let (_, mut read) = ws.split();
+            // 保留 write 半边回 Pong 保活:原 `let (_, mut read)` 丢弃 write,收到 Binance Ping 也无法回 Pong
+            // → 每 3min Ping、10min 内无 Pong 即被断 → 每 ~10min 一次无谓重连+feed 缺口。留 write 后可回 Pong。
+            use tokio_tungstenite::tungstenite::Message;
+            let (mut write, mut read) = ws.split();
             let idle = std::time::Duration::from_secs(WS_IDLE_TIMEOUT_SECS);
 
             loop {
@@ -81,6 +89,7 @@ async fn connect_and_stream(
                 match tokio::time::timeout(idle, read.next()).await {
                     Err(_elapsed) => {
                         warn!(
+                            conn_id,
                             streams = num_streams,
                             timeout_s = WS_IDLE_TIMEOUT_SECS,
                             "Spot WS idle timeout — half-open detected, triggering reconnect"
@@ -92,6 +101,22 @@ async fn connect_and_stream(
                     Ok(None) => break, // stream 正常关闭
                     Ok(Some(msg)) => {
                         let msg = msg?;
+                        // 控制帧优先: Ping→回Pong保活; Close→立即Err触发整体重连(Binance 24h定期断/serverShutdown
+                        // 升级窗口,不必等新鲜度看门狗的 600s 窗口)。下方 Text 处理体保持不变。
+                        match &msg {
+                            Message::Ping(payload) => {
+                                if let Err(e) = write.send(Message::Pong(payload.clone())).await {
+                                    warn!(conn_id, error = %e, "Spot WS pong failed — reconnecting");
+                                    return Err::<(), Box<dyn std::error::Error + Send + Sync>>("pong failed".into());
+                                }
+                                continue;
+                            }
+                            Message::Close(frame) => {
+                                info!(conn_id, ?frame, "Spot WS server close — reconnecting");
+                                return Err::<(), Box<dyn std::error::Error + Send + Sync>>("server close".into());
+                            }
+                            _ => {}
+                        }
                         if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
                             if let Ok(combined) = serde_json::from_str::<BinanceCombinedStream>(&text) {
                                 let symbol = combined.data.symbol.clone();
