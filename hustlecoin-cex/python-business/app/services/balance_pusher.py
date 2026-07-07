@@ -673,8 +673,11 @@ class BalancePusher:
                     logger.warning(f"balance_snapshot persist failed: {e}")
                 # 资金风险告警(回撤/保证金/日亏)→ 跑马灯,节流自管,失败不影响主流程
                 try:
-                    from app.services.fund_alerts import run_fund_alert_checks
+                    from app.services.fund_alerts import run_fund_alert_checks, run_hedge_reconcile_checks
                     run_fund_alert_checks(db, agg_by_user)
+                    # 净敞口对账:主账户合约净仓 vs DB 在管对冲量(本轮已采集的 master_futures_positions
+                    # + spot_bids,零额外 REST),裸多/裸空差额名义超阈值 → 告警
+                    run_hedge_reconcile_checks(db, master_futures_positions, spot_bids)
                 except Exception as e:
                     db.rollback()
                     logger.warning(f"fund alert checks failed: {e}")
