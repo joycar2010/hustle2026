@@ -11,9 +11,20 @@ body{font-family:"Microsoft YaHei",system-ui,sans-serif}
 .up{color:var(--qh-up)} .down{color:var(--qh-down)} .mono{font-family:"Roboto Mono",Consolas,monospace}
 /* 明亮风（默认）灰蓝画布 + 浮白卡片 */
 .layout{height:100vh;display:flex}
-.sidebar{background:#08113A;transition:width .2s;overflow:hidden}
-.sidebar .logo{height:56px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;letter-spacing:2px;
+.sidebar{background:#08113A;transition:width .2s;display:flex;flex-direction:column;height:100vh}
+.sidebar .logo{flex:0 0 56px;height:56px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;letter-spacing:2px;
   background:linear-gradient(135deg,#08113A,#040E32)}
+/* 菜单区自适应: 项多时内部滚动, logo 固定 */
+.sidebar .qh-menu{flex:1;overflow-y:auto;overflow-x:hidden;border-right:none}
+.sidebar .qh-menu::-webkit-scrollbar{width:6px}
+.sidebar .qh-menu::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+.sidebar .qh-menu::-webkit-scrollbar-track{background:transparent}
+/* 可点击收缩的组头 */
+.sidebar .grp-head{display:flex;align-items:center;justify-content:space-between;padding:9px 20px 5px;
+  font-size:11px;color:#5f6f96;letter-spacing:1px;cursor:pointer;user-select:none}
+.sidebar .grp-head:hover{color:#8fa8dc}
+.sidebar .grp-head .grp-arrow{font-size:12px;transition:transform .18s}
+.sidebar .grp-head .grp-arrow.closed{transform:rotate(-90deg)}
 .main-wrap{flex:1;display:flex;flex-direction:column;min-width:0;background:#E9ECF3}
 .topbar{height:50px;background:#fff;border-bottom:1px solid #dde2ee;display:flex;align-items:center;padding:0 14px;gap:12px}
 .topbar .sp{flex:1}
@@ -37,3 +48,59 @@ html.dark .el-table{--el-table-bg-color:#101a33;--el-table-tr-bg-color:#101a33;-
 /* 卡头功能图标: 与文字对齐, 主色调(浅深主题自适应) */
 .ch{display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .ch .el-icon{color:var(--el-color-primary);font-size:16px}
+
+/* ================= 移动/平板响应式适配(六层之 L1) ================= */
+/* 桌面默认: 汉堡隐藏, 折叠钮显示, 遮罩隐藏 */
+.hamburger{display:none}
+.nav-mask{display:none}
+/* 平板(≤1024px): 表格瘦身 — 字号/内边距收敛 */
+@media (max-width:1024px){
+  .page{padding:10px}
+  .el-table{font-size:12.5px}
+  .el-table th.cell,.el-table td.cell{padding:6px 6px!important}
+}
+/* 手机(≤768px): 侧栏抽屉化 + 表格横滚 + 隐次要列 + topbar 瘦身 */
+@media (max-width:768px){
+  .fold-pc{display:none}                       /* 折叠钮改汉堡 */
+  .hamburger{display:inline-flex}
+  /* 侧栏抽屉: 默认移出屏外, mobile-nav-open 滑入 */
+  .sidebar.as-drawer{position:fixed;top:0;left:0;bottom:0;z-index:1200;width:220px!important;
+    transform:translateX(-100%);transition:transform .22s ease;box-shadow:2px 0 16px rgba(0,0,0,.35)}
+  .mobile-nav-open .sidebar.as-drawer{transform:translateX(0)}
+  .mobile-nav-open .nav-mask{display:block;position:fixed;inset:0;z-index:1199;background:rgba(8,17,58,.45)}
+  .sidebar.as-drawer .qh-menu{width:220px!important}
+  .main-wrap{width:100%}
+  /* topbar 瘦身: 隐藏布局选择器 + 时钟, 保留核心 */
+  .topbar{gap:8px;padding:0 10px}
+  .topbar .layout-sel,.topbar .clock-txt{display:none}
+  .topbar .el-select{display:none}
+  .tabs-bar{padding:3px 6px}
+  .crumb{padding:6px 12px;font-size:11px}
+  .page{padding:8px}
+  /* 表格: 容器横向滚动(el-table 自带 scroll, 保证不撑破视口) */
+  .el-card{border-radius:8px}
+  .el-card__body{padding:12px 10px}
+  .el-table{font-size:12px}
+  .el-table th.cell,.el-table td.cell{padding:6px 5px!important;white-space:nowrap}
+  /* 次要列: 标了 col-sec 的隐藏(各页可选标注); 操作列保留 */
+  .el-table .col-sec{display:none}
+  /* 对话框近全屏 */
+  .el-dialog{width:94vw!important;max-width:94vw}
+  .el-message-box{width:90vw!important;max-width:340px}
+  /* 统计卡: 大数字自适应缩放 + 不溢出(内购收入等长数值) */
+  .stat-card .v{font-size:clamp(14px,4.6vw,20px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+  .stat-card .l{font-size:11px}
+  .el-card__body{overflow:hidden}
+  /* 客户360抽屉/一切 el-drawer: 宽度自适应(现 size=540px 撑破小屏) */
+  .el-drawer{width:92vw!important;max-width:92vw!important}
+  .el-drawer.rtl,.el-drawer.ltr{width:92vw!important}
+  .el-descriptions__cell,.el-descriptions__label{word-break:break-all}
+  /* 图表行: el-col 竖排占满(不再 span 挤压); KPI 统计卡例外→两列一行更紧凑 */
+  .el-row>.el-col{flex:0 0 100%!important;max-width:100%!important;margin-bottom:8px}
+  .el-row>.el-col:has(.stat-card){flex:0 0 50%!important;max-width:50%!important}
+  /* 表单项竖排, 输入不溢出 */
+  .el-form--inline .el-form-item{display:flex;margin-right:0;width:100%}
+  .el-form--inline .el-form-item__content{flex:1;min-width:0}
+}
+/* 长按高亮反馈(L2 配套视觉) */
+.lp-active{background:var(--el-color-primary-light-9)!important;transition:background .1s}

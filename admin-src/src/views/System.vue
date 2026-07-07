@@ -33,6 +33,9 @@
         <el-col :span="4"><el-card class="stat-card"><div class="l">真金 / 武装</div>
           <div class="v">{{sys.demo_mode?'演示':'真金'}}</div>
           <div class="s">进{{sys.auto?sys.auto.auto_entry_armed:0}} / 出{{sys.auto?sys.auto.auto_exit_armed:0}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card" :class="cardCls(fraOk)"><div class="l">FRA 代理 · A2T</div>
+          <div class="v" :class="fraOk?'up':'down'">{{fraVal}}</div>
+          <div class="s">{{fraSub}}</div></el-card></el-col>
       </el-row>
 
       <!-- 护栏闸状态 -->
@@ -50,6 +53,33 @@
       <el-divider/>
       <el-button v-if="!estopOn" type="danger" @click="doEstop"><el-icon style="margin-right:4px"><CircleClose/></el-icon>全局急停(停所有自动)</el-button>
       <el-button v-else type="success" @click="clearEstop">解除全局急停</el-button>
+    </el-card>
+
+    <!-- 双腿连接器监控 -->
+    <el-card v-if="sys&&sys.connectors" style="margin-bottom:12px" body-style="padding:10px 14px">
+      <template #header><span class="ch"><el-icon><Connection/></el-icon> 双腿连接器监控</span>
+        <span style="float:right;font-size:12px;color:#909399">当前生效: <b :style="{color:sys.connectors.active_mode==='api'?'#e0863a':'#2E8BD6'}">{{connModeLbl(sys.connectors.active_mode)}}</b> (引擎实执行/取数链路)
+          · Bridge <el-tag size="small" :type="sys.connectors.mode_health&&sys.connectors.mode_health.bridge?'success':'info'">{{sys.connectors.mode_health&&sys.connectors.mode_health.bridge?'健康':'离线'}}</el-tag>
+          · API <el-tag size="small" :type="sys.connectors.mode_health&&sys.connectors.mode_health.api?'success':'info'">{{sys.connectors.mode_health&&sys.connectors.mode_health.api?'健康':'离线'}}</el-tag>
+          <el-tag v-if="sys.connectors.inconsistent>0" size="small" type="danger" style="margin-left:6px">{{sys.connectors.inconsistent}} 个用户主/对冲连接方式不一致</el-tag>
+        </span></template>
+      <div v-if="sys.connectors.err" style="color:#e6a23c;font-size:13px;padding:6px 2px">{{sys.connectors.err}}</div>
+      <el-table v-else :data="sys.connectors.users||[]" size="small" border max-height="300">
+        <el-table-column prop="username" label="用户" width="130" show-overflow-tooltip/>
+        <el-table-column label="主账户连接" width="150"><template #default="s">
+          <el-tag size="small" :type="s.row.main_mode==='api'?'warning':s.row.main_mode?'success':'info'">{{connModeLbl(s.row.main_mode)}}</el-tag>
+          <span v-if="s.row.main_login" style="color:#909399;font-size:11px;margin-left:4px">{{s.row.main_login}}</span></template></el-table-column>
+        <el-table-column label="对冲账户连接" width="150"><template #default="s">
+          <el-tag size="small" :type="s.row.hedge_mode==='api'?'warning':s.row.hedge_mode?'success':'info'">{{connModeLbl(s.row.hedge_mode)}}</el-tag>
+          <span v-if="s.row.hedge_login" style="color:#909399;font-size:11px;margin-left:4px">{{s.row.hedge_login}}</span></template></el-table-column>
+        <el-table-column label="一致性" width="110"><template #default="s">
+          <el-tag size="small" :type="s.row.consistent?'success':'danger'">{{s.row.consistent?('一致·'+connModeLbl(s.row.eff_mode)):'不一致'}}</el-tag></template></el-table-column>
+        <el-table-column label="可运行" width="100"><template #default="s">
+          <el-tag size="small" :type="s.row.runnable?'success':'danger'">{{s.row.runnable?'可运行':'禁止'}}</el-tag></template></el-table-column>
+        <el-table-column label="说明" show-overflow-tooltip><template #default="s">
+          <span style="font-size:12px;color:#909399">{{connExplain(s.row)}}</span></template></el-table-column>
+      </el-table>
+      <div style="font-size:11.5px;color:#909399;margin-top:6px">规则：套利策略器自动运行前 / 三个历史端点查询前，校验主与对冲连接方式一致且该方式健康，否则 fail-closed 禁止执行。</div>
     </el-card>
 
     <!-- 实时告警流 -->
@@ -102,15 +132,32 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { useLiveRefresh } from '../composables/useLiveRefresh'
 const sys=ref(null),audit=ref([]),actionFilter=ref(''),autoRefresh=ref(true),refreshSec=10,lastPull=ref(''),certs=ref([])
-let _timer=null
 const estopOn=computed(()=>sys.value&&sys.value.auto&&sys.value.auto.global_estop)
 // 新鲜度阈值: 引擎循环 5s 一轮, >15s 视为停滞; 采样器 >60s 视为停更
 const engineFresh=computed(()=>sys.value&&sys.value.engine.cycle_age!=null&&sys.value.engine.cycle_age<15)
 const samplerFresh=computed(()=>sys.value&&sys.value.engine.spread_age!=null&&sys.value.engine.spread_age<60)
 const gateFlucOn=computed(()=>sys.value&&sys.value.gates&&sys.value.gates.fluctuation&&sys.value.gates.fluctuation.paused)
 const wsTxt=computed(()=>{ const b=sys.value&&sys.value.ws&&sys.value.ws.broadcaster; return b==='running'?'运行中':b==='stale'?'停滞':'空闲' })
+// FRA 执行代理(a2t-bridge @ eu-central-1, 贴 Api2Trade 源站): 双腿 health 全绿才算在线
+const fraOk=computed(()=>{ const f=sys.value&&sys.value.fra; return !!(f&&f.configured&&f.main&&f.main.ok&&f.hedge&&f.hedge.ok&&f.main.health&&f.main.health.a2t&&f.main.health.a2t.reachable) })
+const fraVal=computed(()=>{ const f=sys.value&&sys.value.fra; if(!f||!f.configured)return '未配置'
+  if(!fraOk.value)return '离线'
+  const p50=f.main.health.a2t.lat_p50_ms; return p50!=null?('源站 '+p50+'ms'):'在线' })
+const fraSub=computed(()=>{ const f=sys.value&&sys.value.fra; if(!f||!f.configured)return ''
+  const rtt=(f.main&&f.main.latency_ms!=null)?('QH→FRA '+f.main.latency_ms+'ms'):'不可达'
+  const armed=!!(f.main&&f.main.health&&f.main.health.trading_armed)
+  return rtt+' · '+(armed?'已武装⚡':'未武装') })
 function cardCls(ok){ return ok?'':'stat-bad' }
+function connModeLbl(m){ return m==='api'?'API·Api2Trade':m==='bridge'?'Bridge云端':(m?m:'未设置') }
+function connExplain(r){
+  if(!r.main_mode||!r.hedge_mode) return '主/对冲未同时配置连接方式';
+  if(!r.consistent) return '主('+connModeLbl(r.main_mode)+')与对冲('+connModeLbl(r.hedge_mode)+')不一致→禁止运行/查询';
+  const mh=(sys.value&&sys.value.connectors&&sys.value.connectors.mode_health)||{};
+  if(!mh[r.eff_mode]) return connModeLbl(r.eff_mode)+' 连接当前离线→禁止运行';
+  return '一致且健康，可正常运行';
+}
 function ageTxt(a){ if(a==null)return '—'; if(a<60)return a+'s'; if(a<3600)return Math.floor(a/60)+'m'; return Math.floor(a/3600)+'h' }
 async function load(){ try{ sys.value=await api.system(); lastPull.value=new Date().toTimeString().slice(0,8) }catch(e){ ElMessage.error('系统状态加载失败') } }
 async function loadAudit(){ try{ audit.value=(await api.auditLog(100,actionFilter.value)).audit||[] }catch(e){} }
@@ -120,9 +167,10 @@ async function doEstop(){
     await api.estop(); ElMessage.success('全局急停已生效'); load() }catch(e){ if(e!=='cancel')ElMessage.error('急停失败') }
 }
 async function clearEstop(){ try{ await api.estopClear(); ElMessage.success('已解除急停'); load() }catch(e){ ElMessage.error('失败') } }
-function tick(){ if(autoRefresh.value) load() }
-onMounted(()=>{ load(); loadAudit(); loadSsl(); _timer=setInterval(tick,refreshSec*1000) })
-onUnmounted(()=>{ if(_timer)clearInterval(_timer) })
+// L5 活保型轮询: 可见性暂停 + 失败指数退避 + 前台/联网自愈(替代裸 setInterval)
+const live=useLiveRefresh(async()=>{ if(autoRefresh.value) await load() }, { interval: refreshSec*1000 })
+onMounted(()=>{ load(); loadAudit(); loadSsl(); live.start() })
+onUnmounted(()=>{ live.stop() })
 </script>
 <style scoped>
 .stat-card .s{font-size:11px;color:#909399;margin-top:2px;font-family:"Roboto Mono",monospace}

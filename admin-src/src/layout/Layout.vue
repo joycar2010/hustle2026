@@ -1,23 +1,41 @@
 ﻿<template>
-  <div class="layout">
-    <div class="sidebar" :style="{width: collapsed?'64px':'210px'}">
+  <div class="layout" :class="{'mobile-nav-open':mnav}">
+    <div class="nav-mask" @click="mnav=false"></div>
+    <div class="sidebar" :class="{'as-drawer':true}" :style="{width: collapsed?'64px':'210px'}">
       <div class="logo">
-        <img src="/logo-white.png" alt="QH" style="height:26px;vertical-align:middle"/>
-        <span v-if="!collapsed" style="margin-left:8px;vertical-align:middle">Quant Hedge</span>
+        <img :src="brand.logo||'/logo-white.png'" alt="QH" style="height:26px;max-width:120px;object-fit:contain;vertical-align:middle"/>
+        <span v-if="!collapsed" style="margin-left:8px;vertical-align:middle">{{ brand.title||'Quant Hedge' }}</span>
       </div>
       <el-menu :collapse="collapsed" :default-active="$route.path" router
-               background-color="#08113A" text-color="#9fb0d6" active-text-color="#fff" :collapse-transition="false">
-        <el-menu-item-group v-for="grp in groups" :key="grp.name" :title="collapsed?'':grp.name">
-          <el-menu-item v-for="r in grp.items" :key="r.path" :index="'/'+r.path">
-            <el-icon><component :is="r.meta.icon"/></el-icon>
-            <template #title>{{ t(r.meta.title) }}</template>
-          </el-menu-item>
-        </el-menu-item-group>
+               background-color="#08113A" text-color="#9fb0d6" active-text-color="#fff" :collapse-transition="false" class="qh-menu">
+        <template v-for="grp in groups" :key="grp.name">
+          <!-- 总控: 无组头, 直接一条 -->
+          <template v-if="grp.standalone">
+            <el-menu-item v-for="r in grp.items" :key="r.path" :index="'/'+r.path">
+              <el-icon><component :is="r.meta.icon"/></el-icon>
+              <template #title>{{ t(r.meta.title) }}</template>
+            </el-menu-item>
+          </template>
+          <!-- 其它: 可点击收缩的组头 -->
+          <template v-else>
+            <div v-if="!collapsed" class="grp-head" @click="toggleGroup(grp.name)">
+              <span>{{ grp.name }}</span>
+              <el-icon class="grp-arrow" :class="{closed:isGroupClosed(grp.name)}"><ArrowDown/></el-icon>
+            </div>
+            <el-menu-item v-for="r in grp.items" :key="r.path" :index="'/'+r.path"
+                          v-show="collapsed || !isGroupClosed(grp.name)">
+              <el-icon><component :is="r.meta.icon"/></el-icon>
+              <template #title>{{ t(r.meta.title) }}</template>
+            </el-menu-item>
+          </template>
+        </template>
       </el-menu>
     </div>
     <div class="main-wrap">
       <div class="topbar">
-        <el-icon style="cursor:pointer;font-size:18px" @click="collapsed=!collapsed"><Fold v-if="!collapsed"/><Expand v-else/></el-icon>
+        <!-- 手机: 汉堡开抽屉; 桌面: 折叠侧栏 -->
+        <el-icon class="hamburger" style="cursor:pointer;font-size:20px" @click="mnav=!mnav"><Expand/></el-icon>
+        <el-icon class="fold-pc" style="cursor:pointer;font-size:18px" @click="collapsed=!collapsed"><Fold v-if="!collapsed"/><Expand v-else/></el-icon>
         <span class="sp"></span>
         <el-select v-model="layoutMode" size="small" style="width:110px" @change="noop">
           <el-option label="侧栏布局" value="side"/><el-option label="顶栏布局" value="top"/>
@@ -69,7 +87,7 @@
     <!-- 强制登录门控: 未登录时全屏蒙皮遮挡, 必须登录(操作员账号 或 超管令牌)才能进入 -->
     <div v-if="!authed" class="login-gate">
       <div class="login-card">
-        <div class="lg-logo">QUANT HEDGE</div>
+        <div class="lg-logo">{{ brand.loginTitle||brand.title||'QUANT HEDGE' }}</div>
         <div class="lg-sub">请登录以继续</div>
         <el-tabs v-model="gateTab" stretch>
           <el-tab-pane label="操作员登录" name="op">
@@ -97,6 +115,14 @@ import { api } from '../api'
 const route=useRoute(), router=useRouter()
 const { t, locale } = useI18n()
 const collapsed=ref(false), dark=ref(false), layoutMode=ref('side'), clock=ref(''), noop=()=>{}
+const mnav=ref(false)   // 手机侧栏抽屉开合
+// 侧栏品牌自定义(官网管理 site=qhadmin 配置; localStorage 缓存防首屏闪默认值; 公开只读端点未登录也可取)
+const brand=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qha_brand')||'{}') }catch(e){ return {} } })())
+function applyBrand(b){ brand.value=b||{}; if(brand.value.docTitle)document.title=brand.value.docTitle
+  try{ localStorage.setItem('qha_brand',JSON.stringify(brand.value)) }catch(e){} }
+async function loadBrand(){ try{ const r=await api.siteGet('qhadmin'); applyBrand((r&&r.cfg&&r.cfg.brand)||{}) }catch(e){} }
+// SiteMgr 保存后广播即时热生效(同页免刷新)
+window.addEventListener('qha-brand-updated', e=>applyBrand(e.detail||{}))
 const menus=router.options.routes[0].children
 // tab 标题左侧功能图标: 由路径回查路由 meta.icon(与侧栏同一套扁平图标, 主色随主题)
 function tabIcon(path){ const r=menus.find(m=>('/'+m.path)===path); return (r&&r.meta&&r.meta.icon)||'Document' }
@@ -123,7 +149,16 @@ async function gateAdminLogin(){
     if(prevL)localStorage.setItem('qh_key',prevL); ElMessage.error('令牌无效或无权限') }
 }
 function canSee(name){ const p=op.value.perms||''; if(!op.value.operator)return true; if(p==='*')return true; return p.split(',').map(x=>x.trim()).includes(name) }
-const groups=computed(()=>{ const order=['分析','经营','运维']; const m={}; menus.forEach(r=>{ if(!canSee(r.name))return; const g=(r.meta&&r.meta.group)||'其它'; (m[g]=m[g]||[]).push(r) }); return order.filter(g=>m[g]).map(g=>({name:g,items:m[g]})) })
+// 分组: 总控(置顶不收缩) → 分析 → 经营 → 运维; 隐藏 meta.hidden; 组内按 ord 排序
+const groups=computed(()=>{ const order=['总控','分析','经营','运维']; const m={}
+  menus.forEach(r=>{ if(!canSee(r.name))return; if(r.meta&&r.meta.hidden)return; const g=(r.meta&&r.meta.group)||'其它'; (m[g]=m[g]||[]).push(r) })
+  return order.filter(g=>m[g]).map(g=>({name:g, standalone:(g==='总控'),
+    items:m[g].slice().sort((a,b)=>((a.meta&&a.meta.ord)||99)-((b.meta&&b.meta.ord)||99))})) })
+// 组收缩状态(localStorage 记忆; 默认全展开)
+const closedGroups=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qh_admin_closed_grps')||'[]') }catch(e){ return [] } })())
+function isGroupClosed(name){ return closedGroups.value.includes(name) }
+function toggleGroup(name){ const i=closedGroups.value.indexOf(name); if(i>=0)closedGroups.value.splice(i,1); else closedGroups.value.push(name)
+  try{ localStorage.setItem('qh_admin_closed_grps', JSON.stringify(closedGroups.value)) }catch(e){} }
 // 退出/更换: 清操作员会话 + 超管令牌, 门控重新弹出可换账号/令牌
 async function opLogout(){ try{ await api.opLogout() }catch(e){}; localStorage.removeItem('qh_op_token'); localStorage.removeItem('qh_admin_token'); op.value={operator:'',role:'',perms:''}; computeAuthed(); ElMessage.success('已退出,请重新登录') }
 async function restoreOp(){ if(localStorage.getItem('qh_op_token')){ try{ const m=await api.opMe(); op.value={operator:m.operator,role:m.role,perms:m.perms} }catch(e){ localStorage.removeItem('qh_op_token') } } computeAuthed() }
@@ -134,7 +169,7 @@ function addTab(){
   if(!tabs.value.find(x=>x.path===route.path)) tabs.value.push({path:route.path,title:m})
   activeTab.value=route.path
 }
-watch(()=>route.path, addTab, {immediate:true})
+watch(()=>route.path, ()=>{ addTab(); mnav.value=false; }, {immediate:true})
 function clickTab(p){ router.push(p.props.name) }
 function removeTab(p){
   if(tabs.value.length<=1)return
@@ -163,7 +198,7 @@ async function aiSend(){
   }catch(e){ aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+(e?.response?.data?.detail||'请稍后重试')}); aiSave() }
   finally{ aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp() })
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand() })
 </script>
 <style scoped>
 .ai-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;background:var(--el-color-primary);color:#fff;

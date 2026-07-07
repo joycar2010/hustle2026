@@ -741,9 +741,143 @@ def deals(username:str, limit:int=50):
     rows=cur.fetchall(); c.close()
     return {"username":username,"deals":[dict(r) for r in rows]}
 
-# ================= Bridge 连接器接入 (P0) =================
-from connector import get_connector
-CONN = get_connector()
+# ================= 连接方式路由 (P0: Bridge / Api2Trade) =================
+from connector import get_connector, build_connector
+import time as _t_conn
+# active_mode 持久在 Redis(qh:conn:active_mode; 默认 bridge, 重启不丢); 连接器按方式懒建+缓存
+_CONN_CACHE={}                       # {mode: connector}
+_CONN_MODE_CACHE={"mode":None,"ts":0.0}
+def _active_mode():
+    """当前生效连接方式(15s 内存缓存, 避免热路径频繁读 Redis)。默认 bridge。"""
+    now=_t_conn.time()
+    if _CONN_MODE_CACHE["mode"] and (now-_CONN_MODE_CACHE["ts"])<15:
+        return _CONN_MODE_CACHE["mode"]
+    try: m=R.get(RNS+"conn:active_mode") or "bridge"
+    except Exception: m="bridge"
+    if m not in ("bridge","api"): m="bridge"
+    _CONN_MODE_CACHE["mode"]=m; _CONN_MODE_CACHE["ts"]=now
+    return m
+def _active_connector():
+    m=_active_mode()
+    c=_CONN_CACHE.get(m)
+    if c is None:
+        c=build_connector(m); _CONN_CACHE[m]=c
+    return c
+def _conn_cache_bust():
+    _CONN_MODE_CACHE["mode"]=None; _CONN_MODE_CACHE["ts"]=0.0
+def _bridge_connector():
+    c=_CONN_CACHE.get("bridge")
+    if c is None: c=build_connector("bridge"); _CONN_CACHE["bridge"]=c
+    return c
+class _BridgeProxy:
+    """读取代理: 始终指向内网桥(同一 MT 账户的直连终端=完整实时真相; 与执行连接方式解耦)。
+       执行走 api/FRA 时, 持仓/历史/坑位/账户/tick 仍读桥→无 A2T 读滞后/会话不完整/分裂视图。"""
+    def __getattr__(self, name): return getattr(_bridge_connector(), name)
+class _ExecProxy:
+    """执行代理: 开/平仓委托到当前生效连接方式(active_mode: bridge 或 api/FRA)。"""
+    def __getattr__(self, name): return getattr(_active_connector(), name)
+CONN = _BridgeProxy()   # 读取 = 桥真相(48 处调用点零改动, 现全部读桥)
+EXEC = _ExecProxy()     # 执行 = active_mode(仅 6 处开/平仓)
+
+def _conn_consistency():
+    """主/对冲账户 conn_mode 一致性(单主+单对冲上下文)。返回 consistent/eff_mode/明细。"""
+    try:
+        c=db(); cur=c.cursor()
+        cur.execute("SELECT role, conn_mode FROM mt_accounts WHERE role IN ('main','hedge') AND enabled")
+        rows=cur.fetchall(); c.close()
+    except Exception as e:
+        return {"consistent":False,"eff_mode":None,"main_modes":[],"hedge_modes":[],"err":str(e)[:100]}
+    mains=set(r[1] for r in rows if r[0]=="main"); hedges=set(r[1] for r in rows if r[0]=="hedge")
+    modes=mains|hedges
+    consistent=(len(modes)==1) and bool(mains) and bool(hedges)
+    return {"consistent":consistent,"eff_mode":(list(modes)[0] if len(modes)==1 else None),
+            "main_modes":sorted(mains),"hedge_modes":sorted(hedges)}
+
+async def _conn_health(mode=None):
+    """某连接方式(默认当前 active)双腿可达? 返回 (ok, status)。"""
+    try:
+        c=_active_connector() if (mode is None or mode==_active_mode()) else build_connector(mode)
+        st=await c.both_status() if hasattr(c,"both_status") else {"main":await c.status(),"hedge":None}
+        def _ok(x):
+            if x is None: return None
+            return bool(x.get("connected", True)) and "error" not in x
+        m=_ok(st.get("main")); h=_ok(st.get("hedge"))
+        return (bool(m) and (h is None or h)), st
+    except Exception as e:
+        return False, {"err":str(e)[:120]}
+
+async def _conn_block_reason():
+    """执行连接方式(active_mode)是否可执行? 不一致/不可达→返回原因串, 否则 None。读取不受此限(读桥真相)。"""
+    cons=_conn_consistency()
+    if not cons["consistent"]:
+        return "主/对冲连接方式不一致(主%s/对冲%s)"%(cons["main_modes"] or "未设",cons["hedge_modes"] or "未设")
+    ok,_st=await _conn_health()   # active_mode(执行链路)健康
+    if not ok:
+        return "当前连接方式(%s)双腿不可达"%_active_mode()
+    return None
+
+async def _conn_gate_exec():
+    """执行前 fail-closed 闸: 连接方式不一致或执行链路不可达 → 409。返回执行连接器 EXEC。"""
+    r=await _conn_block_reason()
+    if r: raise HTTPException(409, r+", 已fail-closed拒绝执行, 请统一/切换连接方式后再操作")
+    return EXEC
+
+# ---- 经纪商服务器时区偏移活标定(MT5 成交/行情 time=经纪商墙钟epoch, 非UTC; ICMarkets 夏GMT+3冬GMT+2) ----
+_BROKER_OFF={"sec":None,"ts":0.0}
+async def _broker_utc_offset():
+    """经纪商 epoch 与 UTC 偏移(秒, broker-utc; GMT+3≈10800)。桥 tick time 活标定→自动兼容夏令时。
+       缓存5min; 失败回落上次值或0。成交转UTC = broker_epoch - 此偏移。"""
+    now=_t_conn.time()
+    if _BROKER_OFF["sec"] is not None and (now-_BROKER_OFF["ts"])<300:
+        return _BROKER_OFF["sec"]
+    try:
+        tk=await _bridge_connector().main._get("/mt5/tick/XAUUSD")
+        bt=tk.get("time")
+        if isinstance(bt,(int,float)) and bt>0:
+            off=int(round((float(bt)-_t_conn.time())/900.0))*900   # 取整到15min(时区粒度)
+            if -43200<=off<=50400:                                 # 合理性 -12h..+14h
+                _BROKER_OFF["sec"]=off; _BROKER_OFF["ts"]=now
+                return off
+    except Exception: pass
+    return _BROKER_OFF["sec"] or 0
+def _to_utc(broker_epoch, off):
+    try: return int(broker_epoch)-int(off) if broker_epoch else broker_epoch
+    except Exception: return broker_epoch
+
+# ---- 执行滑点决策快照(带符号): 决策时刻按"将成交买卖侧"取价的方向化捕获点差; 读取时 滑点=实际成交捕获-决策快照 ----
+def _cap_at(mt, ht, direction, action):
+    """决策时刻方向化捕获点差(hedge/main 用各自将成交的买卖侧报价)。
+       reverse=主卖/对冲买(开)→捕获=对冲价-主价; forward 相反; 平仓两腿反向成交。"""
+    try:
+        mb=float(mt.get("bid")); ma=float(mt.get("ask")); hb=float(ht.get("bid")); ha=float(ht.get("ask"))
+    except Exception: return None
+    if action=="open":
+        return round(ha-mb,4) if direction=="reverse" else round(ma-hb,4)   # 开: 主卖@bid/对冲买@ask | 主买@ask/对冲卖@bid
+    return round(hb-ma,4) if direction=="reverse" else round(mb-ha,4)        # 平: 主买@ask/对冲卖@bid | 主卖@bid/对冲买@ask
+def _realized_cap(direction, m_price, h_price):
+    """实际成交的方向化捕获点差(与 _cap_at 同向): reverse=对冲价-主价, forward=主价-对冲价。"""
+    try: return round((h_price-m_price) if direction=="reverse" else (m_price-h_price),4)
+    except Exception: return None
+def _leg_tickets(legres):
+    """从执行返回体抽 MT 票据候选(桥开=deal/order, 桥平=order, api=ticket/closed), 归一为字符串列表。
+       供 paired_history 按 ticket 精确键匹配快照(deal票↔history.ticket, order票↔history.order)。"""
+    out=[]
+    if isinstance(legres, dict):
+        for k in ("deal","order","ticket"):
+            v=legres.get(k)
+            if v: out.append(str(v))
+        cl=legres.get("closed")
+        if isinstance(cl,list): out+=[str(x) for x in cl if x]
+    return out
+def _slip_snap(direction, action, cap, slot=None, tickets=None, thr=None):
+    """落一条决策快照(全局环形): 优先 ticket 精确键, 时间为兜底。tickets=主腿MT票候选; thr=该单生效的买入点位(逐单阈值, 供历史阈值列/达标差)。"""
+    if cap is None: return
+    try:
+        R.lpush(RNS+"slipsnap", json.dumps({"d":direction,"a":action,"ts":int(_dt.datetime.utcnow().timestamp()),
+                                            "c":cap,"slot":slot,"tk":tickets or [],"th":thr}))
+        R.ltrim(RNS+"slipsnap",0,1999)
+    except Exception: pass
+
 from fastapi import Header
 ADMIN_TOKEN = os.environ.get("QH_ADMIN_TOKEN","")   # 管理写操作令牌(systemd 注入, 默认真源)
 def _admin_token():
@@ -1259,11 +1393,29 @@ async def _contest_loop():
 async def _startup_contest():
     _aio.create_task(_contest_loop())
 
+# ================= 买入点位=入场下限(点差须≥阈值才进) 统一判定(引擎+手动一致) =================
+def _entry_gate(ov, gthr, cur_sp, fee_pts=0.0):
+    """买入点位=入场下限: 当前点差 >= 下限 才进(点差要超过阈值才进; 与出场"点差≤卖出点位才卖"相反)。
+       三态: 无覆盖(ov=None)→回落全局 entry_spread(gthr; 0则不限); 覆盖 buy_point=None→任意点差都开(无下限);
+             数字(含0)→该值为下限(0=点差须≥0, 挡负点差)。费用 fee_pts 抬高下限(点差须更大以覆盖费用)。
+       返回 (通过?, 有效下限或None)。cur_sp=None(无行情)时不拦(上层另有护栏)。"""
+    if ov is not None and ("buy_point" in ov):
+        bp = ov.get("buy_point")
+        lb = None if bp is None else float(bp)
+    else:
+        lb = gthr if (gthr and gthr > 0) else None
+    if lb is None:
+        return True, None
+    lb_eff = lb + (fee_pts or 0.0)
+    if cur_sp is None:
+        return True, lb_eff
+    return (float(cur_sp) >= lb_eff), lb_eff
+
 # ================= 全自动出场循环 (逐对盈亏判定 → 按模式平仓; 默认 OFF) =================
 # 模式(Redis qh:auto_exit:{user}): off=不动 / shadow=只回显"将平哪些坑"不真发 / armed=仅平 exit_enabled 的坑 / full=平所有命中坑
 async def _close_one_pair(username, symbol, hedge_sym, main_side, hedge_side, mode_seq, speed, slot_no, reason):
     """真实平一坑(带裸空守护+账本弹出); 复用 close_pair 内核。返回 (ok, detail)。"""
-    res=await CONN.close_pair(symbol, hedge_sym, main_side, hedge_side, None, None, mode=mode_seq, speed=speed)
+    res=await EXEC.close_pair(symbol, hedge_sym, main_side, hedge_side, None, None, mode=mode_seq, speed=speed)
     mok=("error" not in (res.get("main") or {})); hok=(res.get("hedge") is None) or ("error" not in (res.get("hedge") or {}))
     if mok and not hok:
         R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"err",
@@ -1285,18 +1437,28 @@ async def _auto_exit_loop():
             tmpls=cur.fetchall(); c.close()
         except Exception as e:
             R.set(RNS+"auto_exit:err","tmpl:%s"%e); await _aio.sleep(5); continue
+        # 执行链路闸(读取走桥不受限): 主/对冲不一致或 active 连接离线→本轮跳过+5min冷却告警
+        _blk=await _conn_block_reason()
+        if _blk:
+            if not R.get(RNS+"conn:autoexit_warn"):
+                R.setex(RNS+"conn:autoexit_warn",300,"1")
+                R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"自动出场暂停: "+_blk})); R.ltrim(RNS+"alerts",0,49)
+            await _aio.sleep(5); continue
         # 双腿持仓 + 双腿 tick(一次取, 全用户共用单账户场景)
         try: both=await CONN.both_positions() if hasattr(CONN,"both_positions") else None
         except Exception: both=None
         for t in tmpls:
             user=t["username"]; sym=t.get("symbol") or "XAUUSD"
             mode=R.get(RNS+"auto_exit:"+user) or "off"
+            if mode=="shadow": R.set(RNS+"auto_exit:"+user,"off"); mode="off"   # 影子已废除, 遗留态归一为关闭
             if mode=="off": continue
-            # P1 防御: 武装/全量运行中若 auto_loop 权益失效(到期)→ 降级影子(不真平)
+            # P1 防御: 武装/全量运行中若 auto_loop 权益失效(到期)→ 自动关闭(不真平)
             if mode in ("armed","full") and str(_ent_get(t.get("user_id") or _uid(user),"auto_loop")).lower() not in ("true","1"):
-                R.set(RNS+"auto_exit:"+user,"shadow"); mode="shadow"
-                R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"自动出场权益已失效, 已降级为影子模式"})); R.ltrim(RNS+"alerts",0,49)
+                R.set(RNS+"auto_exit:"+user,"off"); mode="off"
+                R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"自动出场权益已失效, 已自动关闭"})); R.ltrim(RNS+"alerts",0,49)
+                continue
             if not t.get("auto_close"): continue   # 全局自动清仓总闸关→不动
+            if not _in_window(t.get("run_win_start"), t.get("run_win_end")): continue   # 运行时段外→系统不运行(自动出场暂停; 手动平不受限)
             # 休市/周末闸: 休市不自动平(避免休市单腿)
             closed,_why=ENG.market_closed(weekend_guard=t.get("weekend_guard",True),
                                           weekend_sat=t.get("weekend_sat"), weekend_sun=t.get("weekend_sun"))
@@ -1310,11 +1472,19 @@ async def _auto_exit_loop():
             except Exception: pass
             try: ht=await CONN.hedge._get("/mt5/tick/"+hedge_sym) if getattr(CONN,"hedge",None) else None
             except Exception: pass
+            if not _CSIZE.get("_fetched"):   # 惰性取面值(供 点差净盈亏点数 换算)
+                try:
+                    _si=await CONN.main._get("/mt5/symbol_info/"+sym); _cs=float(_si.get("trade_contract_size") or 0)
+                    if _cs>0: _CSIZE[sym]=_cs
+                    _CSIZE["_fetched"]=True
+                except Exception: pass
             slotcfg=R.hgetall(_slot_key(user,sym)) or {}
             xmode=(t.get("exit_mode") or "concurrent"); speed=(t.get("speed_mode") or "fast")
             if xmode not in ("concurrent","main_first","hedge_first"): xmode="concurrent"
             profit_first = (R.get(RNS+"sw:profitfirst:"+user)=="1")  # 盈利平台优先(前端落)
             now_ts=_dt.datetime.utcnow().timestamp()
+            _bkoff=await _broker_utc_offset()   # 持仓 time=经纪商墙钟, 算 elapsed 前须转真UTC(否则 hold_secs 时限晚约offset)
+            _hold_en=(R.get(RNS+"sw:entrymech:"+user)!="0")   # 进单机制开关: 关→持仓时长超时平仓不触发
             n=max(len(mainL),len(hedgeL)); decisions=[]
             for i in range(n):
                 slot_no=i+1; m=mainL[i] if i<len(mainL) else None; h=hedgeL[i] if i<len(hedgeL) else None
@@ -1325,9 +1495,9 @@ async def _auto_exit_loop():
                     mside=("sell" if (m and (str(m.get("type"))=="1" or m.get("side")=="sell")) else "buy")
                     if mside=="sell": cur_sp=round(float(ht.get("ask",0))-float(mt.get("bid",0)),4)
                     else:             cur_sp=round(float(mt.get("ask",0))-float(ht.get("bid",0)),4)
-                # 持仓时长
+                # 持仓时长(opent=经纪商墙钟epoch → 转真UTC 再与 now_ts(UTC) 相减)
                 opent=(m or h or {}).get("time") or 0
-                elapsed=(now_ts-float(opent)) if opent else 0
+                elapsed=(now_ts-(float(opent)-_bkoff)) if opent else 0
                 # 逐坑覆盖
                 ov=None
                 try: ov=json.loads(slotcfg.get(str(slot_no))) if slotcfg.get(str(slot_no)) else None
@@ -1337,8 +1507,11 @@ async def _auto_exit_loop():
                 # 逐坑止盈/止损覆盖全局(0/缺省→回落全局)
                 _tp = (float(ov.get("tp_points") or 0) if ov and ov.get("tp_points") else None) or t.get("tp_points")
                 _sl = (float(ov.get("sl_points") or 0) if ov and ov.get("sl_points") else None) or t.get("sl_points")
-                go,reason=ENG.auto_exit_decision(net,cur_sp,elapsed,
-                              _tp,_sl,t.get("hold_secs"),
+                # 盈利/止损点位=点差净盈亏点数: 把$净盈亏折成点(/手数/面值)再比较
+                _vol=float((m or h or {}).get("volume") or 0)
+                net_pts=_pnl_to_points(net, _vol, sym)
+                go,reason=ENG.auto_exit_decision(net_pts,cur_sp,elapsed,
+                              _tp,_sl,(t.get("hold_secs") if _hold_en else None),
                               sell_point=sell_point,exit_enabled=exit_enabled,profit_first=profit_first)
                 if not go: continue
                 mside=("sell" if (m and (str(m.get("type"))=="1" or m.get("side")=="sell")) else "buy")
@@ -1357,7 +1530,11 @@ async def _auto_exit_loop():
                 # 在途锁 + 冷却(30s): 防 5s 循环重复发
                 if R.get(lockkey): continue
                 R.setex(lockkey, 30, "1")
+                _mark_slot_busy(sym, d["slot"])   # 自动出场: 该坑进度渐变
                 ok,_res=await _close_one_pair(user,sym,hedge_sym,d["mside"],d["hside"],xmode,speed,d["slot"],d["reason"])
+                if ok:   # 执行滑点决策快照(平仓侧, d["mside"]=持仓方向; ticket精确键取自 _res 主腿)
+                    _cdir="reverse" if d["mside"]=="sell" else "forward"
+                    _slip_snap(_cdir,"close",_cap_at(mt,ht,_cdir,"close"),d["slot"],_leg_tickets((_res or {}).get("main")))
                 R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"info" if ok else "err",
                     "msg":"%s自动出场坑%d: %s 净%.2f %s"%("[演示]" if DEMO_MODE else "",d["slot"],d["reason"],d["net"],"已平" if ok else "失败/裸空")})); R.ltrim(RNS+"alerts",0,49)
         R.set(RNS+"auto_exit:last", _dt.datetime.utcnow().isoformat())
@@ -1379,27 +1556,45 @@ async def _auto_entry_loop():
             tmpls=cur.fetchall(); c.close()
         except Exception as e:
             R.set(RNS+"auto_entry:err","tmpl:%s"%e); await _aio.sleep(5); continue
+        # 执行链路闸(读取走桥不受限): 主/对冲不一致或 active 连接离线→本轮跳过+5min冷却告警
+        _blk=await _conn_block_reason()
+        if _blk:
+            if not R.get(RNS+"conn:autoentry_warn"):
+                R.setex(RNS+"conn:autoentry_warn",300,"1")
+                R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"自动进单暂停: "+_blk})); R.ltrim(RNS+"alerts",0,49)
+            await _aio.sleep(5); continue
         try: both=await CONN.both_positions() if hasattr(CONN,"both_positions") else None
         except Exception: both=None
         for t in tmpls:
             user=t["username"]; sym=t.get("symbol") or "XAUUSD"
             mode=R.get(RNS+"auto_entry:"+user) or "off"
+            if mode=="shadow": R.set(RNS+"auto_entry:"+user,"off"); mode="off"   # 影子已废除, 遗留态归一为关闭
             if mode=="off": continue
-            # P1 防御: 武装/全量运行中若 auto_loop 权益失效→ 降级影子(不真开)
+            # P1 防御: 武装/全量运行中若 auto_loop 权益失效→ 自动关闭(不真开)
             if mode in ("armed","full") and str(_ent_get(t.get("user_id") or _uid(user),"auto_loop")).lower() not in ("true","1"):
-                R.set(RNS+"auto_entry:"+user,"shadow"); mode="shadow"
-                R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"自动进单权益已失效, 已降级为影子模式"})); R.ltrim(RNS+"alerts",0,49)
+                R.set(RNS+"auto_entry:"+user,"off"); mode="off"
+                R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"自动进单权益已失效, 已自动关闭"})); R.ltrim(RNS+"alerts",0,49)
+                continue
             direction=R.get(RNS+"auto_entry_dir:"+user) or "reverse"
             if direction not in ("reverse","forward"): direction="reverse"
+            # 运行时段/进单时段闸(北京): 运行时段外→系统不进单; 进单时段外→不开仓(手动/自动一致)
+            if not _in_window(t.get("run_win_start"), t.get("run_win_end")): continue
+            if not _in_window(t.get("entry_win_start"), t.get("entry_win_end")): continue
             # 休市/周末闸
             closed,_why=ENG.market_closed(weekend_guard=t.get("weekend_guard",True),
                                           weekend_sat=t.get("weekend_sat"), weekend_sun=t.get("weekend_sun"))
             if closed: continue
             ladders=int(t.get("ladders") or 0) or 0
             if ladders<=0: continue
-            filled=len(_poslist((both or {}).get("main")))
-            if filled>=ladders: continue   # 阶梯满, 无空坑
-            slot_no=filled+1
+            # gap-aware 下一空坑(支持坑号跳空: 定向开仓可能已占中间坑)
+            _ann=_annotate_slots(both, sym)
+            _occ=set()
+            for _lg in ("main","hedge"):
+                for _p in (_ann.get(_lg) or []):
+                    _s=int(_p.get("slot") or 0)
+                    if _s>0: _occ.add(_s)
+            slot_no=_next_empty_slot(_occ, ladders)
+            if slot_no is None: continue   # 阶梯满, 无空坑
             slotcfg=R.hgetall(_slot_key(user,sym)) or {}
             ov=None
             try: ov=json.loads(slotcfg.get(str(slot_no))) if slotcfg.get(str(slot_no)) else None
@@ -1418,19 +1613,16 @@ async def _auto_entry_loop():
             if not mt or not ht: continue
             if direction=="reverse": cur_sp=round(float(ht.get("ask",0))-float(mt.get("bid",0)),4)
             else:                    cur_sp=round(float(mt.get("ask",0))-float(ht.get("bid",0)),4)
-            # 有效买入点位: 逐坑 buy_point 非None→用之(0=任意), None→全局 entry_spread
-            gthr=float(t.get("entry_spread") or 0); eff_bp=gthr
-            if ov and ov.get("buy_point") is not None:
-                try: eff_bp=float(ov.get("buy_point"))
-                except (TypeError,ValueError): eff_bp=gthr
-            reason=None
-            if eff_bp>0 and cur_sp>eff_bp:
-                continue   # 点差未达买入点位
-            # 费用并入阈值(与手动一致)
-            fee=float(t.get("fee_per_lot") or 0)
-            if fee>0 and gthr>0:
-                eff_thr,_fp=ENG.effective_spread_threshold(gthr,fee,100.0,legs=2)
-                if cur_sp>eff_thr: continue
+            # 买入点位=入场下限(点差须≥阈值才进); 费用抬高下限(与手动一致)
+            gthr=float(t.get("entry_spread") or 0)
+            fee=float(t.get("fee_per_lot") or 0); _fp=0.0
+            if fee>0:
+                try: _,_fp=ENG.effective_spread_threshold(gthr,fee,100.0,legs=2)
+                except Exception: _fp=0.0
+            _pass,_lb=_entry_gate(ov,gthr,cur_sp,_fp)
+            if not _pass:
+                continue   # 点差未达买入点位下限
+            reason="点差%.4f>=买入点位%s"%(cur_sp, ("%.2f"%_lb if _lb is not None else "任意"))
             # 数据波动闸
             _mc=int(t.get("match_count") or 0); _bd=float(t.get("fluctuation_band") or 0)
             if _bd>0 and _mc>=2:
@@ -1453,25 +1645,27 @@ async def _auto_entry_loop():
             if ov and ov.get("lot_mode")=="fixed" and float(ov.get("qty") or 0)>0:
                 _q=float(ov["qty"]); mv=round(_q*_mm,2); hv=round(_q*_hm,2)
             if mv<=0 or hv<=0: continue
-            reason="点差%.4f<=买入点位%.2f"%(cur_sp,eff_bp) if eff_bp>0 else "点差%.4f(任意)"%cur_sp
             R.set(RNS+"auto_entry:decisions:"+user, json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"mode":mode,"dir":direction,"slot":slot_no,"spread":cur_sp,"reason":reason}))
             # 影子: 只回显
             if mode=="shadow":
                 R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"info","msg":"[影子]将开坑%d %s: %s"%(slot_no,direction,reason)})); R.ltrim(RNS+"alerts",0,49)
                 R.set(RNS+"auto_entry:last", _dt.datetime.utcnow().isoformat()); continue
-            # 在途锁 + 冷却(用全局 entry_interval_sec, 最低10s)
+            # 在途锁 + 冷却: 进单等待开→按 entry_interval_sec(最低10s); 关→不按间隔(保留10s安全底线)
             lockkey=RNS+"auto_entry:lock:"+user+":"+sym
             if R.get(lockkey): continue
-            cooldown=max(10,int(t.get("entry_interval_sec") or 5))
+            _wait_en=(R.get(RNS+"sw:entrywait:"+user)!="0")
+            cooldown=max(10,int(t.get("entry_interval_sec") or 5)) if _wait_en else 10
             R.setex(lockkey, cooldown, "1")
             mside,hside=("sell","buy") if direction=="reverse" else ("buy","sell")
-            res=await CONN.open_pair(direction, sym, hedge_sym, mv, hv, mode=(t.get("entry_mode") or "main_first"), speed=(t.get("speed_mode") or "fast"))
+            _mark_slot_busy(sym, slot_no)   # 自动进单: 该坑进度渐变
+            res=await EXEC.open_pair(direction, sym, hedge_sym, mv, hv, mode=(t.get("entry_mode") or "main_first"), speed=(t.get("speed_mode") or "fast"))
             mok=res.get("main_ok"); hok=res.get("hedge_ok")
             if mok and hok:
                 try:
                     es=round(float(ht["ask"])-float(mt["bid"]),4) if direction=="reverse" else round(float(mt["ask"])-float(ht["bid"]),4)
                     R.rpush(RNS+"ledger:"+user+":"+direction, json.dumps({"q":hv,"m":mv,"s":es,"ts":_dt.datetime.utcnow().isoformat(),"ladder":slot_no}))
                 except Exception: pass
+                _slip_snap(direction,"open",_cap_at(mt,ht,direction,"open"),slot_no,_leg_tickets(res.get("main")),thr=_lb)   # 执行滑点决策快照(ticket精确键+逐单阈值)
                 _audit(user,"auto","auto_entry",{"slot":slot_no,"dir":direction,"reason":reason},DEMO_MODE,"auto_opened")
                 R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"info","msg":"%s自动进单坑%d %s: %s 已开"%("[演示]" if DEMO_MODE else "",slot_no,direction,reason)})); R.ltrim(RNS+"alerts",0,49)
             elif mok != hok:
@@ -1484,6 +1678,215 @@ async def _auto_entry_loop():
 @app.on_event("startup")
 async def _startup_auto_entry():
     _aio.create_task(_auto_entry_loop())
+
+
+# ================= 产品对套利扫描采样器 (pairscan, 管理员分析用, 只读不碰交易) =================
+# 宇宙: /opt/quanthedge/pairscan_universe.json (canonical -> ic/by/bn 各平台符号)
+# 采样: 60s/轮; ic/by 经 FRA a2t-bridge /mt5/ticks 批量, bns/bnf 经 Binance 公共 bookTicker
+# 落库: pairscan_samples(ts,instrument,platform,bid,ask), 保留14天
+# 开关: Redis qh:pairscan:enabled ('0'=停, 缺省开); 心跳 qh:pairscan:last
+_PAIRSCAN_UNI=[]
+try: _PAIRSCAN_UNI=json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),"pairscan_universe.json")))
+except Exception: pass
+_PSCAN_CX=None   # 复用 AsyncClient(命门: 每轮重建会反复触发SSL上下文重建阻塞事件循环, testgo老雷)
+async def _pairscan_round():
+    import httpx
+    global _PSCAN_CX
+    if _PSCAN_CX is None:
+        _PSCAN_CX=httpx.AsyncClient(timeout=15,limits=httpx.Limits(max_keepalive_connections=8,keepalive_expiry=120))
+    fra=os.environ.get("QH_FRA_AGENT_URL","http://3.77.161.206").rstrip("/")
+    fk=os.environ.get("QH_FRA_KEY","")
+    mp=os.environ.get("QH_FRA_MAIN_PORT","8021"); hp=os.environ.get("QH_FRA_HEDGE_PORT","8001")
+    ic_syms=[u["ic"] for u in _PAIRSCAN_UNI if u.get("ic")]
+    by_syms=[u["by"] for u in _PAIRSCAN_UNI if u.get("by")]
+    bn_syms=set(u["bn"] for u in _PAIRSCAN_UNI if u.get("bn"))
+    ts=int(_t_conn.time()); rows=[]
+    async def fra_ticks(port,syms,plat):
+        try:
+            r=await _PSCAN_CX.get("%s:%s/mt5/ticks"%(fra,port),params={"symbols":",".join(syms)},headers={"X-API-Key":fk})
+            tk=(r.json() or {}).get("ticks",{}) if r.status_code==200 else {}
+        except Exception: tk={}
+        rev={ (u["ic"] if plat=="ic" else u["by"]) : u["c"] for u in _PAIRSCAN_UNI if u.get("ic" if plat=="ic" else "by")}
+        for s,q in tk.items():
+            c=rev.get(s)
+            try: b,a=float(q["bid"]),float(q["ask"])
+            except (TypeError,KeyError,ValueError): continue
+            if c and b>0 and a>0: rows.append((ts,c,plat,b,a))
+    async def bn_ticks(url,plat):
+        try:
+            r=await _PSCAN_CX.get(url)
+            js=r.json() if r.status_code==200 else []
+        except Exception: js=[]
+        rev={u["bn"]:u["c"] for u in _PAIRSCAN_UNI if u.get("bn")}
+        for x in (js if isinstance(js,list) else []):
+            c=rev.get(x.get("symbol"))
+            if not c: continue
+            try: b,a=float(x["bidPrice"]),float(x["askPrice"])
+            except (TypeError,KeyError,ValueError): continue
+            if b>0 and a>0: rows.append((ts,c,plat,b,a))
+    await _aio.gather(fra_ticks(mp,ic_syms,"ic"), fra_ticks(hp,by_syms,"by"),
+                      bn_ticks("https://api.binance.com/api/v3/ticker/bookTicker","bns"),
+                      bn_ticks("https://fapi.binance.com/fapi/v1/ticker/bookTicker","bnf"))
+    if rows:
+        c=db(); cur=c.cursor()
+        cur.executemany("INSERT INTO pairscan_samples(ts,instrument,platform,bid,ask) VALUES(%s,%s,%s,%s,%s)",rows)
+        c.close()
+    return len(rows)
+async def _pairscan_carry():
+    """费率缓存(小时级): 币安永续 funding(bps/日, 正=多付空) + MT5 双腿 swap 原始字段(内网桥 symbol_info)。"""
+    fund={}; swap={}
+    try:
+        r=await _PSCAN_CX.get("https://fapi.binance.com/fapi/v1/premiumIndex")
+        for x in (r.json() if r.status_code==200 else []):
+            try: fund[x["symbol"]]=round(float(x.get("lastFundingRate") or 0)*3*1e4,3)   # 8h费率×3=日bps
+            except (TypeError,ValueError): pass
+    except Exception: pass
+    for u in _PAIRSCAN_UNI:
+        for plat in ("ic","by"):
+            s=u.get(plat)
+            if not s: continue
+            try:
+                leg=CONN.main if plat=="ic" else getattr(CONN,"hedge",None)
+                if not leg: continue
+                j=await leg._get("/mt5/symbol_info/"+s)
+                swap["%s:%s"%(plat,u["c"])]={"mode":j.get("swap_mode"),"sl":j.get("swap_long"),
+                                             "ss":j.get("swap_short"),"pt":j.get("point")}
+            except Exception: pass
+    R.set(RNS+"pairscan:fund", json.dumps(fund))
+    R.set(RNS+"pairscan:swap", json.dumps(swap))
+async def _pairscan_loop():
+    await _aio.sleep(23)
+    try:
+        c=db(); cur=c.cursor()
+        cur.execute("""CREATE TABLE IF NOT EXISTS pairscan_samples(
+            ts bigint NOT NULL, instrument text NOT NULL, platform text NOT NULL,
+            bid double precision, ask double precision)""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pscan_inst_ts ON pairscan_samples(instrument,ts)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pscan_ts ON pairscan_samples(ts)")
+        # 时间窗列(进单时段/运行时段, 北京 "HH:MM"; 幂等)
+        for _col in ("entry_win_start","entry_win_end","run_win_start","run_win_end"):
+            cur.execute("ALTER TABLE param_templates ADD COLUMN IF NOT EXISTS %s text DEFAULT ''"%_col)
+        # 官网/介绍站内容配置表(site_config + 草稿/发布/回滚; 幂等)
+        cur.execute("CREATE TABLE IF NOT EXISTS site_config(site text PRIMARY KEY, cfg jsonb DEFAULT '{}'::jsonb, updated_at timestamptz DEFAULT now())")
+        cur.execute("ALTER TABLE site_config ADD COLUMN IF NOT EXISTS draft jsonb")
+        cur.execute("CREATE TABLE IF NOT EXISTS site_config_versions(id serial PRIMARY KEY, site text, cfg jsonb, published_at timestamptz DEFAULT now())")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_scv_site ON site_config_versions(site,id DESC)")
+        c.close()
+    except Exception as e:
+        R.set(RNS+"pairscan:err","ddl:%s"%str(e)[:150])
+    while True:
+        try:
+            if not _PAIRSCAN_UNI or R.get(RNS+"pairscan:enabled")=="0":
+                await _aio.sleep(60); continue
+            n=await _pairscan_round()
+            R.set(RNS+"pairscan:last", _dt.datetime.utcnow().isoformat())
+            R.set(RNS+"pairscan:lastn", str(n))
+            if not R.get(RNS+"pairscan:carry_ok"):   # 费率缓存每小时刷一轮
+                R.setex(RNS+"pairscan:carry_ok",3600,"1")
+                try: await _pairscan_carry()
+                except Exception: pass
+            # 每小时清一次14天外旧样本
+            if not R.get(RNS+"pairscan:purged"):
+                R.setex(RNS+"pairscan:purged",3600,"1")
+                try:
+                    c=db(); cur=c.cursor()
+                    cur.execute("DELETE FROM pairscan_samples WHERE ts<%s",(int(_t_conn.time())-14*86400,))
+                    c.close()
+                except Exception: pass
+        except Exception as e:
+            R.set(RNS+"pairscan:err",str(e)[:200])
+        await _aio.sleep(60)
+@app.on_event("startup")
+async def _startup_pairscan():
+    _aio.create_task(_pairscan_loop())
+
+_PSCAN_PLAT_LBL={"ic":"ICMarkets","by":"BybitMT5","bns":"币安现货","bnf":"币安永续"}
+# 主↔对冲取向: 主账户=币安(现货/永续), 对冲=IC/BybitMT5; ic-by 保留为参考对(主=IC)
+_PSCAN_PAIRS=[("bnf","ic"),("bnf","by"),("bns","ic"),("bns","by"),("ic","by")]
+def _pscan_swap_bps(sw, mid):
+    """MT5 swap 原始字段→bps/日。mode1=点(×point/价), mode5=年化%(/365)。其它模式→None。"""
+    if not sw or mid<=0: return (None,None)
+    m=sw.get("mode"); sl=sw.get("sl"); ss=sw.get("ss"); pt=sw.get("pt")
+    try:
+        if m==1 and pt: return (round(float(sl)*float(pt)/mid*1e4,3), round(float(ss)*float(pt)/mid*1e4,3))
+        if m==5: return (round(float(sl)*100.0/365.0,3), round(float(ss)*100.0/365.0,3))
+    except (TypeError,ValueError): pass
+    return (None,None)
+@app.get("/api/admin/pairscan", dependencies=[Depends(require_admin)])
+def admin_pairscan(hours:int=24):
+    """产品对套利扫描排行(主=币安, 对冲=IC/BybitMT5): 基差摆幅/双边点差/捕获分 + 资金费/过夜费 carry → 纯利分。
+       binance 腿按窗口内 USDC/USDT 中值折 USD。只读分析, 不构成交易信号。"""
+    since=int(_t_conn.time())-max(1,min(hours,24*14))*3600
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT ts,instrument,platform,bid,ask FROM pairscan_samples WHERE ts>=%s",(since,))
+    data={}
+    for ts,inst,plat,b,a in cur.fetchall():
+        if b and a and b>0 and a>0: data.setdefault(inst,{}).setdefault(plat,{})[ts]=(b,a)
+    c.close()
+    pegs=[(b+a)/2 for b,a in (data.get("USDPEG",{}).get("bns",{}) or {}).values()]
+    peg=sorted(pegs)[len(pegs)//2] if pegs else 1.0
+    catmap={u["c"]:u["cat"] for u in _PAIRSCAN_UNI}
+    bnmap={u["c"]:u.get("bn") for u in _PAIRSCAN_UNI}
+    try: FUND=json.loads(R.get(RNS+"pairscan:fund") or "{}")
+    except Exception: FUND={}
+    try: SWAP=json.loads(R.get(RNS+"pairscan:swap") or "{}")
+    except Exception: SWAP={}
+    out=[]
+    for inst,plats in data.items():
+        if inst=="USDPEG": continue
+        for pm,ph in _PSCAN_PAIRS:   # pm=主平台 ph=对冲平台
+            if pm not in plats or ph not in plats: continue
+            common=sorted(set(plats[pm])&set(plats[ph]))
+            if len(common)<8: continue
+            bas=[]; spm=[]; sph=[]; mms=[]; mhs=[]
+            for t in common:
+                bm,am=plats[pm][t]; bh,ah=plats[ph][t]
+                if pm.startswith("bn"): bm,am=bm*peg,am*peg   # 主=币安 USDT→USD
+                mm,mh=(bm+am)/2,(bh+ah)/2; mid=(mm+mh)/2
+                bas.append((mh-mm)/mid*1e4)                    # 基差=对冲-主
+                spm.append((am-bm)/mid*1e4); sph.append((ah-bh)/mid*1e4)
+                mms.append(mm); mhs.append(mh)
+            bs=sorted(bas); n=len(bs)
+            med=bs[n//2]; p10=bs[int(n*0.1)]; p90=bs[min(n-1,int(n*0.9))]
+            swing=p90-p10
+            sm=sorted(spm)[n//2]; sh=sorted(sph)[n//2]
+            freshm=len(set(round(x,10) for x in mms))/n; freshh=len(set(round(x,10) for x in mhs))/n
+            score=swing-(sm+sh)
+            # ---- carry: 资金费(主=币安永续)+过夜费(MT5腿) → 日bps ----
+            midh=sorted(mhs)[n//2]; midm=sorted(mms)[n//2]
+            fund_d=FUND.get(bnmap.get(inst) or "") if pm=="bnf" else None   # 正=多付空
+            hsl,hss=_pscan_swap_bps(SWAP.get("%s:%s"%(ph,inst)), midh)      # 对冲腿 swap
+            msl,mss=(None,None)
+            if pm in ("ic","by"): msl,mss=_pscan_swap_bps(SWAP.get("%s:%s"%(pm,inst)), midm)
+            def _main_carry(long_side):
+                if pm=="bnf": return (-fund_d if long_side else fund_d) if fund_d is not None else None
+                if pm=="bns": return 0.0 if long_side else None   # 现货多=0费; 现货空须借币, 成本未知→None
+                return (msl if long_side else mss)
+            def _add(a,b): return None if (a is None or b is None) else round(a+b,3)
+            carry_a=_add(_main_carry(True),  hss)   # 主多+对冲空
+            carry_b=_add(_main_carry(False), hsl)   # 主空+对冲多
+            cands=[(v,l) for v,l in ((carry_a,"主多对冲空"),(carry_b,"主空对冲多")) if v is not None]
+            carry_best,carry_dir=(max(cands) if cands else (None,None))
+            net=round(score+carry_best,2) if carry_best is not None else None   # 纯利分=捕获分+最优方向1日carry
+            flags=[]
+            if freshm<0.3 or freshh<0.3: flags.append("stale")
+            if abs(med)>50: flags.append("mismatch")
+            elif abs(med)>3*max(swing,0.01) and abs(med)>2: flags.append("persistent")
+            out.append({"instrument":inst,"cat":catmap.get(inst,"?"),"pair":"%s-%s"%(pm,ph),
+                        "pair_lbl":"%s(主) ↔ %s(对冲)"%(_PSCAN_PLAT_LBL[pm],_PSCAN_PLAT_LBL[ph]),
+                        "n":n,"basis_med":round(med,2),"swing":round(swing,2),
+                        "sp1":round(sm,2),"sp2":round(sh,2),"score":round(score,2),
+                        "fund_d":fund_d,"hswap_l":hsl,"hswap_s":hss,
+                        "carry_a":carry_a,"carry_b":carry_b,"carry_best":carry_best,"carry_dir":carry_dir,
+                        "net":net,
+                        "fresh1":round(freshm,2),"fresh2":round(freshh,2),"flags":flags})
+    # 排序: 失格沉底; 纯利分优先, 无carry数据的按捕获分
+    out.sort(key=lambda x:(-((x["net"] if x["net"] is not None else x["score"]) if not x["flags"] else -1000+(x["net"] or x["score"]))))
+    return {"rows":out[:300],"peg":round(peg,5),"hours":hours,
+            "last":R.get(RNS+"pairscan:last"),"lastn":R.get(RNS+"pairscan:lastn"),
+            "enabled":R.get(RNS+"pairscan:enabled")!="0","universe":len(_PAIRSCAN_UNI),
+            "carry_syms":len(SWAP),"fund_syms":len(FUND),
+            "err":R.get(RNS+"pairscan:err")}
 
 
 @app.get("/api/engine/state")
@@ -1503,14 +1906,125 @@ def engine_check(main_ask:float, main_bid:float, hedge_ask:float, hedge_bid:floa
     closed,why = ENG.market_closed()
     return {"spread_gate":{"pass":ok,"spread":sp,"reason":reason},"market":{"closed":closed,"why":why}}
 # ================= 双腿 / 告警 端点 =================
+# ================= api 模式 in-flight 票据账本 =================
+# A2T /OpenedOrders 对刚开的仓有读滞后(实测1-2min不可见) → api 模式开仓后本地记账,
+# 供 坑位显示/已填坑计数 合并, 防"看不到新仓→阶梯误判空坑→重复开仓"。真实持仓出现或10min过期即清。
+_INFLIGHT_TTL=600
+def _inflight_key(leg,symbol): return RNS+"inflight:"+leg+":"+symbol
+def _inflight_add(leg,symbol,pos):
+    """记一笔 in-flight 伪持仓(dict 需含 ticket)。仅 api 模式调用方使用。"""
+    try:
+        tk=str((pos or {}).get("ticket") or "")
+        if not tk: return
+        pos=dict(pos); pos["pending"]=True; pos["_exp"]=_dt.datetime.utcnow().timestamp()+_INFLIGHT_TTL
+        R.hset(_inflight_key(leg,symbol), tk, json.dumps(pos, default=str))
+    except Exception: pass
+def _inflight_remove(leg,symbol,ticket):
+    try:
+        if ticket: R.hdel(_inflight_key(leg,symbol), str(ticket))
+    except Exception: pass
+def _inflight_merge(leg,symbol,positions):
+    """把未过期且真实持仓里还看不到的 in-flight 票并入 positions(list)。真实已含→顺手清账。"""
+    try:
+        h=R.hgetall(_inflight_key(leg,symbol)) or {}
+        if not h: return positions
+        now=_dt.datetime.utcnow().timestamp()
+        seen=set(str(p.get("ticket")) for p in (positions or []) if isinstance(p,dict))
+        out=list(positions or [])
+        for tk,raw in h.items():
+            try: p=json.loads(raw)
+            except Exception: R.hdel(_inflight_key(leg,symbol),tk); continue
+            if float(p.get("_exp") or 0)<now or tk in seen:
+                R.hdel(_inflight_key(leg,symbol),tk); continue   # 过期 or 真实可见→清账
+            out.append(p)
+        return out
+    except Exception:
+        return positions
+
+def _annotate_slots(pos, symbol="XAUUSD"):
+    """给双腿持仓分配稳定坑号(Redis 持久 ticket→slot 映射: 新仓分配最小空闲坑, 平仓释放该坑)。
+       每笔持仓加 slot 字段, 返回 {"main":[...],"hedge":[...]}(归一为 list)。纯显示层, 不碰下单/平仓。
+       目的: 平掉几号坑→几号坑空(坑号不再随持仓增减重排)。"""
+    out={}
+    for leg in ("main","hedge"):
+        lst=_poslist((pos or {}).get(leg))
+        lst=[dict(p) for p in (lst or []) if isinstance(p,dict)]
+        mapkey=RNS+"slotmap:"+leg+":"+symbol
+        try: cur={k:int(v) for k,v in (R.hgetall(mapkey) or {}).items()}
+        except Exception: cur={}
+        live=set(str(p.get("ticket")) for p in lst if p.get("ticket") is not None)
+        for tk in list(cur.keys()):        # 释放已平仓 ticket 占的坑
+            if tk not in live: R.hdel(mapkey,tk); cur.pop(tk,None)
+        used=set(cur.values())
+        new=[p for p in lst if str(p.get("ticket")) not in cur]
+        new.sort(key=lambda p: float(p.get("time") or 0))   # 早开=小坑号
+        for p in new:
+            s=1
+            while s in used: s+=1
+            used.add(s); cur[str(p.get("ticket"))]=s; R.hset(mapkey, str(p.get("ticket")), s)
+        for p in lst: p["slot"]=cur.get(str(p.get("ticket")),0)
+        out[leg]=lst
+    return out
+
+def _mark_slot_busy(symbol, slot, ttl=3):
+    """标记某坑"正在操作中"(进/出), 供前端行进度渐变。zset member=坑号 score=过期时刻(秒)。"""
+    try:
+        now=_dt.datetime.utcnow().timestamp()
+        R.zadd(RNS+"slotbusy:"+symbol, {str(int(slot)): now+ttl})
+    except Exception: pass
+
+def _busy_slots(symbol):
+    try:
+        now=_dt.datetime.utcnow().timestamp(); bk=RNS+"slotbusy:"+symbol
+        R.zremrangebyscore(bk,0,now)
+        return [int(x) for x in (R.zrangebyscore(bk,now,"+inf") or [])]
+    except Exception: return []
+
 @app.get("/api/engine/legs")
 async def engine_legs():
     try:
         st = await CONN.both_status() if hasattr(CONN,"both_status") else {"main":await CONN.status(),"hedge":None}
         pos = await CONN.both_positions() if hasattr(CONN,"both_positions") else {"main":await CONN.positions(),"hedge":None}
-        return {"status":st,"positions":pos}
+        try: pos=_annotate_slots(pos, "XAUUSD")   # 注入稳定坑号
+        except Exception as _e: R.set(RNS+"engine:slotmap_err", str(_e)[:120])
+        return {"status":st,"positions":pos,"busy_slots":_busy_slots("XAUUSD")}
     except Exception as e:
         raise HTTPException(502,"bridge error: %s"%e)
+
+@app.get("/api/engine/conn_mode")
+async def engine_conn_mode():
+    """当前生效连接方式 + 主/对冲一致性 + 两方式健康(供顶栏切换按钮与监控)。"""
+    am=_active_mode(); cons=_conn_consistency()
+    bok,_=await _conn_health("bridge"); aok,_=await _conn_health("api")
+    armed=None
+    try:
+        fra_base=os.environ.get("QH_FRA_AGENT_URL","http://3.77.161.206")
+        async with _httpx.AsyncClient(timeout=2.5) as cc:
+            r=await cc.get(fra_base+":8021/health")
+            armed=bool((r.json() or {}).get("trading_armed")) if r.status_code==200 else None
+    except Exception: armed=None
+    return {"active_mode":am,"consistency":cons,"health":{"bridge":bok,"api":aok},"api_armed":armed}
+
+class ConnSwitchReq(BaseModel):
+    mode:str; license_key:str=""; confirm:bool=False
+@app.post("/api/cmd/conn_switch", dependencies=[Depends(require_license)])
+async def cmd_conn_switch(r:ConnSwitchReq):
+    """显式切换生效连接方式(bridge/api): 校验目标连接双腿可达→写两账户 conn_mode + 持久 active_mode。"""
+    if r.mode not in ("bridge","api"): raise HTTPException(400,"mode 须为 bridge|api")
+    if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    ok,_st=await _conn_health(r.mode)
+    if not ok: raise HTTPException(409,"目标连接方式(%s)双腿不可达, 拒绝切换"%r.mode)
+    # 同步两账户 conn_mode=mode(配置与活跃一致), 再持久 active_mode + 清缓存
+    try:
+        c=db(); cur=c.cursor()
+        cur.execute("UPDATE mt_accounts SET conn_mode=%s WHERE role IN ('main','hedge')",(r.mode,)); c.close()
+    except Exception as e:
+        raise HTTPException(500,"写账户连接方式失败: %s"%e)
+    R.set(RNS+"conn:active_mode", r.mode); _conn_cache_bust()
+    R.delete(RNS+"conn:autoentry_warn"); R.delete(RNS+"conn:autoexit_warn")
+    R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn","msg":"连接方式已切换→%s(引擎执行/取数生效)"%r.mode})); R.ltrim(RNS+"alerts",0,49)
+    _audit(getattr(r,"username","") or "system",_actor(r.license_key),"conn_switch",{"mode":r.mode},DEMO_MODE,"switched")
+    return {"ok":True,"active_mode":r.mode}
 
 @app.get("/api/engine/alerts")
 def engine_alerts(limit:int=20):
@@ -1646,16 +2160,20 @@ def _actor(key): return "lk:"+hashlib.sha256((key or "").encode()).hexdigest()[:
 @app.get("/api/accounts/{username}")
 def list_accounts(username:str):
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT a.id,a.label,a.login,a.platform,a.broker,a.role,a.conn_mode,a.enabled FROM mt_accounts a JOIN users u ON u.id=a.user_id WHERE u.username=%s ORDER BY a.role,a.id",(username,))
+    cur.execute("SELECT a.id,a.label,a.login,a.platform,a.broker,a.role,a.conn_mode,a.enabled,a.server,a.api2trade_uuid FROM mt_accounts a JOIN users u ON u.id=a.user_id WHERE u.username=%s ORDER BY a.role,a.id",(username,))
     rows=cur.fetchall(); c.close()
     return {"username":username,"accounts":[dict(r) for r in rows]}
 
 class AcctReg(BaseModel):
     username:str; label:str; login:str; platform:str="MT5"; broker:str=""
     role:str="main"; conn_mode:str="bridge"; bridge_url:str=""; bridge_key_ref:str=""
+    # conn_mode='api'(Api2Trade 云端)注册用: server=MT 服务器名; password 仅在途转交 Api2Trade, 绝不落库/落日志
+    server:str=""; password:str=""
 @app.post("/api/accounts/register", dependencies=[Depends(require_license)])
 def reg_account(a:AcctReg, x_license: str = Header(default="")):
     # 改为用户密钥验证(PC+移动端): 账户绑定到密钥对应用户本人, 忽略 body.username 防越权
+    if a.conn_mode not in ("bridge","api"):
+        raise HTTPException(400,"conn_mode 须为 bridge|api(本地直连已停用)")
     c=db(); cur=c.cursor()
     cur.execute("SELECT id,username FROM users WHERE license_key=%s",(x_license,)); u=cur.fetchone()
     if not u: c.close(); raise HTTPException(403,"密钥无效")
@@ -1666,9 +2184,65 @@ def reg_account(a:AcctReg, x_license: str = Header(default="")):
     existing=[x[0] for x in cur.fetchall()]
     if a.login not in existing and len(existing)>=maxp:
         c.close(); raise HTTPException(403,"账户对数已达上限(%d), 升级'多客户端'内购解锁更多(role=%s)"%(maxp,a.role))
-    cur.execute("INSERT INTO mt_accounts(user_id,label,login,platform,broker,role,conn_mode,bridge_url,bridge_key_ref) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (user_id,login) DO UPDATE SET label=EXCLUDED.label,role=EXCLUDED.role,conn_mode=EXCLUDED.conn_mode,bridge_url=EXCLUDED.bridge_url",(u[0],a.label,a.login,a.platform,a.broker,a.role,a.conn_mode,a.bridge_url,a.bridge_key_ref))
+    # 变更前旧云端绑定: 重注册(保存并登录)拿到新 UUID 后, 旧 UUID 须尽力联动注销, 防云端配额泄漏。
+    # 注意 conn_mode 切 api→bridge 绝不释放 —— /engine/conn_mode 双向热切依赖 api2trade_uuid 留存。
+    cur.execute("SELECT api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE user_id=%s AND login=%s",(u[0],a.login))
+    _prev=cur.fetchone(); prev_uuid=((_prev[0] or "").strip() if _prev else ""); prev_cfg_id=(_prev[1] if _prev else None)
+    # ── conn_mode='api': 服务端代注册到 Api2Trade(密码仅在途), 成功后只存返回的账户 UUID ──
+    a2t_uuid=""; a2t_cfg_id=None
+    if a.conn_mode=="api":
+        if not (a.server or "").strip() or not a.password:
+            c.close(); raise HTTPException(400,"API 连接需提供 MT 服务器名与密码(密码仅注册时在途, 服务端不存储)")
+        try:
+            cfg=_a2t_cfg()  # 激活且未过期的订阅配置, 否则 503(fail-closed)
+            typ="Metatrader 5" if a.platform=="MT5" else "Metatrader 4"
+            j,_ms=_a2t_call(cfg,"/RegisterAccount",{"type":typ,"server":a.server.strip(),
+                            "user":a.login,"password":a.password,"name":(a.label or a.login)},timeout=30)
+            a2t_uuid=str((j or {}).get("id") or "")
+            if not a2t_uuid:
+                raise HTTPException(502,"Api2Trade 注册未返回账户 UUID: %s"%str((j or {}).get("message") or "")[:120])
+            a2t_cfg_id=cfg["id"]
+        except HTTPException:
+            c.close(); raise
+        except Exception as e:
+            c.close(); raise HTTPException(502,"Api2Trade 注册失败: %s"%e.__class__.__name__)
+    cur.execute("INSERT INTO mt_accounts(user_id,label,login,platform,broker,role,conn_mode,bridge_url,bridge_key_ref,server,api2trade_uuid,api2trade_config_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (user_id,login) DO UPDATE SET label=EXCLUDED.label,role=EXCLUDED.role,conn_mode=EXCLUDED.conn_mode,bridge_url=EXCLUDED.bridge_url,server=EXCLUDED.server,api2trade_uuid=CASE WHEN EXCLUDED.api2trade_uuid<>'' THEN EXCLUDED.api2trade_uuid ELSE mt_accounts.api2trade_uuid END,api2trade_config_id=COALESCE(EXCLUDED.api2trade_config_id,mt_accounts.api2trade_config_id)",(u[0],a.label,a.login,a.platform,a.broker,a.role,a.conn_mode,a.bridge_url,a.bridge_key_ref,(a.server or "").strip(),a2t_uuid,a2t_cfg_id))
     c.close()
-    return {"ok":True,"login":a.login,"conn_mode":a.conn_mode}
+    # 本地绑定已落库后再尽力释放旧云端注册(best-effort, 失败仅提示不回滚; 同 UUID=幂等更新则跳过)
+    a2t_prev_released=False; a2t_prev_msg=""
+    if a.conn_mode=="api" and prev_uuid and a2t_uuid and prev_uuid!=a2t_uuid:
+        a2t_prev_released,a2t_prev_msg=_a2t_release(prev_cfg_id or a2t_cfg_id, prev_uuid)
+    return {"ok":True,"login":a.login,"conn_mode":a.conn_mode,"a2t_uuid":a2t_uuid,
+            "a2t_prev_released":a2t_prev_released,"a2t_prev_msg":a2t_prev_msg}
+
+class AcctDelMine(BaseModel):
+    role:str=""; login:str=""; confirm:bool=False
+@app.post("/api/accounts/delete_mine", dependencies=[Depends(require_license)])
+def del_account_mine(b:AcctDelMine, x_license: str = Header(default="")):
+    """用户自删本人 MT 账户登记行(按 role 或 login), 并**联动注销云端托管**(官方 /DeleteAccount, 幂等,
+       失败不阻塞本地删除、结果透明回传)。**绝不动交易记录/历史成交**
+       (配对历史读桥/券商实时, DB deals 表按 user 非按 account, 无级联)。"""
+    if not b.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT id,username FROM users WHERE license_key=%s",(x_license,)); u=cur.fetchone()
+    if not u: c.close(); raise HTTPException(403,"密钥无效")
+    if b.login:
+        cur.execute("DELETE FROM mt_accounts WHERE user_id=%s AND login=%s RETURNING login,role,api2trade_uuid,api2trade_config_id",(u[0],b.login))
+    elif b.role in ("main","hedge"):
+        cur.execute("DELETE FROM mt_accounts WHERE user_id=%s AND role=%s RETURNING login,role,api2trade_uuid,api2trade_config_id",(u[0],b.role))
+    else:
+        c.close(); raise HTTPException(400,"须提供 role(main|hedge) 或 login")
+    rows=cur.fetchall(); c.close()
+    if not rows: raise HTTPException(404,"未找到可删除的账户")
+    # 联动注销云端托管账户(UUID): best-effort, 云端已不存在视为已释放; 失败明确回传
+    released=[]
+    for r in rows:
+        uuid=(r[2] or "").strip()
+        if uuid:
+            ok,msg=_a2t_release(r[3], uuid)
+            released.append({"login":r[0],"role":r[1],"uuid8":uuid[:8],"a2t_ok":ok,"a2t_msg":msg})
+    _audit(u[1],"user","account_delete_mine",{"deleted":[{"login":r[0],"role":r[1]} for r in rows],"a2t_released":released},DEMO_MODE,"deleted:%d"%len(rows))
+    return {"ok":True,"deleted":[{"login":r[0],"role":r[1],"a2t_uuid":r[2]} for r in rows],"a2t_released":released}
 
 DEMO_MODE = os.environ.get("QH_DEMO_MODE","1")=="1"
 def _audit(user,actor,action,payload,demo,result):
@@ -2965,6 +3539,54 @@ async def admin_system():
         if (R.get(RNS+"auto_exit:"+u) or "off") in ("armed","full"): aexit+=1
     out["auto"]={"users":len(users),"auto_entry_armed":aentry,"auto_exit_armed":aexit,
                  "global_estop":R.get(RNS+"global_estop")=="1"}
+    # FRA 执行代理(a2t-bridge, 贴 Api2Trade 源站): fail-soft, 代理挂了绝不拖垮本端点
+    fra_base=os.environ.get("QH_FRA_AGENT_URL","http://3.77.161.206")
+    if fra_base:
+        async def _fra(port):
+            t0=_t.time()
+            try:
+                async with _httpx.AsyncClient(timeout=2.5) as cc:
+                    r=await cc.get("%s:%d/health"%(fra_base,port))
+                return {"ok":r.status_code==200,"latency_ms":int((_t.time()-t0)*1000),
+                        "health":(r.json() if r.status_code==200 else None)}
+            except Exception as e:
+                return {"ok":False,"latency_ms":None,"err":e.__class__.__name__}
+        try:
+            fm,fh=await _aio.gather(_fra(8021),_fra(8001))
+            out["fra"]={"configured":True,"base":fra_base,"main":fm,"hedge":fh}
+        except Exception as e:
+            out["fra"]={"configured":True,"base":fra_base,"err":str(e)[:120]}
+    else:
+        out["fra"]={"configured":False}
+    # 双腿连接器监控: 逐用户 主/对冲 连接方式 + 一致性(不一致=禁止运行) + 各方式健康
+    try:
+        c2=db(); cur2=c2.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur2.execute("SELECT u.username, a.role, a.conn_mode, a.enabled, a.login FROM mt_accounts a JOIN users u ON u.id=a.user_id WHERE a.role IN ('main','hedge')")
+        rows=cur2.fetchall(); c2.close()
+        # 各连接方式健康(全局): bridge=内网桥 out['bridges']; api=FRA 代理 out['fra']
+        _bridge_ok = bool((out.get("bridges",{}).get("main") or {}).get("ok")) and bool((out.get("bridges",{}).get("hedge") or {}).get("ok"))
+        _api_ok = bool(out.get("fra",{}).get("configured") and (out["fra"].get("main") or {}).get("ok") and (out["fra"].get("hedge") or {}).get("ok"))
+        _mode_health={"bridge":_bridge_ok,"api":_api_ok}
+        byuser={}
+        for r in rows:
+            u=byuser.setdefault(r["username"],{"username":r["username"],"main":None,"hedge":None})
+            u[r["role"]]={"conn_mode":r["conn_mode"],"login":r["login"],"enabled":r["enabled"]}
+        conns=[]
+        for u in byuser.values():
+            mm=(u["main"] or {}).get("conn_mode"); hm=(u["hedge"] or {}).get("conn_mode")
+            consistent=(mm is not None and mm==hm)
+            eff=mm if consistent else None
+            conns.append({"username":u["username"],"main_mode":mm,"hedge_mode":hm,
+                          "consistent":consistent,"eff_mode":eff,
+                          "runnable":bool(consistent and eff and _mode_health.get(eff,False)),
+                          "main_login":(u["main"] or {}).get("login"),"hedge_login":(u["hedge"] or {}).get("login")})
+        out["connectors"]={"engine_connector":os.environ.get("QH_CONNECTOR","mt5bridge"),
+                           "active_mode":_active_mode(),
+                           "mode_health":_mode_health,
+                           "inconsistent":sum(1 for x in conns if not x["consistent"]),
+                           "users":sorted(conns,key=lambda x:(x["consistent"],x["username"]))}
+    except Exception as e:
+        out["connectors"]={"err":str(e)[:120]}
     out["demo_mode"]=DEMO_MODE
     out["server_ts"]=_dt.datetime.utcnow().isoformat()
     return out
@@ -3293,6 +3915,95 @@ def chat_config_get(site:str="qh"):
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT site,greeting,kb,enabled FROM chat_config WHERE site=%s",(site,)); r=cur.fetchone(); c.close()
     return dict(r) if r else {"site":site,"greeting":"您好","kb":[],"enabled":True}
+
+# ---- 官网/介绍站 内容配置(site_config, admin可改; 与chat_config同层, 绝不碰引擎) ----
+# 消费端: qh(顶栏LOGO/标题/官网按钮URL) + qhwww(介绍站全量, P2). 各站按 site 硬隔离。
+_SITE_DEFAULT={
+  "qh":{"brand":{"platformName":"Quant Hedge","title":"【Quant Hedge】对冲工具软件","logo":"QHEDGELOGO-s-single.ico"},
+        "officialUrl":"https://app.hustle2026.xyz"},
+  # qhadmin 运营后台侧栏品牌(消费端 qhadmin Layout.vue; logo 支持 URL 或 data:image base64)
+  "qhadmin":{"brand":{"title":"Quant Hedge","logo":"/logo-white.png","loginTitle":"QUANT HEDGE","docTitle":"QH 运营后台"}},
+  "qhwww":{"brand":{"platformName":"Quant Hedge","logo":""},
+    "nav":[{"name":"核心功能","anchor":"#features"},{"name":"多端登录","anchor":"#devices"},
+           {"name":"AI 套利分析","anchor":"#ai"},{"name":"会员权益","anchor":"#member"},
+           {"name":"积分邀请","anchor":"#rewards"},{"name":"版本授权","anchor":"#plans"}],
+    "hero":{"title":"把专业对冲量化","subtitle":"一套系统，覆盖对冲套利全流程","tagline":""},
+    "sections":{"features":"核心功能","devices":"多端登录","ai":"AI 套利分析",
+                "member":"会员权益","rewards":"积分邀请","plans":"版本授权"},
+    "buttons":[{"key":"download","label":"⬇ 下载 Windows 客户端","url":"/QuantHedge-Setup-1.1.0.exe"},
+               {"key":"login","label":"登录控制台","url":"https://qh.hustle2026.xyz"},
+               {"key":"learn","label":"了解核心功能","url":"#features"}],
+    "downloads":[{"os":"Windows","label":"QuantHedge-Setup-1.1.0.exe","url":"/QuantHedge-Setup-1.1.0.exe","ver":"1.1.0"}],
+    "footer":{"email":"support@hustle2026.xyz","qq":"000000000","phone":"+86 000-0000-0000",
+              "copyright":"© 2026 Quant Hedge　保留所有权利 All Rights Reserved",
+              "icp":"浙ICP备 0000000000 号-0","icpUrl":"https://beian.miit.gov.cn","police":"浙公网安备 00000000000000 号",
+              "qrs":{"wechatOA":"","wechatMini":"","douyin":"","kuaishou":""},
+              "agreementTitle":"软件服务协议","agreementHtml":""}}
+}
+class SiteCfg(BaseModel):
+    license_key:str=""; site:str="qh"; cfg:dict={}
+@app.post("/api/admin/site/save", dependencies=[Depends(require_op("sitemgr"))])
+def site_config_save(r:SiteCfg):
+    if r.site not in ("qh","qhwww","qhadmin"): raise HTTPException(400,"site 须为 qh|qhwww|qhadmin")
+    c=db(); cur=c.cursor()
+    cur.execute("""INSERT INTO site_config(site,cfg,updated_at) VALUES(%s,%s,now())
+                   ON CONFLICT (site) DO UPDATE SET cfg=EXCLUDED.cfg,updated_at=now()""",(r.site,json.dumps(r.cfg)))
+    c.close()
+    return {"ok":True,"site":r.site}
+@app.get("/api/site/config")
+def site_config_get(site:str="qh"):
+    """公开只读: 官网/介绍站展示配置(已发布 live 版, 无敏感信息)。缺省回落内置默认。"""
+    try:
+        c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT cfg FROM site_config WHERE site=%s",(site,)); r=cur.fetchone(); c.close()
+        if r and r.get("cfg"): return {"site":site,"cfg":r["cfg"]}
+    except Exception: pass
+    return {"site":site,"cfg":_SITE_DEFAULT.get(site,{})}
+
+# ---- 草稿 / 发布 / 回滚(防手滑改崩官网; cfg=live·draft=草稿·versions=历史) ----
+@app.post("/api/admin/site/draft", dependencies=[Depends(require_op("sitemgr"))])
+def site_draft_save(r:SiteCfg):
+    if r.site not in ("qh","qhwww","qhadmin"): raise HTTPException(400,"bad site")
+    c=db(); cur=c.cursor()
+    cur.execute("""INSERT INTO site_config(site,cfg,draft,updated_at) VALUES(%s,'{}'::jsonb,%s,now())
+                   ON CONFLICT (site) DO UPDATE SET draft=EXCLUDED.draft,updated_at=now()""",(r.site,json.dumps(r.cfg)))
+    c.close(); return {"ok":True,"site":r.site}
+@app.get("/api/admin/site/draft", dependencies=[Depends(require_op("sitemgr"))])
+def site_draft_get(site:str="qh"):
+    """管理端编辑用: 优先取草稿, 无草稿回落 live(cfg), 再回落默认。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT cfg,draft FROM site_config WHERE site=%s",(site,)); r=cur.fetchone(); c.close()
+    dflt=_SITE_DEFAULT.get(site,{})
+    if not r: return {"site":site,"live":dflt,"draft":None,"has_draft":False}
+    return {"site":site,"live":(r.get("cfg") or dflt),"draft":r.get("draft"),"has_draft":bool(r.get("draft"))}
+@app.post("/api/admin/site/publish", dependencies=[Depends(require_op("sitemgr"))])
+def site_publish(r:SiteCfg):
+    """发布: 当前 live 存入历史 → (传入cfg 或 现有draft)成为 live, 清草稿。"""
+    if r.site not in ("qh","qhwww","qhadmin"): raise HTTPException(400,"bad site")
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT cfg,draft FROM site_config WHERE site=%s",(r.site,)); row=cur.fetchone()
+    if row and row[0]: cur.execute("INSERT INTO site_config_versions(site,cfg) VALUES(%s,%s)",(r.site,json.dumps(row[0])))
+    newcfg = r.cfg if r.cfg else ((row[1] if (row and row[1]) else {}) )
+    cur.execute("""INSERT INTO site_config(site,cfg,draft,updated_at) VALUES(%s,%s,NULL,now())
+                   ON CONFLICT (site) DO UPDATE SET cfg=EXCLUDED.cfg,draft=NULL,updated_at=now()""",(r.site,json.dumps(newcfg)))
+    c.close(); return {"ok":True,"site":r.site}
+@app.get("/api/admin/site/versions", dependencies=[Depends(require_op("sitemgr"))])
+def site_versions(site:str="qh", limit:int=20):
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,published_at FROM site_config_versions WHERE site=%s ORDER BY id DESC LIMIT %s",(site,min(limit,100)))
+    rows=cur.fetchall(); c.close()
+    return {"site":site,"versions":[{"id":x["id"],"ts":x["published_at"].isoformat()} for x in rows]}
+class SiteRollback(BaseModel):
+    license_key:str=""; site:str="qh"; version_id:int
+@app.post("/api/admin/site/rollback", dependencies=[Depends(require_op("sitemgr"))])
+def site_rollback(r:SiteRollback):
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT cfg FROM site_config_versions WHERE id=%s AND site=%s",(r.version_id,r.site)); v=cur.fetchone()
+    if not v: c.close(); raise HTTPException(404,"版本不存在")
+    cur.execute("SELECT cfg FROM site_config WHERE site=%s",(r.site,)); old=cur.fetchone()
+    if old and old[0]: cur.execute("INSERT INTO site_config_versions(site,cfg) VALUES(%s,%s)",(r.site,json.dumps(old[0])))
+    cur.execute("UPDATE site_config SET cfg=%s,draft=NULL,updated_at=now() WHERE site=%s",(json.dumps(v[0]),r.site))
+    c.close(); return {"ok":True,"site":r.site,"rolled_to":r.version_id}
 
 # ================= AI 客服 LLM 服务(复刻 coinadmin ai-support; 完全隔离交易引擎) =================
 # 安全边界: 独立表(ai_config/ai_conversations/ai_messages) + 独立 httpx 出站 + 独立端点;
@@ -4161,10 +4872,11 @@ def dm_ws_stats():
 
 class CmdReq(BaseModel):
     username:str; license_key:str=""; confirm:bool=False
-@app.post("/api/cmd/close_all", dependencies=[Depends(require_admin)])
+@app.post("/api/cmd/close_all", dependencies=[Depends(require_license)])
 async def cmd_close_all(r:CmdReq):
     actor=_actor(r.license_key)
     if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    await _conn_gate_exec()   # 连接方式一致+健康才执行(fail-closed)
     if DEMO_MODE:
         # 演示模式：不真实下单，但真实查询双腿当前持仓，回显"将平掉哪些"
         preview={"main":0,"hedge":0}
@@ -4188,8 +4900,8 @@ async def cmd_close_all(r:CmdReq):
             except Exception as ex: last={"error":str(ex)}
             await _aio.sleep(0.6)
         return last,False
-    main_r,main_ok = await _close_leg(CONN.main,"main")
-    hedge_r,hedge_ok = (await _close_leg(CONN.hedge,"hedge")) if getattr(CONN,"hedge",None) else ({"closed":0},True)
+    main_r,main_ok = await _close_leg(EXEC.main,"main")
+    hedge_r,hedge_ok = (await _close_leg(EXEC.hedge,"hedge")) if getattr(EXEC,"hedge",None) else ({"closed":0},True)
     mc=(main_r or {}).get("closed",0); hc=(hedge_r or {}).get("closed",0)
     # 裸空判定：一腿成功平、另一腿失败 = 单边暴露
     naked=None
@@ -4214,7 +4926,7 @@ async def cmd_close_all(r:CmdReq):
     return {"ok":True,"demo":False,"closed":{"main":mc,"hedge":hc},
             "msg":"已强制平仓 主腿%d/对冲腿%d 笔"%(mc,hc),"detail":{"main":main_r,"hedge":hedge_r}}
 
-@app.post("/api/cmd/close_profit", dependencies=[Depends(require_admin)])
+@app.post("/api/cmd/close_profit", dependencies=[Depends(require_license)])
 async def cmd_close_profit(r:CmdReq):
     actor=_actor(r.license_key)
     if not r.confirm: raise HTTPException(400,"二次确认未通过")
@@ -4242,8 +4954,9 @@ def _poslist(pl):
     if isinstance(pl,dict): return pl.get("positions",pl) if isinstance(pl.get("positions",pl),list) else []
     return pl or []
 
-async def _count_filled_slots():
-    """当前已填坑位数 = 主腿持仓笔数(每坑=一笔配对, 顺序填充)。取不到→None(fail-closed)。"""
+async def _count_filled_slots(symbol="XAUUSD"):
+    """当前已填坑位数 = 主腿持仓笔数(每坑=一笔配对, 顺序填充)。取不到→None(fail-closed)。
+       api 模式并入 in-flight 票(A2T 读滞后期间防重复开仓)。"""
     try:
         pos=await CONN.both_positions() if hasattr(CONN,"both_positions") else None
         if not pos: return None
@@ -4251,10 +4964,71 @@ async def _count_filled_slots():
     except Exception:
         return None
 
+async def _occupied_slots(symbol="XAUUSD"):
+    """当前已占坑号 set(经稳定坑号映射; 支持跳空)。取不到→None(fail-closed)。"""
+    try:
+        pos=await CONN.both_positions() if hasattr(CONN,"both_positions") else None
+        if pos is None: return None
+        ann=_annotate_slots(pos, symbol)
+        occ=set()
+        for leg in ("main","hedge"):
+            for p in (ann.get(leg) or []):
+                s=int(p.get("slot") or 0)
+                if s>0: occ.add(s)
+        return occ
+    except Exception:
+        return None
+
+def _next_empty_slot(occ, ladders):
+    """最小空缺坑号(1..ladders; ladders<=0 视为不限)。occ=已占坑号 set。"""
+    occ=occ or set()
+    k=1
+    while (ladders<=0 or k<=ladders):
+        if k not in occ: return k
+        k+=1
+    return None   # 阶梯已满
+
+_CSIZE={"XAUUSD":100.0,"_fetched":False}   # 面值缓存(XAU=100), auto_exit 惰性从 symbol_info 更新
+def _pnl_to_points(pnl, vol, symbol="XAUUSD"):
+    """配对净盈亏($) → 点差净盈亏点数 = pnl /(手数×面值)。盈利/止损点位按此口径比较, 跨坑手数一致。"""
+    try:
+        cs=float(_CSIZE.get(symbol) or 100.0); v=abs(float(vol or 0))
+        return (float(pnl)/(v*cs)) if (v>0 and cs>0) else float(pnl)
+    except Exception: return pnl
+def _bj_hm():
+    """当前北京时间 分钟数(0..1439)。"""
+    n=_dt.datetime.utcnow()+_dt.timedelta(hours=8)
+    return n.hour*60+n.minute
+def _in_window(start, end, now_min=None):
+    """时间窗判定(北京 "HH:MM"): 空/未设→True; 支持跨零点(start>end)。start==end→True(视为全天)。"""
+    def _p(s):
+        try:
+            s=(s or "").strip()
+            if not s or ":" not in s: return None
+            h,m=s.split(":",1); return int(h)*60+int(m)
+        except Exception: return None
+    a=_p(start); b=_p(end)
+    if a is None or b is None: return True   # 未设=全时段
+    if a==b: return True
+    if now_min is None: now_min=_bj_hm()
+    if a<b: return a<=now_min<b
+    return now_min>=a or now_min<b            # 跨零点
+
+def _reserve_slot(symbol, res, slot):
+    """定向开仓后写 ticket→坑号预留(供 _annotate_slots 尊重目标坑而非自动分配最小空缺)。
+       票用 order(市价单 position 票); api 模式票不符时 _annotate_slots 回落最小空缺, graceful。"""
+    try:
+        for leg in ("main","hedge"):
+            lr=(res.get(leg) or {})
+            tk=lr.get("order") or lr.get("deal") or lr.get("ticket")
+            if tk: R.hset(RNS+"slotmap:"+leg+":"+symbol, str(tk), int(slot))
+    except Exception: pass
+
 class OpenPairReq(BaseModel):
     username:str; license_key:str=""; confirm:bool=False
     direction:str                      # 'reverse'(反向/1空2涨) | 'forward'(正向/2空1涨)
     symbol:str="XAUUSD"; slots:int=1   # slots = 本次要填的坑位数(按顺序填最前面的 N 个空坑, 每坑=一对, 每坑per-rung手数)
+    slot:int=0                          # >0=定向开仓该坑(允许坑号跳空); 0=顺序填充(填最小空缺坑)
     qty:float=0.0                       # 兼容旧字段(已废弃; slots 优先, 仅当 slots 缺省且 qty>0 时回退)
 @app.post("/api/cmd/open_pair", dependencies=[Depends(require_license)])
 async def cmd_open_pair(r:OpenPairReq):
@@ -4262,8 +5036,11 @@ async def cmd_open_pair(r:OpenPairReq):
     if r.direction not in ("reverse","forward"):
         raise HTTPException(400,"direction 必须为 reverse 或 forward")
     if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    await _conn_gate_exec()   # 连接方式一致+健康才执行(fail-closed)
     t=_load_tmpl(r.username, r.symbol)
     if not t: raise HTTPException(404,"参数模板未找到")
+    if not _in_window(t.get("entry_win_start"), t.get("entry_win_end")):   # 进单时段闸(北京)
+        raise HTTPException(409,"当前不在进单时段(%s-%s 北京)，已拒绝开仓"%(t.get("entry_win_start") or "?", t.get("entry_win_end") or "?"))
     # 坑位数(红框): 本次开几个坑。兼容旧 qty(整数化)。
     slots=int(r.slots or 0)
     if slots<=0 and r.qty and r.qty>0: slots=int(round(r.qty))
@@ -4282,13 +5059,32 @@ async def cmd_open_pair(r:OpenPairReq):
     mode=(t.get("entry_mode") or "main_first"); speed=(t.get("speed_mode") or "fast")
     if mode not in ("concurrent","main_first","hedge_first"): mode="main_first"
     legmap={"reverse":("sell","buy"),"forward":("buy","sell")}
-    # 顺序填充: 读当前已填坑位, 受阶梯上限约束, 实际可开 = min(请求坑数, 剩余空坑)
-    filled=await _count_filled_slots()
-    if filled is None:
+    # 已占坑号(gap-aware): 支持坑号跳空
+    occ=await _occupied_slots(r.symbol)
+    if occ is None:
         raise HTTPException(502,"无法读取当前持仓坑位(fail-closed, 拒绝开仓避免超额填坑)")
-    remaining = (ladders - filled) if ladders>0 else slots   # ladders=0 视为不限坑
-    if remaining<=0:
-        raise HTTPException(409,"阶梯已满(%d/%d坑)，无空坑可开"%(filled,ladders))
+    filled=len(occ)
+    target=int(r.slot or 0)
+    if target>0:
+        # 定向开仓: 校验范围+未占用, 只开该坑
+        if ladders>0 and (target<1 or target>ladders):
+            raise HTTPException(400,"坑号 %d 超出阶梯范围(1..%d)"%(target,ladders))
+        if target in occ:
+            raise HTTPException(409,"坑 %d 已有持仓，不能重复开"%target)
+        slot_seq=[target]
+    else:
+        # 顺序填充: 填最小空缺坑, 受阶梯上限约束, 实际可开 = min(请求坑数, 剩余空坑)
+        remaining = (ladders - filled) if ladders>0 else slots
+        if remaining<=0:
+            raise HTTPException(409,"阶梯已满(%d/%d坑)，无空坑可开"%(filled,ladders))
+        _tn=min(slots, remaining); slot_seq=[]; _occ2=set(occ)
+        for _ in range(_tn):
+            ns=_next_empty_slot(_occ2, ladders)
+            if ns is None: break
+            slot_seq.append(ns); _occ2.add(ns)
+    to_open=len(slot_seq)
+    if to_open<=0:
+        raise HTTPException(409,"无空坑可开")
     # 数据波动闸: 近 match_count 条点差波动超 band → 拒绝开仓(软暂停, 防剧烈波动追单)
     _mc=int(t.get("match_count") or 0); _bd=float(t.get("fluctuation_band") or 0)
     if _bd>0 and _mc>=2:
@@ -4310,7 +5106,6 @@ async def cmd_open_pair(r:OpenPairReq):
         if getattr(CONN,"hedge",None) and _rh>0:
             ok_h,why_h=ENG.margin_sufficient(_ha.get("margin_free"),_rh,"hedge")
             if not ok_h: raise HTTPException(409,"对冲账户保证金不足预留, 拒绝开仓: %s"%why_h)
-    to_open=min(slots, remaining)
     # 开仓点差(testgo pos_open_ledger 思路): 批前取一次双腿 tick 算 spreadAtExecution
     entry_spread=None
     try:
@@ -4320,13 +5115,11 @@ async def cmd_open_pair(r:OpenPairReq):
             if r.direction=="reverse": entry_spread=round(float(_ht["ask"])-float(_mt["bid"]),4)   # 对冲ASK-主BID
             else:                      entry_spread=round(float(_mt["ask"])-float(_ht["bid"]),4)   # 主ASK-对冲BID
     except Exception: pass
-    # 费用并入点差阈值闸: 每手费用折算成点收紧入场阈值, 当前点差 > 有效阈值 → 拒绝(费用吃掉套利空间)
-    _fee=float(t.get("fee_per_lot") or 0); _nthr=float(t.get("entry_spread") or 0)
-    if _fee>0 and _nthr>0 and entry_spread is not None:
-        # 每点价值≈合约规格(XAU 1手=100oz, 1.00 价差/手 = $100); 双腿计费
-        eff_thr,fee_pts=ENG.effective_spread_threshold(_nthr,_fee,100.0,legs=2)
-        if entry_spread > eff_thr:
-            raise HTTPException(409,"费用并入后点差超阈值, 拒绝开仓: 当前%.4f > 有效阈值%.4f(名义%.2f−费用%.4f点)"%(entry_spread,eff_thr,_nthr,fee_pts))
+    # 费用折算成点(抬高逐坑买入点位下限, 在下方逐坑闸并入)
+    _fee=float(t.get("fee_per_lot") or 0); _nthr=float(t.get("entry_spread") or 0); _fee_pts=0.0
+    if _fee>0:
+        try: _,_fee_pts=ENG.effective_spread_threshold(_nthr,_fee,100.0,legs=2)
+        except Exception: _fee_pts=0.0
     _ledger_key=RNS+"ledger:"+r.username+":"+r.direction
     _force_demo = (R.get(RNS+"force_demo:"+r.username)=="1")  # 试用用户强制 DEMO(限风险)
     if DEMO_MODE or _force_demo:
@@ -4338,17 +5131,14 @@ async def cmd_open_pair(r:OpenPairReq):
     # 真发：逐坑顺序开仓; 任一坑裸空/失败即停(不继续填后续坑); 裸空守护绝不自动反开
     opened=0; details=[]; skipped=[]
     _slotcfg=R.hgetall(_slot_key(r.username,r.symbol)) or {}
-    for i in range(to_open):
-        slot_no=filled+opened+1   # 本坑坑号(顺序填充)
-        # 逐坑策略覆盖(右键"修改订单"设置): 进单状态/交易数量/买入点位
+    for i,slot_no in enumerate(slot_seq):   # slot_seq=定向[该坑] 或 顺序[最小空缺...]
+        # 逐坑策略覆盖(右键"坑位规则设置"): 进单状态/交易数量/买入点位
         ov=None
         try:
             _raw=_slotcfg.get(str(slot_no)); ov=json.loads(_raw) if _raw else None
         except Exception: ov=None
         slot_mv, slot_hv = main_vol, hedge_vol
-        # 该坑有效买入点位阈值: 逐坑 buy_point 非 None→用之(0=任意点差都开); None→回落全局 entry_spread
         _gthr=float(t.get("entry_spread") or 0)
-        _eff_bp=_gthr
         if ov:
             if ov.get("entry_enabled") is False:
                 skipped.append(slot_no); continue   # 该坑被关闭→跳过(不开)
@@ -4356,13 +5146,11 @@ async def cmd_open_pair(r:OpenPairReq):
                 # 固定手数: 该坑用设定数量(主腿=qty×主倍率比, 对冲=qty×对冲倍率比, 以 base 为单位换算)
                 _q=float(ov["qty"]); slot_mv=round(_q*_mm,2); slot_hv=round(_q*_hm,2)
                 if slot_mv<=0 or slot_hv<=0: slot_mv,slot_hv=main_vol,hedge_vol
-            if ov.get("buy_point") is not None:
-                try: _eff_bp=float(ov.get("buy_point"))
-                except (TypeError,ValueError): _eff_bp=_gthr
-        # 阈值>0 才过滤(当前点差>阈值则跳过); ==0 表示任意点差都开
-        if _eff_bp>0 and entry_spread is not None and entry_spread>_eff_bp:
-            skipped.append(slot_no); continue   # 当前点差不满足买入点位(逐坑或全局)→跳过
-        res=await CONN.open_pair(r.direction, main_sym, hedge_sym, slot_mv, slot_hv, mode=mode, speed=speed)
+        # 买入点位=入场下限: 当前点差 >= 下限 才开(费用抬高下限); null=任意都开, 0=数字0(须≥0), 无覆盖=全局
+        _pass,_lb=_entry_gate(ov,_gthr,entry_spread,_fee_pts)
+        if not _pass:
+            skipped.append(slot_no); continue   # 当前点差未达买入点位下限→跳过
+        res=await EXEC.open_pair(r.direction, main_sym, hedge_sym, slot_mv, slot_hv, mode=mode, speed=speed)
         details.append(res)
         mok=res.get("main_ok"); hok=res.get("hedge_ok")
         if mok and hok:
@@ -4371,6 +5159,8 @@ async def cmd_open_pair(r:OpenPairReq):
             try:
                 R.rpush(_ledger_key, json.dumps({"q":slot_hv,"m":slot_mv,"s":entry_spread if entry_spread is not None else 0,"ts":_dt.datetime.utcnow().isoformat(),"ladder":slot_no}))
             except Exception: pass
+            _slip_snap(r.direction,"open",_cap_at(_mt,_ht,r.direction,"open"),slot_no,_leg_tickets(res.get("main")),thr=_lb)   # 执行滑点决策快照(ticket精确键+逐单阈值)
+            if target>0: _reserve_slot(r.symbol,res,slot_no)   # 定向开仓: 预留坑号(防 _annotate 自动分配最小空缺)
             continue
         if not mok and not hok:
             _audit(r.username,actor,"open_pair",{"i":i,"opened":opened,"res":res},False,"slot_both_failed")
@@ -4397,10 +5187,11 @@ class ClosePairReq(BaseModel):
     username:str; license_key:str=""; confirm:bool=False
     symbol:str="XAUUSD"; main_side:str; hedge_side:str
     main_ticket:int=0; hedge_ticket:int=0; main_vol:float=0.0; hedge_vol:float=0.0
-@app.post("/api/cmd/close_pair", dependencies=[Depends(require_admin)])
+@app.post("/api/cmd/close_pair", dependencies=[Depends(require_license)])
 async def cmd_close_pair(r:ClosePairReq):
     actor=_actor(r.license_key)
     if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    await _conn_gate_exec()   # 连接方式一致+健康才执行(fail-closed)
     t=_load_tmpl(r.username, r.symbol)
     hedge_sym=ENG.map_hedge_symbol(r.symbol, (t or {}).get("hedge_symbol")) or r.symbol
     xmode=((t or {}).get("exit_mode") or "concurrent"); speed=((t or {}).get("speed_mode") or "fast")
@@ -4409,7 +5200,14 @@ async def cmd_close_pair(r:ClosePairReq):
         _audit(r.username,actor,"close_pair",{"symbol":r.symbol,"exit_mode":xmode,"main_side":r.main_side,"hedge_side":r.hedge_side},True,"demo:not_sent")
         return {"ok":True,"demo":True,"msg":"演示模式[%s]：将平 主腿%s/对冲腿%s 各一笔，未真实下单"%(xmode,r.main_side,r.hedge_side)}
     mv=r.main_vol or None; hv=r.hedge_vol or None
-    res=await CONN.close_pair(r.symbol, hedge_sym, r.main_side, r.hedge_side, mv, hv, mode=xmode, speed=speed)
+    mt=r.main_ticket or None; ht=r.hedge_ticket or None   # 按坑精确平(有票→只平该笔, 无票→回落按方向平)
+    _slip_dir="reverse" if r.main_side=="sell" else "forward"   # 持仓方向(平仓侧决策快照)
+    _mtk=_htk=None
+    try: _mtk=await CONN.main._get("/mt5/tick/"+r.symbol)
+    except Exception: pass
+    try: _htk=await CONN.hedge._get("/mt5/tick/"+hedge_sym) if getattr(CONN,"hedge",None) else None
+    except Exception: pass
+    res=await EXEC.close_pair(r.symbol, hedge_sym, r.main_side, r.hedge_side, mv, hv, mode=xmode, speed=speed, main_ticket=mt, hedge_ticket=ht)
     mok=("error" not in (res.get("main") or {})); hok=(res.get("hedge") is None) or ("error" not in (res.get("hedge") or {}))
     if mok and not hok:
         R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"err",
@@ -4417,6 +5215,7 @@ async def cmd_close_pair(r:ClosePairReq):
         _audit(r.username,actor,"close_pair",res,False,"NAKED_RISK_hedge_close_failed")
         raise HTTPException(409,"裸空风险：主腿已平、对冲腿平仓失败，已告警(未自动反开)")
     _audit(r.username,actor,"close_pair",res,False,"closed_pair")
+    _slip_snap(_slip_dir,"close",_cap_at(_mtk,_htk,_slip_dir,"close"),None,_leg_tickets((res or {}).get("main")))   # 执行滑点决策快照(平仓侧, ticket精确键)
     # 平掉一对 → 账本 FIFO 弹出一笔(main_side=sell→reverse, buy→forward)
     try:
         _dir = "reverse" if r.main_side=="sell" else "forward"
@@ -4432,11 +5231,22 @@ def cmd_engine(r:EngineCmd):
     _audit(r.username,_actor(r.license_key),"engine_toggle",{"running":r.running},DEMO_MODE,"flag_set")
     return {"ok":True,"running":r.running}
 
+# ---- UI 行为开关(进单机制/进单等待): 前端开关→Redis, 引擎侧真消费 ----
+class UiSwitchesCmd(BaseModel):
+    username:str; license_key:str=""
+    entrymech:bool=True    # 开=「持仓时长」到时自动平仓; 关=超时平仓不触发(止盈/止损/卖点不受影响)
+    entrywait:bool=True    # 开=自动进单/循环下单按「进单间隔」等待; 关=不按间隔(自动进单保留10s安全底线)
+@app.post("/api/cmd/ui_switches", dependencies=[Depends(require_license)])
+def cmd_ui_switches(r:UiSwitchesCmd):
+    R.set(RNS+"sw:entrymech:"+r.username, "1" if r.entrymech else "0")
+    R.set(RNS+"sw:entrywait:"+r.username, "1" if r.entrywait else "0")
+    return {"ok":True,"entrymech":r.entrymech,"entrywait":r.entrywait}
+
 # ---- 全自动出场模式开关(off/shadow/armed/full) + 急停 ----
 class AutoExitCmd(BaseModel):
     username:str; license_key:str=""; mode:str="off"   # off|shadow|armed|full
     profit_first:bool=False                              # 盈利平台优先(止盈/卖点/超时仅盈利时放行; 止损不受限)
-@app.post("/api/cmd/auto_exit", dependencies=[Depends(require_admin)])
+@app.post("/api/cmd/auto_exit", dependencies=[Depends(require_license)])
 def cmd_auto_exit(r:AutoExitCmd):
     if r.mode not in ("off","shadow","armed","full"):
         raise HTTPException(400,"mode 必须为 off/shadow/armed/full")
@@ -4464,7 +5274,7 @@ def get_auto_exit(username:str):
 # ---- 全自动进单模式开关(off/shadow/armed/full) + 方向 ----
 class AutoEntryCmd(BaseModel):
     username:str; license_key:str=""; mode:str="off"; direction:str="reverse"
-@app.post("/api/cmd/auto_entry", dependencies=[Depends(require_admin)])
+@app.post("/api/cmd/auto_entry", dependencies=[Depends(require_license)])
 def cmd_auto_entry(r:AutoEntryCmd):
     if r.mode not in ("off","shadow","armed","full"):
         raise HTTPException(400,"mode 必须为 off/shadow/armed/full")
@@ -4511,6 +5321,8 @@ class ParamSave(BaseModel):
     weekend_sat:bool=False; weekend_sun:bool=False
     # 批八: 保证金预留 + 每手费用
     margin_reserve_main:float=200.0; margin_reserve_hedge:float=200.0; fee_per_lot:float=0.0
+    # 时间窗(北京时间 "HH:MM"; 空=全时段): 进单时段(开仓时段) + 运行时段(系统自动运行时段)
+    entry_win_start:str=""; entry_win_end:str=""; run_win_start:str=""; run_win_end:str=""
 @app.post("/api/params/save", dependencies=[Depends(require_license)])
 def params_save(r:ParamSave):
     c=db(); cur=c.cursor()
@@ -4525,7 +5337,8 @@ def params_save(r:ParamSave):
                    data_mult_main=%s,data_mult_hedge=%s,digits_main=%s,digits_hedge=%s,
                    match_count=%s,fluctuation_band=%s,sync_interval_sec=%s,records_per_sec=%s,
                    weekend_sat=%s,weekend_sun=%s,
-                   margin_reserve_main=%s,margin_reserve_hedge=%s,fee_per_lot=%s,updated_at=now()
+                   margin_reserve_main=%s,margin_reserve_hedge=%s,fee_per_lot=%s,
+                   entry_win_start=%s,entry_win_end=%s,run_win_start=%s,run_win_end=%s,updated_at=now()
                    WHERE user_id=%s AND symbol=%s""",
                 (r.entry_spread,r.tp_points,r.sl_points,r.ladders,r.hold_secs,r.weekend_guard,
                  r.main_lot_mult,r.hedge_lot_mult,r.main_spread_cap,r.hedge_spread_cap,r.slippage_tol,r.slippage_pause_min,
@@ -4535,14 +5348,16 @@ def params_save(r:ParamSave):
                  r.data_mult_main,r.data_mult_hedge,r.digits_main,r.digits_hedge,
                  r.match_count,r.fluctuation_band,r.sync_interval_sec,r.records_per_sec,
                  r.weekend_sat,r.weekend_sun,
-                 r.margin_reserve_main,r.margin_reserve_hedge,r.fee_per_lot,u[0],r.symbol))
+                 r.margin_reserve_main,r.margin_reserve_hedge,r.fee_per_lot,
+                 (r.entry_win_start or ""),(r.entry_win_end or ""),(r.run_win_start or ""),(r.run_win_end or ""),u[0],r.symbol))
     if cur.rowcount==0:
         cur.execute("""INSERT INTO param_templates(user_id,symbol,entry_spread,tp_points,sl_points,ladders,hold_secs,weekend_guard,
                        main_lot_mult,hedge_lot_mult,main_spread_cap,hedge_spread_cap,slippage_tol,slippage_pause_min,entry_interval_sec,max_inflight,auto_close,single_leg_alert,
                        hedge_symbol,base_lot,data_mult,basis_offset,digits,entry_mode,exit_mode,speed_mode,predict_budget,
                        data_mult_main,data_mult_hedge,digits_main,digits_hedge,match_count,fluctuation_band,sync_interval_sec,records_per_sec,weekend_sat,weekend_sun,
-                       margin_reserve_main,margin_reserve_hedge,fee_per_lot)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       margin_reserve_main,margin_reserve_hedge,fee_per_lot,
+                       entry_win_start,entry_win_end,run_win_start,run_win_end)
+                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (u[0],r.symbol,r.entry_spread,r.tp_points,r.sl_points,r.ladders,r.hold_secs,r.weekend_guard,
                      r.main_lot_mult,r.hedge_lot_mult,r.main_spread_cap,r.hedge_spread_cap,r.slippage_tol,r.slippage_pause_min,
                      r.entry_interval_sec,r.max_inflight,r.auto_close,r.single_leg_alert,
@@ -4551,7 +5366,8 @@ def params_save(r:ParamSave):
                      r.data_mult_main,r.data_mult_hedge,r.digits_main,r.digits_hedge,
                      r.match_count,r.fluctuation_band,r.sync_interval_sec,r.records_per_sec,
                      r.weekend_sat,r.weekend_sun,
-                     r.margin_reserve_main,r.margin_reserve_hedge,r.fee_per_lot))
+                     r.margin_reserve_main,r.margin_reserve_hedge,r.fee_per_lot,
+                     (r.entry_win_start or ""),(r.entry_win_end or ""),(r.run_win_start or ""),(r.run_win_end or "")))
     c.close()
     _audit(r.username,_actor(r.license_key),"params_save",{"symbol":r.symbol},DEMO_MODE,"saved")
     return {"ok":True,"msg":"参数已保存，引擎下轮热重载"}
@@ -4781,6 +5597,8 @@ async def bridge_leg_deals(leg:str, days:int=7):
                     "price":float(d.get("price",0) or 0),"profit":float(d.get("profit",0) or 0),
                     "time":d.get("time"),"is_trade":t in (0,1)})
     out=[x for x in out if x["is_trade"]]
+    _off=await _broker_utc_offset()   # 经纪商墙钟→真UTC(前端再+8h显北京)
+    for x in out: x["time"]=_to_utc(x.get("time"), _off)
     out.sort(key=lambda x:x.get("time") or 0, reverse=True)
     return {"leg":leg,"deals":out[:30]}
 
@@ -4898,21 +5716,62 @@ async def engine_paired_history(days:int=7, symbol:str="XAUUSD"):
         c=db(); cur=c.cursor(); cur.execute("SELECT entry_spread FROM param_templates WHERE symbol=%s LIMIT 1",(symbol,)); rr=cur.fetchone(); c.close()
         if rr and rr[0] is not None: thr=float(rr[0])
     except Exception: pass
+    # 执行滑点决策快照(全局环形): 按 action(open/close)+时间就近匹配; 滑点=实际成交捕获-决策快照(带符号)
+    _off=await _broker_utc_offset()
+    try: _snaps=[json.loads(x) for x in (R.lrange(RNS+"slipsnap",0,-1) or [])]
+    except Exception: _snaps=[]
+    _snap_used=set()
+    def _match_snap(md, deal_utc, action):
+        # 1) ticket 精确键: 主deal票↔history.ticket 或 order票↔history.order(唯一, 首选)
+        _mtk={md.get("ticket"), md.get("order")}; _mtk.discard(None); _mtk.discard("")
+        if _mtk:
+            for i,s in enumerate(_snaps):
+                if i in _snap_used or s.get("a")!=action: continue
+                if _mtk & set(s.get("tk") or []):
+                    _snap_used.add(i); return _snaps[i]
+        # 2) 兜底: 时间就近(±4.5s; api票非MT或历史老单无票时)
+        if deal_utc is None: return None
+        best=None; bestd=4.5
+        for i,s in enumerate(_snaps):
+            if i in _snap_used or s.get("a")!=action: continue
+            dt=abs((s.get("ts") or 0)-deal_utc)
+            if dt<bestd: bestd=dt; best=i
+        if best is not None: _snap_used.add(best); return _snaps[best]
+        return None
     for md in sorted(main,key=lambda x:x["time"]):
         hi=_match(md)
         h=hedge[hi] if hi is not None else None
         if hi is not None: used.add(hi)
         spread=round(abs(md["price"]-h["price"]),4) if h else None
-        slippage=round(spread-thr,4) if (spread is not None and thr is not None) else None
+        # 带符号执行滑点: 优先决策快照为基准; 平仓行只认平仓侧快照(无则 None→前端'—'), 开仓行回退近似阈值(标记 approx)
+        _act="open" if md["entry"]==0 else "close"
+        _sn=_match_snap(md, _to_utc(md["time"], _off), _act)
+        slippage=None; slip_src="none"
+        if _sn is not None and h:
+            _rc=_realized_cap(_sn.get("d"), md["price"], h["price"])
+            if _rc is not None and _sn.get("c") is not None:
+                slippage=round(_rc-float(_sn["c"]),4); slip_src="snap"
+        elif _act=="open" and h and thr is not None:
+            _dir="reverse" if "reverse" in md["comment"] else ("forward" if "forward" in md["comment"] else None)
+            _rc=_realized_cap(_dir, md["price"], h["price"]) if _dir else None
+            if _rc is not None: slippage=round(_rc-thr,4); slip_src="approx"
+        # 逐行阈值(达标差用): 快照记了该单下单时真实买入点位(th)则用之, 否则回落全局近似
+        row_thr = thr
+        if _sn is not None and _sn.get("th") is not None:
+            try: row_thr=float(_sn["th"])
+            except (TypeError,ValueError): pass
+        # 达标差 = 点差 − 阈值(用户口径, 与旧HED公式一致; 双列并存)
+        dev = round(spread-row_thr,4) if (spread is not None and row_thr is not None) else None
         pair_profit=round(md["profit"]+md["swap"]+md["comm"]+((h["profit"]+h["swap"]+h["comm"]) if h else 0),2)
         pairs.append({"time":md["time"],"entry":"开" if md["entry"]==0 else "平",
                       "main_side":md["side"],"main_price":md["price"],"main_vol":md["vol"],
                       "hedge_side":(h["side"] if h else None),"hedge_price":(h["price"] if h else None),"hedge_vol":(h["vol"] if h else None),
-                      "spread":spread,"threshold":thr,"slippage":slippage,"matched":h is not None,
+                      "spread":spread,"threshold":row_thr,"dev":dev,"slippage":slippage,"slip_src":slip_src,"matched":h is not None,
                       "main_fee":round(md["comm"],2),"hedge_fee":round(h["comm"],2) if h else 0,
                       "main_swap":round(md["swap"],2),"hedge_swap":round(h["swap"],2) if h else 0,
                       "main_profit":round(md["profit"],2),"hedge_profit":round(h["profit"],2) if h else 0,
                       "pair_profit":pair_profit,"source":"QH" if md["comment"].startswith("QH") else "manual"})
+    for p in pairs: p["time"]=_to_utc(p.get("time"), _off)   # 经纪商墙钟→真UTC(前端再+8h显北京; _off 上面已取)
     pairs.sort(key=lambda x:x["time"] or 0, reverse=True)
     # 汇总(仿 testgo 顶栏): 平仓净利润/笔数/胜率/费用合计
     closed=[p for p in pairs if p["entry"]=="平"]
@@ -5148,3 +6007,355 @@ async def ws_stream(ws: WebSocket):
 
 
 
+
+
+# ================= Api2Trade 接入 (P0 只读 + 配置管理 + 用户账户管理) =================
+# 参考 https://docs.api2trade.com — MT4/MT5 免终端云接入(REST GET, x-api-key / Pro Basic Auth)。
+# 账户模型: api2trade_config 1行=1份订阅 : N 个已注册 MT 账户(mt_accounts.api2trade_uuid)。
+# 安全铁律: ① MT 密码仅注册时在途, 绝不落库/落日志 ② 订阅到期 fail-closed ③ Key 只回掩码
+#          ④ Api2Trade 为 GET 传参(query 内含密码/key), 异常信息绝不回显 query。
+import time as _t33
+
+A2T_BASE = "https://api.api2trade.com"
+
+def _a2t_mask(k):
+    k=k or ""
+    return (k[:4]+"****"+k[-4:]) if len(k)>=12 else ("****" if k else "")
+
+def _a2t_cfg(cfg_id=None, need_active=True):
+    """取订阅配置行(dict)。cfg_id 为空取第一条启用行。need_active 校验 enabled+未过期(fail-closed)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if cfg_id:
+        cur.execute("SELECT * FROM api2trade_config WHERE id=%s",(cfg_id,))
+    else:
+        cur.execute("SELECT * FROM api2trade_config WHERE enabled ORDER BY id LIMIT 1")
+    row=cur.fetchone(); c.close()
+    if not row: raise HTTPException(503,"Api2Trade 未配置(后台→系统管理→Api2Trade)")
+    row=dict(row)
+    if need_active:
+        if not row.get("enabled"): raise HTTPException(503,"Api2Trade 配置已停用")
+        exp=row.get("expires_at")
+        if exp and exp < datetime.date.today():
+            raise HTTPException(503,"Api2Trade 订阅已到期(%s), fail-closed 拒绝调用, 请续期后再试"%exp)
+    return row
+
+def _a2t_call(cfg, path, params=None, timeout=10):
+    """同步调用 Api2Trade(FastAPI sync 端点在线程池执行)。返回 (json, latency_ms)。
+       日志脱敏: 任何异常/错误信息绝不携带 query string(内含密码/key)。"""
+    base=(cfg.get("base_url") or "").strip().rstrip("/") or A2T_BASE
+    headers={}; auth=None
+    if (cfg.get("plan") or "single")=="pro" and (cfg.get("basic_user") or "").strip():
+        auth=(cfg["basic_user"].strip(), cfg.get("basic_pass") or "")
+    else:
+        headers["x-api-key"]=(cfg.get("api_key") or "").strip()
+    t0=_t33.time()
+    try:
+        r=_httpx.get(base+path, params=(params or {}), headers=headers, auth=auth, timeout=timeout)
+    except Exception as e:
+        raise HTTPException(502,"Api2Trade 连接失败: %s (%s)"%(e.__class__.__name__,path))
+    ms=int((_t33.time()-t0)*1000)
+    if r.status_code==401: raise HTTPException(502,"Api2Trade 鉴权失败(401): Key/凭证无效或已失效")
+    if r.status_code==402: raise HTTPException(502,"Api2Trade 套餐额度不足(402): 账户数/请求量超限, 请升级套餐")
+    if r.status_code>=400:
+        raise HTTPException(502,"Api2Trade %s 返回 %d: %s"%(path,r.status_code,(r.text or "")[:160]))
+    try: return r.json(), ms
+    except Exception: return {"raw":(r.text or "")[:160]}, ms
+
+def _a2t_acclist(j):
+    """/GetAccounts 响应容错解包 → list"""
+    if isinstance(j,list): return j
+    return (j or {}).get("accounts") or (j or {}).get("data") or []
+
+def _a2t_release(cfg_id, uuid):
+    """注销云端托管账户: 官方 GET /DeleteAccount?id=UUID(实测语义: 缺参400/不存在403 "Trading Account not found")。
+       返回 (ok,msg), 绝不抛异常。幂等: 云端已不存在视为已释放(不阻塞本地清理)。
+       复用方: 重注册释放旧 UUID(reg_account) / 彻底清除(admin_acct_purge)。"""
+    uuid=(uuid or "").strip()
+    if not uuid: return False,"无云端UUID, 跳过云端注销"
+    try:
+        cfg=_a2t_cfg(cfg_id, need_active=False)
+        base=(cfg.get("base_url") or "").strip().rstrip("/") or A2T_BASE
+        headers={}; auth=None
+        if (cfg.get("plan") or "single")=="pro" and (cfg.get("basic_user") or "").strip():
+            auth=(cfg["basic_user"].strip(), cfg.get("basic_pass") or "")
+        else: headers["x-api-key"]=(cfg.get("api_key") or "").strip()
+        r=_httpx.get(base+"/DeleteAccount", params={"id":uuid}, headers=headers, auth=auth, timeout=10)
+        if r.status_code==200: return True,"云端注销成功"
+        body=(r.text or "")[:120]
+        if "not found" in body.lower(): return True,"云端已不存在该账户(视为已释放)"
+        if r.status_code==401: return False,"云端鉴权失败(401): Key 无效或已失效"
+        if r.status_code==402: return False,"云端套餐额度受限(402)"
+        return False,"云端注销未成功(HTTP %d): %s"%(r.status_code,body)
+    except HTTPException as e:
+        return False,"云端配置不可用: %s"%(str(getattr(e,"detail",""))[:50])
+    except Exception as e:
+        return False,"云端调用异常: %s"%e.__class__.__name__
+
+# ---- 经纪商/服务器目录(供 qh 前端账户设置下拉; 从 A2T /Search 聚合) ----
+# A2T 无"列全部经纪商"端点, 只能按公司名 /Search; 故用种子清单逐个查再聚合。
+# 种子可用 Redis 键 qh:a2t:broker_seed(JSON 数组)热覆盖, 无需改代码/重启。
+# 注意: 种子用"品牌关键词", 但 A2T 按法人名匹配 → ICMarketsSC 实为 "Raw Trading Ltd"(品牌≠法人)。
+# 故显式补 Raw Trading/Infra Capital(Bybit法人) 等易漏项; 缺失平台加关键词即可(热覆盖 qh:a2t:broker_seed)。
+_A2T_BROKER_SEED=["IC Markets","Raw Trading","Bybit","Infra Capital","Exness","XM","Pepperstone",
+                  "FBS","Vantage","Tickmill","FXTM","OctaFX","RoboForex","Admirals","FxPro","HFM"]
+
+def a2t_brokers(refresh:int=0):
+    """经纪商→服务器名聚合列表 helper(A2T /Search 逐经纪商聚合, Redis 缓存 6h)。
+       路由由 a2t_brokers_pub/_admin 承接(叠加本地 override)。
+       chicken-egg: /Search 需一个有效账户 UUID 作 id → 取订阅下任一已注册账户探测。"""
+    ck=RNS+"a2t:brokers"
+    if not refresh:
+        cached=R.get(ck)
+        if cached:
+            try: return json.loads(cached)
+            except Exception: pass
+    cfg=_a2t_cfg(need_active=False)
+    j,_=_a2t_call(cfg,"/GetAccounts")
+    accs=_a2t_acclist(j)
+    if not accs:
+        raise HTTPException(503,"A2T 无已注册账户, 无法查询经纪商服务器目录(先注册至少一个账户)")
+    probe_id=str((accs[0] or {}).get("id") or "")
+    try: seed=json.loads(R.get(RNS+"a2t:broker_seed") or "null") or _A2T_BROKER_SEED
+    except Exception: seed=_A2T_BROKER_SEED
+    companies=[]; seen=set()
+    for name in seed:
+        try:
+            r,_=_a2t_call(cfg,"/Search",{"id":probe_id,"company":name},timeout=8)
+            for co in (r if isinstance(r,list) else []):
+                cn=co.get("companyName") or name
+                servers=[s.get("name") for s in (co.get("results") or []) if s.get("name")]
+                if servers and cn not in seen:
+                    seen.add(cn); companies.append({"company":cn,"servers":sorted(set(servers))})
+        except Exception: continue
+    companies.sort(key=lambda x:x["company"])
+    out={"companies":companies,"count":len(companies),"cached_at":_dt.datetime.utcnow().isoformat()}
+    R.setex(ck, 21600, json.dumps(out))
+    return out
+
+def _apply_broker_override(base):
+    """本地客户端真源覆盖(qh:a2t:broker_override, 由本机 MT5 采集器推送)。
+       对 override 里的经纪商: 本地服务器排前(权威), 再并入 A2T 剩余项(不丢), 标 local=True。"""
+    try: ov=json.loads(R.get(RNS+"a2t:broker_override") or "{}")
+    except Exception: ov={}
+    if not ov: return base
+    comps={c["company"]:c for c in base.get("companies",[])}
+    for company, servers in ov.items():
+        loc=[s for s in (servers or []) if s]
+        if not loc: continue
+        if company in comps:
+            a2t=[s for s in comps[company].get("servers",[]) if s not in loc]
+            comps[company]={"company":company,"servers":loc+a2t,"local":True}
+        else:
+            comps[company]={"company":company,"servers":loc,"local":True}
+    lst=sorted(comps.values(), key=lambda x:x["company"])
+    return {"companies":lst,"count":len(lst),"cached_at":base.get("cached_at"),
+            "override":list(ov.keys())}
+
+@app.get("/api/a2t/brokers", dependencies=[Depends(require_license)])
+def a2t_brokers_pub(refresh:int=0):
+    return _apply_broker_override(a2t_brokers(refresh))
+
+@app.get("/api/admin/a2t/brokers", dependencies=[Depends(require_op("accounts"))])
+def a2t_brokers_admin(refresh:int=0):
+    """同 /api/a2t/brokers, 供 qhadmin 账户管理(操作员可能无用户密钥, 走 op 权限)。"""
+    return _apply_broker_override(a2t_brokers(refresh))
+
+class BrokerOverride(BaseModel):
+    override: dict = {}   # {经纪商法人名: [服务器名,...]}; 由本机 MT5 客户端采集器推送
+
+@app.post("/api/admin/a2t/broker_override", dependencies=[Depends(require_op("accounts"))])
+def set_broker_override(b:BrokerOverride):
+    """接收本地 IC/Bybit 等客户端真实服务器清单, 存 Redis 供 brokers 合并(本地优先)。"""
+    clean={}
+    for k,v in (b.override or {}).items():
+        srvs=[str(s).strip() for s in (v or []) if str(s).strip()]
+        if str(k).strip() and srvs: clean[str(k).strip()]=sorted(set(srvs))
+    R.set(RNS+"a2t:broker_override", json.dumps(clean))
+    return {"ok":True,"companies":list(clean.keys()),"total_servers":sum(len(v) for v in clean.values())}
+
+@app.get("/api/admin/a2t/broker_override", dependencies=[Depends(require_op("accounts"))])
+def get_broker_override():
+    try: ov=json.loads(R.get(RNS+"a2t:broker_override") or "{}")
+    except Exception: ov={}
+    return {"override":ov}
+
+# ---- 订阅配置 CRUD (perm=datamgr, 与 SSL/数据库同权) ----
+class A2TCfgSave(BaseModel):
+    id:int=0; label:str=""; account:str=""; plan:str="single"; api_key:str=""
+    base_url:str=""; basic_user:str=""; basic_pass:str=""
+    expires_at:str=""; enabled:bool=True; note:str=""
+
+@app.get("/api/admin/api2trade/config", dependencies=[Depends(require_op("datamgr"))])
+def a2t_cfg_list():
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM api2trade_config ORDER BY id")
+    rows=[dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT api2trade_config_id cid, COUNT(*) n FROM mt_accounts WHERE conn_mode='api' AND api2trade_uuid<>'' GROUP BY 1")
+    cnt={r["cid"]:r["n"] for r in cur.fetchall()}; c.close()
+    today=datetime.date.today()
+    for r in rows:
+        r["api_key"]=_a2t_mask(r["api_key"]); r["basic_pass"]="****" if r["basic_pass"] else ""
+        r["bound_accounts"]=cnt.get(r["id"],0)
+        r["days_left"]=(r["expires_at"]-today).days if r["expires_at"] else None
+        r["expires_at"]=str(r["expires_at"]) if r["expires_at"] else ""
+        r["created_at"]=str(r["created_at"]); r["updated_at"]=str(r["updated_at"])
+    return {"configs":rows}
+
+@app.post("/api/admin/api2trade/config/save", dependencies=[Depends(require_op("datamgr"))])
+def a2t_cfg_save(b:A2TCfgSave):
+    if b.plan not in ("single","pro"): raise HTTPException(400,"plan 须为 single|pro")
+    exp=None
+    if (b.expires_at or "").strip():
+        try: exp=datetime.date.fromisoformat(b.expires_at.strip()[:10])
+        except ValueError: raise HTTPException(400,"有效期格式须 YYYY-MM-DD")
+    c=db(); cur=c.cursor()
+    if b.id:
+        # 掩码回传(含 ****)不覆盖库中真值
+        sets=["label=%s","account=%s","plan=%s","base_url=%s","basic_user=%s","expires_at=%s","enabled=%s","note=%s","updated_at=now()"]
+        vals=[b.label.strip(),b.account.strip(),b.plan,b.base_url.strip(),b.basic_user.strip(),exp,b.enabled,b.note]
+        if b.api_key and "****" not in b.api_key: sets.append("api_key=%s"); vals.append(b.api_key.strip())
+        if b.basic_pass and "****" not in b.basic_pass: sets.append("basic_pass=%s"); vals.append(b.basic_pass)
+        vals.append(b.id)
+        cur.execute("UPDATE api2trade_config SET "+",".join(sets)+" WHERE id=%s",vals)
+        if not cur.rowcount: c.close(); raise HTTPException(404,"配置不存在")
+    else:
+        cur.execute("INSERT INTO api2trade_config(label,account,plan,api_key,base_url,basic_user,basic_pass,expires_at,enabled,note) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (b.label.strip(),b.account.strip(),b.plan,(b.api_key or "").strip(),b.base_url.strip(),b.basic_user.strip(),b.basic_pass,exp,b.enabled,b.note))
+        b.id=cur.fetchone()[0]
+    c.close(); return {"ok":True,"id":b.id}
+
+class A2TId(BaseModel):
+    id:int=0
+
+@app.post("/api/admin/api2trade/config/delete", dependencies=[Depends(require_op("datamgr"))])
+def a2t_cfg_del(b:A2TId):
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT COUNT(*) FROM mt_accounts WHERE api2trade_config_id=%s AND conn_mode='api'",(b.id,))
+    n=cur.fetchone()[0]
+    if n: c.close(); raise HTTPException(400,"仍有 %d 个用户账户绑定该订阅, 请先解绑/删除账户"%n)
+    cur.execute("DELETE FROM api2trade_config WHERE id=%s",(b.id,)); ok=cur.rowcount; c.close()
+    if not ok: raise HTTPException(404,"配置不存在")
+    return {"ok":True}
+
+@app.post("/api/admin/api2trade/test", dependencies=[Depends(require_op("datamgr"))])
+def a2t_test(b:A2TId):
+    """连通性测试: /GetAccounts。不校验到期(测试本身要能诊断过期前后的连通性), 但明示状态。"""
+    cfg=_a2t_cfg(b.id or None, need_active=False)
+    j,ms=_a2t_call(cfg,"/GetAccounts")
+    exp=cfg.get("expires_at"); expired=bool(exp and exp<datetime.date.today())
+    return {"ok":True,"latency_ms":ms,"accounts":len(_a2t_acclist(j)),
+            "expired":expired,"enabled":bool(cfg.get("enabled"))}
+
+@app.get("/api/admin/api2trade/accounts", dependencies=[Depends(require_op("datamgr"))])
+def a2t_accounts(id:int=0):
+    """Api2Trade 侧已注册账户实时列表 + 本地 mt_accounts 绑定关系"""
+    cfg=_a2t_cfg(id or None, need_active=False)
+    j,ms=_a2t_call(cfg,"/GetAccounts")
+    lst=_a2t_acclist(j)
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT a.api2trade_uuid uuid,a.login,a.role,u.username FROM mt_accounts a JOIN users u ON u.id=a.user_id WHERE a.conn_mode='api' AND a.api2trade_uuid<>''")
+    local={r["uuid"]:r for r in cur.fetchall()}; c.close()
+    out=[]
+    for a in lst:
+        if not isinstance(a,dict): continue
+        uid=str(a.get("id") or "")
+        m=local.get(uid)
+        out.append({"uuid":uid,"account_number":a.get("account_number") or a.get("accountNumber"),
+                    "account_server":a.get("account_server") or a.get("accountServer"),
+                    "type":a.get("type"),"name":a.get("name"),
+                    "bound_user":(m or {}).get("username") or "","bound_role":(m or {}).get("role") or ""})
+    return {"config_id":cfg["id"],"latency_ms":ms,"accounts":out}
+
+class A2TCanary(BaseModel):
+    id:int=0; uuid:str=""; n:int=10
+
+@app.post("/api/admin/api2trade/canary", dependencies=[Depends(require_op("datamgr"))])
+def a2t_canary(b:A2TCanary):
+    """P1 交易腿前置证据: N 次 /AccountSummary 延迟分布。p50>300ms 建议仅只读。"""
+    cfg=_a2t_cfg(b.id or None)
+    uuid=(b.uuid or "").strip()
+    if not uuid:
+        j,_=_a2t_call(cfg,"/GetAccounts")
+        lst=_a2t_acclist(j)
+        if not lst: raise HTTPException(400,"该订阅下无已注册账户, 无法 canary")
+        uuid=str((lst[0] or {}).get("id") or "")
+    n=max(3,min(30,int(b.n or 10))); lat=[]
+    for _i in range(n):
+        _,ms=_a2t_call(cfg,"/AccountSummary",{"id":uuid}); lat.append(ms)
+    lat.sort()
+    p50=lat[n//2]; p90=lat[min(n-1,int(n*0.9))]
+    return {"n":n,"uuid":uuid,"min":lat[0],"p50":p50,"p90":p90,"max":lat[-1],
+            "verdict":("PASS(可评估交易腿, 设 QH_A2T_TRADING=1 武装)" if p50<=300 else "SLOW(延迟偏高, 建议仅只读)")}
+
+# ---- 用户侧只读: 本人 api 模式账户的实时摘要(前端"测试连接"用) ----
+class A2TSummaryReq(BaseModel):
+    role:str="hedge"
+
+@app.post("/api/a2t/summary", dependencies=[Depends(require_license)])
+def a2t_summary(b:A2TSummaryReq, x_license: str = Header(default="")):
+    role=b.role if b.role in ("main","hedge") else "hedge"
+    c=db(); cur=c.cursor()
+    cur.execute("SELECT a.api2trade_uuid,a.api2trade_config_id,a.login FROM mt_accounts a JOIN users u ON u.id=a.user_id WHERE u.license_key=%s AND a.role=%s AND a.conn_mode='api' AND a.api2trade_uuid<>'' AND a.enabled ORDER BY a.id DESC LIMIT 1",(x_license,role))
+    row=cur.fetchone(); c.close()
+    if not row: raise HTTPException(404,"该角色未注册 API 连接账户(请先保存并登录)")
+    cfg=_a2t_cfg(row[1])
+    j,ms=_a2t_call(cfg,"/AccountSummary",{"id":row[0]})
+    j=j if isinstance(j,dict) else {}
+    return {"login":row[2],"latency_ms":ms,"balance":j.get("balance"),"equity":j.get("equity"),
+            "margin":j.get("margin"),"free_margin":j.get("freeMargin"),
+            "margin_level":j.get("marginLevel"),"currency":j.get("currency"),"leverage":j.get("leverage")}
+
+# ================= 用户账户管理 (admin, perm=accounts) =================
+# 跨用户 mt_accounts 登记信息管理。只动登记表, 不触碰任何交易/持仓数据。
+@app.get("/api/admin/accounts", dependencies=[Depends(require_op("accounts"))])
+def admin_accounts(q:str=""):
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    sql=("SELECT a.id,a.label,a.login,a.platform,a.broker,a.role,a.conn_mode,a.enabled,a.server,"
+         "a.api2trade_uuid,a.api2trade_config_id,a.created_at,u.username,u.status user_status "
+         "FROM mt_accounts a JOIN users u ON u.id=a.user_id")
+    args=[]
+    if (q or "").strip():
+        like="%"+q.strip()+"%"
+        sql+=" WHERE u.username ILIKE %s OR a.login ILIKE %s OR a.label ILIKE %s"; args=[like,like,like]
+    sql+=" ORDER BY u.username,a.role,a.id"
+    cur.execute(sql,args); rows=[dict(r) for r in cur.fetchall()]; c.close()
+    for r in rows: r["created_at"]=str(r["created_at"])
+    return {"accounts":rows}
+
+class AdminAcctSave(BaseModel):
+    id:int; label:str=""; role:str="main"; conn_mode:str="bridge"; enabled:bool=True
+    platform:str="MT5"; broker:str=""; server:str=""
+
+@app.post("/api/admin/accounts/save", dependencies=[Depends(require_op("accounts"))])
+def admin_acct_save(b:AdminAcctSave):
+    if b.role not in ("main","hedge"): raise HTTPException(400,"role 须为 main|hedge")
+    if b.conn_mode not in ("bridge","api"): raise HTTPException(400,"conn_mode 须为 bridge|api(本地直连已停用)")
+    if b.platform not in ("MT4","MT5"): raise HTTPException(400,"platform 须为 MT4|MT5")
+    c=db(); cur=c.cursor()
+    cur.execute("UPDATE mt_accounts SET label=%s,role=%s,conn_mode=%s,enabled=%s,platform=%s,broker=%s,server=%s WHERE id=%s",
+                (b.label.strip(),b.role,b.conn_mode,b.enabled,b.platform,b.broker.strip(),b.server.strip(),b.id))
+    n=cur.rowcount; c.close()
+    if not n: raise HTTPException(404,"账户不存在")
+    return {"ok":True}
+
+@app.post("/api/admin/accounts/delete", dependencies=[Depends(require_op("accounts"))])
+def admin_acct_del(b:A2TId):
+    """仅删除登记行。api 模式账户在云端侧的托管不联动删除(需后台处理), 前端已明示。"""
+    c=db(); cur=c.cursor()
+    cur.execute("DELETE FROM mt_accounts WHERE id=%s",(b.id,)); n=cur.rowcount; c.close()
+    if not n: raise HTTPException(404,"账户不存在")
+    return {"ok":True}
+
+@app.post("/api/admin/accounts/purge", dependencies=[Depends(require_op("accounts"))])
+def admin_acct_purge(b:A2TId):
+    """彻底清除: 联动 Api2Trade 官方 /DeleteAccount 注销云端托管账户 + 删本地登记行。
+       **绝不动交易记录/历史成交**: 登记行删除不级联 deals 表(按 user 键), 配对历史读桥/券商实时。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,login,api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE id=%s",(b.id,))
+    acc=cur.fetchone(); c.close()
+    if not acc: raise HTTPException(404,"账户不存在")
+    acc=dict(acc); uuid=(acc.get("api2trade_uuid") or "").strip()
+    a2t_ok,a2t_msg=_a2t_release(acc.get("api2trade_config_id"), uuid)
+    c=db(); cur=c.cursor()
+    cur.execute("DELETE FROM mt_accounts WHERE id=%s",(b.id,)); n=cur.rowcount; c.close()
+    return {"ok":True,"local_deleted":bool(n),"a2t_ok":a2t_ok,"a2t_msg":a2t_msg,"uuid8":uuid[:8]}

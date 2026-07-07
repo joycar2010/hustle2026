@@ -77,6 +77,8 @@
           <span style="color:#909399;font-size:12px">用户消费 ¥100 → L1 得 <b class="up">¥{{(pct.l1||0).toFixed(1)}}</b> / L2 得 <b>¥{{(pct.l2||0).toFixed(1)}}</b> / L3 得 <b>¥{{(pct.l3||0).toFixed(1)}}</b></span>
         </el-form-item>
         <el-form-item label="联系方式"><el-input v-model="cur.contact"/></el-form-item>
+        <el-form-item label="运营用户"><el-input v-model="cur.owner_username" placeholder="代理绑定的平台用户名(招募奖励/代理活动积分发给他)"/>
+          <span style="color:#909399;font-size:11px">下级代理招募成功时, 奖励发给该上级代理的运营用户</span></el-form-item>
       </el-form>
       <template #footer><el-button @click="dlg=false">取消</el-button><el-button type="primary" @click="saveAgent">保存</el-button></template>
     </el-dialog>
@@ -120,7 +122,7 @@ const funnelOpt=computed(()=>{ const f=funnel.value; return {
   series:[{type:'funnel',top:10,bottom:10,left:'6%',right:'6%',minSize:'20%',label:{fontSize:11},
     data:[{value:f.total||0,name:'试用总数'},{value:f.trialing||0,name:'试用中'},{value:f.converted||0,name:`已转化(${f.conv_rate||0}%)`}]}]}})
 async function loadComm(){ try{ comms.value=(await api.commissions(filterAgent.value||'')).commissions||[] }catch(e){} }
-function newAgent(){ cur.value={code:'',name:'',parent_code:'',contact:''}; pct.value={l1:10,l2:5,l3:2}; editing.value=false; dlg.value=true }
+function newAgent(){ cur.value={code:'',name:'',parent_code:'',contact:'',owner_username:''}; pct.value={l1:10,l2:5,l3:2}; editing.value=false; dlg.value=true }
 function editAgent(r){ cur.value={...r}; pct.value={l1:+(r.rate_l1*100).toFixed(1),l2:+(r.rate_l2*100).toFixed(1),l3:+(r.rate_l3*100).toFixed(1)}; editing.value=true; dlg.value=true }
 async function saveAgent(){
   const payload={...cur.value, rate_l1:(pct.value.l1||0)/100, rate_l2:(pct.value.l2||0)/100, rate_l3:(pct.value.l3||0)/100}

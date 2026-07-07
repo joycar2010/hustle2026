@@ -222,9 +222,23 @@
   .tag{display:inline-block;border:1px solid var(--red);color:var(--red);font-size:11px;
     padding:0 4px;border-radius:2px;margin:0 5px;font-family:var(--font)}
   .pt{display:inline-flex;align-items:center;gap:2px}
-  .closebtn{background:linear-gradient(var(--teal),var(--teal-deep));color:#fff;border:none;font-weight:700;font-size:14px;
-    padding:11px 0;width:100%;cursor:pointer;letter-spacing:2px;border-radius:2px}
+  .closebtn{display:inline-block;vertical-align:middle;background:linear-gradient(var(--teal),var(--teal-deep));color:#fff;border:none;font-weight:700;font-size:14px;
+    padding:9px 30px;min-width:260px;cursor:pointer;letter-spacing:2px;border-radius:4px}
   .closebtn:hover{filter:brightness(1.06)}
+  /* 坑位行动作单元格: 组件整体右对齐(进/出 + 开仓/平仓按钮组靠最右) */
+  #otable td.actcell{text-align:right;white-space:nowrap}
+  #otable td.actcell .armwrap{margin-right:6px}
+  .closebtn.full{min-width:340px}
+  /* 逐坑开仓按钮组(空坑有规则): 两按钮合并加长, 宽=平仓按钮宽 */
+  .slotopen{display:inline-flex;vertical-align:middle;min-width:340px;border-radius:4px;overflow:hidden}
+  .slotopen .sob{flex:1;border:none;color:#fff;font-weight:700;font-size:13.5px;padding:11px 0;cursor:pointer;letter-spacing:2px}
+  .slotopen .sob.long{background:var(--teal)} .slotopen .sob.short{background:#e07b3a}
+  .slotopen .sob:hover{filter:brightness(1.07)}
+  .slot-norule{display:inline-block;vertical-align:middle;min-width:340px;text-align:center;padding:11px 0;border:1px dashed #c3cbd2;border-radius:4px;color:#8a959b;font-size:12.5px;cursor:pointer;background:#f7f9fa}
+  .slot-norule:hover{border-color:var(--teal);color:var(--teal)}
+  td.slotno{cursor:pointer} td.slotno:hover{color:var(--teal)}
+  /* 右键菜单本坑四项明细: 仅移动端显示(PC 隐藏) */
+  .mobile-only{display:none}
   .waitbtn{background:#dfe3e7;color:#5a5a5a;font-size:13px;padding:11px 0;width:100%;text-align:center;border-radius:2px}
   .cellinput{width:62px;border:1px solid #b8c0c8;text-align:center;font-family:var(--num);font-size:13.5px;padding:3px;outline:none;background:#fff}
   .cellinput:focus{border-color:var(--blue)}
@@ -302,7 +316,31 @@
   .dlg{background:#f5f8f9;border:1px solid var(--cardline);border-radius:8px;width:760px;max-width:94vw;
     max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}
   .dlg.wide{width:1000px}
-  .dlg .dh{display:flex;align-items:center;background:linear-gradient(var(--teal),var(--teal-deep));color:#fff;padding:10px 16px}
+  .dlg .dh{display:flex;align-items:center;background:linear-gradient(var(--teal),var(--teal-deep));color:#fff;padding:10px 16px;cursor:grab;touch-action:none;user-select:none}
+  .dlg .dh:active{cursor:grabbing}
+  .dlg .dh button,.dlg .dh .x{cursor:pointer}
+  /* 坑位内联武装勾选(进=自动进单 / 出=自动出场; PC 小巧, 移动端大触摸目标) */
+  /* 进/出 勾选按钮: 主色系扁平化(白底描边=未选 / 主色实心=已选), 大小适配平仓按钮 */
+  .armchip{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;padding:0 9px;margin-right:6px;border-radius:4px;border:1px solid var(--teal);background:#fff;color:var(--teal);font-size:12.5px;font-weight:600;cursor:pointer;user-select:none;line-height:1;vertical-align:middle;transition:background .1s,color .1s,opacity .1s}
+  .armchip.on{background:var(--teal);border-color:var(--teal);color:#fff}
+  .armchip:active{opacity:.75}
+  .armwrap{display:inline-flex;gap:0;vertical-align:middle}
+  /* 坑位行"操作中"进度渐变: 天蓝 #2E8BD6 从左到右扫过(进场/平仓, 手动点击+自动实时触发) */
+  #otable tr.slot-busy, body.mobile-mode #otable tr.slot-busy{
+    background-image:linear-gradient(90deg, rgba(46,139,214,0) 0%, rgba(46,139,214,.40) 50%, rgba(46,139,214,0) 100%)!important;
+    background-repeat:no-repeat!important; background-size:45% 100%!important;
+    animation:slotSweep 1.05s linear infinite}
+  @keyframes slotSweep{ from{background-position:-45% 0} to{background-position:145% 0} }
+  /* 操作中秒数(进度渐变之外的数字反馈): 天蓝药丸, 贴操作列 */
+  .slot-timer{display:inline-block;min-width:26px;text-align:center;margin-right:5px;padding:1px 6px;border-radius:9px;background:#2E8BD6;color:#fff;font-size:11px;font-weight:700;font-family:var(--num);vertical-align:middle;box-shadow:0 1px 4px rgba(46,139,214,.4)}
+  @media(max-width:820px){ .slot-timer{min-width:30px;font-size:12px;padding:2px 7px} }
+  body.dark .armchip{background:transparent;border-color:var(--teal);color:#8fd0ff}
+  body.dark .armchip.on{background:var(--teal);color:#fff}
+  @media(max-width:820px){ .armchip{min-width:38px;height:34px;font-size:14px;margin-right:6px;border-radius:6px} }
+  /* 主订单列: 订单号(天蓝)+手数(草绿) 字条放大加粗 */
+  .ord-info{font-size:16px;font-weight:800;margin-left:5px;letter-spacing:.2px;font-family:var(--num)}
+  .ord-tk{color:#2E8BD6}
+  .ord-lot{color:#43a047;margin-left:4px}
   .dlg .dh b{font-size:14px;font-weight:700;letter-spacing:.5px}
   .dlg .dh .sp{flex:1}
   .dlg .dh .x{width:26px;height:24px;border:none;background:rgba(255,255,255,.15);color:#fff;border-radius:4px;cursor:pointer;font-size:13px}
@@ -333,6 +371,32 @@
   .fld.row2{flex-direction:row;align-items:center;gap:6px}
   .fld.row2 input{flex:1;min-width:0}
   .grouptitle{grid-column:1/-1;font-size:12px;font-weight:700;color:var(--teal-deep);border-bottom:1px dashed var(--cardline);padding-bottom:5px;margin-top:6px}
+  /* 对冲参数配置: 3 TAB 合并一页 + flex自动折行居中(字段挨排, 排满换行, 绝无空单元格) */
+  #cfg-mask .dlg{width:860px;max-width:96vw}
+  #cfg-mask .tabpane{display:block}
+  #cfg-mask .tabpane+.tabpane{margin-top:1px}
+  #cfg-mask .db{padding:8px 12px}
+  #cfg-mask .formgrid{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:6px 10px}
+  #cfg-mask .fld{width:120px;gap:2px}
+  #cfg-mask .fld .note{display:none}                    /* 说明文字→输入框/标签悬停提示, 省高度 */
+  #cfg-mask .fld label{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #cfg-mask .fld:not(.row2) input{width:100%;max-width:100%;padding:4px 6px;font-size:12px}
+  #cfg-mask .fld select{width:100%;max-width:100%;padding:4px 4px;font-size:12px}
+  #cfg-mask .grouptitle{flex:0 0 100%;width:100%;margin-top:2px;padding-bottom:2px;font-size:11px}
+  #cfg-mask .fld.row2{width:288px;flex-direction:row;align-items:center;gap:5px}
+  #cfg-mask .fld.row2 label{flex:0 0 auto;font-size:10px}
+  #cfg-mask .fld.row2 input{width:auto;flex:1 1 0;min-width:0}
+  #cfg-mask .switches{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 8px}
+  #cfg-mask .switches .sw{width:186px;padding:5px 9px;font-size:11.5px}
+  /* 坑位规则设置: 说明文字→悬停提示(隐藏灰字, 信息在 title) */
+  #slot-mask .fld .note{display:none}
+  /* 交易历史 3tab: 各自独立(非active隐藏, active纵向flex); 修内联display导致三tab堆叠 */
+  #paired-detail .tabpane{display:none}
+  #paired-detail .tabpane.active{display:flex;flex-direction:column;flex:1;min-height:0}
+  /* 交易历史 3tab 分页条 */
+  .ph-pager{text-align:center;padding:6px 0 2px;border-top:1px solid var(--cardline);flex:0 0 auto}
+  .ph-pager button[disabled]{opacity:.4;cursor:not-allowed}
+  body.dark .ph-pager{border-color:#243056}
   .switches{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 18px}
   .sw{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--cardline);border-radius:5px;padding:7px 11px;font-size:12.5px}
   .sw .t{color:var(--lbl)}
@@ -448,7 +512,7 @@
   .um-sep{height:1px;background:var(--cardline);margin:7px 0}
   /* 会员概览条(PC 下拉, qhwww 浅色调) */
   .um-stats{background:linear-gradient(135deg,#08113A,#2E8BD6);border-radius:9px;padding:10px 12px}
-  .um-lvl-row{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;cursor:pointer}
+  .um-lvl-row{display:flex;align-items:center;justify-content:space-between;gap:4px 6px;margin-bottom:8px;cursor:pointer;flex-wrap:wrap}
   .um-lvl-row:hover{opacity:.9}
   .um-lvl{font-size:13px;font-weight:800;color:#fff}
   .um-paid{font-size:10px;color:rgba(255,255,255,.8);white-space:nowrap}
@@ -467,6 +531,19 @@
   .um-item{display:block;width:100%;text-align:left;border:none;background:transparent;color:#2c4047;font-size:12.5px;padding:7px 8px;border-radius:5px;cursor:pointer}
   .um-item:hover{background:var(--teal-pale)}
   .um-item.danger{color:var(--red)} .um-item.danger:hover{background:#fdecec}
+  /* PC 功能区: 图标卡片网格(与移动端抽屉 mnav-q 同风格, 浅色系适配) */
+  .um-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .um-q{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    background:#f2f6fc;border:1px solid #e2e9f5;border-radius:8px;color:#2c4047;font-size:11.5px;font-weight:600;
+    padding:10px 4px;cursor:pointer;transition:background .15s,border-color .15s}
+  .um-q .mi-ic{margin:0;color:var(--teal)}
+  .um-q:hover{background:var(--teal-pale);border-color:rgba(46,139,214,.4)}
+  .um-q.danger{color:var(--red)} .um-q.danger .mi-ic{color:var(--red)}
+  .um-q.danger:hover{background:#fdecec;border-color:#f3c1bd}
+  body.dark .um-q{background:#111f42;border-color:#1e2a52;color:#cfe0e5}
+  body.dark .um-q .mi-ic{color:#7db8e8}
+  body.dark .um-q:hover{background:#1a2b56}
+  body.dark .um-q.danger{color:#ff8a8a} body.dark .um-q.danger .mi-ic{color:#ff8a8a}
   /* 消费记录标题(编辑信息区已移除, 改点击昵称弹框) */
   .um-orders-hd{font-size:11px;font-weight:700;color:var(--lbl);margin-bottom:5px;letter-spacing:.4px}
   /* 消费记录 */
@@ -517,6 +594,15 @@
   /* ===== account settings dialog ===== */
   .acct-form{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}
   .acct-form .full{grid-column:1/-1}
+  /* 账户设置模态: 紧凑无滚动条 */
+  #acct-mask .db{padding:10px 16px;overflow-x:hidden}
+  #acct-mask .acct-form{gap:7px 16px}
+  /* grid 项 min-width:auto 会被长内容(UUID等)撑爆列宽→横向滚动, 强制可收缩 */
+  #acct-mask .acct-form .fld{gap:2px;min-width:0}
+  #acct-mask .acct-form label{font-size:11px}
+  #acct-mask .acct-form input,#acct-mask .acct-form select{padding:5px 8px}
+  #acct-mask .seg-pick button{padding:6px 0}
+  #acct-mask #acct-api-note>div{padding:7px 9px!important;font-size:11px!important;line-height:1.45!important}
   .seg-pick{display:flex;border:1px solid #b8c0c5;border-radius:6px;overflow:hidden}
   .seg-pick button{flex:1;border:none;background:#fff;padding:8px 0;font-weight:700;cursor:pointer;color:var(--lbl);font-size:13px}
   .seg-pick button.on{background:linear-gradient(var(--teal),var(--teal-deep));color:#fff}
@@ -678,10 +764,13 @@
   .mtabbar{display:none!important}
   @media (max-width:640px){
     /* mobile-mode: 取消 Tab 分屏, 单一自然页面滚动(废除 leftcol 内部嵌套滚动=坑位卡被埋根因) */
+    body.mobile-mode .mobile-only{display:block}
     body.mobile-mode .content{flex-direction:column;gap:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
-    body.mobile-mode .leftcol{min-height:0;flex:0 0 auto;overflow:visible}
-    body.mobile-mode .top{flex-direction:column;height:auto;gap:8px}
-    body.mobile-mode .bottom{flex-direction:column;flex:0 0 auto}
+    /* 单列填满: leftcol/坑位列表 弹性占满剩余视口高度→坑位列表拉到底, 内容超屏则正常滚动(移除底部空白) */
+    body.mobile-mode .leftcol{min-height:0;flex:1 0 auto;display:flex;flex-direction:column;overflow:visible}
+    body.mobile-mode .top{flex-direction:column;height:auto;gap:8px;flex:0 0 auto}
+    body.mobile-mode .bottom{flex-direction:column;flex:1 0 auto}
+    body.mobile-mode .tablecard{flex:1 1 auto}
     /* 配对盈亏面板移出主台(只从抽屉全屏弹出), 不再常驻挤占坑位卡 */
     body.mobile-mode #panel-paired{display:none}
     body.mobile-mode.pair-open #panel-paired{
@@ -825,7 +914,7 @@
     body.mobile-mode .statusbar{min-height:22px;height:auto;font-size:10.5px;flex-wrap:wrap;padding:1px 6px}
     body.mobile-mode .statusbar .seg{padding:0 8px;height:20px}
     body.mobile-mode .statusbar .sb-hide{display:none!important}
-    body.mobile-mode .marquee{flex:0 0 44px}
+    body.mobile-mode .marquee{flex:0 0 44px;border-bottom:1px solid #d4dde0}
     body.mobile-mode .mq-inner{animation-duration:450s;font-size:13px}
     /* 3. 行情: 主账号+对冲账号 两卡并列一张(各占一半) */
     body.mobile-mode .mktcards{display:flex;flex-direction:row;gap:6px}
@@ -890,7 +979,7 @@
           只留 主订单号/买入点位/卖出点位/获利 + 操作列; 降卡高显更多坑 */
     body.mobile-mode .tablecard thead{display:none}
     body.mobile-mode #otable tr{
-      display:grid;grid-template-columns:1fr 1fr 1fr 64px;grid-auto-rows:auto;gap:2px 6px;
+      display:grid;grid-template-columns:1.3fr 1fr 1fr 122px;grid-auto-rows:auto;gap:2px 6px;
       border:1px solid var(--cardline);border-radius:8px;margin:0 0 6px;padding:6px 8px;background:#fff;align-items:center}
     body.mobile-mode #otable td{display:block;border:none;padding:1px 2px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
     /* 隐藏 4 个转移到长按菜单的列: 主开仓价(2)/对冲订单号(3)/对冲开仓价(4)/开仓点差(5) */
@@ -898,9 +987,16 @@
     body.mobile-mode #otable td:nth-child(3),
     body.mobile-mode #otable td:nth-child(4),
     body.mobile-mode #otable td:nth-child(5){display:none}
-    /* 操作列(第9格)钉最右, 跨2行 */
-    body.mobile-mode #otable td:nth-child(9){grid-column:4;grid-row:1/3;display:flex;align-items:center;justify-content:center;
+    /* 操作列(第9格)钉最右, 跨2行; 竖排: 进/出徽章一行 + 平仓一行, 列宽随内容自适应(往左让位) */
+    body.mobile-mode #otable td:nth-child(9){grid-column:4;grid-row:1/3;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:4px;
       font-size:11px;border-left:1px solid var(--cardline);padding-left:6px}
+    body.mobile-mode #otable td:nth-child(9) .armwrap{display:flex;gap:5px;justify-content:center}
+    body.mobile-mode #otable td:nth-child(9) .closebtn{width:100%;padding:6px 4px;font-size:13px}
+    /* 移动端: 逐坑开仓按钮组竖排+全列宽(收窄红框, 左侧信息让位), 覆盖 PC 的 340px */
+    body.mobile-mode #otable td:nth-child(9) .slotopen{flex-direction:column;min-width:0;width:100%;gap:3px;overflow:visible}
+    body.mobile-mode #otable td:nth-child(9) .slotopen .sob{padding:6px 0;font-size:11.5px;letter-spacing:0;border-radius:4px}
+    body.mobile-mode #otable td:nth-child(9) .closebtn.full,
+    body.mobile-mode #otable td:nth-child(9) .slot-norule{min-width:0;width:100%;padding:6px 2px;font-size:11.5px;letter-spacing:0}
     /* 主订单号(1) 独占首行; 买入点位(6)/卖出点位(7)/获利(8) 排第二行 */
     body.mobile-mode #otable td:nth-child(1){grid-column:1/4;grid-row:1;font-weight:700}
     body.mobile-mode #otable td:nth-child(6){grid-column:1;grid-row:2}
@@ -1121,7 +1217,7 @@ body.dark .arb-bar{background:#1a2740}
 <!-- ===== 积分与邀请(顶层, 登录后打开) ===== -->
 <div class="mask" id="points-mask">
   <div class="dlg pm-dlg" style="width:640px">
-    <div class="dh"><b><svg class="svgi"><use href="#i-scale"/></svg> 我的会员中心</b><span class="sp"></span><button class="x" onclick="closeMask('points-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="dh"><b title="会员中心: 查看会员等级/积分/成长值, 每日签到、积分兑换、邀请返佣"><svg class="svgi"><use href="#i-scale"/></svg> 我的会员中心</b><span class="sp"></span><button class="x" onclick="closeMask('points-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db pm-body">
       <!-- 概览: 会员等级 / 余额 / 积分 三卡 -->
       <div class="pm-cards">
@@ -1171,7 +1267,7 @@ body.dark .arb-bar{background:#1a2740}
 <!-- ===== 内购目录(顶层, 登录后打开) ===== -->
 <div class="mask" id="iap-mask">
   <div class="dlg" style="width:640px">
-    <div class="dh"><b><svg class="svgi"><use href="#i-cart"/></svg> 内购商店</b><span class="sp"></span><button class="x" onclick="closeMask('iap-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="dh"><b title="内购商店: 解锁自动进出场循环、多坑位、AI套利分析等高阶功能(按权益档位)"><svg class="svgi"><use href="#i-cart"/></svg> 内购商店</b><span class="sp"></span><button class="x" onclick="closeMask('iap-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
       <div id="iap-list" style="display:flex;flex-wrap:wrap;gap:12px">加载中…</div>
       <div style="font-size:11px;color:#8a959b;margin-top:10px">购买后权益立即生效;订单进入财务核对(演示环境不产生真实扣款)。</div>
@@ -1183,7 +1279,7 @@ body.dark .arb-bar{background:#1a2740}
 <!-- ===== AI 套利分析(ai_arb 权益, 顶层) ===== -->
 <div class="mask" id="arb-mask">
   <div class="dlg" style="width:720px">
-    <div class="dh"><b><svg class="svgi"><use href="#i-robot"/></svg> AI 套利分析 · 主账户 × 对冲账户</b><span class="sp"></span><button class="x" onclick="closeMask('arb-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="dh"><b title="AI 套利分析(最高阶内购): LLM 辅助解读主↔对冲的套利机会与执行质量"><svg class="svgi"><use href="#i-robot"/></svg> AI 套利分析 · 主账户 × 对冲账户</b><span class="sp"></span><button class="x" onclick="closeMask('arb-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
       <div id="arb-locked" style="display:none;text-align:center;padding:30px">
         <div style="font-size:15px;font-weight:700;color:#6a3df0">AI 套利分析为最高阶内购功能</div>
@@ -1213,16 +1309,16 @@ body.dark .arb-bar{background:#1a2740}
 
   <!-- ===== TITLE BAR ===== -->
   <div class="titlebar">
-    <img class="ico" src="QHEDGELOGO-s-single.ico">
+    <img class="ico" id="brand-logo" src="QHEDGELOGO-s-single.ico">
     <button class="mnav-toggle" onclick="toggleMNav()" title="菜单" aria-label="菜单"><svg class="svgi"><use href="#i-menu"/></svg></button>
-    <span class="title">【Quant Hedge】对冲工具软件</span>
-    <span class="expire tb-more" data-tbg>到期时间: 2027-02-21</span>
-    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('month')"><svg class="svgi"><use href="#i-calendar"/></svg> 包月</button>
-    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('recharge')"><svg class="svgi"><use href="#i-money"/></svg> 充值</button>
-    <button class="btn btn-green tb-more" data-tbg onclick="openIap()"><svg class="svgi"><use href="#i-cart"/></svg> 内购</button>
-    <button class="btn btn-green tb-more" data-tbg onclick="openPoints()"><svg class="svgi"><use href="#i-scale"/></svg> 积分/邀请</button>
-    <button class="btn tb-more" data-tbg style="background:linear-gradient(135deg,#6a3df0,#a855f7);color:#fff" onclick="openArb()"><svg class="svgi"><use href="#i-robot"/></svg> AI套利分析</button>
-    <button class="btn btn-white tb-more" data-tbg onclick="window.open('https://app.hustle2026.xyz','_blank')"><svg class="svgi"><use href="#i-globe"/></svg> 官网</button>
+    <span class="title" id="brand-title">【Quant Hedge】对冲工具软件</span>
+    <span class="expire tb-more" data-tbg title="账号授权有效期(到期后无法登录使用)">账号授权至: --</span>
+    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('month')" title="按月续费账号授权(包月套餐)"><svg class="svgi"><use href="#i-calendar"/></svg> 包月</button>
+    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('recharge')" title="USDT 充值/续费账号"><svg class="svgi"><use href="#i-money"/></svg> 充值</button>
+    <button class="btn btn-green tb-more" data-tbg onclick="openIap()" title="内购商店: 解锁自动进出场/AI套利分析等高阶功能"><svg class="svgi"><use href="#i-cart"/></svg> 内购</button>
+    <button class="btn btn-green tb-more" data-tbg onclick="openPoints()" title="会员中心: 积分/成长值/签到/邀请返佣"><svg class="svgi"><use href="#i-scale"/></svg> 积分/邀请</button>
+    <button class="btn tb-more" data-tbg style="background:linear-gradient(135deg,#6a3df0,#a855f7);color:#fff" onclick="openArb()" title="AI 套利分析(最高阶内购): LLM 辅助的套利机会解读"><svg class="svgi"><use href="#i-robot"/></svg> AI套利分析</button>
+    <button class="btn btn-white tb-more" data-tbg id="btn-official" onclick="openOfficial()" title="打开官网(新标签页)"><svg class="svgi"><use href="#i-globe"/></svg> 官网</button>
     <span class="spacer"></span>
     <div class="netbar" title="当日平仓 · 北京时区">
       <span class="nb-lbl">当日平仓利润</span>
@@ -1233,6 +1329,7 @@ body.dark .arb-bar{background:#1a2740}
     </div>
     <span class="spacer"></span>
     <button class="btn-theme tb-more" data-tbg id="soundBtn" onclick="toggleSound()" title="声音提醒开关"><svg class="svgi"><use href="#i-bell"/></svg> 声音</button>
+    <button class="btn-theme tb-more" data-tbg id="connBtn" onclick="switchConnMode()" title="连接方式(引擎执行/取数链路): Bridge ↔ 云端。点击切换, 需二次确认"><svg class="svgi"><use href="#i-globe"/></svg> <span id="connBtn-t">连接--</span></button>
     <button class="btn-theme tb-more" data-tbg id="themeBtn" onclick="toggleTheme()" title="切换浅色/深色"><svg class="svgi"><use href="#i-theme"/></svg> 深色</button>
     <div class="usermenu tb-more" data-tbg id="usermenu">
       <button class="um-btn" id="um-btn" onclick="toggleUserMenu()" title="用户登录管理">
@@ -1252,7 +1349,7 @@ body.dark .arb-bar{background:#1a2740}
         <div class="um-stats">
           <div class="um-lvl-row" onclick="toggleUserMenu();openPoints()" title="进入会员中心">
             <span class="um-lvl" id="um-level">L0 体验交易者</span>
-            <span class="um-paid" id="um-paid">付费到期 --</span>
+            <span class="um-paid" id="um-paid" title="付费会员等级有效期: 决定 L1-L4 会员档位, 到期回落体验级">会员等级有效期至 --</span>
           </div>
           <div class="um-stats-row">
             <div class="um-stat um-stat-click" onclick="event.stopPropagation();toggleUserMenu();openRenew('recharge')" title="点击充值">
@@ -1263,14 +1360,19 @@ body.dark .arb-bar{background:#1a2740}
           <div class="um-auto"><span class="um-auto-dot" id="um-auto-dot"></span><span id="um-auto">自动交易: 未启用</span></div>
         </div>
         <div class="um-sep"></div>
-        <div class="um-row"><span class="k">到期</span><span class="v" id="um-exp">--</span></div>
+        <div class="um-row" title="账号授权有效期: 到期后无法登录使用, 续费即延长"><span class="k">账号授权有效期</span><span class="v" id="um-exp">--</span></div>
         <div class="um-row"><span class="k">飞书ID</span><span class="v" id="um-feishu">--</span></div>
         <div class="um-sep"></div>
-        <button class="um-item" onclick="toggleUserMenu();openPoints()">会员中心 · 积分/邀请</button>
-        <button class="um-item" onclick="openRenew('month');toggleUserMenu()">续费 / 充值</button>
-        <button class="um-item" onclick="toggleUserMenu();openOrders()">消费记录</button>
-        <button class="um-item" onclick="umSwitchKey()">切换密钥</button>
-        <button class="um-item danger" onclick="umLogout()">退出登录</button>
+        <!-- 功能区: 图标卡片网格(与移动端抽屉同风格) -->
+        <div class="um-grid">
+          <button class="um-q" onclick="toggleUserMenu();openPoints()"><span class="mi-ic"><svg class="svgi"><use href="#i-scale"/></svg></span>会员中心</button>
+          <button class="um-q" onclick="openRenew('month');toggleUserMenu()"><span class="mi-ic"><svg class="svgi"><use href="#i-money"/></svg></span>续费/充值</button>
+          <button class="um-q" onclick="toggleUserMenu();openOrders()"><span class="mi-ic"><svg class="svgi"><use href="#i-clipboard"/></svg></span>消费记录</button>
+        </div>
+        <div class="um-grid" style="grid-template-columns:1fr 1fr;margin-top:7px">
+          <button class="um-q" onclick="umSwitchKey()"><span class="mi-ic"><svg class="svgi"><use href="#i-key"/></svg></span>切换密钥</button>
+          <button class="um-q danger" onclick="umLogout()"><span class="mi-ic"><svg class="svgi"><use href="#i-logout"/></svg></span>退出登录</button>
+        </div>
       </div>
     </div>
     <span class="winbtns"><button><svg class="svgi"><use href="#i-window-min"/></svg></button><button><svg class="svgi"><use href="#i-window-max"/></svg></button><button class="x" onclick="location.reload()"><svg class="svgi"><use href="#i-close"/></svg></button></span>
@@ -1283,24 +1385,22 @@ body.dark .arb-bar{background:#1a2740}
     <div class="seg">单量: 3</div>
     <div class="seg">状态: 启动</div>
     <div class="seg sb-hide" data-sbg style="gap:6px">自动进单:
-      <select id="ae-mode" onchange="setAutoEntry()" style="background:#e9ecf3;border:1px solid rgba(255,255,255,.5);color:#08113A;border-radius:3px;font-size:11px;padding:1px 4px">
+      <select id="ae-mode" onchange="setAutoEntry()" title="自动进单模式(引擎按买入点位+费用/波动/保证金护栏自动开仓):&#10;关闭=不自动开仓,仅手动&#10;勾选自动=仅对坑位列表里勾了「进」的坑自动开&#10;开启=所有未禁用的空坑达标即自动开" style="background:#e9ecf3;border:1px solid rgba(255,255,255,.5);color:#08113A;border-radius:3px;font-size:11px;padding:1px 4px">
         <option value="off">关闭</option>
-        <option value="shadow">影子(只提示)</option>
-        <option value="armed">武装(仅勾选坑)</option>
-        <option value="full">全量</option>
+        <option value="armed">勾选自动</option>
+        <option value="full">开启</option>
       </select>
-      <select id="ae-dir" onchange="setAutoEntry()" style="background:#e9ecf3;border:1px solid rgba(255,255,255,.5);color:#08113A;border-radius:3px;font-size:11px;padding:1px 4px">
+      <select id="ae-dir" onchange="setAutoEntry()" title="自动开仓方向:&#10;反向(1空2涨)=主腿卖出+对冲腿买入&#10;正向(2空1涨)=主腿买入+对冲腿卖出" style="background:#e9ecf3;border:1px solid rgba(255,255,255,.5);color:#08113A;border-radius:3px;font-size:11px;padding:1px 4px">
         <option value="reverse">反向(1空2涨)</option>
         <option value="forward">正向(2空1涨)</option>
       </select>
       <span id="ae-state" style="font-size:11px;opacity:.85">--</span>
     </div>
     <div class="seg sb-hide" data-sbg style="gap:6px">自动出场:
-      <select id="ax-mode" onchange="setAutoExit(this.value)" style="background:#e9ecf3;border:1px solid rgba(255,255,255,.5);color:#08113A;border-radius:3px;font-size:11px;padding:1px 4px">
+      <select id="ax-mode" onchange="setAutoExit(this.value)" title="自动出场模式(引擎按逐对盈亏/卖出点位/止盈止损/持仓超时自动平仓):&#10;关闭=不自动平仓,仅手动&#10;勾选自动=仅平坑位列表里勾了「出」的坑&#10;开启=所有命中平仓条件的坑自动平" style="background:#e9ecf3;border:1px solid rgba(255,255,255,.5);color:#08113A;border-radius:3px;font-size:11px;padding:1px 4px">
         <option value="off">关闭</option>
-        <option value="shadow">影子(只提示)</option>
-        <option value="armed">武装(仅勾选坑)</option>
-        <option value="full">全量</option>
+        <option value="armed">勾选自动</option>
+        <option value="full">开启</option>
       </select>
       <span id="ax-state" style="font-size:11px;opacity:.85">--</span>
     </div>
@@ -1388,21 +1488,21 @@ body.dark .arb-bar{background:#1a2740}
       <div class="spreadchart" id="spreadchart" data-mtab="market">
         <div class="sc-toolbar">
           <div class="sc-dates">
-            <span class="sc-drow"><label>开始</label><input type="datetime-local" id="sc-start"></span>
-            <span class="sc-drow"><label>结束</label><input type="datetime-local" id="sc-end"></span>
+            <span class="sc-drow"><label>开始</label><input type="datetime-local" id="sc-start" title="走势图起始时间"></span>
+            <span class="sc-drow"><label>结束</label><input type="datetime-local" id="sc-end" title="走势图结束时间"></span>
           </div>
-          <span class="sc-seg" id="sc-dir">
-            <button class="on" data-d="forward" onclick="scSetDir('forward')">正向</button>
-            <button data-d="reverse" onclick="scSetDir('reverse')">反向</button>
+          <span class="sc-seg" id="sc-dir" title="切换走势方向: 正向开仓点差(主ASK−对冲BID) / 反向开仓点差(对冲ASK−主BID)">
+            <button class="on" data-d="forward" onclick="scSetDir('forward')" title="正向开仓点差 = 主ASK − 对冲BID">正向</button>
+            <button data-d="reverse" onclick="scSetDir('reverse')" title="反向开仓点差 = 对冲ASK − 主BID">反向</button>
           </span>
-          <span class="sc-seg" id="sc-range">
-            <button data-h="1" onclick="scQuick(1)">1小时</button>
-            <button data-h="2" onclick="scQuick(2)">2小时</button>
-            <button data-h="24" onclick="scQuick(24)">24小时</button>
+          <span class="sc-seg" id="sc-range" title="快速时间范围">
+            <button data-h="1" onclick="scQuick(1)" title="近1小时">1小时</button>
+            <button data-h="2" onclick="scQuick(2)" title="近2小时">2小时</button>
+            <button data-h="24" onclick="scQuick(24)" title="近24小时">24小时</button>
           </span>
-          <label>频率(秒)</label><input type="number" id="sc-interval" min="1" max="3600" value="5" style="width:48px">
-          <button class="sc-go" onclick="scFetch()">查询</button>
-          <span class="sc-cnt" id="sc-cnt"></span>
+          <label title="点差采样频率(秒): 每隔N秒取一个数据点">频率(秒)</label><input type="number" id="sc-interval" min="1" max="3600" value="5" style="width:48px" title="点差采样频率(秒): 每隔N秒取一个数据点">
+          <button class="sc-go" onclick="scFetch()" title="按上方时间/方向/频率 拉取并重画点差走势">查询</button>
+          <span class="sc-cnt" id="sc-cnt" title="当前图上的数据点数"></span>
         </div>
         <div class="sc-legend"><span class="sc-dot" id="sc-dot"></span><span id="sc-leg">正向开仓点差</span></div>
         <div class="sc-stats" id="sc-stats" style="display:none">
@@ -1418,13 +1518,10 @@ body.dark .arb-bar{background:#1a2740}
       <div class="orderbook" data-mtab="position">
         <div class="ob-head"><div class="c" title="反向开仓点差=对冲ASK−主BID">反向Ask</div><div class="c" title="正向开仓点差=主ASK−对冲BID">正向Bid</div></div>
         <div class="ob-rows" id="ob-rows"></div>
-        <div class="ob-foot">
+        <div class="ob-foot" id="ob-open-foot">
           <button class="b long" id="btn-open-reverse" onclick="openPair('reverse')" title="反向开仓：主腿卖出 + 对冲腿买入">1空2涨</button>
           <div class="spin" title="坑位数：填几个坑。点开仓按钮即按订单区坑位顺序开最前面的 N 个空坑"><input id="ob-qty" value="1" title="坑位数(整数)"><div class="ar"><span onclick="bumpQty(1)"><svg class="svgi"><use href="#i-tri-up"/></svg></span><span onclick="bumpQty(-1)"><svg class="svgi"><use href="#i-tri-down"/></svg></span></div></div>
           <button class="b short" id="btn-open-forward" onclick="openPair('forward')" title="正向开仓：主腿买入 + 对冲腿卖出">2空1涨</button>
-        </div>
-        <div class="ob-foot" id="ob-loop-foot" style="display:none">
-          <button class="b" id="btn-loop-order" style="background:#5a6;flex:1" onclick="toggleLoopOrder()" title="循环下单：按入场间隔重复反向开仓，有界+可随时停"><svg class="svgi"><use href="#i-play"/></svg> 循环下单</button>
         </div>
       </div>
 
@@ -1496,7 +1593,7 @@ body.dark .arb-bar{background:#1a2740}
             <div class="tab" data-t="ht2" onclick="histTab('ht2')">主账户成交</div>
             <div class="tab" data-t="ht3" onclick="histTab('ht3')">对冲账户成交</div>
           </div>
-          <div class="tabpane active" id="ht1" style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div class="tabpane active" id="ht1" style="flex:1;min-height:0">
             <div class="ph-bar">
               <div class="ph-filters">
                 <label>开始</label><input type="datetime-local" id="ph-start">
@@ -1519,21 +1616,28 @@ body.dark .arb-bar{background:#1a2740}
             <div style="overflow:auto;flex:1;min-height:0">
             <table class="dtable ph-tab">
               <thead><tr>
-                <th>来源</th><th>时间</th><th>开/平</th>
-                <th>主方向</th><th>主价</th><th>主手数</th>
-                <th>对冲方向</th><th>对冲价</th><th>对冲手数</th>
-                <th>点差</th><th>阈值</th><th>滑点</th>
-                <th>主费</th><th>对冲费</th><th>主盈亏</th><th>对冲盈亏</th><th>配对净盈亏</th>
+                <th title="来源: 策略=引擎自动开平; 手动=人工操作">来源</th><th title="成交时间(北京时区)">时间</th><th title="开=开仓成交, 平=平仓成交">开/平</th>
+                <th title="主账户成交方向(买/卖)">主方向</th><th title="主账户成交价">主价</th><th title="主账户成交手数">主手数</th>
+                <th title="对冲账户成交方向">对冲方向</th><th title="对冲账户成交价">对冲价</th><th title="对冲账户成交手数">对冲手数</th>
+                <th title="实际成交的两腿点差(套利基差)">点差</th><th title="该单生效的买入点位/进场阈值(逐单记录, 无则回落全局近似)">阈值</th><th title="达标差 = 点差 − 阈值(旧HED口径)">达标差</th><th title="执行滑点 = 实际成交捕获 − 下单/平仓瞬间报价(决策快照);正=成交更优,负=延迟/滑价成本">执行滑点</th>
+                <th title="主账户手续费">主费</th><th title="对冲账户手续费">对冲费</th><th title="主账户该笔已实现盈亏">主盈亏</th><th title="对冲账户该笔已实现盈亏">对冲盈亏</th><th title="配对净盈亏 = 主盈亏+对冲盈亏+费用">配对净盈亏</th>
               </tr></thead>
               <tbody id="hist-body"></tbody>
             </table>
             </div>
+            <div class="ph-pager" id="pg-ht1"></div>
           </div>
-          <div class="tabpane" id="ht2" style="overflow:auto;flex:1;min-height:0">
-            <table class="dtable"><thead><tr><th>#</th><th>订单号</th><th>币种</th><th>方向</th><th>手数</th><th>价格</th><th>盈亏</th></tr></thead><tbody id="main-deals"></tbody></table>
+          <div class="tabpane" id="ht2" style="flex:1;min-height:0">
+            <div style="overflow:auto;flex:1;min-height:0"><table class="dtable">
+              <thead><tr><th>#</th><th title="成交时间(北京时区)">时间(北京)</th><th title="该笔成交的MT订单号">订单号</th><th title="交易品种">币种</th><th title="买/卖方向">方向</th><th title="成交手数">手数</th><th title="成交价格">价格</th><th title="该笔成交的已实现盈亏($)">盈亏</th></tr></thead>
+              <tbody id="main-deals"></tbody></table></div>
+            <div class="ph-pager" id="pg-ht2"></div>
           </div>
-          <div class="tabpane" id="ht3" style="overflow:auto;flex:1;min-height:0">
-            <table class="dtable"><thead><tr><th>#</th><th>订单号</th><th>币种</th><th>方向</th><th>手数</th><th>价格</th><th>盈亏</th></tr></thead><tbody id="hedge-deals"></tbody></table>
+          <div class="tabpane" id="ht3" style="flex:1;min-height:0">
+            <div style="overflow:auto;flex:1;min-height:0"><table class="dtable">
+              <thead><tr><th>#</th><th title="成交时间(北京时区)">时间(北京)</th><th title="该笔成交的MT订单号">订单号</th><th title="交易品种">币种</th><th title="买/卖方向">方向</th><th title="成交手数">手数</th><th title="成交价格">价格</th><th title="该笔成交的已实现盈亏($)">盈亏</th></tr></thead>
+              <tbody id="hedge-deals"></tbody></table></div>
+            <div class="ph-pager" id="pg-ht3"></div>
           </div>
         </div>
       </div>
@@ -1556,12 +1660,10 @@ body.dark .arb-bar{background:#1a2740}
 </div>
 <!-- ===== 默认菜单（其它位置右击） ===== -->
 <div class="ctxmenu" id="ctxmenu">
-  <div class="mi" id="mi-toggle"><span class="ic"><svg class="svgi"><use href="#i-play"/></svg></span><span id="mi-toggle-t">启动</span></div>
-  <div class="mi" onclick="openCfg()"><span class="ic"><svg class="svgi"><use href="#i-gear"/></svg></span>配置</div>
-  <div class="mi" onclick="openFeishu()"><span class="ic"><svg class="svgi"><use href="#i-bell"/></svg></span>飞书提醒</div>
-  <div class="mi on" id="mi-pin" onclick="togglePin()"><span class="ic"><svg class="svgi"><use href="#i-pin"/></svg></span><span id="mi-pin-t">窗口置顶</span></div>
-  <div class="sep"></div>
-  <div class="mi" onclick="openPlat()"><span class="ic"><svg class="svgi"><use href="#i-clipboard"/></svg></span>平台订单历史</div>
+  <div class="mi" id="mi-toggle" title="启动/停止 套利引擎(自动进出场监控开关)"><span class="ic"><svg class="svgi"><use href="#i-play"/></svg></span><span id="mi-toggle-t">启动</span></div>
+  <div class="mi" onclick="openCfg()" title="打开对冲参数配置"><span class="ic"><svg class="svgi"><use href="#i-gear"/></svg></span>配置</div>
+  <div class="mi" onclick="openFeishu()" title="打开飞书提醒配置(告警推送到飞书)"><span class="ic"><svg class="svgi"><use href="#i-bell"/></svg></span>飞书提醒</div>
+  <div class="mi on" id="mi-pin" onclick="togglePin()" title="窗口置顶开关(桌面客户端行为, Web 端占位)"><span class="ic"><svg class="svgi"><use href="#i-pin"/></svg></span><span id="mi-pin-t">窗口置顶</span></div>
   <div class="sep"></div>
   <div class="mi danger" onclick="hideCtx()"><span class="ic"><svg class="svgi"><use href="#i-close"/></svg></span>关闭菜单</div>
 </div>
@@ -1585,12 +1687,14 @@ body.dark .arb-bar{background:#1a2740}
   <div class="mi danger" onclick="hideCtx()"><span class="ic"><svg class="svgi"><use href="#i-close"/></svg></span>关闭菜单</div>
 </div>
 
-<!-- 阶梯行(坑位)逐行右键菜单 -->
+<!-- 阶梯行(坑位)逐行右键菜单: 仅平仓(该坑) + 本坑四项明细(仅移动端) -->
 <div class="ctxmenu" id="ctxmenu-slot">
-  <div class="mi" onclick="openSlotEdit()"><span class="ic"><svg class="svgi"><use href="#i-edit"/></svg></span>修改订单（本坑策略）</div>
-  <div class="mi" onclick="clearSlotEdit()"><span class="ic"><svg class="svgi"><use href="#i-reset"/></svg></span>清除本坑覆盖（回落全局）</div>
+  <div class="mi" onclick="openSlotEdit()"><span class="ic"><svg class="svgi"><use href="#i-edit"/></svg></span>坑位规则设置</div>
   <div class="sep"></div>
-  <div class="slot-detail" id="slot-detail">
+  <div class="mi danger" onclick="closeSlot('force')"><span class="ic"><svg class="svgi"><use href="#i-stop"/></svg></span>一键平仓（强制·忽略盈亏）</div>
+  <div class="mi" onclick="closeSlot('profit')"><span class="ic"><svg class="svgi"><use href="#i-check"/></svg></span>盈利平仓（利润&gt;0 才平）</div>
+  <div class="sep mobile-only"></div>
+  <div class="slot-detail mobile-only" id="slot-detail">
     <div class="sd-row"><span class="k">主开仓价</span><span class="v" id="sd-mpx">—</span></div>
     <div class="sd-row"><span class="k">对冲订单号</span><span class="v" id="sd-htk">—</span></div>
     <div class="sd-row"><span class="k">对冲开仓价</span><span class="v" id="sd-hpx">—</span></div>
@@ -1603,20 +1707,21 @@ body.dark .arb-bar{background:#1a2740}
 <!-- 修改订单(逐坑策略)弹窗 -->
 <div class="mask" id="slot-mask">
   <div class="dlg" style="width:420px">
-    <div class="dh"><b id="slot-title"><svg class="svgi"><use href="#i-edit"/></svg> <span id="slot-title-t">修改订单 — 坑</span></b><span class="sp"></span><button class="x" onclick="closeMask('slot-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="dh"><b id="slot-title"><svg class="svgi"><use href="#i-edit"/></svg> <span id="slot-title-t">坑位规则设置 — 坑</span></b><span class="sp"></span><button class="x" onclick="closeMask('slot-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
+      <div style="font-size:11.5px;color:#8a959b;margin-bottom:8px">留空/未改的项 = 回落全局参数；设了手数=本坑显示逐坑开仓按钮。</div>
       <div class="formgrid" style="grid-template-columns:repeat(2,1fr)">
         <div class="fld"><label>币名称</label><input id="slot-coin" readonly style="background:#eef1f3;color:#5f7780"><span class="note">回填全局币名(只读)</span></div>
         <div class="fld"><label>算手模式</label><div style="display:flex;align-items:center;gap:8px;padding-top:3px"><div id="slot-lotmode-sw" class="toggle" onclick="this.classList.toggle('on')"></div><span class="note" style="margin:0">开=固定(下方数量) / 关=自动(每U手数)</span></div></div>
         <div class="fld"><label>交易数量</label><input type="number" step="0.01" min="0" id="slot-qty" value="0"><span class="note">本坑手数(固定模式生效)</span></div>
         <div class="fld"><label>进单状态</label><select id="slot-entry"><option value="1">允许进单</option><option value="0">禁止进单</option></select><span class="note">关=顺序填坑时跳过本坑</span></div>
-        <div class="fld" style="grid-column:1/3"><label>买入点位</label><input type="number" step="0.01" min="0" id="slot-buypoint" placeholder="留空=用全局"><span class="note">留空=回落全局入场阈值; 0=任意点差都开; >0=当前点差>此值则跳过本坑</span></div>
-        <div class="fld"><label>是否出单</label><div style="display:flex;align-items:center;gap:8px;padding-top:3px"><div id="slot-exit-sw" class="toggle" onclick="this.classList.toggle('on')"></div><span class="note" style="margin:0">开=按卖出点位平仓(软提示)</span></div></div>
-        <div class="fld"><label>出点计算</label><div style="display:flex;align-items:center;gap:8px;padding-top:3px"><div id="slot-exitcalc-sw" class="toggle" onclick="this.classList.toggle('on')"></div><span class="note" style="margin:0">开=按实时点差自动判到点</span></div></div>
-        <div class="fld" style="grid-column:1/3"><label>卖出点位</label><input type="number" step="0.01" min="0" id="slot-sellpoint" value="0"><span class="note">本坑平仓点差目标(是否出单开启时生效)</span></div>
+        <div class="fld" style="grid-column:1/3"><label>买入点位（入场下限）</label><input type="number" step="0.01" min="0" id="slot-buypoint" placeholder="留空=任意点差都开"><span class="note">入场下限：当前点差 ≥ 此值才进（越大越严）。留空=任意点差都开；0=点差≥0才进；>0=点差≥此值才进</span></div>
+        <div class="fld"><label>卖出点位启用</label><div style="display:flex;align-items:center;gap:8px;padding-top:3px"><div id="slot-exit-sw" class="toggle" onclick="this.classList.toggle('on')"></div><span class="note" style="margin:0">开=按卖出点位平仓(实时点差≤才平)</span></div></div>
+        <div class="fld"><label>实时判到点</label><div style="display:flex;align-items:center;gap:8px;padding-top:3px"><div id="slot-exitcalc-sw" class="toggle" onclick="this.classList.toggle('on')"></div><span class="note" style="margin:0">开=按实时点差自动判到点</span></div></div>
+        <div class="fld" style="grid-column:1/3"><label>卖出点位</label><input type="number" step="0.01" min="0" id="slot-sellpoint" value="0"><span class="note">本坑出场点差门槛: 实时点差≤此值才平(卖出点位启用时生效)</span></div>
       </div>
     </div>
-    <div class="df"><button class="btn-ghost" onclick="closeMask('slot-mask')">取消</button><button class="btn-primary" onclick="saveSlotEdit()">保存本坑策略</button></div>
+    <div class="df"><button class="btn-ghost" onclick="clearSlotEdit()" title="清除本坑逐坑覆盖, 回落全局参数">清除本坑(回落全局)</button><span class="sp"></span><button class="btn-ghost" onclick="closeMask('slot-mask')">取消</button><button class="btn-primary" onclick="saveSlotEdit()">保存本坑规则</button></div>
   </div>
 </div>
 
@@ -1625,12 +1730,7 @@ body.dark .arb-bar{background:#1a2740}
   <div class="dlg wide">
     <div class="dh"><b><svg class="svgi"><use href="#i-gear"/></svg> 对冲参数配置 — XAUUSD</b><span class="sp"></span><button class="x" onclick="closeMask('cfg-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
-      <div class="tabs">
-        <div class="tab active" data-t="t1" onclick="cfgTab('t1')">基础参数</div>
-        <div class="tab" data-t="t2" onclick="cfgTab('t2')">交易控制</div>
-        <div class="tab" data-t="t3" onclick="cfgTab('t3')">时间 / 开关</div>
-      </div>
-
+      <!-- 3 TAB 合并为一页 (基础参数 / 交易控制 / 时间·开关 顺次滚动) -->
       <!-- 基础 -->
       <div class="tabpane active" id="t1">
         <div class="formgrid">
@@ -1664,9 +1764,9 @@ body.dark .arb-bar{background:#1a2740}
       <div class="tabpane" id="t2">
         <div class="formgrid">
           <div class="grouptitle">点差与滑点</div>
-          <div class="fld"><label>主点差</label><input type="number" step="0.01" min="0" id="cfg-mcap" value="30"><span class="note">主账号平台点差不大于此值才进单(0=不开启)</span></div>
-          <div class="fld"><label>对冲点差</label><input type="number" step="0.01" min="0" id="cfg-hcap" value="30"><span class="note">对冲账号平台点差不大于此值才进单(0=不开启)</span></div>
-          <div class="fld"><label>入场点差阈值</label><input type="number" step="0.01" min="0" id="cfg-spread" value="0.30"><span class="note">套利入场点差阈值</span></div>
+          <div class="fld"><label>主账户平台点差</label><input type="number" step="0.01" min="0" id="cfg-mcap" value="0"><span class="note">主券商自身买卖价差上限, 超过不进单(质量过滤; 0=不启用)</span></div>
+          <div class="fld"><label>对冲账户平台点差</label><input type="number" step="0.01" min="0" id="cfg-hcap" value="0"><span class="note">对冲券商自身买卖价差上限, 超过不进单(质量过滤; 0=不启用)</span></div>
+          <div class="fld"><label>买入点位（全局默认）</label><input type="number" step="0.01" min="0" id="cfg-spread" value="0.30"><span class="note">套利进场点差门槛: 实时点差≥此值才开(越大越严); 逐坑「买入点位」可覆盖, 留空回落此值</span></div>
           <div class="fld"><label>滑点值</label><input type="number" step="0.01" min="0" id="cfg-sliptol" value="5"><span class="note">滑点容差(点)</span></div>
           <div class="fld"><label>滑点停顿(分钟)</label><input type="number" step="1" min="0" id="cfg-slippause" value="2"><span class="note">滑点超限后停顿时间,单位分钟</span></div>
           <div class="fld"><label>入场排队数量</label><input type="number" step="1" min="0" id="cfg-inflight" value="3"><span class="note">在途未成交挂单上限(防叠单)</span></div>
@@ -1689,17 +1789,15 @@ body.dark .arb-bar{background:#1a2740}
         <div class="switches">
           <div class="sw"><span class="t" title="周六停市开关:开=周六可交易">周六</span><div id="cfg-sw-sat" class="toggle" onclick="this.classList.toggle('on')"></div></div>
           <div class="sw"><span class="t" title="周日停市开关:开=周日可交易">周日</span><div id="cfg-sw-sun" class="toggle" onclick="this.classList.toggle('on')"></div></div>
-          <div class="sw"><span class="t" title="开启后按钮根据条件显示">智能显示</span><div id="cfg-sw-smartdisplay" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
+          <div class="sw"><span class="t" title="开启后点差≤0时自动禁用开仓按钮与坑位进单勾选">智能显示</span><div id="cfg-sw-smartdisplay" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
           <div class="sw"><span class="t" title="根据预算值显示按钮">智能预判</span><div id="cfg-sw-smartpredict" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
           <div class="sw"><span class="t" title="开启后利润大于0才能平仓">盈利平台</span><div id="cfg-sw-profitfirst" class="toggle" onclick="this.classList.toggle('on');applySwitches()"></div></div>
-          <div class="sw"><span class="t" title="开启后订单停留过长时自动降低利润平仓">进单机制</span><div id="cfg-sw-entrymech" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="sw"><span class="t" title="开启后配合每单间隔设置使用">进单等待</span><div id="cfg-sw-entrywait" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="sw"><span class="t" title="单边强平·单号·已按安全策略禁止开启">强制平衡</span><div id="cfg-sw-forcebalance" class="toggle" style="opacity:.4;pointer-events:none"></div></div>
+          <div class="sw"><span class="t" title="开启后「持仓时长」到时自动平仓；关闭则超时平仓不触发(止盈/止损/卖点不受影响)">进单机制</span><div id="cfg-sw-entrymech" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
+          <div class="sw"><span class="t" title="开启后自动进单/循环下单按「进单间隔」等待；关闭不按间隔等待(保留技术底线: 循环2秒/自动进单10秒)">进单等待</span><div id="cfg-sw-entrywait" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
           <div class="sw"><span class="t" title="自动平仓">自动清仓</span><div id="cfg-sw-autoclose" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
           <div class="sw"><span class="t" title="开启后盈利出单或点位出单;设置请先清空订单">出单模式</span><div id="cfg-sw-exitmode" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
           <div class="sw"><span class="t" title="是否显示盘口报价">显示报价</span><div id="cfg-sw-showquote" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
-          <div class="sw"><span class="t" title="服务器IP自动变化">智能IP</span><div id="cfg-sw-smartip" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-          <div class="sw"><span class="t" title="开启后显示循环下单按钮">循环下单</span><div id="cfg-sw-loop" class="toggle" onclick="this.classList.toggle('on');applySwitches()"></div></div>
+          <div class="sw"><span class="t" title="关=点差流两键立即开N坑; 开=两键变循环模式(点1空2涨/2空1涨启动该方向循环, 按进单间隔重复, 再点即停)">循环下单</span><div id="cfg-sw-loop" class="toggle" onclick="this.classList.toggle('on');applySwitches()"></div></div>
           <div class="sw"><span class="t" title="单腿暴露告警">单腿告警</span><div id="cfg-sw-singleleg" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
         </div>
       </div>
@@ -1734,25 +1832,7 @@ body.dark .arb-bar{background:#1a2740}
   </div>
 </div>
 
-<!-- ===== 平台订单历史 ===== -->
-<div class="mask" id="plat-mask">
-  <div class="dlg wide">
-    <div class="dh"><b><svg class="svgi"><use href="#i-clipboard"/></svg> 平台订单历史</b><span class="sp"></span><button class="x" onclick="closeMask('plat-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
-    <div class="db">
-      <div class="tabs">
-        <div class="tab active" data-t="p-main" onclick="platTab('p-main')">主账户 200201316</div>
-        <div class="tab" data-t="p-hedge" onclick="platTab('p-hedge')">对冲账户 31358615</div>
-      </div>
-      <div class="tabpane active" id="p-main">
-        <table class="dtable"><thead><tr><th>票号</th><th>时间</th><th>方向</th><th>手数</th><th>开仓价</th><th>平仓价</th><th>盈亏</th></tr></thead><tbody id="plat-main-body"></tbody></table>
-      </div>
-      <div class="tabpane" id="p-hedge">
-        <table class="dtable"><thead><tr><th>票号</th><th>时间</th><th>方向</th><th>手数</th><th>开仓价</th><th>平仓价</th><th>盈亏</th></tr></thead><tbody id="plat-hedge-body"></tbody></table>
-      </div>
-    </div>
-    <div class="df"><button class="btn-ghost" onclick="closeMask('plat-mask')">关闭</button></div>
-  </div>
-</div>
+<!-- 平台订单历史模态已移除(功能并入交易历史记录 3tab) -->
 
 <!-- ===== 批量设置弹框 ===== -->
 <div class="mask" id="batch-mask">
@@ -1760,19 +1840,17 @@ body.dark .arb-bar{background:#1a2740}
     <div class="dh"><b><svg class="svgi"><use href="#i-scale"/></svg> 批量设置 — 应用到全部活动单</b><span class="sp"></span><button class="x" onclick="closeMask('batch-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
       <div class="formgrid">
-        <div class="fld"><label>手数</label><input id="b-lot" value="0.01"></div>
-        <div class="fld"><label>买入点位</label><input type="number" step="0.01" id="b-buy" value="1.40"></div>
-        <div class="fld"><label>盈利点位</label><input type="number" step="0.01" id="b-tp" value="15.0"></div>
-        <div class="fld"><label>止损点位</label><input type="number" step="0.01" id="b-sl" value="50.0"></div>
-        <div class="fld"><label>点位计算</label><select><option>按点</option><option>按金额</option></select></div>
-        <div class="fld"><label>进位</label><input value="2"></div>
+        <div class="fld"><label title="批量手数: >0=固定手数写入全部坑; 0/留空=不改手数(各坑保留原设)">手数</label><input id="b-lot" value="0.01" title="批量手数: >0=固定手数写入全部坑; 0/留空=不改手数(各坑保留原设)"></div>
+        <div class="fld"><label title="进场点差门槛: 实时点差≥此值才开仓(写入全部坑, 越大越严, 越大越难进)">买入点位</label><input type="number" step="0.01" id="b-buy" value="0.30" title="进场点差门槛: 实时点差≥此值才开仓(写入全部坑, 越大越严, 越大越难进)"></div>
+        <div class="fld"><label title="止盈=点差净盈亏点数(配对净盈亏折点); 达标即止盈平仓, 写入全部坑">盈利点位</label><input type="number" step="0.01" id="b-tp" value="0.30" title="止盈=点差净盈亏点数(配对净盈亏折点); 达标即止盈平仓, 写入全部坑"></div>
+        <div class="fld"><label title="止损=点差净盈亏点数; 触损即止损平仓(需开启下方「止损出场」才写入各坑, 否则置0不止损)">止损点位</label><input type="number" step="0.01" id="b-sl" value="0.50" title="止损=点差净盈亏点数; 触损即止损平仓(需开启下方「止损出场」才写入各坑, 否则置0不止损)"></div>
       </div>
       <div class="switches" style="margin-top:14px">
-        <div class="sw"><span class="t">入场启用</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-        <div class="sw"><span class="t">盈利出场</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-        <div class="sw"><span class="t">止损出场</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+        <div class="sw"><span class="t" title="开=各坑允许进单(实时点差≥买入点位才开); 关=各坑禁止进单">入场启用</span><div id="b-en-entry" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="sw"><span class="t" title="开=各坑启用卖出点位出场(实时点差≤卖出点位才平); 关=不按卖出点位">卖出点位启用</span><div id="b-en-tp" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="sw"><span class="t" title="开=写入止损点位; 关=止损点位置0(不止损)">止损出场</span><div id="b-en-sl" class="toggle" onclick="this.classList.toggle('on')"></div></div>
       </div>
-      <div style="font-size:11px;color:#8a959b;margin-top:12px">提示：在订单表头/订单簿区域右击可快速呼出本面板，保存后批量写入全部活动单。</div>
+      <div style="font-size:11px;color:#8a959b;margin-top:12px">买入点位=进场点差门槛(点差≥才开) · 盈利/止损点位=<b>点差净盈亏点数</b>(配对净盈亏折点触发) · 右击订单表头/点差条可呼出本面板，保存后写入全部坑。</div>
     </div>
     <div class="df">
       <button class="btn-ghost" onclick="closeMask('batch-mask')">取消</button>
@@ -1784,7 +1862,7 @@ body.dark .arb-bar{background:#1a2740}
 <!-- ===== 飞书提醒配置 ===== -->
 <div class="mask" id="feishu-mask">
   <div class="dlg" style="width:600px">
-    <div class="dh"><b><svg class="svgi"><use href="#i-bell"/></svg> 飞书提醒配置</b><span class="sp"></span><button class="x" onclick="closeMask('feishu-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="dh"><b title="飞书提醒配置: 把裸空/单腿/强平/风险等告警推送到飞书群机器人(可@你)"><svg class="svgi"><use href="#i-bell"/></svg> 飞书提醒配置</b><span class="sp"></span><button class="x" onclick="closeMask('feishu-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
       <div class="formgrid" style="grid-template-columns:1fr 1fr">
         <div class="fld full" style="grid-column:1/-1"><label>Webhook 地址</label><input value="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"></div>
@@ -1834,21 +1912,37 @@ body.dark .arb-bar{background:#1a2740}
           </div>
         </div>
         <div class="fld"><label>登录账号 (Login)</label><input id="acct-login" value="200201316"></div>
-        <div class="fld" id="acct-pwd-row"><label>密码 (Master · 仅本地直连)</label><input id="acct-pwd" type="password" value=""></div>
-        <div class="fld full"><label>服务器 (Server)</label>
-          <select id="acct-server">
-            <option>ICMarketsSC-Live</option><option>ICMarketsSC-Demo</option>
-            <option>Exness-Real8</option><option>FBS-Real</option><option>自定义…</option>
+        <div class="fld" id="acct-pwd-row"><label id="acct-pwd-lbl">登录密码</label><input id="acct-pwd" type="password" value="" placeholder="Bridge 模式无需填写"></div>
+        <div class="fld full"><label>平台名称 (经纪商)</label>
+          <select id="acct-broker" onchange="onBrokerChange()">
+            <option value="">— 加载中… —</option>
           </select>
+          <span class="note" id="acct-broker-note" style="font-size:11px;color:#8a959b"></span>
+        </div>
+        <div class="fld full"><label>服务器 (Server)</label>
+          <select id="acct-server" onchange="onServerChange()">
+            <option value="__custom__">自定义…</option>
+          </select>
+          <input id="acct-server-custom" placeholder="手动输入 MT 服务器名" style="display:none;margin-top:4px" />
         </div>
         <div class="fld"><label>连接方式</label>
-          <select id="acct-mode" onchange="onConnMode()">
-            <option value="bridge">Bridge 云端(已注册)</option>
-            <option value="local">本地终端直连(输密码)</option>
-          </select>
+          <div style="display:flex;align-items:center;gap:8px">
+            <select id="acct-mode" onchange="onConnMode()" style="flex:0 0 auto">
+              <option value="bridge" hidden>Bridge 云端(已注册)</option>
+              <option value="api">API 连接云端托管</option>
+            </select>
+            <button type="button" id="acct-a2t-clear" onclick="clearApiAccount()" disabled
+              title="清除云端账户: 联动注销云端托管 + 删登记(点击后二次确认; 不影响交易记录)"
+              style="flex:0 0 auto;font-size:11px;padding:4px 10px;border:1px solid rgba(224,123,58,.5);background:transparent;color:#e07b3a;border-radius:5px;cursor:not-allowed;opacity:.45;white-space:nowrap">清除云端账户</button>
+          </div>
         </div>
         <div class="fld full" id="acct-pick-row" style="display:none"><label>选择已注册账户</label>
           <select id="acct-pick"></select>
+        </div>
+        <div class="fld full" id="acct-api-note" style="display:none">
+          <div style="background:rgba(224,123,58,.10);border:1px solid rgba(224,123,58,.35);border-radius:8px;padding:9px 11px;font-size:12px;color:#e0a05a;line-height:1.55">
+            <b>⚠ 凭证出域提示</b>：API 连接会将本 MT 账户的<b>登录密码提交至第三方云端服务</b>托管（不同于 Bridge "凭证留桥机"）。仅在你已知悉并授权托管时使用；建议使用<b>只读/交易分离</b>的投资者密码或专用子账户。
+          </div>
         </div>
         <div class="fld"><label>角色</label>
           <select id="acct-role"><option>主账户</option><option>对冲账户</option></select>
@@ -1869,7 +1963,7 @@ body.dark .arb-bar{background:#1a2740}
 <!-- ===== RENEW / RECHARGE ===== -->
 <div class="mask" id="renew-mask">
   <div class="dlg" style="width:560px">
-    <div class="dh"><b id="renew-title"><svg class="svgi"><use href="#i-money"/></svg> <span id="renew-title-t">续费 / 充值</span></b><span class="sp"></span><button class="x" onclick="closeMask('renew-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
+    <div class="dh"><b id="renew-title" title="续费/充值: USDT 转账后粘贴交易哈希, 财务核对到账后延长账号授权"><svg class="svgi"><use href="#i-money"/></svg> <span id="renew-title-t">续费 / 充值</span></b><span class="sp"></span><button class="x" onclick="closeMask('renew-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
       <!-- 套餐(包月模式显示) -->
       <div id="renew-plans">
@@ -1965,7 +2059,11 @@ body.dark .arb-bar{background:#1a2740}
 const QH={user:null,key:null,started:false,
   async get(p){const r=await fetch('/api'+p);if(!r.ok)throw new Error(r.status);return r.json();},
   async post(p,b){const r=await fetch('/api'+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok&&r.status!==400)throw new Error(r.status);return r.json();},
-  start(){ if(this.started)return; this.started=true; window.__LIVE=true; if(typeof applyCoinLabel==='function')applyCoinLabel(); if(typeof applySwitches==='function')applySwitches(); this.connectWS(); this.initLazyCharts(); this.restoreToggles(); } ,
+  start(){ if(this.started)return; this.started=true; window.__LIVE=true; if(typeof applyCoinLabel==='function')applyCoinLabel(); if(typeof applySwitches==='function')applySwitches(); this.connectWS(); this.initLazyCharts(); this.restoreToggles();
+    // 逐坑覆盖(买入/卖出点位等)独立周期加载: WS 主路径不加载 __slotov, 否则列表一直回落全局
+    refreshSlotov(); if(!this._slotovTimer)this._slotovTimer=setInterval(refreshSlotov, 6000);
+    pollConnMode(); if(!this._connTimer)this._connTimer=setInterval(pollConnMode, 10000);
+  } ,
   // 恢复红框两个切换按钮的持久化状态(刷新后不复位)
   restoreToggles(){
     try{
@@ -2037,7 +2135,7 @@ const QH={user:null,key:null,started:false,
     try{ const ov=await this.get('/engine/slot_overrides?username='+encodeURIComponent(this.user)+'&symbol='+encodeURIComponent(window.QHSYM||'XAUUSD')); window.__slotov=(ov&&ov.slots)||{}; }catch(e){}
     try{ const legs=await this.get('/engine/legs'); const ms=legs.status&&legs.status.main, hs=legs.status&&legs.status.hedge;
       if(ms){ fillAcct('m',ms,'MT5'); } if(hs){ fillAcct('h',hs,'MT5'); }
-      _pos=legs.positions; window.__lastPositions=legs.positions; renderPosLive(legs.positions);
+      _pos=legs.positions; window.__lastPositions=legs.positions; window.__remoteBusy=(legs.busy_slots||[]); renderPosLive(legs.positions);
     }catch(e){}
     // 主账户实时报价(ASK/BID)+利润
     let _mt=null;
@@ -2121,7 +2219,7 @@ function renderSnapshot(m){
   let _pos=null;
   if(f.legs){ const ms=f.legs.status&&f.legs.status.main, hs=f.legs.status&&f.legs.status.hedge;
     if(ms)fillAcct('m',ms,'MT5'); if(hs)fillAcct('h',hs,'MT5');
-    _pos=f.legs.positions; window.__lastPositions=f.legs.positions; renderPosLive(f.legs.positions); }
+    _pos=f.legs.positions; window.__lastPositions=f.legs.positions; window.__remoteBusy=(f.legs.busy_slots||[]); renderPosLive(f.legs.positions); }
   // 主账户利润 + 报价
   let _mt=f.tick_main||null;
   if(f.account){ const acc=f.account; setTxt('m-pnl',sign(acc.profit)); cls('m-pnl','v '+(acc.profit>=0?'up':'down')); setHtml('m-tri',acc.profit>=0?SVGI('i-tri-up'):SVGI('i-tri-down')); cls('m-tri','tri '+(acc.profit>=0?'up':'down')); }
@@ -2233,16 +2331,20 @@ function togglePairedDetail(){
   setTimeout(function(){ if(typeof scDraw==='function')scDraw(); },220);  // 面板加宽/收窄后重画点差图防变形
 }
 // 模态框内 主/对冲 原始成交表(行式)
+// 成交时间→北京(与右侧交易历史面板一致: epoch 读 UTC 字段=北京墙钟) "MM-DD HH:mm:ss"
+function fmtDealTime(ts){ if(!ts)return '-'; var d=new Date((ts+28800)*1000); var p=function(n){return('0'+n).slice(-2)};  /* +8h=北京(后端已转真UTC) */
+  return p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate())+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes())+':'+p(d.getUTCSeconds()); }
 function renderDealRows(id,deals){ const tb=$(id); if(!tb)return;
-  if(!deals.length){ tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:#8aa0a8;padding:14px">暂无成交</td></tr>'; return; }
-  tb.innerHTML=deals.map(function(d,i){var pf=Number(d.profit||0);var side={buy:"买",sell:"卖"}[d.side]||d.side;
-    return '<tr><td>'+(i+1)+'</td><td>'+(d.ticket||'-')+'</td><td>'+(d.symbol||'-')+'</td><td class="'+(d.side==="buy"?"up":"down")+'">'+side+'</td><td>'+fnum(d.lots,2)+'</td><td>'+fnum(d.price)+'</td><td class="'+(pf>=0?"up":"down")+'">'+(pf>=0?"+":"")+pf.toFixed(2)+'</td></tr>';}).join('');
+  const tab = id==='main-deals'?'ht2':'ht3';
+  const trs=(deals||[]).map(function(d,i){var pf=Number(d.profit||0);var side={buy:"买",sell:"卖"}[d.side]||d.side;
+    return '<tr><td>'+(i+1)+'</td><td style="white-space:nowrap;color:#5f7780;font-family:var(--num)">'+fmtDealTime(d.time)+'</td><td>'+(d.ticket||'-')+'</td><td>'+(d.symbol||'-')+'</td><td class="'+(d.side==="buy"?"up":"down")+'">'+side+'</td><td>'+fnum(d.lots,2)+'</td><td>'+fnum(d.price)+'</td><td class="'+(pf>=0?"up":"down")+'">'+(pf>=0?"+":"")+pf.toFixed(2)+'</td></tr>';});
+  __histAll[tab]=trs; __histPg[tab]=1; histRenderTab(tab,id,8,'暂无成交');
 }
 // 套利配对成交历史(顶部面板, 紧凑3列: 时间/点差/配对盈亏; 点开"明细"看完整模态框)
 function renderPaired(pairs){ const w=$('paired-rows'); if(!w)return;
   if(!pairs.length){ w.innerHTML='<div class="up-row"><div class="c" style="color:#8aa0a8;padding:12px">暂无配对成交(开仓后积累)</div></div>'; return; }
   w.innerHTML=pairs.map(function(p){
-    var t=p.time?new Date(p.time*1000):null; var hm=t?(('0'+t.getHours()).slice(-2)+':'+('0'+t.getMinutes()).slice(-2)):'--';
+    var t=p.time?new Date((p.time+28800)*1000):null; var hm=t?(('0'+t.getUTCHours()).slice(-2)+':'+('0'+t.getUTCMinutes()).slice(-2)):'--';  /* 北京 */
     var sp=(p.spread!=null)?p.spread.toFixed(2):'—'; var pf=Number(p.pair_profit||0);
     var tag=p.entry+(p.matched?'':SVGI('i-warning')); var src=p.source==='QH'?'':'<span style="color:#8aa0a8">·手</span>';
     return '<div class="up-row" title="'+(p.matched?'已配对':'未配到对冲腿(单边)')+'"><div class="c" style="flex:2;text-align:left;padding-left:8px">'+hm+' '+tag+src+'</div>'+
@@ -2291,29 +2393,46 @@ function renderPosLive(positions){
     return;
   }
   if(!window.__slotDetail)window.__slotDetail={};
+  // 按稳定坑号(后端注入 p.slot)定位: 平几号坑→几号坑空, 坑号不再随持仓增减重排
+  const bySlotM={}, bySlotH={}; let maxSlot=ladders;
+  mainP.forEach(p=>{ const k=Number(p&&p.slot)||0; if(k>0){ bySlotM[k]=p; if(k>maxSlot)maxSlot=k; } });
+  hedgeP.forEach(p=>{ const k=Number(p&&p.slot)||0; if(k>0){ bySlotH[k]=p; if(k>maxSlot)maxSlot=k; } });
+  // 兜底: 旧持仓无 slot 时顺序塞进空坑(保证不丢仓)
+  let _fb=1;
+  mainP.forEach(p=>{ if(!(Number(p&&p.slot)>0)){ while(bySlotM[_fb])_fb++; bySlotM[_fb]=p; if(_fb>maxSlot)maxSlot=_fb; } });
+  let _fbh=1;
+  hedgeP.forEach(p=>{ if(!(Number(p&&p.slot)>0)){ while(bySlotH[_fbh])_fbh++; bySlotH[_fbh]=p; if(_fbh>maxSlot)maxSlot=_fbh; } });
+  const gEntry=Number(window.__gEntry||0), gTp=Number(window.__gTp||0);
+  const tagG='<span style="color:#9aa6ac;font-size:10.5px">（全局）</span>';
   let html='';
-  for(let i=0;i<n;i++){
-    const m=mainP[i], h=hedgeP[i];
+  for(let k=1;k<=maxSlot;k++){
+    const m=bySlotM[k], h=bySlotH[k];
+    const ov=(window.__slotov||{})[String(k)]||null;
+    // 买入点位=入场下限(点差≥此值才进): 无覆盖→全局; 覆盖buy_point=null→任意都开; 数字(含0)→该值
+    let bp;
+    if(!ov) bp=(gEntry>0?gEntry.toFixed(2)+' '+tagG:'<span style="color:#9aa6ac">全局</span>');
+    else if(ov.buy_point===null||ov.buy_point===undefined) bp='<span style="color:#43a047">任意</span>';
+    else bp=Number(ov.buy_point).toFixed(2);
+    // 卖出点位: 逐坑 sell_point>0→用之; 否则本坑有覆盖→显本坑 tp_points(含用户显式设的0, 不回落全局); 无覆盖→全局盈利点位+(全局)
+    let sp;
+    if(ov && Number(ov.sell_point)>0) sp=Number(ov.sell_point).toFixed(2);
+    else if(ov && ov.tp_points!==null && ov.tp_points!==undefined) sp=Number(ov.tp_points).toFixed(2);
+    else sp=(gTp>0?gTp.toFixed(2)+' '+tagG:'<span style="color:#9aa6ac">—</span>');
     if(!m && !h){
-      // 空坑(阶梯功能行): 显示该坑逐坑覆盖参数(买入/卖出点位/手数), 未设则显"全局"
-      const ov=(window.__slotov||{})[String(i+1)]||null;
-      const gEntry=Number(window.__gEntry||0), gTp=Number(window.__gTp||0);
-      const tagG='<span style="color:#9aa6ac;font-size:10.5px">（全局）</span>';
-      // 买入点位: null/未设→显全局阈值数值+(全局)备注; 0→"0.00"(字面0=任意点差); >0→数值
-      const bpVal=ov?ov.buy_point:undefined;
-      const bp=(bpVal===null||bpVal===undefined)?(gEntry>0?gEntry.toFixed(2)+' '+tagG:'<span style="color:#9aa6ac">全局</span>'):Number(bpVal).toFixed(2);
-      // 卖出点位: 逐坑 sell_point>0 用之; 否则坑 tp_points>0 用之; 都未设→显全局盈利点位+(全局)备注
-      let sp;
-      if(ov && Number(ov.sell_point)>0) sp=Number(ov.sell_point).toFixed(2);
-      else if(ov && Number(ov.tp_points)>0) sp=Number(ov.tp_points).toFixed(2);
-      else sp=(gTp>0?gTp.toFixed(2)+' '+tagG:'<span style="color:#9aa6ac">—</span>');
-      const qd=ov&&ov.lot_mode==='fixed'&&Number(ov.qty)>0?('×'+Number(ov.qty).toFixed(2)+'手'):'';
+      // 空坑: 有手数规则→显两开仓按钮(逐坑定向); 无规则→"未设置规则"(点击进坑位规则设置)
+      const hasLot=ov&&ov.lot_mode==='fixed'&&Number(ov.qty)>0;
+      const qd=hasLot?('×'+Number(ov.qty).toFixed(2)+'手'):'';
       const dis=ov&&ov.entry_enabled===false;
-      window.__slotDetail[String(i+1)]={mPx:'—',hTk:'—',hPx:'—',spread:'—'};
-      html+='<tr class="wait" data-slot="'+(i+1)+'"><td>坑'+(i+1)+'</td><td>—</td><td>—</td><td>—</td>'+
+      window.__slotDetail[String(k)]={mPx:'—',hTk:'—',hPx:'—',spread:'—'};
+      let act;
+      if(dis){ act='<span class="slot-norule" style="border-color:#e6b0aa;color:#c0392b" onclick="openSlotEdit('+k+')" title="本坑已禁止进单，点击进入坑位规则设置可重新启用/修改">已禁用 · 点此设置</span>'; }
+      else if(hasLot){ act='<span class="slotopen"><button class="b long sob" onclick="openPairSlot('+k+",'reverse')\""+' title="逐坑开仓·反向(1空2涨)'+qd+'">1空2涨</button>'+
+                           '<button class="b short sob" onclick="openPairSlot('+k+",'forward')\""+' title="逐坑开仓·正向(2空1涨)'+qd+'">2空1涨</button></span>'; }
+      else { act='<span class="slot-norule" onclick="openSlotEdit('+k+')" title="点击设置本坑规则(手数/买入点位等)，留空=回落全局">未设置规则</span>'; }
+      html+='<tr class="wait" data-slot="'+k+'"><td class="slotno" onclick="openSlotEdit('+k+')" title="点击编辑本坑规则">坑'+k+'</td><td>—</td><td>—</td><td>—</td>'+
             '<td>-</td><td>'+bp+'</td><td>'+sp+'</td>'+
             '<td class="st hold">'+(dis?'<span style="color:#c0392b">禁用</span>':'空')+'</td>'+
-            '<td><span style="color:#9aa6ac;font-size:11.5px">等待进单'+qd+'</span></td></tr>';
+            '<td class="actcell">'+_armChips(k)+act+'</td></tr>';
       continue;
     }
     const mPx=m?fnum(m.price_open||m.price,2):'-', hPx=h?fnum(h.price_open||h.price,2):'-';
@@ -2321,18 +2440,101 @@ function renderPosLive(positions){
     const spread=(m&&h)?Math.abs((m.price_open||m.price)-(h.price_open||h.price)).toFixed(2):'-';
     const pf=Number((m?m.profit:0)||0)+Number((h?h.profit:0)||0);
     const vol=fnum((m||h).volume,2);
-    // 持仓方向(MT5 type: 0=buy,1=sell)→平仓需按当前方向反向市价平
     const mSide=m?((Number(m.type)===1||m.side==='sell')?'sell':'buy'):'buy';
     const hSide=h?((Number(h.type)===1||h.side==='sell')?'sell':'buy'):'sell';
-    // 移动端长按功能菜单也展示这些字段(PC 表格已含列, 移动端隐藏列)
-    window.__slotDetail[String(i+1)]={mPx:mPx,hTk:hTk,hPx:hPx,spread:spread};
-    html+='<tr data-slot="'+(i+1)+'"><td>'+mTk+'</td><td>'+mPx+'</td><td>'+hTk+'</td><td>'+hPx+'</td>'+
-          '<td>'+spread+'</td><td>'+vol+'</td><td>-</td>'+
+    window.__slotDetail[String(k)]={mPx:mPx,hTk:hTk,hPx:hPx,spread:spread,filled:true,mTk:mTk,mSide:mSide,hSide:hSide,pf:pf};
+    // 成交行: col1=坑号+订单号+手数(小字); col6/7=本坑买入/卖出点位(与表头一致, 修列错位); col8=获利
+    html+='<tr data-slot="'+k+'"><td class="slotno" onclick="openSlotEdit('+k+')" title="点击编辑本坑规则">坑'+k+' <span class="ord-info"><span class="ord-tk">#'+mTk+'</span><span class="ord-lot">'+vol+'手</span></span></td>'+
+          '<td>'+mPx+'</td><td>'+hTk+'</td><td>'+hPx+'</td>'+
+          '<td>'+spread+'</td><td>'+bp+'</td><td>'+sp+'</td>'+
           '<td class="st '+(pf>=0?'profit':'hold')+'">'+(pf>=0?'+':'')+fnum(pf)+'</td>'+
-          '<td><button class="closebtn" onclick="closePair(\''+mSide+'\',\''+hSide+'\')">平仓</button></td></tr>';
+          '<td class="actcell">'+_armChips(k)+'<button class="closebtn full" onclick="closePair(\''+mSide+'\',\''+hSide+'\',(window.QHSYM||\'XAUUSD\'),\''+(mTk||'')+'\',\''+(hTk||'')+'\','+k+')" title="平仓(按本坑进场方向对应平)">平仓</button></td></tr>';
   }
   tb.innerHTML=html;
+  applySlotBusy();
   if(typeof applySwitches==='function')applySwitches();
+}
+// 坑位行"操作中"进度渐变: 本地(手动点击即时)∪ 远程(后端 busy_slots, 自动实时经WS/poll)
+// 逐坑覆盖加载(独立于 WS/poll; WS 主路径不加载→否则列表买入/卖出点位一直显全局)
+async function refreshSlotov(){
+  if(!QH.user)return;
+  try{ const ov=await QH.get('/engine/slot_overrides?username='+encodeURIComponent(QH.user)+'&symbol='+encodeURIComponent(window.QHSYM||'XAUUSD'));
+    window.__slotov=(ov&&ov.slots)||{};
+    if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);
+  }catch(e){}
+}
+window.__busyLocal = window.__busyLocal || new Set();
+window.__busyStart = window.__busyStart || {};   // 坑号→操作起始 ms(供按钮秒数倒计时)
+function setSlotBusy(slot, on){ slot=Number(slot); if(!slot)return;
+  if(on){ window.__busyLocal.add(slot); window.__busyStart[slot]=Date.now(); }
+  else { window.__busyLocal.delete(slot); delete window.__busyStart[slot]; }
+  applySlotBusy();
+}
+function applySlotBusy(){
+  const remote=(window.__remoteBusy||[]).map(Number);
+  const all=new Set([...(window.__busyLocal||[]), ...remote]);
+  document.querySelectorAll('#otable tr[data-slot]').forEach(function(tr){
+    const k=Number(tr.getAttribute('data-slot'));
+    const busy=all.has(k);
+    tr.classList.toggle('slot-busy', busy);
+    if(busy && !window.__busyStart[k]) window.__busyStart[k]=Date.now();   // 远程(自动)也起表
+    if(!busy){
+      // 结束: 复位按钮/等待文案(去掉秒数)
+      const btn=tr.querySelector('.closebtn'); if(btn&&/\s\d+s$/.test(btn.textContent))btn.textContent='平仓';
+      const w=tr.querySelector('.wait-lbl'); if(w&&w.dataset.base)w.textContent=w.dataset.base;
+    }
+  });
+  updateSlotTimers();
+}
+// 秒数直接显示在按钮上(平仓按钮/开仓等待处), 每秒刷新
+function updateSlotTimers(){
+  const bs=window.__busyStart||{};
+  document.querySelectorAll('#otable tr.slot-busy').forEach(function(tr){
+    const k=Number(tr.getAttribute('data-slot')); const st=bs[k]; if(!st)return;
+    const sec=Math.max(0,Math.round((Date.now()-st)/1000));
+    const btn=tr.querySelector('.closebtn');
+    if(btn){ btn.textContent='平仓 '+sec+'s'; return; }   // 平仓按钮上直接显秒
+    const w=tr.querySelector('.wait-lbl');               // 空坑开仓中: 等待处显"开仓 Ns"
+    if(w){ if(!w.dataset.base)w.dataset.base=w.textContent; w.textContent='开仓 '+sec+'s'; }
+  });
+}
+setInterval(updateSlotTimers, 1000);
+// 坑位内联武装勾选: 进=entry_enabled(自动进单武装) / 出=exit_enabled(自动出场武装)
+function _armChips(slot){
+  const ov=(window.__slotov||{})[String(slot)]||{};
+  // 仅当对应自动模式=勾选自动(armed)时显示对应徽章
+  const showE=(window.__aeMode==='armed'), showX=(window.__axMode==='armed');
+  if(!showE && !showX) return '';
+  let c='';
+  if(showE){ const eOn=ov.entry_enabled===true; c+='<span class="armchip'+(eOn?' on':'')+'" onclick="toggleSlotArm(event,'+slot+',\'entry\')" title="进单勾选 · 开=本坑参与「自动进单-勾选自动」模式；关=不参与">进</span>'; }
+  if(showX){ const xOn=ov.exit_enabled===true; c+='<span class="armchip'+(xOn?' on':'')+'" onclick="toggleSlotArm(event,'+slot+',\'exit\')" title="出单勾选 · 开=本坑参与「自动出场-勾选自动」模式；关=不参与">出</span>'; }
+  return '<span class="armwrap">'+c+'</span>';
+}
+async function toggleSlotArm(ev,slot,which){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  const prev=(window.__slotov||{})[String(slot)]||{};
+  const nextE = which==='entry' ? !(prev.entry_enabled===true) : (prev.entry_enabled!==false);
+  const nextX = which==='exit'  ? !(prev.exit_enabled===true)  : !!prev.exit_enabled;
+  // 关「进」且本坑无其它逐坑覆盖 → 删覆盖回落默认(不留"禁用",避免误伤 full/手动)
+  if(which==='entry' && !nextE){
+    const bare=(prev.buy_point==null)&&!Number(prev.qty)&&prev.lot_mode!=='fixed'&&!prev.exit_enabled&&!Number(prev.sell_point)&&!Number(prev.tp_points)&&!Number(prev.sl_points);
+    if(bare){
+      if(window.__slotov)delete window.__slotov[String(slot)]; renderPosLive(window.__lastPositions||null);
+      try{ await licPost('/engine/slot_override_del',{username:QH.user,license_key:QH.key,symbol:(window.QHSYM||'XAUUSD'),slot:slot}); toast('坑'+slot+' 进单解除'); }
+      catch(e){ if(!window.__slotov)window.__slotov={}; window.__slotov[String(slot)]=prev; renderPosLive(window.__lastPositions||null); toast('设置失败：'+(e.message||e)); }
+      return;
+    }
+  }
+  const body={username:QH.user,license_key:QH.key,symbol:(window.QHSYM||'XAUUSD'),slot:slot,
+    coin:(window.QHSYM||'XAUUSD'), lot_mode:prev.lot_mode||'auto', qty:Number(prev.qty)||0,
+    entry_enabled:nextE, buy_point:(prev.buy_point===undefined?null:prev.buy_point),
+    exit_enabled:nextX, sell_point:Number(prev.sell_point)||0, exit_calc:!!prev.exit_calc,
+    tp_points:Number(prev.tp_points)||0, sl_points:Number(prev.sl_points)||0};
+  if(!window.__slotov)window.__slotov={}; window.__slotov[String(slot)]=body; renderPosLive(window.__lastPositions||null);  // 乐观更新
+  try{ const j=await licPost('/engine/slot_override',body);
+    window.__slotov[String(slot)]=(j&&j.saved)||body;
+    toast('坑'+slot+(which==='entry'?' 进单':' 出单')+((which==='entry'?nextE:nextX)?'已勾选':'已取消'));
+  }catch(e){ window.__slotov[String(slot)]=prev; renderPosLive(window.__lastPositions||null); toast('设置失败：'+(e.message||e)); }
 }
 function renderDealsLive(deals){ const tb=document.querySelector('#hist-body'); if(!tb)return;
   tb.innerHTML=deals.map((d,i)=>{const pf=Number(d.profit||0);const side={buy:'买',sell:'卖',balance:'金'}[d.side]||d.side;
@@ -2392,7 +2594,7 @@ function pushOBStream(rev, fwd){
 var SC={dir:'forward',fwd:[],rev:[],loading:false,quick:null};
 function _bjLocalISO(d){ const b=new Date(d.toLocaleString('en-US',{timeZone:'Asia/Shanghai'}));
   const p=n=>String(n).padStart(2,'0'); return b.getFullYear()+'-'+p(b.getMonth()+1)+'-'+p(b.getDate())+'T'+p(b.getHours())+':'+p(b.getMinutes()); }
-function _bjSecShort(s){ const d=new Date(s*1000); const p=n=>String(n).padStart(2,'0');
+function _bjSecShort(s){ const d=new Date((s+28800)*1000); const p=n=>String(n).padStart(2,'0');  /* +8h=北京 */
   return p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate())+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes())+':'+p(d.getUTCSeconds()); }
 function scSetDir(d){ SC.dir=d; document.querySelectorAll('#sc-dir button').forEach(b=>b.classList.toggle('on',b.dataset.d===d));
   const c=d==='forward'?'#1aa86a':'#e0683a'; const dot=$('sc-dot'); if(dot)dot.style.background=c;
@@ -2626,7 +2828,85 @@ document.addEventListener('DOMContentLoaded',function(){
   if(obr)obr.addEventListener('dblclick',openKDual);
   restoreSession();   // 刷新后凭 localStorage qh_key 自动恢复会话(修复刷新闪退回登录页)
   setupMobileMode();  // 手机(≤640+触屏)启用底部 Tab 分屏
+  applyPanelTips();   // 面板数据项/按钮/菜单 悬停功能说明
+  loadSiteConfig();   // 顶栏 LOGO/标题/官网按钮URL 读后台配置(可后台自定义)
 });
+/* ===== 官网/品牌配置(后台可改): 顶栏 LOGO/标题/官网按钮URL ===== */
+var __officialUrl='https://app.hustle2026.xyz';
+function openOfficial(){ window.open(__officialUrl||'https://app.hustle2026.xyz','_blank'); }
+function applySiteConfig(cfg){
+  try{
+    cfg=cfg||{}; const b=cfg.brand||{};
+    if(cfg.officialUrl)__officialUrl=cfg.officialUrl;
+    const lg=$('brand-logo'); if(lg&&b.logo)lg.src=b.logo;
+    const tl=$('brand-title'); if(tl&&b.title)tl.textContent=b.title;
+    if(b.title){ try{ document.title=b.title.replace(/[【】]/g,''); }catch(_){}}
+  }catch(e){}
+}
+async function loadSiteConfig(){
+  try{ const c=localStorage.getItem('qh_site_cfg'); if(c)applySiteConfig(JSON.parse(c)); }catch(e){}   // 缓存先行(秒出, 防闪)
+  try{
+    const r=await fetch('/api/site/config?site=qh'); const j=await r.json();
+    if(j&&j.cfg){ applySiteConfig(j.cfg); localStorage.setItem('qh_site_cfg', JSON.stringify(j.cfg)); }
+  }catch(e){}
+}
+/* ===== 面板悬停功能说明: 数据项标签/按钮/右键菜单 统一挂 title(信息不丢, 鼠标悬停即见) ===== */
+var PANEL_TIPS={
+  // 账户卡(主/对冲共用)
+  '平台类型':'该账户的交易平台类型(MT4/MT5)','用户ID':'该账户在券商的登录账号',
+  '账户余额':'账户结算余额(不含浮动盈亏)','账户利润':'当前持仓的浮动盈亏(实时变动)',
+  '可预付款':'可用保证金(可用于开新仓的资金)','账户信用':'券商授予的信用额度',
+  '过夜费累':'历史成交累计过夜费(已结算)','手续费累':'历史成交累计手续费(已结算)',
+  '状态':'与该账户桥/终端的连接状态','服务器':'该账户登录的 MT 服务器名',
+  'ASK':'卖方报价(你买入的成交价)','BID':'买方报价(你卖出的成交价)',
+  '多强平':'多头持仓的估算强平价(账户级估算, 非交易所原生)','空强平':'空头持仓的估算强平价(账户级估算)',
+  '做多持仓':'该账户当前多头持仓手数','做空持仓':'该账户当前空头持仓手数',
+  '平均点差':'持仓加权平均开仓点差(套利基差)','实时盈亏':'该账户所有持仓的实时浮动盈亏',
+  '实时过夜费':'当前持仓的实时过夜费累计',
+  // 净利条
+  '当日平仓利润':'今日已平仓配对的净利润合计','当日总净利润':'今日平仓利润 + 当前浮动盈亏',
+  '主账户':'主账户今日 过夜费/手续费/返佣 明细','对冲账户':'对冲账户今日 过夜费/手续费/返佣 明细',
+  '过夜':'今日过夜费','手续':'今日手续费','返佣':'今日返佣',
+  // 历史汇总
+  '配对笔数':'查询时段内的配对成交笔数','平仓净利润':'查询时段内已平仓配对的净利润合计',
+  '胜率':'盈利配对数 / 平仓配对数','主账户费用':'查询时段主账户手续费合计',
+  '对冲费用':'查询时段对冲账户手续费合计','过夜费(主/对冲)':'查询时段主/对冲账户过夜费',
+  // 坑位列表表头
+  '主订单号':'该坑主账户持仓订单号 + 手数','主开仓价':'主账户开仓价','对冲订单号':'对冲账户持仓订单号',
+  '对冲开仓价':'对冲账户开仓价','开仓点差':'开仓时两腿点差(套利基差)','买入点位':'进场点差门槛: 实时点差≥此值才开',
+  '卖出点位':'出场点差门槛: 实时点差≤此值才平','获利':'该坑当前配对浮动盈亏',
+  // 状态栏
+  '币名':'当前交易品种','进位':'价格小数点位数','单量':'每次开仓的坑位数(N 个空坑)',
+  '反向Ask':'反向开仓点差 = 对冲ASK − 主BID','正向Bid':'正向开仓点差 = 主ASK − 对冲BID',
+  // 飞书提醒配置
+  'Webhook 地址':'飞书群机器人的 Webhook URL(接收告警推送)','签名密钥 (Secret)':'飞书机器人加签密钥(启用签名校验时填)',
+  '我的飞书ID（@提醒用）':'你的飞书 用户ID, 告警时 @你(可用「查我的飞书ID」自助获取)','告警冷却 (秒)':'同类告警的最小间隔(秒), 防刷屏',
+  '令牌桶节流 (条/分)':'每分钟最多推送的告警条数上限','爆仓风险阈值 (保证金率%)':'保证金率低于此值触发爆仓风险告警',
+  '大额债务阈值 ($)':'借币债务超过此金额触发告警',
+  // 充值/续费
+  '充值金额 (USDT)':'本次充值/续费的 USDT 金额','转账哈希 TxID(转账后粘贴,供财务核对)':'链上转账交易哈希, 提交供财务核对到账'
+};
+function _tipClean(s){ return (s||'').replace(/[:：*\s]/g,'').trim(); }
+function applyPanelTips(){
+  try{
+    // 数据项标签: 账户卡 .k / 历史汇总 .dsum .it b / 净利条 .nb-i i / 坑位表头 th
+    document.querySelectorAll('.k,.dsum .it b,.nb-i i,.tablecard thead th,.ob-head .c,.seg .k,.status .k').forEach(function(el){
+      const t=_tipClean(el.textContent); const tip=PANEL_TIPS[t]||PANEL_TIPS[(el.textContent||'').trim()];
+      if(tip){ if(!el.title)el.title=tip; const row=el.closest('.r,.mr,.it,.nb-i,.seg'); if(row&&!row.title)row.title=tip; }
+    });
+    // 各模态 .fld 标签 → 悬停(标签+同格输入框); 精确文本匹配
+    document.querySelectorAll('.mask .fld label').forEach(function(lb){
+      const tip=PANEL_TIPS[(lb.textContent||'').trim()]; if(!tip)return;
+      if(!lb.title)lb.title=tip; const inp=lb.parentElement&&lb.parentElement.querySelector('input,select'); if(inp&&!inp.title)inp.title=tip;
+    });
+    // 右键菜单项: 悬停显示各菜单功能
+    var MENU_TIPS={'批量设置…':'一次把 手数/买入卖出点位/止盈止损/启用开关 写入全部坑','一键平仓（强制平仓）':'忽略盈亏, 立即市价平掉全部持仓',
+      '盈利平仓（点差利润>0）':'仅平掉净利润>0 的配对','坑位规则设置':'设置本坑的手数/买入卖出点位/进出场开关(留空=回落全局)',
+      '一键平仓（强制·忽略盈亏）':'忽略盈亏, 市价平掉本坑双腿','盈利平仓（利润>0 才平）':'本坑净利>0 才平'};
+    document.querySelectorAll('.ctxmenu .mi').forEach(function(mi){ const t=(mi.textContent||'').replace(/\s+/g,'').trim();
+      for(var k in MENU_TIPS){ if(t.indexOf(k.replace(/\s+/g,''))>=0||t.indexOf(k.slice(0,4))>=0){ if(!mi.title)mi.title=MENU_TIPS[k]; break; } } });
+  }catch(e){}
+}
 /* ===== 移动 Tab 分屏(方案A): ≤640+触屏 启用; 一次一屏; 切换重画图表; PC 零影响 ===== */
 function isMobileView(){ return window.matchMedia('(max-width:640px)').matches && window.matchMedia('(pointer:coarse)').matches; }
 function switchMTab(t){
@@ -2656,15 +2936,26 @@ function setupMobileMode(){
       });
     }
   }
+  function relocateMarquee(toTop){
+    // 手机: 实时告警条从 .main 底部搬到 币名条(statusbar)上方; 回桌面还原(记录原位)
+    var mq=$('marquee'); if(!mq)return;
+    var sb=document.querySelector('.app > .statusbar');
+    if(toTop){
+      if(!mq.__homeParent){ mq.__homeParent=mq.parentNode; mq.__homeNext=mq.nextSibling; }
+      if(sb && sb.parentNode) sb.parentNode.insertBefore(mq, sb);
+    } else if(mq.__homeParent){
+      mq.__homeParent.insertBefore(mq, mq.__homeNext||null);
+    }
+  }
   function apply(){
     if(isMobileView()){
       if(!document.body.classList.contains('mobile-mode')){
         document.body.classList.add('mobile-mode');
-        relocateAuto(true);
+        relocateAuto(true); relocateMarquee(true);
         setTimeout(function(){ if(typeof scDraw==='function')scDraw(); if(typeof drawKline==='function')drawKline(); },120);  // 进入mobile布局稳定后重画图表(自适应高)
       }
     } else {
-      if(document.body.classList.contains('mobile-mode'))relocateAuto(false);
+      if(document.body.classList.contains('mobile-mode')){ relocateAuto(false); relocateMarquee(false); }
       document.body.classList.remove('mobile-mode','mt-acct','mt-market','mt-position','mt-pair');
     }
   }
@@ -2736,9 +3027,9 @@ setInterval(async ()=>{
 
 // waiting countdown (status bar + row)
 let sec=4;
-setInterval(()=>{ sec=sec<=0?4:sec-1; $('wait-sec').textContent=sec; },1000);
+setInterval(()=>{ sec=sec<=0?4:sec-1; const _e=$('wait-sec'); if(_e)_e.textContent=sec; },1000);
 let cnt=126.0;
-setInterval(()=>{ cnt=cnt<=0?126:cnt-0.5; $('cnt').textContent=cnt.toFixed(2); },500);
+setInterval(()=>{ cnt=cnt<=0?126:cnt-0.5; const _e=$('cnt'); if(_e)_e.textContent=cnt.toFixed(2); },500);
 
 /* ============ CONTEXT MENU (region-routed) ============ */
 const ctx=$('ctxmenu');
@@ -2766,7 +3057,7 @@ document.addEventListener('contextmenu',e=>{
   //  绿框 = 账本表头行(主订单号/主开仓价 那行 thead) → 批量设置
   //  红框 = 订单簿区(.orderbook) → 一键平仓
   //  其它 → 默认菜单
-  if(e.target.closest('.tablecard') && e.target.closest('thead')){ showAt(ctxBatch,e.clientX,e.clientY); }
+  if(e.target.closest('.tablecard') && (e.target.closest('thead')||e.target.closest('.ledger-hd'))){ showAt(ctxBatch,e.clientX,e.clientY); }  // 账本头/点差条(移动端)→批量设置
   else if(e.target.closest('.tablecard') && e.target.closest('tr[data-slot]')){
     window.__slotCtx=parseInt(e.target.closest('tr[data-slot]').dataset.slot)||0;
     fillSlotDetail(window.__slotCtx);
@@ -2783,7 +3074,7 @@ document.addEventListener('scroll',hideCtx,true);
   let lpTimer=null, lpStartX=0, lpStartY=0, lpFired=false;
   function routeMenu(target,x,y){
     if(target.closest('.mask')||target.closest('.ctxmenu')||target.closest('#login'))return;
-    if(target.closest('.tablecard') && target.closest('thead')){ showAt(ctxBatch,x,y); }
+    if(target.closest('.tablecard') && (target.closest('thead')||target.closest('.ledger-hd'))){ showAt(ctxBatch,x,y); }  // 账本头/点差条(移动端长按)→批量设置
     else if(target.closest('.tablecard') && target.closest('tr[data-slot]')){
       window.__slotCtx=parseInt(target.closest('tr[data-slot]').dataset.slot)||0; fillSlotDetail(window.__slotCtx); showAt(ctxSlot,x,y);
     }
@@ -2811,9 +3102,10 @@ document.addEventListener('scroll',hideCtx,true);
 })();
 
 /* ============ 阶梯行(坑位)逐坑策略: 右键修改订单 ============ */
-async function openSlotEdit(){
-  hideCtx(); const slot=window.__slotCtx||0; if(slot<1){ toast('未识别坑号'); return; }
-  $('slot-title-t').textContent='修改订单 — 坑 '+slot;
+async function openSlotEdit(slotArg){
+  hideCtx(); if(slotArg!=null&&Number(slotArg)>0)window.__slotCtx=Number(slotArg);
+  const slot=window.__slotCtx||0; if(slot<1){ toast('未识别坑号'); return; }
+  $('slot-title-t').textContent='坑位规则设置 — 坑 '+slot;
   const setv=function(id,v){const e=$(id); if(e&&v!=null)e.value=v;};
   const setsw=function(id,on){const e=$(id); if(e)e.classList.toggle('on',!!on);};
   // 币名称回填全局(只读): 取全局参数模板 symbol
@@ -2831,6 +3123,7 @@ async function openSlotEdit(){
     setsw('slot-exit-sw', ov?!!ov.exit_enabled:false); setsw('slot-exitcalc-sw', ov?!!ov.exit_calc:false);
     setv('slot-sellpoint', ov?ov.sell_point:0);
   }catch(e){ setsw('slot-lotmode-sw',false); setv('slot-qty',0); setv('slot-entry','1'); const bpe=$('slot-buypoint'); if(bpe)bpe.value=''; setsw('slot-exit-sw',false); setsw('slot-exitcalc-sw',false); setv('slot-sellpoint',0); }
+  notesToTitle('#slot-mask');   // 说明→悬停提示
   openMask('slot-mask');
 }
 async function saveSlotEdit(){
@@ -2854,30 +3147,37 @@ async function saveSlotEdit(){
 async function clearSlotEdit(){
   hideCtx(); const slot=window.__slotCtx||0; if(slot<1)return;
   try{ const j=await licPost('/engine/slot_override_del',{username:QH.user,license_key:QH.key,symbol:(window.QHSYM||'XAUUSD'),slot:slot});
-    toast(j.msg||('坑'+slot+' 覆盖已清除'));
+    closeMask('slot-mask'); toast(j.msg||('坑'+slot+' 已回落全局'));
+    if(window.__slotov)delete window.__slotov[String(slot)];
+    if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);
   }catch(e){ toast('清除失败：'+(e.message||e)); }
 }
 
 /* ============ 全自动出场模式控制 ============ */
+const AUTO_MODE_CN={off:'关闭',armed:'勾选自动',full:'开启',shadow:'关闭'};
+function autoModeCN(m){ return AUTO_MODE_CN[m]||m; }
 async function setAutoExit(mode){
-  // 真金武装/全量需二次确认
+  // 真金"勾选自动/开启"需二次确认
   if((mode==='armed'||mode==='full') && !window.__axDemo){
-    const ok=await uiConfirm('启用全自动出场（真金）','模式: '+mode+'\n\n引擎将按 逐对盈亏/卖出点位/止盈止损/持仓超时 自动平仓（真实下单）。\nfull=平所有命中坑, armed=仅平已勾选"是否出单"的坑。\n确认启用？',true);
+    const ok=await uiConfirm('启用自动出场（真金）','模式: '+autoModeCN(mode)+'\n\n引擎将按 逐对盈亏/卖出点位/止盈止损/持仓超时 自动平仓（真实下单）。\n开启=平所有命中坑, 勾选自动=仅平勾了「出」的坑。\n确认启用？',true);
     if(!ok){ const s=$('ax-mode'); if(s)s.value=window.__axMode||'off'; return; }
   }
   const profitFirst=(localStorage.getItem('qh_cfg-sw-profitfirst')==='1');
   try{
-    const j=await adminPost('/cmd/auto_exit',{username:QH.user,license_key:QH.key,mode:mode,profit_first:profitFirst});
+    const j=await licPost('/cmd/auto_exit',{username:QH.user,license_key:QH.key,mode:mode,profit_first:profitFirst});
     window.__axMode=mode; window.__axDemo=j.demo;
-    toast('自动出场模式: '+mode+(j.demo?'（演示）':(mode==='off'?'':'（真金!）')));
-    pushAlert(mode==='off'?'info':'warn','全自动出场→'+mode);
+    if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);  // 徽章随模式显隐
+    toast('自动出场模式: '+autoModeCN(mode)+(j.demo?'（演示）':(mode==='off'?'':'（真金!）')));
+    pushAlert(mode==='off'?'info':'warn','自动出场→'+autoModeCN(mode));
   }catch(e){ toast('设置失败：'+(e.message||e)); }
 }
 async function pollAutoExit(){
   try{
     const a=await QH.get('/engine/auto_exit/'+QH.user);
-    if(!a)return; window.__axDemo=a.demo; window.__axMode=a.mode;
-    const sel=$('ax-mode'); if(sel && document.activeElement!==sel)sel.value=a.mode||'off';
+    if(!a)return; window.__axDemo=a.demo; const _prevX=window.__axMode; window.__axMode=a.mode;
+    if(_prevX!==a.mode && typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);  // 其它端切换同步→重绘徽章
+    const _m=(a.mode==='shadow'?'off':(a.mode||'off'));   // 影子已废除, 遗留态显示为关闭
+    const sel=$('ax-mode'); if(sel && document.activeElement!==sel)sel.value=_m;
     const st=$('ax-state');
     if(st){ const d=a.decisions; const n=(d&&d.items)?d.items.length:0;
       st.textContent=(a.demo?'演示·':'')+(a.mode==='off'?'未启用':('待平 '+n+' 坑'));
@@ -2889,21 +3189,24 @@ async function pollAutoExit(){
 async function setAutoEntry(){
   const mode=($('ae-mode')||{}).value||'off'; const dir=($('ae-dir')||{}).value||'reverse';
   if((mode==='armed'||mode==='full') && !window.__aeDemo){
-    const ok=await uiConfirm('启用全自动进单（真金）','模式: '+mode+' / 方向: '+dir+'\n\n引擎将按 买入点位(逐坑或全局)+费用/波动/保证金护栏 自动逐坑开仓（真实下单）。\nfull=开所有未禁用空坑, armed=仅开已勾选"进单状态"的坑。\n确认启用？',true);
+    const ok=await uiConfirm('启用自动进单（真金）','模式: '+autoModeCN(mode)+' / 方向: '+dir+'\n\n引擎将按 买入点位(逐坑或全局)+费用/波动/保证金护栏 自动逐坑开仓（真实下单）。\n开启=开所有未禁用空坑, 勾选自动=仅开勾了「进」的坑。\n确认启用？',true);
     if(!ok){ const s=$('ae-mode'); if(s)s.value=window.__aeMode||'off'; return; }
   }
   try{
-    const j=await adminPost('/cmd/auto_entry',{username:QH.user,license_key:QH.key,mode:mode,direction:dir});
+    const j=await licPost('/cmd/auto_entry',{username:QH.user,license_key:QH.key,mode:mode,direction:dir});
     window.__aeMode=mode; window.__aeDemo=j.demo;
-    toast('自动进单: '+mode+'/'+dir+(j.demo?'（演示）':(mode==='off'?'':'（真金!）')));
-    pushAlert(mode==='off'?'info':'warn','全自动进单→'+mode+'/'+dir);
+    if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);  // 徽章随模式显隐
+    toast('自动进单: '+autoModeCN(mode)+'/'+dir+(j.demo?'（演示）':(mode==='off'?'':'（真金!）')));
+    pushAlert(mode==='off'?'info':'warn','自动进单→'+autoModeCN(mode)+'/'+dir);
   }catch(e){ toast('设置失败：'+(e.message||e)); }
 }
 async function pollAutoEntry(){
   try{
     const a=await QH.get('/engine/auto_entry/'+QH.user);
-    if(!a)return; window.__aeDemo=a.demo; window.__aeMode=a.mode;
-    const sel=$('ae-mode'); if(sel && document.activeElement!==sel)sel.value=a.mode||'off';
+    if(!a)return; window.__aeDemo=a.demo; const _prevE=window.__aeMode; window.__aeMode=a.mode;
+    if(_prevE!==a.mode && typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);  // 其它端切换同步→重绘
+    const _m=(a.mode==='shadow'?'off':(a.mode||'off'));   // 影子已废除, 遗留态显示为关闭
+    const sel=$('ae-mode'); if(sel && document.activeElement!==sel)sel.value=_m;
     const sd=$('ae-dir'); if(sd && document.activeElement!==sd)sd.value=a.direction||'reverse';
     const st=$('ae-state');
     if(st){ const d=a.decisions;
@@ -2953,8 +3256,30 @@ function togglePin(){
 }
 
 /* ============ MODALS ============ */
-function openMask(id){ $(id).classList.add('show'); hideCtx(); }
+function openMask(id){ const m=$(id); const d=m&&m.querySelector('.dlg'); if(d){ d.style.transform=''; d.dataset.dx=0; d.dataset.dy=0; } m.classList.add('show'); hideCtx(); }
 function closeMask(id){ $(id).classList.remove('show'); }
+/* ===== 模态框拖拽(PC鼠标+移动触摸统一走 Pointer Events); 抓 .dh 标题栏拖 .dlg ===== */
+(function(){
+  let drag=null;
+  document.addEventListener('pointerdown', function(e){
+    const dh=e.target.closest && e.target.closest('.dh'); if(!dh) return;
+    if(e.target.closest('button, input, select, textarea, a, .x, svg')) return; // 点关闭/控件不触发拖拽
+    const dlg=dh.closest('.dlg'); if(!dlg) return;
+    drag={dlg:dlg, sx:e.clientX, sy:e.clientY, ox:parseFloat(dlg.dataset.dx||0), oy:parseFloat(dlg.dataset.dy||0)};
+    dlg.style.transition='none';
+    try{ dh.setPointerCapture(e.pointerId); }catch(_){}
+    e.preventDefault();
+  }, {passive:false});
+  document.addEventListener('pointermove', function(e){
+    if(!drag) return;
+    const dx=drag.ox+(e.clientX-drag.sx), dy=drag.oy+(e.clientY-drag.sy);
+    drag.dlg.dataset.dx=dx; drag.dlg.dataset.dy=dy;
+    drag.dlg.style.transform='translate('+dx+'px,'+dy+'px)';
+  }, {passive:true});
+  function end(){ drag=null; }
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+})();
 /* ===== 统一风格弹窗(替代原生 confirm/prompt/alert), 复用 .mask/.dlg 主界面风格 ===== */
 function uiModal(opts){
   return new Promise(function(resolve){
@@ -2982,7 +3307,19 @@ function uiAlert(title,msg){ return uiModal({title:title,html:msg,noCancel:true,
 /* 模态框仅可通过 ✕/取消 关闭, 不再点背景关闭(防误关丢失表单) */
 
 /* config */
-function openCfg(){ openMask('cfg-mask'); loadCfg(); }
+function openCfg(){ openMask('cfg-mask'); loadCfg(); notesToTitle('#cfg-mask'); }
+// 紧凑: 参数项说明(灰字)转为悬停提示(输入框/下拉/开关+标签+整块), 省竖向空间, 信息不丢
+function notesToTitle(sel){
+  document.querySelectorAll(sel+' .fld').forEach(function(f){
+    const n=f.querySelector('.note'); if(!n)return;
+    const txt=(n.textContent||'').trim(); if(!txt)return;
+    const ctrl=f.querySelector('input,select,.toggle'); const lb=f.querySelector('label');
+    if(ctrl&&!ctrl.title)ctrl.title=txt;
+    if(lb&&!lb.title)lb.title=txt;
+    if(!f.title)f.title=txt;
+  });
+}
+function cfgNotesToTitle(){ notesToTitle('#cfg-mask'); }   // 兼容旧调用
 // 币名称: 纯前端展示标签(localStorage), 更新顶栏"币名:" + 配置框标题
 function applyCoinLabel(){
   const lbl=localStorage.getItem('qh_coin_label')||'XAUUSD';
@@ -3011,13 +3348,15 @@ async function loadCfg(){
     setv('cfg-spread',p.entry_spread); setv('cfg-sliptol',p.slippage_tol);
     setv('cfg-slippause',p.slippage_pause_min); setv('cfg-inflight',p.max_inflight);
     setv('cfg-hold',p.hold_secs); setv('cfg-interval',p.entry_interval_sec);
+    if(p.entry_win_start!=null)setv('cfg-entry-start',p.entry_win_start); if(p.entry_win_end!=null)setv('cfg-entry-end',p.entry_win_end);
+    if(p.run_win_start!=null)setv('cfg-run-start',p.run_win_start); if(p.run_win_end!=null)setv('cfg-run-end',p.run_win_end);
     setv('cfg-ladders',p.ladders);
     setv('cfg-entrymode',p.entry_mode); setv('cfg-exitmode',p.exit_mode); setv('cfg-speed',p.speed_mode);
     setv('cfg-predict',p.predict_budget);
     setsw('cfg-sw-autoclose', p.auto_close!==false); setsw('cfg-sw-singleleg', p.single_leg_alert!==false);
     setsw('cfg-sw-sat', !!p.weekend_sat); setsw('cfg-sw-sun', !!p.weekend_sun);
     // 10 个 UI 开关从 localStorage 恢复(批四: 状态持久化)
-    ['cfg-sw-smartdisplay','cfg-sw-smartpredict','cfg-sw-profitfirst','cfg-sw-entrymech','cfg-sw-entrywait','cfg-sw-forcebalance','cfg-sw-showquote','cfg-sw-smartip','cfg-sw-loop','cfg-sw-exitmode'].forEach(function(id){ const v=localStorage.getItem('qh_'+id); if(v!=null)setsw(id, v==='1'); });
+    ['cfg-sw-smartdisplay','cfg-sw-smartpredict','cfg-sw-profitfirst','cfg-sw-entrymech','cfg-sw-entrywait','cfg-sw-showquote','cfg-sw-loop','cfg-sw-exitmode'].forEach(function(id){ const v=localStorage.getItem('qh_'+id); if(v!=null)setsw(id, v==='1'); });
   }catch(e){ /* 回填失败保留默认, 不阻断打开 */ }
 }
 function cfgTab(id){
@@ -3032,7 +3371,7 @@ async function saveCfg(){
   // 周末交易 select: 第一项"关闭"=weekend_guard true
   const body={
     username:QH.user, license_key:QH.key, symbol:strv('cfg-symbol','XAUUSD'),
-    entry_spread:numv('cfg-spread',0.30), tp_points:15.0, sl_points:50.0,
+    entry_spread:numv('cfg-spread',0.30), tp_points:0.30, sl_points:0.50,  /* 点差净盈亏点数(全局默认; 逐坑/批量可覆盖) */
     ladders:intv('cfg-ladders',3), hold_secs:intv('cfg-hold',300),
     weekend_guard:!(swon('cfg-sw-sat',false)||swon('cfg-sw-sun',false)),
     weekend_sat:swon('cfg-sw-sat',false), weekend_sun:swon('cfg-sw-sun',false),
@@ -3054,7 +3393,10 @@ async function saveCfg(){
     sync_interval_sec:numv('cfg-syncint',1), records_per_sec:Math.max(1,intv('cfg-recps',1)),
     // 批八 保证金预留 + 每手费用
     margin_reserve_main:numv('cfg-marginmain',200), margin_reserve_hedge:numv('cfg-marginhedge',200),
-    fee_per_lot:numv('cfg-feeperlot',0)
+    fee_per_lot:numv('cfg-feeperlot',0),
+    // 时间窗(北京 HH:MM; 进单时段=开仓时段, 运行时段=系统自动运行时段)
+    entry_win_start:strv('cfg-entry-start',''), entry_win_end:strv('cfg-entry-end',''),
+    run_win_start:strv('cfg-run-start',''), run_win_end:strv('cfg-run-end','')
   };
   // applySwitches 读取用: 预算值 + 循环间隔(=入场间隔) 落 localStorage
   localStorage.setItem('qh_predict_budget', String(body.predict_budget));
@@ -3086,15 +3428,17 @@ async function saveBatch(){
   const buy=parseFloat(($('b-buy')||{}).value)||0;
   const tp=parseFloat(($('b-tp')||{}).value)||0;
   const sl=parseFloat(($('b-sl')||{}).value)||0;
-  if(!await uiConfirm('批量应用到全部坑','将把 买入点位/盈利点位/止损点位'+(lot>0?'/手数':'')+' 写入全部 '+ladders+' 个坑(逐坑覆盖)。\n\n确认应用？')) return;
+  const swon=function(id){const e=$(id);return e?e.classList.contains('on'):false;};
+  const enEntry=swon('b-en-entry'), enTp=swon('b-en-tp'), enSl=swon('b-en-sl');
+  if(!await uiConfirm('批量应用到全部坑','将把 买入点位/盈利点位'+(enSl?'/止损点位':'')+(lot>0?'/手数':'')+' 及 入场启用='+(enEntry?'开':'关')+'/卖出点位启用='+(enTp?'开':'关')+' 写入全部 '+ladders+' 个坑(逐坑覆盖)。\n\n确认应用？')) return;
   let ok=0, fail=0;
   for(let s=1;s<=ladders;s++){
     const prev=(window.__slotov||{})[String(s)]||{};
     const body={username:QH.user, license_key:QH.key, symbol:(window.QHSYM||'XAUUSD'), slot:s,
       coin:prev.coin||'', lot_mode:(lot>0?'fixed':(prev.lot_mode||'auto')), qty:(lot>0?lot:(Number(prev.qty)||0)),
-      entry_enabled:(prev.entry_enabled!==false), buy_point:buy,
-      exit_enabled:(prev.exit_enabled!==undefined?prev.exit_enabled:false), sell_point:(Number(prev.sell_point)||0),
-      exit_calc:!!prev.exit_calc, tp_points:tp, sl_points:sl};
+      entry_enabled:enEntry, buy_point:buy,
+      exit_enabled:enTp, sell_point:(Number(prev.sell_point)||0),
+      exit_calc:!!prev.exit_calc, tp_points:tp, sl_points:(enSl?sl:0)};
     try{ const j=await licPost('/engine/slot_override',body); if(!window.__slotov)window.__slotov={}; window.__slotov[String(s)]=(j&&j.saved)||body; ok++; }
     catch(e){ fail++; }
   }
@@ -3118,13 +3462,15 @@ function testFeishu(){ toast('测试卡片已发送至飞书（演示）'); push
 async function doCloseAll(mode){
   hideCtx();
   const label = mode==='force' ? '强制平仓（忽略盈亏·双腿市价）' : '盈利平仓（仅平利润>0）';
-  if(!await uiConfirm('确认平仓','即将执行：<b>'+label+'</b>\n\n这是真金操作，将发送到服务端引擎执行。', mode==='force')) return;
+  const key='closeall_'+mode;
+  if(!_tradeLock(key)){ toast('平仓进行中…'); return; }   // 立即执行, 不再二次确认
   try{
     const path = mode==='force' ? '/cmd/close_all' : '/cmd/close_profit';
     const r=await QH.post(path,{username:QH.user,license_key:QH.key,confirm:true});
     if(r.demo){ toast('【演示模式】'+r.msg); pushAlert(mode==='force'?'err':'info', '[演示] '+label); }
     else { toast(r.msg||'已执行'); pushAlert('err', label+' 已真实执行'); }
   }catch(e){ toast('执行失败：'+(e.message||e)); }
+  finally{ _tradeUnlock(key); }
 }
 
 /* ===== 套利开仓/按对平仓 + 开关显示逻辑 (批四) ===== */
@@ -3146,25 +3492,76 @@ async function licPost(path, body){
   if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
   return j;
 }
+async function licGet(path){
+  const r=await fetch('/api'+path,{headers:{'X-License':QH.key}});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
+  return j;
+}
 function bumpQty(d){ const e=$('ob-qty'); if(!e)return; let v=parseFloat(e.value)||1; v=Math.max(1,Math.round(v+d)); e.value=v; }
+// 交易防抖锁: 去掉二次确认后靠此防误双击重复下单(点差敏感,立即执行不等确认); 后端单飞兜底。
+const _tradeInflight={};
+function _tradeLock(key){ if(_tradeInflight[key])return false; _tradeInflight[key]=true; return true; }
+function _tradeUnlock(key){ setTimeout(function(){ _tradeInflight[key]=false; }, 900); }
 async function openPair(direction){
+  // 循环下单开关 ON → 两键=启停该方向循环; OFF → 立即开 N 坑
+  const loopMode=(function(){const e=$('cfg-sw-loop');return e?e.classList.contains('on'):(localStorage.getItem('qh_cfg-sw-loop')==='1');})();
+  if(loopMode){
+    if(__loopDir){ if(__loopDir===direction){ stopLoop(); } else { toast('已在循环'+(__loopDir==='reverse'?'1空2涨':'2空1涨')+'，请先停止'); } return; }
+    startLoop(direction); return;
+  }
   const label = direction==='reverse' ? '反向开仓（1空2涨：主腿卖出 + 对冲腿买入）' : '正向开仓（2空1涨：主腿买入 + 对冲腿卖出）';
   const slots=Math.max(1,Math.round(parseFloat(($('ob-qty')||{}).value)||1));
-  if(!await uiConfirm('确认开仓','即将执行：<b>'+label+'</b>\n坑位数 <b>'+slots+'</b>（按订单区坑位顺序，开最前面 '+slots+' 个空坑，每坑一对）\n\n这是真金开仓操作，将按参数模板的每U手数×腿倍率逐坑下单。')) return;
+  const key='open_'+direction;
+  if(!_tradeLock(key)){ toast('开仓进行中…'); return; }   // 立即执行, 不再二次确认(避免确认延迟致点差漂移)
+  // 将开的前 N 个空坑: 给其行加进度渐变(顺序填充口径与后端一致)
+  const _lp=window.__lastPositions||{}; const _mp=(_lp.main&&(_lp.main.positions||_lp.main))||[];
+  const _occ=new Set(_mp.map(p=>Number(p&&p.slot)).filter(x=>x>0));
+  const _lad=Number(window.__ladders||0)||0; const _tgt=[];
+  for(let k=1;(_lad?k<=_lad:k<=slots)&&_tgt.length<slots;k++){ if(!_occ.has(k))_tgt.push(k); }
+  _tgt.forEach(k=>setSlotBusy(k,true));
   try{
     const j=await licPost('/cmd/open_pair',{username:QH.user,license_key:QH.key,confirm:true,direction:direction,symbol:(window.QHSYM||'XAUUSD'),slots:slots});
     if(j.demo){ toast('【演示模式】'+j.msg); pushAlert('info','[演示] '+label+' ×'+slots+'坑'); }
     else { toast(j.msg||'已开仓'); pushAlert('info', label+'：'+(j.msg||('已开'+(j.opened||slots)+'坑'))); }
   }catch(e){ toast('开仓失败：'+(e.message||e)); pushAlert('err','开仓失败：'+(e.message||e)); }
+  finally{ _tradeUnlock(key); setTimeout(function(){ _tgt.forEach(k=>setSlotBusy(k,false)); },800); }
 }
-async function closePair(mainSide,hedgeSide,sym){
-  const label='按对平仓（主腿'+(mainSide==='buy'?'多':'空')+' / 对冲腿'+(hedgeSide==='buy'?'多':'空')+'）';
-  if(!await uiConfirm('确认平仓','即将执行：<b>'+label+'</b>\n\n这是真金操作，将平掉该配对双腿各一笔。', true)) return;
+// 逐坑定向开仓: 只开该坑(允许坑号跳空), 手数走本坑规则
+async function openPairSlot(slot, direction){
+  slot=Number(slot)||0; if(slot<1)return;
+  const label = direction==='reverse' ? '反向(1空2涨)' : '正向(2空1涨)';
+  const key='openslot_'+slot+'_'+direction;
+  if(!_tradeLock(key)){ toast('开仓进行中…'); return; }
+  setSlotBusy(slot,true);
   try{
-    const j=await adminPost('/cmd/close_pair',{username:QH.user,license_key:QH.key,confirm:true,symbol:(sym||window.QHSYM||'XAUUSD'),main_side:mainSide,hedge_side:hedgeSide});
-    if(j.demo){ toast('【演示模式】'+j.msg); pushAlert('info','[演示] '+label); }
-    else { toast(j.msg||'已平仓'); pushAlert('err', label+' 已真实执行'); }
-  }catch(e){ toast('平仓失败：'+(e.message||e)); }
+    const j=await licPost('/cmd/open_pair',{username:QH.user,license_key:QH.key,confirm:true,direction:direction,symbol:(window.QHSYM||'XAUUSD'),slot:slot});
+    if(j.demo){ toast('【演示】坑'+slot+' '+label); pushAlert('info','[演示] 坑'+slot+' '+label); }
+    else { toast(j.msg||('坑'+slot+' 已开')); pushAlert('info','坑'+slot+' '+label+'：'+(j.msg||'已开')); }
+  }catch(e){ toast('坑'+slot+'开仓失败：'+(e.message||e)); pushAlert('err','坑'+slot+'开仓失败：'+(e.message||e)); }
+  finally{ _tradeUnlock(key); setTimeout(function(){ setSlotBusy(slot,false); },800); }
+}
+// 坑位行右键平仓: 仅该坑(force=忽略盈亏 / profit=净利>0 才平), 方向按本坑进场方向对应
+function closeSlot(mode){
+  hideCtx(); const slot=window.__slotCtx||0; if(slot<1){ toast('未识别坑号'); return; }
+  const d=(window.__slotDetail||{})[String(slot)]||{};
+  if(!d.filled){ toast('坑'+slot+' 无持仓'); return; }
+  if(mode==='profit' && !(Number(d.pf)>0)){ toast('坑'+slot+' 未盈利(净'+fnum(Number(d.pf)||0)+')，盈利平仓跳过'); return; }
+  closePair(d.mSide,d.hSide,(window.QHSYM||'XAUUSD'),d.mTk||'',d.hTk||'',slot);
+}
+async function closePair(mainSide,hedgeSide,sym,mTk,hTk,slot){
+  const kLbl=(slot?('坑'+slot):'该配对');
+  const label=kLbl+'平仓（主腿'+(mainSide==='buy'?'多':'空')+' / 对冲腿'+(hedgeSide==='buy'?'多':'空')+'）';
+  const key='closepair_'+(slot||(mTk+''+hTk))+'_'+mainSide+hedgeSide+(sym||'');
+  if(!_tradeLock(key)){ toast(kLbl+'平仓进行中…'); return; }   // 立即执行, 不再二次确认
+  toast(kLbl+'平仓中…');   // 即时反馈(不等后端返回, 明确是哪个坑)
+  if(slot)setSlotBusy(slot,true);   // 该坑行进度渐变
+  try{
+    const j=await licPost('/cmd/close_pair',{username:QH.user,license_key:QH.key,confirm:true,symbol:(sym||window.QHSYM||'XAUUSD'),main_side:mainSide,hedge_side:hedgeSide,main_ticket:(parseInt(mTk,10)||0),hedge_ticket:(parseInt(hTk,10)||0)});
+    if(j.demo){ toast('【演示】'+kLbl+' '+(j.msg||'')); pushAlert('info','[演示] '+label); }
+    else { toast(kLbl+' 已平仓'); pushAlert('err', label+' 已真实执行'); }
+  }catch(e){ toast(kLbl+'平仓失败：'+(e.message||e)); }
+  finally{ _tradeUnlock(key); if(slot)setTimeout(function(){ setSlotBusy(slot,false); },600); }
 }
 // 开关显示逻辑: 持久化到 localStorage, 启动/切换即应用
 function swState(id,def){ const e=$(id); if(e)return e.classList.contains('on'); const v=localStorage.getItem('qh_'+id); return v==null?def:(v==='1'); }
@@ -3174,18 +3571,23 @@ function applySwitches(){
   const smartPredict=swState('cfg-sw-smartpredict',true);   // 按预算值显示开仓键(净值<预算则禁)
   const profitFirst =swState('cfg-sw-profitfirst',false);   // 盈利前禁用平仓键
   const showQuote   =swState('cfg-sw-showquote',true);      // 行情卡/点差流显隐
-  const loopOrder   =swState('cfg-sw-loop',false);          // 显示循环下单按钮
+  const loopMode    =swState('cfg-sw-loop',false);          // 循环下单: 关=两键立即开N坑 / 开=两键启停循环
   const exitMode    =swState('cfg-sw-exitmode',true);       // 平仓键可用
   // 持久化(模态框开时)
-  ['cfg-sw-smartdisplay','cfg-sw-profitfirst','cfg-sw-showquote','cfg-sw-loop','cfg-sw-exitmode','cfg-sw-smartpredict','cfg-sw-entrymech','cfg-sw-entrywait','cfg-sw-forcebalance','cfg-sw-smartip'].forEach(function(id){ const e=$(id); if(e)localStorage.setItem('qh_'+id, e.classList.contains('on')?'1':'0'); });
-  // 手动方向开仓按钮: 始终可见(核心手动功能; 循环下单=自动循环, 无引擎不耦合按钮显隐)
+  ['cfg-sw-smartdisplay','cfg-sw-profitfirst','cfg-sw-showquote','cfg-sw-loop','cfg-sw-exitmode','cfg-sw-smartpredict','cfg-sw-entrymech','cfg-sw-entrywait'].forEach(function(id){ const e=$(id); if(e)localStorage.setItem('qh_'+id, e.classList.contains('on')?'1':'0'); });
+  // 两方向键常显(不再随循环下单显隐); 循环下单只切行为模式。渲染基态(含循环运行态)
+  renderOpenBtns();
   const bR=$('btn-open-reverse'), bF=$('btn-open-forward');
-  if(bR&&bF){
-    bR.style.display=''; bF.style.display='';
-    // 智能显示: 仅当有实时配对点差且<=0 时, 软提示"无可操作"(不硬禁, 避免挡手动)
+  if(bR&&bF && !__loopDir){   // 循环运行中不覆盖停止键态
     const sp=(window.__lastSpread!=null)?window.__lastSpread:null;
-    [bR,bF].forEach(function(b){ b.style.opacity='1'; b.disabled=false; });
-    if(smartDisplay && sp!=null && sp<=0){ [bR,bF].forEach(function(b){ b.style.opacity='.6'; b.title='智能显示：当前点差≤0，开仓不利'; }); }
+    // 智能显示(硬禁用): 点差≤0 → 开仓键禁用 + 坑位"进"勾选禁用
+    const smartBlock=(smartDisplay && sp!=null && sp<=0);
+    if(smartBlock){ [bR,bF].forEach(function(b){ b.disabled=true; b.style.opacity='.45'; b.title='智能显示：当前点差≤0，已禁用开仓'; }); }
+    document.querySelectorAll('#otable .armchip').forEach(function(ch){
+      if(ch.textContent!=='进')return;
+      ch.style.pointerEvents=smartBlock?'none':''; ch.style.opacity=smartBlock?'.4':'';
+      if(smartBlock)ch.title='智能显示：当前点差≤0，进单勾选已禁用';
+    });
     // 智能预判: 净值<预算值 → 禁开仓键
     const budget=parseFloat(localStorage.getItem('qh_predict_budget')||'0')||0;
     if(smartPredict && budget>0){
@@ -3193,8 +3595,13 @@ function applySwitches(){
       if(eq>0 && eq<budget){ [bR,bF].forEach(function(b){ b.disabled=true; b.style.opacity='.4'; b.title='智能预判：账户净值 '+eq+' < 预算 '+budget+'，暂不可开仓'; }); }
     }
   }
-  // 循环下单: 开→显示循环按钮行
-  const lf=$('ob-loop-foot'); if(lf)lf.style.display=loopOrder?'':'none';
+  // 进单机制/进单等待: 真开关 → 同步后端(仅状态变化时发一次, 引擎侧消费)
+  const entryMech=swState('cfg-sw-entrymech',true), entryWait=swState('cfg-sw-entrywait',true);
+  const _swSig=(entryMech?'1':'0')+(entryWait?'1':'0');
+  if(window.__uiSwSig!==_swSig && QH.user && QH.key){
+    window.__uiSwSig=_swSig;
+    licPost('/cmd/ui_switches',{username:QH.user,license_key:QH.key,entrymech:entryMech,entrywait:entryWait}).catch(function(){ window.__uiSwSig=null; });
+  }
   // 显示行情: 关→隐藏点差流订单簿
   const ob=document.querySelector('.orderbook'); if(ob)ob.style.display=showQuote?'':'none';
   // 盈利平台优先 / 出场模式启用: 平仓键禁用态(盈利前不可平 / 出场模式关则不可平)
@@ -3205,28 +3612,38 @@ function applySwitches(){
     btn.title=block?(!exitMode?'出场模式已关闭':'盈利平台优先：盈利前不可平仓'):'平仓';
   });
 }
-// 循环下单: operator 显式启/停, 有界(硬上限), 按入场间隔重复反向开仓, 每单仍走全闸
-var __loopTimer=null, __loopCount=0;
-function toggleLoopOrder(){
-  const btn=$('btn-loop-order');
-  if(__loopTimer){ clearTimeout(__loopTimer); __loopTimer=null; if(btn){btn.innerHTML=SVGI('i-play')+' 循环下单';btn.style.background='#5a6';} toast('循环下单已停止'); return; }
-  startLoopOrder();
+// 循环下单(并入两方向键): 点方向键启动该方向循环, 有界(硬上限), 按进单间隔重复, 每单走全闸
+var __loopTimer=null, __loopCount=0, __loopDir=null;   // __loopDir 非空=循环运行中(reverse|forward)
+function renderOpenBtns(){
+  const bR=$('btn-open-reverse'), bF=$('btn-open-forward'); if(!bR||!bF)return;
+  if(__loopDir){
+    const active=(__loopDir==='reverse')?bR:bF, other=(__loopDir==='reverse')?bF:bR;
+    active.innerHTML=SVGI('i-stop')+' 停止 ('+__loopCount+')'; active.style.background='#d9534f'; active.disabled=false; active.style.opacity='1';
+    active.title='停止本方向循环下单';
+    other.disabled=true; other.style.opacity='.4'; other.title='循环运行中, 请先停止另一方向';
+  }else{
+    bR.innerHTML='1空2涨'; bR.style.background=''; bR.disabled=false; bR.style.opacity='1'; bR.title='反向开仓：主腿卖出 + 对冲腿买入';
+    bF.innerHTML='2空1涨'; bF.style.background=''; bF.disabled=false; bF.style.opacity='1'; bF.title='正向开仓：主腿买入 + 对冲腿卖出';
+  }
 }
-async function startLoopOrder(){
-  const btn=$('btn-loop-order');
-  const interval=Math.max(2, parseInt(localStorage.getItem('qh_loop_interval')||'5')||5);
+function stopLoop(){ if(__loopTimer){ clearTimeout(__loopTimer); __loopTimer=null; } __loopDir=null; renderOpenBtns(); toast('循环下单已停止'); }
+async function startLoop(direction){
+  const dirCN=direction==='reverse'?'1空2涨':'2空1涨';
+  // 进单等待开关: 开=按「进单间隔」等待; 关=不按间隔(2秒技术底线防打爆)
+  const waitOn=(localStorage.getItem('qh_cfg-sw-entrywait')!=='0');
+  const interval=waitOn?Math.max(2, parseInt(localStorage.getItem('qh_loop_interval')||'5')||5):2;
   const maxN=20;  // 硬上限防失控
-  if(!await uiConfirm('启动循环下单','将每 <b>'+interval+'</b> 秒重复一次【反向开仓】，最多 <b>'+maxN+'</b> 单，可随时点停。\n\n这是真金自动化操作。')) return;
-  __loopCount=0;
-  if(btn){btn.innerHTML=SVGI('i-stop')+' 停止循环';btn.style.background='#d9534f';}
+  if(!await uiConfirm('启动循环下单','将每 <b>'+interval+'</b> 秒'+(waitOn?'':'(进单等待已关,不按间隔)')+'重复一次【'+dirCN+'】开仓，最多 <b>'+maxN+'</b> 单，可随时点停。\n\n这是真金自动化操作。')) return;
+  __loopCount=0; __loopDir=direction; renderOpenBtns();
   const tick=async function(){
-    if(__loopCount>=maxN){ toggleLoopOrder(); toast('循环下单达上限 '+maxN+' 单，已停'); return; }
-    __loopCount++;
+    if(!__loopDir) return;   // 已被停止
+    if(__loopCount>=maxN){ stopLoop(); toast('循环下单达上限 '+maxN+' 单，已停'); return; }
+    __loopCount++; renderOpenBtns();
     try{
-      const j=await licPost('/cmd/open_pair',{username:QH.user,license_key:QH.key,confirm:true,direction:'reverse',symbol:(window.QHSYM||'XAUUSD'),slots:Math.max(1,Math.round(parseFloat(($('ob-qty')||{}).value)||1))});
-      pushAlert('info','循环下单 第'+__loopCount+'单 '+(j.msg||''));
-    }catch(e){ pushAlert('err','循环下单第'+__loopCount+'单失败：'+(e.message||e)); toggleLoopOrder(); toast('循环下单遇错已停'); return; }
-    __loopTimer=setTimeout(tick, interval*1000);
+      const j=await licPost('/cmd/open_pair',{username:QH.user,license_key:QH.key,confirm:true,direction:direction,symbol:(window.QHSYM||'XAUUSD'),slots:Math.max(1,Math.round(parseFloat(($('ob-qty')||{}).value)||1))});
+      pushAlert('info','循环['+dirCN+'] 第'+__loopCount+'单 '+(j.msg||''));
+    }catch(e){ pushAlert('err','循环第'+__loopCount+'单失败：'+(e.message||e)); stopLoop(); toast('循环下单遇错已停'); return; }
+    if(__loopDir) __loopTimer=setTimeout(tick, interval*1000);
   };
   tick();
 }
@@ -3252,14 +3669,14 @@ function phQuick(days){
   window.__phDays=days; loadPaired();
 }
 async function loadPaired(){
-  const tb=$('hist-body'); if(!tb)return; tb.innerHTML='<tr><td colspan="17" style="text-align:center;padding:14px">加载中…</td></tr>';
+  const tb=$('hist-body'); if(!tb)return; tb.innerHTML='<tr><td colspan="18" style="text-align:center;padding:14px">加载中…</td></tr>';
   // 用起止时间推算 days(后端按 days 拉 bridge 历史; 取整天, 至少1)
   let days=window.__phDays||7;
   try{ const s=$('ph-start').value,e=$('ph-end').value; if(s&&e){ days=Math.max(1,Math.ceil((new Date(e)-new Date(s))/86400000)); } }catch(_){}
   try{
     const r=await QH.get('/engine/paired_history?days='+days);
     window.__paired=r; renderPairedFull(r);
-  }catch(e){ tb.innerHTML='<tr><td colspan="17" style="text-align:center;padding:14px">加载失败</td></tr>'; }
+  }catch(e){ tb.innerHTML='<tr><td colspan="18" style="text-align:center;padding:14px">加载失败</td></tr>'; }
 }
 function renderPairedFull(r){
   const tb=$('hist-body'); if(!tb)return; const pairs=(r&&r.pairs)||[];
@@ -3272,52 +3689,58 @@ function renderPairedFull(r){
   // 时间窗前端过滤(后端按 days 拉, 这里按起止精确裁)
   let st=null,et=null; try{ st=$('ph-start').value?new Date($('ph-start').value).getTime()/1000:null; et=$('ph-end').value?new Date($('ph-end').value).getTime()/1000:null; }catch(_){}
   const rows=pairs.filter(function(p){ const t=p.time||0; return (!st||t>=st)&&(!et||t<=et); });
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="17" style="text-align:center;padding:14px;color:#8aa0a8">该时段无配对成交</td></tr>'; return; }
   const sd=function(s){return {buy:'买',sell:'卖'}[s]||(s||'-');};
   const num=function(v,d){return v==null?'—':Number(v).toFixed(d==null?2:d);};
-  tb.innerHTML=rows.map(function(p){
-    const t=p.time?new Date(p.time*1000):null; const ts=t?(t.getFullYear()+'-'+('0'+(t.getMonth()+1)).slice(-2)+'-'+('0'+t.getDate()).slice(-2)+' '+('0'+t.getHours()).slice(-2)+':'+('0'+t.getMinutes()).slice(-2)+':'+('0'+t.getSeconds()).slice(-2)):'--';
+  const trs=rows.map(function(p){
+    const t=p.time?new Date((p.time+28800)*1000):null; const ts=t?(t.getUTCFullYear()+'-'+('0'+(t.getUTCMonth()+1)).slice(-2)+'-'+('0'+t.getUTCDate()).slice(-2)+' '+('0'+t.getUTCHours()).slice(-2)+':'+('0'+t.getUTCMinutes()).slice(-2)+':'+('0'+t.getUTCSeconds()).slice(-2)):'--';  /* 北京 */
     const pf=Number(p.pair_profit||0);
     const src=p.source==='QH'?'<span style="color:var(--teal-deep)">策略</span>':'<span style="color:#8aa0a8">手动</span>';
     const mt=p.matched?'':' <span title="未配到对冲腿" style="color:#e0683a">⚠</span>';
+    // 带符号执行滑点: 正=成交比决策报价更优(绿)/负=更差(红); null=无决策快照('—'); approx=以当前阈值近似(≈)
+    let slipTxt,slipCls,slipTitle;
+    if(p.slippage==null){ slipTxt='—'; slipCls=''; slipTitle='无决策快照(改造上线前的历史单/平仓侧无匹配快照)，不再拿开仓阈值硬套'; }
+    else { slipCls=(p.slippage>0?'up':(p.slippage<0?'down':'')); slipTxt=(p.slip_src==='approx'?'≈':'')+(p.slippage>0?'+':'')+Number(p.slippage).toFixed(2);
+      slipTitle=(p.slip_src==='snap'?'执行滑点=实际成交捕获点差−决策时刻报价(同成交方向)；正=成交更优, 负=成交更差(延迟/挂撤成本)':'近似:该笔无决策快照, 暂以当前配置阈值为基准'); }
+    // 达标差 = 点差 − 阈值(旧HED口径, 双列并存)
+    let devTxt,devCls;
+    if(p.dev==null){ devTxt='—'; devCls=''; }
+    else { devCls=(p.dev>0?'up':(p.dev<0?'down':'')); devTxt=(p.dev>0?'+':'')+Number(p.dev).toFixed(2); }
     return '<tr><td>'+src+'</td><td style="text-align:left">'+ts+mt+'</td><td>'+p.entry+'</td>'+
       '<td class="'+(p.main_side==='buy'?'up':'down')+'">'+sd(p.main_side)+'</td><td>'+num(p.main_price)+'</td><td>'+num(p.main_vol)+'</td>'+
       '<td class="'+(p.hedge_side==='buy'?'up':'down')+'">'+sd(p.hedge_side)+'</td><td>'+num(p.hedge_price)+'</td><td>'+num(p.hedge_vol)+'</td>'+
-      '<td>'+num(p.spread)+'</td><td>'+num(p.threshold)+'</td><td class="'+((p.slippage||0)>0?'down':'up')+'">'+num(p.slippage)+'</td>'+
+      '<td>'+num(p.spread)+'</td><td>'+num(p.threshold)+'</td><td class="'+devCls+'" title="达标差=点差−阈值(旧HED口径)">'+devTxt+'</td><td class="'+slipCls+'" title="'+slipTitle+'">'+slipTxt+'</td>'+
       '<td>'+num(p.main_fee)+'</td><td>'+num(p.hedge_fee)+'</td>'+
       '<td class="'+((p.main_profit||0)>=0?'up':'down')+'">'+num(p.main_profit)+'</td><td class="'+((p.hedge_profit||0)>=0?'up':'down')+'">'+num(p.hedge_profit)+'</td>'+
       '<td class="'+(pf>=0?'up':'down')+'" style="font-weight:700">'+(pf>=0?'+':'')+pf.toFixed(2)+'</td></tr>';
-  }).join('');
+  });
+  __histAll.ht1=trs; __histPg.ht1=1; histRenderTab('ht1','hist-body',18,'该时段无配对成交');
 }
+/* ===== 交易历史 3tab 分页 ===== */
+var HIST_PS=50;
+var __histAll={ht1:[],ht2:[],ht3:[]}, __histPg={ht1:1,ht2:1,ht3:1};
+var __histMeta={ht1:['hist-body',18,'该时段无配对成交'],ht2:['main-deals',8,'暂无成交'],ht3:['hedge-deals',8,'暂无成交']};
+function histRenderTab(tab,tbodyId,colspan,emptyMsg){
+  const tb=$(tbodyId); if(!tb)return; const all=__histAll[tab]||[]; const pgEl=$('pg-'+tab);
+  if(!all.length){ tb.innerHTML='<tr><td colspan="'+colspan+'" style="text-align:center;padding:14px;color:#8aa0a8">'+emptyMsg+'</td></tr>'; if(pgEl)pgEl.innerHTML=''; return; }
+  const pages=Math.max(1,Math.ceil(all.length/HIST_PS)); let p=__histPg[tab]||1; p=Math.min(pages,Math.max(1,p)); __histPg[tab]=p;
+  tb.innerHTML=all.slice((p-1)*HIST_PS,p*HIST_PS).join('');
+  if(pgEl)pgEl.innerHTML='<button class="ph-q" '+(p<=1?'disabled':'')+' onclick="histGo(\''+tab+'\','+(p-1)+')" title="上一页">‹ 上一页</button>'+
+    '<span style="margin:0 10px;color:#5f7780;font-size:12px">第 '+p+'/'+pages+' 页 · 共 '+all.length+' 条(每页'+HIST_PS+')</span>'+
+    '<button class="ph-q" '+(p>=pages?'disabled':'')+' onclick="histGo(\''+tab+'\','+(p+1)+')" title="下一页">下一页 ›</button>';
+}
+function histGo(tab,p){ __histPg[tab]=p; const m=__histMeta[tab]; if(m)histRenderTab(tab,m[0],m[1],m[2]); }
 function exportPaired(){
   const r=window.__paired; if(!r||!r.pairs||!r.pairs.length){ toast('无数据可导出'); return; }
-  const head=['来源','时间','开平','主方向','主价','主手数','对冲方向','对冲价','对冲手数','点差','阈值','滑点','主费','对冲费','主盈亏','对冲盈亏','配对净盈亏'];
+  const head=['来源','时间','开平','主方向','主价','主手数','对冲方向','对冲价','对冲手数','点差','阈值','达标差','执行滑点','主费','对冲费','主盈亏','对冲盈亏','配对净盈亏'];
   const lines=[head.join(',')];
-  r.pairs.forEach(function(p){ const t=p.time?new Date(p.time*1000).toISOString():'';
-    lines.push([p.source,t,p.entry,p.main_side,p.main_price,p.main_vol,p.hedge_side,p.hedge_price,p.hedge_vol,p.spread,p.threshold,p.slippage,p.main_fee,p.hedge_fee,p.main_profit,p.hedge_profit,p.pair_profit].join(',')); });
+  r.pairs.forEach(function(p){ const t=p.time?new Date((p.time+28800)*1000).toISOString().slice(0,19).replace('T',' '):'';  /* 北京 */
+    lines.push([p.source,t,p.entry,p.main_side,p.main_price,p.main_vol,p.hedge_side,p.hedge_price,p.hedge_vol,p.spread,p.threshold,p.dev,p.slippage,p.main_fee,p.hedge_fee,p.main_profit,p.hedge_profit,p.pair_profit].join(',')); });
   const blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='paired_history.csv'; a.click();
 }
 
 /* platform history */
-async function fillPlat(id,leg){
-  const tb=$(id); tb.innerHTML='<tr><td colspan="7">加载中…</td></tr>';
-  try{
-    const d=await QH.get('/bridge/deals/'+leg+'?days=7');
-    const deals=(d.deals||[]).filter(x=>x.side!=='balance');
-    tb.innerHTML=deals.map(x=>{ const pf=Number(x.profit||0); const ts=x.time?new Date(x.time*1000):null;
-      const tstr=ts?(ts.getUTCFullYear()+'-'+('0'+(ts.getUTCMonth()+1)).slice(-2)+'-'+('0'+ts.getUTCDate()).slice(-2)+' '+('0'+ts.getUTCHours()).slice(-2)+':'+('0'+ts.getUTCMinutes()).slice(-2)):'-';
-      return '<tr><td>'+(x.ticket||'-')+'</td><td>'+tstr+'</td>'+
-      '<td class="'+(x.side==='buy'?'up':'down')+'">'+({buy:'买',sell:'卖'}[x.side]||x.side)+'</td>'+
-      '<td>'+Number(x.lots).toFixed(2)+'</td><td>'+Number(x.price).toFixed(2)+'</td><td>-</td>'+
-      '<td class="'+(pf>=0?'up':'down')+'">'+(pf>=0?'+':'')+pf.toFixed(2)+'</td></tr>'; }).join('') || '<tr><td colspan="7">暂无</td></tr>';
-  }catch(e){ tb.innerHTML='<tr><td colspan="7">加载失败</td></tr>'; }
-}
-function openPlat(){ fillPlat('plat-main-body','main'); fillPlat('plat-hedge-body','hedge'); openMask('plat-mask'); }
-function platTab(id){
-  document.querySelectorAll('#plat-mask .tab').forEach(t=>t.classList.toggle('active',t.dataset.t===id));
-  document.querySelectorAll('#plat-mask .tabpane').forEach(p=>p.classList.toggle('active',p.id===id));
-}
+/* 平台订单历史(openPlat/platTab/fillPlat) 已移除, 功能并入交易历史记录 3tab */
 
 /* ============ LOGIN ============ */
 async function doLogin(){
@@ -3500,6 +3923,10 @@ function umFill(r){
   set('um-hd-sub', '账户 '+(r.username||'--'));
   set('um-user', r.username||'--'); set('um-plan', r.plan||'--');
   set('um-exp', (r.expire_at||'').slice(0,10)||'--'); set('um-feishu', r.feishu_id||'未绑定');
+  // 顶栏到期徽章: 登录即用 DB 真实 expire_at 刷新(原 HTML 占位符曾长期不更新致"两个到期日期"假象)
+  const _exp10=(r.expire_at||'').slice(0,10);
+  if(_exp10){ const tbe=document.querySelector('.titlebar .expire'); if(tbe)tbe.textContent='账号授权至: '+_exp10;
+    const me=$('mnav-exp'); if(me)me.textContent='账号授权至: '+_exp10; }
   // 移动端菜单同步(昵称→内层 span, 保留 pen 图标)
   const mn=$('mnav-uname'); if(mn)mn.textContent=disp;
   const ma=$('mnav-ava'); if(ma)ma.textContent=(disp||'U').slice(0,1).toUpperCase();
@@ -3515,12 +3942,12 @@ async function loadMemberStrip(){
     setBoth('um-level','mnav-level',lvl);
     setBoth('um-points','mnav-points',p.points||0);
     setBoth('um-growth','mnav-growth',p.growth_value||0);
-    const paidTxt = p.paid_until ? ('付费到期 '+p.paid_until) : (p.trial_until ? ('试用到期 '+p.trial_until) : '免费用户');
+    const paidTxt = p.paid_until ? ('会员等级有效期至 '+p.paid_until) : (p.trial_until ? ('试用有效期至 '+p.trial_until) : '免费用户');
     setBoth('um-paid','mnav-paid',paidTxt);
   }catch(e){}
   // 自动交易状态(进/出场档位) — 拉 auto_entry/auto_exit, 组合展示 + 圆点色
   try{
-    const MODE={off:'关',shadow:'影子',armed:'武装',full:'全量'};
+    const MODE={off:'关',shadow:'关',armed:'勾选自动',full:'开启'};   // 影子已废除, 遗留态显示关
     const DIR={reverse:'反向',forward:'正向'};
     const ae=await QH.get('/engine/auto_entry/'+QH.user).catch(()=>null);
     const ax=await QH.get('/engine/auto_exit/'+QH.user).catch(()=>null);
@@ -3620,7 +4047,7 @@ function openRenew(mode, iapProd){
   $('renew-amount').style.display = mode==='recharge' ? '' : 'none';
   $('renew-iap').style.display = mode==='iap' ? '' : 'none';
   const curExp=(document.querySelector('.titlebar .expire')||{}).textContent||'';
-  $('pay-cur-exp').textContent = curExp.replace('到期时间: ','')||'--';
+  $('pay-cur-exp').textContent = curExp.replace('账号授权至: ','').replace('到期时间: ','')||'--';
   if(mode==='month'){ applyPlan(renewMonths, planPrice(renewMonths)); }
   else if(mode==='recharge'){ syncAmt(); $('pay-k').textContent='充值金额'; $('pay-len').textContent='—'; $('pay-new-k').textContent='到账后'; $('pay-new').textContent='计入账户余额'; }
   else if(mode==='iap' && iapProd){
@@ -3767,7 +4194,7 @@ async function confirmPay(){
     closeMask('renew-mask');
     const discTxt = (r.discount>0||r.points_used>0) ? (' · 实付'+Number(r.amount).toFixed(2)+'U'+(r.points_used>0?('(用'+r.points_used+'积分)'):'')) : '';
     if(mode==='month'){ const nd=(r.expire_at||addMonths(renewMonths)).slice(0,10);
-      const e=document.querySelector('.titlebar .expire'); if(e)e.textContent='到期时间: '+nd; if($('bs-exp'))$('bs-exp').textContent=nd;
+      const e=document.querySelector('.titlebar .expire'); if(e)e.textContent='账号授权至: '+nd; if($('bs-exp'))$('bs-exp').textContent=nd;
       toast('续费成功 · '+(pm==='balance'?'余额已扣':'待财务核对')+discTxt+' · 至 '+nd);
     }else if(mode==='recharge'){ toast('充值已提交 · 余额 '+(r.balance!=null?r.balance.toFixed(2)+'U':'待到账')); }
     else if(mode==='iap'){
@@ -3871,6 +4298,34 @@ __loadSoundCfg(); setInterval(__loadSoundCfg, 300000);   // 5min 刷新人设参
 function __soundBtnSync(){ var b=$('soundBtn'); if(b)b.innerHTML=SVGI('i-bell')+(__soundOn?' 声音开':' 声音关'); if(b)b.style.opacity=__soundOn?'1':'.55'; }
 function toggleSound(){ __soundOn=!__soundOn; localStorage.setItem('qh_sound_on',__soundOn?'1':'0'); __soundBtnSync();
   if(__soundOn) speakAlert('声音提醒已开启','sweet'); }
+/* ===== 连接方式切换(引擎执行/取数链路: Bridge ↔ 云端) ===== */
+window.__connMode=null;
+function __connBtnSync(){ var b=$('connBtn-t'); if(!b)return;
+  var m=window.__connMode; b.textContent = m==='api'?'API·A2T':m==='bridge'?'Bridge':'连接--';
+  var btn=$('connBtn'); if(btn) btn.style.borderColor = m==='api'?'#e0863a':(m==='bridge'?'#2E8BD6':'');
+}
+async function pollConnMode(){
+  try{ var r=await QH.get('/engine/conn_mode'); if(!r)return;
+    window.__connMode=r.active_mode; window.__connState=r; __connBtnSync();
+  }catch(e){}
+}
+async function switchConnMode(){
+  var cur=window.__connMode||'bridge'; var next=cur==='bridge'?'api':'bridge';
+  var st=window.__connState||{}; var h=(st.health||{});
+  var nextLbl=next==='api'?'API·云端':'Bridge 云端';
+  if(next==='api' && st.api_armed===false){
+    if(!await uiConfirm('切到 API 连接（FRA 未武装）','目标: <b>'+nextLbl+'</b>\n\nFRA 代理当前<b>交易腿未武装</b>(A2T_TRADING=0)：切过去后<b>读/查询可用</b>，但真金开平仓会被 FRA 侧 403 拦截(需 canary 达标后武装)。\n\n仅切换取数链路、暂不交易？')) return;
+  } else {
+    if(!await uiConfirm('切换连接方式','即将把引擎的<b>执行与取数链路</b>切到 <b>'+nextLbl+'</b>。\n\n这会改变真金开平仓走哪条链路，并同步主/对冲账户连接方式。确认切换？',true)) return;
+  }
+  try{
+    var j=await licPost('/cmd/conn_switch',{mode:next,confirm:true});
+    window.__connMode=j.active_mode; __connBtnSync();
+    toast('连接方式已切换 → '+(j.active_mode==='api'?'API·云端':'Bridge云端'));
+    pushAlert('warn','连接方式切换→'+j.active_mode+'(引擎执行/取数生效)');
+    pollConnMode();
+  }catch(e){ toast('切换失败：'+(e.message||e)); }
+}
 function __speakBrowser(text, cfg){
   try{
     if(!('speechSynthesis' in window)) return;
@@ -3909,49 +4364,187 @@ async function openAcct(which){
   const isMain=which==='main';
   $('acct-title-t').textContent = isMain ? '主账户设置' : '对冲账户设置';
   $('acct-role').value = isMain ? '主账户' : '对冲账户';
-  // 拉真实账户列表填充"已注册"下拉
+  // 拉真实账户列表填充"已注册"下拉 + 找本角色已存账户
+  let want=null;
   try{
     const r=await QH.get('/accounts/'+QH.user);
     const sel=$('acct-pick'); sel.innerHTML='';
     (r.accounts||[]).forEach(a=>{ const o=document.createElement('option'); o.value=a.login;
       o.textContent=a.label+' · '+a.login+' ('+a.broker+'/'+a.conn_mode+')'; o.dataset.role=a.role; sel.appendChild(o); });
-    // 选中对应角色账户
-    const want=(r.accounts||[]).find(a=>a.role===(isMain?'main':'hedge'));
-    if(want){ sel.value=want.login; $('acct-login').value=want.login; $('acct-server').value=mapServer(want.broker);
-      pickPlat(document.querySelectorAll('#acct-plat button')[want.platform==='MT4'?0:1], want.platform); }
+    want=(r.accounts||[]).find(a=>a.role===(isMain?'main':'hedge'))||null;
   }catch(e){}
-  $('acct-mode').value='bridge'; onConnMode();
-  $('acct-stat').textContent='Bridge 已注册账户 · 凭证留 bridge 机，服务端不接收';
+  // 基础字段回填(平台类型/登录/连接方式/角色下拉/UUID)
+  if(want){
+    $('acct-pick').value=want.login; $('acct-login').value=want.login;
+    pickPlat(document.querySelectorAll('#acct-plat button')[want.platform==='MT4'?0:1], want.platform||'MT5');
+    $('acct-mode').value=(want.conn_mode==='api'?'api':'bridge');
+    _setA2tClear(want.api2trade_uuid||'');
+  }else{
+    $('acct-mode').value='api'; $('acct-login').value='';   // 屏蔽Bridge注册, 新账户默认API
+    _setA2tClear('');
+  }
+  onConnMode();
   openMask('acct-mask');
+  // 关键: 先等平台/服务器目录加载完, 再回填两个下拉(否则被 loadBrokers 异步重置)
+  await loadBrokers();
+  if(want){ prefillBrokerServer(want.broker, want.server); }
+  $('acct-stat').textContent = want
+    ? ('已加载'+(isMain?'主':'对冲')+'账户 '+want.login+' · '+(want.conn_mode==='api'?'API':'Bridge')+' · 凭证不回传服务端')
+    : '新账户 · 请选择平台名称/服务器后注册';
 }
-function mapServer(b){ return {ICMarkets:'ICMarketsSC-Live',Bybit:'Bybit-Live-2'}[b]||'自定义…'; }
+// 「清除云端账户」按钮状态: 有托管UUID才可点, UUID 存 dataset 不再展示长串
+function _setA2tClear(uuid){
+  const b=$('acct-a2t-clear'); if(!b)return;
+  uuid=(uuid||'').trim();
+  b.dataset.uuid=uuid; b.disabled=!uuid;
+  b.style.opacity=uuid?'1':'.45'; b.style.cursor=uuid?'pointer':'not-allowed';
+  b.title=uuid?('清除云端账户('+uuid.slice(0,8)+'…): 联动注销云端托管 + 删登记(点击后二次确认; 不影响交易记录)')
+             :'当前角色暂无已托管的云端账户';
+}
+// 点击「清除云端账户」→ 二次确认 → 清除本账户 API 连接登记(不影响任何交易记录)
+async function clearApiAccount(){
+  const uuid=((($('acct-a2t-clear')||{}).dataset||{}).uuid||'').trim();
+  if(!uuid){ toast('无已托管账户可清除'); return; }
+  const isMain=($('acct-role').value==='主账户'); const role=isMain?'main':'hedge'; const rn=isMain?'主账户':'对冲账户';
+  const ok=await uiConfirm('清除云端账户',
+    '将清除<b>'+rn+'</b>（云端账户 '+uuid.slice(0,8)+'…）：\n\n'+
+    '• 联动<b>注销云端托管账户</b>（不可逆；之后可重新「保存并登录」再次接入）\n'+
+    '• 删除本地登记\n'+
+    '• <b>不影响任何交易记录 / 历史成交</b>\n\n确认清除？', true);
+  if(!ok)return;
+  try{
+    const r=await licPost('/accounts/delete_mine',{role:role,confirm:true});
+    _setA2tClear(''); $('acct-login').value='';
+    const rel=((r&&r.a2t_released)||[])[0];
+    const cloudMsg=rel?(rel.a2t_ok?'云端托管已注销':'云端注销未成功: '+rel.a2t_msg):'无云端托管';
+    $('acct-stat').textContent=rn+' 已清除 · '+cloudMsg+'（交易记录不受影响）';
+    toast('已清除 '+rn+(rel&&rel.a2t_ok?' · 云端已注销':''));
+    pushAlert(rel&&!rel.a2t_ok?'warn':'info', rn+' 云端账户已清除 · '+cloudMsg);
+  }catch(e){ toast('清除失败：'+(e.message||e)); }
+}
+// 回填 平台名称/服务器 两个下拉(目录已加载后调用): 目录无该平台则注入"已存"选项; 服务器不在列表则落自定义
+function prefillBrokerServer(broker, server){
+  const bsel=$('acct-broker'), ssel=$('acct-server');
+  if(bsel && broker){
+    let found=false;
+    for(const o of bsel.options){ if(o.value===broker){ found=true; break; } }
+    if(!found){ const o=document.createElement('option'); o.value=broker; o.textContent=broker+' · 已存'; bsel.appendChild(o); }
+    bsel.value=broker; onBrokerChange();   // 填该平台服务器列表(目录无则仅自定义)
+  }
+  if(ssel && server){
+    let sf=false;
+    for(const o of ssel.options){ if(o.value===server){ ssel.value=server; sf=true; break; } }
+    if(!sf){ ssel.value='__custom__'; const ci=$('acct-server-custom'); if(ci)ci.value=server; }
+    onServerChange();
+  }
+}
+// 平台名称/服务器目录: 从 A2T 聚合(后端缓存6h)。经纪商→服务器名。
+let _brokerDir=null;
+async function loadBrokers(){
+  const nb=$('acct-broker-note'); const bsel=$('acct-broker');
+  if(_brokerDir){ fillBrokers(); return; }
+  nb.textContent='正从云端拉取平台/服务器目录…';
+  try{
+    const r=await licGet('/a2t/brokers');
+    _brokerDir=r.companies||[];
+    nb.textContent='共 '+(r.count||0)+' 家平台 · '+(r.cached_at?('缓存 '+r.cached_at.slice(11,16)+'UTC'):'');
+    fillBrokers();
+  }catch(e){
+    nb.textContent='目录拉取失败（可手动输入服务器）：'+(e.message||e);
+    bsel.innerHTML='<option value="">（不可用，用下方自定义服务器）</option>';
+    // 回退: 服务器下拉给自定义
+    fillServers(null);
+  }
+}
+function fillBrokers(){
+  const bsel=$('acct-broker'); bsel.innerHTML='<option value="">— 选择平台 —</option>';
+  (_brokerDir||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.company; o.textContent=c.company+(c.local?' · 本地':''); bsel.appendChild(o); });
+  onBrokerChange();
+}
+function onBrokerChange(){
+  const co=(_brokerDir||[]).find(c=>c.company===$('acct-broker').value);
+  fillServers(co?co.servers:null);
+}
+function fillServers(servers){
+  const ssel=$('acct-server'); ssel.innerHTML='';
+  (servers||[]).forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; ssel.appendChild(o); });
+  const oc=document.createElement('option'); oc.value='__custom__'; oc.textContent='自定义…'; ssel.appendChild(oc);
+  if(!servers||!servers.length){ ssel.value='__custom__'; }
+  onServerChange();
+}
+function onServerChange(){
+  $('acct-server-custom').style.display=($('acct-server').value==='__custom__')?'':'none';
+}
+function selectedServer(){ const v=$('acct-server').value; return v==='__custom__'?($('acct-server-custom').value||'').trim():v; }
 function onConnMode(){
-  const m=$('acct-mode').value, isBridge=(m==='bridge');
+  const m=$('acct-mode').value, isBridge=(m==='bridge'), isApi=(m==='api');
   $('acct-pick-row').style.display=isBridge?'':'none';
-  $('acct-pwd-row').style.display=isBridge?'none':'';   // bridge 不输密码；local 才输
+  $('acct-api-note').style.display=isApi?'':'none';
+  // 密码框始终可见(用户要求固定在登录账号右侧); bridge 不发送, 仅提示
+  const pl=$('acct-pwd-lbl'); const pw=$('acct-pwd');
+  if(pl) pl.textContent=isApi?'登录密码 (托管至云端)':'登录密码 (Bridge 无需)';
+  if(pw) pw.placeholder=isBridge?'Bridge 模式无需填写':'';
   $('acct-stat').textContent=isBridge?'Bridge 已注册账户 · 凭证留 bridge 机，服务端不接收'
-    :'本地直连 · 密码仅在用户端本地使用(DPAPI 加密)，绝不回传服务端';
+    :'API 连接 · 经 云端免终端接入，密码将托管至第三方（见上方提示）';
 }
 function pickPlat(btn,p){
   document.querySelectorAll('#acct-plat button').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
 }
-function testAcct(){ $('acct-stat').textContent='测试中…'; setTimeout(()=>{ $('acct-stat').textContent='连接成功 · 已读取余额与持仓 · 凭证未离开本机'; toast('账户连接正常'); },700); }
+async function testAcct(){
+  const mode=$('acct-mode').value;
+  if(mode==='api'){
+    // API 连接: 调后端只读摘要验证(须先保存并登录, 该角色已注册 云端账户UUID)
+    const role=$('acct-role').value.indexOf('对冲')>=0?'hedge':'main';
+    $('acct-stat').textContent='测试中… 经云端读取账户摘要';
+    try{
+      const r=await licPost('/a2t/summary',{role:role});
+      $('acct-stat').textContent='连接成功 · 余额 '+(r.balance??'--')+' '+(r.currency||'')+' · 净值 '+(r.equity??'--')+' · 延迟 '+r.latency_ms+'ms';
+      toast('云端连接正常');
+    }catch(e){ $('acct-stat').textContent='测试失败：'+(e.message||e)+'（API 连接需先"保存并登录"注册账户）'; toast('测试失败'); }
+    return;
+  }
+  $('acct-stat').textContent='测试中…'; setTimeout(()=>{ $('acct-stat').textContent='连接成功 · 已读取余额与持仓 · 凭证未离开本机'; toast('账户连接正常'); },700);
+}
 async function saveAcct(){
   const mode=$('acct-mode').value;
   const role=$('acct-role').value.indexOf('对冲')>=0?'hedge':'main';
   const login=mode==='bridge' ? ($('acct-pick').value||$('acct-login').value) : $('acct-login').value;
-  if(mode==='local'){
-    // 本地直连：密码绝不发服务端，仅前端提示，服务端只登记标记
-    toast('本地直连：凭证保留在用户端，未上传服务端');
+  const platform=(document.querySelector('#acct-plat .on')?.textContent.indexOf('5')>=0?'MT5':'MT4');
+  const broker=$('acct-broker').value||'';
+  const server=selectedServer();
+  const body={username:QH.user,label:$('acct-title-t').textContent,login:login,platform:platform,
+    broker:broker, role:role, conn_mode:mode, server:server};
+  if(mode==='api'){
+    // API 连接: 需 server + password, 后端代注册到 云端(密码仅在途)
+    const pwd=$('acct-pwd').value||'';
+    if(!server){ toast('请选择/填写有效的 MT 服务器名'); return; }
+    if(!pwd){ toast('API 连接需填写密码(将托管至 云端)'); return; }
+    if(!await uiConfirm('确认托管凭证','即将把该 MT 账户密码提交至第三方云端服务托管以实现免终端接入。\n\n确认你已知悉并授权该凭证出域？')){ return; }
+    body.password=pwd;
+    $('acct-stat').textContent='注册中… 经云端连接账户';
   }
   try{
-    await licPost('/accounts/register',{username:QH.user,label:$('acct-title-t').textContent,login:login,
-      platform:(document.querySelector('#acct-plat .on')?.textContent.indexOf('5')>=0?'MT5':'MT4'),
-      broker:'', role:role, conn_mode:mode});
-    closeMask('acct-mask'); toast('账户已保存 ('+(mode==='bridge'?'Bridge':'本地直连')+')');
-    pushAlert('info', role+' 账户已登记 · '+(mode==='bridge'?'Bridge模式':'本地直连·凭证不回传'));
-  }catch(e){ toast('保存失败：'+(e.message||e)); }
+    const r=await licPost('/accounts/register',body);
+    if(mode==='api') $('acct-pwd').value='';   // 立即清空前端密码, 不驻留
+    closeMask('acct-mask');
+    const modeLbl=mode==='api'?'API·云端':'Bridge';
+    toast('账户已保存 ('+modeLbl+')'+(r.a2t_uuid?' · UUID '+r.a2t_uuid.slice(0,8):''));
+    pushAlert('info', role+' 账户已登记 · '+modeLbl+(mode==='api'?'·凭证已托管云端':'·凭证留bridge'));
+    // 重注册产生新云端账户时, 旧注册释放结果透明化(成功=自动释放; 失败=提示后台处理防配额泄漏)
+    if(mode==='api' && r.a2t_prev_msg){
+      pushAlert(r.a2t_prev_released?'info':'warn', '云端旧注册: '+r.a2t_prev_msg);
+    }
+  }catch(e){
+    const msg=(e.message||''+e);
+    // (c) 云端 套餐账户配额已满 → 明确提示(后端透传 402 文案)
+    if(/额度不足|402|上限/.test(msg)){
+      $('acct-stat').textContent='注册失败：云端账户配额已满';
+      uiModal? uiModal('配额已满','当前 云端订阅的可注册账户数已用满，无法再托管新账户。\n\n请在后台升级套餐（Single→PRO 无限），或在 云端后台删除闲置账户后重试。') : toast('云端账户配额已满');
+    }else{
+      $('acct-stat').textContent='保存失败：'+msg; toast('保存失败：'+msg);
+    }
+  }
 }
 
 /* ============ BOTTOM BAR CLOCK ============ */
@@ -4058,14 +4651,14 @@ bindFeishuMirror();
     <span class="mnav-ava" id="mnav-ava">·</span>
     <div class="mnav-uid">
       <div class="mnav-uname"><span id="mnav-uname">未登录</span> <svg class="svgi mnav-pen"><use href="#i-edit"/></svg></div>
-      <div class="mnav-exp" id="mnav-exp">到期时间: --</div>
+      <div class="mnav-exp" id="mnav-exp" title="账号授权有效期(到期后无法登录使用)">账号授权至: --</div>
     </div>
   </div>
   <!-- 会员概览: 等级 + 余额/积分/成长值(点进会员中心) -->
   <div class="mnav-stats">
     <div class="mnav-lvl-row" onclick="toggleMNav();openPoints()">
       <span class="mnav-lvl" id="mnav-level">L0 体验交易者</span>
-      <span class="mnav-paid" id="mnav-paid">付费到期 --</span>
+      <span class="mnav-paid" id="mnav-paid" title="付费会员等级有效期: 决定 L1-L4 会员档位">会员等级有效期至 --</span>
     </div>
     <div class="mnav-stats-row">
       <div class="mnav-stat" onclick="event.stopPropagation();toggleMNav();openRenew('recharge')"><span>余额 <b class="mnav-plus">+充值</b></span><b class="mnav-green" id="mnav-balance">0.00</b></div>

@@ -25,7 +25,7 @@
           <el-button size="small" type="primary" @click="openCreate">+ 新建用户</el-button></span></template>
       <el-table :data="users" size="small" border @row-click="openDetail">
         <el-table-column label="用户" width="150"><template #default="s">
-          <span>{{s.row.username}}</span>
+          <span v-longpress="()=>openEdit(s.row)" title="长按快捷编辑">{{s.row.username}}</span>
           <div v-if="s.row.nickname" style="font-size:11px;color:#909399">{{s.row.nickname}}</div></template></el-table-column>
         <el-table-column label="状态" width="90"><template #default="s">
           <el-tag size="small" :type="USER_STATUS_TAG[s.row.status]||'info'">
@@ -54,13 +54,16 @@
       <div v-if="cur.username">
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="状态"><el-tag size="small" :type="USER_STATUS_TAG[cur.status]||'info'">{{zh(USER_STATUS,cur.status)}}</el-tag></el-descriptions-item>
-          <el-descriptions-item label="套餐">{{ ownedPackages(cur).join(' / ') || cur.plan || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="已购套餐">{{ ownedPackages(cur).join(' / ') || '—' }}</el-descriptions-item>
           <el-descriptions-item label="付费到期">{{fmt(cur.paid_until)}}</el-descriptions-item>
           <el-descriptions-item label="试用到期">{{fmt(cur.trial_until)}}</el-descriptions-item>
           <el-descriptions-item label="累计充值">{{cur.total_recharge}}</el-descriptions-item>
           <el-descriptions-item label="累计成交">{{cur.deals_total}} ({{cur.pnl_total}})</el-descriptions-item>
           <el-descriptions-item label="模式">{{cur.force_demo?'强制演示':'真金'}}</el-descriptions-item>
           <el-descriptions-item label="自动">进{{zh(AUTO_MODE,cur.auto_entry)}}/出{{zh(AUTO_MODE,cur.auto_exit)}}</el-descriptions-item>
+          <el-descriptions-item label="会员等级"><el-tag size="small" :type="['info','success','warning','danger','danger'][cur.member_level]||'info'">L{{cur.member_level||0}} {{cur.member_level_name||'体验交易者'}}</el-tag></el-descriptions-item>
+          <el-descriptions-item label="积分/成长值">{{cur.points||0}} / {{cur.growth_value||0}}</el-descriptions-item>
+          <el-descriptions-item label="归属员工">{{cur.staff_code||'—'}}</el-descriptions-item>
         </el-descriptions>
         <el-divider>权益</el-divider>
         <el-descriptions :column="2" border size="small">
@@ -106,9 +109,6 @@
       <el-form label-width="90">
         <el-form-item label="用户名"><el-input v-model="edit.username" :disabled="!edit.isNew" placeholder="唯一,登录标识"/></el-form-item>
         <el-form-item label="别名"><el-input v-model="edit.nickname" placeholder="显示名(可选),面板/搜索用" autocomplete="off"/></el-form-item>
-        <el-form-item label="主套餐"><el-select v-model="edit.plan" clearable placeholder="选套餐(内购商品目录),空=免费无套餐" style="width:100%">
-          <el-option v-for="p in planOpts" :key="p.key" :label="p.name+' ('+p.price+' '+(p.unit||'USDT')+')'" :value="p.key"/></el-select>
-          <span style="color:#909399;font-size:11px">主套餐仅为标签展示,实际功能以下方权益为准。</span></el-form-item>
         <el-form-item label="飞书ID"><el-input v-model="edit.feishu_id" placeholder="可选"/></el-form-item>
         <el-form-item :label="edit.isNew?'有效天数':'延长天数'"><el-input-number v-model="edit.expire_days" :min="0" :max="3650"/>
           <span style="color:#909399;font-size:11px;margin-left:6px">{{edit.isNew?'新号有效期(默认30)':'0=不改到期'}}</span></el-form-item>
@@ -226,7 +226,7 @@ async function saveEdit(){
   if(!edit.value.username) return ElMessage.warning('请输入用户名')
   const op=edit.value.isNew?'create':'edit'
   const body={op,username:edit.value.username,nickname:edit.value.nickname||'',feishu_id:edit.value.feishu_id,expire_days:edit.value.expire_days}
-  if(edit.value.isNew || canAdv.value) body.plan=edit.value.plan||''   // plan 变更属高级字段, 基础操作员不发以免误触发权限闸
+  // 主套餐字段已移除(套餐以「已购套餐」权益包为准), 不再提交 plan
   if(!edit.value.isNew){
     if(edit.value.paid_until) body.paid_until=edit.value.paid_until
     if(edit.value.trial_until) body.trial_until=edit.value.trial_until

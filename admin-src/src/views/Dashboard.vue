@@ -25,6 +25,30 @@
       </el-row>
     </el-card>
 
+    <!-- ========== 会员增长(会员积分 + 双轨渠道 + 转化漏斗) ========== -->
+    <el-card style="margin-bottom:12px" body-style="padding:14px">
+      <template #header><span class="ch"><el-icon><Medal/></el-icon> 会员增长</span>
+        <span style="float:right;font-size:12px;color:#909399">会员积分体系 + 内外双轨获客</span></template>
+      <el-row :gutter="12">
+        <el-col :span="4"><el-card class="stat-card"><div class="l">会员总数</div><div class="v">{{mstat.total}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card"><div class="l">付费会员(L1+)</div><div class="v up">{{mstat.paidLv}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card"><div class="l">积分存量</div><div class="v" style="color:#e0863a">{{fmtInt(mstat.pointsSum)}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card"><div class="l">成长值存量</div><div class="v">{{fmtInt(mstat.growthSum)}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card"><div class="l">员工归因用户</div><div class="v">{{mstat.staffUsers}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card"><div class="l">代理归因用户</div><div class="v">{{(chans&&chans.agent&&chans.agent.users)||0}}</div></el-card></el-col>
+      </el-row>
+      <el-row :gutter="12" style="margin-top:12px">
+        <el-col :span="8"><el-card body-style="padding:8px"><div class="chart-title">会员等级分布</div>
+          <ChartBox v-if="mstat.total" :option="levelRingOpt" :height="220"/>
+          <div v-else style="color:#909399;text-align:center;padding:40px">暂无会员数据</div></el-card></el-col>
+        <el-col :span="8"><el-card body-style="padding:8px"><div class="chart-title">双轨渠道对比(获客/付费/营收)</div>
+          <ChartBox v-if="chans" :option="channelOpt" :height="220"/>
+          <div v-else style="color:#909399;text-align:center;padding:40px">暂无渠道数据</div></el-card></el-col>
+        <el-col :span="8"><el-card body-style="padding:8px"><div class="chart-title">转化漏斗(注册→试用→付费)</div>
+          <ChartBox v-if="ov" :option="funnelOpt" :height="220"/></el-card></el-col>
+      </el-row>
+    </el-card>
+
     <!-- ========== 系统运行 ========== -->
     <el-card body-style="padding:14px">
       <template #header><span class="ch"><el-icon><Monitor/></el-icon> 系统运行</span>
@@ -63,13 +87,28 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useLiveRefresh } from '../composables/useLiveRefresh'
 import { api } from '../api'
 import ChartBox from '../components/ChartBox.vue'
-const days=ref(30),ov=ref(null),rev=ref(null)
+const days=ref(30),ov=ref(null),rev=ref(null),chans=ref(null)
 const AZURE='#2E8BD6', NAVY='#08113A'
+const LVL_NAME={0:'L0 体验',1:'L1 基础',2:'L2 进阶',3:'L3 专业',4:'L4 旗舰'}
+const LVL_COLOR={0:'#C0C4CC',1:'#909399',2:'#2E8BD6',3:'#67C23A',4:'#E6A23C'}
+const mstat=ref({total:0,paidLv:0,pointsSum:0,growthSum:0,staffUsers:0,byLevel:{}})
+function fmtInt(n){ n=Number(n||0); return n>=10000?(n/10000).toFixed(1)+'万':String(n) }
 async function load(){
   try{ ov.value=await api.biOverview(days.value) }catch(e){ ElMessage.error('总控加载失败') }
   try{ rev.value=await api.revenue(days.value) }catch(e){}
+  try{ chans.value=(await api.overviewChannels(days.value)).channels }catch(e){}
+  // 会员积分健康度: 从 /admin/members 客户端聚合(等级分布/积分存量/成长值/员工归因)
+  try{
+    const us=(await api.members()).users||[]
+    const s={total:us.length,paidLv:0,pointsSum:0,growthSum:0,staffUsers:0,byLevel:{0:0,1:0,2:0,3:0,4:0}}
+    us.forEach(u=>{ const lv=u.member_level||0; s.byLevel[lv]=(s.byLevel[lv]||0)+1
+      if(lv>=1)s.paidLv++; s.pointsSum+=Number(u.points||0); s.growthSum+=Number(u.growth_value||0)
+      if(u.staff_code)s.staffUsers++ })
+    mstat.value=s
+  }catch(e){}
 }
 const userRingOpt=computed(()=>{ const u=ov.value.users; return {
   tooltip:{trigger:'item'}, legend:{bottom:0,textStyle:{fontSize:11}},
@@ -91,9 +130,27 @@ const topAgentOpt=computed(()=>{ const a=(ov.value.top_agents||[]).slice().rever
   tooltip:{trigger:'axis',axisPointer:{type:'shadow'}}, grid:{left:70,right:24,top:8,bottom:20},
   xAxis:{type:'value',axisLabel:{fontSize:10}}, yAxis:{type:'category',data:a.map(x=>x.code),axisLabel:{fontSize:11}},
   series:[{type:'bar',data:a.map(x=>Number(x.comm)),itemStyle:{color:AZURE,borderRadius:[0,4,4,0]},barMaxWidth:20,label:{show:true,position:'right',fontSize:10}}]}})
-let timer=null
-onMounted(()=>{ load(); timer=setInterval(load,15000) })
-onBeforeUnmount(()=>{ timer&&clearInterval(timer) })
+const levelRingOpt=computed(()=>{ const b=mstat.value.byLevel||{}; return {
+  tooltip:{trigger:'item'}, legend:{bottom:0,textStyle:{fontSize:10},type:'scroll'},
+  series:[{type:'pie',radius:['40%','64%'],center:['50%','44%'],avoidLabelOverlap:true,label:{show:true,formatter:'{c}'},
+    data:[0,1,2,3,4].map(lv=>({value:b[lv]||0,name:LVL_NAME[lv],itemStyle:{color:LVL_COLOR[lv]}})).filter(x=>x.value>0)}]}})
+const channelOpt=computed(()=>{ const c=chans.value||{}; const order=[['staff','员工'],['agent','代理'],['organic','自然']]
+  const cats=order.map(o=>o[1])
+  return { tooltip:{trigger:'axis',axisPointer:{type:'shadow'}}, legend:{bottom:0,textStyle:{fontSize:10}},
+    grid:{left:40,right:14,top:16,bottom:34}, xAxis:{type:'category',data:cats,axisLabel:{fontSize:11}},
+    yAxis:{type:'value',axisLabel:{fontSize:10}},
+    series:[
+      {name:'获客',type:'bar',data:order.map(o=>(c[o[0]]||{}).users||0),itemStyle:{color:AZURE},barMaxWidth:18},
+      {name:'付费',type:'bar',data:order.map(o=>(c[o[0]]||{}).paid||0),itemStyle:{color:'#67C23A'},barMaxWidth:18},
+      {name:'营收',type:'bar',data:order.map(o=>(c[o[0]]||{}).revenue||0),itemStyle:{color:'#E6A23C'},barMaxWidth:18}]}})
+const funnelOpt=computed(()=>{ const u=ov.value.users; const reg=u.total||0, tri=u.trialing||0, paid=u.paid||0
+  return { tooltip:{trigger:'item',formatter:'{b}: {c}'},
+    series:[{type:'funnel',left:'6%',right:'6%',top:10,bottom:10,minSize:'28%',label:{formatter:'{b} {c}',fontSize:11},
+      data:[{value:reg,name:'注册',itemStyle:{color:AZURE}},{value:tri,name:'试用',itemStyle:{color:'#E6A23C'}},
+        {value:paid,name:'付费',itemStyle:{color:'#67C23A'}}]}]}})
+const live=useLiveRefresh(load,{interval:15000})
+onMounted(()=>{ load(); live.start() })
+onBeforeUnmount(()=>live.stop())
 </script>
 <style scoped>
 .chart-title{font-size:13px;font-weight:600;color:#08113A;margin:2px 0 6px 4px}

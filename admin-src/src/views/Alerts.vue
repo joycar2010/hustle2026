@@ -9,7 +9,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api'
-const alerts=ref([]); let timer=null
+import { useLiveRefresh } from '../composables/useLiveRefresh'
+const alerts=ref([])
 async function load(){ try{ alerts.value=(await api.alerts(50)).alerts||[] }catch(e){} }
-onMounted(()=>{ load(); timer=setInterval(load,4000) }); onUnmounted(()=>clearInterval(timer))
+const live=useLiveRefresh(load,{interval:4000})
+onMounted(()=>{ load(); live.start() }); onUnmounted(()=>live.stop())
 </script>

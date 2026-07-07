@@ -92,13 +92,13 @@ const roleDlg=ref(false),roleCur=ref({}),roleEdit=ref(false),roleMods=ref([]),al
 // 后台模块清单(perms = 这些 key 的逗号串; '*'=全部)。按业务分组展示(对齐侧栏 分析/经营/运维)
 const MODULE_GROUPS=[
   {name:'分析',items:[{k:'dashboard',n:'总控面板'}]},
-  {name:'经营',items:[{k:'bi',n:'经营分析'},{k:'users',n:'用户管理'},{k:'users_adv',n:'用户高级管理'},{k:'leads',n:'线索中台'},{k:'trials',n:'试用管理'},{k:'orders',n:'充值订单'},{k:'agents',n:'三级代理'},{k:'iap',n:'内购配置'},{k:'chat',n:'AI客服配置'}]},
-  {name:'运维',items:[{k:'system',n:'运维监控'},{k:'params',n:'参数下发'},{k:'product',n:'产品分析'},{k:'notify',n:'系统通知'},{k:'datamgr',n:'系统管理'},{k:'operators',n:'操作员'},{k:'legs',n:'双腿监控'},{k:'recon',n:'对账'},{k:'deals',n:'成交记录'}]},
+  {name:'经营',items:[{k:'bi',n:'经营分析'},{k:'users',n:'用户管理'},{k:'users_adv',n:'用户高级管理'},{k:'accounts',n:'账户管理'},{k:'points',n:'会员与积分'},{k:'staff',n:'员工推广'},{k:'coupons',n:'折扣券'},{k:'campaigns',n:'活动引擎'},{k:'contests',n:'冲榜赛'},{k:'leads',n:'线索中台'},{k:'trials',n:'试用管理'},{k:'orders',n:'充值订单'},{k:'agents',n:'三级代理'},{k:'iap',n:'内购配置'},{k:'chat',n:'AI客服配置'}]},
+  {name:'运维',items:[{k:'system',n:'运维监控'},{k:'params',n:'参数下发'},{k:'product',n:'产品分析'},{k:'notify',n:'系统通知'},{k:'sitemgr',n:'官网管理'},{k:'datamgr',n:'系统管理'},{k:'operators',n:'操作员'},{k:'legs',n:'双腿监控'},{k:'recon',n:'对账'},{k:'deals',n:'成交记录'}]},
 ]
 // 角色模板: 运营默认不含运维系统页
 const ROLE_TPLS=[
   {key:'ops',     label:'运营',     mods:['dashboard','bi','users','orders','iap','agents','trials','leads','chat']},
-  {key:'opsadv',  label:'高级运营', mods:['dashboard','bi','users','users_adv','orders','iap','agents','trials','leads','chat']},
+  {key:'opsadv',  label:'高级运营', mods:['dashboard','bi','users','users_adv','accounts','orders','iap','agents','trials','leads','chat']},
   {key:'finance', label:'财务',     mods:['dashboard','bi','orders','iap','agents']},
   {key:'service', label:'客服',     mods:['dashboard','leads','chat','users','trials']},
   {key:'opsro',   label:'只读运维', mods:['dashboard','system','product','legs','recon','deals','params']},

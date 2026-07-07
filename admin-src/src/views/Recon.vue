@@ -20,12 +20,14 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api'
-const rows=ref([]),market=ref('--'),pairs=ref(0),singleCnt=ref(0); let timer=null
+import { useLiveRefresh } from '../composables/useLiveRefresh'
+const rows=ref([]),market=ref('--'),pairs=ref(0),singleCnt=ref(0)
 async function load(){
   try{ const st=await api.engineState()
     market.value=st.market?.closed?('休市('+st.market.why+')'):'开市'; pairs.value=st.cycle?.pairs||0; singleCnt.value=st.cycle?.single_leg||0
     const ev=st.eval||{}; rows.value=Object.entries(ev).map(([user,e])=>({user,symbol:e.symbol,mainLots:e.main_lots,hedgeLots:e.hedge_lots,singleLeg:e.single_leg,missing:e.missing,ok:!e.single_leg}))
   }catch(e){}
 }
-onMounted(()=>{ load(); timer=setInterval(load,3000) }); onUnmounted(()=>clearInterval(timer))
+const live=useLiveRefresh(load,{interval:3000})
+onMounted(()=>{ load(); live.start() }); onUnmounted(()=>live.stop())
 </script>

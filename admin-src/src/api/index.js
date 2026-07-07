@@ -53,6 +53,15 @@ export const api = {
   userOp: (body) => http.post('/admin/user/op', { ...body, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   // ── P4b 系统 + 总控 ──
   system: () => http.get('/admin/system'),
+  pairscan: (hours=24) => http.get('/admin/pairscan', { params:{ hours }, headers: adminHeaders() }),
+  // ── 官网管理(site_config + 草稿/发布/回滚) ──
+  siteGet: (site='qh') => http.get('/site/config', { params:{ site } }),
+  siteSave: (site, cfg) => http.post('/admin/site/save', { site, cfg, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  siteDraftGet: (site='qhwww') => http.get('/admin/site/draft', { params:{ site }, headers: adminHeaders() }),
+  siteDraftSave: (site, cfg) => http.post('/admin/site/draft', { site, cfg, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  sitePublish: (site, cfg=null) => http.post('/admin/site/publish', { site, cfg: cfg||{}, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  siteVersions: (site='qhwww') => http.get('/admin/site/versions', { params:{ site }, headers: adminHeaders() }),
+  siteRollback: (site, version_id) => http.post('/admin/site/rollback', { site, version_id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   estop: () => http.post('/admin/system/estop', { confirm:true, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   estopClear: () => http.post('/admin/system/estop_clear', { license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   auditLog: (limit=100, action='') => http.get('/admin/audit', { params:{ limit, action } }),
@@ -119,6 +128,53 @@ export const api = {
   dmSslDelete: (id) => http.post('/admin/datamgr/ssl/delete', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   dmWsStats: () => http.get('/admin/datamgr/ws_stats', { headers: adminHeaders() }),
   dmGitPush: (message) => http.post('/admin/datamgr/git-push', { message }, { headers: adminHeaders(), timeout: 240000 }),
+  // ── Api2Trade 订阅配置(系统管理) ──
+  a2tConfigs: () => http.get('/admin/api2trade/config', { headers: adminHeaders() }),
+  a2tSave: (b) => http.post('/admin/api2trade/config/save', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  a2tDelete: (id) => http.post('/admin/api2trade/config/delete', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  a2tTest: (id) => http.post('/admin/api2trade/test', { id }, { headers: adminHeaders(), timeout: 40000 }),
+  a2tAccounts: (id=0) => http.get('/admin/api2trade/accounts', { params:{ id }, headers: adminHeaders() }),
+  a2tCanary: (b) => http.post('/admin/api2trade/canary', b, { headers: adminHeaders(), timeout: 60000 }),
+  // ── 用户账户管理 ──
+  a2tBrokers: () => http.get('/admin/a2t/brokers', { headers: adminHeaders(), timeout: 90000 }),
+  adminAccounts: (q='') => http.get('/admin/accounts', { params:{ q }, headers: adminHeaders() }),
+  adminAcctSave: (b) => http.post('/admin/accounts/save', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  adminAcctDelete: (id) => http.post('/admin/accounts/delete', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  adminAcctPurge: (id) => http.post('/admin/accounts/purge', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── 第一阶段: 会员与积分 + 员工推广 ──
+  members: (q='') => http.get('/admin/members', { params:{ q }, headers: adminHeaders() }),
+  pointsLedger: (username='', limit=100) => http.get('/admin/points/ledger', { params:{ username, limit }, headers: adminHeaders() }),
+  pointsAdjust: (b) => http.post('/admin/points/adjust', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  staffList: () => http.get('/admin/staff', { headers: adminHeaders() }),
+  staffSave: (s) => http.post('/admin/staff', { ...s, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  staffDel: (code) => http.post('/admin/staff/del', { code, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  staffStats: () => http.get('/admin/staff/stats', { headers: adminHeaders() }),
+  // ── 第二阶段: 折扣券 ──
+  coupons: () => http.get('/admin/coupons', { headers: adminHeaders() }),
+  couponSave: (b) => http.post('/admin/coupon', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  couponDel: (code) => http.post('/admin/coupon/del', { code, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  couponRedemptions: (code='', limit=100) => http.get('/admin/coupon/redemptions', { params:{ code, limit }, headers: adminHeaders() }),
+  // ── 第三阶段: 绩效积分 + 全渠道总看板 ──
+  staffPerfAdjust: (b) => http.post('/admin/staff/perf_adjust', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  staffPerfLedger: (staff_code='', limit=100) => http.get('/admin/staff/perf_ledger', { params:{ staff_code, limit }, headers: adminHeaders() }),
+  overviewChannels: (days=30) => http.get('/admin/overview/channels', { params:{ days }, headers: adminHeaders() }),
+  // ── 活动引擎 ──
+  campaigns: () => http.get('/admin/campaigns', { headers: adminHeaders() }),
+  campaignMeta: () => http.get('/admin/campaign/meta', { headers: adminHeaders() }),
+  campaignSave: (b) => http.post('/admin/campaign', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  campaignDel: (id) => http.post('/admin/campaign/del', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  campaignGrants: (campaign_id=0, limit=100) => http.get('/admin/campaign/grants', { params:{ campaign_id, limit }, headers: adminHeaders() }),
+  recallCfgGet: () => http.get('/admin/recall/config', { headers: adminHeaders() }),
+  recallCfgSave: (b) => http.post('/admin/recall/config', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  staffPerfCfgGet: () => http.get('/admin/staff_perf/config', { headers: adminHeaders() }),
+  staffPerfCfgSave: (b) => http.post('/admin/staff_perf/config', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // ── 周期冲榜赛 ──
+  contests: () => http.get('/admin/contests', { headers: adminHeaders() }),
+  contestSave: (b) => http.post('/admin/contest', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  contestDel: (id) => http.post('/admin/contest/del', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  contestSettle: (id, force=false) => http.post('/admin/contest/settle', { id, force, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  contestResults: (contest_id, period_key='') => http.get('/admin/contest/results', { params:{ contest_id, period_key }, headers: adminHeaders() }),
+  contestPreview: (kind, metric, period) => http.get('/admin/contest/preview', { params:{ kind, metric, period }, headers: adminHeaders() }),
 }
 
 

@@ -30,13 +30,15 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
+import { useLiveRefresh } from '../composables/useLiveRefresh'
 const { t }=useI18n()
-const main=ref({}),hedge=ref({}),positions=ref([]); let timer=null
+const main=ref({}),hedge=ref({}),positions=ref([])
 const num=n=>(n==null||isNaN(n))?'--':Number(n).toFixed(2)
 async function load(){
   try{ const l=await api.legs(); main.value=l.status?.main||{}; hedge.value=l.status?.hedge||{}
     const rows=[]; const add=(leg,pl)=>{(pl?.positions||pl||[]).forEach(p=>rows.push({leg,symbol:p.symbol,dir:(p.type==0||p.type=='buy')?'买':'卖',volume:p.volume,price:p.price_open||p.price,profit:p.profit}))}
     add('主',l.positions?.main); add('对冲',l.positions?.hedge); positions.value=rows }catch(e){}
 }
-onMounted(()=>{ load(); timer=setInterval(load,3000) }); onUnmounted(()=>clearInterval(timer))
+const live=useLiveRefresh(load,{interval:3000})
+onMounted(()=>{ load(); live.start() }); onUnmounted(()=>live.stop())
 </script>
