@@ -101,6 +101,10 @@ def closed_history(
             "cumulative_funding_fee": str(p.cumulative_funding_fee) if p.cumulative_funding_fee is not None else None,
             "cumulative_interest": str(p.cumulative_interest) if p.cumulative_interest is not None else None,
             "open_usdt_amount": str(p.open_usdt_amount) if p.open_usdt_amount is not None else None,
+            # P0-3 逐回路成本记账:本回路净损益(含资金费)+ 开仓预期E + 4腿手续费合计
+            "round_net_pnl": str(p.round_net_pnl) if getattr(p, "round_net_pnl", None) is not None else None,
+            "expected_e": str(p.expected_e) if getattr(p, "expected_e", None) is not None else None,
+            "fee_total": str(p.fee_total) if p.fee_total is not None else None,
             "opened_at": str(p.opened_at) if p.opened_at else None,
             "closed_at": str(p.closed_at) if p.closed_at else None,
         })

@@ -25,6 +25,9 @@ class PositionResponse(BaseModel):
     funding_rate_ratio: Optional[Decimal] = None
     realized_pnl: Optional[Decimal] = None
     fee_total: Optional[Decimal] = None
+    # P0-3 逐回路成本记账:本回路净损益(含资金费) + 开仓预期净期望E
+    round_net_pnl: Optional[Decimal] = None
+    expected_e: Optional[Decimal] = None
     opened_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
     created_at: datetime
