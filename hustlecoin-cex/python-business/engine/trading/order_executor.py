@@ -361,6 +361,63 @@ def _log_trade(db, position_id: int, sub_account_id: int, action: str, symbol: s
     db.commit()
 
 
+SPOT_MAKER_WAIT_SEC = 3.0    # maker 挂单最长等待成交,超时撤单转市价兜底
+SPOT_MAKER_POLL_SEC = 0.4
+
+
+async def _spot_maker_fill(client, symbol: str, side: str, qty: Decimal, spread,
+                           spot_lot: dict, is_margin: bool = True) -> dict:
+    """现货腿 maker 成交(P1 现货 maker 化):挂 post-only 限价(LIMIT_MAKER)做挂单方省手续费;
+    最长等 SPOT_MAKER_WAIT_SEC,未全成 → 撤单 → 剩余市价兜底,保证必成交、绝不留单腿。
+    返回结构兼容市价单:{executedQty, orderId, _avg}(_avg=成交均价)。post-only 若会穿越盘口被币安
+    -2010 拒单,直接市价兜底(此刻点差已收窄,做 taker 也认)。"""
+    filters = await client._get_spot_filters(symbol)
+    tick = filters["tick"]
+    if side == "SELL":
+        px = round_to_step(spread.spot_ask, tick) if getattr(spread, "spot_ask", 0) else None
+        maker_fn = client.spot_limit_maker_sell
+        market_fn = client.spot_market_sell
+    else:
+        px = round_to_step(spread.spot_bid, tick) if getattr(spread, "spot_bid", 0) else None
+        maker_fn = client.spot_limit_maker_buy
+        market_fn = client.spot_market_buy_qty
+    filled = Decimal("0"); value = Decimal("0"); oid = ""
+    if px and px > 0:
+        try:
+            r = await maker_fn(symbol, qty, px, is_margin)
+            oid = str(r["orderId"])
+            waited = 0.0; done = False
+            while waited < SPOT_MAKER_WAIT_SEC:
+                await asyncio.sleep(SPOT_MAKER_POLL_SEC); waited += SPOT_MAKER_POLL_SEC
+                o = await client.spot_query_order(symbol, oid, is_margin)
+                if o.get("status") == "FILLED":
+                    filled = Decimal(str(o.get("executedQty", "0")))
+                    value = Decimal(str(o.get("cummulativeQuoteQty", "0")))
+                    done = True; break
+            if not done:
+                try:
+                    c = await client.spot_cancel_order(symbol, oid, is_margin)
+                    filled = Decimal(str(c.get("executedQty", "0")))
+                    value = Decimal(str(c.get("cummulativeQuoteQty", "0")))
+                except Exception:
+                    o = await client.spot_query_order(symbol, oid, is_margin)
+                    filled = Decimal(str(o.get("executedQty", "0")))
+                    value = Decimal(str(o.get("cummulativeQuoteQty", "0")))
+        except BinanceAPIError as e:
+            if getattr(e, "api_code", None) != -2010 and "-2010" not in str(e):
+                raise   # 非"会立即成交被拒",真错误上抛
+    # 剩余市价兜底(必成交,不留单腿)
+    remaining = round_to_step(qty - filled, spot_lot["stepSize"])
+    if remaining > 0:
+        mr = await market_fn(symbol, remaining, is_margin)
+        mq = Decimal(str(mr.get("executedQty", "0")))
+        filled += mq
+        value += mq * _avg_fill_price(mr)
+        oid = str(mr.get("orderId", oid))
+    avg = (value / filled) if filled > 0 else Decimal("0")
+    return {"executedQty": str(filled), "orderId": oid, "_avg": avg}
+
+
 async def execute_borrow(
     sub_account_id: int,
     symbol: str,
@@ -717,10 +774,17 @@ async def execute_hedge(
                 logger.info(f"Hedge {symbol}: tail batch {b} below min notional, selling stops at {total_sold}")
                 break
             t0 = time.monotonic()
-            sell_result = await client.spot_market_sell(symbol, b)
+            # 现货腿 maker 化:spot_order_mode=maker 时挂 post-only 省手续费(超时撤单+市价兜底)
+            _spot_mode = getattr(rules, "spot_order_mode", "market") or "market"
+            if _spot_mode == "maker":
+                sell_result = await _spot_maker_fill(client, symbol, "SELL", b, spread, spot_lot)
+                fqty = Decimal(str(sell_result["executedQty"]))
+                fprice = sell_result["_avg"]
+            else:
+                sell_result = await client.spot_market_sell(symbol, b)
+                fqty = Decimal(str(sell_result["executedQty"]))
+                fprice = _avg_fill_price(sell_result)
             latency = int((time.monotonic() - t0) * 1000)
-            fqty = Decimal(str(sell_result["executedQty"]))
-            fprice = _avg_fill_price(sell_result)
             total_sold += fqty
             total_value += fqty * fprice
             last_oid = str(sell_result["orderId"])
@@ -898,6 +962,7 @@ async def execute_unhedge(
     notifier: FeishuSender,
     account_note: str,
     futures_client: BinanceTradingClient = None,
+    spot_order_mode: str = "market",   # 现货买回腿:market/maker(post-only省手续费)
 ):
     """Phase 1 of close: close the futures long + buy back the spot, leaving the coin
     in the margin account awaiting repay. OPEN → PENDING_REPAY (net-flat, no exposure).
@@ -956,10 +1021,16 @@ async def execute_unhedge(
         pos.status = "CLOSING_SPOT"
         db.commit()
         t0 = time.monotonic()
-        buy_result = await client.spot_market_buy_qty(pos.symbol, buy_qty)
+        # 现货买回腿 maker 化(超时撤单+市价兜底,必足量买回以还币)
+        if (spot_order_mode or "market") == "maker":
+            buy_result = await _spot_maker_fill(client, pos.symbol, "BUY", buy_qty, spread, spot_lot)
+            pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
+            pos.spot_buy_price = buy_result["_avg"]
+        else:
+            buy_result = await client.spot_market_buy_qty(pos.symbol, buy_qty)
+            pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
+            pos.spot_buy_price = _avg_fill_price(buy_result)
         latency = int((time.monotonic() - t0) * 1000)
-        pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
-        pos.spot_buy_price = _avg_fill_price(buy_result)
         pos.spot_buy_order_id = str(buy_result["orderId"])
         pos.close_spread = spread.spread_short
         pos.status = "PENDING_REPAY"   # coin held; awaiting manual/auto repay

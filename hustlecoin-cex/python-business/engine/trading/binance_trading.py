@@ -445,6 +445,37 @@ class BinanceTradingClient:
             "quantity": str(quantity),
         })
 
+    # ---- Spot maker (post-only) orders ----
+    # 现货腿 maker 化:LIMIT_MAKER = post-only,只做挂单方(taker 费≈15bp→maker 费更低甚至返佣),
+    # 砍近半 4 腿手续费、扩可做点差空间。现货/杠杆不支持 GTX,post-only 用 type=LIMIT_MAKER。
+    # 若挂价会立即成交(穿越盘口),币安直接拒单(-2010),调用方据此改市价兜底,绝不留单腿。
+
+    async def spot_limit_maker_sell(self, symbol: str, quantity: Decimal, price: Decimal, is_margin: bool = True) -> dict:
+        """post-only 限价卖(杠杆户,NO_SIDE_EFFECT 不借不还)。price 应挂在卖一或更高,确保做 maker。"""
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        params = {"symbol": symbol, "side": "SELL", "type": "LIMIT_MAKER",
+                  "quantity": str(quantity), "price": str(price)}
+        if is_margin:
+            params["sideEffectType"] = "NO_SIDE_EFFECT"
+        return await self._request("POST", base, params)
+
+    async def spot_limit_maker_buy(self, symbol: str, quantity: Decimal, price: Decimal, is_margin: bool = True) -> dict:
+        """post-only 限价买(杠杆户,NO_SIDE_EFFECT)。price 应挂在买一或更低,确保做 maker。"""
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        params = {"symbol": symbol, "side": "BUY", "type": "LIMIT_MAKER",
+                  "quantity": str(quantity), "price": str(price)}
+        if is_margin:
+            params["sideEffectType"] = "NO_SIDE_EFFECT"
+        return await self._request("POST", base, params)
+
+    async def spot_query_order(self, symbol: str, order_id: str, is_margin: bool = True) -> dict:
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        return await self._request("GET", base, {"symbol": symbol, "orderId": str(order_id)})
+
+    async def spot_cancel_order(self, symbol: str, order_id: str, is_margin: bool = True) -> dict:
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        return await self._request("DELETE", base, {"symbol": symbol, "orderId": str(order_id)})
+
     # ---- Futures Orders ----
 
     async def futures_market_long(self, symbol: str, quantity: Decimal,

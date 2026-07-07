@@ -543,6 +543,7 @@ class Worker:
             await execute_unhedge(
                 position, spread, self._trading_client, self._notifier, account_note,
                 futures_client=fc,
+                spot_order_mode=(getattr(self.config.global_rules, "spot_order_mode", "market") or "market"),
             )
             now = datetime.now(timezone.utc)
             self._repay_ban[position.symbol] = now
