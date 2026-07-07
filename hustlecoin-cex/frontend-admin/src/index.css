@@ -78,3 +78,10 @@ select:focus {
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* 手机侧栏抽屉从左滑入(qhadmin 同款 .22s) */
+@keyframes drawer-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.drawer-in-left { animation: drawer-in-left 0.22s ease; }
