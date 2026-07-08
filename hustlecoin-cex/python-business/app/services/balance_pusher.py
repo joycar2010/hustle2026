@@ -43,6 +43,8 @@ class BalancePusher:
         # 写后即时刷新:待处理用户集合 + 唤醒事件(去抖合并突发信号)
         self._refresh_pending: set[int] = set()
         self._refresh_event: Optional[asyncio.Event] = None
+        # 孤儿合约腿对账:per (uid:symbol) 连续命中计数(去抖,排除开/平仓在途的瞬时差)
+        self._orphan_hits: dict[str, int] = {}
 
     async def start(self):
         self._redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -104,6 +106,68 @@ class BalancePusher:
             except Exception as e:
                 logger.warning(f"balance refresh worker error: {e}")
                 await asyncio.sleep(1)
+
+    async def _check_orphan_futures(self, db, master_positions: dict):
+        """孤儿合约腿对账(每整轮≈10s,零额外 REST,复用本轮已采集的主账户合约仓):
+        主账户各币合约净仓(币安实际)vs DB「合约腿应在场」持仓(OPEN/CLOSING_FUTURES 且
+        hedge_account=master)的 futures_long_qty 之和。差额超容差且连续 2 轮命中 →
+        跑马灯 + 飞书告警(30min 节流)。只告警不自动平:共享净仓上自动动手可能误吃
+        在途开仓的腿,人工核对后处理。
+        (背景:partial_repay 曾在开仓态放行还币并把 position 抹成 CLOSED,主账户合约腿
+        就此脱管且无任何机制发现 —— FIL 0.1 合约残留事故。守卫已补,此处是持续对账防线。)"""
+        from sqlalchemy import func as _f
+        from engine.models import Position as _P
+        from app.services.notifier import throttle_ok
+        for uid, positions in (master_positions or {}).items():
+            for sym, amt in (positions or {}).items():
+                key = f"{uid}:{sym}"
+                try:
+                    expected = float(db.query(_f.coalesce(_f.sum(_P.futures_long_qty), 0)).filter(
+                        _P.user_id == uid, _P.symbol == sym,
+                        _P.hedge_account == "master",
+                        _P.status.in_(("OPEN", "CLOSING_FUTURES")),
+                    ).scalar() or 0)
+                    diff = float(amt or 0) - expected
+                    # 容差:相对 1%(双腿取整/费差)——命中容差即清计数
+                    if abs(diff) < 1e-9 or (expected > 0 and abs(diff) / expected < 0.01):
+                        self._orphan_hits.pop(key, None)
+                        continue
+                    price = 0.0
+                    try:
+                        raw = await self._redis.hget("spreads", sym)
+                        if raw:
+                            price = float(json.loads(raw).get("spot_bid") or 0)
+                    except Exception:
+                        pass
+                    if price > 0 and abs(diff) * price < 0.2:
+                        # 名义 <0.2U 的纯浮点/结算尘埃不告警
+                        self._orphan_hits.pop(key, None)
+                        continue
+                    self._orphan_hits[key] = self._orphan_hits.get(key, 0) + 1
+                    if self._orphan_hits[key] < 2:
+                        continue   # 开/平仓在途的瞬时差,下一轮(10s)复核
+                    self._orphan_hits.pop(key, None)
+                    if not throttle_ok(f"orphanfut:{uid}:{sym}", 1800, 1):
+                        continue
+                    notional = abs(diff) * price if price > 0 else 0.0
+                    detail = (f"⚠ 主账户 {sym} 合约净仓 {float(amt or 0):g} 与系统在场合约腿合计 "
+                              f"{expected:g} 不符(差 {diff:+g},≈{notional:.2f}U):存在脱管孤儿腿。"
+                              f"请人工核对后在主账户合约手动平掉差额;勿在此状态下手动还币。")
+                    logger.warning(f"ORPHAN FUTURES LEG u{uid} {sym}: binance={amt} expected={expected}")
+                    try:
+                        from app.db.models_notify import NotificationLog
+                        db.add(NotificationLog(template_name="孤儿合约腿", channel="marquee",
+                                               status="sent", content=detail))
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                    try:
+                        from engine.notify.feishu_sender import FeishuSender
+                        await FeishuSender().notify_error("主账户", f"孤儿合约腿 {sym}", detail)
+                    except Exception as fe:
+                        logger.debug(f"orphan futures feishu failed: {fe}")
+                except Exception as e:
+                    logger.debug(f"orphan futures check failed {key}: {e}")
 
     async def _btc_price(self) -> float:
         """Read BTCUSDT futures bid from the Redis spreads hash to convert
@@ -431,11 +495,12 @@ class BalancePusher:
                     logger.debug(f"Balance fetch failed for account {acc.id}: {e}")
 
             # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)。
-            # immediate 即时刷新跳过此段(省主账户 futures_position_risk 的逐币 REST),payload 用上一轮缓存兜底,
-            # 避免把「现-期/爆率」列清空闪烁;整轮采集后刷新缓存。
+            # immediate 即时刷新也采集:它由借/还币/开平仓事件触发且范围限定单用户(去抖 0.8s),
+            # 正是「现-期」列必须立刻反映合约腿变化的时刻 —— 原先跳过导致对冲成交后合约列
+            # 仍等 10s 整轮才更新。采集失败时 payload 仍回退上一轮缓存,不闪空。
             master_futures_positions = {}  # {uid: {symbol: positionAmt}}
             master_futures_liq = {}        # {uid: 维持保证金率%} 主账户合约户爆仓率(币安标准:totalMaintMargin/totalMarginBalance×100,越接近100越接近强平)
-            for uid in ([] if immediate else user_balances.keys()):
+            for uid in user_balances.keys():
                 from app.db.models import MasterAccount
                 master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
                 if not master or not master.api_key:
@@ -455,6 +520,9 @@ class BalancePusher:
                         # 只采集 pushed_symbols 里的币(避免全市场遍历)
                         pushed = self._redis.smembers(f"engine:{uid}:pushed_symbols")
                         if not pushed:
+                            # pushed 已清空也要写空 dict:否则缓存永远留着最后一次的旧仓位,
+                            # 全部下架后「现-期」列仍显示残留数字
+                            master_futures_positions[uid] = {}
                             continue
                         positions = {}
                         for sym_bytes in pushed:
@@ -469,10 +537,16 @@ class BalancePusher:
                 except Exception as e:
                     logger.debug(f"Master futures position fetch failed for user {uid}: {e}")
 
+            # 采集成功即刷新缓存(uid 级全量替换),供采集失败的轮次兜底(避免清空闪烁)
+            self._last_master_pos.update(master_futures_positions)
+            self._last_master_liq.update(master_futures_liq)
+
+            # 孤儿合约腿对账(整轮才跑:immediate 单用户窗口窄、开平仓在途易误报)
             if not immediate:
-                # 整轮采集成功 → 刷新主账户合约缓存,供后续 immediate 即时刷新兜底(避免清空闪烁)
-                self._last_master_pos.update(master_futures_positions)
-                self._last_master_liq.update(master_futures_liq)
+                try:
+                    await self._check_orphan_futures(db, master_futures_positions)
+                except Exception as e:
+                    logger.debug(f"orphan futures sweep failed: {e}")
 
             for uid, balances in user_balances.items():
                 position_count = db.query(Position).filter(

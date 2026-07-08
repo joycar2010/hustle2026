@@ -37,6 +37,7 @@ class Worker:
         self._margin_safe = True
         self._symbol_rules: dict[str, dict] = {}
         self._symbol_statuses: dict[str, str] = {}
+        self._last_pushed_statuses: dict[str, str] = {}   # 上次已广播的状态快照(变化即发去重用)
         self._glitch_logged: dict[str, datetime] = {}
         self._symbol_volumes: dict[str, float] = {}   # symbol -> 现货24h成交量(USDT),交易护栏用
         self._symbol_futures_volumes: dict[str, float] = {}   # symbol -> 合约24h成交量(USDT),双腿量过滤用
@@ -430,6 +431,21 @@ class Worker:
             active_count += 1
 
         self._symbol_statuses = statuses
+
+        # 状态变化即发:每周期(≈1s)对比上次已广播快照,任何币的执行状态一变立即
+        # publish symbol_status:updates —— 借币/开仓在途状态只存活 1-2 个周期,原来只靠
+        # %10 周期广播(≈10-30s 一次)几乎永远抓不到(「借币状态反应慢」的根因)。
+        # 无变化不发(不刷 Redis);%10 的 _update_state 全量广播保留作兜底心跳。
+        if statuses != self._last_pushed_statuses and self._redis:
+            try:
+                await self._redis.publish("symbol_status:updates", json.dumps({
+                    "sub_account_id": self.sub_account_id,
+                    "user_id": self._user_id,
+                    "statuses": statuses,
+                }))
+                self._last_pushed_statuses = dict(statuses)
+            except Exception as e:
+                logger.debug(f"symbol_status immediate publish failed: {e}")
 
         # ── Auto-push: symbols whose spread ≥ auto_push_spread join the user's pushed list ──
         if self._cycle_count % 10 == 0 and getattr(rules, "auto_push_spread", 0) and rules.auto_push_spread > 0:
