@@ -31,8 +31,6 @@ const COLS = [
   { key: 'close_funding_ratio', label: '平资息', w: 'w-12' },
   { key: 'repay_spread', label: '还币开', w: 'w-12' },
   { key: 'repay_funding_ratio', label: '还资息', w: 'w-12' },
-  { key: 'slippage_pct', label: '滑点%', w: 'w-12' },
-  { key: 'follow_type', label: '跟单', w: 'w-16', type: 'select' as const },
 ] as const
 
 type Row = Record<string, unknown>
@@ -50,6 +48,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   const [repaying, setRepaying] = useState<number | null>(null)
   const addToast = useToastStore((s) => s.addToast)
   const balances = useBalanceStore((s) => s.balances)
+  const markRepaid = useBalanceStore((s) => s.markRepaid)
 
   // 某账户对当前币的持币(已借本金+利息),数据来自 balance 实时快照 symbol_margin
   const heldOf = useCallback((accountId: number) => {
@@ -66,18 +65,19 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
     const base = symbol.replace('USDT', '')
     if (!(await confirmDialog({
       title: '还币',
-      message: `确认为 ${note} 还清 ${base}？\n本金 ${borrowed.toFixed(6)} + 利息 ${interest.toFixed(6)} ≈ ${total.toFixed(6)} ${base}`,
+      message: `确认为 ${note} 还清 ${base}？\n本金 ${borrowed.toFixed(6)} + 利息 ${interest.toFixed(6)} ≈ ${total.toFixed(6)} ${base}\n\n注意:还清后该币立即恢复自动借币(挂单差为负会秒级重借);\n如需暂停借币,请从右键「部分还币」弹窗勾选暂停选项。`,
       danger: true,
     }))) return
     setRepaying(accountId)
     try {
       await partialRepay(accountId, symbol, total)
+      markRepaid(accountId, symbol)   // 乐观清零 → 持币列即时归"—",下次WS推送对账
       addToast(`${note} 还币已提交`, 'success')
     } catch (e) {
       addToast(`还币失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
     }
     setRepaying(null)
-  }, [heldOf, symbol, addToast])
+  }, [heldOf, symbol, addToast, markRepaid])
 
   useEffect(() => {
     const loadAll = async () => {
@@ -152,6 +152,24 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   }
 
   const handleSave = useCallback(async () => {
+    // 防呆:开仓值设为负(负基差测试)而生效的平仓值不是更低的负值时,
+    // 开仓后当前点差(<0)大概率立即 < 平仓值 → 开完即平。提醒一次,可确认继续。
+    {
+      const num = (v: unknown) => (v === '' || v == null ? null : parseFloat(String(v)))
+      const gClose = num(globalRules['close_spread'])
+      const sClose = num(symbolRule['close_spread'])
+      const rowsToCheck: Row[] = []
+      if (dirty.has('common')) rowsToCheck.push(symbolRule)
+      for (const a of accounts) if (dirty.has(String(a.id))) rowsToCheck.push(accountRules[a.id] || {})
+      const risky = rowsToCheck.some((r) => {
+        const o = num(r['open_spread'])
+        if (o == null || Number.isNaN(o) || o >= 0) return false
+        const c = num(r['close_spread']) ?? sClose ?? gClose
+        // 负点差行情下平仓值仍 ≥0(或未设) → 开仓瞬间点差(<0)即 < 平仓值,开完即平
+        return c == null || Number.isNaN(c) || c >= 0
+      })
+      if (risky && !confirm('开仓值为负,但生效的平仓值不是更低的负值:\n负点差行情下开仓后很可能立即满足平仓条件、开完即平。\n确认按当前值保存?')) return
+    }
     setSaving(true)
     try {
       const tasks: Promise<unknown>[] = []
@@ -168,7 +186,14 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
       await Promise.all(tasks)
       addToast(`已保存 ${tasks.length} 项`, 'success')
       onClose()
-    } catch { addToast('保存失败(请检查数值是否合法)', 'error') }
+    } catch (e) {
+      // 透出后端 422 detail(pydantic 校验错误是数组,取 msg;字符串直接用),用户才知道具体哪个值越界
+      const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = typeof d === 'string' ? d
+        : Array.isArray(d) ? d.map((x) => (x as { msg?: string })?.msg || '').filter(Boolean).join('; ')
+        : ''
+      addToast(`保存失败: ${msg || '请检查数值是否合法'}`, 'error')
+    }
     setSaving(false)
   }, [symbol, symbolRule, accountRules, accounts, dirty, onClose, addToast])
 
@@ -274,7 +299,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
                     </td>
                     {COLS.map((c) => {
                       const v = ar[c.key]
-                      const baseline = String(symbolRule[c.key] ?? '')
+                      const baseline = String(symbolRule[c.key] ?? globalRules[c.key] ?? '')
                       const modified = v != null && v !== '' && String(v) !== baseline
                       return (
                         <td key={c.key} className="px-1 py-1 text-center" title={modified ? '右键恢复为批量值' : undefined}>

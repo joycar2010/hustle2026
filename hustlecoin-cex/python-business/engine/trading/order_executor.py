@@ -48,9 +48,74 @@ def _publish_balance_refresh(user_id):
         pass
 
 
+def _publish_position(position, user_id):
+    """状态机推进(借到币/对冲/还币)后把 position 实时推给前端(position:updates),让 dashboard
+    子账户行不等 15s REST 轮询就切换成真实持仓行 —— 修复"手推借到币后黄框列(现-期/最大可借/
+    现币/借币/保证金/净值)要手动刷新才出"。sub_account_id 用 int(与前端 balanceMap 的 account_id
+    同类型,get 才命中)。失败静默,持仓最终仍由轮询兜底。"""
+    if user_id is None:
+        return
+    try:
+        import json as _json
+        import redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.publish("position:updates", _json.dumps({
+            "id": position.id,
+            "user_id": int(user_id),
+            "sub_account_id": int(position.sub_account_id),
+            "symbol": position.symbol,
+            "status": position.status,
+            "borrow_qty": str(position.borrow_qty or "0"),
+        }))
+        rc.close()
+    except Exception:
+        pass
+
+
 TAKER_FEE_RATE = Decimal("0.00075")
 FEE_BUFFER = Decimal("1.0015")
 BORROW_FRESH_MS = 3000   # 借币二次确认: 点差快照超此毫秒数视为陈旧,不在已死/过期点差上完成借币
+
+
+def _compute_net_expect(spread_short_pct, notional_usdt: float, interest_rate_daily,
+                        hold_hours: float, f_spot, f_fut, buffer_pct) -> tuple[float, dict]:
+    """开仓前净期望收益 E(USDT,统一绝对值口径)。所有输入折成 USDT 再比较,避免 %/币/分数混算。
+      E = 点差捕获 − 利息(持有期) − 4腿手续费 − tick/滑点摩擦
+    - 点差捕获 = spread_short(%)/100 × 名义额。本策略借币→卖现货→多合约,收敛即赚这段基差。
+    - 利息 = 日利率 × 名义额 × 持有小时/24。持有小时取"预期最短持仓"(≥1,币安按小时头计息)。
+    - 4腿手续费 = (现卖+现买)×f_spot + (期开+期平)×f_fut = 2×名义×(f_spot+f_fut)。
+    - tick摩擦 = open_spread_buffer(%)/100 × 名义额(近似腿间滑点/tick 步进,现状唯一摩擦旋钮)。
+    资金费预期第一版不计入(短持有常跨不到8h结算,且可正可负):作为已知保守偏差,E 偏低=宁可少开。
+    返回 (E, 分项dict)。E≤0 = 结构性亏损,不该开。"""
+    n = float(notional_usdt or 0)
+    cap = float(spread_short_pct or 0) / 100.0 * n
+    interest = float(interest_rate_daily or 0) * n * max(1.0, hold_hours) / 24.0
+    fee = 2.0 * n * (float(f_spot or 0) + float(f_fut or 0))
+    tick = float(buffer_pct or 0) / 100.0 * n
+    e = cap - interest - fee - tick
+    return e, {
+        "notional_usdt": round(n, 4), "spread_capture": round(cap, 4),
+        "interest_cost": round(interest, 4), "fee_cost": round(fee, 4),
+        "tick_cost": round(tick, 4), "funding_expect": 0.0, "E": round(e, 4),
+    }
+
+
+def _publish_net_eval(user_id, symbol: str, e: float, br: dict, decision: str, gate_mode: str):
+    """把开仓净期望评估写 Redis(供 coinadmin market-monitor 实时 E 榜)。
+    键 engine:{uid}:neteval:{SYMBOL},60s TTL 保鲜;失败静默,绝不影响借币主流程。"""
+    if user_id is None:
+        return
+    try:
+        import json as _json, time as _t, redis as _r
+        from app.config import settings as _s
+        rc = _r.from_url(_s.redis_url, decode_responses=True)
+        rc.setex(f"engine:{user_id}:neteval:{symbol}", 60, _json.dumps({
+            **br, "decision": decision, "gate_mode": gate_mode, "ts": int(_t.time() * 1000),
+        }))
+        rc.close()
+    except Exception:
+        pass
 
 
 async def _get_asset_debt(client: BinanceTradingClient, asset: str) -> tuple[Decimal, Decimal]:
@@ -296,6 +361,63 @@ def _log_trade(db, position_id: int, sub_account_id: int, action: str, symbol: s
     db.commit()
 
 
+SPOT_MAKER_WAIT_SEC = 3.0    # maker 挂单最长等待成交,超时撤单转市价兜底
+SPOT_MAKER_POLL_SEC = 0.4
+
+
+async def _spot_maker_fill(client, symbol: str, side: str, qty: Decimal, spread,
+                           spot_lot: dict, is_margin: bool = True) -> dict:
+    """现货腿 maker 成交(P1 现货 maker 化):挂 post-only 限价(LIMIT_MAKER)做挂单方省手续费;
+    最长等 SPOT_MAKER_WAIT_SEC,未全成 → 撤单 → 剩余市价兜底,保证必成交、绝不留单腿。
+    返回结构兼容市价单:{executedQty, orderId, _avg}(_avg=成交均价)。post-only 若会穿越盘口被币安
+    -2010 拒单,直接市价兜底(此刻点差已收窄,做 taker 也认)。"""
+    filters = await client._get_spot_filters(symbol)
+    tick = filters["tick"]
+    if side == "SELL":
+        px = round_to_step(spread.spot_ask, tick) if getattr(spread, "spot_ask", 0) else None
+        maker_fn = client.spot_limit_maker_sell
+        market_fn = client.spot_market_sell
+    else:
+        px = round_to_step(spread.spot_bid, tick) if getattr(spread, "spot_bid", 0) else None
+        maker_fn = client.spot_limit_maker_buy
+        market_fn = client.spot_market_buy_qty
+    filled = Decimal("0"); value = Decimal("0"); oid = ""
+    if px and px > 0:
+        try:
+            r = await maker_fn(symbol, qty, px, is_margin)
+            oid = str(r["orderId"])
+            waited = 0.0; done = False
+            while waited < SPOT_MAKER_WAIT_SEC:
+                await asyncio.sleep(SPOT_MAKER_POLL_SEC); waited += SPOT_MAKER_POLL_SEC
+                o = await client.spot_query_order(symbol, oid, is_margin)
+                if o.get("status") == "FILLED":
+                    filled = Decimal(str(o.get("executedQty", "0")))
+                    value = Decimal(str(o.get("cummulativeQuoteQty", "0")))
+                    done = True; break
+            if not done:
+                try:
+                    c = await client.spot_cancel_order(symbol, oid, is_margin)
+                    filled = Decimal(str(c.get("executedQty", "0")))
+                    value = Decimal(str(c.get("cummulativeQuoteQty", "0")))
+                except Exception:
+                    o = await client.spot_query_order(symbol, oid, is_margin)
+                    filled = Decimal(str(o.get("executedQty", "0")))
+                    value = Decimal(str(o.get("cummulativeQuoteQty", "0")))
+        except BinanceAPIError as e:
+            if getattr(e, "api_code", None) != -2010 and "-2010" not in str(e):
+                raise   # 非"会立即成交被拒",真错误上抛
+    # 剩余市价兜底(必成交,不留单腿)
+    remaining = round_to_step(qty - filled, spot_lot["stepSize"])
+    if remaining > 0:
+        mr = await market_fn(symbol, remaining, is_margin)
+        mq = Decimal(str(mr.get("executedQty", "0")))
+        filled += mq
+        value += mq * _avg_fill_price(mr)
+        oid = str(mr.get("orderId", oid))
+    avg = (value / filled) if filled > 0 else Decimal("0")
+    return {"executedQty": str(filled), "orderId": oid, "_avg": avg}
+
+
 async def execute_borrow(
     sub_account_id: int,
     symbol: str,
@@ -339,21 +461,32 @@ async def execute_borrow(
         position.borrow_interest_rate = interest_rate
 
         # delay + re-confirm spread still above the borrow threshold(含 ts 新鲜度,防陈旧缓存)
-        await asyncio.sleep(rules.borrow_delay_sec)
+        # 负阈值(挂单差<0)=任何点差都借的囤券意图,点差质量/新鲜度与借币决策无关 → 跳过两道确认闸。
+        # 否则冷门币(bookTicker 仅价/量变才推,常几十秒~分钟无 tick)会在「睡 borrow_delay_sec 后
+        # 要求快照 ≤BORROW_FRESH_MS(3s) 新鲜」上反复 FAILED,借币落地被拖成分钟级随机延迟。
+        skip_confirm = confirm_spread is not None and confirm_spread < 0
+        # 负阈值零等待:确认闸已跳过时,borrow_delay_sec 的唯一意义(睡后复核点差)不复存在,
+        # 这 3s 纯属死等 → 连同省去,借币立即执行。正阈值路径行为不变。
+        if not skip_confirm:
+            await asyncio.sleep(rules.borrow_delay_sec)
         if spread_feed:
             current = spread_feed.get_symbol(symbol)
-            now_ms = int(time.time() * 1000)
-            fresh = bool(current and getattr(current, "ts", 0) and now_ms - int(current.ts) <= BORROW_FRESH_MS)
-            if not fresh or current.spread_short <= confirm_spread:
-                position.status = "FAILED"
-                position.error_message = (
-                    f"Spread degraded/stale after delay: "
-                    f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}% 或快照陈旧"
-                )
-                db.commit()
-                db.close()
-                return None
-            spread = current
+            if skip_confirm:
+                if current:
+                    spread = current   # 有新快照就用(仅用于数量换算),陈旧也不拦
+            else:
+                now_ms = int(time.time() * 1000)
+                fresh = bool(current and getattr(current, "ts", 0) and now_ms - int(current.ts) <= BORROW_FRESH_MS)
+                if not fresh or current.spread_short <= confirm_spread:
+                    position.status = "FAILED"
+                    position.error_message = (
+                        f"Spread degraded/stale after delay: "
+                        f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}% 或快照陈旧"
+                    )
+                    db.commit()
+                    db.close()
+                    return None
+                spread = current
 
         # quantity
         lot_info = await client.get_lot_size(symbol, "spot")
@@ -426,9 +559,41 @@ async def execute_borrow(
             db.close()
             return None
 
+        # ── P0-1 净期望收益闸(成本线) ── 借币前评估这笔套利的净期望 E(USDT);此刻所有成本变量齐全
+        # (点差/名义/利率/费率/缓冲)且尚未真花钱。shadow=只记录不拦(先跑一周看会拦掉多少);
+        # enforce=E≤0 直接放弃(结构性亏损不开);off=不评估。评估结果写 Redis 供 market-monitor E 榜。
+        gate_mode = getattr(rules, "net_gate_mode", "shadow") or "shadow"
+        expected_e = None
+        e_break = None
+        if gate_mode != "off":
+            hold_hours = float(getattr(rules, "repay_ban_minutes", 30) or 30) / 60.0
+            expected_e, e_break = _compute_net_expect(
+                spread_short_pct=float(getattr(spread, "spread_short", 0) or 0),
+                notional_usdt=float(qty * price),
+                interest_rate_daily=float(interest_rate or 0),
+                hold_hours=hold_hours,
+                f_spot=float(getattr(rules, "taker_fee_spot", TAKER_FEE_RATE) or TAKER_FEE_RATE),
+                f_fut=float(getattr(rules, "taker_fee_futures", TAKER_FEE_RATE) or TAKER_FEE_RATE),
+                buffer_pct=float(getattr(rules, "open_spread_buffer", 0) or 0),
+            )
+            decision = "borrow" if (gate_mode == "shadow" or expected_e > 0) else "reject"
+            _publish_net_eval(user_id, symbol, expected_e, e_break, decision, gate_mode)
+            if gate_mode == "enforce" and expected_e <= 0:
+                position.status = "FAILED"
+                position.error_message = (f"净期望闸拒开: E={expected_e:.4f}U≤0 "
+                                          f"(点差捕获{e_break['spread_capture']:.4f}−利息{e_break['interest_cost']:.4f}"
+                                          f"−手续费{e_break['fee_cost']:.4f}−摩擦{e_break['tick_cost']:.4f})")
+                logger.info(f"Net-expect gate REJECT {symbol}: {position.error_message}")
+                db.commit()
+                db.close()
+                return None
+            if expected_e is not None and expected_e <= 0:
+                logger.info(f"[shadow] Net-expect≤0 {symbol}: E={expected_e:.4f}U (借币仍继续, gate={gate_mode})")
+
         # 借币前最终二次确认: 算 qty 期间(get_lot_size / maxBorrowable REST)又过去若干 ms,
         # 重读最新点差,确认仍新鲜且 ≥ 阈值 → 否则放弃,减少在已消失点差上完成 ~160ms 借币。
-        if spread_feed:
+        # 负阈值同上跳过(囤券不依赖点差存活)。
+        if spread_feed and not skip_confirm:
             latest = spread_feed.get_symbol(symbol)
             now_ms = int(time.time() * 1000)
             fresh = bool(latest and getattr(latest, "ts", 0) and now_ms - int(latest.ts) <= BORROW_FRESH_MS)
@@ -461,11 +626,23 @@ async def execute_borrow(
         latency = int((time.monotonic() - t0) * 1000)
         position.status = "BORROWED_IDLE"
         position.borrow_qty = qty
+        # 记开仓预期净收益 E + 分项(事后与 round_net_pnl 校准闸的准度)
+        if expected_e is not None:
+            position.expected_e = Decimal(str(round(expected_e, 4)))
+            try:
+                import json as _j
+                position.e_breakdown = _j.dumps(e_break)
+            except Exception:
+                pass
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, quantity=qty, status="SUCCESS", latency=latency)
         logger.info(f"Borrowed (idle): {symbol} qty={qty}")
         # 写后即时刷新:借到币 → 让该用户 dashboard 现币/借币列秒级更新,不等 10s 轮询
-        _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
+        _uid = user_id if user_id is not None else _resolve_user_id(db, sub_account_id)
+        _publish_balance_refresh(_uid)
+        # 持仓实时推送:让前端 positions 立即含这条 BORROWED_IDLE(切换成真实持仓行),不等 15s 轮询 →
+        # 修复"手推借到币后子账户行整块(现-期/最大可借/现币/借币/保证金/净值)要手动刷新才出"
+        _publish_position(position, _uid)
         try:
             await notifier.notify_new_borrow(account_note, symbol, qty, qty * price)
         except Exception as e:
@@ -597,10 +774,17 @@ async def execute_hedge(
                 logger.info(f"Hedge {symbol}: tail batch {b} below min notional, selling stops at {total_sold}")
                 break
             t0 = time.monotonic()
-            sell_result = await client.spot_market_sell(symbol, b)
+            # 现货腿 maker 化:spot_order_mode=maker 时挂 post-only 省手续费(超时撤单+市价兜底)
+            _spot_mode = getattr(rules, "spot_order_mode", "market") or "market"
+            if _spot_mode == "maker":
+                sell_result = await _spot_maker_fill(client, symbol, "SELL", b, spread, spot_lot)
+                fqty = Decimal(str(sell_result["executedQty"]))
+                fprice = sell_result["_avg"]
+            else:
+                sell_result = await client.spot_market_sell(symbol, b)
+                fqty = Decimal(str(sell_result["executedQty"]))
+                fprice = _avg_fill_price(sell_result)
             latency = int((time.monotonic() - t0) * 1000)
-            fqty = Decimal(str(sell_result["executedQty"]))
-            fprice = _avg_fill_price(sell_result)
             total_sold += fqty
             total_value += fqty * fprice
             last_oid = str(sell_result["orderId"])
@@ -778,6 +962,7 @@ async def execute_unhedge(
     notifier: FeishuSender,
     account_note: str,
     futures_client: BinanceTradingClient = None,
+    spot_order_mode: str = "market",   # 现货买回腿:market/maker(post-only省手续费)
 ):
     """Phase 1 of close: close the futures long + buy back the spot, leaving the coin
     in the margin account awaiting repay. OPEN → PENDING_REPAY (net-flat, no exposure).
@@ -836,10 +1021,16 @@ async def execute_unhedge(
         pos.status = "CLOSING_SPOT"
         db.commit()
         t0 = time.monotonic()
-        buy_result = await client.spot_market_buy_qty(pos.symbol, buy_qty)
+        # 现货买回腿 maker 化(超时撤单+市价兜底,必足量买回以还币)
+        if (spot_order_mode or "market") == "maker":
+            buy_result = await _spot_maker_fill(client, pos.symbol, "BUY", buy_qty, spread, spot_lot)
+            pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
+            pos.spot_buy_price = buy_result["_avg"]
+        else:
+            buy_result = await client.spot_market_buy_qty(pos.symbol, buy_qty)
+            pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
+            pos.spot_buy_price = _avg_fill_price(buy_result)
         latency = int((time.monotonic() - t0) * 1000)
-        pos.spot_buy_qty = Decimal(str(buy_result["executedQty"]))
-        pos.spot_buy_price = _avg_fill_price(buy_result)
         pos.spot_buy_order_id = str(buy_result["orderId"])
         pos.close_spread = spread.spread_short
         pos.status = "PENDING_REPAY"   # coin held; awaiting manual/auto repay
@@ -864,6 +1055,36 @@ async def execute_unhedge(
         await notifier.notify_error(account_note, f"unhedge {pos.symbol}", str(e))
     finally:
         db.close()
+
+
+async def sell_residual_spot(client: BinanceTradingClient, symbol: str, base_asset: str, qty) -> tuple[Decimal, str]:
+    """把杠杆户 base_asset 现币残留市价卖回 USDT(NO_SIDE_EFFECT,不借币)。残留来源=平仓买回按
+    FEE_BUFFER 超买/开仓尾批不足额,还清债务后无人消费。qty 向下对齐 stepSize;名义 < minNotional
+    时币安不接单,如实返回原因。返回 (实际卖出数量, 说明)。
+    ⚠调用方必须自行保证: 该账户该币债务已清 且 无其它非终态持仓 —— 否则会把别的仓等待还币的
+    买回币卖掉,制造裸债。(engine_api 手动「卖回」与 execute_repay 自动卖回共用此实现)"""
+    q = Decimal(str(qty))
+    info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
+                                 {"symbol": symbol}, signed=False)
+    sp = info.get("symbols", [{}])[0]
+    flt = {f["filterType"]: f for f in sp.get("filters", [])}
+    step = str(flt.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
+    min_notional = Decimal(str(flt.get("NOTIONAL", {}).get("minNotional", "5") or "5"))
+    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                {"symbol": symbol}, signed=False)
+    price = Decimal(str(tkr.get("price", 0) or 0))
+    if price <= 0:
+        return Decimal("0"), "取价失败,稍后重试"
+    sell_qty = round_to_step(q, step)
+    if sell_qty <= 0 or sell_qty * price < min_notional:
+        return Decimal("0"), (f"残留 {q:.6f} 名义价值 {float(q * price):.2f}U "
+                              f"低于币安最小卖出额 {min_notional}U,暂留账")
+    await client._request(
+        "POST", "https://api.binance.com/sapi/v1/margin/order",
+        {"symbol": symbol, "side": "SELL", "type": "MARKET",
+         "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT", "isIsolated": "FALSE"},
+    )
+    return sell_qty, f"已卖回 {sell_qty:.6f} {base_asset}"
 
 
 async def execute_repay(
@@ -937,25 +1158,65 @@ async def execute_repay(
                     quantity=repay_amount, status="SUCCESS", latency=latency)
 
         # Finalize PnL (fees + interest)
-        spot_pnl = (pos.spot_sell_qty * pos.spot_sell_price) - (pos.spot_buy_qty * pos.spot_buy_price)
-        futures_pnl = (pos.futures_close_price - pos.futures_long_price) * pos.futures_long_qty
-        spot_sell_notional = pos.spot_sell_qty * pos.spot_sell_price
-        spot_buy_notional = pos.spot_buy_qty * pos.spot_buy_price
-        futures_open_notional = pos.futures_long_qty * pos.futures_long_price
-        futures_close_notional = pos.futures_long_qty * pos.futures_close_price
+        # 腿字段 None 归零:BORROWED_IDLE(借了未开腿)直转 PENDING_REPAY 还币时,现/期四腿字段
+        # 全 NULL → None*None TypeError,margin_repay 已成功但状态写不回 → 卡 REPAYING 二次卡死。
+        _z = Decimal("0")
+        _ssq = pos.spot_sell_qty or _z; _ssp = pos.spot_sell_price or _z
+        _sbq = pos.spot_buy_qty or _z;  _sbp = pos.spot_buy_price or _z
+        _flq = pos.futures_long_qty or _z; _flp = pos.futures_long_price or _z
+        _fcp = pos.futures_close_price or _z
+        spot_pnl = (_ssq * _ssp) - (_sbq * _sbp)
+        futures_pnl = (_fcp - _flp) * _flq
+        spot_sell_notional = _ssq * _ssp
+        spot_buy_notional = _sbq * _sbp
+        futures_open_notional = _flq * _flp
+        futures_close_notional = _flq * _fcp
         # 双腿吃单费率(可配): 现货腿与合约腿分开,None 回退硬编码常量(旧行为)
         f_spot = Decimal(str(fee_spot)) if fee_spot is not None else TAKER_FEE_RATE
         f_fut = Decimal(str(fee_futures)) if fee_futures is not None else TAKER_FEE_RATE
         total_fee = (spot_sell_notional + spot_buy_notional) * f_spot \
             + (futures_open_notional + futures_close_notional) * f_fut
-        interest_cost = interest_amount * pos.spot_buy_price if interest_amount else Decimal("0")
+        interest_cost = interest_amount * _sbp if interest_amount else Decimal("0")
         pos.fee_total = total_fee + interest_cost
         pos.realized_pnl = spot_pnl + futures_pnl - total_fee - interest_cost
+        # P0-3 逐回路净损益:realized_pnl 不含资金费(资金费单独落 cumulative_funding_fee),
+        # 本回路真实净 = realized + 已结算资金费。这是"这一轮开平到底赚没赚"的唯一真值,
+        # 与 expected_e(开仓预期)同 USDT 口径,供 dashboard/admin 历史逐笔展示 + 事后校准 E 闸准度。
+        _funding = pos.cumulative_funding_fee or Decimal("0")
+        pos.round_net_pnl = pos.realized_pnl + _funding
         pos.closed_at = datetime.now(timezone.utc)
         pos.status = "CLOSED"
         db.commit()
 
         logger.info(f"Position closed (repaid): {pos.symbol} pnl={pos.realized_pnl}")
+
+        # 自动卖回本轮残留零头:买回按 FEE_BUFFER 超买、还币只还 min(pos_owed,债务),差额
+        # 无人消费会永久躺在"现币"列。护栏(缺一不卖):
+        #   ① 该账户该币无其它非终态持仓 —— 多仓并存时 free 里是别的仓等待还币的买回币,卖了=裸债;
+        #   ② 还后实测债务已为 0 —— 部分还(pos_owed<总债)说明还有仓欠着,零头要留给后续还币。
+        # 只卖本轮算术零头 min(free_bal-repay_amount, 当前free),不碰账户里其它来源的持币。
+        # best-effort:任何失败只记日志,不影响已完成的平仓。
+        try:
+            leftover = free_bal - repay_amount
+            if leftover > 0:
+                others = db.query(Position).filter(
+                    Position.sub_account_id == pos.sub_account_id,
+                    Position.symbol == pos.symbol,
+                    Position.id != pos.id,
+                    Position.status.notin_(["CLOSED", "FAILED"]),
+                ).count()
+                if others == 0:
+                    debt_now, _i2, free_now = await _read_debt_free()
+                    if debt_now <= 0 and free_now > 0:
+                        sold, note = await sell_residual_spot(
+                            client, pos.symbol, pos.base_asset, min(leftover, free_now))
+                        if sold > 0:
+                            logger.info(f"Repay {pos.symbol}: residual sold back {sold} ({account_note})")
+                        else:
+                            logger.info(f"Repay {pos.symbol}: residual not sold — {note}")
+        except Exception as se:
+            logger.warning(f"Repay {pos.symbol}: residual sell-back skipped: {se}")
+
         # 写后即时刷新:还币平仓(引擎自动 / manual-repay 端点都走此函数)→ 该用户余额秒级刷新
         _publish_balance_refresh(
             pos.user_id if getattr(pos, "user_id", None) is not None

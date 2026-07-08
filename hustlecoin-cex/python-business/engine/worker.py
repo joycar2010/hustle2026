@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
@@ -20,6 +21,7 @@ MAX_PER_SYMBOL = 3
 SPREAD_FRESH_MS = 10_000   # 借币门:快照 ts 超此毫秒数视为 feed 停更/陈旧,不在死数据上开仓(与 rust 新鲜度护栏对齐)
 STALE_PENDING_BORROW_SEC = 120   # PENDING_BORROW 超此秒数视为僵尸(正常秒级转 IDLE/FAILED),每周期回收(与 orchestrator 启动回收阈值一致)
 NAKED_CHECK_INTERVAL = 0.5       # 裸空安全网检查周期(秒):0.5s 准实时发现「孤儿债务」(借币未对冲)
+IDLE_GIVEUP_MINUTES = 30         # BORROWED_IDLE 超时放弃:正阈值仓借后超此分钟仍达不到对冲阈值 → 还币止损(负阈值囤券不适用)
 AUTO_REMEDIATE = True            # 裸空全自动收口(用户已选):检测+告警+自动买回还币;False=仅检测告警
 
 
@@ -373,6 +375,11 @@ class Worker:
             if spread.spread_short > self._sym_threshold(pos.symbol, "open_spread", rules.open_spread):
                 await self._hedge_position(pos, spread, account_note)
                 open_positions = await asyncio.to_thread(self._load_open_positions)
+                continue
+            # 超时放弃:状态机原本 BORROWED_IDLE 唯一出路是对冲,点差借完回落就永久卡住白付利息
+            # +dashboard 挂"现-期残留"(实测 FIL 借后 open 阈值够不着卡 15min+)。正阈值(非囤券)的
+            # idle 仓超时未能对冲 → 放弃还币止损。负阈值=故意囤券持币等点差,不适用超时。
+            await self._maybe_giveup_idle(pos, rules)
 
         # ── BORROW: pushed ∩ tradable, spread > borrow_spread → execute_borrow (idle) ──
         # 同时为挂单中(未持仓)的每个推送币算逐账户状态写入 statuses(点差不符/无券/量不足/冷却…),
@@ -394,16 +401,26 @@ class Worker:
                 statuses[symbol] = "黑名单"; continue
             if symbol not in tradable_symbols:
                 statuses[symbol] = "不可交易"; continue
-            # 无券/量不足/行情陈旧/点差不符 均为"正常等待态"(非故障)→ 统一显示"运行中",
-            # 但仍 continue 不借(仅展示口径统一,借币逻辑不变)。
+            # 无券/量不足/行情陈旧/点差不符 均为"正常等待态"(非故障),但各自如实显示 ——
+            # 曾统一显示"运行中",用户无从区分"在等什么/是否真在借"(只能去币安App查借币记录),已拆回。
+            # 无券冷却:按用户口径显示"运行中"(运行中而借不进=市场没券,无需单独状态词);
+            # 最大可借列已恒显 VIP 额度数字,无券信息不再单独上屏。
             if symbol in no_inventory:
                 statuses[symbol] = "运行中"; continue
             if not self._volume_ok(symbol):
-                statuses[symbol] = "运行中"; continue
+                statuses[symbol] = "量不足"; continue
             if self._is_banned(symbol):
                 statuses[symbol] = "借币冷却"; continue
             if self._is_removed_banned(symbol):
                 statuses[symbol] = "移除冷却"; continue
+            # 手动还币后的暂停标记(engine_api 写,勾选1800s/在途10s):防"刚还清又被负阈值秒级重借"。
+            # ⚠self._redis 是 aioredis(异步),必须 await —— 漏 await 时 get() 返回 coroutine 对象
+            # 恒为 truthy → 每个币每周期恒判「还币暂停」永不借币(Redis 无 key 也照样暂停)。已修。
+            try:
+                if await self._redis.get(f"engine:{self._user_id}:repayhold:{symbol}"):
+                    statuses[symbol] = "还币暂停"; continue
+            except Exception:
+                pass
             sym_rule = self._symbol_rules.get(symbol, {})
             if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                 statuses[symbol] = "禁借"; continue
@@ -412,10 +429,21 @@ class Worker:
             spread = self.spread_feed.get_symbol(symbol)
             if not self._spread_sane(spread):
                 statuses[symbol] = "行情异常"; continue
-            if not self._spread_fresh(spread):
-                statuses[symbol] = "运行中"; continue
+            # 负有效阈值(挂单差<0)=无条件囤券,借币决策不依赖点差质量:行情新鲜度只影响换算
+            # 数量用的价格新旧 → 跳过 10s 新鲜闸(与 execute_borrow 内层 skip_confirm 呼应),
+            # 用最近一次快照价换算数量,做到零等待借币;冷清币不再"等下一个 tick 才借"。
+            # 盘口 sane 闸(非正价格/离谱点差)仍保留 —— 换算数量至少要一个正常价。
+            if eff_borrow >= 0 and not self._spread_fresh(spread):
+                statuses[symbol] = "行情陈旧"; continue
             if not self._spread_persisted(symbol, float(spread.spread_short), eff_borrow):
-                statuses[symbol] = "运行中"; continue
+                statuses[symbol] = "点差不符"; continue
+            # ── P0-2 自杀组合校验 ── 开仓阈值 < 平仓阈值 = 必然循环:借币对冲开仓(spread>open_spread)
+            # 后立刻满足平仓(spread<close_spread),整夜开→平→重开烧 4 腿手续费+每轮小时头利息
+            # (FIL 开-1/平1.0 即此)。从借币源头掐掉:开<平直接不借,记"配置冲突"提示用户改配置。
+            _open_th = self._sym_threshold(symbol, "open_spread", rules.open_spread)
+            _close_th = self._sym_threshold(symbol, "close_spread", rules.close_spread)
+            if _open_th is not None and _close_th is not None and float(_open_th) < float(_close_th):
+                statuses[symbol] = "配置冲突"; continue
             # 有券 + 无异常 + 点差达标 → 正常运行(挂单借币中);本轮真借或受满仓/账户护栏暂缓,均标"运行中"
             statuses[symbol] = "运行中"
             if not can_borrow or active_count >= max_positions or not self._running:
@@ -430,6 +458,17 @@ class Worker:
             active_count += 1
 
         self._symbol_statuses = statuses
+
+        # P1-8 借币子路径心跳:借币评估循环每跑完一轮就打戳,证明借币子路径真活着。
+        # 区别于 _update_state 每10周期的主循环心跳——主循环心跳在借币子路径卡死时照跳
+        # (就像"漏 await 致借币全废但主循环空转"那类);此戳一旦停更(而主心跳仍在)= 借币停摆。
+        if self._redis:
+            try:
+                await self._redis.setex(
+                    f"engine:{self._user_id}:borrow_hb:{self.sub_account_id}", 300,
+                    datetime.now(timezone.utc).isoformat())
+            except Exception:
+                pass
 
         # ── Auto-push: symbols whose spread ≥ auto_push_spread join the user's pushed list ──
         if self._cycle_count % 10 == 0 and getattr(rules, "auto_push_spread", 0) and rules.auto_push_spread > 0:
@@ -521,6 +560,7 @@ class Worker:
             await execute_unhedge(
                 position, spread, self._trading_client, self._notifier, account_note,
                 futures_client=fc,
+                spot_order_mode=(getattr(self.config.global_rules, "spot_order_mode", "market") or "market"),
             )
             now = datetime.now(timezone.utc)
             self._repay_ban[position.symbol] = now
@@ -542,28 +582,78 @@ class Worker:
         except Exception as e:
             logger.error(f"Repay failed {position.symbol}: {e}")
 
+    async def _maybe_giveup_idle(self, position, rules):
+        """BORROWED_IDLE 超时放弃(状态机补洞):借币后点差回落、对冲阈值长时间够不着的仓,
+        原状态机无任何出路 → 永久 idle 白付小时头利息 + dashboard 挂「现-期残留」。
+        条件(全满足才放弃):
+          ① 有效挂单点差阈值 ≥ 0 —— 负阈值=故意囤券(借币持券等点差),持有即策略,不放弃;
+          ② idle 时长 > IDLE_GIVEUP_MINUTES;
+          ③ 还币未被该币规则禁止(allow_repay)。
+        放弃 = 腿字段归零 + CAS 翻 PENDING_REPAY,复用既有还币路径(repay_spread 未配即立即还)。"""
+        try:
+            g_borrow = getattr(rules, "borrow_spread", rules.open_spread)
+            eff = self._sym_threshold(position.symbol, "borrow_spread", g_borrow)
+            if eff is not None and float(eff) < 0:
+                return   # 囤券意图,不超时
+            if not self._is_repay_allowed(position.symbol):
+                return
+            anchor = position.created_at or position.updated_at
+            if anchor is None:
+                return
+            if anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=timezone.utc)
+            age_min = (datetime.now(timezone.utc) - anchor).total_seconds() / 60
+            if age_min <= IDLE_GIVEUP_MINUTES:
+                return
+            def _flip():
+                db = SessionLocal()
+                try:
+                    z = Decimal("0")
+                    n = db.query(Position).filter(
+                        Position.id == position.id, Position.status == "BORROWED_IDLE",
+                    ).update({
+                        "status": "PENDING_REPAY",
+                        "spot_sell_qty": z, "spot_sell_price": z,
+                        "spot_buy_qty": z, "spot_buy_price": z,
+                        "futures_long_qty": z, "futures_long_price": z, "futures_close_price": z,
+                        "error_message": f"idle 超时 {int(age_min)}min 未达对冲阈值,放弃还币止损",
+                    }, synchronize_session=False)
+                    db.commit()
+                    return n
+                finally:
+                    db.close()
+            if await asyncio.to_thread(_flip):
+                logger.info(f"Idle give-up {position.symbol}: {int(age_min)}min 未达对冲阈值 → 转还币")
+        except Exception as e:
+            logger.warning(f"idle give-up check failed {position.symbol}: {e}")
+
     async def _check_and_remove_symbol_after_close(self, symbol: str):
         """平仓后自动下架+清规则:检查该币所有持仓是否已 CLOSED,若是则从 pushed_symbols discard + 清 SymbolRule/AccountSymbolRule。"""
         db = SessionLocal()
         try:
             from app.db.models import Position
-            # 检查该 user 该 symbol 是否还有非 CLOSED 持仓
+            # 检查该 user 该 symbol 是否还有活跃持仓。FAILED 是终态且永久留库(借币点差中止等
+            # 高频产生),必须与 CLOSED 一并排除 —— 原 `!= "CLOSED"` 把 FAILED 也当"未平仓",
+            # 导致交易过的币几乎永不自动下架(engine_api 手动路径早已用 notin_ 口径,此处对齐)。
             open_count = db.query(Position).filter(
                 Position.user_id == self._user_id,
                 Position.symbol == symbol,
-                Position.status != "CLOSED",
+                Position.status.notin_(["CLOSED", "FAILED"]),
             ).count()
             if open_count > 0:
                 return  # 还有未平仓位,不下架
             # 所有持仓已 CLOSED → 从 pushed_symbols 下架 + 清规则
+            # ⚠self._redis 是 aioredis,get/set/publish 必须 await —— 曾漏 await 致 raw 为 coroutine,
+            # json.loads 崩 TypeError 被 except 吞 → 全部币的平仓后自动下架+清规则从未生效
+            # (FIL 残留配置本该在全平后被清,就是被这里挡住;实测 12:19:55 "not coroutine" 日志)。
             ps_key = f"engine:{self._user_id}:pushed_symbols"
-            raw = self._redis.get(ps_key)
+            raw = await self._redis.get(ps_key)
             if raw:
                 current = set(json.loads(raw))
                 if symbol in current:
                     current.discard(symbol)
-                    self._redis.set(ps_key, json.dumps(sorted(current)))
-                    self._redis.publish("pushed:updates", json.dumps({
+                    await self._redis.set(ps_key, json.dumps(sorted(current)))
+                    await self._redis.publish("pushed:updates", json.dumps({
                         "user_id": self._user_id, "pushed_symbols": sorted(current)
                     }))
                     logger.info(f"Auto-removed {symbol} from pushed_symbols (all positions CLOSED)")
@@ -653,6 +743,30 @@ class Worker:
         except Exception:
             return set()
 
+    async def _filter_by_tick(self, syms: set, threshold: float) -> set:
+        """P1-6 tick 粒度过滤:剔除"一个 tick 的点差步进 > 阈值一半"的币。
+        粗刻度低价币(如 RPL,tick=0.54%)点差只能按 tick 大档跳、量子化,开平各付半个 tick 摩擦
+        就吃掉大半空间,推了也是伪机会。tick 从现货 exchangeInfo(_get_spot_filters,缓存1h),
+        price 用点差快照 spot_ask。查不到价/tick 时不过滤(保守放行)。"""
+        if not syms or not self._trading_client:
+            return syms
+        kept = set()
+        for sym in syms:
+            try:
+                sp = self.spread_feed.get_symbol(sym)
+                px = float(getattr(sp, "spot_ask", 0) or 0) if sp else 0.0
+                if px <= 0:
+                    kept.add(sym); continue
+                f = await self._trading_client._get_spot_filters(sym)
+                tick_pct = float(f["tick"]) / px * 100.0   # 一个 tick 的点差步进(%)
+                if tick_pct <= threshold / 2.0:
+                    kept.add(sym)
+                else:
+                    logger.info(f"auto_push tick-filter 剔除 {sym}: tick步进 {tick_pct:.3f}% > 阈值半 {threshold/2:.3f}%")
+            except Exception:
+                kept.add(sym)   # 查失败保守放行
+        return kept
+
     async def _auto_push(self, threshold: float, tradable_symbols: set[str]):
         """Add symbols whose spread_short ≥ auto_push_spread to the user's pushed set."""
         try:
@@ -674,6 +788,10 @@ class Worker:
             new = candidates - current
             if not new:
                 return
+            # P1-6 tick 粒度过滤:一个 tick 的点差步进 > 阈值一半的币剔除(量子化伪点差)
+            new = await self._filter_by_tick(new, threshold)
+            if not new:
+                return
             # 二次确认推送:点差≥confirm_skip_spread 直推;否则等 confirm_delay_sec 复核防抖(防瞬时跳点误推)
             rules = self.config.global_rules
             cd = int(getattr(rules, "confirm_delay_sec", 0) or 0)
@@ -689,6 +807,15 @@ class Worker:
             if immediate:
                 current |= immediate
                 await self._redis.set(key, json.dumps(sorted(current)))
+                # 通知链与手动推送对齐:记首次推送时刻 + publish pushed:updates。
+                # 原先只写 Redis 不广播 → 前端(WS pushed_update→refreshPushed)与 BalancePusher
+                # (推送即查 maxBorrowable)都收不到,自动推进来的币要手动刷新页面才出现。
+                now_ts = int(time.time())
+                for s in immediate:
+                    await self._redis.hsetnx(f"engine:{self._user_id}:pushed_at", s, now_ts)
+                await self._redis.publish("pushed:updates", json.dumps({
+                    "user_id": self._user_id, "pushed_symbols": sorted(current),
+                }))
                 logger.info(f"Auto-pushed {len(immediate)} (spread≥{threshold}, 直推): {sorted(immediate)[:10]}")
             if need_confirm and cd > 0:
                 asyncio.create_task(self._confirm_push(need_confirm, threshold, cd, key))
@@ -712,6 +839,13 @@ class Worker:
             if add:
                 current |= ok
                 await self._redis.set(key, json.dumps(sorted(current)))
+                # 与直推分支同款:记推送时刻 + 广播,前端/BalancePusher 实时感知
+                now_ts = int(time.time())
+                for s in add:
+                    await self._redis.hsetnx(f"engine:{self._user_id}:pushed_at", s, now_ts)
+                await self._redis.publish("pushed:updates", json.dumps({
+                    "user_id": self._user_id, "pushed_symbols": sorted(current),
+                }))
                 logger.info(f"Auto-pushed {len(add)} after 2nd-confirm({cd}s): {sorted(add)[:10]}")
         except Exception as e:
             logger.debug(f"confirm_push failed: {e}")
@@ -911,13 +1045,25 @@ class Worker:
         return rule.get("allow_repay", True)
 
     def _is_borrow_banned(self, symbol: str) -> bool:
-        """C4: Check if symbol is within the post-borrow repay ban window."""
+        """C4 + P1-4: 借币后最短持仓闸,并【对齐利息整点】。
+        币安杠杆利息按小时头计(整点结算):借了就要付这一个小时头,提前平仓=白付。
+        原实现是"借币后固定 repay_ban_minutes 分钟"→ 配合恒满足的开/平点差变成 30 分钟振荡器,
+        每小时借还两轮吃两个小时头利息。改为:满足最短持仓时长后,再对齐到下一个 UTC 整点才放行平仓
+        —— 把已按小时头付的利息用满,每个利息小时最多一轮开平。repay_ban_minutes<=0 则不 ban。"""
         last_borrow = self._last_borrow_at.get(symbol)
         if not last_borrow:
             return False
-        elapsed = (datetime.now(timezone.utc) - last_borrow).total_seconds()
-        ban_seconds = self.config.global_rules.repay_ban_minutes * 60
-        return elapsed < ban_seconds
+        ban_min = self.config.global_rules.repay_ban_minutes
+        if ban_min is None or ban_min <= 0:
+            return False
+        now = datetime.now(timezone.utc)
+        # 最短持仓(防秒级抖动)
+        min_release = last_borrow + timedelta(minutes=ban_min)
+        # 对齐到 min_release 之后的下一个 UTC 整点(利息小时边界)
+        aligned = min_release.replace(minute=0, second=0, microsecond=0)
+        if aligned < min_release:
+            aligned = aligned + timedelta(hours=1)
+        return now < aligned
 
     def _is_removed_banned(self, symbol: str) -> bool:
         """移除/平仓冷却: 同币退出后 removed_cooldown_minutes 分钟内禁止再借(0=不启用)。"""

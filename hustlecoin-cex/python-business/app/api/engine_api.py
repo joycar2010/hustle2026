@@ -618,6 +618,7 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     current.add(sym)
     r.set(ps_key, json.dumps(sorted(current)))
     r.hsetnx(_user_redis_key(user_id, "pushed_at"), sym, int(time.time()))  # 记首次推送时刻(已存在不覆盖)
+    r.delete(f"engine:{user_id}:repayhold:{sym}")  # 重新推送=显式再武装,清还币暂停标记允许重借
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
     return {"message": f"Pushed {sym}"}
@@ -642,9 +643,10 @@ def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids:
 
 def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: int, symbol: str, repay_qty: Decimal):
     """手动还币(/partial-repay)后收口 position 状态:把该子账户该币的未终态 position 置 CLOSED
-    (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。若该 user 该币全部 CLOSED → 自动下架
-    pushed_symbols + 清单一规则,对齐引擎平仓后行为(worker._check_and_remove_symbol_after_close),
-    防止刚还清又被引擎按残留规则(如 borrow_spread=-1)立即重借。失败回滚不阻断还币主流程。"""
+    (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。
+    ⚠只做持仓收口,不下架 pushed、不清规则、也不再写还币暂停标记 —— 「挂单开着=持续借」
+    是策略语义,还币后是否暂停自动借币由还币端点按用户勾选(pause_borrow)决定,不在此隐式改变。
+    失败回滚不阻断还币主流程。"""
     from datetime import datetime as _dt, timezone as _tz
     try:
         active = db.query(Position).filter(
@@ -673,26 +675,6 @@ def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: 
                 }))
         except Exception:
             pass
-        # 该 user 该 symbol 是否还有未终态持仓;无 → 下架 + 清规则
-        sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
-        remaining = db.query(Position).filter(
-            Position.sub_account_id.in_(sub_ids), Position.symbol == symbol,
-            Position.status.notin_(["CLOSED", "FAILED"]),
-        ).count() if sub_ids else 0
-        if remaining == 0:
-            try:
-                r = _redis()
-                ps_key = _user_redis_key(user_id, "pushed_symbols")
-                raw = r.get(ps_key)
-                if raw:
-                    current = set(json.loads(raw))
-                    if symbol in current:
-                        current.discard(symbol)
-                        r.set(ps_key, json.dumps(sorted(current)))
-                        r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
-            except Exception:
-                pass
-            _purge_symbol_rules(db, user_id, symbol, sub_ids)
     except Exception as e:
         db.rollback()
         logger.warning(f"reconcile positions after repay failed ({symbol}): {e}")
@@ -705,15 +687,55 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
 
     sub_ids = [s.id for s in db.query(SubAccount.id).filter(SubAccount.user_id == user_id).all()]
     if sub_ids:
-        # OPEN/BORROWED_IDLE/PENDING_REPAY 等活跃状态都算"持仓中",不允许移除
-        ACTIVE_STATUSES = ("OPEN", "BORROWED_IDLE", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING")
+        # 活跃保护之前先收口"状态孤儿": BORROWED_IDLE/PENDING_REPAY 但币安实测债务=0 ——
+        # 借币已被外部(币安App/手动)还清,引擎生命周期没机会回写,DB 行永久停在活跃态,
+        # 会让"该币无借币"的移除弹窗撞上 409"仍有活跃持仓"(两个真相源打架)。
+        # 只收 BORROWED_IDLE/PENDING_REPAY(生死只取决于债务);OPEN 有合约对冲腿,绝不在此自动收口。
+        try:
+            orphan_rows = db.query(Position).filter(
+                Position.sub_account_id.in_(sub_ids),
+                Position.symbol == sym,
+                Position.status.in_(("BORROWED_IDLE", "PENDING_REPAY")),
+            ).all()
+            if orphan_rows:
+                from datetime import datetime as _odt, timezone as _otz
+                from engine.trading.binance_trading import BinanceTradingClient as _BTC
+                from engine.trading.order_executor import _get_asset_debt as _gad
+                _base = sym.replace("USDT", "")
+                _by_sub: dict[int, list] = {}
+                for p in orphan_rows:
+                    _by_sub.setdefault(p.sub_account_id, []).append(p)
+                for sid, rows in _by_sub.items():
+                    acct = db.query(SubAccount).filter(SubAccount.id == sid).first()
+                    if not acct:
+                        continue
+                    try:
+                        async with _BTC(acct.api_key, acct.api_secret, sub_account_id=sid) as c0:
+                            debt0, _i0 = await _gad(c0, _base)
+                        if float(debt0) < 1e-8:
+                            for p in rows:
+                                p.status = "CLOSED"
+                                p.closed_at = _odt.now(_otz.utc)
+                                p.error_message = (((p.error_message + " | ") if p.error_message else "")
+                                                   + "移除时收口:币安实测债务为0的状态孤儿")
+                            db.commit()
+                            logger.info(f"remove {sym} sub{sid}: reconciled {len(rows)} zero-debt orphan position(s)")
+                    except Exception as _oe:
+                        logger.warning(f"remove {sym} sub{sid}: orphan reconcile skipped: {_oe}")
+        except Exception as _oo:
+            logger.warning(f"remove {sym}: orphan pass failed (non-blocking): {_oo}")
+
+        # 有对冲敞口/正在对冲平仓的状态才拦移除(必须先正常平仓);
+        # BORROWED_IDLE(纯借币未对冲,净平无方向敞口)不拦 —— 下方还债块会还清借币并收口该 position,
+        # 消除"借了没对冲想移除却撞 409、移除后又留待对冲孤儿"的两难(用户实测 FIL 场景)。
+        HEDGED_STATUSES = ("OPEN", "PENDING_REPAY", "BORROWING", "HEDGING", "REPAYING", "SPOT_SOLD")
         active_count = db.query(Position).filter(
             Position.sub_account_id.in_(sub_ids),
             Position.symbol == sym,
-            Position.status.in_(ACTIVE_STATUSES),
+            Position.status.in_(HEDGED_STATUSES),
         ).count()
         if active_count > 0:
-            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个活跃持仓(OPEN/借币中/待还币)")
+            raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个对冲持仓,请先平仓")
 
     # 移除前还清该 symbol 在所有子账户的杠杆账户残留借贷(粉尘/利息),
     # 防止移除后前端"现币/借币"列仍显示残余数据(币安那边债务未清)。
@@ -738,6 +760,42 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
                             sub_id, sym, client, notifier,
                             account.note or f"#{sub_id}", user_id=user_id,
                         )
+                    # 债清后顺带清扫现币残留:端点入口已确保该币无任何活跃持仓,此时 free 里的
+                    # 零头(历史超买/尾批)属纯残留;不清的话移除后会不可见地躺在杠杆户。
+                    try:
+                        mi = await client.get_margin_account()
+                        ai = next((a for a in mi.get("userAssets", []) if a.get("asset") == base_asset), None)
+                        free_now = float(ai.get("free", "0") or 0) if ai else 0.0
+                        debt_now = (float(ai.get("borrowed", "0") or 0) + float(ai.get("interest", "0") or 0)) if ai else 0.0
+                        if free_now > 0 and debt_now < 1e-8:
+                            sold, note = await _sell_residual_spot(client, sym, base_asset, free_now)
+                            if sold > 0:
+                                logger.info(f"remove {sym} sub{sub_id}: residual sold back {sold}")
+                            else:
+                                logger.info(f"remove {sym} sub{sub_id}: residual not sold — {note}")
+                    except Exception as _se:
+                        logger.warning(f"remove {sym} sub{sub_id}: residual sweep failed (non-blocking): {_se}")
+                    # 还债后收口该子账户该币的非终态孤儿(BORROWED_IDLE/PENDING_BORROW/PENDING_REPAY):
+                    # execute_borrow_only_repay 只新建 CLOSED 记账、不回写已存在的 BORROWED_IDLE,
+                    # 不收口就留下"借着币待对冲"却实际零债务的孤儿(用户实测 hustle-012「待对冲」根因)。
+                    try:
+                        from datetime import datetime as _cdt, timezone as _ctz
+                        orphans = db.query(Position).filter(
+                            Position.sub_account_id == sub_id,
+                            Position.symbol == sym,
+                            Position.status.in_(("BORROWED_IDLE", "PENDING_BORROW", "PENDING_REPAY")),
+                        ).all()
+                        if orphans:
+                            for _p in orphans:
+                                _p.status = "CLOSED"
+                                _p.closed_at = _cdt.now(_ctz.utc)
+                                _p.error_message = (((_p.error_message + " | ") if _p.error_message else "")
+                                                    + "移除交易对时收口(还清借币,原借仓未回写)")
+                            db.commit()
+                            logger.info(f"remove {sym} sub{sub_id}: reconciled {len(orphans)} idle orphan position(s) to CLOSED")
+                    except Exception as _rc:
+                        db.rollback()
+                        logger.warning(f"remove {sym} sub{sub_id}: orphan reconcile after repay failed: {_rc}")
             except Exception as _re:
                 logger.warning(f"remove {sym} sub{sub_id}: repay residual failed (non-blocking): {_re}")
     except Exception as _outer:
@@ -760,10 +818,83 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
     return {"message": f"Removed {sym}"}
 
 
+async def _sell_residual_spot(client, symbol_upper: str, base_asset: str, qty: float) -> tuple[float, str]:
+    """把杠杆户里的 base_asset 现币残留市价卖回 USDT。
+    权威实现在 engine.trading.order_executor.sell_residual_spot(引擎自动卖回与手动「卖回」共用),
+    此处仅做 float 适配。调用方须保证债务已清且无其它非终态持仓。"""
+    from engine.trading.order_executor import sell_residual_spot
+    sold, note = await sell_residual_spot(client, symbol_upper, base_asset, qty)
+    return float(sold), note
+
+
+async def _dust_residual_to_bnb(client, base_asset: str, qty: float) -> tuple[bool, str]:
+    """尘埃残留(名义 < 币安 minNotional=5U,市价单卖不掉)的唯一清理正路:
+    杠杆户 → 现货钱包划转(transfer MARGIN_MAIN,无 minNotional 约束) → 现货「小额兑换 BNB」。
+    币安约束:该币须在 dust 可转列表(并非所有币支持)、同币 ~6h 频控;不满足则转换不发生。
+    容错:dust 未成功时把币回划杠杆户,避免留在现货钱包更难被发现。只在手动「卖回」按钮触发,
+    不进引擎自动平仓热路径(transfer+dust+结算等待较重)。"""
+    from decimal import Decimal as _D, ROUND_DOWN as _RD
+    q = _D(str(qty)).quantize(_D("0.00000001"), rounding=_RD)
+    if q <= 0:
+        return False, "残留过小无法处理"
+    # 预检可划出额:全仓杠杆有负债时,所有资产被当抵押物锁定,maxTransferable=0 → 划不出。
+    # 先查清楚给准确原因,避免徒劳撞 -3020(Transfer out amount exceeds max)。
+    try:
+        mt = await client._request("GET", "https://api.binance.com/sapi/v1/margin/maxTransferable",
+                                   {"asset": base_asset}, signed=True)
+        max_tx = _D(str(mt.get("amount", "0") or "0"))
+    except Exception:
+        max_tx = q   # 查不到就照常尝试
+    if max_tx < q:
+        return False, (f"账户有借币,{base_asset} 被全仓杠杆当抵押物锁定(可划出 {max_tx}),"
+                       f"无法划转清理;还清该账户全部借币后再清尘埃(总值极小,可忽略)")
+    try:
+        await client.transfer("MARGIN_MAIN", base_asset, q)   # 全仓杠杆 → 现货
+    except Exception as e:
+        return False, f"划转现货失败: {str(e)[:60]}"
+    await asyncio.sleep(1.2)   # 等钱包间划转结算
+    dust_err = "币安不支持该币兑换 BNB 或 6h 频控中"
+    try:
+        res = await client.dust_to_bnb([base_asset])
+        if (res or {}).get("transferResult"):
+            return True, f"{q} {base_asset} 尘埃已兑换为 BNB"
+    except Exception as e:
+        dust_err = str(e)[:60]
+    # 未转成 → 回划杠杆户(尽力,失败则留现货并提示)
+    try:
+        await client.transfer("MAIN_MARGIN", base_asset, q)
+        return False, f"名义低于 5U 且转 BNB 未成功({dust_err}),已回划杠杆户留账"
+    except Exception:
+        return False, f"名义低于 5U 且转 BNB 未成功({dust_err}),币现暂存现货钱包"
+
+
 class PartialRepayRequest(BaseModel):
     sub_account_id: int
     symbol: str
-    amount: Decimal
+    # 还币数量(币)。与 amount_usdt 二选一:数量>0 按数量还;否则看金额。
+    amount: Decimal = Decimal("0")
+    # 还币金额(USDT):后端按现价(REST ticker,回退 Redis spreads)换算成币数量再还。
+    # 换算放后端 = 单一权威价格源,避免前端过期价把金额算错。
+    amount_usdt: Decimal | None = None
+    # 前端「卖回」按钮:债务为 0 但杠杆户仍有现币残留时,显式请求把残留市价卖回 USDT。
+    # 默认 False 保持旧行为(仅同步持仓状态),防其它调用方误触发卖出。
+    sell_residual: bool = False
+    # 还币后暂停该币自动借币 30 分钟(前端勾选,默认不勾)。不勾且挂单差为负 → 还完立即重借
+    # 是设计行为(挂单开着=持续借);勾选才写 repayhold 标记,状态列可见可点击解除。
+    pause_borrow: bool = False
+
+
+@router.delete("/repay-hold/{symbol}")
+def clear_repay_hold(symbol: str, request: Request):
+    """解除「还币暂停」:立即恢复该币自动借币(状态列点击/用户显式操作)。
+    等价再武装动作:重存该币规则、重新推送。幂等。"""
+    user_id = get_current_user_id(request)
+    sym = symbol.upper()
+    try:
+        _redis().delete(f"engine:{user_id}:repayhold:{sym}")
+    except Exception:
+        pass
+    return {"message": f"{sym} 已恢复自动借币"}
 
 
 @router.post("/partial-repay")
@@ -793,15 +924,67 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             usdt_free = float(usdt_info.get("free", "0") or 0) if usdt_info else 0.0
             total_debt = borrowed + interest
             if total_debt < 1e-8:
-                # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED + 自动下架),
+                # 债务已为 0(可能此前已还/外部还清):仍收口卡住的 position(置 CLOSED),
                 # 修复"已还币但状态仍待对冲"的孤儿。
                 _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(), Decimal("0"))
+                if data.pause_borrow:
+                    try:
+                        _redis().set(f"engine:{user_id}:repayhold:{data.symbol.upper()}", "1", ex=1800)
+                    except Exception:
+                        pass
+                if data.sell_residual and free > 1e-8:
+                    # 显式卖回:零债务现币残留原本没有任何清理入口(还币闸只认债务,
+                    # debt_converter/reconcile 均 debt<=0 跳过,dust→BNB 够不到杠杆户)。
+                    # ① 名义 ≥ 5U → 市价卖回 USDT;② < 5U 尘埃 → 杠杆户划现货 + 兑换 BNB。
+                    sold, note = await _sell_residual_spot(client, data.symbol.upper(), base_asset, free)
+                    if sold <= 0:
+                        dust_ok, dust_note = await _dust_residual_to_bnb(client, base_asset, free)
+                        try:
+                            _redis().publish("balance:refresh", str(user_id))
+                        except Exception:
+                            pass
+                        if dust_ok:
+                            return {"message": f"{account.note} {dust_note}", "dusted": True}
+                        raise HTTPException(status_code=400, detail=f"{base_asset} 残留无法清理: {note};{dust_note}")
+                    try:
+                        _redis().publish("balance:refresh", str(user_id))
+                    except Exception:
+                        pass
+                    return {"message": f"{account.note} {base_asset} 无债务,{note}", "sold": sold}
                 return {"message": f"{account.note} {base_asset} 无需还币(债务为0),已同步持仓状态"}
+
+            # 在途静默窗:还币操作(可能含买回/划转,数秒~数十秒)期间引擎不抢跑借币,
+            # 防"边还边借"账目打架。秒级窗口对囤券策略无感;成功后按 pause_borrow 决定去留。
+            try:
+                _redis().set(f"engine:{user_id}:repayhold:{data.symbol.upper()}", "1", ex=10)
+            except Exception:
+                pass
 
             # data.amount 是 Decimal(pydantic),而 free/total_debt/usdt_free 全为 float(来自币安字符串)。
             # 归一为 float,避免下游 `repay_amount - free`(shortfall)/`*= 0.999`(重试)触发 Decimal-float
-            # 类型崩溃;margin_repay 内部 str(amount) 故 float 入参亦正常序列化。
-            repay_amount = min(float(data.amount), total_debt)
+            # 类型崩溃;margin_repay 出口统一 8 位量化,float 入参安全。
+            req_qty = float(data.amount)
+            if req_qty <= 0 and data.amount_usdt is not None and float(data.amount_usdt) > 0:
+                # 金额(USDT)还币:按现价换算成币数量。REST ticker 为权威价,失败回退 Redis spreads。
+                cv_price = 0.0
+                try:
+                    tk0 = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
+                                                {"symbol": data.symbol.upper()}, signed=False)
+                    cv_price = float(tk0.get("price", 0) or 0)
+                except Exception:
+                    cv_price = 0.0
+                if cv_price <= 0:
+                    try:
+                        snap0 = _build_spread_snapshot(data.symbol.upper())
+                        cv_price = float(snap0.spot_bid) if snap0 and snap0.spot_bid else 0.0
+                    except Exception:
+                        cv_price = 0.0
+                if cv_price <= 0:
+                    raise HTTPException(status_code=400, detail=f"无法获取 {base_asset} 现价,按金额还币暂不可用,请稍后重试或改用数量")
+                req_qty = float(data.amount_usdt) / cv_price
+            if req_qty <= 0:
+                raise HTTPException(status_code=400, detail="还币数量或还币金额需大于 0")
+            repay_amount = min(req_qty, total_debt)
 
             # 2) free 不足时:用 USDT 市价买入差额(常见于已平仓残留利息零头)。
             #    币安 MARKET BUY 受 NOTIONAL.minNotional(常 5 USDT)+ LOT_SIZE.stepSize 约束,
@@ -941,27 +1124,9 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             try:
                 leftover = free - repay_amount
                 if leftover > 0:
-                    sp_info = await client._request("GET", "https://api.binance.com/api/v3/exchangeInfo",
-                                                    {"symbol": data.symbol.upper()}, signed=False)
-                    sp0 = sp_info.get("symbols", [{}])[0]
-                    flt0 = {f["filterType"]: f for f in sp0.get("filters", [])}
-                    sell_step = float(flt0.get("LOT_SIZE", {}).get("stepSize", "0.01") or "0.01")
-                    sell_min_notional = float(flt0.get("NOTIONAL", {}).get("minNotional", "5") or "5")
-                    tkr = await client._request("GET", "https://api.binance.com/api/v3/ticker/price",
-                                                {"symbol": data.symbol.upper()}, signed=False)
-                    sell_price = float(tkr.get("price", 0) or 0)
-                    import math as _math
-                    sell_qty = _math.floor(leftover / sell_step) * sell_step  # 向下对齐,不卖超持有
-                    if sell_price > 0 and sell_qty > 0 and sell_qty * sell_price >= sell_min_notional:
-                        await client._request(
-                            "POST", "https://api.binance.com/sapi/v1/margin/order",
-                            {
-                                "symbol": data.symbol.upper(), "side": "SELL", "type": "MARKET",
-                                "quantity": f"{sell_qty:.8f}", "sideEffectType": "NO_SIDE_EFFECT",
-                                "isIsolated": "FALSE",
-                            }
-                        )
-                        logger.info(f"partial_repay: sold leftover {sell_qty} {base_asset} back to USDT (acct {data.sub_account_id})")
+                    sold, _note = await _sell_residual_spot(client, data.symbol.upper(), base_asset, leftover)
+                    if sold > 0:
+                        logger.info(f"partial_repay: sold leftover {sold} {base_asset} back to USDT (acct {data.sub_account_id})")
             except Exception as se:
                 logger.warning(f"partial_repay 卖回零头残留失败(还币已成功): {se}")
 
@@ -969,6 +1134,17 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
             #    position 会永久卡在「待对冲」(状态孤儿)。债已清 → 收口该币 position(见 helper)。
             _reconcile_positions_after_repay(db, user_id, data.sub_account_id, data.symbol.upper(),
                                              Decimal(str(repay_amount)))
+
+            # 借币暂停按用户勾选定去留:勾了 → 30 分钟(状态列可见可点解);没勾 → 立即删掉
+            # 在途静默窗,挂单负阈的币下个周期(≤1s)就恢复借币(「挂单开着=持续借」)。
+            try:
+                _hk = f"engine:{user_id}:repayhold:{data.symbol.upper()}"
+                if data.pause_borrow:
+                    _redis().set(_hk, "1", ex=1800)
+                else:
+                    _redis().delete(_hk)
+            except Exception:
+                pass
 
             # 写后即时刷新:手动部分/全额还币 → 请求 BalancePusher 立刻重推该用户余额(不等 10s 轮询,问题4)
             try:
