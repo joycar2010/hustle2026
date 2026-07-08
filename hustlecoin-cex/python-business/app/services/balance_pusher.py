@@ -378,21 +378,27 @@ class BalancePusher:
 
     async def _auto_converge_hedge(self, db, tasks: list[dict]):
         """P1-7 净敞口自动收敛:对裸多(master实仓>在管对冲)reduceOnly 市价卖出对齐。
-        仅当系统规则 hedge_auto_converge 开启才执行(默认关=只告警不动仓)。用主账户 key 下单,
+        开关 hedge_auto_converge 用户行优先(规则页可自助开),用户行 NULL 回退系统行
+        (user_id IS NULL,admin 管;默认关=只告警不动仓)。用主账户 key 下单,
         reduceOnly 保证只减不反向开仓(绝对安全)。量向下取整到合约步长,不超卖。收敛后飞书+跑马灯报告。"""
         from app.db.models import MasterAccount, GlobalRules
         try:
-            enabled = db.query(GlobalRules.hedge_auto_converge).filter(
+            sys_enabled = db.query(GlobalRules.hedge_auto_converge).filter(
                 GlobalRules.user_id.is_(None)).order_by(GlobalRules.id).scalar()
         except Exception:
-            enabled = None
-        if not enabled:
-            return   # 开关默认关:只告警(上游已发),不自动动仓
+            sys_enabled = None
         from engine.trading.binance_trading import BinanceTradingClient
         by_uid: dict[int, list] = {}
         for t in tasks:
             by_uid.setdefault(t["uid"], []).append(t)
         for uid, uid_tasks in by_uid.items():
+            try:
+                user_enabled = db.query(GlobalRules.hedge_auto_converge).filter(
+                    GlobalRules.user_id == uid).scalar()
+            except Exception:
+                user_enabled = None
+            if not (user_enabled if user_enabled is not None else sys_enabled):
+                continue   # 该用户未开(系统行也未开):只告警(上游已发),不自动动仓
             master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
             if not master or not master.api_key:
                 continue
