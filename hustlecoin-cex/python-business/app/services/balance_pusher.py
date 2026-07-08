@@ -737,11 +737,12 @@ class BalancePusher:
                     logger.debug(f"Balance fetch failed for account {acc.id}: {e}")
 
             # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)。
-            # immediate 即时刷新跳过此段(省主账户 futures_position_risk 的逐币 REST),payload 用上一轮缓存兜底,
-            # 避免把「现-期/爆率」列清空闪烁;整轮采集后刷新缓存。
+            # immediate 即时刷新也采集:它由借/还币/开平仓事件触发且范围限定单用户(去抖 0.8s),
+            # 正是「现-期」列必须立刻反映合约腿变化的时刻 —— 原先跳过导致对冲成交后合约列
+            # 仍等 10s 整轮才更新。采集失败时 payload 仍回退上一轮缓存,不闪空。
             master_futures_positions = {}  # {uid: {symbol: positionAmt}}
             master_futures_liq = {}        # {uid: 维持保证金率%} 主账户合约户爆仓率(币安标准:totalMaintMargin/totalMarginBalance×100,越接近100越接近强平)
-            for uid in ([] if immediate else user_balances.keys()):
+            for uid in user_balances.keys():
                 from app.db.models import MasterAccount
                 master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
                 if not master or not master.api_key:
@@ -765,6 +766,9 @@ class BalancePusher:
                         raw_ps = await self._redis.get(f"engine:{uid}:pushed_symbols")
                         pushed = json.loads(raw_ps) if raw_ps else []
                         if not pushed:
+                            # pushed 已清空也要写空 dict:否则缓存永远留着最后一次的旧仓位,
+                            # 全部下架后「现-期」列仍显示残留数字
+                            master_futures_positions[uid] = {}
                             continue
                         positions = {}
                         for sym_bytes in pushed:
@@ -783,10 +787,10 @@ class BalancePusher:
                 except Exception as e:
                     logger.debug(f"Master futures position fetch failed for user {uid}: {e}")
 
-            if not immediate:
-                # 整轮采集成功 → 刷新主账户合约缓存,供后续 immediate 即时刷新兜底(避免清空闪烁)
-                self._last_master_pos.update(master_futures_positions)
-                self._last_master_liq.update(master_futures_liq)
+            # 采集成功即刷新缓存(uid 级全量替换),供采集失败的轮次兜底(避免清空闪烁)。
+            # 孤儿/净敞口对账由下方 run_hedge_reconcile_checks 统一负责(裸多可自动收敛)。
+            self._last_master_pos.update(master_futures_positions)
+            self._last_master_liq.update(master_futures_liq)
             self._force_mb_assets -= force_consumed   # 强查已完成,防同资产反复无视节流
 
             for uid, balances in user_balances.items():

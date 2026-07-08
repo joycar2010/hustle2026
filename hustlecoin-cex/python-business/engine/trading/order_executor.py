@@ -48,26 +48,46 @@ def _publish_balance_refresh(user_id):
         pass
 
 
-def _publish_position(position, user_id):
-    """状态机推进(借到币/对冲/还币)后把 position 实时推给前端(position:updates),让 dashboard
-    子账户行不等 15s REST 轮询就切换成真实持仓行 —— 修复"手推借到币后黄框列(现-期/最大可借/
-    现币/借币/保证金/净值)要手动刷新才出"。sub_account_id 用 int(与前端 balanceMap 的 account_id
-    同类型,get 才命中)。失败静默,持仓最终仍由轮询兜底。"""
-    if user_id is None:
-        return
+def _publish_position_update(pos, user_id=None, account_note=None):
+    """状态跃迁即推:持仓状态每次变更 commit 后 publish position:updates → 后端 WS 按
+    user_id 路由 → 前端 ws:position 秒级插行/更新/删行,替代「开仓后只能等 30s 兜底轮询
+    或 F5 才可见」。payload 字段对齐 REST PositionResponse 的行渲染所需;user_id/sub_account_id
+    用 int(与前端 balanceMap 的 account_id 同类型,get 才命中)。
+    同步轻量 publish、失败静默:推送绝不影响交易主流程,REST 轮询仍兜底。"""
     try:
         import json as _json
+        uid = user_id if user_id is not None else getattr(pos, "user_id", None)
+        if uid is None:
+            uid = _uid_cache.get(pos.sub_account_id)
+
+        def _s(v):
+            return str(v) if v is not None else None
+
+        payload = {
+            "id": pos.id,
+            "user_id": int(uid) if uid is not None else None,
+            "sub_account_id": int(pos.sub_account_id),
+            "account_note": account_note,
+            "symbol": pos.symbol,
+            "base_asset": pos.base_asset,
+            "status": pos.status,
+            "borrow_qty": _s(pos.borrow_qty),
+            "spot_sell_price": _s(pos.spot_sell_price),
+            "futures_long_qty": _s(pos.futures_long_qty),
+            "futures_long_price": _s(pos.futures_long_price),
+            "open_spread": _s(pos.open_spread),
+            "close_spread": _s(pos.close_spread),
+            "open_usdt_amount": _s(pos.open_usdt_amount),
+            "realized_pnl": _s(pos.realized_pnl),
+            "error_message": pos.error_message,
+            "opened_at": pos.opened_at.isoformat() if pos.opened_at else None,
+            "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
+            "created_at": pos.created_at.isoformat() if getattr(pos, "created_at", None) else None,
+        }
         import redis as _r
-        from app.config import settings as _s
-        rc = _r.from_url(_s.redis_url, decode_responses=True)
-        rc.publish("position:updates", _json.dumps({
-            "id": position.id,
-            "user_id": int(user_id),
-            "sub_account_id": int(position.sub_account_id),
-            "symbol": position.symbol,
-            "status": position.status,
-            "borrow_qty": str(position.borrow_qty or "0"),
-        }))
+        from app.config import settings as _s2
+        rc = _r.from_url(_s2.redis_url, decode_responses=True)
+        rc.publish("position:updates", _json.dumps(payload))
         rc.close()
     except Exception:
         pass
@@ -446,6 +466,7 @@ async def execute_borrow(
     db.commit()
     db.refresh(position)
     pos_id = position.id
+    _publish_position_update(position, user_id, account_note)
 
     try:
         # interest-rate filter
@@ -456,6 +477,7 @@ async def execute_borrow(
             position.status = "FAILED"
             position.error_message = f"Interest rate {interest_rate} too high"
             db.commit()
+            _publish_position_update(position, user_id, account_note)
             db.close()
             return None
         position.borrow_interest_rate = interest_rate
@@ -484,6 +506,7 @@ async def execute_borrow(
                         f"{current.spread_short if current else 'N/A'}% <= {confirm_spread}% 或快照陈旧"
                     )
                     db.commit()
+                    _publish_position_update(position, user_id, account_note)
                     db.close()
                     return None
                 spread = current
@@ -547,6 +570,7 @@ async def execute_borrow(
             position.status = "FAILED"
             position.error_message = "Order amount too small for lot size"
             db.commit()
+            _publish_position_update(position, user_id, account_note)
             db.close()
             return None
 
@@ -556,6 +580,7 @@ async def execute_borrow(
             position.status = "FAILED"
             position.error_message = f"Borrow notional {float(qty * price):.2f} < min_borrow_usdt {float(min_usdt)}"
             db.commit()
+            _publish_position_update(position, user_id, account_note)
             db.close()
             return None
 
@@ -604,6 +629,7 @@ async def execute_borrow(
                     f"{latest.spread_short if latest else 'N/A'} (需 >{confirm_spread}, 新鲜<{BORROW_FRESH_MS}ms)"
                 )
                 db.commit()
+                _publish_position_update(position, user_id, account_note)
                 db.close()
                 return None
 
@@ -640,9 +666,8 @@ async def execute_borrow(
         # 写后即时刷新:借到币 → 让该用户 dashboard 现币/借币列秒级更新,不等 10s 轮询
         _uid = user_id if user_id is not None else _resolve_user_id(db, sub_account_id)
         _publish_balance_refresh(_uid)
-        # 持仓实时推送:让前端 positions 立即含这条 BORROWED_IDLE(切换成真实持仓行),不等 15s 轮询 →
-        # 修复"手推借到币后子账户行整块(现-期/最大可借/现币/借币/保证金/净值)要手动刷新才出"
-        _publish_position(position, _uid)
+        # 持仓实时推送:让前端 positions 立即含这条 BORROWED_IDLE(切换成真实持仓行),不等轮询
+        _publish_position_update(position, _uid, account_note)
         try:
             await notifier.notify_new_borrow(account_note, symbol, qty, qty * price)
         except Exception as e:
@@ -654,6 +679,7 @@ async def execute_borrow(
         position.status = "FAILED"
         position.error_message = str(e)
         db.commit()
+        _publish_position_update(position, user_id, account_note)
         _log_trade(db, pos_id, sub_account_id, "BORROW", symbol, status="FAILED", error=str(e))
         # -3045 = 币安杠杆池该币无可借库存。这是相当稳定的市场状态(一个币池子空,常持续数小时),
         # 故冷却设 30 分钟:半小时重试一次足够捕捉库存恢复,又避免每 5 分钟重试一波刷高错误率/SAPI。
@@ -676,6 +702,7 @@ async def execute_borrow(
         position.status = "FAILED"
         position.error_message = str(e)
         db.commit()
+        _publish_position_update(position, user_id, account_note)
         return None
     finally:
         db.close()
@@ -707,6 +734,7 @@ async def execute_hedge(
     pos = db.query(Position).get(position.id)
     symbol = pos.symbol
     sub_account_id = pos.sub_account_id
+    _publish_position_update(pos, user_id, account_note)
 
     # 每币种执行质量覆盖(slippage_pct / follow_type): 账户·币种 → 单币种 → 全局,空则跟随上层
     try:
@@ -748,6 +776,7 @@ async def execute_hedge(
         if reserved is None:
             pos.status = "BORROWED_IDLE"
             db.commit()
+            _publish_position_update(pos, user_id, account_note)
             db.close()
             return
 
@@ -842,6 +871,10 @@ async def execute_hedge(
         db.commit()
         _log_trade(db, pos_id, sub_account_id, "FUTURES_LONG", symbol, "BUY",
                     pos.futures_long_qty, pos.futures_long_price, pos.futures_long_order_id, "SUCCESS", latency=latency)
+        # 状态即推 + 余额即刷:对冲腿成交 = 用户「第一时间确认对冲成功」的时刻,
+        # OPEN 行秒级出现(含合约量/价),主账户合约列由 balance:refresh 即时重推
+        _publish_position_update(pos, user_id, account_note)
+        _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
 
         logger.info(f"Position opened: {symbol} qty={qty} spread={spread.spread_short}%")
         await notifier.notify_position_opened(
@@ -876,6 +909,7 @@ async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, 
         pos.status = "FAILED"
         pos.error_message = f"Spot sell failed: {error}. Borrow rolled back."
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
     elif current == "SPOT_SOLD":
         # futures long failed — close any partial futures fill first (master 残腿不平会污染共享净仓),
         # then buy back spot + repay
@@ -920,10 +954,12 @@ async def _handle_hedge_failure(db, pos, client, error, sub_account_id, symbol, 
         except Exception as _ve:
             pos.error_message = f"Futures long failed: {error}. 回滚结果未核实({_ve}),guard 将复核"
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
     else:
         pos.status = "FAILED"
         pos.error_message = str(error)
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
     await notifier.notify_error(account_note, f"hedge {symbol} (rollback from {current})", str(error))
 
 
@@ -990,6 +1026,7 @@ async def execute_unhedge(
         db.close()
         return
     db.refresh(pos)
+    _publish_position_update(pos, account_note=account_note)
 
     try:
         # Step 1: close futures
@@ -1002,6 +1039,9 @@ async def execute_unhedge(
         pos.futures_close_order_id = str(close_result["orderId"])
         pos.status = "FUTURES_CLOSED"
         db.commit()
+        # 合约腿已平:即推状态 + 即刷主账户合约列(平仓的「第一时间确认」时刻)
+        _publish_position_update(pos, account_note=account_note)
+        _publish_balance_refresh(getattr(pos, "user_id", None) or _resolve_user_id(db, pos.sub_account_id))
         _log_trade(db, pos.id, pos.sub_account_id, "FUTURES_CLOSE", pos.symbol, "SELL",
                     pos.futures_long_qty, pos.futures_close_price,
                     pos.futures_close_order_id, "SUCCESS", latency=latency)
@@ -1035,6 +1075,7 @@ async def execute_unhedge(
         pos.close_spread = spread.spread_short
         pos.status = "PENDING_REPAY"   # coin held; awaiting manual/auto repay
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
         _log_trade(db, pos.id, pos.sub_account_id, "SPOT_BUY", pos.symbol, "BUY",
                     pos.spot_buy_qty, pos.spot_buy_price,
                     pos.spot_buy_order_id, "SUCCESS", latency=latency)
@@ -1046,12 +1087,14 @@ async def execute_unhedge(
         pos.error_message = str(e)
         pos.retry_count = (pos.retry_count or 0) + 1
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
         _log_trade(db, pos.id, pos.sub_account_id, "CLOSE_ERROR", pos.symbol, status="FAILED", error=str(e))
         await notifier.notify_error(account_note, f"unhedge {pos.symbol}", str(e))
     except Exception as e:
         logger.error(f"Unhedge failed unexpectedly: {e}", exc_info=True)
         pos.error_message = str(e)
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
         await notifier.notify_error(account_note, f"unhedge {pos.symbol}", str(e))
     finally:
         db.close()
@@ -1111,6 +1154,7 @@ async def execute_repay(
         db.close()
         return
     db.refresh(pos)
+    _publish_position_update(pos, account_note=account_note)
 
     try:
         # 买回的币入杠杆账户有结算延迟 —— 轮询等 free 覆盖负债(最长 ~8s),
@@ -1221,6 +1265,7 @@ async def execute_repay(
         _publish_balance_refresh(
             pos.user_id if getattr(pos, "user_id", None) is not None
             else _resolve_user_id(db, pos.sub_account_id))
+        _publish_position_update(pos, account_note=account_note)   # CLOSED → 前端秒级删行
         await notifier.notify_position_closed(account_note, pos.symbol, pos.realized_pnl, pos.close_spread or Decimal("0"))
 
     except BinanceAPIError as e:
@@ -1229,12 +1274,14 @@ async def execute_repay(
         pos.error_message = str(e)
         pos.retry_count = (pos.retry_count or 0) + 1
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
         _log_trade(db, pos.id, pos.sub_account_id, "REPAY", pos.symbol, status="FAILED", error=str(e))
         await notifier.notify_error(account_note, f"repay {pos.symbol}", str(e))
     except Exception as e:
         logger.error(f"Repay failed unexpectedly: {e}", exc_info=True)
         pos.error_message = str(e)
         db.commit()
+        _publish_position_update(pos, account_note=account_note)
         await notifier.notify_error(account_note, f"repay {pos.symbol}", str(e))
     finally:
         db.close()
@@ -1297,6 +1344,8 @@ async def execute_borrow_only_repay(
 
         _log_trade(db, position.id, sub_account_id, "BORROW_ONLY_REPAY", symbol,
                     quantity=total_debt, status="SUCCESS")
+        # 债务已清 → 现币/借币列即时刷新(不等 10s 轮询)
+        _publish_balance_refresh(user_id if user_id is not None else _resolve_user_id(db, sub_account_id))
 
         logger.info(f"Borrow-only repay: {symbol} debt={total_debt} interest={interest_amount}")
         await notifier.send(
