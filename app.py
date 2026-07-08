@@ -827,14 +827,20 @@ def _a2t_norm_order(o):
             "commission":float(o.get("commission") or 0)+float(o.get("fee") or 0),
             "time":ts,"comment":o.get("comment") or ""}
 async def _a2t_tick(leg, sym):
-    j=await leg._get("/GetQuote", symbol=sym)
+    """行情: 用 /GetQuoteMany(MT4/MT5 两组通用)。坑: /GetQuote 仅 MT5 组存在, MT4 账户 403 "path not valid";
+       无效符号返回 201 INVALID_SYMBOL(非4xx, httpx 不抛)——须显式判列表。"""
+    j=await leg._get("/GetQuoteMany", symbols=sym)
+    lst=j if isinstance(j,list) else []
+    if not lst:
+        raise RuntimeError("a2t no quote for %s: %s"%(sym,str((j or {}).get("message") or "")[:60]))
+    q=lst[0]
     t=0
     try:
-        _ts=j.get("time")
+        _ts=q.get("time")
         if isinstance(_ts,str): t=int(_dt.datetime.fromisoformat(_ts).replace(tzinfo=_dt.timezone.utc).timestamp())
     except Exception: pass
-    return {"symbol":j.get("symbol") or sym,"bid":j.get("bid"),"ask":j.get("ask"),
-            "last":j.get("last") or 0.0,"volume":j.get("volume") or 0,"time":t,"time_msc":t*1000,"src":"a2t"}
+    return {"symbol":q.get("symbol") or sym,"bid":q.get("bid"),"ask":q.get("ask"),
+            "last":q.get("last") or 0.0,"volume":q.get("volume") or 0,"time":t,"time_msc":t*1000,"src":"a2t"}
 async def _a2t_positions(leg):
     j=await leg._get("/OpenedOrders")
     items=j if isinstance(j,list) else ((j or {}).get("orders") or [])
