@@ -1,1 +1,0 @@
-import{dt as e}from"./index-Bv4VHAPe.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};
