@@ -20,6 +20,10 @@ function getTokenExpiry(token: string): number {
 }
 
 client.interceptors.request.use(async (config) => {
+  // 交易端点同步执行长耗时,15s 全局超时会把仍在执行的开/平仓误判为失败
+  if (isTradeEndpoint(config.url) && (!config.timeout || config.timeout === 15000)) {
+    config.timeout = 60000
+  }
   const token = localStorage.getItem('cex_jwt_token')
   if (token) {
     const expiry = getTokenExpiry(token)
@@ -58,6 +62,11 @@ const RETRY_MAX = 3
 const RETRY_BASE_DELAY = 1000
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
+// 非幂等交易端点:同步执行耗时长(借币延迟+对冲可达 20~40s),超时(无 status)若自动重试
+// 会重复下单/划转 —— 一律禁自动重试,且放宽超时,成败由用户看结果决定。
+const TRADE_NO_RETRY = ['/manual-open', '/manual-close', '/manual-hedge', '/manual-repay', '/partial-repay', '/transfer']
+const isTradeEndpoint = (url?: string) => !!url && TRADE_NO_RETRY.some((p) => url.includes(p))
+
 interface RetryConfig extends InternalAxiosRequestConfig {
   __retryCount?: number
   __silent?: boolean
@@ -70,7 +79,7 @@ client.interceptors.response.use(
     if (!config) return Promise.reject(error)
 
     const status = error.response?.status
-    const isRetryable = !status || RETRYABLE_STATUSES.has(status)
+    const isRetryable = (!status || RETRYABLE_STATUSES.has(status)) && !isTradeEndpoint(config.url)
     const retryCount = config.__retryCount || 0
 
     if (isRetryable && retryCount < RETRY_MAX) {

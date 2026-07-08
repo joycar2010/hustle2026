@@ -31,8 +31,6 @@ const COLS = [
   { key: 'close_funding_ratio', label: '平资息', w: 'w-12' },
   { key: 'repay_spread', label: '还币开', w: 'w-12' },
   { key: 'repay_funding_ratio', label: '还资息', w: 'w-12' },
-  { key: 'slippage_pct', label: '滑点%', w: 'w-12' },
-  { key: 'follow_type', label: '跟单', w: 'w-16', type: 'select' as const },
 ] as const
 
 type Row = Record<string, unknown>
@@ -50,6 +48,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   const [repaying, setRepaying] = useState<number | null>(null)
   const addToast = useToastStore((s) => s.addToast)
   const balances = useBalanceStore((s) => s.balances)
+  const markRepaid = useBalanceStore((s) => s.markRepaid)
 
   // 某账户对当前币的持币(已借本金+利息),数据来自 balance 实时快照 symbol_margin
   const heldOf = useCallback((accountId: number) => {
@@ -72,12 +71,13 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
     setRepaying(accountId)
     try {
       await partialRepay(accountId, symbol, total)
+      markRepaid(accountId, symbol)   // 乐观清零 → 持币列即时归"—",下次WS推送对账
       addToast(`${note} 还币已提交`, 'success')
     } catch (e) {
       addToast(`还币失败: ${(e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || (e as Error)?.message}`, 'error')
     }
     setRepaying(null)
-  }, [heldOf, symbol, addToast])
+  }, [heldOf, symbol, addToast, markRepaid])
 
   useEffect(() => {
     const loadAll = async () => {
@@ -152,6 +152,19 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
   }
 
   const handleSave = useCallback(async () => {
+    // 平点差负值防误设:平仓条件是「点差 < 平点差」,负值=点差要跌破该负值才平,
+    // 正常行情下几乎永不触发(把 -1 当"立即平仓"是高频误用;立即平仓走右键→强制平仓)
+    const isNeg = (v: unknown) => v !== '' && v !== undefined && v !== null && Number(v) < 0
+    const negRows: string[] = []
+    if (dirty.has('common') && isNeg(symbolRule.close_spread)) negRows.push('批量')
+    for (const a of accounts) {
+      if (dirty.has(String(a.id)) && isNeg(accountRules[a.id]?.close_spread)) negRows.push(a.note)
+    }
+    if (negRows.length > 0 && !(await confirmDialog({
+      title: '平点差为负值 — 几乎永不触发',
+      message: `【${negRows.join('、')}】的平点差是负数。\n平仓条件为「点差 < 平点差」:负值意味着点差要跌破该负值才会平仓,正常行情下永远等不到。\n若想立即平仓:持仓行右键 →「强制平仓」。\n\n仍要按负值保存吗?`,
+      danger: true,
+    }))) return
     setSaving(true)
     try {
       const tasks: Promise<unknown>[] = []
@@ -274,7 +287,7 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
                     </td>
                     {COLS.map((c) => {
                       const v = ar[c.key]
-                      const baseline = String(symbolRule[c.key] ?? '')
+                      const baseline = String(symbolRule[c.key] ?? globalRules[c.key] ?? '')
                       const modified = v != null && v !== '' && String(v) !== baseline
                       return (
                         <td key={c.key} className="px-1 py-1 text-center" title={modified ? '右键恢复为批量值' : undefined}>
