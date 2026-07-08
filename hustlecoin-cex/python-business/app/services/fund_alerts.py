@@ -23,6 +23,9 @@ DAILY_LOSS_ALERT = 50.0       # 单用户当日净亏(USDT)超过此 → 告警
 DRAWDOWN_PCT = 0.20           # 24h 峰值回撤比例超过此 → 告警
 DRAWDOWN_MIN_EQUITY = 20.0    # 峰值净值需 ≥ 此值才判回撤(避免小额噪音)
 THROTTLE_SEC = 1800           # 同类同用户告警最小间隔(30min)
+# 净敞口对账:主账户合约净仓 vs DB 在管对冲量,差额名义超此值 → 裸多/裸空告警(实测 50 FIL≈40U 裸多躺 6h 才被发现)
+HEDGE_MISMATCH_NOTIONAL = 5.0   # 单币净敞口差额名义(USDT)超此 → 告警
+HEDGE_MISMATCH_MIN_QTY = 1e-6   # 差额绝对量地板(过滤取整残差/浮点噪音)
 
 
 def _fire(db: Session, alert_type: str, uid: int, title: str, detail: str) -> None:
@@ -83,3 +86,49 @@ def run_fund_alert_checks(db: Session, agg_by_user: dict[int, dict]) -> None:
                 if dd >= DRAWDOWN_PCT:
                     _fire(db, "drawdown", uid, "资金告警·回撤",
                           f"⚠ 用户 {uname} 24h 净值回撤 {dd * 100:.1f}%(峰值 {peak:.2f}→当前 {equity:.2f}),请关注")
+
+
+def run_hedge_reconcile_checks(db: Session, master_pos_by_user: dict[int, dict],
+                               prices: dict[str, float]) -> list[dict]:
+    """净敞口对账:主账户每个币的合约净仓 vs DB 在管对冲量(该 user 该币非终态、hedge_account='master'
+    的 futures_long_qty 合计)。差额名义 > HEDGE_MISMATCH_NOTIONAL → 裸多/裸空告警。
+    数据全部现成(master_pos 由 balance_pusher 本轮采集,prices 用 spot_bids),零额外 REST。
+    master_pos_by_user: {uid: {SYMBOL: positionAmt}}; prices: {SYMBOL: spot_bid}。
+    返回【裸多收敛任务列表】[{uid,symbol,excess_qty,notional}] 供 balance_pusher 在开关开启时
+    reduceOnly 自动对齐(P1-7)。只返回裸多(可 reduceOnly 卖多单,不开新敞口最安全);裸空只告警不自动补。"""
+    converge_tasks: list[dict] = []
+    if not master_pos_by_user:
+        return converge_tasks
+    unames = {u.id: u.username for u in db.query(User.id, User.username).all()}
+    for uid, pos in master_pos_by_user.items():
+        if not pos:
+            continue
+        uname = unames.get(uid, f"#{uid}")
+        # 该 user 各币在管对冲量(master 腿),一次 SQL 聚合
+        rows = (db.query(Position.symbol, func.coalesce(func.sum(Position.futures_long_qty), 0))
+                .filter(Position.user_id == uid,
+                        Position.status.notin_(["CLOSED", "FAILED"]),
+                        Position.hedge_account == "master")
+                .group_by(Position.symbol).all())
+        hedged = {sym: float(q or 0) for sym, q in rows}
+        # 对账口径取并集:主账户有仓但 DB 无对冲(裸露) 或 DB 有对冲但主账户仓不足,都要覆盖
+        for sym in set(pos) | set(hedged):
+            actual = float(pos.get(sym, 0) or 0)      # 主账户合约净仓(多为正)
+            managed = hedged.get(sym, 0.0)            # DB 在管对冲量
+            diff = actual - managed                   # >0 裸多(实仓多于对冲) / <0 裸空(对冲多于实仓)
+            if abs(diff) < HEDGE_MISMATCH_MIN_QTY:
+                continue
+            px = prices.get(sym, 0.0)
+            notional = abs(diff) * px if px > 0 else 0.0
+            # 拿不到价时用绝对量兜底(名义 0 会漏报),阈值退化为 1 个币
+            if (px > 0 and notional < HEDGE_MISMATCH_NOTIONAL) or (px <= 0 and abs(diff) < 1.0):
+                continue
+            kind = "裸多(实仓>对冲)" if diff > 0 else "裸空(对冲>实仓)"
+            _fire(db, f"hedge:{sym}", uid, "资金告警·净敞口",
+                  f"⚠ 用户 {uname} {sym} {kind} 差额 {diff:+.4f}(实仓 {actual:.4f} vs 在管对冲 {managed:.4f}"
+                  f"{f',名义≈{notional:.1f}U' if notional > 0 else ''}),请核对合约仓")
+            # 裸多(diff>0)加入自动收敛任务:reduceOnly 卖掉多余多单对齐,不会开新敞口
+            if diff > 0:
+                converge_tasks.append({"uid": uid, "symbol": sym, "excess_qty": diff,
+                                       "actual": actual, "managed": managed, "notional": notional})
+    return converge_tasks

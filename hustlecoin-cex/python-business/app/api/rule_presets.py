@@ -111,6 +111,8 @@ def apply_preset(preset_id: int, symbol: str, request: Request, db: Session = De
         raise HTTPException(status_code=404, detail="Preset not found")
 
     sym = symbol.upper().strip()
+    if sym and not sym.endswith("USDT"):   # 补全 USDT 后缀,杜绝裸键规则(与 symbol_rules._norm_symbol 同口径)
+        sym += "USDT"
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id, SymbolRule.symbol == sym,
     ).first()

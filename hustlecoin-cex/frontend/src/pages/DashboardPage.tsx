@@ -121,10 +121,11 @@ export function DashboardPage() {
       const sig = ctrl.signal
       fetchDashboard()
       refreshPositions(sig)
+      refreshPushed()   // 兜底:自动推送广播万一丢失(WS重连窗口等),30s 内仍能看到新推的币
       getSpreads(sig).then((data: SpreadData[]) => setBulk(data)).catch(() => {})
     }, 30000)
     return () => { clearInterval(t); ctrl?.abort() }
-  }, [fetchDashboard, refreshPositions, setBulk])
+  }, [fetchDashboard, refreshPositions, refreshPushed, setBulk])
 
   // Refresh pushed symbols on push events
   useEffect(() => {

@@ -59,6 +59,7 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
     pubsub = None
     listener_task = None
     flush_task = None
+    snapshot_task = None
 
     # 黑名单(本用户 ∪ 全局系统死币如 HOMEUSDT)∪ 无券币(engine:noinv:*)— WS 利差推送据此排除
     def _load_blacklist():
@@ -78,19 +79,26 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
             pass
         finally:
             db.close()
-        # 并入无券币(借币 -3045 池空,常点差虚高占榜首);snapshot 时点排除,
-        # 连接后新变无券的币由前端每 20s 的 /api/spreads 整表刷新纠正。
+        # 注:不再把无券币(engine:noinv:*)并入黑名单 —— 否则 dashboard 用户主动推送、等借券的币
+        # 开/平点差被挡空白。无券标志改为随每条 spread 附 no_inventory 字段下发,由前端各页自行处理
+        # (SpreadsPage 点差榜过滤无券币避免虚高点差占榜;dashboard 正常显示)。
+        return syms
+    blacklist_syms = await asyncio.to_thread(_load_blacklist)
+
+    # 无券币集(engine:noinv:*):不再用于排除,仅用于给 spread payload 打 no_inventory 标志。
+    def _load_noinv():
+        s = set()
         try:
             import redis as _r
             from app.config import settings as _s
             rc = _r.from_url(_s.redis_url, decode_responses=True)
             keys = rc.keys("engine:noinv:*")
             rc.close()
-            syms |= {k.split("engine:noinv:", 1)[1].upper() for k in keys}
+            s = {k.split("engine:noinv:", 1)[1].upper() for k in keys}
         except Exception:
             pass
-        return syms
-    blacklist_syms = await asyncio.to_thread(_load_blacklist)
+        return s
+    noinv_syms = await asyncio.to_thread(_load_noinv)
 
     # 在交易白名单 engine:universe(现货∩合约 status==TRADING 的 USDT 对,随上/退市动态刷新)。
     # 退市/单腿下架的币不在此集 → 监控不推送。连接时点取一次,连接后由前端 10s 整表刷新纠正。
@@ -114,14 +122,19 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
         u = sym.upper()
         return u in blacklist_syms or (universe_syms is not None and u not in universe_syms)
 
+    def _tag_noinv(d: dict) -> dict:
+        # 给一条 spread dict 附 no_inventory 标志(无券币),前端据此处理(榜单过滤/dashboard 仍显示)
+        d["no_inventory"] = d.get("symbol") in noinv_syms
+        return d
+
     try:
-        # Send initial spread snapshot(排除黑名单)
+        # Send initial spread snapshot(排除黑名单/退市,但无券币照常推送并标 no_inventory)
         try:
             from app.services.spread_reader import spread_reader
             all_spreads = [s for s in spread_reader.get_all() if not _excluded(s.symbol)]
             await ws.send_json({
                 "type": "spread_snapshot",
-                "data": [json.loads(s.model_dump_json()) for s in all_spreads],
+                "data": [_tag_noinv(json.loads(s.model_dump_json())) for s in all_spreads],
             })
         except Exception as e:
             logger.warning(f"Failed to send initial spread snapshot: {e}")
@@ -165,10 +178,11 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
 
                 if channel == "spread:updates":
                     if _excluded(str(data_str)):
-                        continue  # 黑名单/死币/退市(不在 universe)不推送到利差监控
+                        continue  # 黑名单/死币/退市(不在 universe)不推送;无券币不再排除(标 no_inventory)
                     raw = await redis_conn.hget("spreads", data_str)
                     if raw:
                         parsed = json.loads(raw)
+                        parsed["no_inventory"] = str(data_str) in noinv_syms
                         async with batch_lock:
                             batch[data_str] = parsed
 
@@ -249,8 +263,24 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                     except Exception:
                         pass
 
+        async def snapshot_loop():
+            # 定期重发全量 spread_snapshot(整表替换):前端增量(spread_batch)改为合并 upsert 后,
+            # 退市/停发的死币不再被增量冲掉,靠此周期全量快照纠正;同时补齐任何因增量时序遗漏的币。
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    from app.services.spread_reader import spread_reader as _sr
+                    snap = [s for s in _sr.get_all() if not _excluded(s.symbol)]
+                    await ws.send_json({
+                        "type": "spread_snapshot",
+                        "data": [_tag_noinv(json.loads(s.model_dump_json())) for s in snap],
+                    })
+                except Exception:
+                    break
+
         listener_task = asyncio.create_task(redis_listener())
         flush_task = asyncio.create_task(flush_loop())
+        snapshot_task = asyncio.create_task(snapshot_loop())
 
         while True:
             text = await ws.receive_text()
@@ -270,6 +300,8 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
             listener_task.cancel()
         if flush_task:
             flush_task.cancel()
+        if snapshot_task:
+            snapshot_task.cancel()
         if pubsub:
             try:
                 await pubsub.unsubscribe()

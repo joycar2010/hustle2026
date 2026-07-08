@@ -10,6 +10,16 @@ from app.middleware.permissions import get_current_user_id
 router = APIRouter(prefix="/api/symbol-rules", tags=["symbol-rules"])
 
 
+def _norm_symbol(symbol: str) -> str:
+    """规范化交易对:大写去空格 + 补全 USDT 后缀(本系统全为 USDT 永续对)。
+    根除「裸币种名」规则(如 'FIL')—— 前端/引擎都按全名 'FILUSDT' 查点差/行情/规则,裸键会建出
+    对不上的空白行(实测 AXL/FIDA/FIL 六列全空根因)。已带 USDT 的不动。"""
+    s = (symbol or "").upper().strip()
+    if s and not s.endswith("USDT"):
+        s += "USDT"
+    return s
+
+
 def _publish_rules_reload(user_id: int):
     """事件驱动 0 秒规则热重载:保存/重置/删除单一规则后立即通知该 user 的 worker 重读规则
     (worker 订阅 rules:reload:{uid})。失败静默,不阻断保存(主循环 3s 轮询仍兜底)。"""
@@ -80,16 +90,15 @@ def list_symbol_rules(
 @router.get("/{symbol}", response_model=SymbolRuleResponse)
 def get_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,
     ).first()
     if not rule:
-        rule = SymbolRule(user_id=user_id, symbol=symbol, source="custom")
-        db.add(rule)
-        db.commit()
-        db.refresh(rule)
+        # 不再为"查看"落库空壳 custom 行(否则该币永久误显"单一规则"、被前端并集钉在面板上清不掉)。
+        # 返回 404,前端 SymbolRuleDialog 自动用全局规则兜底(已有逻辑,比构造临时对象更安全)。
+        raise HTTPException(status_code=404, detail=f"No custom rule for {symbol}")
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 
@@ -98,7 +107,7 @@ def get_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)
 def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db: Session = Depends(get_db)):
     from decimal import Decimal
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,
@@ -134,6 +143,15 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
     db.commit()
     db.refresh(rule)
     _publish_rules_reload(user_id)   # 0 秒通知引擎重载
+    try:
+        # 保存该币规则=显式再武装 → 清还币暂停标记(手动还币后设的),允许引擎立即重新借币
+        import redis as _rr
+        from app.config import settings as _ss
+        _rc = _rr.from_url(_ss.redis_url, decode_responses=True)
+        _rc.delete(f"engine:{user_id}:repayhold:{symbol}")
+        _rc.close()
+    except Exception:
+        pass
     global_rules = _get_global_rules(db, user_id)
     return _to_response(rule, global_rules)
 
@@ -141,7 +159,7 @@ def update_symbol_rule(symbol: str, data: SymbolRuleUpdate, request: Request, db
 @router.post("/{symbol}/reset", response_model=SymbolRuleResponse)
 def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,
@@ -169,7 +187,7 @@ def reset_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_d
 @router.delete("/{symbol}", response_model=MessageResponse)
 def delete_symbol_rule(symbol: str, request: Request, db: Session = Depends(get_db)):
     user_id = get_current_user_id(request)
-    symbol = symbol.upper().strip()
+    symbol = _norm_symbol(symbol)
     rule = db.query(SymbolRule).filter(
         SymbolRule.user_id == user_id,
         SymbolRule.symbol == symbol,

@@ -5,7 +5,7 @@ import { useBalanceStore } from '@/stores/balanceStore'
 import { useToastStore } from '@/components/ui/toast'
 import {
   Activity, AlertTriangle, ChevronDown, ChevronUp,
-  Heart, Server, Zap, Gauge, Clock, Wallet,
+  Heart, Server, Zap, Gauge, Clock,
 } from 'lucide-react'
 import { HoldingsSummary } from './HoldingsSummary'
 
@@ -82,10 +82,13 @@ export function EngineHealthBar() {
   const weightPct = Math.min(100, Math.round((usedWeight / weightLimit) * 100))
   const weightColor = weightPct >= 85 ? 'text-negative' : weightPct >= 60 ? 'text-yellow-500' : 'text-positive'
   const weightBar = weightPct >= 85 ? 'bg-negative' : weightPct >= 60 ? 'bg-yellow-500' : 'bg-positive'
+  // API错误改「近5分钟实时」口径:total_errors 是进程级单调累计(只增不减),陈旧错误会常驻误报。
+  // 仅当该账户最近一次错误发生在 300s 内才计入,既反映真实近期故障,又不被历史累计污染。
+  const ERR_FRESH_SEC = 300
   const totalMetrics = Object.values(health.api_metrics).reduce(
     (acc, m) => ({
       calls: acc.calls + m.total_calls,
-      errors: acc.errors + m.total_errors,
+      errors: acc.errors + (m.last_error_ago_sec != null && m.last_error_ago_sec < ERR_FRESH_SEC ? m.total_errors : 0),
       rate_limited: acc.rate_limited + m.rate_limited,
     }),
     { calls: 0, errors: 0, rate_limited: 0 },
@@ -93,9 +96,9 @@ export function EngineHealthBar() {
 
   return (
     <div className="border-b border-border bg-card/50">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-xs hover:bg-accent/50 transition-colors"
+      {/* 状态条本身不再整片可点;Worker 下拉改由「N Worker」触发、持币汇总改由「N 持仓」触发 */}
+      <div
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-xs"
       >
         <div className="flex items-center gap-1.5">
           <Icon className={`h-3.5 w-3.5 ${health.status === 'HEALTHY' ? 'text-positive' : health.status === 'DEGRADED' ? 'text-yellow-500' : 'text-negative'}`} />
@@ -127,13 +130,19 @@ export function EngineHealthBar() {
 
         <span className="hidden sm:inline text-muted-foreground">|</span>
 
-        <div className="flex items-center gap-1">
+        {/* 「N Worker」= Worker 下拉触发(取代原整条状态条点击) */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          title="点击展开/收起 Worker 列表"
+          className="flex items-center gap-1 -mx-1 rounded px-1 cursor-pointer hover:bg-accent/60"
+        >
           <Server className="h-3 w-3 text-muted-foreground" />
           <span>{runningWorkers.length} Worker</span>
           {staleWorkers.length > 0 && (
             <Badge variant="warning" className="ml-1">{staleWorkers.length} 超时</Badge>
           )}
-        </div>
+          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
 
         <span className="hidden sm:inline text-muted-foreground">|</span>
 
@@ -159,30 +168,25 @@ export function EngineHealthBar() {
 
         {/* 持仓 + 合约 — 移到状态条最右侧 */}
         <span className="hidden sm:inline text-muted-foreground">|</span>
-        <div className="flex items-center gap-1">
+        {/* 「N 持仓」= 持币汇总模态框触发(取代原右侧「持币汇总」按钮) */}
+        <button
+          onClick={() => setShowHoldings(true)}
+          title="持币汇总 — 各子账户已借币种,逐笔单独还币(点击持仓打开)"
+          className="flex items-center gap-1 -mx-1 rounded px-1 cursor-pointer hover:bg-accent/60"
+        >
           <Activity className="h-3 w-3 text-muted-foreground" />
           <span>{health.open_positions} 持仓</span>
           {health.stuck_positions.length > 0 && (
             <Badge variant="destructive" className="ml-1">{health.stuck_positions.length} 卡住</Badge>
           )}
-        </div>
+        </button>
 
         <span className="hidden sm:inline text-muted-foreground">|</span>
         <div className="flex items-center gap-1" title="合约: 未平仓 / 累计持仓数">
           <span>合约 <span className="text-primary">{balanceSummary.positionCount}</span>/<span className="text-muted-foreground">{balanceSummary.totalContracts}</span></span>
         </div>
 
-        <button
-          onClick={(e) => { e.stopPropagation(); setShowHoldings(true) }}
-          title="持币汇总 — 各子账户已借币种,逐笔单独还币"
-          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/60"
-        >
-          <Wallet className="h-3 w-3" />持币汇总
-        </button>
-        <div>
-          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-border/50 px-4 py-3 space-y-3">

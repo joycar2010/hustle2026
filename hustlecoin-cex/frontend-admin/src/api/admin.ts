@@ -1121,6 +1121,74 @@ export async function getRankings() {
   return data as RankingsData
 }
 
+// ─── 净期望收益 E 榜(P0-1) ───
+export interface NetExpectRow {
+  user_id: number
+  symbol: string
+  E: number | null
+  notional_usdt: number | null
+  spread_capture: number | null
+  interest_cost: number | null
+  fee_cost: number | null
+  tick_cost: number | null
+  funding_expect: number | null
+  decision: string | null
+  gate_mode: string | null
+  ts: number | null
+}
+export interface NetExpectBoard {
+  rows: NetExpectRow[]
+  count: number
+  positive: number
+  negative: number
+  gate_mode: string | null
+}
+export async function getNetExpect() {
+  const { data } = await client.get('/api/admin/market/net-expect')
+  return data as NetExpectBoard
+}
+
+// ─── P2-a 跨所标尺(五所;资金费均为日化%) ───
+export interface CrossVenueRow {
+  symbol: string
+  bn_spread: number | null
+  okx_spread: number | null
+  bybit_spread: number | null
+  gate_spread: number | null
+  bitget_spread: number | null
+  bn_funding: number | null
+  bybit_funding: number | null
+  gate_funding: number | null
+  bitget_funding: number | null
+  funding_gap: number | null
+  gap_pair: string | null
+  venues: number
+}
+export interface CrossVenueBoard {
+  rows: CrossVenueRow[]
+  count: number
+  errors: string[]
+  note: string
+  ts: number
+}
+export async function getCrossVenue() {
+  const { data } = await client.get('/api/admin/market/cross-venue')
+  return data as CrossVenueBoard
+}
+
+// ─── P2-b PM 纸面对比 ───
+export interface PmCompareRow { dim: string; current: string; pm: string }
+export interface PmCompareBoard {
+  rows: PmCompareRow[]
+  verdict: string
+  caveat: string
+  collateral_ratio_current: number | null
+}
+export async function getPmCompare() {
+  const { data } = await client.get('/api/admin/market/pm-compare')
+  return data as PmCompareBoard
+}
+
 export async function resetHistoryScores() {
   const { data } = await client.delete('/api/admin/market/rankings/history')
   return data

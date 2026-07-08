@@ -153,5 +153,8 @@ def _rules_to_dict(r: GlobalRules) -> dict:
         "taker_fee_spot": str(r.taker_fee_spot) if getattr(r, "taker_fee_spot", None) is not None else None,
         "taker_fee_futures": str(r.taker_fee_futures) if getattr(r, "taker_fee_futures", None) is not None else None,
         "spread_stale_sec": getattr(r, "spread_stale_sec", None),
+        "net_gate_mode": getattr(r, "net_gate_mode", None) or "shadow",
+        "hedge_auto_converge": bool(getattr(r, "hedge_auto_converge", False)),
+        "spot_order_mode": getattr(r, "spot_order_mode", None) or "market",
         "updated_at": str(r.updated_at) if r.updated_at else None,
     }

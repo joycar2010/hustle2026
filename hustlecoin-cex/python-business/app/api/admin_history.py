@@ -101,6 +101,10 @@ def closed_history(
             "cumulative_funding_fee": str(p.cumulative_funding_fee) if p.cumulative_funding_fee is not None else None,
             "cumulative_interest": str(p.cumulative_interest) if p.cumulative_interest is not None else None,
             "open_usdt_amount": str(p.open_usdt_amount) if p.open_usdt_amount is not None else None,
+            # P0-3 逐回路成本记账:本回路净损益(含资金费)+ 开仓预期E + 4腿手续费合计
+            "round_net_pnl": str(p.round_net_pnl) if getattr(p, "round_net_pnl", None) is not None else None,
+            "expected_e": str(p.expected_e) if getattr(p, "expected_e", None) is not None else None,
+            "fee_total": str(p.fee_total) if p.fee_total is not None else None,
             "opened_at": str(p.opened_at) if p.opened_at else None,
             "closed_at": str(p.closed_at) if p.closed_at else None,
         })
@@ -180,4 +184,16 @@ def trade_logs(
             "created_at": str(t.created_at) if t.created_at else None,
         })
 
-    return {"logs": logs, "count": count}
+    resp = {"logs": logs, "count": count}
+    # P2-c 资金流水审计分段提示:大跨度一次拉全量既慢又可能撞 market-monitor 的 7 天查询窗;
+    # 这里给出按 ≤7 天分段的建议(与该窗对齐),既有 page/size 翻页也可直接分段拉,响应附字段不破坏老调用。
+    if start is not None and end is not None:
+        rng_days = max(1, (end - start).days)
+        resp["range_days"] = rng_days
+        if rng_days > 7:
+            segs = (rng_days + 6) // 7
+            resp["segment_hint"] = (
+                f"查询跨度 {rng_days} 天 > 7 天:资金流水审计建议按 ≤7 天分段拉取(约 {segs} 段),"
+                f"或用 page 翻页;避免一次拉全量。"
+            )
+    return resp

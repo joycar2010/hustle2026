@@ -71,6 +71,12 @@ async fn load_universe(redis_url: &str) -> Vec<String> {
     }
 }
 
+/// 公开版:ws 模块每次重连时调用,只返回原始列表(不 fallback),供增量对比。
+/// 空列表=Redis 暂时不可读,调用方保留现有 symbols 不变。
+pub async fn load_universe_symbols(redis_url: &str) -> Vec<String> {
+    try_load_universe(redis_url).await.unwrap_or_default()
+}
+
 async fn try_load_universe(redis_url: &str) -> Option<Vec<String>> {
     let client = redis::Client::open(redis_url).ok()?;
     let mut conn = client.get_multiplexed_async_connection().await.ok()?;

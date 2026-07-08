@@ -140,6 +140,9 @@ class GlobalRules(Base):
     bnb_burn_enabled = Column(Boolean, default=False)        # BNB 抵扣手续费开关(每用户):引擎对本用户各子账户统一下发 spot/marginBNBBurn
     removed_cooldown_minutes = Column(Integer, default=0)    # 移除/平仓冷却(分钟): 同币退出后此时长内禁止再借,抑制反复进出(0=不启用)
     spread_stale_sec = Column(Integer, default=300)          # 利差监控新鲜阈值(秒,系统全局): ts 落后全表最新值超此秒数的币在 /spreads 不显示(死币剔除;前端读)
+    net_gate_mode = Column(String(10), default="shadow")     # 净期望闸(系统级): off不评估/shadow评估记录不拦/enforce E≤0拒开
+    hedge_auto_converge = Column(Boolean, default=False)     # 净敞口自动收敛(系统级): 裸多(实仓>对冲)自动 reduceOnly 对齐(默认关,只告警)
+    spot_order_mode = Column(String(10), default="market")   # 现货腿下单模式(系统级): market市价/maker post-only限价(省手续费,扩点差空间)
     version = Column(Integer, default=0)                      # 乐观锁版本号(保存事务化用)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -165,12 +168,16 @@ class FeishuConfig(Base):
     app_secret = Column(String(200), nullable=True)
     alert_interval_sec = Column(Integer, default=5)
     alert_count = Column(Integer, default=1)
+    risk_alert_cooldown_sec = Column(Integer, default=1800)  # 子账户保证金风险告警专属冷却(默认30min),独立于全局节流,防低保证金持续刷屏
     margin_rate_alert = Column(Numeric(10, 2), default=30)
     leverage_risk_alert = Column(Numeric(10, 4), default=1.3)
     enable_transfer_fail_alert = Column(Boolean, default=True)
     enable_new_borrow_alert = Column(Boolean, default=True)
     enable_borrow_success_alert = Column(Boolean, default=True)   # 借币成功(开仓/对冲完成)提醒
     enable_repay_success_alert = Column(Boolean, default=True)    # 还币成功(平仓/还币完成)提醒
+    # 每类型提醒覆盖:{alert_type: {count:int, interval:int}};缺失/留空回退全局 alert_count/alert_interval_sec。
+    # alert_type ∈ new_borrow/borrow_success/repay_success/transfer_fail/risk/margin_rate/error/naked_short
+    alert_overrides = Column(JSON, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

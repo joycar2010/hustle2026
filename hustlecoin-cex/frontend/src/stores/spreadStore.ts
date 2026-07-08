@@ -9,6 +9,7 @@ export interface SpreadData {
   spread_long: number
   spread_short: number
   ts: number
+  no_inventory?: boolean   // 无券(币安杠杆池-3045池空):dashboard 仍显示点差,SpreadsPage 点差榜可过滤
 }
 
 interface SpreadState {
@@ -16,6 +17,7 @@ interface SpreadState {
   lastUpdateTs: number
   setSpread: (symbol: string, data: SpreadData) => void
   setBulk: (items: SpreadData[]) => void
+  mergeBulk: (items: SpreadData[]) => void
   getSorted: () => SpreadData[]
 }
 
@@ -53,8 +55,9 @@ export const useSpreadStore = create<SpreadState>((set, get) => ({
     })
   },
 
-  // 整表替换(非合并):Redis 已不再发布的死币/退市币不会残留。
-  // 之前用 new Map(state.spreads) 合并 → 死币(HIGH/ATA 退市后引擎停发)永远冻结在表里。
+  // 整表替换(非合并):仅用于全量快照(spread_snapshot)。Redis 已不再发布的死币/退市币不残留。
+  // 注意:增量(spread_batch)绝不能用此函数,否则只含变化币的批次会把整表冲掉、其余币(如点差稳定的)
+  // 瞬间消失开/平空白 → 增量用 mergeBulk。
   setBulk: (items) => {
     set(() => {
       const newMap = new Map<string, SpreadData>()
@@ -69,6 +72,34 @@ export const useSpreadStore = create<SpreadState>((set, get) => ({
           spread_long: Number(item.spread_long),
           spread_short: Number(item.spread_short),
           ts: item.ts,
+          no_inventory: item.no_inventory,
+        }
+        newMap.set(parsed.symbol, parsed)
+        if (parsed.ts > maxTs) maxTs = parsed.ts
+      }
+      saveSpreads(newMap)
+      return { spreads: newMap, lastUpdateTs: maxTs }
+    })
+  },
+
+  // 增量合并:WS spread_batch(只含本批变化的币)逐个 upsert,不动其余币。
+  // 死币残留由全量 snapshot(连接时 + 定期)纠正,而非靠增量冲表。
+  mergeBulk: (items) => {
+    set((state) => {
+      if (!items || items.length === 0) return state
+      const newMap = new Map(state.spreads)
+      let maxTs = state.lastUpdateTs
+      for (const item of items) {
+        const parsed: SpreadData = {
+          symbol: item.symbol,
+          spot_bid: Number(item.spot_bid),
+          spot_ask: Number(item.spot_ask),
+          fut_bid: Number(item.fut_bid),
+          fut_ask: Number(item.fut_ask),
+          spread_long: Number(item.spread_long),
+          spread_short: Number(item.spread_short),
+          ts: item.ts,
+          no_inventory: item.no_inventory,
         }
         newMap.set(parsed.symbol, parsed)
         if (parsed.ts > maxTs) maxTs = parsed.ts

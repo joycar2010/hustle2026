@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import logging
 import time
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from urllib.parse import urlencode
 
 import httpx
@@ -97,7 +97,7 @@ class BinanceTradingClient:
         故用 urlencode(与发送同款编码),否则含 @ 等特殊字符的参数(如 email)
         会因 httpx 把 @→%40 与朴素 join 不一致而 -1022 签名错误。"""
         params["timestamp"] = int(time.time() * 1000)
-        query = urlencode(params)
+        query = urlencode(params, doseq=True)  # doseq: list 值展开为 asset=A&asset=B(dust 等数组参数);标量不受影响
         sig = hmac.new(self._api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
         return f"{query}&signature={sig}"
 
@@ -109,7 +109,7 @@ class BinanceTradingClient:
         if params is None:
             params = {}
         # 预先编码成 querystring 并直接拼到 URL,绕过 httpx 的二次编码 —— 保证「签名串==发送串」
-        qs = self._sign(params) if signed else urlencode(params)
+        qs = self._sign(params) if signed else urlencode(params, doseq=True)
         full_url = f"{url}?{qs}" if qs else url
 
         # Backoff is COMPUTED while holding the semaphore but SLEPT after releasing it,
@@ -345,10 +345,17 @@ class BinanceTradingClient:
             "sideEffectType": "MARGIN_BUY", "isIsolated": "FALSE",
         })
 
-    async def margin_repay(self, asset: str, amount: Decimal) -> dict:
+    async def margin_repay(self, asset: str, amount) -> dict:
         await _pace_borrow(self._sub_account_id)  # repay = 1500 UID, shares borrow budget → same pacer
+        # 币安 amount 参数正则 ^[0-9]{1,20}(\.[0-9]{1,8})?$ —— 最多 8 位小数。
+        # 手动还币路径把金额归一成 float 后,min()/×0.999 重试等浮点运算会让 str() 带出
+        # 15+ 位小数(如 25.001517999999998)→ -1100 "Illegal characters found in a parameter"。
+        # 在此咽喉点统一量化到 8 位(HALF_UP 贴回币安 8 位真值,不留 1e-8 债务尾差),
+        # format(...,"f") 防科学计数法。引擎侧 Decimal 调用方(本就≤8位)行为不变。
+        amt = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+        amt_s = format(amt.quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP), "f")
         return await self._request("POST", f"{SPOT_BASE}/sapi/v1/margin/borrow-repay", {
-            "asset": asset, "amount": str(amount),
+            "asset": asset, "amount": amt_s,
             "type": "REPAY", "isIsolated": "FALSE",
         })
 
@@ -363,6 +370,27 @@ class BinanceTradingClient:
     async def get_margin_account(self) -> dict:
         return await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/account")
 
+    async def get_cross_margin_data(self, coin: str) -> dict:
+        """全仓杠杆币种数据(按当前账户 VIP 档):borrowLimit/dailyInterest 等,与池子库存无关。
+        maxBorrowable 在 -3045(无券)时整个报错、连 borrowLimit 一起拿不到 —— 此接口是
+        无券币"账户最大可借额度"的唯一来源(推送即显示额度数字,而非只会写「无券」)。"""
+        data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/crossMarginData", {"coin": coin})
+        if isinstance(data, list):
+            return data[0] if data else {}
+        return data or {}
+
+    async def get_dust_assets(self) -> dict:
+        """现货钱包可转 BNB 的小额资产清单(币安「小额资产兑换 BNB」)。该端点为 POST(非 GET)。
+        返回 {details:[{asset, amountFree, toBNB, ...}], totalTransferBtc:..., totalTransferBNB:...}。"""
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/asset/dust-btc")
+
+    async def dust_to_bnb(self, assets: list[str]) -> dict:
+        """把指定小额资产(现货钱包)一次性兑换成 BNB。assets 为资产名列表(如 ['ADA','XRP'])。
+        币安对同一资产有 ~6h 兑换频控,失败由调用方吞掉(本就是清扫,不影响交易)。"""
+        # 多值 asset 参数: 需 asset=A&asset=B,_sign 用 urlencode(doseq 默认不展开 list)→ 手动拼
+        params = {"asset": assets}  # urlencode(doseq=True) 会展开为多份 asset=
+        return await self._request("POST", f"{SPOT_BASE}/sapi/v1/asset/dust", params)
+
     async def get_margin_interest_rate(self, asset: str) -> Decimal:
         data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/interestRateHistory", {
             "asset": asset, "limit": "1",
@@ -371,11 +399,13 @@ class BinanceTradingClient:
             return Decimal(str(data[0].get("dailyInterestRate", "0")))
         return Decimal("0")
 
-    async def get_max_borrowable(self, asset: str) -> Decimal:
+    async def get_max_borrowable(self, asset: str) -> dict:
+        """全仓杠杆最大可借:返回 {amount:当前实际可借(受抵押/VIP/库存取min), borrowLimit:VIP档借贷额度上限}。
+        amount 受账户持U影响、各账户不同;borrowLimit 按VIP档、与持U无关、同VIP各账户相同。"""
         data = await self._request("GET", f"{SPOT_BASE}/sapi/v1/margin/maxBorrowable", {
             "asset": asset,
         })
-        return Decimal(str(data.get("amount", "0")))
+        return {"amount": Decimal(str(data.get("amount", "0"))), "borrowLimit": Decimal(str(data.get("borrowLimit", "0")))}
 
     async def get_loan_records(self, txn_type: str = "BORROW", asset: str = None, size: int = 20) -> dict:
         """币安全仓借/还流水(原始 REST 对账用)。txn_type=BORROW/REPAY。返回 {rows,total}。"""
@@ -414,6 +444,37 @@ class BinanceTradingClient:
             "symbol": symbol, "side": "BUY", "type": "MARKET",
             "quantity": str(quantity),
         })
+
+    # ---- Spot maker (post-only) orders ----
+    # 现货腿 maker 化:LIMIT_MAKER = post-only,只做挂单方(taker 费≈15bp→maker 费更低甚至返佣),
+    # 砍近半 4 腿手续费、扩可做点差空间。现货/杠杆不支持 GTX,post-only 用 type=LIMIT_MAKER。
+    # 若挂价会立即成交(穿越盘口),币安直接拒单(-2010),调用方据此改市价兜底,绝不留单腿。
+
+    async def spot_limit_maker_sell(self, symbol: str, quantity: Decimal, price: Decimal, is_margin: bool = True) -> dict:
+        """post-only 限价卖(杠杆户,NO_SIDE_EFFECT 不借不还)。price 应挂在卖一或更高,确保做 maker。"""
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        params = {"symbol": symbol, "side": "SELL", "type": "LIMIT_MAKER",
+                  "quantity": str(quantity), "price": str(price)}
+        if is_margin:
+            params["sideEffectType"] = "NO_SIDE_EFFECT"
+        return await self._request("POST", base, params)
+
+    async def spot_limit_maker_buy(self, symbol: str, quantity: Decimal, price: Decimal, is_margin: bool = True) -> dict:
+        """post-only 限价买(杠杆户,NO_SIDE_EFFECT)。price 应挂在买一或更低,确保做 maker。"""
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        params = {"symbol": symbol, "side": "BUY", "type": "LIMIT_MAKER",
+                  "quantity": str(quantity), "price": str(price)}
+        if is_margin:
+            params["sideEffectType"] = "NO_SIDE_EFFECT"
+        return await self._request("POST", base, params)
+
+    async def spot_query_order(self, symbol: str, order_id: str, is_margin: bool = True) -> dict:
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        return await self._request("GET", base, {"symbol": symbol, "orderId": str(order_id)})
+
+    async def spot_cancel_order(self, symbol: str, order_id: str, is_margin: bool = True) -> dict:
+        base = f"{SPOT_BASE}/sapi/v1/margin/order" if is_margin else f"{SPOT_BASE}/api/v3/order"
+        return await self._request("DELETE", base, {"symbol": symbol, "orderId": str(order_id)})
 
     # ---- Futures Orders ----
 

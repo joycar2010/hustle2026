@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   getAnnouncements, checkDelist, listPendingBlacklist, confirmBlacklist, dismissPending,
-  getKlineData, searchCoin, getRankings, resetHistoryScores,
+  getKlineData, searchCoin, getRankings, resetHistoryScores, getNetExpect,
+  getCrossVenue, getPmCompare,
   type AnnouncementItem, type PendingBlacklistItem, type CoinSearchItem, type RankingItem, type HistoryScoreItem,
+  type NetExpectRow, type CrossVenueRow, type PmCompareRow,
 } from '@/api/admin'
 import { extractError } from '@/api/client'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,11 +15,11 @@ import { useToastStore } from '@/components/ui/toast'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import {
   AlertTriangle, Search, CheckCircle, XCircle, ExternalLink, RefreshCw, ShieldAlert,
-  CandlestickChart, TrendingUp,
+  CandlestickChart, TrendingUp, Calculator, Scale, Layers,
 } from 'lucide-react'
 import { createChart, type IChartApi, CandlestickSeries, HistogramSeries, ColorType, type UTCTimestamp } from 'lightweight-charts'
 
-type Tab = 'kline' | 'rankings' | 'announcements' | 'blacklist'
+type Tab = 'kline' | 'rankings' | 'announcements' | 'blacklist' | 'netexpect' | 'crossvenue' | 'pmcompare'
 
 export function MarketMonitorPage() {
   const [tab, setTab] = useState<Tab>('kline')
@@ -44,13 +46,243 @@ export function MarketMonitorPage() {
         <button onClick={() => setTab('blacklist')} className={tabCls('blacklist')}>
           <ShieldAlert className="h-4 w-4" /> 待审核黑名单
         </button>
+        <button onClick={() => setTab('netexpect')} className={tabCls('netexpect')}>
+          <Calculator className="h-4 w-4" /> 净期望E榜
+        </button>
+        <button onClick={() => setTab('crossvenue')} className={tabCls('crossvenue')}>
+          <Scale className="h-4 w-4" /> 跨所标尺
+        </button>
+        <button onClick={() => setTab('pmcompare')} className={tabCls('pmcompare')}>
+          <Layers className="h-4 w-4" /> PM纸面评估
+        </button>
       </div>
 
       {tab === 'kline' && <KlineTab />}
       {tab === 'rankings' && <RankingsTab />}
       {tab === 'announcements' && <AnnouncementsTab />}
       {tab === 'blacklist' && <BlacklistTab />}
+      {tab === 'netexpect' && <NetExpectTab />}
+      {tab === 'crossvenue' && <CrossVenueTab />}
+      {tab === 'pmcompare' && <PmCompareTab />}
     </div>
+  )
+}
+
+// ─── 净期望 E 榜 Tab(P0-1: 开仓成本线) ───
+
+function NetExpectTab() {
+  const [rows, setRows] = useState<NetExpectRow[]>([])
+  const [meta, setMeta] = useState<{ positive: number; negative: number; gate_mode: string | null }>({ positive: 0, negative: 0, gate_mode: null })
+
+  const fetch = useCallback(async () => {
+    try {
+      const d = await getNetExpect()
+      setRows(d.rows || [])
+      setMeta({ positive: d.positive, negative: d.negative, gate_mode: d.gate_mode })
+    } catch { /* 静默 */ }
+  }, [])
+  useAutoRefresh(fetch, 10000)
+
+  const modeLabel = meta.gate_mode === 'enforce' ? '强制(E≤0拒开)'
+    : meta.gate_mode === 'off' ? '关闭' : '影子(记录不拦)'
+  const fmt = (v: number | null | undefined, d = 4) => v == null ? '—' : v.toFixed(d)
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">开仓净期望收益 E</span>
+          <Badge variant={meta.gate_mode === 'enforce' ? 'default' : 'secondary'}>闸模式: {modeLabel}</Badge>
+          <span className="text-emerald-500">可做(E&gt;0): {meta.positive}</span>
+          <span className="text-red-500">被成本吃(E≤0): {meta.negative}</span>
+          <span className="text-muted-foreground text-xs">E = 点差捕获 − 利息 − 4腿手续费 − tick摩擦(USDT);60s内引擎评估过的币</span>
+        </div>
+        {rows.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">近 60 秒无开仓评估记录(点差达标才评估;shadow 模式下有借币尝试才写入)</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-muted-foreground text-left">
+                  <th className="px-2 py-1.5">币种</th>
+                  <th className="px-2 py-1.5 text-right">净期望 E(U)</th>
+                  <th className="px-2 py-1.5 text-right">名义(U)</th>
+                  <th className="px-2 py-1.5 text-right">点差捕获</th>
+                  <th className="px-2 py-1.5 text-right">利息</th>
+                  <th className="px-2 py-1.5 text-right">手续费</th>
+                  <th className="px-2 py-1.5 text-right">tick摩擦</th>
+                  <th className="px-2 py-1.5 text-center">决定</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const pos = (r.E ?? 0) > 0
+                  return (
+                    <tr key={`${r.user_id}-${r.symbol}`} className="border-b border-border/30 hover:bg-accent/10">
+                      <td className="px-2 py-1.5 font-medium">{r.symbol.replace('USDT', '')}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono font-semibold ${pos ? 'text-emerald-500' : 'text-red-500'}`}>{fmt(r.E)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">{fmt(r.notional_usdt, 1)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-emerald-500/80">{fmt(r.spread_capture)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-amber-500/80">−{fmt(r.interest_cost)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-amber-500/80">−{fmt(r.fee_cost)}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-amber-500/80">−{fmt(r.tick_cost)}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <Badge variant={r.decision === 'reject' ? 'destructive' : pos ? 'default' : 'secondary'}>
+                          {r.decision === 'reject' ? '拒开' : r.decision === 'borrow' && !pos ? '影子放行' : '可做'}
+                        </Badge>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── 跨所标尺 Tab(P2-a: Binance/OKX/Bybit 只读参照,不做腿) ───
+
+function CrossVenueTab() {
+  const [rows, setRows] = useState<CrossVenueRow[]>([])
+  const [note, setNote] = useState('')
+  const [loading, setLoading] = useState(false)
+  const fetch = useCallback(async () => {
+    setLoading(true)
+    try {
+      const d = await getCrossVenue()
+      setRows(d.rows || [])
+      setNote(d.note || '')
+    } catch { /* 静默 */ } finally { setLoading(false) }
+  }, [])
+  useAutoRefresh(fetch, 30000)
+
+  const pct = (v: number | null, d = 3) => v == null ? '—' : `${v.toFixed(d)}%`
+  const sprCls = (bn: number | null, alt: number | null) =>
+    (bn != null && alt != null && alt < bn) ? 'text-emerald-500' : 'text-muted-foreground'
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">跨所标尺 · Binance / OKX / Bybit / Gate / Bitget</span>
+          <Badge variant="secondary">只读参照 · 不做腿</Badge>
+          <Button variant="outline" size="sm" onClick={fetch} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> 刷新
+          </Button>
+          <span className="text-muted-foreground text-xs">公共行情批量并发拉取,60s 缓存;资金费均为日化%;按四所费差(最高−最低)排序</span>
+        </div>
+        {note && <p className="text-xs text-muted-foreground leading-relaxed">{note}</p>}
+        {rows.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">{loading ? '拉取五所行情中…' : '暂无数据(至少两所有价的币才列)'}</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-muted-foreground text-left">
+                  <th className="px-2 py-1.5">币种</th>
+                  <th className="px-2 py-1.5 text-right">币安价差</th>
+                  <th className="px-2 py-1.5 text-right">OKX价差</th>
+                  <th className="px-2 py-1.5 text-right">Bybit价差</th>
+                  <th className="px-2 py-1.5 text-right">Gate价差</th>
+                  <th className="px-2 py-1.5 text-right">Bitget价差</th>
+                  <th className="px-2 py-1.5 text-right">币安费/日</th>
+                  <th className="px-2 py-1.5 text-right">Bybit费/日</th>
+                  <th className="px-2 py-1.5 text-right">Gate费/日</th>
+                  <th className="px-2 py-1.5 text-right">Bitget费/日</th>
+                  <th className="px-2 py-1.5 text-right">费差/日</th>
+                  <th className="px-2 py-1.5 text-center">方向(空→多)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const fund = (v: number | null) => (
+                    <td className={`px-2 py-1.5 text-right font-mono ${v == null ? 'text-muted-foreground' : v > 0 ? 'text-amber-500/80' : 'text-emerald-500/80'}`}>{pct(v, 4)}</td>
+                  )
+                  return (
+                    <tr key={r.symbol} className="border-b border-border/30 hover:bg-accent/10">
+                      <td className="px-2 py-1.5 font-medium">{r.symbol.replace('USDT', '')}</td>
+                      <td className="px-2 py-1.5 text-right font-mono">{pct(r.bn_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.okx_spread)}`}>{pct(r.okx_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.bybit_spread)}`}>{pct(r.bybit_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.gate_spread)}`}>{pct(r.gate_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.bitget_spread)}`}>{pct(r.bitget_spread)}</td>
+                      {fund(r.bn_funding)}
+                      {fund(r.bybit_funding)}
+                      {fund(r.gate_funding)}
+                      {fund(r.bitget_funding)}
+                      <td className="px-2 py-1.5 text-right font-mono font-semibold text-emerald-500">{pct(r.funding_gap, 4)}</td>
+                      <td className="px-2 py-1.5 text-center text-amber-500/90">{r.gap_pair || '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── PM 纸面评估 Tab(P2-b: Portfolio Margin 对比,不动工) ───
+
+function PmCompareTab() {
+  const [rows, setRows] = useState<PmCompareRow[]>([])
+  const [verdict, setVerdict] = useState('')
+  const [caveat, setCaveat] = useState('')
+
+  const fetch = useCallback(async () => {
+    try {
+      const d = await getPmCompare()
+      setRows(d.rows || [])
+      setVerdict(d.verdict || '')
+      setCaveat(d.caveat || '')
+    } catch { /* 静默 */ }
+  }, [])
+  useEffect(() => { fetch() }, [fetch])
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">Portfolio Margin 纸面评估</span>
+          <Badge variant="secondary">只读参照 · 本期不动工</Badge>
+        </div>
+        {caveat && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" /> <span>{caveat}</span>
+          </div>
+        )}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b text-muted-foreground text-left">
+                <th className="px-2 py-2 w-24">对比维度</th>
+                <th className="px-2 py-2">当前:全仓杠杆</th>
+                <th className="px-2 py-2">Portfolio Margin(纸面)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.dim} className="border-b border-border/30 align-top">
+                  <td className="px-2 py-2 font-medium whitespace-nowrap">{r.dim}</td>
+                  <td className="px-2 py-2 text-muted-foreground leading-relaxed">{r.current}</td>
+                  <td className="px-2 py-2 text-foreground leading-relaxed">{r.pm}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {verdict && (
+          <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs leading-relaxed">
+            <span className="font-semibold text-primary">评估结论:</span> {verdict}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -16,10 +17,20 @@ INTEREST_RATE_URL = "https://www.binance.com/bapi/margin/v1/public/margin/vip/sp
 SPOT_EXINFO_URL = "https://api.binance.com/api/v3/exchangeInfo"
 FUT_EXINFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 
-REFRESH_INTERVAL = 30
-STATIC_REFRESH_MULTIPLIER = 10  # refresh static data every 10 cycles = 5 min
+REFRESH_INTERVAL = 8    # 资金费率/mark价 实时刷新(premiumIndex 是低IP权重公开端点,8s 安全且够实时)
+STATIC_REFRESH_MULTIPLIER = 38  # 静态数据(资费周期/上限/利率)每 ~5 分钟刷一次(8s×38≈304s)
 INTEREST_CACHE_KEY = "market:interest_rates"  # Redis backup for last-good interest rates
 UNIVERSE_KEY = "engine:universe"  # Rust 引擎订阅集:现货∩合约 USDT 可交易对(随上/退市动态刷新)
+
+# 点差停更监控:rust 点差引擎某分片半开/掉线 → 大片币的点差停更(实测 A–M 段冻结 9.6h 无人知)。
+# 口径校准(实测健康稳态):bookTicker 仅在买卖一价变动时推,大量非活跃币本就长时间不变价 →
+# fresh<60s 稳态仅 ~65%(不可用作阈值,会狂误报);但 fresh<30min=100%(健康态每个币 30min 内必更新)。
+# 故改用「长窗口停更比例」:单币 ts 超 STALE_WINDOW_MS(10min)算停更;停更币 / universe 超阈值且持续
+# >1 分钟 → 跑马灯+飞书告警。健康稳态停更比例 ~12%,单分片整死 ~55% → 阈值 40% 两边都留足余量。
+STALE_WINDOW_MS = 600_000         # 单币 ts 超此(10min)算「停更」
+STALE_ALERT_FRACTION = 0.40       # 停更币 / universe > 此比例触发(健康~12%,单分片死~55%)
+STALE_ALERT_SUSTAIN_SEC = 60      # 持续 >1 分钟才告警(滤瞬态)
+STALE_ALERT_COOLDOWN_SEC = 600    # 告警冷却 10 分钟(问题持续期间不刷屏)
 
 
 class MarketDataPusher:
@@ -30,6 +41,8 @@ class MarketDataPusher:
         self._interest_rates: dict[str, float] = {}
         self._static_tick = 0
         self._monitored_symbols: set[str] = set()
+        self._high_stale_since: Optional[float] = None  # 停更比例持续超阈起始(monotonic)
+        self._last_stale_alert_mono: float = -1e9       # 上次停更告警时间(冷却)
 
     async def start(self):
         self._redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -55,6 +68,7 @@ class MarketDataPusher:
                     await self._fetch_static_data()
 
                 await self._fetch_and_publish()
+                await self._check_freshness_and_alert()
                 self._static_tick += 1
             except Exception as e:
                 logger.warning(f"MarketDataPusher cycle error: {e}")
@@ -173,6 +187,71 @@ class MarketDataPusher:
 
         if market_data:
             await self._redis.publish("market:updates", json.dumps(market_data))
+
+    async def _check_freshness_and_alert(self):
+        """点差停更监控:停更币(ts>10min)/universe > STALE_ALERT_FRACTION 且持续 >STALE_ALERT_SUSTAIN_SEC,
+        跑马灯+飞书告警(冷却 STALE_ALERT_COOLDOWN_SEC)。本可在某分片冻结的 ~1 分钟内就发现,而非 9.6h 后。"""
+        try:
+            h = await self._redis.hgetall("spreads")
+            if not h:
+                return
+            uni_raw = await self._redis.get(UNIVERSE_KEY)
+            universe_n = len(json.loads(uni_raw)) if uni_raw else len(h)
+            if universe_n < 50:
+                return
+            now = int(time.time() * 1000)
+            stale = 0
+            for v in h.values():
+                try:
+                    if now - int(json.loads(v).get("ts", 0)) > STALE_WINDOW_MS:
+                        stale += 1
+                except Exception:
+                    pass
+            frac = stale / universe_n
+            mono = time.monotonic()
+            if frac > STALE_ALERT_FRACTION:
+                if self._high_stale_since is None:
+                    self._high_stale_since = mono
+                if (mono - self._high_stale_since) >= STALE_ALERT_SUSTAIN_SEC \
+                        and (mono - self._last_stale_alert_mono) >= STALE_ALERT_COOLDOWN_SEC:
+                    self._last_stale_alert_mono = mono
+                    await self._send_stale_alert(stale, universe_n, frac)
+            else:
+                self._high_stale_since = None
+        except Exception as e:
+            logger.warning(f"freshness check error: {e}")
+
+    async def _send_stale_alert(self, stale: int, universe_n: int, frac: float):
+        title = "⚠️行情点差停更告警"
+        content = (f"点差停更币(>10min) {stale}/{universe_n}({frac * 100:.0f}%) 超阈值且持续 >1 分钟 — "
+                   f"rust 点差引擎(cex-engine @10.0.1.95)疑似半开/分片掉线,请立即检查")
+        logger.warning(f"SPREAD FEED STALE ALERT: {content}")
+        # 跑马灯(notification:broadcast,前端订阅)
+        try:
+            await self._redis.publish("notification:broadcast", json.dumps({
+                "title": title, "content": content, "priority": 1,
+                "color": "#ef4444", "blink": True, "sound": "none",
+            }))
+        except Exception as e:
+            logger.warning(f"stale alert marquee failed: {e}")
+        # 飞书(全局 FeishuConfig webhook,user_id=None)
+        try:
+            def _get_webhook():
+                from app.db.session import SessionLocal
+                from app.db.models import FeishuConfig
+                db = SessionLocal()
+                try:
+                    fc = db.query(FeishuConfig).filter(FeishuConfig.user_id.is_(None)).first()
+                    return fc.webhook_url if fc else None
+                finally:
+                    db.close()
+            url = await asyncio.to_thread(_get_webhook)
+            if url:
+                async with httpx.AsyncClient(timeout=10) as c:
+                    await c.post(url, json={"msg_type": "text",
+                                            "content": {"text": f"{title}\n{content}"}})
+        except Exception as e:
+            logger.warning(f"stale alert feishu failed: {e}")
 
 
 market_data_pusher = MarketDataPusher()

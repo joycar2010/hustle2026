@@ -42,6 +42,8 @@ class FeishuSender:
         # 绿框配置(安全默认;_ensure_config 从 DB 覆盖)
         self._alert_interval_sec = 5
         self._alert_count = 1
+        self._alert_overrides = {}     # {alert_type: {count, interval}} 每类型覆盖,空则回退全局
+        self._risk_alert_cooldown_sec = 1800  # 保证金风险告警专属冷却(默认30min),独立于全局节流
         self.leverage_risk_alert = Decimal("1.3")
         self.margin_rate_alert = Decimal("30")
         self.enable_transfer_fail_alert = True
@@ -66,6 +68,9 @@ class FeishuSender:
                 try:
                     self._alert_interval_sec = int(getattr(cfg, "alert_interval_sec", 5) or 0)
                     self._alert_count = max(1, int(getattr(cfg, "alert_count", 1) or 1))
+                    ov = getattr(cfg, "alert_overrides", None)
+                    self._alert_overrides = ov if isinstance(ov, dict) else {}
+                    self._risk_alert_cooldown_sec = max(0, int(getattr(cfg, "risk_alert_cooldown_sec", 1800) or 0))
                     if getattr(cfg, "leverage_risk_alert", None) is not None:
                         self.leverage_risk_alert = Decimal(str(cfg.leverage_risk_alert))
                     if getattr(cfg, "margin_rate_alert", None) is not None:
@@ -178,21 +183,35 @@ class FeishuSender:
             except Exception:
                 pass
 
+    def _resolve_count_interval(self, alert_type: str | None) -> tuple[int, int]:
+        """取该类型的「提醒次数/间隔」:alert_overrides[type] 有值则用,否则回退全局。"""
+        cnt, iv = self._alert_count, self._alert_interval_sec
+        if alert_type:
+            o = self._alert_overrides.get(alert_type) if isinstance(self._alert_overrides, dict) else None
+            if isinstance(o, dict):
+                try:
+                    if o.get("count") not in (None, ""):
+                        cnt = int(o["count"])
+                    if o.get("interval") not in (None, ""):
+                        iv = int(o["interval"])
+                except (TypeError, ValueError):
+                    pass
+        return max(1, cnt), max(1, iv)
+
     async def send(self, title: str, content: str, *, marquee: bool = False,
                    priority: int = 3, color: str = "#3b82f6", blink: bool = False,
-                   throttle_key: str | None = None):
+                   throttle_key: str | None = None, alert_type: str | None = None):
         self._ensure_config()
-        # 防刷屏:同一告警在「整段重复序列(alert_interval_sec × alert_count)」内只放行一次触发
-        # (Redis 令牌桶,跨 worker;异常 fail-open)
+        # 防刷屏:同一告警在「整段重复序列(interval × count)」内只放行一次触发(Redis 令牌桶,跨 worker;异常 fail-open)
+        # 次数/间隔按 alert_type 取每类型覆盖,缺失回退全局
         key = f"engine:{throttle_key or title}"
-        iv = max(1, self._alert_interval_sec)
-        n = max(1, self._alert_count)
+        n, iv = self._resolve_count_interval(alert_type)
         if not await asyncio.to_thread(throttle_ok, key, iv * n, 1):
             return
-        # 先发第一条;再按「提醒次数」alert_count 补发 (n-1) 次,每隔 alert_interval_sec(后台,不阻塞)
+        # 先发第一条;再按「提醒次数」补发 (n-1) 次,每隔 interval(后台,不阻塞)
         await self._emit(title, content, marquee=marquee, priority=priority, color=color, blink=blink)
         if n > 1:
-            asyncio.create_task(self._repeat(n - 1, self._alert_interval_sec, title, content, priority, color))
+            asyncio.create_task(self._repeat(n - 1, iv, title, content, priority, color))
 
     async def notify_position_opened(self, account_note: str, symbol: str, spread: Decimal, qty: Decimal, usdt: Decimal):
         """借币成功(开仓/对冲完成)提醒,绿框开关 enable_borrow_success_alert 控制。"""
@@ -208,6 +227,7 @@ class FeishuSender:
             f"金额: {usdt} USDT\n"
             f"点差: {spread}%",
             throttle_key=f"opened:{account_note}:{symbol}",
+            alert_type="borrow_success",
         )
 
     async def notify_position_closed(self, account_note: str, symbol: str, pnl: Decimal, spread: Decimal):
@@ -223,6 +243,7 @@ class FeishuSender:
             f"盈亏: {emoji}{pnl} USDT\n"
             f"平仓点差: {spread}%",
             throttle_key=f"closed:{account_note}:{symbol}",
+            alert_type="repay_success",
         )
 
     async def notify_new_borrow(self, account_note: str, symbol: str, qty: Decimal, usdt: Decimal):
@@ -237,6 +258,7 @@ class FeishuSender:
             f"借入数量: {qty}\n"
             f"名义金额: {usdt} USDT",
             throttle_key=f"borrow:{account_note}:{symbol}",
+            alert_type="new_borrow",
         )
 
     async def notify_error(self, account_note: str, action: str, error: str):
@@ -247,9 +269,17 @@ class FeishuSender:
             f"错误: {error}",
             marquee=True, priority=2, color="#f59e0b",
             throttle_key=f"error:{account_note}:{action}",
+            alert_type="error",
         )
 
     async def notify_risk(self, account_note: str, margin_level: Decimal):
+        # 保证金风险告警专属冷却:低保证金会每个风控周期(30s)持续命中,故用独立的较长冷却
+        # (默认30min,绿框 risk_alert_cooldown_sec 可配)按账户去抖,避免刷屏。0=不专属冷却,退回全局节流。
+        self._ensure_config()
+        cd = self._risk_alert_cooldown_sec
+        if cd > 0:
+            if not await asyncio.to_thread(throttle_ok, f"riskcd:{account_note}", cd, 1):
+                return
         await self.send(
             "风险告警",
             f"账户: {account_note}\n"
@@ -257,6 +287,34 @@ class FeishuSender:
             f"请立即检查!",
             marquee=True, priority=1, color="#ef4444", blink=True,
             throttle_key=f"risk:{account_note}",
+            alert_type="risk",
+        )
+
+    async def notify_naked_short(self, account_note: str, symbol: str, debt: Decimal,
+                                 free: Decimal, futures_qty=None, *, remediated: bool = False):
+        """裸空/孤儿债务告警 + 收口结果。检测时红框闪烁置顶跑马灯+飞书;收口完成发绿框确认。
+        裸空=借币未对冲(现货已卖、合约未开),delta 失衡有爆仓风险,故按最高优先级(同风险告警)。"""
+        if remediated:
+            await self.send(
+                "裸空已自动收口",
+                f"账户: {account_note}\n"
+                f"币种: {symbol}\n"
+                f"收口后剩余欠债: {debt}(≈0 即已清)",
+                marquee=True, priority=2, color="#22c55e",
+                throttle_key=f"nakedfix:{account_note}:{symbol}",
+            )
+            return
+        fut = "未知" if futures_qty is None else f"{futures_qty}"
+        await self.send(
+            "⚠️裸空敞口",
+            f"账户: {account_note}\n"
+            f"币种: {symbol}\n"
+            f"欠债(借+息): {debt}  现货可用: {free}\n"
+            f"主账户合约对冲量: {fut}\n"
+            f"检测到借币未对冲(现货已卖/合约未开),正在自动买回还币收口!",
+            marquee=True, priority=1, color="#ef4444", blink=True,
+            throttle_key=f"naked:{account_note}:{symbol}",
+            alert_type="naked_short",
         )
 
     async def notify_futures_margin(self, account_note: str, buffer_pct: Decimal, threshold: Decimal):
@@ -268,6 +326,7 @@ class FeishuSender:
             f"合约账户接近强平,请立即检查/补保证金!",
             marquee=True, priority=1, color="#ef4444", blink=True,
             throttle_key=f"futmargin:{account_note}",
+            alert_type="margin_rate",
         )
 
     async def notify_stuck_positions(self, positions: list[dict]):
@@ -302,4 +361,5 @@ class FeishuSender:
             f"请立即检查账户余额!",
             marquee=True, priority=1, color="#ef4444", blink=True,
             throttle_key=f"transfer_fail:{account_note}",
+            alert_type="transfer_fail",
         )

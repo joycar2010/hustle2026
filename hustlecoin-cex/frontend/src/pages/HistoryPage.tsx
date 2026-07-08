@@ -32,6 +32,9 @@ interface HistoryPosition {
   realized_pnl?: string
   cumulative_funding_fee?: string
   cumulative_interest?: string
+  round_net_pnl?: string
+  expected_e?: string
+  fee_total?: string
   opened_at: string
   closed_at: string
 }
@@ -257,6 +260,16 @@ function ClosedHistoryTab() {
                       <span className="text-foreground/30"> · </span>
                       <span className="text-foreground/70">平润</span>
                       <span className={pnlColor(pnl)}>{fmtVal(p.realized_pnl)}</span>
+                      {p.round_net_pnl != null && <>
+                        <span className="text-foreground/30"> · </span>
+                        <span className="text-foreground/70" title="本回路真实净损益(含资金费),这一轮开平到底赚没赚">回路净</span>
+                        <span className={pnlColor(parseFloat(p.round_net_pnl || '0'))}>{fmtVal(p.round_net_pnl)}</span>
+                      </>}
+                      {p.expected_e != null && <>
+                        <span className="text-foreground/30"> · </span>
+                        <span className="text-foreground/70" title="开仓时的预期净期望E(USDT),与回路净对比看闸准度">预期E</span>
+                        <span className={pnlColor(parseFloat(p.expected_e || '0'))}>{fmtVal(p.expected_e)}</span>
+                      </>}
                     </td>
                     <td className={cn('px-3 py-1.5 text-right tabular-nums font-mono font-medium', pnlColor(net))}>
                       {formatNumber(net)}

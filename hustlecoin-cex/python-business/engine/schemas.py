@@ -7,6 +7,7 @@ from typing import Optional
 class PositionResponse(BaseModel):
     id: int
     sub_account_id: int
+    account_note: Optional[str] = None   # 子账户备注名(借到币的真实 position 也带名,前端不再 fallback 显示 #N)
     symbol: str
     base_asset: str
     status: str
@@ -24,6 +25,9 @@ class PositionResponse(BaseModel):
     funding_rate_ratio: Optional[Decimal] = None
     realized_pnl: Optional[Decimal] = None
     fee_total: Optional[Decimal] = None
+    # P0-3 逐回路成本记账:本回路净损益(含资金费) + 开仓预期净期望E
+    round_net_pnl: Optional[Decimal] = None
+    expected_e: Optional[Decimal] = None
     opened_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
     created_at: datetime
@@ -140,3 +144,4 @@ class HealthResponse(BaseModel):
     throttle_rate: float = 0.0  # per-symbol borrow throughput (req/s) under current weight headroom
     agg_borrow_rate: float = 0.0  # Σ per-account effective borrow rate (req/s)
     single_borrow_rate: float = 0.0  # 单UID建仓速率: 单账户配速 min(borrow_rate_per_sec, UID硬顶) (req/s)
+    account_borrow_rates: dict[str, float] = {}  # 逐子账户可借速率 {sub_account_id: req/s},各账户因UID消耗不同而不同
