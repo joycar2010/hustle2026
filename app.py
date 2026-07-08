@@ -765,19 +765,239 @@ def _active_connector():
     return c
 def _conn_cache_bust():
     _CONN_MODE_CACHE["mode"]=None; _CONN_MODE_CACHE["ts"]=0.0
-def _bridge_connector():
+_READ_SRC_CACHE={"v":None,"ts":0.0}
+def _read_source():
+    """读取数据源: 'a2t'=纯云端(默认, 内网桥退出读取链路; 登记即有数据, 清除即停) / 'bridge'=回滚杆(桥优先+熔断回退云端)。
+       Redis qh:conn:read_source 热切换, 15s 缓存, 无需重启。"""
+    now=_t_conn.time()
+    if _READ_SRC_CACHE["v"] and (now-_READ_SRC_CACHE["ts"])<15: return _READ_SRC_CACHE["v"]
+    try: v=R.get(RNS+"conn:read_source") or "a2t"
+    except Exception: v="a2t"
+    if v not in ("a2t","bridge"): v="a2t"
+    _READ_SRC_CACHE["v"]=v; _READ_SRC_CACHE["ts"]=now
+    return v
+def _raw_bridge():
     c=_CONN_CACHE.get("bridge")
     if c is None: c=build_connector("bridge"); _CONN_CACHE["bridge"]=c
     return c
+
+# ---- A2T 动态读取腿: 按 mt_accounts 登记行(conn_mode=api 且有 UUID)实时构建云端读取腿 ----
+# 用途: 行情 tick/账户/持仓/历史成交(过夜费/手续费)读取回退 —— 桥无该账户或桥挂时不断流。
+# 与 FRA 静态代理不同: UUID 直接取自 DB 当前登记, 重注册换 UUID 后零配置自动跟随。
+_A2T_LEG_CACHE={"ts":0.0,"legs":None,"rows":None}
+def _a2t_read_legs():
+    now=_t_conn.time()
+    if _A2T_LEG_CACHE["legs"] is not None and (now-_A2T_LEG_CACHE["ts"])<30:
+        return _A2T_LEG_CACHE["legs"]
+    legs={"main":None,"hedge":None}; rowsmap={}
+    try:
+        c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT role,login,server,platform,api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE role IN ('main','hedge') AND enabled AND conn_mode='api' AND api2trade_uuid<>'' ORDER BY id")
+        rows=cur.fetchall(); c.close()
+        from connector import Api2TradeLeg
+        for r in rows:
+            if legs.get(r["role"]) is not None: continue
+            try:
+                cfg=_a2t_cfg(r["api2trade_config_id"], need_active=False)
+                is_pro=(cfg.get("plan") or "single")=="pro" and (cfg.get("basic_user") or "").strip()
+                legs[r["role"]]=Api2TradeLeg(r["api2trade_uuid"], (cfg.get("api_key") or "").strip(),
+                                             (cfg.get("base_url") or "").strip() or "https://api.api2trade.com",
+                                             cfg["basic_user"].strip() if is_pro else "",
+                                             (cfg.get("basic_pass") or "") if is_pro else "")
+                rowsmap[r["role"]]=dict(r)
+            except Exception: pass
+    except Exception:
+        return legs
+    _A2T_LEG_CACHE["legs"]=legs; _A2T_LEG_CACHE["rows"]=rowsmap; _A2T_LEG_CACHE["ts"]=now
+    return legs
+def _a2t_leg_bust():
+    _A2T_LEG_CACHE["legs"]=None; _A2T_LEG_CACHE["rows"]=None; _A2T_LEG_CACHE["ts"]=0.0
+    try: _A2T_RC.clear()   # 读取微缓存一并清(防重注册后 ≤30s 读到旧 UUID 数据)
+    except Exception: pass
+
+# A2T 响应归一化为桥形状(上层解析零改动)
+def _a2t_norm_order(o):
+    ot=str(o.get("orderType") or "").lower()
+    t=0 if "buy" in ot else (1 if "sell" in ot else -1)   # Balance/出入金=-1, legstats 自动排除
+    ts=int((o.get("closeTimestampUTC") or o.get("openTimestampUTC") or 0)/1000)
+    return {"ticket":o.get("ticket"),"symbol":o.get("symbol"),"type":t,
+            "volume":float(o.get("lots") or o.get("volume") or 0),
+            "price_open":o.get("openPrice"),"price_current":o.get("closePrice"),
+            "profit":float(o.get("profit") or 0),"swap":float(o.get("swap") or 0),
+            "commission":float(o.get("commission") or 0)+float(o.get("fee") or 0),
+            "time":ts,"comment":o.get("comment") or ""}
+async def _a2t_tick(leg, sym):
+    j=await leg._get("/GetQuote", symbol=sym)
+    t=0
+    try:
+        _ts=j.get("time")
+        if isinstance(_ts,str): t=int(_dt.datetime.fromisoformat(_ts).replace(tzinfo=_dt.timezone.utc).timestamp())
+    except Exception: pass
+    return {"symbol":j.get("symbol") or sym,"bid":j.get("bid"),"ask":j.get("ask"),
+            "last":j.get("last") or 0.0,"volume":j.get("volume") or 0,"time":t,"time_msc":t*1000,"src":"a2t"}
+async def _a2t_positions(leg):
+    j=await leg._get("/OpenedOrders")
+    items=j if isinstance(j,list) else ((j or {}).get("orders") or [])
+    return {"positions":[_a2t_norm_order(o) for o in items],"src":"a2t"}
+async def _a2t_history(leg, days=1):
+    j=await leg._get("/ClosedOrders")
+    items=j if isinstance(j,list) else ((j or {}).get("orders") or [])
+    cutoff=(_t_conn.time()-float(days or 1)*86400)
+    deals=[_a2t_norm_order(o) for o in items]
+    return {"deals":[d for d in deals if (d.get("time") or 0)>=cutoff],"src":"a2t"}
+async def _a2t_leg_status(role, leg):
+    st=await leg.status()
+    if st.get("connected"):
+        try:
+            ai=await leg.account_info()
+            st.update({"balance":ai.get("balance"),"equity":ai.get("equity")})
+        except Exception: pass
+        row=(_A2T_LEG_CACHE.get("rows") or {}).get(role) or {}
+        st.update({"account":row.get("login") or "--","server":row.get("server") or "--",
+                   "platform":row.get("platform") or "--","via":"a2t"})
+    return st
+
+# A2T 读取微缓存: A2T 是计费 SaaS(402 配额), 1s 快照热路径直打会烧配额/触限。
+# tick 1s / 持仓 2s / 状态·账户 5s / 历史成交 30s。仅缓存成功结果, 异常直接透传。
+_A2T_RC={}
+async def _a2t_cached(key, ttl, fn):
+    now=_t_conn.time(); e=_A2T_RC.get(key)
+    if e and (now-e[0])<ttl: return e[1]
+    v=await fn(); _A2T_RC[key]=(now,v)
+    if len(_A2T_RC)>512: _A2T_RC.clear()
+    return v
+
+class _FallbackLeg:
+    """读取腿(数据源由 _read_source() 决定):
+       - 'a2t'(默认): **纯云端** —— 内网桥退出读取链路; 该腿以 mt_accounts 登记(conn_mode=api+UUID)为准,
+         未登记→返回良性空形状(both_* 聚合不塌, 卡片/行情显示'--'), 登记→行情/账户/持仓/历史全走 A2T。
+       - 'bridge'(回滚杆): 桥优先+连续3败熔断60s回退云端(保留旧行为, redis 热切换)。
+       执行(_post/open/close)与桥专属路径(symbol_info/symbols等)不参与切换, 原样走桥。"""
+    _EMPTY_POS={"positions":[],"registered":False}
+    _EMPTY_HIST={"deals":[],"registered":False}
+    _EMPTY_ST={"connected":False,"registered":False}
+    def __init__(self, role): self.role=role; self._fail=0; self._skip_until=0.0
+    def _b(self):
+        bc=_raw_bridge(); return bc.main if self.role=="main" else getattr(bc,"hedge",None)
+    def _fb(self): return _a2t_read_legs().get(self.role)
+    async def _read(self, bridge_call, a2t_call, empty=None):
+        fb=self._fb()
+        if _read_source()=="a2t":
+            if fb is None:
+                if empty is not None: return dict(empty)
+                raise RuntimeError("%s 腿未登记(纯云端读取模式)"%self.role)
+            return await a2t_call(fb)
+        # bridge 回滚模式: 桥优先 + 熔断回退云端
+        if fb is not None and _t_conn.time()<self._skip_until:
+            try: return await a2t_call(fb)
+            except Exception: pass          # 云端也挂→半开重试桥
+        b=self._b(); err=None
+        if b is not None:
+            try:
+                r=await bridge_call(b); self._fail=0; self._skip_until=0.0; return r
+            except Exception as e:
+                err=e; self._fail+=1
+                if self._fail>=3: self._skip_until=_t_conn.time()+60
+        if fb is not None:
+            return await a2t_call(fb)
+        if err: raise err
+        raise RuntimeError("no %s leg (bridge/a2t both missing)"%self.role)
+    async def _get(self, path, **params):
+        if path.startswith("/mt5/tick/"):
+            sym=path.rsplit("/",1)[-1]
+            return await self._read(lambda b: b._get(path,**params),
+                                    lambda fb: _a2t_cached(("tick",self.role,sym),1.0,lambda: _a2t_tick(fb,sym)))
+        if path=="/mt5/history/deals":
+            d=params.get("days",1)
+            return await self._read(lambda b: b._get(path,**params),
+                                    lambda fb: _a2t_cached(("hist",self.role,d),30.0,lambda: _a2t_history(fb,d)), empty=self._EMPTY_HIST)
+        if path=="/mt5/account/info":
+            return await self._read(lambda b: b._get(path,**params),
+                                    lambda fb: _a2t_cached(("acct",self.role),5.0,lambda: fb.account_info()))
+        if path=="/mt5/positions":
+            return await self._read(lambda b: b._get(path,**params),
+                                    lambda fb: _a2t_cached(("pos",self.role),2.0,lambda: _a2t_positions(fb)), empty=self._EMPTY_POS)
+        b=self._b()
+        if b is None: raise RuntimeError("bridge leg missing: "+path)
+        return await b._get(path, **params)                     # 桥专属路径(symbol_info/symbols等)
+    async def account_info(self):
+        return await self._read(lambda b: b.account_info(),
+                                lambda fb: _a2t_cached(("acct",self.role),5.0,lambda: fb.account_info()))
+    async def positions(self):
+        return await self._read(lambda b: b.positions(),
+                                lambda fb: _a2t_cached(("pos",self.role),2.0,lambda: _a2t_positions(fb)), empty=self._EMPTY_POS)
+    async def history_deals(self, days=1):
+        return await self._read(lambda b: b.history_deals(days),
+                                lambda fb: _a2t_cached(("hist",self.role,days),30.0,lambda: _a2t_history(fb,days)), empty=self._EMPTY_HIST)
+    async def status(self):
+        return await self._read(lambda b: b.status(),
+                                lambda fb: _a2t_cached(("st",self.role),5.0,lambda: _a2t_leg_status(self.role,fb)), empty=self._EMPTY_ST)
+    def __getattr__(self, name):                                 # 执行/其它方法透传桥(不参与读取源切换)
+        b=self._b()
+        if b is None: raise AttributeError("bridge leg missing: "+name)
+        return getattr(b, name)
+
+def _bridge_connector():
+    """读取连接器: 桥优先 + A2T 云端回退的双腿(both_* 组合逻辑复用 Mt5BridgeConnector)。"""
+    c=_CONN_CACHE.get("bridge_read")
+    if c is None:
+        import connector as _cn
+        c=_cn.Mt5BridgeConnector.__new__(_cn.Mt5BridgeConnector)
+        c.main=_FallbackLeg("main"); c.hedge=_FallbackLeg("hedge")
+        _CONN_CACHE["bridge_read"]=c
+    return c
 class _BridgeProxy:
-    """读取代理: 始终指向内网桥(同一 MT 账户的直连终端=完整实时真相; 与执行连接方式解耦)。
-       执行走 api/FRA 时, 持仓/历史/坑位/账户/tick 仍读桥→无 A2T 读滞后/会话不完整/分裂视图。"""
+    """读取代理: 优先内网桥(完整实时真相; 与执行连接方式解耦); 桥无该账户/不可达时按登记 UUID 回退 A2T 云端,
+       行情/点差/账户/持仓/过夜费/手续费在纯云端托管场景不断流。"""
     def __getattr__(self, name): return getattr(_bridge_connector(), name)
 class _ExecProxy:
     """执行代理: 开/平仓委托到当前生效连接方式(active_mode: bridge 或 api/FRA)。"""
     def __getattr__(self, name): return getattr(_active_connector(), name)
 CONN = _BridgeProxy()   # 读取 = 桥真相(48 处调用点零改动, 现全部读桥)
 EXEC = _ExecProxy()     # 执行 = active_mode(仅 6 处开/平仓)
+
+_REG_ROLES_CACHE={"roles":None,"ts":0.0}
+def _reg_roles():
+    """当前有启用登记行的角色集合(10s 缓存; 供操作台账户卡门控)。DB 异常 fail-open 不遮真相。"""
+    now=_t_conn.time()
+    if _REG_ROLES_CACHE["roles"] is not None and (now-_REG_ROLES_CACHE["ts"])<10:
+        return _REG_ROLES_CACHE["roles"]
+    try:
+        c=db(); cur=c.cursor()
+        cur.execute("SELECT DISTINCT role FROM mt_accounts WHERE role IN ('main','hedge') AND enabled")
+        roles=set(r[0] for r in cur.fetchall()); c.close()
+    except Exception:
+        return _REG_ROLES_CACHE["roles"] if _REG_ROLES_CACHE["roles"] is not None else {"main","hedge"}
+    _REG_ROLES_CACHE["roles"]=roles; _REG_ROLES_CACHE["ts"]=now
+    return roles
+def _reg_roles_bust():
+    _REG_ROLES_CACHE["roles"]=None; _REG_ROLES_CACHE["ts"]=0.0
+    try: _a2t_leg_bust()   # A2T 动态读取腿一并失效(重注册换 UUID 立即跟随)
+    except Exception: pass
+
+def _auto_loop_running():
+    """任一用户自动进/出场处于 armed/full → 返回描述; 否则 None。(单账户上下文, 全局判定)"""
+    try:
+        for pfx in ("auto_entry:","auto_exit:"):
+            for k in R.scan_iter(RNS+pfx+"*"):
+                v=R.get(k) or "off"
+                if v in ("armed","full"):
+                    return "%s=%s (用户 %s)"%(pfx[:-1], v, str(k).split(":")[-1])
+    except Exception: pass
+    return None
+async def _acct_clear_guard(role):
+    """清除账户保护闸: 自动策略运行中 或 该腿有未平持仓 → 返回禁止原因(str); 放行返回 None。
+       持仓查询失败(桥/云端均不可达)时 fail-open 放行 —— 策略闸(Redis 本地)是硬保障。"""
+    r=_auto_loop_running()
+    if r: return "系统自动策略运行中(%s), 禁止清除账户; 请先在操作台停止自动进/出场"%r
+    try:
+        pos=await CONN.both_positions()
+        pl=(pos or {}).get(role) or {}
+        items=pl.get("positions",pl) if isinstance(pl,dict) else (pl or [])
+        n=len([p for p in (items or []) if float(p.get("volume",0) or 0)>0])
+        if n>0: return "该账户尚有 %d 笔未平持仓, 请先平仓再清除(防止监控盲区)"%n
+    except Exception: pass
+    return None
 
 def _conn_consistency():
     """主/对冲账户 conn_mode 一致性(单主+单对冲上下文)。返回 consistent/eff_mode/明细。"""
@@ -1987,6 +2207,15 @@ async def engine_legs():
         pos = await CONN.both_positions() if hasattr(CONN,"both_positions") else {"main":await CONN.positions(),"hedge":None}
         try: pos=_annotate_slots(pos, "XAUUSD")   # 注入稳定坑号
         except Exception as _e: R.set(RNS+"engine:slotmap_err", str(_e)[:120])
+        # 登记门控: 角色无启用登记行(如「清除云端账户」后)→该腿状态置未登记, 操作台卡片同步清空。
+        # 读取虽走桥真相(与连接方式解耦), 但账户卡的展示资格以登记为准; 持仓仍如实展示(安全考量不隐藏)。
+        try:
+            reg=_reg_roles()
+            if isinstance(st,dict):
+                for _r in ("main","hedge"):
+                    if _r not in reg:
+                        st[_r]={"registered":False,"connected":False,"account":"--","server":"--","platform":"--"}
+        except Exception: pass
         return {"status":st,"positions":pos,"busy_slots":_busy_slots("XAUUSD")}
     except Exception as e:
         raise HTTPException(502,"bridge error: %s"%e)
@@ -2208,21 +2437,40 @@ def reg_account(a:AcctReg, x_license: str = Header(default="")):
             c.close(); raise HTTPException(502,"Api2Trade 注册失败: %s"%e.__class__.__name__)
     cur.execute("INSERT INTO mt_accounts(user_id,label,login,platform,broker,role,conn_mode,bridge_url,bridge_key_ref,server,api2trade_uuid,api2trade_config_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (user_id,login) DO UPDATE SET label=EXCLUDED.label,role=EXCLUDED.role,conn_mode=EXCLUDED.conn_mode,bridge_url=EXCLUDED.bridge_url,server=EXCLUDED.server,api2trade_uuid=CASE WHEN EXCLUDED.api2trade_uuid<>'' THEN EXCLUDED.api2trade_uuid ELSE mt_accounts.api2trade_uuid END,api2trade_config_id=COALESCE(EXCLUDED.api2trade_config_id,mt_accounts.api2trade_config_id)",(u[0],a.label,a.login,a.platform,a.broker,a.role,a.conn_mode,a.bridge_url,a.bridge_key_ref,(a.server or "").strip(),a2t_uuid,a2t_cfg_id))
     c.close()
+    _reg_roles_bust()   # 账户卡登记门控缓存立即失效(注册后卡片即恢复)
     # 本地绑定已落库后再尽力释放旧云端注册(best-effort, 失败仅提示不回滚; 同 UUID=幂等更新则跳过)
     a2t_prev_released=False; a2t_prev_msg=""
     if a.conn_mode=="api" and prev_uuid and a2t_uuid and prev_uuid!=a2t_uuid:
         a2t_prev_released,a2t_prev_msg=_a2t_release(prev_cfg_id or a2t_cfg_id, prev_uuid)
+    # FRA a2t-bridge 对应腿 UUID 热同步(api 执行模式的腿配置随注册自动跟随, 零人工)
+    fra_ok=None; fra_msg=""
+    if a.conn_mode=="api" and a.role in ("main","hedge") and a2t_uuid:
+        fra_ok,fra_msg=_fra_sync_uuid(a.role, a2t_uuid)
     return {"ok":True,"login":a.login,"conn_mode":a.conn_mode,"a2t_uuid":a2t_uuid,
-            "a2t_prev_released":a2t_prev_released,"a2t_prev_msg":a2t_prev_msg}
+            "a2t_prev_released":a2t_prev_released,"a2t_prev_msg":a2t_prev_msg,
+            "fra_synced":fra_ok,"fra_msg":fra_msg}
 
 class AcctDelMine(BaseModel):
     role:str=""; login:str=""; confirm:bool=False
 @app.post("/api/accounts/delete_mine", dependencies=[Depends(require_license)])
-def del_account_mine(b:AcctDelMine, x_license: str = Header(default="")):
+async def del_account_mine(b:AcctDelMine, x_license: str = Header(default="")):
     """用户自删本人 MT 账户登记行(按 role 或 login), 并**联动注销云端托管**(官方 /DeleteAccount, 幂等,
        失败不阻塞本地删除、结果透明回传)。**绝不动交易记录/历史成交**
-       (配对历史读桥/券商实时, DB deals 表按 user 非按 account, 无级联)。"""
+       (配对历史读桥/券商实时, DB deals 表按 user 非按 account, 无级联)。
+       保护闸: 自动策略运行中 或 该腿有未平持仓 → 409 禁止清除。"""
     if not b.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    # 保护闸(角色: login 传入时反查; 都无则 400 在下方分支抛)
+    _grole=b.role if b.role in ("main","hedge") else ""
+    if not _grole and b.login:
+        try:
+            c=db(); cur=c.cursor()
+            cur.execute("SELECT role FROM mt_accounts WHERE login=%s LIMIT 1",(b.login,))
+            _r=cur.fetchone(); c.close()
+            if _r: _grole=_r[0]
+        except Exception: pass
+    if _grole:
+        _deny=await _acct_clear_guard(_grole)
+        if _deny: raise HTTPException(409,_deny)
     c=db(); cur=c.cursor()
     cur.execute("SELECT id,username FROM users WHERE license_key=%s",(x_license,)); u=cur.fetchone()
     if not u: c.close(); raise HTTPException(403,"密钥无效")
@@ -2234,13 +2482,19 @@ def del_account_mine(b:AcctDelMine, x_license: str = Header(default="")):
         c.close(); raise HTTPException(400,"须提供 role(main|hedge) 或 login")
     rows=cur.fetchall(); c.close()
     if not rows: raise HTTPException(404,"未找到可删除的账户")
+    _reg_roles_bust()   # 账户卡登记门控缓存立即失效(清除后卡片即清空)
     # 联动注销云端托管账户(UUID): best-effort, 云端已不存在视为已释放; 失败明确回传
-    released=[]
+    released=[]; _synced_roles=set()
     for r in rows:
         uuid=(r[2] or "").strip()
         if uuid:
             ok,msg=_a2t_release(r[3], uuid)
             released.append({"login":r[0],"role":r[1],"uuid8":uuid[:8],"a2t_ok":ok,"a2t_msg":msg})
+        # FRA 对应腿清空(异步线程防阻塞事件循环; 每角色一次)
+        if r[1] in ("main","hedge") and r[1] not in _synced_roles:
+            _synced_roles.add(r[1])
+            try: await _aio.to_thread(_fra_sync_uuid, r[1], "")
+            except Exception: pass
     _audit(u[1],"user","account_delete_mine",{"deleted":[{"login":r[0],"role":r[1]} for r in rows],"a2t_released":released},DEMO_MODE,"deleted:%d"%len(rows))
     return {"ok":True,"deleted":[{"login":r[0],"role":r[1],"a2t_uuid":r[2]} for r in rows],"a2t_released":released}
 
@@ -5841,6 +6095,11 @@ async def _ws_build_fast():
     except Exception: out["legs"]=None
     try: out["account"]=await bridge_account()
     except Exception: out["account"]=None
+    # 主账户未登记(卡片已清空)→不播账户利润, 防前端 m-pnl 字段被 account 块复活
+    try:
+        _lm=(((out.get("legs") or {}).get("status") or {}).get("main") or {})
+        if _lm.get("registered") is False: out["account"]=None
+    except Exception: pass
     try: out["state"]=engine_state()
     except Exception: out["state"]=None
     # 品种: 取 primary_user 模板的对冲映射(防他人非法符号污染全局)
@@ -6066,6 +6325,25 @@ def _a2t_acclist(j):
     if isinstance(j,list): return j
     return (j or {}).get("accounts") or (j or {}).get("data") or []
 
+def _fra_sync_uuid(role, uuid):
+    """登记变更→FRA a2t-bridge 对应腿 UUID 热同步(POST /admin/account_uuid, 持久化 env)。
+       best-effort: 失败仅跑马灯告警绝不阻塞注册/清除主流程。返回 (ok,msg)。"""
+    try:
+        base=os.environ.get("QH_FRA_AGENT_URL","http://3.77.161.206").rstrip("/")
+        key=os.environ.get("QH_FRA_KEY","")
+        port=(os.environ.get("QH_FRA_MAIN_PORT","8021") if role=="main" else os.environ.get("QH_FRA_HEDGE_PORT","8001"))
+        r=_httpx.post("%s:%s/admin/account_uuid"%(base,port), json={"uuid":uuid or ""},
+                      headers={"X-API-Key":key}, timeout=5)
+        if r.status_code!=200: raise RuntimeError("http %d"%r.status_code)
+        return True,"FRA %s 腿已同步(%s)"%(role,(uuid or "")[:8] or "清除")
+    except Exception as e:
+        try:
+            R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn",
+                    "msg":"FRA %s 腿 UUID 同步失败(%s), api 执行模式恢复前需人工核对"%(role,e.__class__.__name__)}))
+            R.ltrim(RNS+"alerts",0,49)
+        except Exception: pass
+        return False,"FRA 同步失败: %s"%e.__class__.__name__
+
 def _a2t_release(cfg_id, uuid):
     """注销云端托管账户: 官方 GET /DeleteAccount?id=UUID(实测语义: 缺参400/不存在403 "Trading Account not found")。
        返回 (ok,msg), 绝不抛异常。幂等: 云端已不存在视为已释放(不阻塞本地清理)。
@@ -6151,14 +6429,96 @@ def _apply_broker_override(base):
     return {"companies":lst,"count":len(lst),"cached_at":base.get("cached_at"),
             "override":list(ov.keys())}
 
+# ---- 品牌终处理: 法人实体→品牌改名 + 品牌合并法人服务器 + 内网桥终端在用服务器注入(真源置顶) ----
+# 背景: A2T /Search 按法人聚合 —— 用户的 IC 账户实际在 "Raw Trading Ltd"(SC 法人)服务器上,
+#       Bybit 的法人名是 "Infra Capital Limited", 用户视角应显示品牌名且服务器列表补齐。
+# 热覆盖 Redis qh:a2t:broker_finalize = {"rename":{},"merge":{},"bridge_map":{}}, 无需改代码。
+_BROKER_FINALIZE_DEFAULT={
+  "rename":{"Infra Capital Limited":"Bybit"},
+  "merge":{"IC Markets Ltd":["Raw Trading Ltd"],"Bybit":["Infra Capital Limited"]},
+  "bridge_map":{"main":"IC Markets Ltd","hedge":"Bybit"},
+}
+def _bridge_live_servers():
+    """内网桥两腿终端在用 服务器/公司(由 _bridge_srv_collector 后台采集写 Redis, 桥挂保旧值)。"""
+    try: return json.loads(R.get(RNS+"a2t:bridge_srv") or "{}")
+    except Exception: return {}
+def _broker_finalize(base):
+    try:
+        cfg=_BROKER_FINALIZE_DEFAULT
+        try:
+            ov=json.loads(R.get(RNS+"a2t:broker_finalize") or "null")
+            if isinstance(ov,dict) and ov: cfg=ov
+        except Exception: pass
+        comps={c["company"]:dict(c) for c in base.get("companies",[])}
+        ren=cfg.get("rename") or {}
+        # ① 法人→品牌改名(目标已存在则并服务器)
+        for old,new in ren.items():
+            if old in comps:
+                e=comps.pop(old)
+                tgt=comps.get(new)
+                if tgt:
+                    tgt["servers"]=list(dict.fromkeys((tgt.get("servers") or [])+(e.get("servers") or [])))
+                    tgt["local"]=tgt.get("local") or e.get("local")
+                else:
+                    e["company"]=new; e["legal"]=old; comps[new]=e
+        # ② 品牌 ← 法人实体服务器合并(原实体条目保留, 不丢信息)
+        for brand,srcs in (cfg.get("merge") or {}).items():
+            for s in srcs:
+                src=comps.get(s) or comps.get(ren.get(s) or "")
+                if not src or src is comps.get(brand): continue
+                tgt=comps.setdefault(brand,{"company":brand,"servers":[]})
+                tgt["servers"]=list(dict.fromkeys((tgt.get("servers") or [])+(src.get("servers") or [])))
+                if src.get("local"): tgt["local"]=True
+        # ③ 内网桥终端在用服务器注入(真源, 置顶回显优先)
+        live=_bridge_live_servers()
+        for role,brand in (cfg.get("bridge_map") or {}).items():
+            srv=((live.get(role) or {}).get("server") or "").strip()
+            if not srv: continue
+            tgt=comps.setdefault(brand,{"company":brand,"servers":[]})
+            tgt["servers"]=[srv]+[x for x in (tgt.get("servers") or []) if x!=srv]
+            tgt["local"]=True
+        lst=sorted(comps.values(), key=lambda x:x["company"])
+        out=dict(base); out["companies"]=lst; out["count"]=len(lst)
+        return out
+    except Exception:
+        return base
+
+async def _bridge_srv_collector():
+    """内网桥终端在用 服务器/公司 采集(300s/轮, 每腿5s超时): 供平台目录'真源注入'。
+       独立于 read_source 切换(目录补齐明确要求走桥终端); 桥挂→Redis 保旧值, 目录不抖。"""
+    await _aio.sleep(20)
+    while True:
+        try:
+            bc=_raw_bridge(); out={}
+            for role in ("main","hedge"):
+                leg=bc.main if role=="main" else getattr(bc,"hedge",None)
+                if leg is None: continue
+                try:
+                    ai=await _aio.wait_for(leg.account_info(), timeout=5)
+                    srv=(ai.get("server") or "").strip()
+                    if srv: out[role]={"server":srv,"company":(ai.get("company") or "").strip(),
+                                       "ts":_dt.datetime.utcnow().isoformat()}
+                except Exception: pass
+            if out:
+                try: prev=json.loads(R.get(RNS+"a2t:bridge_srv") or "{}")
+                except Exception: prev={}
+                prev.update(out)
+                R.set(RNS+"a2t:bridge_srv", json.dumps(prev))
+        except Exception: pass
+        await _aio.sleep(300)
+
+@app.on_event("startup")
+async def _bridge_srv_boot():
+    _aio.create_task(_bridge_srv_collector())
+
 @app.get("/api/a2t/brokers", dependencies=[Depends(require_license)])
 def a2t_brokers_pub(refresh:int=0):
-    return _apply_broker_override(a2t_brokers(refresh))
+    return _broker_finalize(_apply_broker_override(a2t_brokers(refresh)))
 
 @app.get("/api/admin/a2t/brokers", dependencies=[Depends(require_op("accounts"))])
 def a2t_brokers_admin(refresh:int=0):
     """同 /api/a2t/brokers, 供 qhadmin 账户管理(操作员可能无用户密钥, 走 op 权限)。"""
-    return _apply_broker_override(a2t_brokers(refresh))
+    return _broker_finalize(_apply_broker_override(a2t_brokers(refresh)))
 
 class BrokerOverride(BaseModel):
     override: dict = {}   # {经纪商法人名: [服务器名,...]}; 由本机 MT5 客户端采集器推送
@@ -6344,18 +6704,27 @@ def admin_acct_del(b:A2TId):
     c=db(); cur=c.cursor()
     cur.execute("DELETE FROM mt_accounts WHERE id=%s",(b.id,)); n=cur.rowcount; c.close()
     if not n: raise HTTPException(404,"账户不存在")
+    _reg_roles_bust()
     return {"ok":True}
 
 @app.post("/api/admin/accounts/purge", dependencies=[Depends(require_op("accounts"))])
-def admin_acct_purge(b:A2TId):
+async def admin_acct_purge(b:A2TId):
     """彻底清除: 联动 Api2Trade 官方 /DeleteAccount 注销云端托管账户 + 删本地登记行。
-       **绝不动交易记录/历史成交**: 登记行删除不级联 deals 表(按 user 键), 配对历史读桥/券商实时。"""
+       **绝不动交易记录/历史成交**: 登记行删除不级联 deals 表(按 user 键), 配对历史读桥/券商实时。
+       保护闸: 自动策略运行中 或 该腿有未平持仓 → 409 禁止清除(与用户端 delete_mine 同口径)。"""
     c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,login,api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE id=%s",(b.id,))
+    cur.execute("SELECT id,login,role,api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE id=%s",(b.id,))
     acc=cur.fetchone(); c.close()
     if not acc: raise HTTPException(404,"账户不存在")
+    if (acc.get("role") or "") in ("main","hedge"):
+        _deny=await _acct_clear_guard(acc["role"])
+        if _deny: raise HTTPException(409,_deny)
     acc=dict(acc); uuid=(acc.get("api2trade_uuid") or "").strip()
     a2t_ok,a2t_msg=_a2t_release(acc.get("api2trade_config_id"), uuid)
     c=db(); cur=c.cursor()
     cur.execute("DELETE FROM mt_accounts WHERE id=%s",(b.id,)); n=cur.rowcount; c.close()
+    _reg_roles_bust()
+    if (acc.get("role") or "") in ("main","hedge"):
+        try: await _aio.to_thread(_fra_sync_uuid, acc["role"], "")
+        except Exception: pass
     return {"ok":True,"local_deleted":bool(n),"a2t_ok":a2t_ok,"a2t_msg":a2t_msg,"uuid8":uuid[:8]}

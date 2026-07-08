@@ -40,6 +40,10 @@
   .titlebar{flex:0 0 auto;min-height:34px;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;padding:3px 8px;overflow-x:auto;
     background:linear-gradient(#f4f8f9,#e6edef);border-bottom:1px solid #c0cace}
   .titlebar>*{flex:0 0 auto}                                   /* 各项不收缩, 保持自然宽度, 永不压扁重叠 */
+  /* 顶栏永不显示横向滚动条(极窄时仍可触控板横滑); 综合盈亏条允许收缩裁切让位给功能按钮 */
+  .titlebar{scrollbar-width:none}
+  .titlebar::-webkit-scrollbar{display:none}
+  .titlebar .netbar{flex:0 1 auto;min-width:0;overflow:hidden;flex-wrap:nowrap;max-height:28px}
   .titlebar .ico{width:20px;height:20px;border-radius:50%}
   .titlebar .title{font-weight:700;font-size:13px;color:#222;white-space:nowrap}
   .titlebar .expire{background:var(--yellow);color:#c62828;font-weight:700;padding:4px 9px;border-radius:2px;font-size:12.5px}
@@ -540,6 +544,17 @@
   .um-q:hover{background:var(--teal-pale);border-color:rgba(46,139,214,.4)}
   .um-q.danger{color:var(--red)} .um-q.danger .mi-ic{color:var(--red)}
   .um-q.danger:hover{background:#fdecec;border-color:#f3c1bd}
+  /* 邀请返佣醒目横幅(用户面板) */
+  .um-invite{display:flex;align-items:center;gap:9px;width:100%;border:none;cursor:pointer;text-align:left;
+    padding:9px 11px;border-radius:8px;margin:6px 0 2px;
+    background:linear-gradient(135deg,#f7b733,#e0683a);color:#fff;box-shadow:0 2px 8px rgba(224,104,58,.25)}
+  .um-invite:hover{filter:brightness(1.06)}
+  .um-invite .um-inv-ic{width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.22);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .um-invite .um-inv-t{flex:1;display:flex;flex-direction:column;line-height:1.3}
+  .um-invite .um-inv-t b{font-size:12.5px}
+  .um-invite .um-inv-t small{font-size:10.5px;opacity:.88;font-weight:400}
+  .um-invite .um-inv-go{font-size:17px;opacity:.9;flex:0 0 auto}
   body.dark .um-q{background:#111f42;border-color:#1e2a52;color:#cfe0e5}
   body.dark .um-q .mi-ic{color:#7db8e8}
   body.dark .um-q:hover{background:#1a2b56}
@@ -602,7 +617,6 @@
   #acct-mask .acct-form label{font-size:11px}
   #acct-mask .acct-form input,#acct-mask .acct-form select{padding:5px 8px}
   #acct-mask .seg-pick button{padding:6px 0}
-  #acct-mask #acct-api-note>div{padding:7px 9px!important;font-size:11px!important;line-height:1.45!important}
   .seg-pick{display:flex;border:1px solid #b8c0c5;border-radius:6px;overflow:hidden}
   .seg-pick button{flex:1;border:none;background:#fff;padding:8px 0;font-weight:700;cursor:pointer;color:var(--lbl);font-size:13px}
   .seg-pick button.on{background:linear-gradient(var(--teal),var(--teal-deep));color:#fff}
@@ -1313,10 +1327,8 @@ body.dark .arb-bar{background:#1a2740}
     <button class="mnav-toggle" onclick="toggleMNav()" title="菜单" aria-label="菜单"><svg class="svgi"><use href="#i-menu"/></svg></button>
     <span class="title" id="brand-title">【Quant Hedge】对冲工具软件</span>
     <span class="expire tb-more" data-tbg title="账号授权有效期(到期后无法登录使用)">账号授权至: --</span>
-    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('month')" title="按月续费账号授权(包月套餐)"><svg class="svgi"><use href="#i-calendar"/></svg> 包月</button>
-    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('recharge')" title="USDT 充值/续费账号"><svg class="svgi"><use href="#i-money"/></svg> 充值</button>
+    <button class="btn btn-green tb-more" data-tbg onclick="openRenew('month')" title="包月续费 / 账户充值(模态内可切换)"><svg class="svgi"><use href="#i-calendar"/></svg> 包月/充值</button>
     <button class="btn btn-green tb-more" data-tbg onclick="openIap()" title="内购商店: 解锁自动进出场/AI套利分析等高阶功能"><svg class="svgi"><use href="#i-cart"/></svg> 内购</button>
-    <button class="btn btn-green tb-more" data-tbg onclick="openPoints()" title="会员中心: 积分/成长值/签到/邀请返佣"><svg class="svgi"><use href="#i-scale"/></svg> 积分/邀请</button>
     <button class="btn tb-more" data-tbg style="background:linear-gradient(135deg,#6a3df0,#a855f7);color:#fff" onclick="openArb()" title="AI 套利分析(最高阶内购): LLM 辅助的套利机会解读"><svg class="svgi"><use href="#i-robot"/></svg> AI套利分析</button>
     <button class="btn btn-white tb-more" data-tbg id="btn-official" onclick="openOfficial()" title="打开官网(新标签页)"><svg class="svgi"><use href="#i-globe"/></svg> 官网</button>
     <span class="spacer"></span>
@@ -1359,6 +1371,12 @@ body.dark .arb-bar{background:#1a2740}
           </div>
           <div class="um-auto"><span class="um-auto-dot" id="um-auto-dot"></span><span id="um-auto">自动交易: 未启用</span></div>
         </div>
+        <!-- 邀请返佣: 醒目入口(积分/邀请自顶栏移入用户面板) -->
+        <button class="um-invite" onclick="toggleUserMenu();openPoints()" title="邀请好友注册: 专属邀请链接, 好友消费返积分/返佣">
+          <span class="um-inv-ic"><svg class="svgi"><use href="#i-scale"/></svg></span>
+          <span class="um-inv-t"><b>邀请好友 · 得返佣</b><small>专属邀请链接 · 好友消费返积分</small></span>
+          <span class="um-inv-go">›</span>
+        </button>
         <div class="um-sep"></div>
         <div class="um-row" title="账号授权有效期: 到期后无法登录使用, 续费即延长"><span class="k">账号授权有效期</span><span class="v" id="um-exp">--</span></div>
         <div class="um-row"><span class="k">飞书ID</span><span class="v" id="um-feishu">--</span></div>
@@ -1912,7 +1930,15 @@ body.dark .arb-bar{background:#1a2740}
           </div>
         </div>
         <div class="fld"><label>登录账号 (Login)</label><input id="acct-login" value="200201316"></div>
-        <div class="fld" id="acct-pwd-row"><label id="acct-pwd-lbl">登录密码</label><input id="acct-pwd" type="password" value="" placeholder="Bridge 模式无需填写"></div>
+        <div class="fld" id="acct-pwd-row"><label id="acct-pwd-lbl">登录密码</label>
+          <div style="position:relative">
+            <input id="acct-pwd" type="password" value="" placeholder="" style="width:100%;padding-right:32px;box-sizing:border-box">
+            <button type="button" id="acct-pwd-eye" onclick="togglePwdEye()" title="显示密码"
+              style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;color:#8a959b;padding:3px;display:flex;align-items:center">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
         <div class="fld full"><label>平台名称 (经纪商)</label>
           <select id="acct-broker" onchange="onBrokerChange()">
             <option value="">— 加载中… —</option>
@@ -1925,34 +1951,24 @@ body.dark .arb-bar{background:#1a2740}
           </select>
           <input id="acct-server-custom" placeholder="手动输入 MT 服务器名" style="display:none;margin-top:4px" />
         </div>
-        <div class="fld"><label>连接方式</label>
-          <div style="display:flex;align-items:center;gap:8px">
-            <select id="acct-mode" onchange="onConnMode()" style="flex:0 0 auto">
-              <option value="bridge" hidden>Bridge 云端(已注册)</option>
-              <option value="api">API 连接云端托管</option>
-            </select>
-            <button type="button" id="acct-a2t-clear" onclick="clearApiAccount()" disabled
-              title="清除云端账户: 联动注销云端托管 + 删登记(点击后二次确认; 不影响交易记录)"
-              style="flex:0 0 auto;font-size:11px;padding:4px 10px;border:1px solid rgba(224,123,58,.5);background:transparent;color:#e07b3a;border-radius:5px;cursor:not-allowed;opacity:.45;white-space:nowrap">清除云端账户</button>
-          </div>
-        </div>
+        <!-- 连接方式/角色: 界面不再展示(连接方式默认 API 直连; 角色由打开的模态固化), 隐藏控件保 JS 链路零改动 -->
+        <select id="acct-mode" onchange="onConnMode()" style="display:none">
+          <option value="bridge" hidden>Bridge(已注册)</option>
+          <option value="api">API 直连登录</option>
+        </select>
         <div class="fld full" id="acct-pick-row" style="display:none"><label>选择已注册账户</label>
           <select id="acct-pick"></select>
         </div>
-        <div class="fld full" id="acct-api-note" style="display:none">
-          <div style="background:rgba(224,123,58,.10);border:1px solid rgba(224,123,58,.35);border-radius:8px;padding:9px 11px;font-size:12px;color:#e0a05a;line-height:1.55">
-            <b>⚠ 凭证出域提示</b>：API 连接会将本 MT 账户的<b>登录密码提交至第三方云端服务</b>托管（不同于 Bridge "凭证留桥机"）。仅在你已知悉并授权托管时使用；建议使用<b>只读/交易分离</b>的投资者密码或专用子账户。
-          </div>
-        </div>
-        <div class="fld"><label>角色</label>
-          <select id="acct-role"><option>主账户</option><option>对冲账户</option></select>
-        </div>
+        <select id="acct-role" style="display:none"><option>主账户</option><option>对冲账户</option></select>
         <div class="fld"><label>最大持仓 (手)</label><input value="2.00"></div>
         <div class="fld"><label>保证金预留 ($)</label><input value="200"></div>
       </div>
       <div class="acct-status"><span class="dot"></span><span id="acct-stat">已连接 · 延迟 12ms · 凭证仅存本地 (DPAPI 加密)</span></div>
     </div>
     <div class="df">
+      <button type="button" id="acct-a2t-clear" onclick="clearApiAccount()" disabled
+        title="清除账户: 注销账户接入并删除登记(点击后二次确认; 不影响交易记录)"
+        style="margin-right:auto;font-size:12px;padding:7px 14px;border:1px solid rgba(224,123,58,.5);background:transparent;color:#e07b3a;border-radius:5px;cursor:not-allowed;opacity:.45;white-space:nowrap;font-weight:700">清除账户</button>
       <button class="btn-ghost" onclick="testAcct()">测试连接</button>
       <button class="btn-ghost" onclick="closeMask('acct-mask')">取消</button>
       <button class="btn-primary" onclick="saveAcct()">保存并登录</button>
@@ -1965,6 +1981,11 @@ body.dark .arb-bar{background:#1a2740}
   <div class="dlg" style="width:560px">
     <div class="dh"><b id="renew-title" title="续费/充值: USDT 转账后粘贴交易哈希, 财务核对到账后延长账号授权"><svg class="svgi"><use href="#i-money"/></svg> <span id="renew-title-t">续费 / 充值</span></b><span class="sp"></span><button class="x" onclick="closeMask('renew-mask')"><svg class="svgi"><use href="#i-close"/></svg></button></div>
     <div class="db">
+      <!-- 包月/充值 模式切换(充值已并入本模块; 内购模式隐藏) -->
+      <div class="seg-pick" id="renew-tabs" style="margin-bottom:12px;max-width:300px">
+        <button type="button" id="rt-month" onclick="openRenew('month')" title="选套餐按月续费账号授权">包月续费</button>
+        <button type="button" id="rt-recharge" onclick="openRenew('recharge')" title="USDT 充值到账户余额(可用于包月/内购抵扣)">账户充值</button>
+      </div>
       <!-- 套餐(包月模式显示) -->
       <div id="renew-plans">
         <div class="plans">
@@ -2140,7 +2161,7 @@ const QH={user:null,key:null,started:false,
     // 主账户实时报价(ASK/BID)+利润
     let _mt=null;
     try{ const acc=await this.get('/bridge/account').catch(()=>null);
-      if(acc){ setTxt('m-pnl',sign(acc.profit)); cls('m-pnl','v '+(acc.profit>=0?'up':'down')); setHtml('m-tri',acc.profit>=0?SVGI('i-tri-up'):SVGI('i-tri-down')); cls('m-tri','tri '+(acc.profit>=0?'up':'down')); }
+      if(acc && !(window.__unreg&&window.__unreg.m)){ setTxt('m-pnl',sign(acc.profit)); cls('m-pnl','v '+(acc.profit>=0?'up':'down')); setHtml('m-tri',acc.profit>=0?SVGI('i-tri-up'):SVGI('i-tri-down')); cls('m-tri','tri '+(acc.profit>=0?'up':'down')); }
       const t=await this.get('/quote/tick/'+(window.QHSYM||'XAUUSD')).catch(()=>null);
       if(t){ setTxt('mk-m-ask',fnum(t.ask)); setTxt('mk-m-bid',fnum(t.bid)); window.__lastTick=t; _mt=t; }
     }catch(e){}
@@ -2152,8 +2173,8 @@ const QH={user:null,key:null,started:false,
       if(ev&&ev.entry_spread!=null)window.__gEntry=ev.entry_spread;
       if(ev&&ev.g_tp_points!=null)window.__gTp=ev.g_tp_points;
       window.__hedgeSym=_hedgeSym;
-      const seg=document.querySelectorAll('.statusbar .seg'); if(seg[3])seg[3].textContent='状态: '+(st.market&&st.market.closed?'休市':'运行'); if(seg[2])seg[2].textContent='单量: '+(st.cycle?st.cycle.pairs:0);
-      const be=$('bs-eng'); if(be)be.textContent=st.cycle?'运行中':'--';
+      const seg=document.querySelectorAll('.statusbar .seg'); if(seg[3])seg[3].textContent='状态: '+((st.market&&st.market.closed)?'休市':(engineRunning()?'运行':'已停止')); if(seg[2])seg[2].textContent='单量: '+(st.cycle?st.cycle.pairs:0);
+      const be=$('bs-eng'); if(be)be.textContent=engineRunning()?'运行中':'已停止';
     }catch(e){}
     // ② 蓝框: 获利=所有坑位未平仓浮盈汇总(主腿+对冲腿) ; 反向Ask/正向Bid=当前开仓点差
     try{
@@ -2229,8 +2250,8 @@ function renderSnapshot(m){
     if(ev&&ev.ladders!=null)window.__ladders=ev.ladders;
     if(ev&&ev.entry_spread!=null)window.__gEntry=ev.entry_spread;
     if(ev&&ev.g_tp_points!=null)window.__gTp=ev.g_tp_points;
-    const seg=document.querySelectorAll('.statusbar .seg'); if(seg[3])seg[3].textContent='状态: '+(st.market&&st.market.closed?'休市':'运行'); if(seg[2])seg[2].textContent='单量: '+(st.cycle?st.cycle.pairs:0);
-    const be=$('bs-eng'); if(be)be.textContent=st.cycle?'运行中':'--';
+    const seg=document.querySelectorAll('.statusbar .seg'); if(seg[3])seg[3].textContent='状态: '+((st.market&&st.market.closed)?'休市':(engineRunning()?'运行':'已停止')); if(seg[2])seg[2].textContent='单量: '+(st.cycle?st.cycle.pairs:0);
+    const be=$('bs-eng'); if(be)be.textContent=engineRunning()?'运行中':'已停止';
   }
   // 对冲报价 + 获利汇总 + 开仓点差
   const ht=f.tick_hedge||null;
@@ -2269,12 +2290,40 @@ function renderSnapshot(m){
   if(typeof pollAutoEntry==='function')pollAutoEntry();
 }
 function fillAcct(pfx,a,plat){
+  // 登记门控: 后端标记未登记(如「清除云端账户」后)→整卡清空显示未登记
+  if(a && a.registered===false){ clearAcctCard(pfx); return; }
+  (window.__unreg=window.__unreg||{})[pfx]=false;
   setTxt(pfx+'-plat',a.platform||plat); setTxt(pfx+'-login',a.account||'--');
   setTxt(pfx+'-bal',fnum(a.balance)); setTxt(pfx+'-free',fnum(a.equity));
   setTxt(pfx+'-conn',a.connected?'链接成功':'断开'); cls(pfx+'-conn','v '+(a.connected?'':'down'));
   setTxt(pfx+'-server',a.server||'--');
   const eqp=Number(a.equity||0)-Number(a.balance||0);
   setTxt(pfx+'-pnl',sign(eqp)); cls(pfx+'-pnl','v '+(eqp>=0?'up':'down')); setHtml(pfx+'-tri',eqp>=0?SVGI('i-tri-up'):SVGI('i-tri-down')); cls(pfx+'-tri','tri '+(eqp>=0?'up':'down'));
+}
+// 未登记腿的行情卡/点差流显式清空(纯云端读取: 登记即有数据, 清除即停; 防旧值冻结造成"还有数据"错觉)
+function applyUnregMarket(){
+  const u=window.__unreg||{};
+  ['m','h'].forEach(function(pfx){
+    if(!u[pfx])return;
+    ['ask','bid','pf','sw','long','short'].forEach(function(k){ var e=$('mk-'+pfx+'-'+k); if(e){e.textContent='--'; if(e.className&&e.className.indexOf('v ')===0)e.className='v';} });
+  });
+  if(u.m||u.h){  // 点差流需双腿报价, 任一腿未登记即无有效点差: 当前值+历史滚动缓冲一并清
+    var a=$('t-ask'),b=$('t-bid'); if(a){a.textContent='--';a.className='';} if(b){b.textContent='--';b.className='';}
+    window.__obStream=[]; window.__lastSpread=null;
+    var w=$('ob-rows'); if(w)w.innerHTML='';
+    var mr=$('mob-rev'),mf=$('mob-fwd');
+    if(mr){mr.textContent='--';mr.className='';} if(mf){mf.textContent='--';mf.className='';}
+  }
+}
+// 清空账户卡片(m=主 / h=对冲): 清除云端账户后立即调用 + 快照未登记态持续保持
+function clearAcctCard(pfx){
+  (window.__unreg=window.__unreg||{})[pfx]=true;   // fillLeg 慢字段(过夜/手续累计)按此跳过回写
+  ['plat','login','server','bal','free','pnl','credit','swapcum','commcum'].forEach(function(k){
+    var e=$(pfx+'-'+k); if(e)e.textContent='--';
+  });
+  var c=$(pfx+'-conn'); if(c){ c.textContent='未登记'; c.className='v down'; }
+  var t=$(pfx+'-tri'); if(t)t.innerHTML='';
+  applyUnregMarket();   // 行情卡/点差流同步清空(清除即停)
 }
 function sign(n){n=Number(n||0);return (n>=0?'+':'')+n.toFixed(2);}
 function fillLiq(pfx,d){
@@ -2290,6 +2339,7 @@ function fillLiq(pfx,d){
 // 行情卡 实时盈亏/过夜费 + 账户卡 累计过夜费/手续费
 function fillLeg(pfx,d){
   if(!d){ return; }
+  if(window.__unreg&&window.__unreg[pfx]){ return; }   // 未登记: 纯云端模式该腿无数据源, 全部字段由 applyUnregMarket 置'--'
   const setv=function(id,v,cls){ const e=$(id); if(!e)return; e.textContent=(v==null?'--':sign(v)); if(cls)e.className='v '+((v||0)>=0?'up':'down'); };
   setv('mk-'+pfx+'-pf', d.live_profit, true);
   setv('mk-'+pfx+'-sw', d.live_swap, true);
@@ -3176,6 +3226,7 @@ async function pollAutoExit(){
     const a=await QH.get('/engine/auto_exit/'+QH.user);
     if(!a)return; window.__axDemo=a.demo; const _prevX=window.__axMode; window.__axMode=a.mode;
     if(_prevX!==a.mode && typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);  // 其它端切换同步→重绘徽章
+    if(typeof refreshRunUI==='function')refreshRunUI();   // 右键菜单/状态栏 运行态同步真实档位
     const _m=(a.mode==='shadow'?'off':(a.mode||'off'));   // 影子已废除, 遗留态显示为关闭
     const sel=$('ax-mode'); if(sel && document.activeElement!==sel)sel.value=_m;
     const st=$('ax-state');
@@ -3205,6 +3256,7 @@ async function pollAutoEntry(){
     const a=await QH.get('/engine/auto_entry/'+QH.user);
     if(!a)return; window.__aeDemo=a.demo; const _prevE=window.__aeMode; window.__aeMode=a.mode;
     if(_prevE!==a.mode && typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);  // 其它端切换同步→重绘
+    if(typeof refreshRunUI==='function')refreshRunUI();   // 右键菜单/状态栏 运行态同步真实档位
     const _m=(a.mode==='shadow'?'off':(a.mode||'off'));   // 影子已废除, 遗留态显示为关闭
     const sel=$('ae-mode'); if(sel && document.activeElement!==sel)sel.value=_m;
     const sd=$('ae-dir'); if(sd && document.activeElement!==sd)sd.value=a.direction||'reverse';
@@ -3233,17 +3285,57 @@ function applyEntGates(){
   });
 }
 
-/* engine start/stop */
+/* engine start/stop — 接真实自动策略档位(进单/出场), 不再是纯前端摆设 */
+function engineRunning(){
+  const on=m=>(m==='armed'||m==='full');
+  return on(window.__aeMode)||on(window.__axMode);
+}
 function setRunning(on){
   running=on;
   $('mi-toggle-t').textContent=on?'停止':'启动';
   ctx.querySelector('#mi-toggle .ic').innerHTML=on?SVGI('i-stop'):SVGI('i-play');
+  // status bar 4th seg = 状态(快照周期也按 engineRunning 口径刷新, 此处即时反馈)
   const seg=document.querySelectorAll('.statusbar .seg');
-  // status bar 4th seg = 状态
-  document.querySelectorAll('.statusbar .seg')[3].textContent='状态: '+(on?'启动':'停止');
+  if(seg[3])seg[3].textContent='状态: '+(on?'运行':'已停止');
 }
-$('mi-toggle').onclick=()=>{ setRunning(!running); hideCtx(); };
-setRunning(true);
+function refreshRunUI(){ setRunning(engineRunning()); }
+$('mi-toggle').onclick=async ()=>{
+  hideCtx();
+  const profitFirst=(localStorage.getItem('qh_cfg-sw-profitfirst')==='1');
+  const dir=($('ae-dir')||{}).value||'reverse';
+  if(engineRunning()){
+    // 停止: 记忆当前档位 → 双 off(不平已有持仓, 不影响手动)
+    try{ localStorage.setItem('qh_eng_prev', JSON.stringify({entry:window.__aeMode||'off',exit:window.__axMode||'off',dir:dir})); }catch(e){}
+    const ok=await uiConfirm('停止自动策略','将停止本账号的 <b>自动进单</b> 与 <b>自动出场</b>。\n\n• 不会平掉已有持仓\n• 不影响手动开/平仓\n• 可从右键菜单「启动」恢复停止前档位\n\n确认停止？',true);
+    if(!ok)return;
+    try{
+      await licPost('/cmd/auto_entry',{username:QH.user,license_key:QH.key,mode:'off',direction:dir});
+      await licPost('/cmd/auto_exit',{username:QH.user,license_key:QH.key,mode:'off',profit_first:profitFirst});
+      window.__aeMode='off'; window.__axMode='off'; refreshRunUI();
+      const se=$('ae-mode'); if(se)se.value='off'; const sx=$('ax-mode'); if(sx)sx.value='off';
+      if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);
+      toast('自动策略已停止'); pushAlert('warn','自动策略已全部停止(右键菜单)');
+    }catch(e){ toast('停止失败：'+(e.message||e)); }
+  }else{
+    // 启动: 恢复停止前档位; 无记忆档位绝不擅自武装(真金安全)
+    let prev=null; try{ prev=JSON.parse(localStorage.getItem('qh_eng_prev')||'null'); }catch(e){}
+    const pe=(prev&&prev.entry)||'off', px=(prev&&prev.exit)||'off';
+    if(pe==='off'&&px==='off'){
+      if(typeof uiAlert==='function')uiAlert('启动自动策略','没有可恢复的运行档位。\n\n请在「全自动策略」面板分别选择 自动进单/自动出场 档位启动。');
+      return;
+    }
+    const ok=await uiConfirm('启动自动策略','将恢复停止前档位:\n\n• 自动进单: '+autoModeCN(pe)+'\n• 自动出场: '+autoModeCN(px)+(window.__aeDemo||window.__axDemo?'\n\n（演示模式）':'\n\n（真金, 引擎将真实下单!）')+'\n\n确认启动？',true);
+    if(!ok)return;
+    try{
+      if(pe!=='off')await licPost('/cmd/auto_entry',{username:QH.user,license_key:QH.key,mode:pe,direction:(prev&&prev.dir)||dir});
+      if(px!=='off')await licPost('/cmd/auto_exit',{username:QH.user,license_key:QH.key,mode:px,profit_first:profitFirst});
+      window.__aeMode=pe; window.__axMode=px; refreshRunUI();
+      if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);
+      toast('自动策略已启动'); pushAlert('warn','自动策略已恢复: 进单='+autoModeCN(pe)+' / 出场='+autoModeCN(px));
+    }catch(e){ toast('启动失败：'+(e.message||e)); refreshRunUI(); }
+  }
+};
+setRunning(false);   // 初始按"未运行"显示, 首轮档位轮询(~1s)即校正为真实态
 
 /* pin */
 let pinned=true;
@@ -4043,6 +4135,11 @@ function openRenew(mode, iapProd){
   // mode: month(包月) / recharge(充值) / iap(内购)
   window.__payMode=mode; window.__payIap=iapProd||null;
   $('renew-title-t').textContent = mode==='month' ? '包月续费' : (mode==='recharge' ? '账户充值' : '内购支付');
+  // 包月/充值 页签态(内购模式隐藏页签)
+  const _rt=$('renew-tabs');
+  if(_rt){ _rt.style.display=(mode==='iap')?'none':'';
+    const _m=$('rt-month'), _r=$('rt-recharge');
+    if(_m)_m.classList.toggle('on',mode==='month'); if(_r)_r.classList.toggle('on',mode==='recharge'); }
   $('renew-plans').style.display = mode==='month' ? '' : 'none';
   $('renew-amount').style.display = mode==='recharge' ? '' : 'none';
   $('renew-iap').style.display = mode==='iap' ? '' : 'none';
@@ -4392,35 +4489,50 @@ async function openAcct(which){
     ? ('已加载'+(isMain?'主':'对冲')+'账户 '+want.login+' · '+(want.conn_mode==='api'?'API':'Bridge')+' · 凭证不回传服务端')
     : '新账户 · 请选择平台名称/服务器后注册';
 }
-// 「清除云端账户」按钮状态: 有托管UUID才可点, UUID 存 dataset 不再展示长串
+// 登录密码 显示/隐藏 切换(眼睛按钮)
+function togglePwdEye(){
+  const i=$('acct-pwd'), b=$('acct-pwd-eye'); if(!i||!b)return;
+  const show=(i.type==='password');
+  i.type=show?'text':'password';
+  b.style.color=show?'var(--teal)':'#8a959b';
+  b.title=show?'隐藏密码':'显示密码';
+}
+// 「清除账户」按钮状态: 有接入UUID才可点, UUID 存 dataset 不再展示长串
 function _setA2tClear(uuid){
   const b=$('acct-a2t-clear'); if(!b)return;
   uuid=(uuid||'').trim();
   b.dataset.uuid=uuid; b.disabled=!uuid;
   b.style.opacity=uuid?'1':'.45'; b.style.cursor=uuid?'pointer':'not-allowed';
-  b.title=uuid?('清除云端账户('+uuid.slice(0,8)+'…): 联动注销云端托管 + 删登记(点击后二次确认; 不影响交易记录)')
-             :'当前角色暂无已托管的云端账户';
+  b.title=uuid?('清除账户('+uuid.slice(0,8)+'…): 注销接入并删除登记(点击后二次确认; 不影响交易记录)')
+             :'当前角色暂无已接入的账户';
 }
-// 点击「清除云端账户」→ 二次确认 → 清除本账户 API 连接登记(不影响任何交易记录)
+// 点击「清除账户」→ 二次确认 → 注销接入 + 删除登记(不影响任何交易记录)
 async function clearApiAccount(){
   const uuid=((($('acct-a2t-clear')||{}).dataset||{}).uuid||'').trim();
-  if(!uuid){ toast('无已托管账户可清除'); return; }
+  if(!uuid){ toast('无已接入账户可清除'); return; }
   const isMain=($('acct-role').value==='主账户'); const role=isMain?'main':'hedge'; const rn=isMain?'主账户':'对冲账户';
-  const ok=await uiConfirm('清除云端账户',
-    '将清除<b>'+rn+'</b>（云端账户 '+uuid.slice(0,8)+'…）：\n\n'+
-    '• 联动<b>注销云端托管账户</b>（不可逆；之后可重新「保存并登录」再次接入）\n'+
+  const ok=await uiConfirm('清除账户',
+    '将清除<b>'+rn+'</b>（'+uuid.slice(0,8)+'…）：\n\n'+
+    '• <b>注销该账户接入</b>（不可逆；之后可重新「保存并登录」再次接入）\n'+
     '• 删除本地登记\n'+
     '• <b>不影响任何交易记录 / 历史成交</b>\n\n确认清除？', true);
   if(!ok)return;
   try{
     const r=await licPost('/accounts/delete_mine',{role:role,confirm:true});
     _setA2tClear(''); $('acct-login').value='';
+    clearAcctCard(isMain?'m':'h');   // 操作台账户卡片立即清空(快照未登记态随后接管保持)
     const rel=((r&&r.a2t_released)||[])[0];
-    const cloudMsg=rel?(rel.a2t_ok?'云端托管已注销':'云端注销未成功: '+rel.a2t_msg):'无云端托管';
-    $('acct-stat').textContent=rn+' 已清除 · '+cloudMsg+'（交易记录不受影响）';
-    toast('已清除 '+rn+(rel&&rel.a2t_ok?' · 云端已注销':''));
-    pushAlert(rel&&!rel.a2t_ok?'warn':'info', rn+' 云端账户已清除 · '+cloudMsg);
-  }catch(e){ toast('清除失败：'+(e.message||e)); }
+    const clrMsg=rel?(rel.a2t_ok?'账户接入已注销':'注销未完成，请联系管理员'):'无接入账户';
+    $('acct-stat').textContent=rn+' 已清除 · '+clrMsg+'（交易记录不受影响）';
+    toast('已清除 '+rn+(rel&&rel.a2t_ok?' · 已注销':''));
+    pushAlert(rel&&!rel.a2t_ok?'warn':'info', rn+' 已清除 · '+clrMsg);
+  }catch(e){
+    const em=(e.message||''+e);
+    $('acct-stat').textContent='清除被拒绝：'+em;
+    // 保护闸(策略运行中/有未平持仓)→弹窗明示原因(uiAlert 单键弹窗; uiModal 须传 opts 对象不可传字符串)
+    if(/策略运行中|未平持仓/.test(em) && typeof uiAlert==='function') uiAlert('禁止清除', em);
+    else toast('清除失败：'+em);
+  }
 }
 // 回填 平台名称/服务器 两个下拉(目录已加载后调用): 目录无该平台则注入"已存"选项; 服务器不在列表则落自定义
 function prefillBrokerServer(broker, server){
@@ -4443,7 +4555,7 @@ let _brokerDir=null;
 async function loadBrokers(){
   const nb=$('acct-broker-note'); const bsel=$('acct-broker');
   if(_brokerDir){ fillBrokers(); return; }
-  nb.textContent='正从云端拉取平台/服务器目录…';
+  nb.textContent='正在拉取平台/服务器目录…';
   try{
     const r=await licGet('/a2t/brokers');
     _brokerDir=r.companies||[];
@@ -4479,13 +4591,12 @@ function selectedServer(){ const v=$('acct-server').value; return v==='__custom_
 function onConnMode(){
   const m=$('acct-mode').value, isBridge=(m==='bridge'), isApi=(m==='api');
   $('acct-pick-row').style.display=isBridge?'':'none';
-  $('acct-api-note').style.display=isApi?'':'none';
   // 密码框始终可见(用户要求固定在登录账号右侧); bridge 不发送, 仅提示
   const pl=$('acct-pwd-lbl'); const pw=$('acct-pwd');
-  if(pl) pl.textContent=isApi?'登录密码 (托管至云端)':'登录密码 (Bridge 无需)';
+  if(pl) pl.textContent=isApi?'登录密码':'登录密码 (Bridge 无需)';
   if(pw) pw.placeholder=isBridge?'Bridge 模式无需填写':'';
   $('acct-stat').textContent=isBridge?'Bridge 已注册账户 · 凭证留 bridge 机，服务端不接收'
-    :'API 连接 · 经 云端免终端接入，密码将托管至第三方（见上方提示）';
+    :'API 直连登录 · 密码仅登录时使用';
 }
 function pickPlat(btn,p){
   document.querySelectorAll('#acct-plat button').forEach(b=>b.classList.remove('on'));
@@ -4494,13 +4605,13 @@ function pickPlat(btn,p){
 async function testAcct(){
   const mode=$('acct-mode').value;
   if(mode==='api'){
-    // API 连接: 调后端只读摘要验证(须先保存并登录, 该角色已注册 云端账户UUID)
+    // API 连接: 调后端只读摘要验证(须先保存并登录, 该角色已有接入 UUID)
     const role=$('acct-role').value.indexOf('对冲')>=0?'hedge':'main';
-    $('acct-stat').textContent='测试中… 经云端读取账户摘要';
+    $('acct-stat').textContent='测试中… 正在读取账户信息';
     try{
       const r=await licPost('/a2t/summary',{role:role});
       $('acct-stat').textContent='连接成功 · 余额 '+(r.balance??'--')+' '+(r.currency||'')+' · 净值 '+(r.equity??'--')+' · 延迟 '+r.latency_ms+'ms';
-      toast('云端连接正常');
+      toast('账户连接正常');
     }catch(e){ $('acct-stat').textContent='测试失败：'+(e.message||e)+'（API 连接需先"保存并登录"注册账户）'; toast('测试失败'); }
     return;
   }
@@ -4516,31 +4627,31 @@ async function saveAcct(){
   const body={username:QH.user,label:$('acct-title-t').textContent,login:login,platform:platform,
     broker:broker, role:role, conn_mode:mode, server:server};
   if(mode==='api'){
-    // API 连接: 需 server + password, 后端代注册到 云端(密码仅在途)
+    // API 直连: 需 server + password(密码仅登录时在途使用)
     const pwd=$('acct-pwd').value||'';
     if(!server){ toast('请选择/填写有效的 MT 服务器名'); return; }
-    if(!pwd){ toast('API 连接需填写密码(将托管至 云端)'); return; }
-    if(!await uiConfirm('确认托管凭证','即将把该 MT 账户密码提交至第三方云端服务托管以实现免终端接入。\n\n确认你已知悉并授权该凭证出域？')){ return; }
+    if(!pwd){ toast('API 直连登录需填写密码'); return; }
+    if(!await uiConfirm('确认保存并登录','将使用该 MT 账户密码完成在线登录验证（密码仅登录时使用，不作本地存储）。\n\n确认继续？')){ return; }
     body.password=pwd;
-    $('acct-stat').textContent='注册中… 经云端连接账户';
+    $('acct-stat').textContent='登录中… 正在验证账户';
   }
   try{
     const r=await licPost('/accounts/register',body);
     if(mode==='api') $('acct-pwd').value='';   // 立即清空前端密码, 不驻留
     closeMask('acct-mask');
-    const modeLbl=mode==='api'?'API·云端':'Bridge';
-    toast('账户已保存 ('+modeLbl+')'+(r.a2t_uuid?' · UUID '+r.a2t_uuid.slice(0,8):''));
-    pushAlert('info', role+' 账户已登记 · '+modeLbl+(mode==='api'?'·凭证已托管云端':'·凭证留bridge'));
-    // 重注册产生新云端账户时, 旧注册释放结果透明化(成功=自动释放; 失败=提示后台处理防配额泄漏)
+    const modeLbl=mode==='api'?'API':'Bridge';
+    toast('账户已保存 ('+modeLbl+')'+(r.a2t_uuid?' · '+r.a2t_uuid.slice(0,8):''));
+    pushAlert('info', role+' 账户已登记 · '+modeLbl+(mode==='api'?'·已接入':'·凭证留bridge'));
+    // 重注册产生新接入时, 旧注册释放结果透明化(成功=自动释放; 失败=提示后台处理防配额泄漏)
     if(mode==='api' && r.a2t_prev_msg){
-      pushAlert(r.a2t_prev_released?'info':'warn', '云端旧注册: '+r.a2t_prev_msg);
+      pushAlert(r.a2t_prev_released?'info':'warn', '旧账户注册: '+String(r.a2t_prev_msg).replace(/云端/g,''));
     }
   }catch(e){
     const msg=(e.message||''+e);
-    // (c) 云端 套餐账户配额已满 → 明确提示(后端透传 402 文案)
+    // (c) 账户接入配额已满 → 明确提示(后端透传 402 文案; uiAlert 单键弹窗, uiModal 须传 opts 对象)
     if(/额度不足|402|上限/.test(msg)){
-      $('acct-stat').textContent='注册失败：云端账户配额已满';
-      uiModal? uiModal('配额已满','当前 云端订阅的可注册账户数已用满，无法再托管新账户。\n\n请在后台升级套餐（Single→PRO 无限），或在 云端后台删除闲置账户后重试。') : toast('云端账户配额已满');
+      $('acct-stat').textContent='保存失败：账户接入数已达上限';
+      typeof uiAlert==='function'? uiAlert('接入数已达上限','可接入的账户数已用满，暂无法新增账户。\n\n请联系管理员提升配额，或清理闲置账户后重试。') : toast('账户接入数已达上限');
     }else{
       $('acct-stat').textContent='保存失败：'+msg; toast('保存失败：'+msg);
     }
@@ -4564,7 +4675,7 @@ setRunning=function(on){
   if(changed && typeof pushAlert==='function'){ pushAlert(on?'info':'warn', on?'引擎已启动 · 开始监控':'引擎已停止 · 暂停下单'); }
   _engInited=true;
 };
-setRunning(true);
+setRunning(engineRunning());   // 初始按真实档位(未知=false), 首轮轮询校正
 
 /* ============ MARQUEE (飞书镜像跑马灯) ============ */
 let mqMirror=true;       // 受飞书"镜像到跑马灯"开关控制
