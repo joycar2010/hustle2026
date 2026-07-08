@@ -1148,15 +1148,20 @@ export async function getNetExpect() {
   return data as NetExpectBoard
 }
 
-// ─── P2-a 跨所标尺 ───
+// ─── P2-a 跨所标尺(五所;资金费均为日化%) ───
 export interface CrossVenueRow {
   symbol: string
   bn_spread: number | null
   okx_spread: number | null
   bybit_spread: number | null
+  gate_spread: number | null
+  bitget_spread: number | null
   bn_funding: number | null
   bybit_funding: number | null
+  gate_funding: number | null
+  bitget_funding: number | null
   funding_gap: number | null
+  gap_pair: string | null
   venues: number
 }
 export interface CrossVenueBoard {

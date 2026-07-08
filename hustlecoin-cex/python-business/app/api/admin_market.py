@@ -444,70 +444,167 @@ async def _fetch_json(cli, url, params=None):
 
 @router.get("/cross-venue")
 async def cross_venue_ruler(request: Request, top: int = 60):
-    """跨所标尺(P2):并排对比 Binance / OKX / Bybit 三所同币的现货买卖价差 + 合约资金费率。
-    纯参照标尺——判断 Binance 点差/资金费是否有竞争力、carry 是否别处更优;不做任何下单腿。
-    全走公共行情(免鉴权),每所批量一次拉全量(约 5 次调用),60s redis 缓存,打开页面才算、不常驻轮询。"""
+    """跨所标尺(P2):并排对比 Binance / OKX / Bybit / Gate / Bitget 五所同币的现货买卖价差
+    + 四所合约资金费(OKX 资金费仅逐合约端点,按需标尺省略)。纯参照标尺,不做任何下单腿。
+    资金费全部按【结算周期】归一化成日化%(币安部分币4h/Bybit有1h·2h·4h/Gate按秒/Bitget按小时,
+    不归一化跨所对比会差2~8倍——xv采样器同款命门);费差=四所日化最高−最低(最优对)+方向。
+    全走公共行情免鉴权,批量端点并发拉(~9次调用),60s redis 缓存,打开页面才算、不常驻轮询。"""
     require_admin(request)
     r = _redis()
-    cached = r.get("crossvenue:ruler")
+    cached = r.get("crossvenue:ruler:v2")
     if cached:
         try:
             return json.loads(cached)
         except Exception:
             pass
 
-    bn_spot: dict[str, tuple] = {}
-    okx_spot: dict[str, tuple] = {}
-    bb_spot: dict[str, tuple] = {}
-    bn_fund: dict[str, float] = {}
-    bb_fund: dict[str, float] = {}
+    import asyncio as _aio
     errors = []
+
+    async def _safe(name, coro, default):
+        try:
+            return await coro
+        except Exception as e:
+            errors.append(f"{name}:{e}")
+            return default
+
     async with httpx.AsyncClient(timeout=12, headers={"User-Agent": "Mozilla/5.0"}) as cli:
-        try:  # Binance 现货 bookTicker(全量一次)
+        async def bn_spot_f():
+            out = {}
             for t in await _fetch_json(cli, "https://api.binance.com/api/v3/ticker/bookTicker"):
                 s = t.get("symbol", "")
                 if s.endswith("USDT"):
                     bid = _safe_float(t.get("bidPrice")); ask = _safe_float(t.get("askPrice"))
                     if bid > 0 and ask > 0:
-                        bn_spot[s] = (bid, ask)
-        except Exception as e:
-            errors.append(f"binance_spot:{e}")
-        try:  # Binance 合约资金费(premiumIndex 全量一次)
+                        out[s] = (bid, ask)
+            return out
+
+        async def bn_fund_f():
+            # premiumIndex 每期费率 + fundingInfo 例外结算周期(缺省8h) → 日化%
+            intervals = {}
+            try:
+                for x in await _fetch_json(cli, "https://fapi.binance.com/fapi/v1/fundingInfo"):
+                    if isinstance(x, dict) and x.get("symbol"):
+                        intervals[x["symbol"]] = _safe_float(x.get("fundingIntervalHours"), 8) or 8
+            except Exception as e:
+                errors.append(f"binance_fundinfo:{e}")
+            out = {}
             for t in await _fetch_json(cli, "https://fapi.binance.com/fapi/v1/premiumIndex"):
                 s = t.get("symbol", "")
-                if s.endswith("USDT"):
-                    bn_fund[s] = _safe_float(t.get("lastFundingRate")) * 100
-        except Exception as e:
-            errors.append(f"binance_fund:{e}")
-        try:  # OKX 现货 tickers(全量一次,instId 形如 BTC-USDT)
+                if s.endswith("USDT") and "_" not in s:
+                    out[s] = _safe_float(t.get("lastFundingRate")) * (24 / intervals.get(s, 8)) * 100
+            return out
+
+        async def okx_spot_f():
+            out = {}
             d = await _fetch_json(cli, "https://www.okx.com/api/v5/market/tickers", {"instType": "SPOT"})
             for t in d.get("data", []):
                 inst = t.get("instId", "")
                 if inst.endswith("-USDT"):
                     bid = _safe_float(t.get("bidPx")); ask = _safe_float(t.get("askPx"))
                     if bid > 0 and ask > 0:
-                        bn_key = inst.replace("-", "")
-                        okx_spot[bn_key] = (bid, ask)
-        except Exception as e:
-            errors.append(f"okx_spot:{e}")
-        try:  # Bybit 现货 tickers(全量一次)
+                        out[inst.replace("-", "")] = (bid, ask)
+            return out
+
+        async def bb_spot_f():
+            out = {}
             d = await _fetch_json(cli, "https://api.bybit.com/v5/market/tickers", {"category": "spot"})
             for t in d.get("result", {}).get("list", []):
                 s = t.get("symbol", "")
                 if s.endswith("USDT"):
                     bid = _safe_float(t.get("bid1Price")); ask = _safe_float(t.get("ask1Price"))
                     if bid > 0 and ask > 0:
-                        bb_spot[s] = (bid, ask)
-        except Exception as e:
-            errors.append(f"bybit_spot:{e}")
-        try:  # Bybit 合约 linear tickers(全量一次,含 fundingRate)
+                        out[s] = (bid, ask)
+            return out
+
+        async def bb_fund_f():
+            # linear tickers 每期费率 + instruments-info 结算周期(分钟,缺省480) → 日化%
+            intervals = {}
+            try:
+                cursor = ""
+                for _ in range(6):
+                    params = {"category": "linear", "limit": "1000"}
+                    if cursor:
+                        params["cursor"] = cursor
+                    d = await _fetch_json(cli, "https://api.bybit.com/v5/market/instruments-info", params)
+                    res = d.get("result", {})
+                    for it in res.get("list", []):
+                        s = it.get("symbol", "")
+                        if s.endswith("USDT"):
+                            intervals[s] = (_safe_float(it.get("fundingInterval"), 480) or 480) / 60.0
+                    cursor = res.get("nextPageCursor") or ""
+                    if not cursor:
+                        break
+            except Exception as e:
+                errors.append(f"bybit_instruments:{e}")
+            out = {}
             d = await _fetch_json(cli, "https://api.bybit.com/v5/market/tickers", {"category": "linear"})
             for t in d.get("result", {}).get("list", []):
                 s = t.get("symbol", "")
                 if s.endswith("USDT"):
-                    bb_fund[s] = _safe_float(t.get("fundingRate")) * 100
-        except Exception as e:
-            errors.append(f"bybit_fund:{e}")
+                    out[s] = _safe_float(t.get("fundingRate")) * (24 / intervals.get(s, 8)) * 100
+            return out
+
+        async def gt_spot_f():
+            out = {}
+            for t in await _fetch_json(cli, "https://api.gateio.ws/api/v4/spot/tickers"):
+                cp = t.get("currency_pair", "")
+                if cp.endswith("_USDT"):
+                    bid = _safe_float(t.get("highest_bid")); ask = _safe_float(t.get("lowest_ask"))
+                    if bid > 0 and ask > 0:
+                        out[cp.replace("_USDT", "USDT")] = (bid, ask)
+            return out
+
+        async def gt_fund_f():
+            # contracts 批量自带 funding_rate + funding_interval(秒) + in_delisting(下架剔除) → 日化%
+            out = {}
+            for t in await _fetch_json(cli, "https://api.gateio.ws/api/v4/futures/usdt/contracts"):
+                name = t.get("name", "")
+                if not name.endswith("_USDT") or t.get("in_delisting"):
+                    continue
+                itv = _safe_float(t.get("funding_interval"), 28800) or 28800
+                out[name.replace("_USDT", "USDT")] = _safe_float(t.get("funding_rate")) * (86400 / itv) * 100
+            return out
+
+        async def bg_spot_f():
+            out = {}
+            d = await _fetch_json(cli, "https://api.bitget.com/api/v2/spot/market/tickers", {})
+            for t in d.get("data", []):
+                s = t.get("symbol", "")
+                if s.endswith("USDT"):
+                    bid = _safe_float(t.get("bidPr")); ask = _safe_float(t.get("askPr"))
+                    if bid > 0 and ask > 0:
+                        out[s] = (bid, ask)
+            return out
+
+        async def bg_fund_f():
+            # mix tickers 每期费率 + contracts fundInterval(小时,缺省8;仅 normal 态) → 日化%
+            intervals = {}
+            try:
+                d = await _fetch_json(cli, "https://api.bitget.com/api/v2/mix/market/contracts",
+                                      {"productType": "USDT-FUTURES"})
+                for x in d.get("data", []):
+                    s = x.get("symbol", "")
+                    if s.endswith("USDT") and x.get("symbolStatus") in (None, "normal"):
+                        intervals[s] = _safe_float(x.get("fundInterval"), 8) or 8
+            except Exception as e:
+                errors.append(f"bitget_contracts:{e}")
+            out = {}
+            d = await _fetch_json(cli, "https://api.bitget.com/api/v2/mix/market/tickers",
+                                  {"productType": "USDT-FUTURES"})
+            for t in d.get("data", []):
+                s = t.get("symbol", "")
+                if s.endswith("USDT") and s in intervals:
+                    out[s] = _safe_float(t.get("fundingRate")) * (24 / intervals.get(s, 8)) * 100
+            return out
+
+        (bn_spot, bn_fund, okx_spot, bb_spot, bb_fund,
+         gt_spot, gt_fund, bg_spot, bg_fund) = await _aio.gather(
+            _safe("binance_spot", bn_spot_f(), {}), _safe("binance_fund", bn_fund_f(), {}),
+            _safe("okx_spot", okx_spot_f(), {}), _safe("bybit_spot", bb_spot_f(), {}),
+            _safe("bybit_fund", bb_fund_f(), {}), _safe("gate_spot", gt_spot_f(), {}),
+            _safe("gate_fund", gt_fund_f(), {}), _safe("bitget_spot", bg_spot_f(), {}),
+            _safe("bitget_fund", bg_fund_f(), {}))
 
     def _spr(pair):
         if not pair:
@@ -515,21 +612,34 @@ async def cross_venue_ruler(request: Request, top: int = 60):
         bid, ask = pair
         return round((ask - bid) / bid * 100, 4) if bid > 0 else None
 
+    _FUND_NAMES = {"bn": "币安", "bybit": "Bybit", "gate": "Gate", "bitget": "Bitget"}
     rows = []
     for s in bn_spot:  # 以 Binance 现货宇宙为基(=我们在做的币)
-        o = okx_spot.get(s); b = bb_spot.get(s)
-        venues = 1 + (1 if o else 0) + (1 if b else 0)
+        spreads = {
+            "bn_spread": _spr(bn_spot.get(s)), "okx_spread": _spr(okx_spot.get(s)),
+            "bybit_spread": _spr(bb_spot.get(s)), "gate_spread": _spr(gt_spot.get(s)),
+            "bitget_spread": _spr(bg_spot.get(s)),
+        }
+        venues = sum(1 for v in spreads.values() if v is not None)
         if venues < 2:
             continue   # 至少两所有价才有对比意义
-        bnf = bn_fund.get(s); bbf = bb_fund.get(s)
+        funds = {"bn": bn_fund.get(s), "bybit": bb_fund.get(s),
+                 "gate": gt_fund.get(s), "bitget": bg_fund.get(s)}
+        avail = {k: v for k, v in funds.items() if v is not None}
+        gap = gap_pair = None
+        if len(avail) >= 2:
+            hi = max(avail, key=lambda k: avail[k])
+            lo = min(avail, key=lambda k: avail[k])
+            gap = round(avail[hi] - avail[lo], 5)
+            gap_pair = f"{_FUND_NAMES[hi]}→{_FUND_NAMES[lo]}"
         rows.append({
-            "symbol": s,
-            "bn_spread": _spr(bn_spot.get(s)),
-            "okx_spread": _spr(o),
-            "bybit_spread": _spr(b),
-            "bn_funding": round(bnf, 5) if bnf is not None else None,
-            "bybit_funding": round(bbf, 5) if bbf is not None else None,
-            "funding_gap": round(bnf - bbf, 5) if (bnf is not None and bbf is not None) else None,
+            "symbol": s, **spreads,
+            "bn_funding": round(funds["bn"], 5) if funds["bn"] is not None else None,
+            "bybit_funding": round(funds["bybit"], 5) if funds["bybit"] is not None else None,
+            "gate_funding": round(funds["gate"], 5) if funds["gate"] is not None else None,
+            "bitget_funding": round(funds["bitget"], 5) if funds["bitget"] is not None else None,
+            "funding_gap": gap,
+            "gap_pair": gap_pair,
             "venues": venues,
         })
     # 排序:资金费跨所背离绝对值降序(carry 差异最大的币最有参照意义;None 沉底)
@@ -538,12 +648,12 @@ async def cross_venue_ruler(request: Request, top: int = 60):
         "rows": rows[:top],
         "count": len(rows),
         "errors": errors,
-        "note": "现货价差%越大=盘口越宽/流动性越差;资金费%为合约多头每期成本(正=多头付)。"
-                "funding_gap=Binance−Bybit(正=Bybit 对多头更便宜)。OKX 资金费需逐 inst 查,已省略。仅参照不做腿。",
+        "note": "现货价差%越大=盘口越宽/流动性越差;资金费均为【日化%】(已按各所结算周期归一,正=多头付)。"
+                "费差=四所日化最高−最低,方向=空高费所→多低费所。OKX 资金费仅逐合约端点,标尺省略。仅参照不做腿。",
         "ts": int(time.time() * 1000),
     }
     try:
-        r.setex("crossvenue:ruler", _VENUE_CACHE_TTL, json.dumps(result))
+        r.setex("crossvenue:ruler:v2", _VENUE_CACHE_TTL, json.dumps(result))
     except Exception:
         pass
     return result

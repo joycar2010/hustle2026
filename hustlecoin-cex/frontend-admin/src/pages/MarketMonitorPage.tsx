@@ -167,42 +167,57 @@ function CrossVenueTab() {
     <Card>
       <CardContent className="p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="font-medium">跨所标尺 · Binance / OKX / Bybit</span>
+          <span className="font-medium">跨所标尺 · Binance / OKX / Bybit / Gate / Bitget</span>
           <Badge variant="secondary">只读参照 · 不做腿</Badge>
           <Button variant="outline" size="sm" onClick={fetch} disabled={loading}>
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> 刷新
           </Button>
-          <span className="text-muted-foreground text-xs">公共行情批量拉取,60s 缓存;按资金费跨所背离排序</span>
+          <span className="text-muted-foreground text-xs">公共行情批量并发拉取,60s 缓存;资金费均为日化%;按四所费差(最高−最低)排序</span>
         </div>
         {note && <p className="text-xs text-muted-foreground leading-relaxed">{note}</p>}
         {rows.length === 0 ? (
-          <div className="py-10 text-center text-muted-foreground text-sm">{loading ? '拉取三所行情中…' : '暂无数据(至少两所有价的币才列)'}</div>
+          <div className="py-10 text-center text-muted-foreground text-sm">{loading ? '拉取五所行情中…' : '暂无数据(至少两所有价的币才列)'}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b text-muted-foreground text-left">
                   <th className="px-2 py-1.5">币种</th>
-                  <th className="px-2 py-1.5 text-right">Binance 价差</th>
-                  <th className="px-2 py-1.5 text-right">OKX 价差</th>
-                  <th className="px-2 py-1.5 text-right">Bybit 价差</th>
-                  <th className="px-2 py-1.5 text-right">Binance 资金费</th>
-                  <th className="px-2 py-1.5 text-right">Bybit 资金费</th>
-                  <th className="px-2 py-1.5 text-right">费差(B−By)</th>
+                  <th className="px-2 py-1.5 text-right">币安价差</th>
+                  <th className="px-2 py-1.5 text-right">OKX价差</th>
+                  <th className="px-2 py-1.5 text-right">Bybit价差</th>
+                  <th className="px-2 py-1.5 text-right">Gate价差</th>
+                  <th className="px-2 py-1.5 text-right">Bitget价差</th>
+                  <th className="px-2 py-1.5 text-right">币安费/日</th>
+                  <th className="px-2 py-1.5 text-right">Bybit费/日</th>
+                  <th className="px-2 py-1.5 text-right">Gate费/日</th>
+                  <th className="px-2 py-1.5 text-right">Bitget费/日</th>
+                  <th className="px-2 py-1.5 text-right">费差/日</th>
+                  <th className="px-2 py-1.5 text-center">方向(空→多)</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.symbol} className="border-b border-border/30 hover:bg-accent/10">
-                    <td className="px-2 py-1.5 font-medium">{r.symbol.replace('USDT', '')}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">{pct(r.bn_spread)}</td>
-                    <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.okx_spread)}`}>{pct(r.okx_spread)}</td>
-                    <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.bybit_spread)}`}>{pct(r.bybit_spread)}</td>
-                    <td className={`px-2 py-1.5 text-right font-mono ${(r.bn_funding ?? 0) > 0 ? 'text-amber-500/80' : 'text-emerald-500/80'}`}>{pct(r.bn_funding, 4)}</td>
-                    <td className={`px-2 py-1.5 text-right font-mono ${(r.bybit_funding ?? 0) > 0 ? 'text-amber-500/80' : 'text-emerald-500/80'}`}>{pct(r.bybit_funding, 4)}</td>
-                    <td className={`px-2 py-1.5 text-right font-mono font-semibold ${(r.funding_gap ?? 0) > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{pct(r.funding_gap, 4)}</td>
-                  </tr>
-                ))}
+                {rows.map((r) => {
+                  const fund = (v: number | null) => (
+                    <td className={`px-2 py-1.5 text-right font-mono ${v == null ? 'text-muted-foreground' : v > 0 ? 'text-amber-500/80' : 'text-emerald-500/80'}`}>{pct(v, 4)}</td>
+                  )
+                  return (
+                    <tr key={r.symbol} className="border-b border-border/30 hover:bg-accent/10">
+                      <td className="px-2 py-1.5 font-medium">{r.symbol.replace('USDT', '')}</td>
+                      <td className="px-2 py-1.5 text-right font-mono">{pct(r.bn_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.okx_spread)}`}>{pct(r.okx_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.bybit_spread)}`}>{pct(r.bybit_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.gate_spread)}`}>{pct(r.gate_spread)}</td>
+                      <td className={`px-2 py-1.5 text-right font-mono ${sprCls(r.bn_spread, r.bitget_spread)}`}>{pct(r.bitget_spread)}</td>
+                      {fund(r.bn_funding)}
+                      {fund(r.bybit_funding)}
+                      {fund(r.gate_funding)}
+                      {fund(r.bitget_funding)}
+                      <td className="px-2 py-1.5 text-right font-mono font-semibold text-emerald-500">{pct(r.funding_gap, 4)}</td>
+                      <td className="px-2 py-1.5 text-center text-amber-500/90">{r.gap_pair || '—'}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
