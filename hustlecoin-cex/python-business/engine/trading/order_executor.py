@@ -1211,23 +1211,37 @@ async def execute_repay(
         # 按仓分配债务:本仓应还 = 本仓借量 × FEE_BUFFER(覆盖利息+扣币),与 unhedge 买回口径一致。
         # 多仓并存时 total_debt 是账户总债,会被首个还币的仓"全额还清",后续仓 repay_qty=0 记账失真。
         # min(pos_owed, total_debt) 防止最后一仓超还(前面仓已归还部分,剩余 < pos_owed 时封顶)。
-        repay_amount = min(pos_owed, total_debt) if total_debt > 0 else pos.borrow_qty
-        # 等满后 free 仍不足(手续费扣币的真实小额缺口): 按 free 封顶,真·粉尘留账
-        if Decimal("0") < free_bal < repay_amount:
-            logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount} after settle wait, "
-                           f"repaying free (dust {repay_amount - free_bal} stays)")
-            repay_amount = free_bal
+        # 币安真实债务已为0(用户在App/持币汇总手动还过、或他仓还币已清账)= 没有可还的了 → 直接
+        # 零额收口。原回退分支拿 DB borrow_qty 当应还额,对着不存在的债务用粉尘 free 反复还 →
+        # -3015"还款超过借款"→ 异常回 PENDING_REPAY → 1s级无限重试(实测012卡死+告警轰炸)。
         t0 = time.monotonic()
-        # 买回后立即还币会踩杠杆账户结算延迟(-3041 Balance is not enough)—— 重试等结算
-        for attempt in range(4):
-            try:
-                await client.margin_repay(pos.base_asset, repay_amount)
-                break
-            except BinanceAPIError as re_err:
-                if re_err.api_code == -3041 and attempt < 3:
-                    await asyncio.sleep(1.5)
-                    continue
-                raise
+        if total_debt <= 0:
+            logger.info(f"Repay {pos.symbol}: 币安债务已为0(外部已清),零额收口不发还币")
+            repay_amount = Decimal("0")
+        else:
+            repay_amount = min(pos_owed, total_debt)
+            # 等满后 free 仍不足(手续费扣币的真实小额缺口): 按 free 封顶,真·粉尘留账
+            if Decimal("0") < free_bal < repay_amount:
+                logger.warning(f"Repay {pos.symbol}: free {free_bal} < debt {repay_amount} after settle wait, "
+                               f"repaying free (dust {repay_amount - free_bal} stays)")
+                repay_amount = free_bal
+            # 买回后立即还币会踩杠杆账户结算延迟(-3041 Balance is not enough)—— 重试等结算
+            for attempt in range(4):
+                try:
+                    await client.margin_repay(pos.base_asset, repay_amount)
+                    break
+                except BinanceAPIError as re_err:
+                    if re_err.api_code == -3041 and attempt < 3:
+                        await asyncio.sleep(1.5)
+                        continue
+                    if re_err.api_code == -3015:
+                        # 还款超过借款=债务在我们读数后被外部清掉(竞态)。复核:确实≈0 → 零额收口
+                        _d2, _i2, _f2 = await _read_debt_free()
+                        if _d2 <= Decimal("0.00000001"):
+                            logger.info(f"Repay {pos.symbol}: -3015后复核债务=0,零额收口")
+                            repay_amount = Decimal("0")
+                            break
+                    raise
         latency = int((time.monotonic() - t0) * 1000)
         pos.repay_qty = repay_amount
         pos.repay_interest = interest_amount

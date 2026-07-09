@@ -33,7 +33,8 @@ NOINV_TTL_SEC = 1800
 # 让 dashboard 子账户行的现币/借币/利息秒级刷新,而非干等下一个 10s 轮询周期(问题4根因)。
 REFRESH_CHANNEL = "balance:refresh"
 # 突发去抖:一批信号(如引擎连续借多币)合并为一次该用户刷新,避免逐笔打爆 SAPI/REST 预算。
-REFRESH_DEBOUNCE = 0.8  # seconds
+# 0.8→0.3:账户采集已并行化(整轮<2s),去抖是显示延迟链上纯等待,缩短以贴近"秒级"体感。
+REFRESH_DEBOUNCE = 0.3  # seconds
 
 
 class BalancePusher:
@@ -544,7 +545,10 @@ class BalancePusher:
             force_consumed: set[str] = set()   # 本轮已消费的"推送即查"强查资产,轮末从全局集扣除
 
             user_balances: dict[int, list] = {}
-            for acc in accounts:
+            # 逐账户采集并行化(信号量4):原串行 for 循环 12 账户×~0.4s ≈ 5s,是"借币/开仓后
+            # 显示延迟约5秒"的主瓶颈(即时刷新也走这里)。各账户写各自 key(user_balances 按uid append/
+            # _max_borrow_cache 按acc.id),单线程事件循环下无竞态;并发额外突发 REST 权重可忽略(总量不变)。
+            async def _fetch_acc(acc):
                 try:
                     targets = target_assets.get(acc.id, set())
                     async with BinanceTradingClient(acc.api_key, acc.api_secret) as client:
@@ -561,7 +565,7 @@ class BalancePusher:
                                 self._force_mb_assets.add(_a)
                                 self._grab_last[_a] = _gnow
                         force_assets = self._force_mb_assets & targets  # 推送即查/抢券:无视节流/无券缓存
-                        force_consumed |= force_assets
+                        force_consumed.update(force_assets)   # 闭包内不可 |= 重绑定外层变量
                         if (fetch_max_borrow or force_assets) and targets:
                             mb_results = dict(self._max_borrow_cache.get(acc.id, {}))
                             # _limits 是嵌套 dict,浅拷贝后与缓存共享同一内层对象 → 重新复制一份再写
@@ -742,6 +746,14 @@ class BalancePusher:
                 except Exception as e:
                     logger.debug(f"Balance fetch failed for account {acc.id}: {e}")
 
+            _acc_sem = asyncio.Semaphore(4)
+
+            async def _fetch_acc_guarded(acc):
+                async with _acc_sem:
+                    await _fetch_acc(acc)
+
+            await asyncio.gather(*[_fetch_acc_guarded(a) for a in accounts])
+
             # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)。
             # immediate 即时刷新也采集:它由借/还币/开平仓事件触发且范围限定单用户(去抖 0.8s),
             # 正是「现-期」列必须立刻反映合约腿变化的时刻 —— 原先跳过导致对冲成交后合约列
@@ -777,18 +789,22 @@ class BalancePusher:
                             master_futures_positions[uid] = {}
                             continue
                         positions = {}
-                        for sym_bytes in pushed:
+                        _pr_sem = asyncio.Semaphore(5)
+
+                        async def _one_pos(sym_bytes):
+                            # futures_position_risk 返回【单个 dict】(或 None),不是 list ——
+                            # 原代码按 list 取 pos_data[0] → dict 取键 0 → KeyError 被逐币
+                            # except 吞掉 → master_futures_positions 恒 {}。已修为 dict 直取。
+                            # 逐币并行(sem5):原串行 N 币×~0.3s 拖慢即时刷新的「现-期」列更新。
                             try:
                                 sym = sym_bytes.decode() if isinstance(sym_bytes, bytes) else sym_bytes
-                                # futures_position_risk 返回【单个 dict】(或 None),不是 list ——
-                                # 原代码按 list 取 pos_data[0] → dict 取键 0 → KeyError 被逐币
-                                # except 吞掉 → master_futures_positions 恒 {},「现-期」列永远看不到
-                                # 主账户真实合约仓(75.7裸多在dashboard上不可见的直接原因)。已修为 dict 直取。
-                                pos_data = await mc.futures_position_risk(sym)
+                                async with _pr_sem:
+                                    pos_data = await mc.futures_position_risk(sym)
                                 if pos_data:
                                     positions[sym] = float(pos_data.get("positionAmt", "0") or 0)
                             except Exception:
                                 pass  # 某币查不到持仓不影响其他币
+                        await asyncio.gather(*[_one_pos(s) for s in pushed])
                         master_futures_positions[uid] = positions
                 except Exception as e:
                     logger.debug(f"Master futures position fetch failed for user {uid}: {e}")
