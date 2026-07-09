@@ -612,9 +612,13 @@ async def execute_borrow(
                 f_fut=float(getattr(rules, "taker_fee_futures", TAKER_FEE_RATE) or TAKER_FEE_RATE),
                 buffer_pct=float(getattr(rules, "open_spread_buffer", 0) or 0),
             )
-            decision = "borrow" if (gate_mode == "shadow" or expected_e > 0) else "reject"
+            # 负阈值豁免:挂单差<0(skip_confirm)=用户显式囤券/测试意图(-1 等),enforce 让路只记录
+            # 不拦——与 idle 超时"负阈值=故意囤券不适用"同一原则。E 仍写榜供观察;阈值回正后闸恢复把关。
+            decision = "borrow" if (gate_mode == "shadow" or skip_confirm or expected_e > 0) else "reject"
             _publish_net_eval(user_id, symbol, expected_e, e_break, decision, gate_mode)
-            if gate_mode == "enforce" and expected_e <= 0:
+            if gate_mode == "enforce" and expected_e <= 0 and skip_confirm:
+                logger.info(f"[netgate] 负阈值豁免 {symbol}: E={expected_e:.4f}U≤0 仍放行(挂单差<0=显式囤券/测试)")
+            if gate_mode == "enforce" and expected_e <= 0 and not skip_confirm:
                 position.status = "FAILED"
                 position.error_message = (f"净期望闸拒开: E={expected_e:.4f}U≤0 "
                                           f"(点差捕获{e_break['spread_capture']:.4f}−利息{e_break['interest_cost']:.4f}"
