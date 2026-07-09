@@ -1,0 +1,18 @@
+[Unit]
+Description=DexCexMix dual-perp pairing engine (shadow mode until keys+canary)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=1G
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=DCM_DP_MODE=shadow
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/engine-dualperp/app/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
