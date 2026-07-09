@@ -38,6 +38,7 @@ EXPECTED_HB = {
     "coin-bridge": 240,
     "universe-sync": 7500,
     "gateway": 120,
+    "decision": 120,
 }
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
 

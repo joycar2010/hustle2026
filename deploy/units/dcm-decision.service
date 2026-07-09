@@ -1,0 +1,17 @@
+[Unit]
+Description=DexCexMix decision (route authority writer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=512M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/uvicorn --app-dir services/decision app.main:app --host 0.0.0.0 --port 8001 --workers 1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
