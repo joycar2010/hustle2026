@@ -728,6 +728,25 @@ async def execute_borrow(
             except Exception:
                 pass
         else:
+            # 通用借币失败冷却(120s):-3045有noinv/E闸有netgate,但其它错误码(-3055等)原来
+            # 零冷却 → 每周期重试刷 FAILED 行(实测sub9 -3055 十分钟467条)+打错误通知。
+            # worker 见键显示"借币异常"并跳过;120s后重试(错误多为账户态/临时性,自愈即恢复)。
+            try:
+                _uid_bf = user_id
+                if _uid_bf is None:
+                    _db3 = SessionLocal()
+                    try:
+                        _uid_bf = _resolve_user_id(_db3, sub_account_id)
+                    finally:
+                        _db3.close()
+                import redis as _r
+                from app.config import settings as _s
+                rc = _r.from_url(_s.redis_url, decode_responses=True)
+                _code = getattr(e, "api_code", None)
+                rc.set(f"engine:{_uid_bf}:borrowfail:{symbol}", str(_code or "ERR"), ex=120)
+                rc.close()
+            except Exception:
+                pass
             await notifier.notify_error(account_note, f"borrow {symbol}", str(e))
         return None
     except Exception as e:

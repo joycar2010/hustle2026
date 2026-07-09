@@ -429,6 +429,13 @@ class Worker:
                     statuses[symbol] = "E闸拒开"; continue
             except Exception:
                 pass
+            # 通用借币失败冷却(execute_borrow 非-3045错误写,EX120):如实显示+2min不重试
+            # (防 -3055 等其它错误码每周期重试刷 FAILED 行,同 E闸/无券的打地鼠终版)。
+            try:
+                if await self._redis.get(f"engine:{self._user_id}:borrowfail:{symbol}"):
+                    statuses[symbol] = "借币异常"; continue
+            except Exception:
+                pass
             sym_rule = self._symbol_rules.get(symbol, {})
             if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                 statuses[symbol] = "禁借"; continue
