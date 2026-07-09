@@ -621,6 +621,7 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     r.delete(f"engine:{user_id}:repayhold:{sym}")  # 重新推送=显式再武装,清还币暂停标记允许重借
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
     r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+    r.publish("balance:refresh", str(user_id))   # 推送后即时刷余额/借币/现币(绕开10s轮询)
     return {"message": f"Pushed {sym}"}
 
 
@@ -737,6 +738,23 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
         if active_count > 0:
             raise HTTPException(status_code=409, detail=f"无法移除 {sym}：仍有 {active_count} 个对冲持仓,请先平仓")
 
+    # ── 防裸空竞态(用户实测 FIL 根因):先切断引擎对该币的借币源,再还债清残 ──
+    # 命门:移除在"还债/卖现货残留"期间,引擎主循环仍对同账户同币借币(该币还在 pushed_symbols
+    # 直到本函数末尾才摘除),两方无锁并发 → 残留清扫误卖掉引擎并发新借的现货 → 裸空。
+    # 故把"摘 pushed + 写 repayhold(worker 见此键即跳过该币不借)"提到还债之前,先关水龙头。
+    try:
+        _r0 = _redis()
+        _ps0 = _user_redis_key(user_id, "pushed_symbols")
+        _raw0 = _r0.get(_ps0)
+        _cur0 = set(json.loads(_raw0)) if _raw0 else set()
+        _cur0.discard(sym)
+        _r0.set(_ps0, json.dumps(sorted(_cur0)))
+        _r0.hdel(_user_redis_key(user_id, "pushed_at"), sym)
+        _r0.set(f"engine:{user_id}:repayhold:{sym}", "1", ex=1800)  # 阻断移除期间自动重借
+        _r0.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(_cur0)}))
+    except Exception as _pe:
+        logger.warning(f"remove {sym}: 预摘除/挂还币暂停失败(继续还债): {_pe}")
+
     # 移除前还清该 symbol 在所有子账户的杠杆账户残留借贷(粉尘/利息),
     # 防止移除后前端"现币/借币"列仍显示残余数据(币安那边债务未清)。
     # execute_borrow_only_repay 自包含:查实时债务→还币→记录 position,非零才执行,异常不阻断移除。
@@ -767,12 +785,20 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
                         ai = next((a for a in mi.get("userAssets", []) if a.get("asset") == base_asset), None)
                         free_now = float(ai.get("free", "0") or 0) if ai else 0.0
                         debt_now = (float(ai.get("borrowed", "0") or 0) + float(ai.get("interest", "0") or 0)) if ai else 0.0
-                        if free_now > 0 and debt_now < 1e-8:
+                        # 第二道防裸空闸:除币安实测债务≈0外,再确认 DB 层该账户该币无任何非终态在途借币仓。
+                        # 否则卖的是引擎并发新借、尚未记入债务快照的现货 → 现货<借款=裸空(用户实测根因)。
+                        _inflight = db.query(Position).filter(
+                            Position.sub_account_id == sub_id, Position.symbol == sym,
+                            Position.status.in_(("BORROWED_IDLE", "PENDING_BORROW", "HEDGING", "SPOT_SOLD")),
+                        ).count()
+                        if free_now > 0 and debt_now < 1e-8 and _inflight == 0:
                             sold, note = await _sell_residual_spot(client, sym, base_asset, free_now)
                             if sold > 0:
                                 logger.info(f"remove {sym} sub{sub_id}: residual sold back {sold}")
                             else:
                                 logger.info(f"remove {sym} sub{sub_id}: residual not sold — {note}")
+                        elif free_now > 0 and _inflight > 0:
+                            logger.info(f"remove {sym} sub{sub_id}: 有 {_inflight} 个在途借币仓,跳过残留卖回防裸空")
                     except Exception as _se:
                         logger.warning(f"remove {sym} sub{sub_id}: residual sweep failed (non-blocking): {_se}")
                     # 还债后收口该子账户该币的非终态孤儿(BORROWED_IDLE/PENDING_BORROW/PENDING_REPAY):
@@ -815,6 +841,7 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
 
     # 移除即清该币的单一规则覆盖(SymbolRule + AccountSymbolRule)→ 再推进来回归全局参数。
     _purge_symbol_rules(db, user_id, sym, sub_ids)
+    r.publish("balance:refresh", str(user_id))   # 移除+还债后即时刷余额/借币/现币(绕开10s轮询)
     return {"message": f"Removed {sym}"}
 
 

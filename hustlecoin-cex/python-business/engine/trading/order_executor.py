@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
@@ -13,6 +14,13 @@ from engine.trading.quantity_calc import usdt_to_quantity, round_to_step
 from engine.notify.feishu_sender import FeishuSender
 
 logger = logging.getLogger(__name__)
+
+# 逐币强制 enforce 观察名单:命中的币净期望闸一律按 enforce(E≤0拒开),无视全局 net_gate_mode 的 shadow。
+# 用于对结构性负期望的币(如 FIL 恒 E<0 却被反复借)单独止血观察。默认 FILUSDT;运维改 systemd 环境变量
+# NETGATE_ENFORCE_SYMBOLS=A,B 覆盖(设为空字符串=关闭强制),重启引擎生效。
+_FORCE_ENFORCE_SYMBOLS = {
+    x.strip().upper() for x in os.getenv("NETGATE_ENFORCE_SYMBOLS", "FILUSDT").split(",") if x.strip()
+}
 
 # 子账户→归属用户 缓存(归属不可变,进程级缓存;未命中查 DB 后回填)。
 # 用于给 TradeLog 补 user_id —— 历史上 _log_trade 漏写该字段致流水「用户」列全空。
@@ -563,6 +571,9 @@ async def execute_borrow(
         # (点差/名义/利率/费率/缓冲)且尚未真花钱。shadow=只记录不拦(先跑一周看会拦掉多少);
         # enforce=E≤0 直接放弃(结构性亏损不开);off=不评估。评估结果写 Redis 供 market-monitor E 榜。
         gate_mode = getattr(rules, "net_gate_mode", "shadow") or "shadow"
+        # 逐币强制 enforce 观察名单:命中即升 enforce(即便全局 shadow),对恒负期望币单独止血
+        if gate_mode != "off" and symbol in _FORCE_ENFORCE_SYMBOLS:
+            gate_mode = "enforce"
         expected_e = None
         e_break = None
         if gate_mode != "off":
