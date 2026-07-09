@@ -20,17 +20,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{sleep_until, Duration, Instant};
+use tokio_tungstenite::Connector;
 use tracing::{error, info, warn};
-use venues::{PingMode, VenueSpec};
+use venues::{PingMode, TlsMode, VenueSpec};
 
 static CONN_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const WS_IDLE_TIMEOUT_SECS: u64 = 30;
 const FRESH_CHECK_SECS: u64 = 20;
-const SYMBOL_STALE_SECS: i64 = 600;
-const CHUNK_STALE_FRACTION: f64 = 0.4;
 const FRESH_GRACE_SECS: u64 = 75;
 const RECONNECT_DELAY_SECS: u64 = 2;
+// 逐币新鲜度阈值(stale_secs/stale_fraction)按 spec 配置:各所推送语义与长尾活跃度不同,
+// 币安用 coin 生产校准值(600s/40%),小所先保守(900s/60%),跑一周实测停更比例再收紧。
 
 type Err = Box<dyn std::error::Error + Send + Sync>;
 
@@ -46,6 +47,26 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64
+}
+
+/// per-spec TLS 连接器:默认 rustls(webpki 根);Gate 前置层掐 rustls 指纹 → native-tls(OpenSSL)。
+fn build_connector(mode: TlsMode) -> Result<Connector, Err> {
+    match mode {
+        TlsMode::Rustls => {
+            static CFG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+            let cfg = CFG.get_or_init(|| {
+                let mut roots = rustls::RootCertStore::empty();
+                roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+                Arc::new(
+                    rustls::ClientConfig::builder()
+                        .with_root_certificates(roots)
+                        .with_no_client_auth(),
+                )
+            });
+            Ok(Connector::Rustls(cfg.clone()))
+        }
+        TlsMode::NativeTls => Ok(Connector::NativeTls(native_tls::TlsConnector::new()?)),
+    }
 }
 
 /// 一个 (venue,market) 的常驻任务:连接→断线→重连循环,重连时热重读 universe。
@@ -118,12 +139,13 @@ async fn connect_and_stream(
                     let stale = chunk
                         .iter()
                         .filter(|s| {
-                            let key = composed_key(spec.venue, spec.market, &s.to_uppercase());
+                            // 键必须与解析器同源经 normalize,否则原生/统一符号错位=永远误判 stale
+                            let key = composed_key(spec.venue, spec.market, &(spec.normalize)(s));
                             let last = mon_tickers.get(&key).map(|t| t.recv_ts).unwrap_or(0);
-                            now - last > SYMBOL_STALE_SECS * 1000
+                            now - last > spec.stale_secs * 1000
                         })
                         .count();
-                    if (stale as f64 / chunk.len() as f64) >= CHUNK_STALE_FRACTION {
+                    if (stale as f64 / chunk.len() as f64) >= spec.stale_fraction {
                         warn!(feed = %spec.key(), stale, total = chunk.len(),
                               "per-symbol freshness: chunk mostly stale — forcing reconnect");
                         return Err::<(), Err>("chunk stale".into());
@@ -158,7 +180,9 @@ async fn chunk_session(
 
     let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
     let url = (spec.url)(&chunk);
-    let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
+    let connector = build_connector(spec.tls)?;
+    let (ws, _) =
+        tokio_tungstenite::connect_async_tls_with_config(&url, None, false, Some(connector)).await?;
     info!(feed = %spec.key(), conn_id, streams = chunk.len(), "WS connected");
 
     let (mut write, mut read) = ws.split();
@@ -169,8 +193,8 @@ async fn chunk_session(
 
     let idle = Duration::from_secs(WS_IDLE_TIMEOUT_SECS);
     let mut idle_deadline = Instant::now() + idle;
-    let (ping_payload, ping_period) = match spec.ping {
-        PingMode::Text { payload, every_secs } => (Some(payload), Duration::from_secs(every_secs)),
+    let (ping_build, ping_period) = match spec.ping {
+        PingMode::Text { build, every_secs } => (Some(build), Duration::from_secs(every_secs)),
         PingMode::Protocol => (None, Duration::from_secs(3600)),
     };
     let mut next_ping = Instant::now() + ping_period;
@@ -183,10 +207,10 @@ async fn chunk_session(
                       "WS idle timeout — half-open detected, reconnecting");
                 return Err("idle timeout".into());
             }
-            // 客户端文本 ping(OKX 类;币安 Protocol 模式下周期极长,等效关闭)
-            _ = sleep_until(next_ping), if ping_payload.is_some() => {
-                if let Some(p) = ping_payload {
-                    if let Err(e) = write.send(Message::Text(p.to_string())).await {
+            // 客户端文本 ping(OKX/Bybit/Gate/Bitget;币安 Protocol 模式下周期极长,等效关闭)
+            _ = sleep_until(next_ping), if ping_build.is_some() => {
+                if let Some(build) = ping_build {
+                    if let Err(e) = write.send(Message::Text(build())).await {
                         warn!(feed = %spec.key(), conn_id, error = %e, "text ping failed — reconnecting");
                         return Err("text ping failed".into());
                     }
@@ -214,9 +238,23 @@ async fn chunk_session(
                     _ => {}
                 }
                 if let Message::Text(text) = msg {
-                    if let Some((symbol, td)) = (spec.parse)(&text, now_ms()) {
-                        let key = composed_key(spec.venue, spec.market, &symbol);
-                        tickers.insert(key.clone(), td);
+                    let recv = now_ms();
+                    if let Some(p) = (spec.parse)(&text, recv) {
+                        let key = composed_key(spec.venue, spec.market, &p.symbol);
+                        {
+                            // 与共享表合并:delta 语义的所(Bybit orderbook.1)只推变动侧,缺侧保留旧值
+                            let mut e = tickers.entry(key.clone()).or_default();
+                            if let Some((bp, bs)) = p.bid {
+                                e.bid = bp;
+                                e.bid_sz = bs;
+                            }
+                            if let Some((ap, asz)) = p.ask {
+                                e.ask = ap;
+                                e.ask_sz = asz;
+                            }
+                            e.ts = p.ts;
+                            e.recv_ts = recv;
+                        }
                         let _ = update_tx.send(key);
                     }
                 }

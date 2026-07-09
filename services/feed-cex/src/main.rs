@@ -51,8 +51,8 @@ async fn main() {
         let symbols = {
             let v = config::load_universe(&cfg.redis_url, spec.venue, spec.market).await;
             if v.is_empty() {
-                warn!(feed = %spec.key(), "universe missing in Redis — using fallback list");
-                config::fallback_universe()
+                warn!(feed = %spec.key(), "universe missing in Redis — using fallback majors");
+                config::fallback_bases().iter().map(|b| (spec.to_native)(b)).collect()
             } else {
                 v
             }

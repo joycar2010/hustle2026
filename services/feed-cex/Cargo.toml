@@ -5,10 +5,13 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-# rustls 而非 native-tls:构建机免装 openssl-devel,产物不依赖系统 openssl
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# 双 TLS 栈:默认 rustls;Gate 的前置层按 TLS 指纹掐 rustls 握手(curl/OpenSSL 通、rustls eof),
+# 故 per-spec 可选 native-tls(OpenSSL)。构建机需 openssl-devel(deploy_feed.sh 已装)。
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots", "native-tls"] }
 # rustls 0.23 须显式选定唯一 CryptoProvider(ring),main 里 install_default;缺省会运行时 panic
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+native-tls = "0.2"
+webpki-roots = "0.26"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rust_decimal = { version = "1", features = ["serde-with-str"] }

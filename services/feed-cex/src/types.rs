@@ -27,7 +27,18 @@ pub struct TickerSnapshot<'a> {
     pub recv_ts: i64,
 }
 
-/// 币安 bookTicker(spot 无事件时间 T,usdm 有;B/A=一档量)。
+/// 解析结果:统一大写符号 + 可缺侧的 L1(Bybit orderbook.1 delta 只推变动侧,
+/// 由连接器与共享表合并;全量推送的所把两侧都填上)。
+#[derive(Debug, Clone)]
+pub struct ParsedTick {
+    /// 统一符号(大写,无分隔符,如 BTCUSDT)——已经过 spec.normalize
+    pub symbol: String,
+    pub bid: Option<(rust_decimal::Decimal, rust_decimal::Decimal)>, // (价,量)
+    pub ask: Option<(rust_decimal::Decimal, rust_decimal::Decimal)>,
+    pub ts: i64,
+}
+
+/// 币安 bookTicker(spot 无事件时间 T,perp 有;B/A=一档量)。
 #[derive(Debug, Deserialize)]
 pub struct BinanceBookTicker {
     #[serde(rename = "s")]

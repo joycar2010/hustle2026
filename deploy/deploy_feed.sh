@@ -7,8 +7,8 @@ KEY="$HOME/.ssh/cex-trading-key2.pem"
 SSH="ssh -i $KEY -o StrictHostKeyChecking=no ec2-user@$HOST"
 cd "$(dirname "$0")/.."
 
-# 工具链(一次性幂等):gcc 链接器 + ec2-user 级 rustup minimal
-$SSH 'command -v cc >/dev/null || sudo dnf -y -q install gcc;
+# 工具链(一次性幂等):gcc 链接器 + openssl-devel(native-tls 构建需要)+ ec2-user 级 rustup minimal
+$SSH 'sudo dnf -y -q install gcc openssl-devel >/dev/null 2>&1 || true;
       test -x ~/.cargo/bin/cargo || (curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1)'
 
 OLD_PID=$($SSH "systemctl show -p MainPID --value dcm-feed-cex 2>/dev/null" || echo 0)
@@ -19,7 +19,9 @@ tar czf - --exclude='__pycache__' --exclude='*.pyc' --exclude='.git' \
     packages services deploy | $SSH "tar xzf - -C ~/dexcexmix/src"
 
 echo "== cargo build (目标机原生) =="
-$SSH "cd ~/dexcexmix/src/services/feed-cex && ~/.cargo/bin/cargo build --release 2>&1 | tail -4 &&
+# set -o pipefail 必须:cargo 失败被 tail 的 0 退出码掩盖曾导致旧二进制被当新版部署(假成功)
+$SSH "set -o pipefail; cd ~/dexcexmix/src/services/feed-cex &&
+      ~/.cargo/bin/cargo build --release 2>&1 | tail -30 &&
       cp target/release/dcm-feed ~/dexcexmix/bin/dcm-feed.new &&
       mv ~/dexcexmix/bin/dcm-feed.new ~/dexcexmix/bin/dcm-feed"
 
