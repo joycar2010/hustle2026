@@ -43,10 +43,15 @@ class Notifier:
     def fire(self, key: str, title: str, content: str,
              level: str = "info", marquee: bool = False,
              color: str = "#3b82f6", blink: bool = False) -> dict:
-        """发一条通知。key 用于节流分桶(自动加 service 前缀);level=fatal 绕过节流。"""
+        """发一条通知。key 用于节流分桶(自动加 service 前缀)。
+        level=fatal 不绕过节流而是用 300s/1 硬地板——完全绕过曾造成巡检循环每 30s 重发同一致命告警
+        (告警风暴淹没真信号);300s 地板保证致命级最多被压制 5 分钟,不会被长节流吞掉。"""
         results: dict = {}
         tkey = f"{self.service}:{key}"
-        if level != "fatal" and not throttle_ok(
+        if level == "fatal":
+            if not throttle_ok(self.redis_url, f"{tkey}:fatal", 300, 1):
+                return {"throttled": True}
+        elif not throttle_ok(
                 self.redis_url, tkey, self.throttle_interval_sec, self.throttle_max_count):
             return {"throttled": True}
 
