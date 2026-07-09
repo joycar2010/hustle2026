@@ -422,6 +422,13 @@ class Worker:
                     statuses[symbol] = "还币暂停"; continue
             except Exception:
                 pass
+            # 净期望闸拒开冷却(execute_borrow enforce 分支写,EX300):显示真实拦截原因
+            # (原来只显"运行中"=反馈黑洞)+ 5min 内不重试(防 FAILED 洪水+白烧利率 REST)。
+            try:
+                if await self._redis.get(f"engine:{self._user_id}:netgate:{symbol}"):
+                    statuses[symbol] = "E闸拒开"; continue
+            except Exception:
+                pass
             sym_rule = self._symbol_rules.get(symbol, {})
             if sym_rule.get("max_borrow_amount") is not None and sym_rule["max_borrow_amount"] == 0:
                 statuses[symbol] = "禁借"; continue

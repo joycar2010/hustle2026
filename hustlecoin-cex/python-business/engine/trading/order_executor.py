@@ -622,6 +622,24 @@ async def execute_borrow(
                 logger.info(f"Net-expect gate REJECT {symbol}: {position.error_message}")
                 db.commit()
                 db.close()
+                # 拒开冷却键(5min):①worker 见键即显示状态"E闸拒开"并跳过重试——否则用户只看到
+                # "运行中"却始终不借(反馈黑洞);②防每秒重试制造 FAILED 洪水(实测11秒20行)+白烧
+                # 利率查询 REST。点差是活的,5min 后重评一次。与 -3045 noinv 键同款 sync 写法。
+                try:
+                    _uid_g = user_id
+                    if _uid_g is None:
+                        _db2 = SessionLocal()
+                        try:
+                            _uid_g = _resolve_user_id(_db2, sub_account_id)
+                        finally:
+                            _db2.close()
+                    import redis as _r
+                    from app.config import settings as _s
+                    rc = _r.from_url(_s.redis_url, decode_responses=True)
+                    rc.set(f"engine:{_uid_g}:netgate:{symbol}", f"E={expected_e:.4f}U", ex=300)
+                    rc.close()
+                except Exception:
+                    pass
                 return None
             if expected_e is not None and expected_e <= 0:
                 logger.info(f"[shadow] Net-expect≤0 {symbol}: E={expected_e:.4f}U (借币仍继续, gate={gate_mode})")
