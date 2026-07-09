@@ -604,7 +604,12 @@ class BalancePusher:
                                         # (engine:noinv:{sym},-3045 冷却 1800s)→ 立即删全局键解冻,worker 下一周期(≤3s)
                                         # 即可重新借该币。原来只清本进程 local 标志、全局键一直钉到 TTL 过期 → worker 盲等30min。
                                         # delete 返回删除数>0 = 真发生"无券→有券"跃迁,只在跃迁时记日志/播报(天然去重)。
-                                        if _amt > 0:
+                                        # 解冻门槛:恢复量名义 ≥15U 才解冻。零星补货(几粒币)时 maxBorrowable>0
+                                        # 但引擎按整口借必再 -3045 → 解冻/冻结互搏,1s级重试刷 FAILED 行
+                                        # (实测囤券模式下 2min 93 次)。无价格数据时保守要求 ≥5 个币。
+                                        _px = spot_bids.get(f"{asset}USDT", 0) or 0
+                                        _meaningful = (_amt * _px >= 15.0) if _px > 0 else (_amt >= 5.0)
+                                        if _amt > 0 and _meaningful:
                                             try:
                                                 if await self._redis.delete(f"engine:noinv:{asset}USDT"):
                                                     logger.info(f"抢券:{asset} 库存恢复(可借{_amt:.4f}),已解冻全局无券标志,worker 下周期可借")
