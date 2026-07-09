@@ -11,6 +11,9 @@ export const api = {
   legs: () => http.get('/engine/legs'),
   alerts: (limit=30) => http.get('/engine/alerts', { params:{limit} }),
   deals: (user, limit=100) => http.get(`/deals/${user}`, { params:{limit} }),
+  // 持久账本(leg_deals): 平仓即落库+120s对账, 不受云端会话清零影响; 跨用户带用户名
+  adminLegDeals: (params) => http.get('/admin/leg_deals', { params, headers: adminHeaders() }),
+  adminLegDealsSweep: () => http.post('/admin/leg_deals/sweep', {}, { headers: adminHeaders() }),
   params: (user) => http.get(`/params/${user}`),
   paramsSave: (row) => http.post('/params/save', { ...row, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   syncLast: () => http.get('/sync/last'),

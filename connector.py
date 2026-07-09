@@ -15,20 +15,33 @@ class IHedgeConnector(ABC):
     @abstractmethod
     async def status(self): ...
 
+# ---- 共享 HTTP 连接池(keep-alive 复用) ----
+# 坑: 原每次调用 `async with httpx.AsyncClient()` 新建客户端 = 每个请求都付一次 TCP 握手,
+#     跨洲链路(东京→法兰克福 FRA)实测 460ms/调用, 复用后 ~230ms(省一整个 RTT)。
+#     uvicorn 单事件循环下模块级共享安全; 按用途分池, 超时按请求粒度传。
+_POOL={}
+def _pooled(key, timeout):
+    c=_POOL.get(key)
+    if c is None or c.is_closed:
+        c=httpx.AsyncClient(timeout=timeout,
+            limits=httpx.Limits(max_keepalive_connections=16, keepalive_expiry=90))
+        _POOL[key]=c
+    return c
+
 class _BridgeLeg:
     """单条 bridge 腿（凭证留 bridge 机，QH 只发 X-API-Key）"""
     def __init__(self, url, key):
         self.base=url; self.h={"X-API-Key":key}
     async def _get(self, path, **params):
-        async with httpx.AsyncClient(timeout=10) as c:
-            r=await c.get(self.base+path, headers=self.h, params=params); r.raise_for_status(); return r.json()
+        r=await _pooled("bridge",10).get(self.base+path, headers=self.h, params=params, timeout=10)
+        r.raise_for_status(); return r.json()
     async def account_info(self): return await self._get("/mt5/account/info")
     async def positions(self):    return await self._get("/mt5/positions")
     async def history_deals(self, days=1): return await self._get("/mt5/history/deals", days=days)
     async def status(self):       return await self._get("/mt5/connection/status")
     async def _post(self, path, body=None):
-        async with httpx.AsyncClient(timeout=15) as c:
-            r=await c.post(self.base+path, headers=self.h, json=(body or {})); r.raise_for_status(); return r.json()
+        r=await _pooled("bridge",15).post(self.base+path, headers=self.h, json=(body or {}), timeout=15)
+        r.raise_for_status(); return r.json()
     async def close_all(self, symbol=None):
         return await self._post("/mt5/position/close-all", {"symbol": symbol})
     async def open_order(self, symbol, volume, order_type, comment="QH"):
@@ -55,21 +68,30 @@ class Mt5BridgeConnector(IHedgeConnector):
     async def history_deals(self, days=1): return await self.main.history_deals(days)
     async def status(self):       return await self.main.status()
     # 双腿接口
+    # 双腿读取/紧急平仓一律并发(gather): 串行会把跨洲 RTT ×2(开仓前置检查曾因此多花 ~1s)
     async def both_accounts(self):
-        m=await self.main.account_info()
-        h=await self.hedge.account_info() if self.hedge else None
+        if self.hedge:
+            m,h=await asyncio.gather(self.main.account_info(), self.hedge.account_info())
+        else:
+            m=await self.main.account_info(); h=None
         return {"main":m,"hedge":h}
     async def both_positions(self):
-        m=await self.main.positions()
-        h=await self.hedge.positions() if self.hedge else None
+        if self.hedge:
+            m,h=await asyncio.gather(self.main.positions(), self.hedge.positions())
+        else:
+            m=await self.main.positions(); h=None
         return {"main":m,"hedge":h}
     async def both_status(self):
-        m=await self.main.status()
-        h=await self.hedge.status() if self.hedge else None
+        if self.hedge:
+            m,h=await asyncio.gather(self.main.status(), self.hedge.status())
+        else:
+            m=await self.main.status(); h=None
         return {"main":m,"hedge":h}
     async def both_close_all(self, symbol=None):
-        m=await self.main.close_all(symbol)
-        h=await self.hedge.close_all(symbol) if self.hedge else None
+        if self.hedge:
+            m,h=await asyncio.gather(self.main.close_all(symbol), self.hedge.close_all(symbol))
+        else:
+            m=await self.main.close_all(symbol); h=None
         return {"main":m,"hedge":h}
     async def open_pair(self, direction, main_symbol, hedge_symbol, main_vol, hedge_vol,
                         mode="main_first", speed="fast"):
@@ -150,9 +172,8 @@ class Api2TradeLeg:
         self.armed = os.environ.get("QH_A2T_TRADING","0")=="1"
     async def _get(self, path, **params):
         params.setdefault("id", self.uuid)
-        async with httpx.AsyncClient(timeout=10) as c:
-            r=await c.get(self.base+path, params=params, headers=self.h, auth=self.auth)
-            r.raise_for_status(); return r.json()
+        r=await _pooled("a2t",10).get(self.base+path, params=params, headers=self.h, auth=self.auth, timeout=10)
+        r.raise_for_status(); return r.json()
     # ---- 读(P0 就绪) ---- 归一化为与 bridge 相近的键, 供上层复用
     async def account_info(self):
         j=await self._get("/AccountSummary")

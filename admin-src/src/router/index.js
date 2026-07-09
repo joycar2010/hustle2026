@@ -34,7 +34,8 @@ const routes = [
     // 保留(功能不丢, 附运维末尾)
     { path:'legs', name:'legs', meta:{title:'双腿监控',icon:'Connection',group:'运维',ord:6}, component:()=>import('../views/Legs.vue') },
     { path:'recon', name:'recon', meta:{title:'跨用户对账',icon:'Files',group:'运维',ord:7}, component:()=>import('../views/Recon.vue') },
-    { path:'deals', name:'deals', meta:{title:'成交记录',icon:'List',group:'运维',ord:8}, component:()=>import('../views/Deals.vue') },
+    // 成交记录已并入 跨用户对账(/recon 第二页签"成交记录·统计"); 旧 /deals 直达链接重定向兜底
+    { path:'deals', redirect:'/recon' },
   ]}
 ]
 export default createRouter({ history:createWebHistory(), routes })

@@ -792,7 +792,7 @@ def _a2t_read_legs():
     legs={"main":None,"hedge":None}; rowsmap={}
     try:
         c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT role,login,server,platform,api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE role IN ('main','hedge') AND enabled AND conn_mode='api' AND api2trade_uuid<>'' ORDER BY id")
+        cur.execute("SELECT role,login,server,platform,user_id,api2trade_uuid,api2trade_config_id FROM mt_accounts WHERE role IN ('main','hedge') AND enabled AND conn_mode='api' AND api2trade_uuid<>'' ORDER BY id")
         rows=cur.fetchall(); c.close()
         from connector import Api2TradeLeg
         for r in rows:
@@ -815,17 +815,39 @@ def _a2t_leg_bust():
     try: _A2T_RC.clear()   # 读取微缓存一并清(防重注册后 ≤30s 读到旧 UUID 数据)
     except Exception: pass
 
-# A2T 响应归一化为桥形状(上层解析零改动)
-def _a2t_norm_order(o):
-    ot=str(o.get("orderType") or "").lower()
-    t=0 if "buy" in ot else (1 if "sell" in ot else -1)   # Balance/出入金=-1, legstats 自动排除
-    ts=int((o.get("closeTimestampUTC") or o.get("openTimestampUTC") or 0)/1000)
-    return {"ticket":o.get("ticket"),"symbol":o.get("symbol"),"type":t,
+# A2T 响应归一化为桥形状(上层解析零改动)。MT4/MT5 两组字段差异大坑:
+#   方向: MT5组=orderType("Buy"/"Balance") / MT4组=type("Sell"), Balance/出入金→-1 自动排除
+#   时间: MT5组=closeTimestampUTC(毫秒) / MT4组该字段为 null, 真 UTC 纪元在 ex.close_time/ex.open_time,
+#         ISO 字符串(closeTime)是经纪商本地墙钟(仅最后兜底, 精度够天数窗过滤)
+def _a2t_norm_order(o, off=0):
+    ot=str(o.get("orderType") or o.get("type") or "").lower()
+    t=0 if "buy" in ot else (1 if "sell" in ot else -1)
+    ex=o.get("ex") or {}
+    def _iso_ep(v):
+        try:
+            if v and not str(v).startswith("1970"):
+                return int(_dt.datetime.fromisoformat(str(v)).replace(tzinfo=_dt.timezone.utc).timestamp())
+        except Exception: pass
+        return 0
+    if o.get("closeTimestampUTC"): close_ep=int(o["closeTimestampUTC"]/1000)
+    elif ex.get("close_time"):     close_ep=int(ex["close_time"] or 0)
+    else:                          close_ep=_iso_ep(o.get("closeTime"))
+    if o.get("openTimestampUTC"): open_ep=int(o["openTimestampUTC"]/1000)
+    elif ex.get("open_time"):     open_ep=int(ex["open_time"] or 0)
+    else:                         open_ep=_iso_ep(o.get("openTime"))
+    # 统一折回 UTC(off=该腿经纪商墙钟偏移, _a2t_leg_off 标定; A2T 所有时间字段均为墙钟纪元)
+    if close_ep: close_ep-=off
+    if open_ep:  open_ep-=off
+    closed=bool(close_ep)
+    px=float(o.get("closePrice") or 0) if closed else 0.0
+    if not px: px=float(o.get("openPrice") or 0)
+    return {"ticket":o.get("ticket"),"order":o.get("ticket"),"symbol":o.get("symbol"),"type":t,
+            "entry":1 if closed else 0,   # 整单模型: 已平=出场行(paired_history 按平仓行配对)
             "volume":float(o.get("lots") or o.get("volume") or 0),
-            "price_open":o.get("openPrice"),"price_current":o.get("closePrice"),
+            "price":px,"price_open":o.get("openPrice"),"price_current":o.get("closePrice"),
             "profit":float(o.get("profit") or 0),"swap":float(o.get("swap") or 0),
             "commission":float(o.get("commission") or 0)+float(o.get("fee") or 0),
-            "time":ts,"comment":o.get("comment") or ""}
+            "time":(close_ep or open_ep),"time_open":open_ep,"comment":o.get("comment") or ""}
 async def _a2t_tick(leg, sym):
     """行情: 用 /GetQuoteMany(MT4/MT5 两组通用)。坑: /GetQuote 仅 MT5 组存在, MT4 账户 403 "path not valid";
        无效符号返回 201 INVALID_SYMBOL(非4xx, httpx 不抛)——须显式判列表。"""
@@ -841,16 +863,130 @@ async def _a2t_tick(leg, sym):
     except Exception: pass
     return {"symbol":q.get("symbol") or sym,"bid":q.get("bid"),"ask":q.get("ask"),
             "last":q.get("last") or 0.0,"volume":q.get("volume") or 0,"time":t,"time_msc":t*1000,"src":"a2t"}
-async def _a2t_positions(leg):
+# 每腿经纪商墙钟偏移标定: A2T 的 ex.close_time/ISO 时间全是**各经纪商本地墙钟纪元非 UTC**
+# (IC=+3h / Exness=0, 两腿相差 3h 曾致配对历史错配出假单腿)。用该腿行情时间与服务器 UTC 差值
+# 推偏移(取整到 30min 吸收链路噪声), 10min 缓存, 换券商自动适应。
+_A2T_OFF_CACHE={}
+def _role_sym(role):
+    try:
+        c=db(); cur=c.cursor(); cur.execute("SELECT symbol,hedge_symbol FROM param_templates LIMIT 1")
+        r=cur.fetchone(); c.close()
+        if r:
+            base=(r[0] or "XAUUSD")
+            return base if role=="main" else (ENG.map_hedge_symbol(base, r[1]) or base)
+    except Exception: pass
+    return "XAUUSD"
+async def _a2t_leg_off(role, leg):
+    ent=_A2T_OFF_CACHE.get(role); now=_t_conn.time()
+    if ent and (now-ent[1])<600: return ent[0]
+    off=ent[0] if ent else 0
+    try:
+        tk=await _a2t_cached(("tick",role,"_off"),5.0,lambda: _a2t_tick(leg,_role_sym(role)))
+        if tk.get("time"):
+            off=int(round((float(tk["time"])-now)/1800.0)*1800)
+    except Exception: pass
+    _A2T_OFF_CACHE[role]=(off,now)
+    return off
+async def _a2t_positions(leg, role=None):
+    off=await _a2t_leg_off(role,leg) if role else 0
     j=await leg._get("/OpenedOrders")
     items=j if isinstance(j,list) else ((j or {}).get("orders") or [])
-    return {"positions":[_a2t_norm_order(o) for o in items],"src":"a2t"}
-async def _a2t_history(leg, days=1):
+    return {"positions":[_a2t_norm_order(o,off) for o in items],"src":"a2t"}
+async def _a2t_history(leg, days=1, role=None):
+    """历史成交 = 云端会话增量 ∪ 本地持久层(leg_deals)。
+       命门: A2T ClosedOrders 是**会话级近期缓存**(断线重连即清零, ~100笔上限), 绝不能单独当历史真相源
+       (Exness-Trial 会话重启曾把对冲腿账本整段抹掉→配对历史全变假单腿)。ticket 去重, 云端优先。"""
+    off=await _a2t_leg_off(role,leg) if role else 0
     j=await leg._get("/ClosedOrders")
     items=j if isinstance(j,list) else ((j or {}).get("orders") or [])
     cutoff=(_t_conn.time()-float(days or 1)*86400)
-    deals=[_a2t_norm_order(o) for o in items]
-    return {"deals":[d for d in deals if (d.get("time") or 0)>=cutoff],"src":"a2t"}
+    deals=[_a2t_norm_order(o,off) for o in items]
+    cloud=[d for d in deals if (d.get("time") or 0)>=cutoff]
+    if role:
+        try:
+            seen={str(d.get("ticket")) for d in cloud}
+            c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT ticket,symbol,type,volume,price,price_open,profit,swap,commission,comment,entry,time_utc,time_open FROM leg_deals WHERE leg=%s AND time_utc>=%s",(role,int(cutoff)))
+            for r_ in cur.fetchall():
+                if str(r_["ticket"]) in seen: continue
+                cloud.append({"ticket":r_["ticket"],"order":r_["ticket"],"symbol":r_["symbol"],"type":r_["type"],
+                              "entry":int(r_["entry"] or 1),"volume":float(r_["volume"] or 0),"price":float(r_["price"] or 0),
+                              "price_open":r_["price_open"],"price_current":r_["price"],
+                              "profit":float(r_["profit"] or 0),"swap":float(r_["swap"] or 0),
+                              "commission":float(r_["commission"] or 0),"time":int(r_["time_utc"] or 0),
+                              "time_open":int(r_["time_open"] or 0),"comment":r_["comment"] or ""})
+            c.close()
+        except Exception: pass
+    cloud.sort(key=lambda d:(d.get("time") or 0))
+    return {"deals":cloud,"src":"a2t+db"}
+
+def _persist_leg_rows(role, rows, user_id=None):
+    """平仓行落库(ticket 幂等去重)。仅真实成交(type 0/1)且已平(entry=1)。返回新增行数。"""
+    if not rows: return 0
+    try:
+        c=db(); cur=c.cursor(); n=0
+        for d in rows:
+            if d.get("type") not in (0,1) or not d.get("entry"): continue
+            tk=str(d.get("ticket") or "")
+            if not tk: continue
+            cur.execute("""INSERT INTO leg_deals(user_id,leg,ticket,symbol,type,volume,price,price_open,profit,swap,commission,comment,entry,time_utc,time_open)
+                           VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (leg,ticket) DO NOTHING""",
+                        (user_id,role,tk,d.get("symbol"),d.get("type"),d.get("volume"),d.get("price"),d.get("price_open"),
+                         d.get("profit"),d.get("swap"),d.get("commission"),d.get("comment"),1,
+                         int(d.get("time") or 0),int(d.get("time_open") or 0)))
+            n+=cur.rowcount
+        c.close(); return n
+    except Exception:
+        return 0
+
+async def _persist_sweep_once():
+    """把两腿云端会话内的已平记录增量落库一次。供 120s 周期对账 + 平仓后即时补账共用。"""
+    total=0
+    try:
+        legs=_a2t_read_legs(); rowsmap=(_A2T_LEG_CACHE.get("rows") or {})
+        for role,leg in (legs or {}).items():
+            if leg is None: continue
+            try:
+                off=await _a2t_leg_off(role,leg)
+                j=await leg._get("/ClosedOrders")
+                items=j if isinstance(j,list) else ((j or {}).get("orders") or [])
+                rows=[_a2t_norm_order(o,off) for o in items]
+                uid=(rowsmap.get(role) or {}).get("user_id")
+                total+=_persist_leg_rows(role,[d for d in rows if d.get("entry")],uid)
+            except Exception: pass
+        if total: R.set(RNS+"deals:persist:last", json.dumps({"n":total,"ts":_dt.datetime.utcnow().isoformat()}))
+    except Exception: pass
+    return total
+
+def _persist_after_close():
+    """平仓成功后即时补账(3s 延迟等云端记录就绪, fire-and-forget): 会话在下一轮对账前重启也不丢单。"""
+    async def once():
+        await _aio.sleep(3)
+        await _persist_sweep_once()
+    try: _aio.create_task(once())
+    except Exception: pass
+
+async def _deal_persist_sweeper():
+    await _aio.sleep(30)
+    while True:
+        await _persist_sweep_once()
+        await _aio.sleep(120)
+
+@app.on_event("startup")
+async def _deal_persist_boot():
+    try:
+        c=db(); cur=c.cursor()
+        cur.execute("""CREATE TABLE IF NOT EXISTS leg_deals(
+            id BIGSERIAL PRIMARY KEY, user_id INT, leg TEXT NOT NULL, ticket TEXT NOT NULL,
+            symbol TEXT, type INT, volume DOUBLE PRECISION, price DOUBLE PRECISION, price_open DOUBLE PRECISION,
+            profit DOUBLE PRECISION, swap DOUBLE PRECISION, commission DOUBLE PRECISION,
+            comment TEXT, entry INT DEFAULT 1, time_utc BIGINT, time_open BIGINT,
+            created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(leg,ticket))""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_leg_deals_time ON leg_deals(leg,time_utc)")
+        c.close()
+    except Exception: pass
+    _aio.create_task(_deal_persist_sweeper())
 async def _a2t_leg_status(role, leg):
     st=await leg.status()
     if st.get("connected"):
@@ -916,13 +1052,13 @@ class _FallbackLeg:
         if path=="/mt5/history/deals":
             d=params.get("days",1)
             return await self._read(lambda b: b._get(path,**params),
-                                    lambda fb: _a2t_cached(("hist",self.role,d),30.0,lambda: _a2t_history(fb,d)), empty=self._EMPTY_HIST)
+                                    lambda fb: _a2t_cached(("hist",self.role,d),30.0,lambda: _a2t_history(fb,d,self.role)), empty=self._EMPTY_HIST)
         if path=="/mt5/account/info":
             return await self._read(lambda b: b._get(path,**params),
                                     lambda fb: _a2t_cached(("acct",self.role),5.0,lambda: fb.account_info()))
         if path=="/mt5/positions":
             return await self._read(lambda b: b._get(path,**params),
-                                    lambda fb: _a2t_cached(("pos",self.role),2.0,lambda: _a2t_positions(fb)), empty=self._EMPTY_POS)
+                                    lambda fb: _a2t_cached(("pos",self.role),2.0,lambda: _a2t_positions(fb,self.role)), empty=self._EMPTY_POS)
         b=self._b()
         if b is None: raise RuntimeError("bridge leg missing: "+path)
         return await b._get(path, **params)                     # 桥专属路径(symbol_info/symbols等)
@@ -931,10 +1067,10 @@ class _FallbackLeg:
                                 lambda fb: _a2t_cached(("acct",self.role),5.0,lambda: fb.account_info()))
     async def positions(self):
         return await self._read(lambda b: b.positions(),
-                                lambda fb: _a2t_cached(("pos",self.role),2.0,lambda: _a2t_positions(fb)), empty=self._EMPTY_POS)
+                                lambda fb: _a2t_cached(("pos",self.role),2.0,lambda: _a2t_positions(fb,self.role)), empty=self._EMPTY_POS)
     async def history_deals(self, days=1):
         return await self._read(lambda b: b.history_deals(days),
-                                lambda fb: _a2t_cached(("hist",self.role,days),30.0,lambda: _a2t_history(fb,days)), empty=self._EMPTY_HIST)
+                                lambda fb: _a2t_cached(("hist",self.role,days),30.0,lambda: _a2t_history(fb,days,self.role)), empty=self._EMPTY_HIST)
     async def status(self):
         return await self._read(lambda b: b.status(),
                                 lambda fb: _a2t_cached(("st",self.role),5.0,lambda: _a2t_leg_status(self.role,fb)), empty=self._EMPTY_ST)
@@ -1019,7 +1155,7 @@ def _conn_consistency():
     return {"consistent":consistent,"eff_mode":(list(modes)[0] if len(modes)==1 else None),
             "main_modes":sorted(mains),"hedge_modes":sorted(hedges)}
 
-async def _conn_health(mode=None):
+async def _conn_health_once(mode=None):
     """某连接方式(默认当前 active)双腿可达? 返回 (ok, status)。"""
     try:
         c=_active_connector() if (mode is None or mode==_active_mode()) else build_connector(mode)
@@ -1031,6 +1167,21 @@ async def _conn_health(mode=None):
         return (bool(m) and (h is None or h)), st
     except Exception as e:
         return False, {"err":str(e)[:120]}
+
+_CONN_HEALTH_CACHE={"ts":0.0,"ok":None,"st":None}
+async def _conn_health(mode=None):
+    """健康检查加固: ①4s 结果缓存(开/平仓闸不再每次都付跨洲双腿探测) ②失败自动重试一次(网络抖动不再直接拒单)。
+       仅缓存当前 active_mode 的结果; 显式查询其它 mode 不缓存。"""
+    now=_t_conn.time()
+    is_active=(mode is None or mode==_active_mode())
+    if is_active and _CONN_HEALTH_CACHE["ok"] is not None and (now-_CONN_HEALTH_CACHE["ts"])<4:
+        return _CONN_HEALTH_CACHE["ok"], _CONN_HEALTH_CACHE["st"]
+    ok,st=await _conn_health_once(mode)
+    if not ok:
+        ok,st=await _conn_health_once(mode)   # 抖动重试
+    if is_active:
+        _CONN_HEALTH_CACHE["ts"]=now; _CONN_HEALTH_CACHE["ok"]=ok; _CONN_HEALTH_CACHE["st"]=st
+    return ok,st
 
 async def _conn_block_reason():
     """执行连接方式(active_mode)是否可执行? 不一致/不可达→返回原因串, 否则 None。读取不受此限(读桥真相)。"""
@@ -1052,7 +1203,9 @@ async def _conn_gate_exec():
 _BROKER_OFF={"sec":None,"ts":0.0}
 async def _broker_utc_offset():
     """经纪商 epoch 与 UTC 偏移(秒, broker-utc; GMT+3≈10800)。桥 tick time 活标定→自动兼容夏令时。
-       缓存5min; 失败回落上次值或0。成交转UTC = broker_epoch - 此偏移。"""
+       缓存5min; 失败回落上次值或0。成交转UTC = broker_epoch - 此偏移。
+       纯云端读取(a2t)时恒 0: _a2t_norm_order 已按逐腿标定折回 UTC, 再减会二次校正。"""
+    if _read_source()=="a2t": return 0
     now=_t_conn.time()
     if _BROKER_OFF["sec"] is not None and (now-_BROKER_OFF["ts"])<300:
         return _BROKER_OFF["sec"]
@@ -1641,7 +1794,8 @@ def _entry_gate(ov, gthr, cur_sp, fee_pts=0.0):
 # 模式(Redis qh:auto_exit:{user}): off=不动 / shadow=只回显"将平哪些坑"不真发 / armed=仅平 exit_enabled 的坑 / full=平所有命中坑
 async def _close_one_pair(username, symbol, hedge_sym, main_side, hedge_side, mode_seq, speed, slot_no, reason):
     """真实平一坑(带裸空守护+账本弹出); 复用 close_pair 内核。返回 (ok, detail)。"""
-    res=await EXEC.close_pair(symbol, hedge_sym, main_side, hedge_side, None, None, mode=mode_seq, speed=speed)
+    res=await _exec_close_pair(symbol, hedge_sym, main_side, hedge_side, None, None, mode_seq, speed)
+    _persist_after_close()   # 平仓账本即时落库(云端会话级缓存不可靠)
     mok=("error" not in (res.get("main") or {})); hok=(res.get("hedge") is None) or ("error" not in (res.get("hedge") or {}))
     if mok and not hok:
         R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"err",
@@ -1884,7 +2038,7 @@ async def _auto_entry_loop():
             R.setex(lockkey, cooldown, "1")
             mside,hside=("sell","buy") if direction=="reverse" else ("buy","sell")
             _mark_slot_busy(sym, slot_no)   # 自动进单: 该坑进度渐变
-            res=await EXEC.open_pair(direction, sym, hedge_sym, mv, hv, mode=(t.get("entry_mode") or "main_first"), speed=(t.get("speed_mode") or "fast"))
+            res=await _exec_open_pair(direction, sym, hedge_sym, mv, hv, (t.get("entry_mode") or "main_first"), (t.get("speed_mode") or "fast"))
             mok=res.get("main_ok"); hok=res.get("hedge_ok")
             if mok and hok:
                 try:
@@ -5162,6 +5316,7 @@ async def cmd_close_all(r:CmdReq):
         return last,False
     main_r,main_ok = await _close_leg(EXEC.main,"main")
     hedge_r,hedge_ok = (await _close_leg(EXEC.hedge,"hedge")) if getattr(EXEC,"hedge",None) else ({"closed":0},True)
+    _persist_after_close()   # 平仓账本即时落库(云端会话级缓存不可靠)
     mc=(main_r or {}).get("closed",0); hc=(hedge_r or {}).get("closed",0)
     # 裸空判定：一腿成功平、另一腿失败 = 单边暴露
     naked=None
@@ -5319,8 +5474,24 @@ async def cmd_open_pair(r:OpenPairReq):
     mode=(t.get("entry_mode") or "main_first"); speed=(t.get("speed_mode") or "fast")
     if mode not in ("concurrent","main_first","hedge_first"): mode="main_first"
     legmap={"reverse":("sell","buy"),"forward":("buy","sell")}
+    # ── 前置读取并行化: 占坑/双腿账户/双腿tick 同时发起(原为串行冷调用, 跨洲链路累计 ~2.5s) ──
+    _rm=float(t.get("margin_reserve_main") or 0); _rh=float(t.get("margin_reserve_hedge") or 0)
+    async def _safe_coro(coro):
+        try: return await coro
+        except Exception as e: return e
+    _occ_task=_aio.create_task(_occupied_slots(r.symbol))
+    _accs_task=_aio.create_task(_safe_coro(CONN.both_accounts())) if ((_rm>0 or _rh>0) and hasattr(CONN,"both_accounts")) else None
+    async def _tick_pair():
+        async def one(leg,sym):
+            try: return await leg._get("/mt5/tick/"+sym)
+            except Exception: return None
+        _h=getattr(CONN,"hedge",None)
+        if _h is not None:
+            return await _aio.gather(one(CONN.main,main_sym), one(_h,hedge_sym))
+        return (await one(CONN.main,main_sym), None)
+    _tick_task=_aio.create_task(_tick_pair())
     # 已占坑号(gap-aware): 支持坑号跳空
-    occ=await _occupied_slots(r.symbol)
+    occ=await _occ_task
     if occ is None:
         raise HTTPException(502,"无法读取当前持仓坑位(fail-closed, 拒绝开仓避免超额填坑)")
     filled=len(occ)
@@ -5353,24 +5524,21 @@ async def cmd_open_pair(r:OpenPairReq):
         fl=ENG.fluctuation_guard(_sp,_mc,_bd)
         if fl[0]:
             raise HTTPException(409,"数据波动过大暂停入场: %s(近%d条幅度>阈值%.2f)"%(fl[2],_mc,_bd))
-    # 保证金预留闸: 开仓前查双腿可用保证金须 >= 预留(留风险垫, fail-closed)
-    _rm=float(t.get("margin_reserve_main") or 0); _rh=float(t.get("margin_reserve_hedge") or 0)
+    # 保证金预留闸: 开仓前查双腿可用保证金须 >= 预留(留风险垫, fail-closed; 读取已在前置并行任务发起)
     if _rm>0 or _rh>0:
-        try:
-            _accs=await CONN.both_accounts() if hasattr(CONN,"both_accounts") else {"main":await CONN.account_info(),"hedge":None}
-        except Exception as ex:
-            raise HTTPException(502,"无法读取账户保证金(fail-closed, 拒绝开仓): %s"%ex)
+        _accs=(await _accs_task) if _accs_task is not None else None
+        if _accs is None or isinstance(_accs,Exception):
+            raise HTTPException(502,"无法读取账户保证金(fail-closed, 拒绝开仓): %s"%(_accs if _accs is not None else "no both_accounts"))
         _ma=(_accs.get("main") or {}); _ha=(_accs.get("hedge") or {})
         ok_m,why_m=ENG.margin_sufficient(_ma.get("margin_free"),_rm,"main")
         if not ok_m: raise HTTPException(409,"主账户保证金不足预留, 拒绝开仓: %s"%why_m)
         if getattr(CONN,"hedge",None) and _rh>0:
             ok_h,why_h=ENG.margin_sufficient(_ha.get("margin_free"),_rh,"hedge")
             if not ok_h: raise HTTPException(409,"对冲账户保证金不足预留, 拒绝开仓: %s"%why_h)
-    # 开仓点差(testgo pos_open_ledger 思路): 批前取一次双腿 tick 算 spreadAtExecution
+    # 开仓点差(testgo pos_open_ledger 思路): 批前取一次双腿 tick 算 spreadAtExecution(前置并行任务取回)
     entry_spread=None
     try:
-        _mt=await CONN.main._get("/mt5/tick/"+main_sym)
-        _ht=await CONN.hedge._get("/mt5/tick/"+hedge_sym) if getattr(CONN,"hedge",None) else None
+        _mt,_ht=await _tick_task
         if _mt and _ht and _mt.get("bid") is not None and _ht.get("ask") is not None:
             if r.direction=="reverse": entry_spread=round(float(_ht["ask"])-float(_mt["bid"]),4)   # 对冲ASK-主BID
             else:                      entry_spread=round(float(_mt["ask"])-float(_ht["bid"]),4)   # 主ASK-对冲BID
@@ -5410,7 +5578,7 @@ async def cmd_open_pair(r:OpenPairReq):
         _pass,_lb=_entry_gate(ov,_gthr,entry_spread,_fee_pts)
         if not _pass:
             skipped.append(slot_no); continue   # 当前点差未达买入点位下限→跳过
-        res=await EXEC.open_pair(r.direction, main_sym, hedge_sym, slot_mv, slot_hv, mode=mode, speed=speed)
+        res=await _exec_open_pair(r.direction, main_sym, hedge_sym, slot_mv, slot_hv, mode, speed)
         details.append(res)
         mok=res.get("main_ok"); hok=res.get("hedge_ok")
         if mok and hok:
@@ -5443,6 +5611,90 @@ async def cmd_open_pair(r:OpenPairReq):
     return {"ok":True,"demo":False,"direction":r.direction,"mode":mode,"opened":opened,"skipped":skipped,"filled_before":filled,"ladders":ladders,"detail":details,
             "msg":"已顺序开 %d 个坑[%s]%s"%(opened,mode,_smsg)}
 
+@app.get("/api/admin/leg_deals", dependencies=[Depends(require_op("recon"))])
+def admin_leg_deals(user:str="", leg:str="", days:int=7, limit:int=300):
+    """成交记录(持久账本 leg_deals, 跨用户带用户名): 平仓即落库+120s对账, 不受云端会话清零影响。
+       已并入 /recon 页(权限随页面=recon)。stats=同筛选条件的 SQL 全量聚合(不受 limit 截断)。"""
+    c=db(); cur=c.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cond=" FROM leg_deals ld LEFT JOIN users u ON u.id=ld.user_id WHERE ld.time_utc>=%s"
+    p=[int(_t_conn.time()-max(1,min(days,90))*86400)]
+    if user: cond+=" AND u.username=%s"; p.append(user)
+    if leg in ("main","hedge"): cond+=" AND ld.leg=%s"; p.append(leg)
+    cur.execute("SELECT ld.*, u.username"+cond+" ORDER BY ld.time_utc DESC LIMIT %s", tuple(p+[min(max(limit,1),1000)]))
+    rows=cur.fetchall()
+    # 统计(全量聚合, 与列表同筛选): 总计/分腿/胜率 + 按用户小计
+    cur.execute("""SELECT COUNT(*) n, COALESCE(SUM(ld.profit),0) pf, COALESCE(SUM(ld.swap),0) sw,
+                          COALESCE(SUM(ld.commission),0) cm, COALESCE(SUM(ld.volume),0) lots,
+                          SUM(CASE WHEN ld.profit>0 THEN 1 ELSE 0 END) wins,
+                          COALESCE(SUM(CASE WHEN ld.leg='main' THEN ld.profit ELSE 0 END),0) pf_main,
+                          COALESCE(SUM(CASE WHEN ld.leg='hedge' THEN ld.profit ELSE 0 END),0) pf_hedge"""+cond, tuple(p))
+    s=dict(cur.fetchone() or {})
+    cur.execute("SELECT COALESCE(u.username,'-') username, COUNT(*) n, COALESCE(SUM(ld.profit),0) pf, COALESCE(SUM(ld.swap),0) sw, COALESCE(SUM(ld.commission),0) cm"
+                +cond+" GROUP BY 1 ORDER BY pf DESC LIMIT 20", tuple(p))
+    by_user=[{"username":r["username"],"n":int(r["n"]),"profit":round(float(r["pf"]),2),
+              "swap":round(float(r["sw"]),2),"commission":round(float(r["cm"]),2)} for r in cur.fetchall()]
+    c.close()
+    out=[]
+    for r in rows:
+        ts=int(r["time_utc"] or 0)
+        out.append({"time_bj":(_dt.datetime.utcfromtimestamp(ts+28800).strftime("%Y-%m-%d %H:%M:%S") if ts else "-"),
+                    "username":r.get("username") or "-","leg":r["leg"],"ticket":r["ticket"],"symbol":r["symbol"],
+                    "side":("buy" if r["type"]==0 else ("sell" if r["type"]==1 else "-")),
+                    "lots":r["volume"],"price":r["price"],"price_open":r["price_open"],
+                    "profit":r["profit"],"swap":r["swap"],"commission":r["commission"],"comment":r["comment"] or ""})
+    n=int(s.get("n") or 0); wins=int(s.get("wins") or 0)
+    stats={"n":n,"lots":round(float(s.get("lots") or 0),2),
+           "profit":round(float(s.get("pf") or 0),2),"swap":round(float(s.get("sw") or 0),2),
+           "commission":round(float(s.get("cm") or 0),2),
+           "net":round(float(s.get("pf") or 0)+float(s.get("sw") or 0)+float(s.get("cm") or 0),2),
+           "win_rate":(round(wins*100.0/n,1) if n else None),
+           "profit_main":round(float(s.get("pf_main") or 0),2),"profit_hedge":round(float(s.get("pf_hedge") or 0),2),
+           "by_user":by_user}
+    return {"deals":out,"count":len(out),"stats":stats}
+
+@app.post("/api/admin/leg_deals/sweep", dependencies=[Depends(require_op("recon"))])
+async def admin_leg_deals_sweep():
+    """手动触发一次云端→本地账本对账(平时 120s 自动跑)。"""
+    n=await _persist_sweep_once()
+    return {"ok":True,"added":n}
+
+class RepairLegReq(BaseModel):
+    username:str; license_key:str=""; confirm:bool=False
+    symbol:str="XAUUSD"; direction:str="reverse"; leg:str="hedge"; volume:float=0.0; slot:int=0
+@app.post("/api/cmd/repair_leg", dependencies=[Depends(require_license)])
+async def cmd_repair_leg(r:RepairLegReq):
+    """单腿修复: 一键补开缺失腿(人工确认的市价补开, 点差漂移成本由用户判断)。
+       只开缺失的那条腿, 绝不动已有腿; 方向按持仓对方向映射(reverse=主sell/对冲buy, forward=主buy/对冲sell)。"""
+    actor=_actor(r.license_key)
+    if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
+    if r.leg not in ("main","hedge"): raise HTTPException(400,"leg 须为 main|hedge")
+    if r.direction not in ("reverse","forward"): raise HTTPException(400,"direction 须为 reverse|forward")
+    if not (r.volume and r.volume>0): raise HTTPException(400,"volume 须>0")
+    await _conn_gate_exec()
+    t=_load_tmpl(r.username, r.symbol)
+    hedge_sym=ENG.map_hedge_symbol(r.symbol,(t or {}).get("hedge_symbol")) or r.symbol
+    legmap={"reverse":("sell","buy"),"forward":("buy","sell")}
+    side=legmap[r.direction][0 if r.leg=="main" else 1]
+    sym=r.symbol if r.leg=="main" else hedge_sym
+    _force_demo=(R.get(RNS+"force_demo:"+r.username)=="1")
+    if DEMO_MODE or _force_demo:
+        _audit(r.username,actor,"repair_leg",{"leg":r.leg,"side":side,"sym":sym,"vol":r.volume,"slot":r.slot},True,"demo:not_sent")
+        return {"ok":True,"demo":True,"msg":"演示模式: 将补开%s腿 %s %s %.2f手, 未真实下单"%("主" if r.leg=="main" else "对冲",sym,side,r.volume)}
+    leg_obj=EXEC.main if r.leg=="main" else getattr(EXEC,"hedge",None)
+    if leg_obj is None: raise HTTPException(502,"缺失腿执行连接不可用")
+    try:
+        res=await leg_obj.open_order(sym, r.volume, side, comment="QH-%s-%s"%(r.direction,r.leg))
+    except Exception as e:
+        raise HTTPException(502,"补腿下单失败: %s"%str(e)[:150])
+    ok=bool((res or {}).get("ok",True)) and "error" not in (res or {})
+    _audit(r.username,actor,"repair_leg",{"leg":r.leg,"side":side,"sym":sym,"vol":r.volume,"slot":r.slot,"res":res},False,"ok" if ok else "fail")
+    R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn" if ok else "err",
+        "msg":"单腿修复: 补开%s腿 %s %s %.2f手 %s"%("主" if r.leg=="main" else "对冲",sym,side,r.volume,"成功" if ok else "失败")})); R.ltrim(RNS+"alerts",0,49)
+    if not ok: raise HTTPException(502,"补腿未成交: %s"%json.dumps(res)[:180])
+    return {"ok":True,"demo":False,"leg":r.leg,"side":side,"symbol":sym,"volume":r.volume,
+            "ticket":(res or {}).get("ticket") or (res or {}).get("order"),
+            "msg":"已补开%s腿 %s %s %.2f手"%("主" if r.leg=="main" else "对冲",sym,side,r.volume)}
+
 class ClosePairReq(BaseModel):
     username:str; license_key:str=""; confirm:bool=False
     symbol:str="XAUUSD"; main_side:str; hedge_side:str
@@ -5462,12 +5714,17 @@ async def cmd_close_pair(r:ClosePairReq):
     mv=r.main_vol or None; hv=r.hedge_vol or None
     mt=r.main_ticket or None; ht=r.hedge_ticket or None   # 按坑精确平(有票→只平该笔, 无票→回落按方向平)
     _slip_dir="reverse" if r.main_side=="sell" else "forward"   # 持仓方向(平仓侧决策快照)
-    _mtk=_htk=None
-    try: _mtk=await CONN.main._get("/mt5/tick/"+r.symbol)
-    except Exception: pass
-    try: _htk=await CONN.hedge._get("/mt5/tick/"+hedge_sym) if getattr(CONN,"hedge",None) else None
-    except Exception: pass
-    res=await EXEC.close_pair(r.symbol, hedge_sym, r.main_side, r.hedge_side, mv, hv, mode=xmode, speed=speed, main_ticket=mt, hedge_ticket=ht)
+    # 双腿 tick 并行取(平仓滑点快照用; 原串行 2×跨洲 RTT)
+    async def _tk(leg,sym):
+        try: return await leg._get("/mt5/tick/"+sym)
+        except Exception: return None
+    _hleg=getattr(CONN,"hedge",None)
+    if _hleg is not None:
+        _mtk,_htk=await _aio.gather(_tk(CONN.main,r.symbol), _tk(_hleg,hedge_sym))
+    else:
+        _mtk=await _tk(CONN.main,r.symbol); _htk=None
+    res=await _exec_close_pair(r.symbol, hedge_sym, r.main_side, r.hedge_side, mv, hv, xmode, speed, main_ticket=mt, hedge_ticket=ht)
+    _persist_after_close()   # 平仓账本即时落库(云端会话级缓存不可靠)
     mok=("error" not in (res.get("main") or {})); hok=(res.get("hedge") is None) or ("error" not in (res.get("hedge") or {}))
     if mok and not hok:
         R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"err",
@@ -5952,8 +6209,8 @@ async def engine_paired_history(days:int=7, symbol:str="XAUUSD"):
         return out
     main=await _deals("main"); hedge=await _deals("hedge")
     used=set()
-    def _match(md):
-        # 1) comment 精确: 同 direction 的对侧 leg, entry 相同(同为开/同为平), 时间最近
+    def _match(md, max_dt=None):
+        # comment 精确: 同 direction 的对侧 leg, entry 相同(同为开/同为平), 时间最近; 无标签退时间窗 ±2s
         cm=md["comment"]; want_dir=None
         if "reverse" in cm: want_dir="reverse"
         elif "forward" in cm: want_dir="forward"
@@ -5962,13 +6219,24 @@ async def engine_paired_history(days:int=7, symbol:str="XAUUSD"):
             if i in used: continue
             if h["entry"]!=md["entry"]: continue
             hc=h["comment"]
+            dt=abs((h["time"] or 0)-(md["time"] or 0))
             precise = want_dir and (want_dir in hc)
-            within = abs((h["time"] or 0)-(md["time"] or 0))<=2   # 时间窗兜底 ±2s
-            if precise or within:
-                cands.append((0 if precise else 1, abs((h["time"] or 0)-(md["time"] or 0)), i))
+            within = dt<=2
+            if not (precise or within): continue
+            if max_dt is not None and dt>max_dt: continue
+            cands.append((0 if precise else 1, dt, i))
         if not cands: return None
         cands.sort()
         return cands[0][2]
+    # 两轮配对(防贪心就近抢错搭档: 先把 ±5s 内的精确对锁定, 剩余再放宽时间)
+    _ordered=sorted(range(len(main)), key=lambda i: main[i]["time"])
+    _match_map={}
+    for _pass_dt in (5, None):
+        for mi in _ordered:
+            if mi in _match_map: continue
+            hi=_match(main[mi], max_dt=_pass_dt)
+            if hi is not None:
+                _match_map[mi]=hi; used.add(hi)
     pairs=[]
     # 阈值(取该品种 param entry_spread, 历史单无逐单阈值→用当前配置近似)
     thr=None
@@ -5998,10 +6266,10 @@ async def engine_paired_history(days:int=7, symbol:str="XAUUSD"):
             if dt<bestd: bestd=dt; best=i
         if best is not None: _snap_used.add(best); return _snaps[best]
         return None
-    for md in sorted(main,key=lambda x:x["time"]):
-        hi=_match(md)
+    for mi in _ordered:
+        md=main[mi]
+        hi=_match_map.get(mi)
         h=hedge[hi] if hi is not None else None
-        if hi is not None: used.add(hi)
         spread=round(abs(md["price"]-h["price"]),4) if h else None
         # 带符号执行滑点: 优先决策快照为基准; 平仓行只认平仓侧快照(无则 None→前端'—'), 开仓行回退近似阈值(标记 approx)
         _act="open" if md["entry"]==0 else "close"
@@ -6330,6 +6598,54 @@ def _a2t_acclist(j):
     """/GetAccounts 响应容错解包 → list"""
     if isinstance(j,list): return j
     return (j or {}).get("accounts") or (j or {}).get("data") or []
+
+# ---- 执行编排下沉 FRA(架构第4项): api 模式配对开/平仓改调 FRA /pair/* 一条指令 ----
+# 收益: 两腿时序(串行/并发/腿间延迟)在法兰克福本地完成(对 A2T ~50ms/调用), 东京↔法兰克福只剩 1 个来回。
+# 安全铁律: FRA 明确拒绝(4xx/连接未建立)→回退逐腿; **请求已发出但结果未知(读超时等)→绝不回退重发(防双开), fail-loud**。
+def _pair_uuids():
+    rows=(_A2T_LEG_CACHE.get("rows") or {})
+    if not rows:
+        _a2t_read_legs(); rows=(_A2T_LEG_CACHE.get("rows") or {})
+    return ((rows.get("main") or {}).get("api2trade_uuid") or "", (rows.get("hedge") or {}).get("api2trade_uuid") or "")
+async def _fra_pair(path, payload):
+    from connector import _pooled
+    base=os.environ.get("QH_FRA_AGENT_URL","http://3.77.161.206").rstrip("/")
+    port=os.environ.get("QH_FRA_MAIN_PORT","8021")
+    key=os.environ.get("QH_FRA_KEY","")
+    r=await _pooled("bridge",25).post("%s:%s%s"%(base,port,path), json=payload, headers={"X-API-Key":key}, timeout=25)
+    r.raise_for_status(); return r.json()
+def _fra_pair_warn(what, e):
+    try:
+        R.lpush(RNS+"alerts", json.dumps({"ts":_dt.datetime.utcnow().isoformat(),"lv":"warn",
+                "msg":"FRA配对%s通道不可用(%s), 已回退逐腿执行"%(what,e.__class__.__name__)})); R.ltrim(RNS+"alerts",0,49)
+    except Exception: pass
+async def _exec_open_pair(direction, main_sym, hedge_sym, mv, hv, mode, speed):
+    if _active_mode()=="api":
+        mu,hu=_pair_uuids()
+        if mu and hu:
+            try:
+                return await _fra_pair("/pair/open",{"direction":direction,"main_symbol":main_sym,"hedge_symbol":hedge_sym,
+                        "main_vol":mv,"hedge_vol":hv,"mode":mode,"speed":speed,"main_uuid":mu,"hedge_uuid":hu})
+            except (_httpx.HTTPStatusError,_httpx.ConnectError,_httpx.ConnectTimeout) as e:
+                _fra_pair_warn("开仓",e)   # 明确未执行(4xx/连接未建立)→安全回退逐腿
+            except Exception as e:
+                raise HTTPException(502,"FRA 配对开仓结果未知(%s): 指令可能已执行, 请核对持仓后再操作, 勿立即重试"%e.__class__.__name__)
+    return await EXEC.open_pair(direction, main_sym, hedge_sym, mv, hv, mode=mode, speed=speed)
+async def _exec_close_pair(main_sym, hedge_sym, mside, hside, mv, hv, mode, speed, main_ticket=None, hedge_ticket=None):
+    if _active_mode()=="api":
+        mu,hu=_pair_uuids()
+        if mu and hu:
+            try:
+                _pl={"main_symbol":main_sym,"hedge_symbol":hedge_sym,
+                     "main_side":mside,"hedge_side":hside,"main_vol":mv,"hedge_vol":hv,
+                     "mode":mode,"speed":speed,"main_ticket":main_ticket,"hedge_ticket":hedge_ticket,
+                     "main_uuid":mu,"hedge_uuid":hu}
+                return await _fra_pair("/pair/close",{k:v for k,v in _pl.items() if v is not None})
+            except (_httpx.HTTPStatusError,_httpx.ConnectError,_httpx.ConnectTimeout) as e:
+                _fra_pair_warn("平仓",e)
+            except Exception as e:
+                raise HTTPException(502,"FRA 配对平仓结果未知(%s): 指令可能已执行, 请核对持仓后再操作, 勿立即重试"%e.__class__.__name__)
+    return await EXEC.close_pair(main_sym, hedge_sym, mside, hside, mv, hv, mode=mode, speed=speed, main_ticket=main_ticket, hedge_ticket=hedge_ticket)
 
 def _fra_sync_uuid(role, uuid):
     """登记变更→FRA a2t-bridge 对应腿 UUID 热同步(POST /admin/account_uuid, 持久化 env)。
