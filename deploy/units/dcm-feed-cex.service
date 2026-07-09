@@ -1,0 +1,19 @@
+[Unit]
+Description=DexCexMix multi-venue market feed (Rust)
+After=network-online.target redis6.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=1G
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=RUST_LOG=dcm_feed=info
+# 95 孤儿进程教训:启动前清同名残留,杜绝双进程并写行情
+ExecStartPre=-/usr/bin/pkill -x dcm-feed
+ExecStart=/home/ec2-user/dexcexmix/bin/dcm-feed
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
