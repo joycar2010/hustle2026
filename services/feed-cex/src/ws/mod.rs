@@ -30,6 +30,10 @@ const WS_IDLE_TIMEOUT_SECS: u64 = 30;
 const FRESH_CHECK_SECS: u64 = 20;
 const FRESH_GRACE_SECS: u64 = 75;
 const RECONNECT_DELAY_SECS: u64 = 2;
+/// universe 变更监视:每此秒数对比 Redis universe,变更即优雅重连应用(新上币≤5min 自动纳入)。
+const UNIVERSE_POLL_SECS: u64 = 300;
+/// 新鲜度分片判死的绝对下限:活跃样本不足此数不判(防小样本误判)。
+const MIN_STALE_ABS: usize = 5;
 // 逐币新鲜度阈值(stale_secs/stale_fraction)按 spec 配置:各所推送语义与长尾活跃度不同,
 // 币安用 coin 生产校准值(600s/40%),小所先保守(900s/60%),跑一周实测停更比例再收紧。
 
@@ -80,7 +84,7 @@ pub async fn run(
     let tag = spec.key();
     let mut symbols = initial_symbols;
     loop {
-        if let Err(e) = connect_and_stream(&spec, &symbols, &tickers, &update_tx).await {
+        if let Err(e) = connect_and_stream(&spec, &symbols, &redis_url, &tickers, &update_tx).await {
             error!(feed = %tag, error = %e, "WS session ended");
         }
         warn!(feed = %tag, "reconnecting in {RECONNECT_DELAY_SECS}s...");
@@ -96,6 +100,7 @@ pub async fn run(
 async fn connect_and_stream(
     spec: &VenueSpec,
     symbols: &[String],
+    redis_url: &str,
     tickers: &TickerMap,
     update_tx: &mpsc::UnboundedSender<String>,
 ) -> Result<(), Err> {
@@ -136,17 +141,25 @@ async fn connect_and_stream(
                     if chunk.is_empty() {
                         continue;
                     }
-                    let stale = chunk
-                        .iter()
-                        .filter(|s| {
-                            // 键必须与解析器同源经 normalize,否则原生/统一符号错位=永远误判 stale
-                            let key = composed_key(spec.venue, spec.market, &(spec.normalize)(s));
-                            let last = mon_tickers.get(&key).map(|t| t.recv_ts).unwrap_or(0);
-                            now - last > spec.stale_secs * 1000
-                        })
-                        .count();
-                    if (stale as f64 / chunk.len() as f64) >= spec.stale_fraction {
-                        warn!(feed = %spec.key(), stale, total = chunk.len(),
+                    // 只统计「见过帧之后转 stale」的币(半开检测的本义)。从未推帧的长尾死对
+                    // 不算 stale——否则全宇宙上线时 Gate 类长尾整片 never-seen 会触发重连风暴。
+                    let (mut seen, mut stale) = (0usize, 0usize);
+                    for s in chunk {
+                        // 键必须与解析器同源经 normalize,否则原生/统一符号错位=永远误判 stale
+                        let key = composed_key(spec.venue, spec.market, &(spec.normalize)(s));
+                        let last = mon_tickers.get(&key).map(|t| t.recv_ts).unwrap_or(0);
+                        if last > 0 {
+                            seen += 1;
+                            if now - last > spec.stale_secs * 1000 {
+                                stale += 1;
+                            }
+                        }
+                    }
+                    if seen >= MIN_STALE_ABS
+                        && stale >= MIN_STALE_ABS
+                        && (stale as f64 / seen as f64) >= spec.stale_fraction
+                    {
+                        warn!(feed = %spec.key(), stale, seen, total = chunk.len(),
                               "per-symbol freshness: chunk mostly stale — forcing reconnect");
                         return Err::<(), Err>("chunk stale".into());
                     }
@@ -158,6 +171,32 @@ async fn connect_and_stream(
             match h.await {
                 Ok(inner) => inner,
                 Err(e) => Err(format!("monitor join: {e}").into()),
+            }
+        }));
+    }
+
+    // universe 变更监视:Python universe-sync 更新 Redis 后,≤5min 优雅重连应用新列表
+    // (上新首日费率极端是双合约引擎的高频机会源,不能等 24h 自然重连)
+    {
+        let spec = *spec;
+        let cur: Vec<String> = symbols.to_vec();
+        let url = redis_url.to_string();
+        let h = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(UNIVERSE_POLL_SECS)).await;
+                let fresh = load_universe(&url, spec.venue, spec.market).await;
+                if !fresh.is_empty() && fresh != cur {
+                    info!(feed = %spec.key(), prev = cur.len(), next = fresh.len(),
+                          "universe changed — reconnecting to apply");
+                    return Err::<(), Err>("universe changed".into());
+                }
+            }
+        });
+        aborts.push(h.abort_handle());
+        join_futs.push(Box::pin(async move {
+            match h.await {
+                Ok(inner) => inner,
+                Err(e) => Err(format!("universe watch join: {e}").into()),
             }
         }));
     }
