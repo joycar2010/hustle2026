@@ -12,6 +12,9 @@
 
 SSH: `ssh -i ~/.ssh/cex-trading-key2.pem ec2-user@<EIP>`
 
+已收编存量:coin 引擎(engine-coin)经 `dcm-coin-bridge` 旁车挂号(coin 业务机 57.183.43.62,
+零侵入只读 dcm_ro)——`dcm:hb:coin-bridge` / `dcm:engine:coin:state` / `dcm:engine:coin:positions`。
+
 ## 目录
 
 - `packages/dcm-common/` — 横切共享包(飞书/节流/总线事件/心跳),从 coin 生产资产抽取,零 ORM 依赖

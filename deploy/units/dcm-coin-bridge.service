@@ -1,0 +1,15 @@
+[Unit]
+Description=DexCexMix coin bridge (read-only sidecar, zero-touch to coin services)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+MemoryMax=128M
+EnvironmentFile=/home/ec2-user/dcmbridge/.env
+ExecStart=/home/ec2-user/dcmbridge/venv/bin/python /home/ec2-user/dcmbridge/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
