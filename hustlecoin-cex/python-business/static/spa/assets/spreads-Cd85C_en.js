@@ -1,0 +1,1 @@
+import{dt as e}from"./index-Cn-1aWC3.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};

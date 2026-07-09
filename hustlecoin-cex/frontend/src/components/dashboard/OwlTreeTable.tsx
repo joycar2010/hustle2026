@@ -525,12 +525,16 @@ const SubAccountRow = memo(function SubAccountRow({
         const isMaster = masterQty !== 0
         const price = spread?.fut_bid ?? 0
         const val = qty * price
+        // 名义 <1U 的合约尾巴 = 粉尘/孤儿残留(如还币事故留下的 0.1),弱化显示并标注
+        const isDust = qty > 0 && price > 0 && val < 1
         const title = qty > 0
-          ? `${isMaster ? '主账户' : '子账户'}合约持仓 · 名义价值: ${formatNumber(val, 2)} USDT`
+          ? (isDust
+            ? `粉尘/孤儿残留(名义 ≈ ${formatNumber(val, 2)} USDT)· 请在主账户合约人工核对平掉`
+            : `${isMaster ? '主账户' : '子账户'}合约持仓 · 名义价值: ${formatNumber(val, 2)} USDT`)
           : undefined
         return (
           <td className={numCell} title={title}>
-            {qty > 0 ? formatNumber(qty, 4) : '-'}
+            {qty > 0 ? <span className={isDust ? 'text-muted-foreground/50' : ''}>{formatNumber(qty, 4)}</span> : '-'}
           </td>
         )
       })()}
@@ -568,12 +572,21 @@ const SubAccountRow = memo(function SubAccountRow({
           })()}
         </td>
       )}
-      {/* 现币 */}
+      {/* 现币 — 名义 <1U 的零头 = 还币取整留下的真实粉尘(低于币安最小可卖名义),弱化显示 */}
       {!isMobile && (
         <td className={numCell}>
-          {balance?.symbol_margin?.[pos.symbol]?.free != null
-            ? formatNumber(balance.symbol_margin[pos.symbol].free, 4)
-            : '-'}
+          {(() => {
+            const free = balance?.symbol_margin?.[pos.symbol]?.free
+            if (free == null) return '-'
+            const px = spread?.spot_bid ?? 0
+            const isDust = free > 0 && px > 0 && free * px < 1
+            return (
+              <span className={isDust ? 'text-muted-foreground/50' : ''}
+                title={isDust ? `粉尘残留(≈ ${formatNumber(free * px, 2)} USDT,低于最小可卖名义,留账无害)` : undefined}>
+                {formatNumber(free, 4)}
+              </span>
+            )
+          })()}
         </td>
       )}
       {/* 借币 — 币安杠杆户实时借币本金(sm.borrowed),非 position 静态快照,随利息/部分还币/还币即时变 */}

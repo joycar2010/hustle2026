@@ -630,12 +630,13 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
       setGlobalRules((p) => ({ ...p, version: res.global_version }))
       setFundRules((p) => ({ ...p, version: res.fund_version }))
       addToast('保存成功', 'success')
+      onClose?.()   // 嵌入模态(dashboard 通用规则弹窗)时保存成功即自动关闭;失败留框可改
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status
       addToast(extractError(err, status === 409 ? '配置已被他人修改,请刷新后重试' : '保存失败'), 'error')
     }
     setSaving(false)
-  }, [feishu, globalRules, fundRules, addToast])
+  }, [feishu, globalRules, fundRules, addToast, onClose])
 
   const handleTest = useCallback(async () => {
     setTesting(true)
@@ -987,6 +988,12 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
               <InlineField value={gv('repay_spread')} onChange={(v) => updateG('repay_spread', v)} width="w-10" />
               <span className="text-muted-foreground">还币: 资息倍率 &lt;</span>
               <InlineField value={gv('repay_funding_ratio')} onChange={(v) => updateG('repay_funding_ratio', v)} width="w-10" />
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap text-[11px] pt-1 border-t border-border/40">
+              <TogglePill label="净敞口自动收敛" active={globalRules.hedge_auto_converge === true}
+                onChange={(v) => setGlobalRules((p) => ({ ...p, hedge_auto_converge: v }))} />
+              <span className="text-muted-foreground/60 text-[10px]">开=主账户合约实仓&gt;系统在管对冲(裸多,如还币事故脱管腿)时自动 reduceOnly 卖出差额对齐;关=仅告警不动仓。每约10分钟对账一次,差额名义&gt;5U才动作</span>
             </div>
 
             <div className="flex items-center justify-between flex-wrap text-[11px]">

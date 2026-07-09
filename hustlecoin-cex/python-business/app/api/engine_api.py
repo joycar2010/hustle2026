@@ -642,18 +642,31 @@ def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids:
         db.rollback()
 
 
+# 持仓状态两分:对冲在场/在途(现货已卖出或合约腿已开)vs 无对冲腿(币在手/待还)。
+# 手动还币守卫与还币后收口都按此划分 —— 两集合互补,覆盖全部非终态(终态 CLOSED/FAILED 二者皆不含)。
+HEDGE_IN_FLIGHT_STATUSES = (
+    "OPEN", "HEDGING", "SPOT_SOLD", "CLOSING_FUTURES", "FUTURES_CLOSED", "CLOSING_SPOT", "SPOT_BOUGHT",
+)
+REPAY_SAFE_STATUSES = ("PENDING_BORROW", "BORROWING", "BORROWED_IDLE", "PENDING_REPAY", "REPAYING")
+
+
 def _reconcile_positions_after_repay(db: Session, user_id: int, sub_account_id: int, symbol: str, repay_qty: Decimal):
-    """手动还币(/partial-repay)后收口 position 状态:把该子账户该币的未终态 position 置 CLOSED
+    """手动还币(/partial-repay)后收口 position 状态:把该子账户该币「无对冲腿」的 position 置 CLOSED
     (否则 BORROWED_IDLE 等永久卡「待对冲」状态孤儿)。
     ⚠只做持仓收口,不下架 pushed、不清规则、也不再写还币暂停标记 —— 「挂单开着=持续借」
     是策略语义,还币后是否暂停自动借币由还币端点按用户勾选(pause_borrow)决定,不在此隐式改变。
-    失败回滚不阻断还币主流程。"""
+    失败回滚不阻断还币主流程。
+
+    只收口 REPAY_SAFE_STATUSES(币在手/待还,无合约腿):绝不抹 OPEN/HEDGING/SPOT_SOLD 等
+    对冲在场态 —— 此前 notin_(CLOSED,FAILED) 一刀切,把 OPEN 也标成 CLOSED,主账户合约腿
+    就此脱管成永久孤儿(FIL 0.1 合约残留的根因)。对冲在场的还币已被 partial_repay 守卫拦截,
+    这里是第二道防线(债务=0 早退路径也会进来)。"""
     from datetime import datetime as _dt, timezone as _tz
     try:
         active = db.query(Position).filter(
             Position.sub_account_id == sub_account_id,
             Position.symbol == symbol,
-            Position.status.notin_(["CLOSED", "FAILED"]),
+            Position.status.in_(list(REPAY_SAFE_STATUSES)),
         ).all()
         if not active:
             return
@@ -933,6 +946,24 @@ async def partial_repay(data: PartialRepayRequest, request: Request, db: Session
     ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Sub-account not found")
+
+    # ── 还币闸:对冲在场(现货已卖出/合约腿已开)禁止手动还币 ──
+    # 借来的币已卖出时 free≈0,此端点会自动市价买回再还 = 强拆空头腿;而合约腿无人平,
+    # 直接制造主账户孤儿合约仓(FIL 0.1 残留事故根因)。必须先平仓(强制平仓/等引擎平),
+    # 对冲全平(PENDING_REPAY)或币还在手(BORROWED_IDLE)才允许还币。
+    # 注意守卫只按本子账户本币查:其他子账户的对冲结构独立记账,不受本账户还币影响,
+    # 查全用户会把「A 号已平想还币、B 号还开着」的正常操作也误拦。
+    blocked = db.query(Position).filter(
+        Position.sub_account_id == data.sub_account_id,
+        Position.symbol == data.symbol.upper(),
+        Position.status.in_(list(HEDGE_IN_FLIGHT_STATUSES)),
+    ).count()
+    if blocked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{data.symbol.upper()} 在该账户有 {blocked} 笔开仓/执行中的对冲持仓,禁止还币。"
+                   f"请先平仓(右键→强制平仓),对冲全部平完后再还币。",
+        )
 
     base_asset = data.symbol.upper().replace("USDT", "")
     from engine.trading.binance_trading import BinanceTradingClient, BinanceAPIError
@@ -1286,6 +1317,13 @@ async def manual_open(data: ManualOpenRequest, request: Request, db: Session = D
     if not spread:
         raise HTTPException(status_code=400, detail=f"无 {symbol} 行情数据，无法开仓")
 
+    # 进行中锁:同账户同币的开仓在途时拒绝并发提交。开仓同步执行 20~40s(借币延迟+对冲),
+    # 客户端超时重发/连点会重复借币开仓(端点无幂等),Redis NX 锁挡住第二发。
+    _open_lock_key = f"manual_open_lock:{data.sub_account_id}:{symbol}"
+    _rl = _redis()
+    if not _rl.set(_open_lock_key, "1", nx=True, ex=90):
+        raise HTTPException(status_code=429, detail=f"{symbol} 该账户已有开仓请求执行中,请等待其完成(勿重复提交)")
+
     import dataclasses
     rules = _load_global_rules_snapshot(db, user_id)
     if data.order_amount and data.order_amount > 0:
@@ -1318,6 +1356,11 @@ async def manual_open(data: ManualOpenRequest, request: Request, db: Session = D
             )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"开仓失败: {e}")
+    finally:
+        try:
+            _rl.delete(_open_lock_key)
+        except Exception:
+            pass
 
     latest = db.query(Position).filter(
         Position.sub_account_id == account.id, Position.symbol == symbol,

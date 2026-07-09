@@ -170,6 +170,19 @@ export function SymbolRuleDialog({ symbol, onClose }: SymbolRuleDialogProps) {
       })
       if (risky && !confirm('开仓值为负,但生效的平仓值不是更低的负值:\n负点差行情下开仓后很可能立即满足平仓条件、开完即平。\n确认按当前值保存?')) return
     }
+    // 平点差负值防误设(反向陷阱):平仓条件是「点差 < 平点差」,负值=点差要跌破该负值才平,
+    // 正常行情下几乎永不触发(把 -1 当"立即平仓"是高频误用;立即平仓走右键→强制平仓)
+    const isNeg = (v: unknown) => v !== '' && v !== undefined && v !== null && Number(v) < 0
+    const negRows: string[] = []
+    if (dirty.has('common') && isNeg(symbolRule.close_spread)) negRows.push('批量')
+    for (const a of accounts) {
+      if (dirty.has(String(a.id)) && isNeg(accountRules[a.id]?.close_spread)) negRows.push(a.note)
+    }
+    if (negRows.length > 0 && !(await confirmDialog({
+      title: '平点差为负值 — 几乎永不触发',
+      message: `【${negRows.join('、')}】的平点差是负数。\n平仓条件为「点差 < 平点差」:负值意味着点差要跌破该负值才会平仓,正常行情下永远等不到。\n若想立即平仓:持仓行右键 →「强制平仓」。\n\n仍要按负值保存吗?`,
+      danger: true,
+    }))) return
     setSaving(true)
     try {
       const tasks: Promise<unknown>[] = []

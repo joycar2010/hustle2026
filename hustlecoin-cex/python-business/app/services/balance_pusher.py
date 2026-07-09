@@ -378,21 +378,27 @@ class BalancePusher:
 
     async def _auto_converge_hedge(self, db, tasks: list[dict]):
         """P1-7 净敞口自动收敛:对裸多(master实仓>在管对冲)reduceOnly 市价卖出对齐。
-        仅当系统规则 hedge_auto_converge 开启才执行(默认关=只告警不动仓)。用主账户 key 下单,
+        开关 hedge_auto_converge 用户行优先(规则页可自助开),用户行 NULL 回退系统行
+        (user_id IS NULL,admin 管;默认关=只告警不动仓)。用主账户 key 下单,
         reduceOnly 保证只减不反向开仓(绝对安全)。量向下取整到合约步长,不超卖。收敛后飞书+跑马灯报告。"""
         from app.db.models import MasterAccount, GlobalRules
         try:
-            enabled = db.query(GlobalRules.hedge_auto_converge).filter(
+            sys_enabled = db.query(GlobalRules.hedge_auto_converge).filter(
                 GlobalRules.user_id.is_(None)).order_by(GlobalRules.id).scalar()
         except Exception:
-            enabled = None
-        if not enabled:
-            return   # 开关默认关:只告警(上游已发),不自动动仓
+            sys_enabled = None
         from engine.trading.binance_trading import BinanceTradingClient
         by_uid: dict[int, list] = {}
         for t in tasks:
             by_uid.setdefault(t["uid"], []).append(t)
         for uid, uid_tasks in by_uid.items():
+            try:
+                user_enabled = db.query(GlobalRules.hedge_auto_converge).filter(
+                    GlobalRules.user_id == uid).scalar()
+            except Exception:
+                user_enabled = None
+            if not (user_enabled if user_enabled is not None else sys_enabled):
+                continue   # 该用户未开(系统行也未开):只告警(上游已发),不自动动仓
             master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
             if not master or not master.api_key:
                 continue
@@ -737,11 +743,12 @@ class BalancePusher:
                     logger.debug(f"Balance fetch failed for account {acc.id}: {e}")
 
             # 主账户合约持仓采集(hedge_via_master 模式下合约腿在主账户,前端"现-期"列需要)。
-            # immediate 即时刷新跳过此段(省主账户 futures_position_risk 的逐币 REST),payload 用上一轮缓存兜底,
-            # 避免把「现-期/爆率」列清空闪烁;整轮采集后刷新缓存。
+            # immediate 即时刷新也采集:它由借/还币/开平仓事件触发且范围限定单用户(去抖 0.8s),
+            # 正是「现-期」列必须立刻反映合约腿变化的时刻 —— 原先跳过导致对冲成交后合约列
+            # 仍等 10s 整轮才更新。采集失败时 payload 仍回退上一轮缓存,不闪空。
             master_futures_positions = {}  # {uid: {symbol: positionAmt}}
             master_futures_liq = {}        # {uid: 维持保证金率%} 主账户合约户爆仓率(币安标准:totalMaintMargin/totalMarginBalance×100,越接近100越接近强平)
-            for uid in ([] if immediate else user_balances.keys()):
+            for uid in user_balances.keys():
                 from app.db.models import MasterAccount
                 master = db.query(MasterAccount).filter(MasterAccount.user_id == uid).first()
                 if not master or not master.api_key:
@@ -765,6 +772,9 @@ class BalancePusher:
                         raw_ps = await self._redis.get(f"engine:{uid}:pushed_symbols")
                         pushed = json.loads(raw_ps) if raw_ps else []
                         if not pushed:
+                            # pushed 已清空也要写空 dict:否则缓存永远留着最后一次的旧仓位,
+                            # 全部下架后「现-期」列仍显示残留数字
+                            master_futures_positions[uid] = {}
                             continue
                         positions = {}
                         for sym_bytes in pushed:
@@ -783,10 +793,10 @@ class BalancePusher:
                 except Exception as e:
                     logger.debug(f"Master futures position fetch failed for user {uid}: {e}")
 
-            if not immediate:
-                # 整轮采集成功 → 刷新主账户合约缓存,供后续 immediate 即时刷新兜底(避免清空闪烁)
-                self._last_master_pos.update(master_futures_positions)
-                self._last_master_liq.update(master_futures_liq)
+            # 采集成功即刷新缓存(uid 级全量替换),供采集失败的轮次兜底(避免清空闪烁)。
+            # 孤儿/净敞口对账由下方 run_hedge_reconcile_checks 统一负责(裸多可自动收敛)。
+            self._last_master_pos.update(master_futures_positions)
+            self._last_master_liq.update(master_futures_liq)
             self._force_mb_assets -= force_consumed   # 强查已完成,防同资产反复无视节流
 
             for uid, balances in user_balances.items():

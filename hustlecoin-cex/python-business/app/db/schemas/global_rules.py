@@ -30,6 +30,7 @@ class GlobalRulesUpdate(BaseModel):
     otoco_legs: Optional[int] = None
     multi_max_accounts_per_symbol: Optional[int] = None
     hedge_via_master: Optional[bool] = None
+    hedge_auto_converge: Optional[bool] = None   # 净敞口自动收敛:裸多(实仓>在管)自动 reduceOnly 对齐;关=只告警
     max_spread_pct: Optional[Decimal] = None
     min_volume_24h: Optional[Decimal] = None
     min_volume_24h_futures: Optional[Decimal] = None
@@ -188,6 +189,7 @@ class GlobalRulesResponse(BaseModel):
     otoco_legs: Optional[int] = 2
     multi_max_accounts_per_symbol: Optional[int] = 3
     hedge_via_master: Optional[bool] = False
+    hedge_auto_converge: Optional[bool] = False
     max_spread_pct: Optional[Decimal] = 3.0
     min_volume_24h: Optional[Decimal] = 0
     min_volume_24h_futures: Optional[Decimal] = 0
