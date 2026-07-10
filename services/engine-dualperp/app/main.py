@@ -178,7 +178,7 @@ async def main():
     executor = None
     trade_cli = None
     if MODE == "armed":
-        from app.armed import ArmedExecutor, ARM_SYMBOLS
+        from armed import ArmedExecutor, ARM_SYMBOLS
         cfg = {"binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
                "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")}}
         notifier = Notifier(REDIS_URL, "engine-dualperp",
