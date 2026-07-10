@@ -411,6 +411,63 @@ pub const BITGET_PERP: VenueSpec = VenueSpec {
     tls: TlsMode::Rustls,
 };
 
+// ---------- Hyperliquid(第六腿,perp only;bbo 频道;{"method":"ping"} 保活) ----------
+// 原生符号=coin 名("BTC"),归一 = coin+USDT(实际 USDC 保证金,统一命名跨所 join 用)。
+// 注意:HL 千倍币用 k 前缀(kPEPE→KPEPEUSDT),与币安 1000PEPE 命名不同,跨所 join 时
+// 由下游消费者对表处理——feed 层保持机械归一不做币名翻译(数据面纪律)。
+
+fn hl_parse(text: &str, _recv_ts: i64) -> Option<ParsedTick> {
+    let v: Value = serde_json::from_str(text).ok()?;
+    if v.get("channel")?.as_str()? != "bbo" {
+        return None; // subscriptionResponse/pong 等
+    }
+    let d = v.get("data")?;
+    let coin = d.get("coin")?.as_str()?;
+    let bbo = d.get("bbo")?.as_array()?;
+    let side = |i: usize| -> Option<(Decimal, Decimal)> {
+        let e = bbo.get(i)?;
+        if e.is_null() {
+            return None; // 空侧(无挂单)按可缺侧处理
+        }
+        Some((dec(e.get("px")?)?, dec(e.get("sz")?)?))
+    };
+    Some(ParsedTick {
+        symbol: hl_normalize(coin),
+        bid: side(0),
+        ask: side(1),
+        ts: d.get("time").and_then(i64_of)?,
+    })
+}
+
+fn hl_normalize(s: &str) -> String {
+    format!("{}USDT", strip_seps_upper(s))
+}
+
+fn hl_subscribe(symbols: &[String]) -> Vec<String> {
+    // HL 无批量订阅:一币一消息
+    symbols
+        .iter()
+        .map(|s| {
+            format!(r#"{{"method":"subscribe","subscription":{{"type":"bbo","coin":"{s}"}}}}"#)
+        })
+        .collect()
+}
+
+pub const HYPERLIQUID_PERP: VenueSpec = VenueSpec {
+    venue: "hyperliquid",
+    market: "perp",
+    max_streams_per_conn: 100,
+    url: |_| "wss://api.hyperliquid.xyz/ws".to_string(),
+    subscribe: hl_subscribe,
+    parse: hl_parse,
+    ping: PingMode::Text { build: || r#"{"method":"ping"}"#.to_string(), every_secs: 30 },
+    normalize: hl_normalize,
+    to_native: |b| b.to_uppercase(),
+    stale_secs: 900,
+    stale_fraction: 0.6,
+    tls: TlsMode::Rustls,
+};
+
 /// 已注册的全部 spec;按 DCM_FEED_VENUES(逗号分隔 spec.key)筛选启用。
 pub const ALL_SPECS: &[VenueSpec] = &[
     BINANCE_SPOT, BINANCE_PERP,
@@ -418,4 +475,5 @@ pub const ALL_SPECS: &[VenueSpec] = &[
     BYBIT_SPOT, BYBIT_PERP,
     GATE_SPOT, GATE_PERP,
     BITGET_SPOT, BITGET_PERP,
+    HYPERLIQUID_PERP,
 ];

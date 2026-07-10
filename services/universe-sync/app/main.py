@@ -134,6 +134,20 @@ async def bitget(cli: httpx.AsyncClient, market: str) -> list[str]:
                   if t["symbol"] in ok and _f(t.get("usdtVolume")) >= MIN_QVOL)
 
 
+# ---------- Hyperliquid(perp only;POST /info metaAndAssetCtxs;dayNtlVlm=24h 名义 USD) ----------
+
+async def hyperliquid(cli: httpx.AsyncClient) -> list[str]:
+    meta, ctxs = (await cli.post("https://api.hyperliquid.xyz/info",
+                                 json={"type": "metaAndAssetCtxs"})).json()
+    out = []
+    for u, c in zip(meta["universe"], ctxs):
+        if u.get("isDelisted"):
+            continue
+        if _f(c.get("dayNtlVlm")) >= MIN_QVOL:
+            out.append(u["name"])  # 原生符号=coin 名(BTC/kPEPE)
+    return sorted(out)
+
+
 FETCHERS = {
     ("binance", "spot"): lambda c: binance(c, "spot"),
     ("binance", "perp"): lambda c: binance(c, "perp"),
@@ -145,6 +159,7 @@ FETCHERS = {
     ("gate", "perp"): lambda c: gate(c, "perp"),
     ("bitget", "spot"): lambda c: bitget(c, "spot"),
     ("bitget", "perp"): lambda c: bitget(c, "perp"),
+    ("hyperliquid", "perp"): hyperliquid,
 }
 
 

@@ -178,6 +178,25 @@ class FundingSync:
                 out[s] = self.entry(fr, self.bg_interval_h.get(s, 8.0), mark, now)
         return out
 
+    async def fetch_hl(self, cli, now) -> dict[str, str]:
+        """Hyperliquid:metaAndAssetCtxs 批量返回全宇宙;funding=每小时费率(interval 1h)。
+        统一符号=coin 名+USDT(与 feed hl_normalize 同源;kPEPE 类 k 前缀原样保留)。"""
+        r = await cli.post("https://api.hyperliquid.xyz/info",
+                           json={"type": "metaAndAssetCtxs"})
+        meta, ctxs = r.json()
+        out = {}
+        for u, c in zip(meta.get("universe", []), ctxs):
+            if u.get("isDelisted"):
+                continue
+            try:
+                fr, mark = float(c.get("funding") or 0), float(c.get("markPx") or 0)
+            except (TypeError, ValueError):
+                continue
+            if mark > 0:
+                sym = u["name"].upper().replace("-", "").replace("_", "") + "USDT"
+                out[sym] = self.entry(fr, 1.0, mark, now)
+        return out
+
     async def okx_sweep(self, cli, now):
         """逐合约轮转扫:每轮 OKX_CHUNK 个,interval=nextFundingTime-fundingTime 推,异常回退 8h。"""
         if not self.okx_insts:
@@ -221,9 +240,11 @@ async def main():
                 results = await asyncio.gather(
                     fs.fetch_bn(cli, now), fs.fetch_bb(cli, now),
                     fs.fetch_gate(cli, now), fs.fetch_bg(cli, now),
+                    fs.fetch_hl(cli, now),
                     fs.okx_sweep(cli, now), return_exceptions=True)
                 venue_maps = {"binance": results[0], "bybit": results[1],
-                              "gate": results[2], "bitget": results[3]}
+                              "gate": results[2], "bitget": results[3],
+                              "hyperliquid": results[4]}
                 counts = {}
                 for venue, m in venue_maps.items():
                     if isinstance(m, BaseException):

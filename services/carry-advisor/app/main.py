@@ -35,7 +35,9 @@ FUNDING_FRESH_SEC = int(os.environ.get("DCM_ADV_FUNDING_FRESH_SEC", "1800"))
 DEPTH_SAFETY = float(os.environ.get("DCM_ADV_DEPTH_SAFETY", "0.1"))
 MIN_TRADE_USDT = float(os.environ.get("DCM_ADV_MIN_TRADE_USDT", "15"))
 DEPTH_FRESH_SEC = int(os.environ.get("DCM_ADV_DEPTH_FRESH_SEC", "300"))
-VENUES = ["binance", "okx", "bybit", "gate", "bitget"]
+# hyperliquid=第六腿:入榜供 shadow 路由(dualperp 执行器 SUPPORTED 不含 HL,armed 自动拒=安全);
+# HL 交易腿(独立签名进程)另期,armed 前勿加入 SUPPORTED
+VENUES = ["binance", "okx", "bybit", "gate", "bitget", "hyperliquid"]
 ACTOR = "advisor:carry-v1"
 
 

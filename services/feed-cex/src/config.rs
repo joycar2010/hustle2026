@@ -15,7 +15,7 @@ impl AppConfig {
         let enabled = env::var("DCM_FEED_VENUES")
             .unwrap_or_else(|_| {
                 "binance_spot,binance_perp,okx_spot,okx_perp,bybit_spot,bybit_perp,\
-                 gate_spot,gate_perp,bitget_spot,bitget_perp"
+                 gate_spot,gate_perp,bitget_spot,bitget_perp,hyperliquid_perp"
                     .to_string()
             })
             .split(',')
