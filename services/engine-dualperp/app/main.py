@@ -271,22 +271,8 @@ async def main():
                     elif decision == "would_close" and has_pos:
                         asyncio.create_task(executor.close_pair(trade_cli, sym))
 
-            # 平仓触发(路由消失/off/draining):这些币已不在 active 循环内,须单独扫持仓集,
-            # 否则置 off 的仓位会被孤立(引擎不再管、实盘仍开着)——close 不能只挂在 active 路由上
-            # R6 自动收敛:持仓腿逼近强平即双腿减仓(maybe_converge 内部受 AUTO_CONVERGE 开关门控)
-            if executor:
-                for sym in list(executor.open_syms):
-                    if sym in executor.inflight or not executor.armed_for(sym):
-                        continue
-                    rt = book.routes.get(sym)
-                    if rt is None or rt.get("state") in ("off", "draining"):
-                        log.info("close trigger: %s route %s -> close_pair", sym,
-                                 "missing" if rt is None else rt.get("state"))
-                        asyncio.create_task(executor.close_pair(trade_cli, sym))
-                    else:
-                        # 持仓管理:先基差止损(撤退),未撤退再看保证金收敛——顺序执行避免抢锁
-                        asyncio.create_task(executor.manage_open(trade_cli, sym))
-
+                # shadow 落库(决策变化或60s)——必须在 for route 循环内,每个活跃路由都记,
+                # 且与 armed 无关(shadow 模式 executor=None 也要记战绩)
                 prev = last_logged.get(sym)
                 if prev is None or prev[0] != decision or time.time() - prev[1] >= SHADOW_LOG_EVERY_SEC:
                     await pool.execute(
@@ -299,7 +285,21 @@ async def main():
                         Decimal(detail["short_bid"]) if "short_bid" in detail else None,
                         decision, json.dumps(detail, ensure_ascii=False))
                     last_logged[sym] = (decision, time.time())
-                    log.info(f"shadow[{sym}] {decision} {detail.get('gap_bps', '-')}bps")
+                    log.info(f"shadow[{sym}] {decision} {detail.get('gap_bps', '-')}bps E={detail.get('e_bps','-')}")
+
+            # 平仓触发(路由消失/off/draining)+ 持仓管理(基差止损/收敛):独立于 for route 扫持仓集,
+            # 否则置 off 的仓位会被孤立(引擎不再管、实盘仍开着)——close/manage 不能只挂在 active 路由上
+            if executor:
+                for sym in list(executor.open_syms):
+                    if sym in executor.inflight or not executor.armed_for(sym):
+                        continue
+                    rt = book.routes.get(sym)
+                    if rt is None or rt.get("state") in ("off", "draining"):
+                        log.info("close trigger: %s route %s -> close_pair", sym,
+                                 "missing" if rt is None else rt.get("state"))
+                        asyncio.create_task(executor.close_pair(trade_cli, sym))
+                    else:
+                        asyncio.create_task(executor.manage_open(trade_cli, sym))
 
             # 快照契约(risk-ledger/gateway 消费)
             open_positions = []
