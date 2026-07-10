@@ -10,10 +10,10 @@ MemoryMax=1G
 WorkingDirectory=/home/ec2-user/dexcexmix/src
 EnvironmentFile=/home/ec2-user/dexcexmix/.env
 # ── canary(开+平)已验证,解除武装回 shadow;再武装改 MODE=armed + ARM_SYMBOLS ──
-Environment=DCM_DP_MODE=shadow
-Environment=DCM_DP_ARM_SYMBOLS=LABUSDT
-Environment=DCM_DP_MAX_NOTIONAL_HARD=12
-Environment=DCM_DP_MAX_PORTFOLIO_NOTIONAL=80
+Environment=DCM_DP_MODE=armed
+Environment=DCM_DP_ARM_SYMBOLS=SLXUSDT,SKLUSDT,GUNUSDT
+Environment=DCM_DP_MAX_NOTIONAL_HARD=15
+Environment=DCM_DP_MAX_PORTFOLIO_NOTIONAL=50
 Environment=DCM_DP_AUTO_CONVERGE=false
 Environment=DCM_DP_CONVERGE_CRIT_PCT=6
 ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/engine-dualperp/app/main.py
